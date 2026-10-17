@@ -210,7 +210,7 @@ enum PromptParts {
 
 /// What the Orb is told about its own browser (`browse_*`), after the other sections of the system prompt.
 enum BrowserPrompt {
-    static func section(bot: Bot, availability: BrowserAvailability, status: BrowserEngineStatus?) -> String {
+    static func section(bot: Bot, availability: BrowserAvailability, status: BrowserStatus?) -> String {
         switch availability {
         case .off:
             return ""
@@ -218,19 +218,18 @@ enum BrowserPrompt {
             guard let status else { return "" }
             return status.modelNote ?? ""
         case .browser:
-            let engine = bot.browserEngine
-            var lines = [
+            let lines = [
                 "## Your browser",
-                "You have your own browser (browse_open and the other browse_* tools): a real \(engine.label) engine that runs JavaScript"
-                    + (engine.keepsProfile ? " and keeps the user's logins between runs" : " (headless, with no saved logins)")
-                    + ". web_search and web_fetch are lighter for public pages; use the browser for JavaScript pages, logins and forms.",
+                "You have your own browser (browse_open and the other browse_* tools): a real Chrome that runs JavaScript and keeps the "
+                    + "user's logins between runs. "
+                    + (bot.browserMode == .visible ? "Its window is open on the user's screen for them to watch. "
+                                                   : "It runs in the background, with no window, so it never takes over the user's screen. ")
+                    + "web_search and web_fetch are lighter for public pages; use the browser for JavaScript pages, logins and forms.",
                 "A login, a 2FA code, a captcha, a consent wall or anything else only the person can do is theirs: never type a password "
                     + "or card number, never try to solve a captcha or get around a block.",
+                "Call browse_show for those: the browser opens in a window, the user does it there and answers on a card "
+                    + "(Pronto or Cancelar), and the call returns when they do. If its result says to ask the user and stop, do that.",
             ]
-            lines.append(engine.canShowWindow
-                ? "Call browse_show for those: the browser opens in a window, the user does it there and answers on a card "
-                    + "(Pronto or Cancelar), and the call returns when they do. If its result says to ask the user and stop, do that."
-                : "This engine has no window: tell the user to switch the Orb's browser to Chrome or CloakBrowser (Ajustes), and stop.")
             return lines.joined(separator: "\n")
         }
     }

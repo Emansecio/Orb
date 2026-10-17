@@ -12,7 +12,7 @@ private enum FakeAgentBrowser {
     args = sys.argv[1:]
     with open(os.environ["FAKE_AB_LOG"], "a") as log:
         log.write(json.dumps(args) + "\n")
-    VALUE_FLAGS = {"--session", "--profile", "--engine", "--executable-path", "--args", "--config"}
+    VALUE_FLAGS = {"--session", "--profile", "--executable-path", "--args", "--config"}
     rest, i, session = [], 0, ""
     while i < len(args):
         if args[i] == "--session": session = args[i + 1]
@@ -102,19 +102,16 @@ struct AgentBrowserDriverTests {
         return (run, calls)
     }
 
-    private func make(_ engine: BrowserEngineKind = .chrome, headed: Bool = false, listsSession: Bool = true, reply: @escaping @Sendable ([String]) -> String)
+    private func make(headed: Bool = false, listsSession: Bool = true, reply: @escaping @Sendable ([String]) -> String)
         -> (driver: AgentBrowserDriver, calls: OSAllocatedUnfairLock<[[String]]>) {
-        let name = "orb-test-\(engine.rawValue)"
+        let name = "orb-test-chrome"
         // The session is running, as far as `session list` goes (the driver asks before any command but `open`).
         let (run, calls) = recorder { arguments in
             listsSession && arguments.contains("session") && arguments.contains("list") ? abOK("{\"sessions\":[\"\(name)\"]}") : reply(arguments)
         }
-        let config = AgentBrowserConfig(executable: "/x/agent-browser", session: "orb-test-\(engine.rawValue)", engine: engine,
-                                        browserExecutable: engine == .chrome ? nil : "/bin/\(engine.rawValue)",
-                                        profile: engine.keepsProfile ? URL(fileURLWithPath: "/p") : nil, headed: headed, cloakSeed: 20_000)
+        let config = AgentBrowserConfig(executable: "/x/agent-browser", session: name, profile: URL(fileURLWithPath: "/p"), headed: headed)
         return (AgentBrowserDriver(config: config, environment: { nil }, run: run), calls)
     }
-
 
     @Test func openCarriesTheLaunchFlagsAndOtherCommandsDoNot() async throws {
         let (driver, calls) = make { _ in abOK(#"{"url":"https://a.test/","title":"A","clicked":"@e1"}"#) }
@@ -126,17 +123,16 @@ struct AgentBrowserDriverTests {
         #expect(all[1] == ["--session", "orb-test-chrome", "--json", "click", "@e1"])
     }
 
-    @Test func theEnginesLaunchWithTheirOwnFlags() async throws {
-        for engine in [BrowserEngineKind.obscura, .cloak] {
-            let (driver, calls) = make(engine) { _ in abOK(#"{"url":"https://a.test/","title":"A"}"#) }
-            _ = try await driver.open("https://a.test/")
-            let arguments = try #require(calls.withLock { $0.first })
-            #expect(arguments.starts(with: ["--session", "orb-test-\(engine.rawValue)", "--json"]))
-            #expect(arguments.contains("--executable-path") && arguments.contains("/bin/\(engine.rawValue)"))
-            #expect(arguments.suffix(2) == ["open", "https://a.test/"])
-            #expect(arguments.contains("--engine") == (engine == .obscura))
-            #expect(arguments.contains("--args") == (engine == .cloak))
-        }
+    @Test func theBrowserIsLaunchedFromItsOwnExecutableWhenOneIsGiven() async throws {
+        let (run, calls) = recorder { _ in abOK(#"{"url":"https://a.test/","title":"A"}"#) }
+        let brave = BrowserProgram(kind: .brave, executable: "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser", major: 140)
+        let config = AgentBrowserConfig(executable: "/x/agent-browser", session: "orb-test-chrome", browser: brave, profile: URL(fileURLWithPath: "/p"))
+        _ = try await AgentBrowserDriver(config: config, environment: { nil }, run: run).open("https://a.test/")
+        let arguments = try #require(calls.withLock { $0.first })
+        #expect(arguments.starts(with: ["--session", "orb-test-chrome", "--json"]))
+        #expect(arguments.contains("--executable-path") && arguments.contains(brave.executable))
+        #expect(arguments.suffix(2) == ["open", "https://a.test/"])
+        #expect(!arguments.contains("--engine"), "there is one engine: Chromium")
     }
 
     @Test func everyCommandBuildsTheArgumentsOfTheCommandLine() async throws {
@@ -233,7 +229,7 @@ struct AgentBrowserDriverTests {
         let fake = try FakeAgentBrowser.install()
         defer { try? FileManager.default.removeItem(at: fake.folder) }
         let base = ProcessInfo.processInfo.environment
-        let config = AgentBrowserConfig(executable: fake.executable.path, session: "orb-real", engine: .chrome, profile: URL(fileURLWithPath: "/p"))
+        let config = AgentBrowserConfig(executable: fake.executable.path, session: "orb-real", profile: URL(fileURLWithPath: "/p"))
         let driver = AgentBrowserDriver(config: config, environment: { base.merging(["FAKE_AB_LOG": fake.log.path]) { $1 } })
 
         let page = try await driver.open("https://fake.test/start")
@@ -260,7 +256,7 @@ struct AgentBrowserDriverTests {
         defer { try? FileManager.default.removeItem(at: fake.folder) }
         func driver(mode: String) -> AgentBrowserDriver {
             let base = ProcessInfo.processInfo.environment
-            return AgentBrowserDriver(config: AgentBrowserConfig(executable: fake.executable.path, session: "orb-real", engine: .chrome),
+            return AgentBrowserDriver(config: AgentBrowserConfig(executable: fake.executable.path, session: "orb-real"),
                                       environment: { base.merging(["FAKE_AB_LOG": fake.log.path, "FAKE_AB_MODE": mode]) { $1 } })
         }
         await #expect(throws: BrowserDriverError.noPage) { _ = try await driver(mode: "unlaunched").snapshot(interactive: true, selector: nil) }
@@ -271,7 +267,7 @@ struct AgentBrowserDriverTests {
         guard case .notInstalled(let message) = error else { Issue.record("wrong error \(error)"); return }
         #expect(message.contains("agent-browser install"))
         // An executable that is not there.
-        let missing = AgentBrowserDriver(config: AgentBrowserConfig(executable: "/nonexistent/agent-browser", session: "s", engine: .chrome),
+        let missing = AgentBrowserDriver(config: AgentBrowserConfig(executable: "/nonexistent/agent-browser", session: "s"),
                                          environment: { nil })
         let missingError = try #require(await #expect(throws: BrowserDriverError.self, "a missing command must fail") {
             _ = try await missing.open("https://a.test/")
@@ -288,7 +284,7 @@ struct AgentBrowserDriverTests {
             // a machine under load can take longer than that to start a script.)
             try await ProcessRunner.run(executable, arguments, environment: environment, timeout: arguments.contains("session") && arguments.contains("list") ? .seconds(20) : .milliseconds(400))
         }
-        let driver = AgentBrowserDriver(config: AgentBrowserConfig(executable: fake.executable.path, session: "s", engine: .chrome),
+        let driver = AgentBrowserDriver(config: AgentBrowserConfig(executable: fake.executable.path, session: "s"),
                                         environment: { base.merging(["FAKE_AB_LOG": fake.log.path, "FAKE_AB_MODE": "hang"]) { $1 } }, run: run)
         await #expect(throws: BrowserDriverError.timedOut("read")) { _ = try await driver.read() }
     }

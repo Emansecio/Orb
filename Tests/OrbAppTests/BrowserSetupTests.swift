@@ -5,10 +5,10 @@ import Testing
 
 /// What the driver learned from running against the real browsers, and the settings model of Ajustes → Navegador.
 struct BrowserDriverRealityTests {
-    private func make(_ engine: BrowserEngineKind = .chrome, listsSession: Bool = true, reply: @escaping @Sendable ([String]) -> String)
+    private func make(listsSession: Bool = true, reply: @escaping @Sendable ([String]) -> String)
         -> (driver: AgentBrowserDriver, calls: OSAllocatedUnfairLock<[[String]]>) {
         let calls = OSAllocatedUnfairLock<[[String]]>(initialState: [])
-        let name = "orb-test-\(engine.rawValue)"
+        let name = "orb-test-chrome"
         let run: BrowserCommandRunner = { _, arguments, _, _ in
             calls.withLock { $0.append(arguments) }
             // The session is running, as far as `session list` goes (the driver asks before any command but `open`).
@@ -16,8 +16,7 @@ struct BrowserDriverRealityTests {
                 ? "{\"success\":true,\"data\":{\"sessions\":[\"\(name)\"]},\"error\":null}" : reply(arguments)
             return ProcessOutput(status: 0, signal: nil, output: answer, timedOut: false)
         }
-        let config = AgentBrowserConfig(executable: "/x/agent-browser", session: name, engine: engine,
-                                        browserExecutable: nil, profile: nil)
+        let config = AgentBrowserConfig(executable: "/x/agent-browser", session: name)
         return (AgentBrowserDriver(config: config, environment: { nil }, run: run), calls)
     }
 
@@ -40,9 +39,9 @@ struct BrowserDriverRealityTests {
 
     /// The quoting above only matters if the real `batch` reads it back as the words that were meant. Asks the real command line
     /// (no browser starts: the `fill` fails on an element that is not there, and its reply still says how the command was read).
-    @Test(.enabled(if: !RealBrowsers.skipped && RealBrowsers.status(.chrome).agentBrowser != nil))
+    @Test(.enabled(if: !RealBrowsers.skipped && RealBrowsers.status().agentBrowser != nil))
     func theRealBatchReadsTheQuotedWordsBackAsTheyWere() async throws {
-        let executable = try #require(RealBrowsers.status(.chrome).agentBrowser)
+        let executable = try #require(RealBrowsers.status().agentBrowser)
         let sockets = "/tmp/orbab-\(UUID().uuidString.prefix(8))"
         let session = "orb-test-batch-\(UUID().uuidString.prefix(8).lowercased())"
         let environment = ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory(), "AGENT_BROWSER_SOCKET_DIR": sockets]
@@ -84,100 +83,6 @@ struct BrowserDriverRealityTests {
         #expect(!AgentBrowserDriver.isStaleConnection("Element not found") && !AgentBrowserDriver.isStaleConnection(nil))
     }
 
-    @Test func obscuraClicksALinkInThePageWhenItsOwnClickCannotReadTheAnswer() async throws {
-        let failure = "Failed to deserialize CDP response for DOM.getBoxModel: invalid type: floating point `91.25`, expected i64"
-        let (driver, calls) = make(.obscura) { arguments in
-            if arguments.contains("snapshot") { return ok(#"{"snapshot":"- link \"Ir\" [ref=e2]","origin":"http://a.test/","refs":{"e2":{"role":"link","name":"Ir"}}}"#) }
-            if arguments.contains("click") { return "{\"success\":false,\"data\":null,\"error\":\"\(failure)\"}" }
-            return ok(#"{"result":"clicked"}"#)
-        }
-        _ = try await driver.snapshot(interactive: true, selector: nil)
-        try await driver.click("e2")
-        let eval = try #require(calls.withLock { $0.last })
-        #expect(eval.contains("eval") && eval.last?.contains("a[href]") == true && eval.last?.contains("\"Ir\"") == true)
-        #expect(eval.last?.contains(".click()") == true)
-
-        // Another failure is still a failure, and so is a link that is not on the page.
-        let (other, _) = make(.obscura) { _ in "{\"success\":false,\"data\":null,\"error\":\"Unknown ref: e5\"}" }
-        await #expect(throws: BrowserDriverError.failed("Unknown ref: e5")) { try await other.click("e5") }
-        let (gone, _) = make(.obscura) { arguments in
-            arguments.contains("click") ? "{\"success\":false,\"data\":null,\"error\":\"\(failure)\"}" : ok(#"{"result":false}"#)
-        }
-        await #expect(throws: BrowserDriverError.self) { try await gone.click("e2") }
-        // Chrome does not get the workaround.
-        let (chrome, _) = make(.chrome) { _ in "{\"success\":false,\"data\":null,\"error\":\"\(failure)\"}" }
-        await #expect(throws: BrowserDriverError.failed(failure)) { try await chrome.click("e2") }
-    }
-
-    // MARK: Obscura's click in the page never guesses (finding 5)
-
-    private static let boxModelFailure = "{\"success\":false,\"data\":null,\"error\":\"Failed to deserialize CDP response for DOM.getBoxModel: invalid type: floating point `1.5`, expected i64\"}"
-
-    @Test func obscuraDoesNotClickWhenTheSnapshotHadTwoElementsAlike() async throws {
-        let (driver, calls) = make(.obscura) { arguments in
-            if arguments.contains("snapshot") {
-                return ok(#"{"snapshot":"x","origin":"http://a.test/","refs":{"e1":{"role":"button","name":"Comprar"},"e2":{"role":"button","name":"Comprar"},"e3":{"role":"link","name":"Ajuda"}}}"#)
-            }
-            if arguments.contains("click") { return Self.boxModelFailure }
-            return ok(#"{"result":"clicked"}"#)
-        }
-        _ = try await driver.snapshot(interactive: true, selector: nil)
-        do {
-            try await driver.click("e1")
-            Issue.record("two buttons called Comprar: a click on the first one that matches could buy the wrong thing")
-        } catch BrowserDriverError.failed(let message) {
-            #expect(message.contains("more than one element is called “Comprar”"))
-        }
-        #expect(!calls.withLock { $0.contains { $0.contains("eval") } }, "the page was not even asked to click")
-        // A name that is alone is clicked.
-        try await driver.click("e3")
-        #expect(calls.withLock { $0.contains { $0.contains("eval") } })
-    }
-
-    @Test func obscuraDoesNotClickWhenThePageHasTwoElementsAlikeEvenIfTheSnapshotHadOne() async throws {
-        let (driver, _) = make(.obscura) { arguments in
-            if arguments.contains("snapshot") { return ok(#"{"snapshot":"x","origin":"http://a.test/","refs":{"e1":{"role":"link","name":"Ver"}}}"#) }
-            if arguments.contains("click") { return Self.boxModelFailure }
-            return ok(#"{"result":"ambiguous"}"#)
-        }
-        _ = try await driver.snapshot(interactive: true, selector: nil)
-        await #expect(throws: BrowserDriverError.failed(AgentBrowserDriver.ambiguousClick("Ver"))) { try await driver.click("e1") }
-        // The script itself: it counts the elements and clicks only a single one.
-        let script = AgentBrowserDriver.clickScript(role: "link", name: "Ver")
-        #expect(script.contains("found.length > 1) return 'ambiguous'") && script.contains("if (!wanted) return 'none'"))
-    }
-
-    @Test func theClickScriptRunsInANodeLikeEngineAndKeepsToItsRules() throws {
-        // Runs the script against a tiny stand-in document, if `node` is on the Mac: two equal links are ambiguous, one is clicked.
-        let node = ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"].first { FileManager.default.isExecutableFile(atPath: $0) }
-        guard let node else { return }
-        func run(links: [String], name: String) throws -> String {
-            let script = AgentBrowserDriver.clickScript(role: "link", name: name)
-            let harness = """
-            const clicked = [];
-            const make = text => ({innerText: text, getAttribute: () => null, click() { clicked.push(text); }});
-            const items = \(JSONValue.array(links.map { .string($0) }).jsonString).map(make);
-            const document = {querySelectorAll: () => items};
-            const result = \(script);
-            console.log(result + ':' + clicked.length);
-            """
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: node)
-            process.arguments = ["-e", harness]
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            try process.run()
-            process.waitUntilExit()
-            return String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        #expect(try run(links: ["Ver", "Ver", "Outro"], name: "Ver") == "ambiguous:0")
-        #expect(try run(links: ["Ver", "Outro"], name: "Ver") == "clicked:1")
-        #expect(try run(links: ["Ver tudo", "Outro"], name: "Ver") == "clicked:1", "one partial match is the one")
-        #expect(try run(links: ["Ver tudo", "Ver mais"], name: "Ver") == "ambiguous:0")
-        #expect(try run(links: ["Outro"], name: "Ver") == "none:0")
-        #expect(try run(links: ["", "Outro"], name: "") == "none:0", "an empty name matches nothing")
-    }
-
     @Test func aSessionNobodyOpenedIsNotStartedToAskItsAddress() async throws {
         // (The driver answers `noPage` from its own `session list`, never sending the command that would start a browser.)
         let (driver, calls) = make(listsSession: false) { arguments in
@@ -201,17 +106,17 @@ struct BrowserDriverRealityTests {
         #expect(try await driver.currentURL() == "https://a.test/")
     }
 
-    @Test func theCommandLineGetsTheEnvironmentOfTheEngine() async throws {
+    @Test func theCommandLineGetsTheUsersEnvironmentWithoutTheirAgentBrowserSettings() async throws {
         let seen = OSAllocatedUnfairLock<[String: String]?>(initialState: nil)
         let run: BrowserCommandRunner = { _, _, environment, _ in
             seen.withLock { $0 = environment }
             return ProcessOutput(status: 0, signal: nil, output: "{\"success\":true,\"data\":{\"url\":\"u\",\"title\":\"t\"},\"error\":null}", timedOut: false)
         }
-        let config = AgentBrowserConfig(executable: "/x/ab", session: "s", engine: .obscura, browserExecutable: "/x/obscura")
-        let driver = AgentBrowserDriver(config: config, environment: { ["PATH": "/usr/bin"] }, run: run)
+        let config = AgentBrowserConfig(executable: "/x/ab", session: "s")
+        let driver = AgentBrowserDriver(config: config, environment: { ["PATH": "/usr/bin", "AGENT_BROWSER_PROXY": "x"] }, run: run)
         _ = try await driver.open("https://a.test/")
         let environment = try #require(seen.withLock { $0 })
-        #expect(environment["PATH"] == "/usr/bin" && environment["AGENT_BROWSER_OBSCURA_STEALTH"] == "1" && environment["AGENT_BROWSER_IDLE_TIMEOUT_MS"] == "1800000")
+        #expect(environment["PATH"] == "/usr/bin" && environment["AGENT_BROWSER_PROXY"] == nil && environment["AGENT_BROWSER_IDLE_TIMEOUT_MS"] == "1800000")
     }
 
     @Test func googleLinksAreFollowedToTheirRealAddress() async throws {
@@ -226,32 +131,38 @@ struct BrowserDriverRealityTests {
 @Suite(.serialized) struct BrowserSetupTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbSetup-\(UUID().uuidString)/navegador")
 
-    private func installer() -> BrowserInstaller {
-        BrowserInstaller(layout: BrowserInstallLayout(root: root), network: FakeInstallNetwork(), run: FakeInstallRunner { _, _ in nil }.runner,
-                         freeSpace: { _ in nil }, findPython: { _ in "/usr/bin/python3" })
+    private func installer(network: FakeInstallNetwork = FakeInstallNetwork()) -> BrowserInstaller {
+        BrowserInstaller(layout: BrowserInstallLayout(root: root), network: network, run: FakeInstallRunner { _, _ in nil }.runner,
+                         freeSpace: { _ in nil })
     }
 
-    private func status(ready: Set<BrowserEngineKind>) -> @Sendable (BrowserEngineKind) async -> BrowserEngineStatus {
-        { engine in
-            var status = BrowserEngineStatus(engine: engine, agentBrowser: "/x/agent-browser")
-            if !ready.contains(engine) { status.missing = [.init(name: engine.browserComponent?.name ?? "")] }
-            return status
-        }
+    private static let chrome = BrowserProgram(kind: .chrome, executable: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", major: 155)
+
+    /// What the Mac has: `agentBrowser` and a browser, each only when asked.
+    private func status(agentBrowser: Bool = false, browser: BrowserProgram? = nil) -> @Sendable () async -> BrowserStatus {
+        { BrowserStatus(agentBrowser: agentBrowser ? "/x/agent-browser" : nil, program: browser,
+                        missing: (agentBrowser ? [] : [.init(name: "agent-browser")]) + (browser == nil ? [.init(name: "Chrome")] : [])) }
     }
 
-    @MainActor @Test func everyEngineThatNeedsInstallingHasARow() async {
-        let setup = BrowserSetup(installer: installer(), status: status(ready: [.obscura]))
-        #expect(setup.rows.map(\.engine) == [.chrome, .obscura, .cloak])
+    @MainActor @Test func theRowsAreAgentBrowserAndTheBrowserAndNothingElse() async {
+        let setup = BrowserSetup(installer: installer(), status: status())
+        #expect(setup.rows.map(\.component) == [.agentBrowser, .chrome])
         await setup.refresh()
-        #expect(setup.row(.chrome)?.phase == .notInstalled && setup.row(.chrome)?.canInstall == true && setup.row(.chrome)?.canRemove == false)
-        // Found on the Mac but not put there by the app: usable, and not the app's to remove.
-        #expect(setup.row(.obscura)?.phase == .installed(managed: false) && setup.row(.obscura)?.canInstall == false && setup.row(.obscura)?.canRemove == false)
-        #expect(setup.row(.obscura)?.statusText == "Instalado fora do Orb")
-        #expect(setup.row(.cloak)?.statusText == "Não instalado")
+        #expect(setup.row(.agentBrowser)?.phase == .notInstalled && setup.row(.agentBrowser)?.canInstall == true)
+        #expect(setup.row(.agentBrowser)?.statusText == "Não instalado")
+        #expect(setup.row(.chrome)?.statusText == "Nenhum navegador encontrado")
     }
 
-    @MainActor @Test func beforeTheFirstLookEveryEngineIsCheckingWithNothingToInstallOrRemove() async {
-        let setup = BrowserSetup(installer: installer(), status: status(ready: [.obscura]))
+    @MainActor @Test func aChromeFoundOnTheMacIsUsableAndNotTheAppsToRemove() async {
+        let setup = BrowserSetup(installer: installer(), status: status(agentBrowser: true, browser: Self.chrome))
+        await setup.refresh()
+        let row = setup.row(.chrome)
+        #expect(row?.phase == .installed(managed: false) && row?.canInstall == false && row?.canRemove == false)
+        #expect(row?.statusText == "Usando Google Chrome 155")
+    }
+
+    @MainActor @Test func beforeTheFirstLookEveryRowIsCheckingWithNothingToInstallOrRemove() async {
+        let setup = BrowserSetup(installer: installer(), status: status(agentBrowser: true, browser: Self.chrome))
         for row in setup.rows {
             #expect(row.phase == .checking && row.statusText == "Conferindo…", "not \"Não instalado\" before anything was looked at")
             #expect(!row.canInstall && !row.canRemove && !row.canUpdate)
@@ -260,84 +171,52 @@ struct BrowserDriverRealityTests {
         #expect(setup.rows.allSatisfy { $0.phase != .checking }, "the first look replaces it")
     }
 
-    @MainActor @Test func anEngineTheAppInstalledShowsItsVersionsAndCanBeRemovedAndUpdated() async throws {
-        let layout = BrowserInstallLayout(root: root)
-        try FileManager.default.createDirectory(at: layout.binDirectory, withIntermediateDirectories: true)
-        for file in [layout.agentBrowser, layout.obscura] {
-            try Data("x".utf8).write(to: file)
-            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
-        }
-        let now = Date()
-        let records: InstalledRecords = ["agentBrowser": InstalledComponent(version: "0.39.0", installedAt: now),
-                                         "obscura": InstalledComponent(version: "0.2.4", installedAt: now, detail: "stealth")]
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        try encoder.encode(records).write(to: layout.recordsFile)
-        let setup = BrowserSetup(installer: installer(), status: status(ready: [.obscura]))
-        await setup.refresh()
-        let row = try #require(setup.row(.obscura))
-        #expect(row.phase == .installed(managed: true) && row.canRemove && !row.canUpdate && row.versionText == "agent-browser 0.39.0 · Obscura 0.2.4")
-        #expect(row.statusText == "Instalado · agent-browser 0.39.0 · Obscura 0.2.4")
-
-        let withUpdate = BrowserEngineRow(engine: .obscura, phase: .installed(managed: true), updateAvailable: true)
-        #expect(withUpdate.canUpdate)
-        #expect(!BrowserEngineRow(engine: .obscura, phase: .installed(managed: false), updateAvailable: true).canUpdate, "only what the app installed is updated")
-    }
-
     @Test func aRowInEachStateSaysWhatItIsAndWhatCanBeDone() {
-        let progress = BrowserInstallProgress(component: .chrome, phase: .downloading, received: 42_000_000, total: 184_000_000, step: 2, steps: 2)
-        let installing = BrowserEngineRow(engine: .chrome, phase: .installing(progress))
-        #expect(installing.isInstalling && !installing.canInstall && !installing.canRemove)
-        #expect(installing.statusText == "2/2 · Baixando o Chrome… 42 de 184 MB")
-        #expect(progress.fraction == (1 + 42.0 / 184.0) / 2)
-
-        let failed = BrowserEngineRow(engine: .cloak, phase: .failed("Sem conexão com a internet. Confira a rede e tente de novo."))
+        let failed = BrowserComponentRow(component: .agentBrowser, phase: .failed("Sem conexão com a internet. Confira a rede e tente de novo."))
         #expect(failed.canInstall && failed.statusText.hasPrefix("Sem conexão"), "a failure can be tried again")
 
-        var blocked = BrowserEngineRow(engine: .chrome, phase: .notInstalled)
+        var blocked = BrowserComponentRow(component: .chrome, phase: .notInstalled)
         blocked.isBlocked = true
         #expect(!blocked.canInstall, "one install at a time")
 
+        var managed = BrowserComponentRow(component: .agentBrowser, phase: .installed(managed: true), versionText: "agent-browser 0.39.1")
+        #expect(managed.statusText == "Instalado · agent-browser 0.39.1" && managed.canRemove && !managed.canUpdate)
+        managed.updateAvailable = true
+        #expect(managed.canUpdate)
+
         let bare = BrowserInstallProgress(component: .agentBrowser, phase: .resolving)
         #expect(bare.text == "Procurando a versão mais nova do agent-browser…" && bare.fraction == nil)
-        #expect(BrowserInstallProgress(component: .obscura, phase: .downloading, received: 5_000_000).text == "Baixando o Obscura… 5 MB")
     }
 
     @MainActor @Test func installingShowsProgressThenTheResultOrTheFailure() async throws {
         let network = FakeInstallNetwork()
         network.offline = true
-        let installer = BrowserInstaller(layout: BrowserInstallLayout(root: root), network: network, run: FakeInstallRunner { _, _ in nil }.runner,
-                                         freeSpace: { _ in nil }, findPython: { _ in "/usr/bin/python3" })
-        let setup = BrowserSetup(installer: installer, status: status(ready: []))
+        let setup = BrowserSetup(installer: installer(network: network), status: status())
         await setup.refresh()
-        setup.install(.chrome)
-        #expect(setup.working == .chrome && setup.row(.chrome)?.isInstalling == true)
-        #expect(setup.row(.obscura)?.isBlocked == true && setup.row(.obscura)?.canInstall == false)
-        await waitUntil("the failed install to settle") { setup.working == nil && setup.row(.chrome)?.isInstalling != true }
+        setup.install(.agentBrowser)
+        #expect(setup.working == .agentBrowser && setup.row(.agentBrowser)?.isInstalling == true)
+        #expect(setup.row(.chrome)?.isBlocked == true && setup.row(.chrome)?.canInstall == false)
+        await waitUntil("the failed install to settle") { setup.working == nil && setup.row(.agentBrowser)?.isInstalling != true }
         #expect(setup.working == nil)
-        guard case .failed(let message)? = setup.row(.chrome)?.phase else { Issue.record("\(String(describing: setup.row(.chrome)))"); return }
+        guard case .failed(let message)? = setup.row(.agentBrowser)?.phase else { Issue.record("\(String(describing: setup.row(.agentBrowser)))"); return }
         #expect(message == BrowserInstallError.noNetwork.errorDescription)
-        #expect(setup.row(.obscura)?.canInstall == true)
+        #expect(setup.row(.chrome)?.canInstall == true)
     }
 
     @MainActor @Test func cancellingStopsTheInstallWithoutAnError() async throws {
         let network = FakeInstallNetwork()
-        network.serve(document: "https://api.github.com/repos/vercel-labs/agent-browser/releases/latest", FakeInstallNetwork.releaseJSON(
-            tag: "v1.0.0", assets: [(BrowserPlatform.current.agentBrowserAsset, Data("x".utf8), true)]))
         let started = LockedBox(false)
         network.beforeDownload = { _ in
             started.value = true
             try await Task.sleep(for: .seconds(30))
         }
-        let installer = BrowserInstaller(layout: BrowserInstallLayout(root: root), network: network, run: FakeInstallRunner { _, _ in nil }.runner,
-                                         freeSpace: { _ in nil }, findPython: { _ in "/usr/bin/python3" })
-        let setup = BrowserSetup(installer: installer, status: status(ready: []))
-        setup.install(.obscura)
+        let setup = BrowserSetup(installer: installer(network: network), status: status())
+        setup.install(.agentBrowser)
         defer { setup.cancel() }
         guard await waitUntil("the download to start", { started.value }) else { return }
         setup.cancel()
-        await waitUntil("the cancelled install to settle") { setup.working == nil && setup.row(.obscura)?.isInstalling != true }
+        await waitUntil("the cancelled install to settle") { setup.working == nil && setup.row(.agentBrowser)?.isInstalling != true }
         #expect(setup.working == nil)
-        #expect(setup.row(.obscura)?.phase == .notInstalled, "cancelled is not a failure")
+        #expect(setup.row(.agentBrowser)?.phase == .notInstalled, "cancelled is not a failure")
     }
 }

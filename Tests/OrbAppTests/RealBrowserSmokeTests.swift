@@ -2,37 +2,35 @@ import Foundation
 import Testing
 @testable import Orb
 
-// Smoke tests of the real engines (see RealBrowserTests.swift for how they are enabled and what they measured).
+// Smoke tests of the real browser (see RealBrowserTests.swift for how they are enabled and what they measured).
 
-/// What each engine is put through, on a page of ours served from `127.0.0.1` and on `example.com`.
+/// What the browser is put through, on a page of ours served from `127.0.0.1` and on `example.com`.
 struct RealBrowserScenario {
-    let engine: BrowserEngineKind
     let hub: BrowserHub
     let botID = UUID()
     let profiles: URL
     let server: LocalPageServer
 
     /// Takes the turn of the real-browser tests; `finish()` gives it back.
-    static func make(_ engine: BrowserEngineKind) async throws -> RealBrowserScenario {
+    static func make() async throws -> RealBrowserScenario {
         await RealBrowsers.gate.lock()
-        do { return try await build(engine) } catch {
+        do { return try await build() } catch {
             await RealBrowsers.gate.unlock()
             throw error
         }
     }
 
-    private static func build(_ engine: BrowserEngineKind) async throws -> RealBrowserScenario {
+    private static func build() async throws -> RealBrowserScenario {
         let profiles = FileManager.default.temporaryDirectory.appending(path: "OrbRealBrowser-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: profiles, withIntermediateDirectories: true)
         // The background processes keep their files in a folder of this test, not in the user's `~/.agent-browser`.
         let sockets = "/tmp/orbab-\(UUID().uuidString.prefix(8))"
-        let hub = BrowserHub(profilesDirectory: profiles, locate: { RealBrowsers.status($0) }, makeDriver: { config in
+        let hub = BrowserHub(profilesDirectory: profiles, locate: { RealBrowsers.status() }, makeDriver: { config in
             var config = config
-            config.allowPrivateNetwork = true // Obscura blocks 127.0.0.1 unless told
             config.socketDirectory = URL(fileURLWithPath: sockets)
             return AgentBrowserDriver(config: config, environment: { ProcessInfo.processInfo.environment })
         })
-        return RealBrowserScenario(engine: engine, hub: hub, profiles: profiles, server: try await LocalPageServer(pages: LocalPageServer.testSite))
+        return RealBrowserScenario(hub: hub, profiles: profiles, server: try await LocalPageServer(pages: LocalPageServer.testSite))
     }
 
     /// Closes everything, waits for the browser processes to be gone (a second or two) and gives the turn back. Returns what was
@@ -42,16 +40,16 @@ struct RealBrowserScenario {
         await hub.close(botID: botID)
         server.stop()
         try? FileManager.default.removeItem(at: profiles)
-        var left = Self.processes(under: RealBrowsers.root.path)
+        var left = Self.processes(under: profiles.path)
         for _ in 0..<150 where !left.isEmpty {
             try? await Task.sleep(for: .milliseconds(100))
-            left = Self.processes(under: RealBrowsers.root.path)
+            left = Self.processes(under: profiles.path)
         }
         await RealBrowsers.gate.unlock()
         return left
     }
 
-    func session() async throws -> BrowserSession { try await hub.session(botID: botID, engine: engine) }
+    func session() async throws -> BrowserSession { try await hub.session(botID: botID, mode: .background) }
 
     /// Seconds a step took, printed for the table at the top of RealBrowserTests.swift.
     func timed<T>(_ label: String, _ work: () async throws -> T) async rethrows -> T {
@@ -59,7 +57,7 @@ struct RealBrowserScenario {
         let result = try await work()
         let elapsed = start.duration(to: .now)
         let seconds = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18
-        print("[\(engine.rawValue)] \(label): \(String(format: "%.2f", seconds)) s")
+        print("\(label): \(String(format: "%.2f", seconds)) s")
         return result
     }
 
@@ -99,21 +97,16 @@ struct RealBrowserScenario {
 @Suite(.serialized)
 struct RealBrowserSmokeTests {
     // The pages of ours: forms, clicks, tabs.
-    @Test(.enabled(if: RealBrowsers.isReady(.chrome)), .timeLimit(.minutes(3))) func chromeBrowsesALocalPage() async throws { try await Self.localPage(.chrome) }
-    @Test(.enabled(if: RealBrowsers.isReady(.obscura)), .timeLimit(.minutes(3))) func obscuraBrowsesALocalPage() async throws { try await Self.localPage(.obscura) }
-    @Test(.enabled(if: RealBrowsers.isReady(.cloak)), .timeLimit(.minutes(3))) func cloakBrowsesALocalPage() async throws { try await Self.localPage(.cloak) }
+    @Test(.enabled(if: RealBrowsers.isReady), .timeLimit(.minutes(3))) func browsesALocalPage() async throws { try await Self.localPage() }
 
     // A real public page.
-    @Test(.enabled(if: RealBrowsers.isReady(.chrome)), .timeLimit(.minutes(3))) func chromeOpensExampleCom() async throws { try await Self.publicPage(.chrome) }
-    @Test(.enabled(if: RealBrowsers.isReady(.obscura)), .timeLimit(.minutes(3))) func obscuraOpensExampleCom() async throws { try await Self.publicPage(.obscura) }
-    @Test(.enabled(if: RealBrowsers.isReady(.cloak)), .timeLimit(.minutes(3))) func cloakOpensExampleCom() async throws { try await Self.publicPage(.cloak) }
+    @Test(.enabled(if: RealBrowsers.isReady), .timeLimit(.minutes(3))) func opensExampleCom() async throws { try await Self.publicPage() }
 
-    // The window, for the engines that have one.
-    @Test(.enabled(if: RealBrowsers.isReady(.chrome)), .timeLimit(.minutes(3))) func chromeShowsAWindowAndGoesBack() async throws { try await Self.window(.chrome) }
-    @Test(.enabled(if: RealBrowsers.isReady(.cloak)), .timeLimit(.minutes(3))) func cloakShowsAWindowAndGoesBack() async throws { try await Self.window(.cloak) }
+    // The window (browse_show). It takes the focus of the Mac: run it only when nobody is using it.
+    @Test(.enabled(if: RealBrowsers.isReady), .timeLimit(.minutes(3))) func showsAWindowAndGoesBack() async throws { try await Self.window() }
 
-    static func localPage(_ engine: BrowserEngineKind) async throws {
-        let scenario = try await RealBrowserScenario.make(engine)
+    static func localPage() async throws {
+        let scenario = try await RealBrowserScenario.make()
         do {
             let driver = try await scenario.session().driver
             let page = try await scenario.timed("cold start + open of the local page") { try await driver.open(scenario.server.url("/index.html")) }
@@ -146,12 +139,12 @@ struct RealBrowserSmokeTests {
             try await driver.press("Tab")
             try await driver.scroll(.down, pixels: 200)
 
-            let shot = scenario.profiles.appending(path: "tela-\(engine.rawValue).png")
+            let shot = scenario.profiles.appending(path: "tela.png")
             try await scenario.timed("screenshot") { try await driver.screenshot(to: shot) }
             let bytes = try Data(contentsOf: shot)
             #expect(bytes.count > 1_000 && bytes.prefix(4) == Data([0x89, 0x50, 0x4E, 0x47]), "a PNG of some size")
 
-            // A link: Obscura cannot click it with its own command, so the driver does it in the page.
+            // A link.
             try await driver.click(link)
             let second = try await RealBrowserScenario.waitForAddress(driver, endingWith: "/segunda.html")
             #expect(second.hasSuffix("/segunda.html"))
@@ -182,8 +175,8 @@ struct RealBrowserSmokeTests {
         #expect(left.isEmpty, "no browser left behind: \(left)")
     }
 
-    static func publicPage(_ engine: BrowserEngineKind) async throws {
-        let scenario = try await RealBrowserScenario.make(engine)
+    static func publicPage() async throws {
+        let scenario = try await RealBrowserScenario.make()
         do {
             let driver = try await scenario.session().driver
             let page = try await scenario.timed("cold start + open example.com") { try await driver.open("https://example.com") }
@@ -205,8 +198,8 @@ struct RealBrowserSmokeTests {
         await scenario.finish()
     }
 
-    static func window(_ engine: BrowserEngineKind) async throws {
-        let scenario = try await RealBrowserScenario.make(engine)
+    static func window() async throws {
+        let scenario = try await RealBrowserScenario.make()
         do {
             let driver = try await scenario.session().driver
             _ = try await driver.open(scenario.server.url("/index.html"))

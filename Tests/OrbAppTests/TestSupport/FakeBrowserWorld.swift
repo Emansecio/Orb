@@ -62,8 +62,8 @@ final class FakeBrowserWorld: @unchecked Sendable {
 
     /// A hub whose `agent-browser` is found (an engine is ready), in this world.
     func hub(profiles: URL? = nil) -> BrowserHub {
-        BrowserHub(profilesDirectory: profiles, locate: { engine in
-            BrowserEngineStatus(engine: engine, agentBrowser: "/fake/agent-browser", browserExecutable: engine == .chrome ? nil : "/fake/\(engine.rawValue)")
+        BrowserHub(profilesDirectory: profiles, locate: {
+            BrowserStatus(agentBrowser: "/fake/agent-browser", program: BrowserProgram(kind: .chrome, executable: "/fake/chrome", major: 155))
         }, makeDriver: makeDriver)
     }
 }

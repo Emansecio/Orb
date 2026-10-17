@@ -369,7 +369,7 @@ struct WebSearchTool: AgentTool {
             provider = .duckduckgo
         }
         if context.browser.drivesABrowser, let hub = context.browser.hub, let botID = context.botID {
-            let browser = try await hub.session(botID: botID, engine: context.browser.engine)
+            let browser = try await hub.session(botID: botID, mode: context.browser.mode)
             return try await Self.searchInBrowser(request, provider: provider, session: browser, note: note, http: session)
         }
         return try await searchByFetch(request, note: note)
@@ -496,21 +496,19 @@ struct WebSearchTool: AgentTool {
         case .google:
             let json = try await session.driver.evaluate(SearchResultsParser.googleScript)
             let location = JSONValue.parse(json)?["url"]?.string ?? ""
-            if SearchResultsParser.isGoogleBlock(url: location) { throw blocked(.google, window: session.engine.canShowWindow) }
+            if SearchResultsParser.isGoogleBlock(url: location) { throw blocked(.google) }
             let hits = await GoogleRedirects.resolve(SearchResultsParser.google(json: json, limit: search.count), http: http)
             return report(query: search.query, provider: .google, hits: hits, note: note)
         case .duckduckgo, .tinyfish:
             let html = try await session.driver.evaluate("document.documentElement.outerHTML")
-            if SearchResultsParser.isDuckDuckGoBlock(html: html) { throw blocked(.duckduckgo, window: session.engine.canShowWindow) }
+            if SearchResultsParser.isDuckDuckGoBlock(html: html) { throw blocked(.duckduckgo) }
             return report(query: search.query, provider: .duckduckgo, hits: SearchResultsParser.duckDuckGo(html: html, limit: search.count), note: note)
         }
     }
 
-    private static func blocked(_ provider: SearchProvider, window: Bool) -> SearchBlocked {
-        let ask = window ? "Call browse_show so the user can get past it, then search again."
-            : "This engine has no window; tell the user to switch the Orb's browser to Chrome or CloakBrowser, or search with the other provider."
-        return SearchBlocked(message: "\(provider.label) is asking for a person (a consent page, a captcha or an \"unusual traffic\" check) and returned no "
-            + "results. Do not try to solve it. " + ask)
+    private static func blocked(_ provider: SearchProvider) -> SearchBlocked {
+        SearchBlocked(message: "\(provider.label) is asking for a person (a consent page, a captcha or an \"unusual traffic\" check) and returned no "
+            + "results. Do not try to solve it. Call browse_show so the user can get past it, then search again.")
     }
 
     // MARK: Report

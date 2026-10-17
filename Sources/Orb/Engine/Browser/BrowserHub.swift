@@ -5,27 +5,30 @@ import os
 /// `ToolContext`; without a hub (tests) the `browse_*` tools say the browser is not there.
 struct BrowserAccess: Sendable {
     var hub: BrowserHub?
-    var engine: BrowserEngineKind = .simple
+    /// The Orb has "Navegar na web" and its browser is installed.
+    var available = false
+    /// Background or visible (the Orb's own setting).
+    var mode: BrowserMode = .background
     var searchProvider: SearchProvider = .duckduckgo
     /// The keys of the providers that need one (TinyFish), read when a search needs them.
     var searchKeys: SearchKeys?
 
-    /// Whether the Orb has a browser to drive (not `simple`, and a hub that can start it).
-    var drivesABrowser: Bool { hub != nil && engine.drivesABrowser }
+    /// Whether the Orb has a browser to drive (installed, and a hub that can start it).
+    var drivesABrowser: Bool { hub != nil && available }
 }
 
 /// Which browser tools an Orb is offered right now (see `ToolBox.offered`).
 enum BrowserAvailability: Sendable, Equatable {
     /// "Navegar na web" is off: no web tools at all.
     case off
-    /// `web_fetch` and `web_search` over plain HTTP: the engine `simple`, or the one chosen is not installed.
+    /// `web_fetch` and `web_search` over plain HTTP: the browser is not installed.
     case fetchOnly
-    /// The chosen engine is installed: the `browse_*` tools too.
+    /// The browser is installed: the `browse_*` tools too.
     case browser
 
-    init(capabilities: Set<Capability>, engine: BrowserEngineKind, status: BrowserEngineStatus?) {
+    init(capabilities: Set<Capability>, status: BrowserStatus?) {
         if !capabilities.contains(.browser) { self = .off }
-        else if engine.drivesABrowser, status?.isReady == true { self = .browser }
+        else if status?.isReady == true { self = .browser }
         else { self = .fetchOnly }
     }
 }
@@ -53,7 +56,7 @@ actor AsyncMutex {
 /// a ref is before acting on it) and the last text read (so `offset` continues it).
 final class BrowserSession: @unchecked Sendable {
     let botID: UUID
-    let engine: BrowserEngineKind
+    let mode: BrowserMode
     let driver: any BrowserDriver
     private let mutex = AsyncMutex()
     private let memory = OSAllocatedUnfairLock(initialState: Memory())
@@ -68,9 +71,9 @@ final class BrowserSession: @unchecked Sendable {
         var showingWindow = false
     }
 
-    init(botID: UUID, engine: BrowserEngineKind, driver: any BrowserDriver) {
+    init(botID: UUID, mode: BrowserMode, driver: any BrowserDriver) {
         self.botID = botID
-        self.engine = engine
+        self.mode = mode
         self.driver = driver
     }
 
@@ -129,21 +132,21 @@ final class BrowserSession: @unchecked Sendable {
     }
 }
 
-/// The browsers of the app, one per Orb: finds the engines on the Mac, starts the driver of an Orb's engine on first use and
+/// The browsers of the app, one per Orb: finds the browser on the Mac, starts the driver of an Orb's browser on first use and
 /// keeps it, so the tools of the Orb's next turns find the same page open. It never installs anything (that is `BrowserInstaller`,
 /// from Ajustes) and closes every browser it started when the app quits.
 final class BrowserHub: Sendable {
-    /// `<data folder>/navegador`: a folder per Orb (and engine) for what the browser keeps, logins included, and `bin`, `chrome`,
-    /// `cloak` for what the installer put there (`BrowserInstallLayout`).
+    /// `<data folder>/navegador`: a folder per Orb for what the browser keeps, logins included, and `bin`, `chrome` for what the
+    /// installer put there (`BrowserInstallLayout`).
     let profilesDirectory: URL?
-    private let locate: @Sendable (BrowserEngineKind) async -> BrowserEngineStatus
+    private let locate: @Sendable () async -> BrowserStatus
     private let makeDriver: @Sendable (AgentBrowserConfig) -> any BrowserDriver
     private let sessions = OSAllocatedUnfairLock<[UUID: BrowserSession]>(initialState: [:])
     /// What the tools say a ref is ("Entrar" for e3), by Orb, readable without waiting (the approval card shows it).
     private let labels = OSAllocatedUnfairLock<[UUID: [String: String]]>(initialState: [:])
 
     init(profilesDirectory: URL?,
-         locate: (@Sendable (BrowserEngineKind) async -> BrowserEngineStatus)? = nil,
+         locate: (@Sendable () async -> BrowserStatus)? = nil,
          makeDriver: @escaping @Sendable (AgentBrowserConfig) -> any BrowserDriver = { AgentBrowserDriver(config: $0) }) {
         self.profilesDirectory = profilesDirectory
         self.locate = locate ?? BrowserHub.liveStatus(root: profilesDirectory)
@@ -153,16 +156,16 @@ final class BrowserHub: Sendable {
     /// The hub of the app, with its folder in the data folder (`Store.directory`).
     static func live(dataFolder: URL) -> BrowserHub { BrowserHub(profilesDirectory: dataFolder.appending(path: "navegador")) }
 
-    /// The engines as they are on this Mac now: what the app installed first, then the user's own PATH.
-    static func liveStatus(root: URL?) -> @Sendable (BrowserEngineKind) async -> BrowserEngineStatus {
-        { engine in
+    /// The browser as it is on this Mac now: what the app installed first, then the user's own PATH.
+    static func liveStatus(root: URL?) -> @Sendable () async -> BrowserStatus {
+        {
             let path = await ShellEnvironment.shared.resolved().environment["PATH"]
-            return BrowserEngineLocator.live(path: path, managedRoot: root).status(for: engine)
+            return BrowserLocator.live(path: path, managedRoot: root).status()
         }
     }
 
-    func status(for engine: BrowserEngineKind) async -> BrowserEngineStatus {
-        let status = await locate(engine)
+    func status() async -> BrowserStatus {
+        let status = await locate()
         remember(status)
         return status
     }
@@ -170,36 +173,51 @@ final class BrowserHub: Sendable {
     /// The `agent-browser` last seen, for closing browsers at quit, which cannot ask where it is.
     private let knownAgentBrowser = OSAllocatedUnfairLock<String?>(initialState: nil)
 
-    private func remember(_ status: BrowserEngineStatus) {
+    private func remember(_ status: BrowserStatus) {
         if let path = status.agentBrowser, path.hasPrefix("/") { knownAgentBrowser.withLock { $0 = path } }
     }
 
-    /// How the Orb's browser is launched for this engine and status.
-    func configuration(botID: UUID, engine: BrowserEngineKind, status: BrowserEngineStatus) -> AgentBrowserConfig {
+    /// The folder of the Orb's profile (`<navegador>/<orb id>/chrome`, the name the first versions gave it: logins made then stay).
+    func profileFolder(botID: UUID) -> URL? {
+        profilesDirectory?.appending(path: botID.uuidString).appending(path: "chrome")
+    }
+
+    /// How the Orb's browser is launched for this mode and status.
+    func configuration(botID: UUID, mode: BrowserMode, status: BrowserStatus) -> AgentBrowserConfig {
         remember(status)
-        let profile = engine.keepsProfile
-            ? profilesDirectory?.appending(path: botID.uuidString).appending(path: engine.rawValue) : nil
-        var config = AgentBrowserConfig(executable: status.agentBrowser ?? "agent-browser",
-                                        session: AgentBrowserConfig.sessionName(botID: botID, engine: engine), engine: engine,
-                                        browserExecutable: status.browserExecutable, profile: profile, stateDirectory: profilesDirectory)
-        // Written once (atomically, see `CloakSeed`): two callers at the same time get the same seed.
-        if engine == .cloak, let profile { config.cloakSeed = CloakSeed.seed(inProfile: profile) }
+        Self.adoptOldProfile(for: botID, in: profilesDirectory)
+        var config = AgentBrowserConfig(executable: status.agentBrowser ?? "agent-browser", session: AgentBrowserConfig.sessionName(botID: botID),
+                                        browser: status.program, profile: profileFolder(botID: botID), stateDirectory: profilesDirectory)
+        config.headed = mode == .visible
+        config.visibleByDefault = mode == .visible
         return config
     }
 
-    /// The Orb's browser, started on first use. Throws what is missing when the engine is not installed.
-    func session(botID: UUID, engine: BrowserEngineKind) async throws -> BrowserSession {
-        if let existing = sessions.withLock({ $0[botID] }), existing.engine == engine { return existing }
-        let status = await status(for: engine)
+    /// An Orb that used CloakBrowser has its logins in `<orb id>/cloak`, an older Chromium profile that Chrome opens as it is: with no
+    /// `chrome` folder yet, the folder is renamed to it. The seed file is not needed. If both folders exist the Chrome one wins and the other is left alone.
+    static func adoptOldProfile(for botID: UUID, in directory: URL?) {
+        guard let orbFolder = directory?.appending(path: botID.uuidString) else { return }
+        let fileManager = FileManager.default
+        let chrome = orbFolder.appending(path: "chrome"), cloak = orbFolder.appending(path: "cloak")
+        if !fileManager.fileExists(atPath: chrome.path), fileManager.fileExists(atPath: cloak.path) {
+            try? fileManager.moveItem(at: cloak, to: chrome)
+            try? fileManager.removeItem(at: chrome.appending(path: ".cloakbrowser-seed"))
+        }
+    }
+
+    /// The Orb's browser, started on first use. Throws what is missing when it is not installed.
+    func session(botID: UUID, mode: BrowserMode) async throws -> BrowserSession {
+        if let existing = sessions.withLock({ $0[botID] }), existing.mode == mode { return existing }
+        let status = await status()
         guard status.isReady else { throw BrowserDriverError.notInstalled(status.modelNote ?? "The browser is not installed.") }
         // Two calls for the same Orb can both get here (the tools of one turn run at the same time, and the lookup above waited):
         // the check and the installing of the session are one step, so the second finds the first one's and uses it.
         let (session, replaced) = sessions.withLock { sessions -> (BrowserSession, BrowserSession?) in
-            if let existing = sessions[botID], existing.engine == engine { return (existing, nil) }
-            let session = BrowserSession(botID: botID, engine: engine, driver: makeDriver(configuration(botID: botID, engine: engine, status: status)))
+            if let existing = sessions[botID], existing.mode == mode { return (existing, nil) }
+            let session = BrowserSession(botID: botID, mode: mode, driver: makeDriver(configuration(botID: botID, mode: mode, status: status)))
             return (session, sessions.updateValue(session, forKey: botID))
         }
-        // Another engine is another browser: the old one is closed (best effort).
+        // Another mode is another browser (a running one keeps the flags it was launched with): the old one is closed (best effort).
         if let replaced, replaced !== session { try? await replaced.driver.close() }
         return session
     }
@@ -224,34 +242,26 @@ final class BrowserHub: Sendable {
     // MARK: Closing
 
     // A browser outlives the process that started it: its background process (`agent-browser`) keeps it, and one left by an earlier
-    // run of the app is not held here. Sessions are named after the Orb and the engine (`AgentBrowserConfig.sessionName`), so
+    // run of the app is not held here. Sessions are named after the Orb (`AgentBrowserConfig.sessionName`), so
     // everything below that closes a browser closes it by name too: the sessions `agent-browser` reports running that are the Orb's,
     // whoever started them.
 
-    private static let driven: [BrowserEngineKind] = [.chrome, .obscura, .cloak]
-
-    /// The `agent-browser` to ask which sessions run: the one the engines resolve to now.
-    private func agentBrowserPath() async -> String? {
-        for engine in Self.driven {
-            if let path = await status(for: engine).agentBrowser { return path }
-        }
-        return nil
-    }
+    /// The `agent-browser` to ask which sessions run: the one found now.
+    private func agentBrowserPath() async -> String? { await status().agentBrowser }
 
     /// The same when nothing can be awaited (the app is quitting): the last one seen, or the one the app installed, or one in the
     /// usual places of a Mac (the login shell's PATH cannot be asked now).
     private func agentBrowserPathNow() -> String? {
         if let known = knownAgentBrowser.withLock({ $0 }) { return known }
-        return BrowserEngineLocator.live(path: nil, managedRoot: profilesDirectory).agentBrowser()
+        return BrowserLocator.live(path: nil, managedRoot: profilesDirectory).agentBrowser()
     }
 
     /// A driver for a session by name, to ask or close it.
     private func driver(forSession name: String, executable: String) -> any BrowserDriver {
-        makeDriver(AgentBrowserConfig(executable: executable, session: name, engine: AgentBrowserConfig.engine(ofSession: name) ?? .chrome,
-                                      stateDirectory: profilesDirectory))
+        makeDriver(AgentBrowserConfig(executable: executable, session: name, stateDirectory: profilesDirectory))
     }
 
-    /// The Orb's sessions running now (`orb-<id>-<engine>`) that `matches`, whoever started them.
+    /// The Orb's sessions running now (`orb-<id>-chrome`) that `matches`, whoever started them.
     private func runningSessions(executable: String, where matches: (String) -> Bool) async -> [String] {
         await driver(forSession: "orb-sessions", executable: executable).runningSessions()
             .filter { $0.hasPrefix(AgentBrowserConfig.sessionPrefix) && matches($0) }
@@ -267,18 +277,15 @@ final class BrowserHub: Sendable {
     }
 
     /// Closes the browser this hub holds for the Orb (and forgets it); true when there was one.
-    private func closeHeld(botID: UUID, engine: BrowserEngineKind? = nil) async -> BrowserSession? {
-        let held = sessions.withLock { sessions -> BrowserSession? in
-            guard let session = sessions[botID], engine == nil || session.engine == engine else { return nil }
-            return sessions.removeValue(forKey: botID)
-        }
+    private func closeHeld(botID: UUID) async -> BrowserSession? {
+        let held = sessions.withLock { $0.removeValue(forKey: botID) }
         if let held { try? await held.driver.close() }
         return held
     }
 
-    private static func name(of session: BrowserSession) -> String { AgentBrowserConfig.sessionName(botID: session.botID, engine: session.engine) }
+    private static func name(of session: BrowserSession) -> String { AgentBrowserConfig.sessionName(botID: session.botID) }
 
-    /// Closes the Orb's browsers, whichever engine and whoever started them (and forgets them). The profile stays: logins survive.
+    /// Closes the Orb's browser, whoever started it (and forgets it). The profile stays: logins survive.
     /// True when one was open.
     @discardableResult
     func close(botID: UUID) async -> Bool {
@@ -287,19 +294,6 @@ final class BrowserHub: Sendable {
         let prefix = AgentBrowserConfig.botPrefix(botID)
         let others = await closeRunning(where: { $0.hasPrefix(prefix) }, skipping: held.map { [Self.name(of: $0)] } ?? [])
         return held != nil || others
-    }
-
-    /// Closes the browsers of every Orb that uses `engine` (before its files are removed or replaced), the ones an earlier run of the
-    /// app started included.
-    func close(engine: BrowserEngineKind) async {
-        let ids = sessions.withLock { $0.filter { $0.value.engine == engine }.map(\.key) }
-        var held: Set<String> = []
-        for id in ids {
-            clearLabels(botID: id)
-            if let session = await closeHeld(botID: id, engine: engine) { held.insert(Self.name(of: session)) }
-        }
-        let suffix = "-" + engine.rawValue
-        await closeRunning(where: { $0.hasSuffix(suffix) }, skipping: held)
     }
 
     /// Closes every browser at once, without waiting for a task: for `willTerminate`, which cannot wait for one. A browser left
@@ -336,17 +330,6 @@ final class BrowserHub: Sendable {
             }
         }
         _ = group.wait(timeout: .now() + timeout + 1)
-    }
-
-    /// The Orb left `engine` for another: closes the browser it had open with it. The session may have been started by another
-    /// process (an earlier run of the app), so when this hub
-    /// holds none the session is closed by name; it does nothing when no browser is running. The profile stays.
-    func close(botID: UUID, leaving engine: BrowserEngineKind) async {
-        clearLabels(botID: botID)
-        if await closeHeld(botID: botID, engine: engine) != nil { return }
-        guard engine.drivesABrowser else { return }
-        let name = AgentBrowserConfig.sessionName(botID: botID, engine: engine)
-        await closeRunning(where: { $0 == name })
     }
 
     func closeAll() async {

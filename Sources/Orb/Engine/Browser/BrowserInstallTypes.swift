@@ -3,67 +3,36 @@ import Foundation
 // What the app installs for the Orbs' browsers, where it puts it, and what it tells the person while it works. The installer
 // itself is `BrowserInstaller`; the settings screen talks to it through `BrowserSetup`.
 
-/// One thing that can be installed. An engine is made of these: `agent-browser` (the command line that drives every browser)
-/// plus the browser itself.
+/// One thing that can be installed: `agent-browser` (the command line that drives the browser) and, only for a Mac with no Chrome
+/// or Brave, the Chrome for Testing it falls back to.
 enum BrowserComponent: String, CaseIterable, Codable, Sendable, Identifiable {
-    case agentBrowser, chrome, obscura, cloak
+    case agentBrowser, chrome
 
     var id: String { rawValue }
 
-    /// "agent-browser", "Chrome", "Obscura", "CloakBrowser".
+    /// "agent-browser", "Chrome".
     var name: String {
         switch self {
         case .agentBrowser: "agent-browser"
         case .chrome: "Chrome"
-        case .obscura: "Obscura"
-        case .cloak: "CloakBrowser"
         }
     }
-
-    /// The engine this component is the browser of (nil for the command line, which every engine uses).
-    var engine: BrowserEngineKind? {
-        switch self {
-        case .agentBrowser: nil
-        case .chrome: .chrome
-        case .obscura: .obscura
-        case .cloak: .cloak
-        }
-    }
-}
-
-extension BrowserEngineKind {
-    /// What the engine needs installed, in the order to install it. `simple` needs nothing.
-    var components: [BrowserComponent] {
-        switch self {
-        case .simple: []
-        case .chrome: [.agentBrowser, .chrome]
-        case .obscura: [.agentBrowser, .obscura]
-        case .cloak: [.agentBrowser, .cloak]
-        }
-    }
-
-    /// The component that is the browser itself, when the engine has one to install.
-    var browserComponent: BrowserComponent? { components.last.flatMap { $0 == .agentBrowser ? nil : $0 } }
 }
 
 /// Where everything the installer puts on the Mac goes, all inside `<data folder>/navegador` (next to the Orbs' profiles):
 ///
-///     bin/agent-browser, bin/obscura, bin/obscura-worker
-///     chrome/chrome-<version>/Google Chrome for Testing.app
-///     cloak/cache/chromium-<version>/Chromium.app (the Python environment that downloads it lives only in the work folder)
+///     bin/agent-browser
+///     chrome/chrome-<version>/Google Chrome for Testing.app (only when the Mac has no Chrome or Brave)
 ///     instalados.json (what is installed, and which version), atualizacoes.json (the last look for newer releases),
-///     agent-browser.json (the empty config every command is told to read), sessoes/<session>.launch (how each browser was launched)
+///     agent-browser.json (the empty config every command is told to read), sessoes/<session>.launch (how each browser was launched),
+///     lancadores/ (the one-line scripts that start Chrome with the user agent of a real one)
 struct BrowserInstallLayout: Sendable, Equatable {
     var root: URL
 
     var binDirectory: URL { root.appending(path: "bin", directoryHint: .isDirectory) }
     var agentBrowser: URL { binDirectory.appending(path: "agent-browser") }
-    var obscura: URL { binDirectory.appending(path: "obscura") }
-    var obscuraWorker: URL { binDirectory.appending(path: "obscura-worker") }
     /// Holds `chrome-<version>` folders, as `agent-browser install` names them.
     var chromeDirectory: URL { root.appending(path: "chrome", directoryHint: .isDirectory) }
-    var cloakDirectory: URL { root.appending(path: "cloak", directoryHint: .isDirectory) }
-    var cloakCache: URL { cloakDirectory.appending(path: "cache", directoryHint: .isDirectory) }
     var recordsFile: URL { root.appending(path: "instalados.json") }
     var updatesFile: URL { root.appending(path: "atualizacoes.json") }
 
@@ -81,11 +50,10 @@ struct InstalledComponent: Codable, Equatable, Sendable {
     var source: String?
     /// The SHA-256 the download was checked against; nil when the release publishes none (and nothing was checked).
     var sha256: String?
-    /// Something worth showing next to the version: CloakBrowser's Chromium, say.
+    /// Something worth showing next to the version: "Chrome for Testing", say.
     var detail: String?
-    /// Whether the download matched a checksum the release publishes (true), or the release published none and the file is
-    /// whatever the server sent (false, shown in Ajustes). Nil for what has no such download (Chrome and CloakBrowser verify their
-    /// own packages) and for records written before this was told.
+    /// Whether the download matched a checksum (true), or there was none to match (false, shown in Ajustes). Nil for what has no
+    /// such download (Chrome verifies its own package) and for records written before this was told.
     var verified: Bool?
 }
 
@@ -165,15 +133,12 @@ struct BrowserInstallProgress: Sendable, Equatable {
 enum BrowserInstallError: LocalizedError, Equatable, Sendable {
     case noNetwork
     case rateLimited
-    case noPython
-    case needsCommandLineTools
     case checksumMismatch(String)
     case diskFull(needed: Int64?)
     case unsupportedMac(String)
     case assetMissing(String)
     case needsAgentBrowser
     case broken(String, detail: String)
-    case cloakNeedsKey
     /// The new version did not work in its place, and the one that was installed came back.
     case updateRolledBack(String, detail: String)
     case failed(String, detail: String)
@@ -184,10 +149,6 @@ enum BrowserInstallError: LocalizedError, Equatable, Sendable {
             "Sem conexão com a internet. Confira a rede e tente de novo."
         case .rateLimited:
             "O GitHub limitou as consultas deste Mac por enquanto. Tente de novo em alguns minutos."
-        case .noPython:
-            "O CloakBrowser precisa do Python 3.9 ou mais novo, e este Mac não tem um que funcione. Instale o Python (python.org) ou as Ferramentas de Linha de Comando e tente de novo."
-        case .needsCommandLineTools:
-            "O Python que vem com o macOS só funciona depois de instalar as Ferramentas de Linha de Comando. No Terminal, rode xcode-select --install, espere terminar e tente de novo."
         case .checksumMismatch(let name):
             "O arquivo baixado do \(name) não confere com a soma de verificação publicada. Nada foi instalado. Tente de novo; se repetir, a rede pode estar alterando o arquivo."
         case .diskFull(let needed):
@@ -204,8 +165,6 @@ enum BrowserInstallError: LocalizedError, Equatable, Sendable {
             "Falta o agent-browser, que dirige os navegadores. Instale-o primeiro."
         case .broken(let name, let detail):
             "O \(name) foi instalado mas não abriu (\(detail)). Foi removido; tente instalar de novo."
-        case .cloakNeedsKey:
-            "O CloakBrowser pediu uma chave de licença para baixar o navegador. Crie uma chave grátis em cloakbrowser.dev/free, rode no Terminal cloakbrowser login e tente de novo."
         case .updateRolledBack(let name, let detail):
             "A versão nova do \(name) não abriu (\(detail)). A que estava instalada voltou e continua como estava."
         case .failed(let name, let detail):
@@ -237,11 +196,23 @@ struct BrowserPlatform: Sendable, Equatable {
     /// The `agent-browser` release file: `agent-browser-darwin-arm64` / `-darwin-x64`.
     var agentBrowserAsset: String { "agent-browser-darwin-" + (architecture == .arm64 ? "arm64" : "x64") }
 
-    /// The Obscura release files for macOS, the one wanted first: `obscura-aarch64-macos-stealth.tar.gz` (the stealth build:
-    /// consistent fingerprint and TLS impersonation), then the plain one.
-    var obscuraAssets: [String] {
-        let arch = architecture == .arm64 ? "aarch64" : "x86_64"
-        return ["obscura-\(arch)-macos-stealth.tar.gz", "obscura-\(arch)-macos.tar.gz"]
+    /// The `agent-browser` the app installs, pinned: the version it was tested with and the SHA-256 of each release file (the
+    /// `digest` GitHub publishes for the asset, conferred against the downloaded file on 16/10/2026). A new version is a change in
+    /// the app, with the new hashes; the install never takes "the latest".
+    static let agentBrowserVersion = "0.39.1"
+    /// About the size of the release file, for the progress bar and the free-space check.
+    static let agentBrowserSize: Int64 = 17_500_000
+
+    /// The pinned hash of each release file. A property so that tests can serve a file of their own.
+    var pinnedHashes: [Architecture: String] = [
+        .arm64: "cc18fac41d9dc9821918340a136e643286ea05544c4dd35671b796f1a874cdef",
+        .x86_64: "339cb9aa6dfd404856cf938df34cd3b4779c61dfd57fc257be11b14fd1a885f9",
+    ]
+
+    var agentBrowserSHA256: String { pinnedHashes[architecture] ?? "" }
+
+    var agentBrowserURL: URL {
+        URL(string: "https://github.com/vercel-labs/agent-browser/releases/download/v\(Self.agentBrowserVersion)/\(agentBrowserAsset)")!
     }
 }
 
@@ -278,7 +249,7 @@ enum BrowserVersion {
     }
 }
 
-/// Reads `42/184 MB` out of what `agent-browser install` and `python -m cloakbrowser install` print as they download
+/// Reads `42/184 MB` out of what `agent-browser install` prints as it downloads
 /// ("  9/184 MB (5%)", "Download progress: 59% (82/140 MB)").
 enum DownloadProgressLine {
     private static let progress = try? NSRegularExpression(pattern: #"(\d+)\s*/\s*(\d+)\s*MB"#)

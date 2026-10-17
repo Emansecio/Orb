@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-/// Ajustes → Navegador: install, update and remove the browsers the Orbs drive, and keep the key of the search that needs one.
+/// Ajustes → Navegador: install, update and remove what the Orbs' browser needs, and keep the key of the search that needs one.
 /// Everything is installed inside the app's data folder (nothing from Homebrew or Node, nothing with administrator rights).
 struct BrowserSettings: View {
     @Environment(AppModel.self) private var model
@@ -10,16 +10,16 @@ struct BrowserSettings: View {
         let setup = model.browserSetup
         Form {
             Section {
-                ForEach(setup.rows) { row in BrowserEngineRowView(row: row, setup: setup) }
+                ForEach(setup.rows) { row in BrowserComponentRowView(row: row, setup: setup) }
             } header: {
-                Text("Navegadores")
+                Text("Navegador dos Orbs")
             } footer: { FormFootnote {
-                Text("Cada Orb escolhe o seu no painel dele. O que você instala aqui não precisa de Homebrew, Node nem senha.")
+                Text("Cada Orb escolhe no painel dele se o navegador fica em segundo plano ou visível. O que você instala aqui não precisa de Homebrew, Node nem senha.")
             } }
             SearchKeySection()
             Section("Privacidade") {
                 LearnMoreNote(short: "Senhas nunca são digitadas pelo Orb: quando um site pede, ele abre a janela para você.",
-                              more: "Os navegadores rodam neste Mac, em segundo plano, e guardam os logins de cada Orb em uma pasta separada. "
+                              more: "O navegador roda neste Mac, em segundo plano, e guarda os logins de cada Orb em uma pasta separada. "
                               + "As buscas do Google e do DuckDuckGo saem do seu IP; a do TinyFish passa pela conta dele.")
             }
         }
@@ -35,23 +35,23 @@ struct BrowserSettings: View {
     }
 }
 
-/// One engine: its name and what it is, what it is doing, and the buttons that fit its state.
-private struct BrowserEngineRowView: View {
-    let row: BrowserEngineRow
+/// One component: its name and what it is, what it is doing, and the buttons that fit its state.
+private struct BrowserComponentRowView: View {
+    let row: BrowserComponentRow
     let setup: BrowserSetup
     @State private var isConfirmingRemoval = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(row.engine.label).font(.body.weight(.medium))
-                if row.updateAvailable, case .installed(managed: true) = row.phase {
+                Text(row.title).font(.body.weight(.medium))
+                if row.updateAvailable, case .installed = row.phase {
                     CatalogBadge(text: "Atualização", tint: Palette.accentText)
                 }
                 Spacer()
                 actions
             }
-            Text(row.engine.summary)
+            Text(row.summary)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -66,15 +66,10 @@ private struct BrowserEngineRowView: View {
         }
         .padding(.vertical, 2)
         .animation(.default, value: row.phase)
-        .confirmationDialog("Remover o navegador \(row.engine.label)?", isPresented: $isConfirmingRemoval) {
-            Button("Remover e manter os logins") { setup.remove(row.engine) }
-            if row.engine.keepsProfile {
-                Button("Remover e apagar os logins dos Orbs", role: .destructive) { setup.remove(row.engine, removeProfiles: true) }
-            }
+        .confirmationDialog("Remover \(row.title)?", isPresented: $isConfirmingRemoval) {
+            Button("Remover", role: .destructive) { setup.remove(row.component) }
         } message: {
-            Text(row.engine.keepsProfile
-                 ? "Os arquivos do navegador saem deste Mac. Os logins que os Orbs guardaram ficam, a menos que você apague também."
-                 : "Os arquivos do navegador saem deste Mac. Você pode instalar de novo quando quiser.")
+            Text("Os arquivos saem deste Mac. Os logins que os Orbs guardaram ficam. Você pode instalar de novo quando quiser.")
         }
     }
 
@@ -83,22 +78,22 @@ private struct BrowserEngineRowView: View {
         case .checking:
             EmptyView()
         case .notInstalled, .failed:
-            Button(isFailed ? "Tentar de novo" : "Instalar") { setup.install(row.engine) }
+            Button(isFailed ? "Tentar de novo" : "Instalar") { setup.install(row.component) }
                 .disabled(!row.canInstall)
-                .help(isFailed ? "Tenta instalar de novo" : "Baixa e instala este navegador na pasta do Orb")
+                .help(isFailed ? "Tenta instalar de novo" : "Baixa e instala na pasta do Orb")
         case .installing:
             Button("Cancelar") { setup.cancel() }
                 .help("Interrompe a instalação e descarta o que já foi baixado")
-        case .installed(let managed):
-            if managed {
+        case .installed:
+            if row.versionText != nil {
                 if row.canUpdate {
-                    Button("Atualizar") { setup.update(row.engine) }
+                    Button("Atualizar") { setup.update(row.component) }
                         .help("Instala a versão mais nova")
                 }
                 Button("Remover…", role: .destructive) { isConfirmingRemoval = true }
                     .disabled(!row.canRemove)
                     .buttonStyle(.borderless)
-                    .help("Tira este navegador do Mac, perguntando antes")
+                    .help("Tira do Mac o que o Orb instalou, perguntando antes")
             }
         }
     }

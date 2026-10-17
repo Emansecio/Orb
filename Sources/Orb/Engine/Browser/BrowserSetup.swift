@@ -1,8 +1,8 @@
 import Foundation
 import Observation
 
-/// One line of Ajustes → Navegador: an engine, and what can be done with it now.
-struct BrowserEngineRow: Equatable, Identifiable, Sendable {
+/// One line of Ajustes → Navegador: a component of the Orb's browser, and what can be done with it now.
+struct BrowserComponentRow: Equatable, Identifiable, Sendable {
     enum Phase: Equatable, Sendable {
         /// The Mac has not been looked at yet: nothing is said and nothing can be done until it has.
         case checking
@@ -13,16 +13,34 @@ struct BrowserEngineRow: Equatable, Identifiable, Sendable {
         case failed(String)
     }
 
-    var engine: BrowserEngineKind
+    var component: BrowserComponent
     var phase: Phase
-    /// "agent-browser 0.39.0 · Chrome 155.0.8059.39", what is installed.
+    /// "agent-browser 0.39.1", what the app installed.
     var versionText: String?
-    /// A newer release of something this engine uses exists.
+    /// What the browser row says the Mac uses ("Google Chrome 155").
+    var found: String?
+    /// A newer release of this component exists.
     var updateAvailable = false
-    /// Another engine is being installed: one install at a time (they share `agent-browser`).
+    /// Another component is being installed: one install at a time.
     var isBlocked = false
 
-    var id: String { engine.rawValue }
+    var id: String { component.rawValue }
+
+    /// The name of the row.
+    var title: String {
+        switch component {
+        case .agentBrowser: "agent-browser"
+        case .chrome: "Navegador"
+        }
+    }
+
+    /// What the component is, one line under the name.
+    var summary: String {
+        switch component {
+        case .agentBrowser: "A ferramenta que dirige o navegador dos Orbs (15 MB)."
+        case .chrome: "Usa o Google Chrome ou o Brave que já estão neste Mac. Sem eles, o Orb baixa o Chrome for Testing (cerca de 180 MB) como reserva."
+        }
+    }
 
     var canInstall: Bool {
         guard !isBlocked else { return false }
@@ -32,169 +50,169 @@ struct BrowserEngineRow: Equatable, Identifiable, Sendable {
         }
     }
 
+    /// What the app put there can go (a browser found on the Mac is not the app's to remove).
     var canRemove: Bool {
-        guard !isBlocked else { return false }
-        if case .installed(let managed) = phase { return managed }
-        return false
+        guard !isBlocked, case .installed = phase else { return false }
+        return versionText != nil
     }
 
     var canUpdate: Bool {
         guard !isBlocked, updateAvailable else { return false }
-        if case .installed(true) = phase { return true }
+        if case .installed = phase { return versionText != nil }
         return false
     }
 
     var isInstalling: Bool { if case .installing = phase { true } else { false } }
 
-    /// The line under the name: what it is doing or has.
+    /// The line under the summary: what it is doing or has.
     var statusText: String {
         switch phase {
         case .checking: "Conferindo…"
-        case .notInstalled: "Não instalado"
-        case .installed(let managed):
-            managed ? "Instalado" + (versionText.map { " · \($0)" } ?? "") : "Instalado fora do Orb" + (versionText.map { " · \($0)" } ?? "")
+        case .notInstalled: component == .chrome ? "Nenhum navegador encontrado" : "Não instalado"
+        case .installed:
+            switch component {
+            case .agentBrowser: "Instalado" + (versionText.map { " · \($0)" } ?? "")
+            case .chrome: "Usando \(found ?? "o navegador do Mac")" + (versionText.map { " · reserva do Orb guardada (\($0))" } ?? "")
+            }
         case .installing(let progress): progress.text
         case .failed(let message): message
         }
     }
 }
 
-/// What Ajustes → Navegador shows and does: which engines are installed and with what version, the install in progress (one at a
-/// time), its cancellation, the removal, and the look for newer releases (at most once a day). The work is `BrowserInstaller`'s.
+/// What Ajustes → Navegador shows and does: what is installed and with what version, the install in progress (one at a time),
+/// its cancellation, the removal, and the look for newer releases (at most once a day). The work is `BrowserInstaller`'s.
 @MainActor @Observable
 final class BrowserSetup {
-    private(set) var rows: [BrowserEngineRow] = []
-    /// The engine being installed, updated or removed now.
-    private(set) var working: BrowserEngineKind?
+    private(set) var rows: [BrowserComponentRow] = []
+    /// The component being installed, updated or removed now.
+    private(set) var working: BrowserComponent?
     private(set) var updates: Set<BrowserComponent> = []
     private(set) var lastCheck: Date?
 
     @ObservationIgnored let installer: BrowserInstaller
-    @ObservationIgnored private let status: @Sendable (BrowserEngineKind) async -> BrowserEngineStatus
-    @ObservationIgnored private let closeBrowsers: @Sendable (BrowserEngineKind) async -> Void
+    @ObservationIgnored private let status: @Sendable () async -> BrowserStatus
+    @ObservationIgnored private let closeBrowsers: @Sendable () async -> Void
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var progress: BrowserInstallProgress?
-    @ObservationIgnored private var failures: [BrowserEngineKind: String] = [:]
+    @ObservationIgnored private var failures: [BrowserComponent: String] = [:]
 
-    /// The engines shown, in order: the ones a person installs (`simple` has nothing to install).
-    static let engines: [BrowserEngineKind] = [.chrome, .obscura, .cloak]
-
-    init(installer: BrowserInstaller, status: @escaping @Sendable (BrowserEngineKind) async -> BrowserEngineStatus,
-         closeBrowsers: @escaping @Sendable (BrowserEngineKind) async -> Void = { _ in }) {
+    init(installer: BrowserInstaller, status: @escaping @Sendable () async -> BrowserStatus,
+         closeBrowsers: @escaping @Sendable () async -> Void = {}) {
         self.installer = installer
         self.status = status
         self.closeBrowsers = closeBrowsers
-        // Until the first look, every engine is "checking", never "not installed" with an Install button that would be wrong.
-        rows = Self.engines.map { BrowserEngineRow(engine: $0, phase: .checking) }
+        // Until the first look, every row is "checking", never "not installed" with an Install button that would be wrong.
+        rows = BrowserComponent.allCases.map { BrowserComponentRow(component: $0, phase: .checking) }
     }
 
     var isBusy: Bool { working != nil }
 
-    func row(_ engine: BrowserEngineKind) -> BrowserEngineRow? { rows.first { $0.engine == engine } }
+    func row(_ component: BrowserComponent) -> BrowserComponentRow? { rows.first { $0.component == component } }
 
     // MARK: Reading
 
     /// Looks at the Mac again and rebuilds the rows.
     func refresh() async {
-        let engines = Self.engines
-        var found: [BrowserEngineKind: BrowserEngineStatus] = [:]
-        for engine in engines { found[engine] = await status(engine) }
+        let found = await status()
         let installer = installer
         let (records, installed) = await Task.detached { () -> (InstalledRecords, [BrowserComponent: Bool]) in
-            installer.removeLegacyCloakEnvironment()
+            installer.removeLegacyEngines()
             var installed: [BrowserComponent: Bool] = [:]
             for component in BrowserComponent.allCases { installed[component] = installer.isInstalled(component) }
             return (installer.records(), installed)
         }.value
-        rebuild(statuses: found, records: records, installed: installed)
+        rebuild(status: found, records: records, installed: installed)
     }
 
-    private func rebuild(statuses: [BrowserEngineKind: BrowserEngineStatus], records: InstalledRecords, installed: [BrowserComponent: Bool]) {
-        rows = Self.engines.map { engine in
-            let ready = statuses[engine]?.isReady == true
-            var row = BrowserEngineRow(engine: engine, phase: .notInstalled)
-            let managed = engine.components.allSatisfy { installed[$0] == true }
-            if working == engine, let progress {
+    private func rebuild(status: BrowserStatus, records: InstalledRecords, installed: [BrowserComponent: Bool]) {
+        rows = BrowserComponent.allCases.map { component in
+            var row = BrowserComponentRow(component: component, phase: .notInstalled)
+            let ready: Bool
+            switch component {
+            case .agentBrowser:
+                ready = status.agentBrowser != nil
+            case .chrome:
+                ready = status.program != nil
+                row.found = status.program?.label
+            }
+            if working == component, let progress {
                 row.phase = .installing(progress)
-            } else if working == engine {
-                row.phase = .installing(BrowserInstallProgress(component: engine.browserComponent ?? .agentBrowser, phase: .preparing))
-            } else if let failure = failures[engine] {
+            } else if working == component {
+                row.phase = .installing(BrowserInstallProgress(component: component, phase: .preparing))
+            } else if let failure = failures[component] {
                 row.phase = .failed(failure)
             } else if ready {
-                row.phase = .installed(managed: managed)
+                row.phase = .installed(managed: installed[component] == true)
             }
-            row.versionText = Self.versionText(for: engine, records: records, installed: installed)
-            row.updateAvailable = managed && !engine.components.filter(updates.contains).isEmpty
-            row.isBlocked = working != nil && working != engine
+            row.versionText = Self.versionText(for: component, records: records, installed: installed)
+            row.updateAvailable = installed[component] == true && updates.contains(component)
+            row.isBlocked = working != nil && working != component
             return row
         }
     }
 
-    /// "agent-browser 0.39.0 · Chrome 155.0.8059.39" from what the installer wrote down.
-    nonisolated static func versionText(for engine: BrowserEngineKind, records: InstalledRecords, installed: [BrowserComponent: Bool]) -> String? {
-        let parts = engine.components.compactMap { component -> String? in
-            guard installed[component] == true, let record = records[component.rawValue] else { return nil }
-            // A download the release gave no checksum for is installed, but not as checked: Ajustes says so.
-            return "\(component.name) \(record.version)" + (record.verified == false ? " (sem soma de verificação)" : "")
-        }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    /// "agent-browser 0.39.1" from what the installer wrote down.
+    nonisolated static func versionText(for component: BrowserComponent, records: InstalledRecords, installed: [BrowserComponent: Bool]) -> String? {
+        guard installed[component] == true, let record = records[component.rawValue] else { return nil }
+        return "\(component.name == "Chrome" ? "Chrome for Testing" : component.name) \(record.version)"
     }
 
     // MARK: Doing
 
-    /// Installs what the engine is missing.
-    func install(_ engine: BrowserEngineKind) {
-        run(engine, components: nil)
+    /// Installs what the row is missing. The browser fallback needs `agent-browser`, so that comes along when it is not there.
+    func install(_ component: BrowserComponent) {
+        let needed: [BrowserComponent] = component == .chrome && !installer.isInstalled(.agentBrowser) ? [.agentBrowser, .chrome] : [component]
+        run(component, components: needed)
     }
 
     /// Installs again what has a newer release.
-    func update(_ engine: BrowserEngineKind) {
-        let components = engine.components.filter { updates.contains($0) }
-        guard !components.isEmpty else { return }
-        run(engine, components: components)
+    func update(_ component: BrowserComponent) {
+        guard updates.contains(component) else { return }
+        run(component, components: [component])
     }
 
-    private func run(_ engine: BrowserEngineKind, components: [BrowserComponent]?) {
+    private func run(_ component: BrowserComponent, components: [BrowserComponent]) {
         guard working == nil else { return }
-        working = engine
-        failures[engine] = nil
-        progress = BrowserInstallProgress(component: (components ?? engine.components).first ?? .agentBrowser, phase: .preparing,
-                                          steps: max((components ?? engine.components).count, 1))
+        working = component
+        failures[component] = nil
+        progress = BrowserInstallProgress(component: components.first ?? component, phase: .preparing, steps: max(components.count, 1))
         showWorking()
         let installer = installer, closeBrowsers = closeBrowsers
         let sink: @Sendable (BrowserInstallProgress) -> Void = { [weak self] update in
-            Task { @MainActor in self?.receive(update, for: engine) }
+            Task { @MainActor in self?.receive(update, for: component) }
         }
+        let replacing = components.contains { installer.isInstalled($0) }
         task = Task { [weak self] in
             do {
-                // A browser of this engine that is running holds the files that are about to be replaced.
-                if components != nil { await closeBrowsers(engine) }
-                try await installer.install(engine, components: components, progress: sink)
+                // A browser that is running holds the files that are about to be replaced.
+                if replacing { await closeBrowsers() }
+                try await installer.install(components, progress: sink)
             } catch is CancellationError {
                 // The person stopped it: nothing to say.
             } catch {
-                self?.failures[engine] = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                self?.failures[component] = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             }
             self?.finishWork()
         }
     }
 
-    /// The rows say at once that this engine is working and the others wait, before anything is read again.
+    /// The rows say at once that this component is working and the others wait, before anything is read again.
     private func showWorking() {
-        guard let engine = working else { return }
+        guard let component = working else { return }
         for index in rows.indices {
-            if rows[index].engine == engine {
-                rows[index].phase = .installing(progress ?? BrowserInstallProgress(component: engine.browserComponent ?? .agentBrowser, phase: .preparing))
+            if rows[index].component == component {
+                rows[index].phase = .installing(progress ?? BrowserInstallProgress(component: component, phase: .preparing))
             } else {
                 rows[index].isBlocked = true
             }
         }
     }
 
-    private func receive(_ update: BrowserInstallProgress, for engine: BrowserEngineKind) {
-        guard working == engine else { return }
+    private func receive(_ update: BrowserInstallProgress, for component: BrowserComponent) {
+        guard working == component else { return }
         progress = update
-        if let index = rows.firstIndex(where: { $0.engine == engine }) { rows[index].phase = .installing(update) }
+        if let index = rows.firstIndex(where: { $0.component == component }) { rows[index].phase = .installing(update) }
     }
 
     private func finishWork() {
@@ -210,19 +228,19 @@ final class BrowserSetup {
     /// Stops the install in progress (what was half done is thrown away).
     func cancel() { task?.cancel() }
 
-    /// Removes the engine's files; `removeProfiles` also deletes the logins the Orbs kept with it.
-    func remove(_ engine: BrowserEngineKind, removeProfiles: Bool = false) {
+    /// Removes the component's files. The logins the Orbs kept stay: they are in the Orbs' own folders.
+    func remove(_ component: BrowserComponent) {
         guard working == nil else { return }
-        working = engine
-        failures[engine] = nil
+        working = component
+        failures[component] = nil
         let installer = installer, closeBrowsers = closeBrowsers
         showWorking()
         task = Task { [weak self] in
-            await closeBrowsers(engine)
+            await closeBrowsers()
             do {
-                try await Task.detached { try installer.uninstall(engine, removeProfiles: removeProfiles) }.value
+                try await Task.detached { try installer.uninstall(component) }.value
             } catch {
-                self?.failures[engine] = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                self?.failures[component] = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             }
             self?.finishWork()
         }

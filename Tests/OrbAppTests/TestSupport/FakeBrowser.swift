@@ -96,19 +96,19 @@ struct FakeBrowserSetup {
     let driver = FakeBrowserDriver()
     let hub: BrowserHub
     let botID = UUID()
-    let engine: BrowserEngineKind
+    let mode: BrowserMode
     /// The configurations the hub asked drivers for.
     let configs = OSAllocatedUnfairLock<[AgentBrowserConfig]>(initialState: [])
 
-    init(engine: BrowserEngineKind = .chrome, ready: Bool = true, profiles: URL? = nil) {
-        self.engine = engine
+    init(mode: BrowserMode = .background, ready: Bool = true, profiles: URL? = nil) {
+        self.mode = mode
         let driver = driver
         let configs = configs
         hub = BrowserHub(
             profilesDirectory: profiles,
-            locate: { engine in
-                var status = BrowserEngineStatus(engine: engine, agentBrowser: "/fake/agent-browser",
-                                                 browserExecutable: engine == .chrome ? nil : "/fake/\(engine.rawValue)")
+            locate: {
+                var status = BrowserStatus(agentBrowser: "/fake/agent-browser",
+                                           program: BrowserProgram(kind: .chrome, executable: "/fake/chrome", major: 155))
                 if !ready { status.missing = [.init(name: "Chrome")] }
                 return status
             },
@@ -121,7 +121,7 @@ struct FakeBrowserSetup {
     func context(directory: URL = FileManager.default.temporaryDirectory, provider: SearchProvider = .duckduckgo,
                  keys: SearchKeys? = nil) -> ToolContext {
         var context = ToolContext(workingDirectory: directory, botID: botID)
-        context.browser = BrowserAccess(hub: hub, engine: engine, searchProvider: provider, searchKeys: keys)
+        context.browser = BrowserAccess(hub: hub, available: true, mode: mode, searchProvider: provider, searchKeys: keys)
         return context
     }
 }

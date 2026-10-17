@@ -6,8 +6,8 @@ import Testing
 // of engine does to the browser the Orb has open.
 
 struct BrowserPickerCopyTests {
-    private func missing(_ engine: BrowserEngineKind, _ names: String...) -> BrowserEngineStatus {
-        var status = BrowserEngineStatus(engine: engine, agentBrowser: "/fake/agent-browser")
+    private func missing(_ names: String...) -> BrowserStatus {
+        var status = BrowserStatus(agentBrowser: "/fake/agent-browser")
         status.missing = names.map { .init(name: $0) }
         return status
     }
@@ -18,51 +18,49 @@ struct BrowserPickerCopyTests {
         #expect(!BrowserPickerCopy.showsPickers([]))
     }
 
-    @Test func theEnginesAndProvidersAreNamedAndSummarizedForThePicker() {
-        #expect(BrowserEngineKind.allCases.map(\.label) == ["Leitura simples", "Chrome", "Obscura", "CloakBrowser"])
+    @Test func theModesAndProvidersAreNamedAndSummarizedForThePicker() {
+        #expect(BrowserMode.allCases.map(\.label) == ["Segundo plano", "Visível"])
         #expect(SearchProvider.allCases.map(\.label) == ["DuckDuckGo", "Google", "TinyFish"])
-        for engine in BrowserEngineKind.allCases { #expect(!engine.summary.isEmpty && !engine.summary.hasSuffix("\n")) }
+        for mode in BrowserMode.allCases { #expect(!mode.summary.isEmpty && !mode.summary.hasSuffix("\n")) }
         for provider in SearchProvider.allCases { #expect(!BrowserPickerCopy.searchSummary(provider).isEmpty) }
         // The default is the one a new Orb gets.
-        #expect(BrowserEngineKind.default == .chrome && Bot(name: "A", role: "", orb: OrbConfig()).searchProvider == .duckduckgo)
+        #expect(BrowserMode.default == .background && Bot(name: "A", role: "", orb: OrbConfig()).searchProvider == .duckduckgo)
     }
 
-    @Test func anInstalledEngineIsReadyAndTheSimpleOneNeedsNothing() {
-        let ready = BrowserPickerCopy.engineLine(.chrome, status: BrowserEngineStatus(engine: .chrome, agentBrowser: "/fake/agent-browser"))
-        #expect(ready == BrowserPickerCopy.Line(text: "Pronto", tone: .ready))
-        let simple = BrowserPickerCopy.engineLine(.simple, status: nil)
-        #expect(simple.tone == .ready && simple.action == nil && simple.text.contains("nada"))
+    @Test func anInstalledBrowserIsReadyAndSaysWhichOne() {
+        let program = BrowserProgram(kind: .chrome, executable: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", major: 155)
+        let ready = BrowserPickerCopy.browserLine(status: BrowserStatus(agentBrowser: "/fake/agent-browser", program: program))
+        #expect(ready == BrowserPickerCopy.Line(text: "Pronto · usa o Google Chrome 155", tone: .ready))
+        let noName = BrowserPickerCopy.browserLine(status: BrowserStatus(agentBrowser: "/fake/agent-browser"))
+        #expect(noName == BrowserPickerCopy.Line(text: "Pronto", tone: .ready))
     }
 
-    @Test func aMissingEngineSaysWhatIsMissingAndSendsToAjustes() {
-        let line = BrowserPickerCopy.engineLine(.chrome, status: missing(.chrome, "agent-browser", "Chrome"))
-        #expect(line.tone == .warning && line.action == .installEngine)
+    @Test func aMissingBrowserSaysWhatIsMissingAndSendsToAjustes() {
+        let line = BrowserPickerCopy.browserLine(status: missing("agent-browser", "Chrome"))
+        #expect(line.tone == .warning && line.action == .installBrowser)
         #expect(line.text.hasPrefix("Não instalado") && line.text.contains("agent-browser e Chrome") && line.text.contains("só lê"))
-        #expect(BrowserPickerCopy.Action.installEngine.title == "Instalar em Ajustes")
+        #expect(BrowserPickerCopy.Action.installBrowser.title == "Instalar em Ajustes")
         #expect(line.symbol == "exclamationmark.triangle.fill")
         // While it is being looked for there is no verdict yet.
-        let checking = BrowserPickerCopy.engineLine(.cloak, status: nil)
+        let checking = BrowserPickerCopy.browserLine(status: nil)
         #expect(checking.tone == .neutral && checking.action == nil)
     }
 
     @Test func tinyFishWithoutAKeySaysSoAndSendsToAjustes() {
-        let none = BrowserPickerCopy.searchLine(.tinyfish, engine: .chrome, browserIsReady: true, hasKey: false)
+        let none = BrowserPickerCopy.searchLine(.tinyfish, browserIsReady: true, hasKey: false)
         #expect(none?.tone == .warning && none?.action == .addSearchKey && none?.text.contains("Sem chave") == true)
         #expect(none?.text.contains("DuckDuckGo") == true, "says where the search goes meanwhile")
         #expect(BrowserPickerCopy.Action.addSearchKey.title == "Adicionar em Ajustes")
-        #expect(BrowserPickerCopy.searchLine(.tinyfish, engine: .chrome, browserIsReady: true, hasKey: true)?.tone == .ready)
-        #expect(BrowserPickerCopy.searchLine(.tinyfish, engine: .chrome, browserIsReady: true, hasKey: nil) == nil, "still being read")
+        #expect(BrowserPickerCopy.searchLine(.tinyfish, browserIsReady: true, hasKey: true)?.tone == .ready)
+        #expect(BrowserPickerCopy.searchLine(.tinyfish, browserIsReady: true, hasKey: nil) == nil, "still being read")
     }
 
     @Test func googleNeedsTheOrbsBrowserAndDuckDuckGoNeedsNothing() {
-        #expect(BrowserPickerCopy.searchLine(.duckduckgo, engine: .simple, browserIsReady: nil, hasKey: nil) == nil)
-        #expect(BrowserPickerCopy.searchLine(.google, engine: .chrome, browserIsReady: true, hasKey: nil) == nil)
-        #expect(BrowserPickerCopy.searchLine(.google, engine: .chrome, browserIsReady: nil, hasKey: nil) == nil, "not known yet")
-        let notInstalled = BrowserPickerCopy.searchLine(.google, engine: .chrome, browserIsReady: false, hasKey: nil)
-        #expect(notInstalled?.action == .installEngine && notInstalled?.text.contains("DuckDuckGo") == true)
-        // With the simple engine there is nothing to install: the line only explains.
-        let simple = BrowserPickerCopy.searchLine(.google, engine: .simple, browserIsReady: true, hasKey: nil)
-        #expect(simple?.tone == .warning && simple?.action == nil)
+        #expect(BrowserPickerCopy.searchLine(.duckduckgo, browserIsReady: nil, hasKey: nil) == nil)
+        #expect(BrowserPickerCopy.searchLine(.google, browserIsReady: true, hasKey: nil) == nil)
+        #expect(BrowserPickerCopy.searchLine(.google, browserIsReady: nil, hasKey: nil) == nil, "not known yet")
+        let notInstalled = BrowserPickerCopy.searchLine(.google, browserIsReady: false, hasKey: nil)
+        #expect(notInstalled?.action == .installBrowser && notInstalled?.text.contains("DuckDuckGo") == true)
     }
 
     @Test func theLinkOpensTheNavegadorTabOfAjustes() {
@@ -87,56 +85,44 @@ struct BrowserPickerCopyTests {
         return (model, model.bots[0].id)
     }
 
-    @Test @MainActor func changingTheEngineSavesItAndClosesTheBrowserTheOrbHadOpen() async throws {
+    @Test @MainActor func changingTheModeSavesItAndClosesTheBrowserTheOrbHadOpen() async throws {
         let (model, botID) = model()
-        let setup = FakeBrowserSetup(engine: .chrome)
+        let setup = FakeBrowserSetup()
         model.browserHub = setup.hub
-        _ = try await setup.hub.session(botID: botID, engine: .chrome)
-        #expect(model.bot(botID)?.browserEngine == .chrome)
+        _ = try await setup.hub.session(botID: botID, mode: .background)
+        #expect(model.bot(botID)?.browserMode == .background)
 
-        model.setBrowserEngine(.cloak, for: botID)
-        #expect(model.bot(botID)?.browserEngine == .cloak)
+        model.setBrowserMode(.visible, for: botID)
+        #expect(model.bot(botID)?.browserMode == .visible)
         await waitUntil("the old browser to close") { setup.driver.calls.contains("close") }
         #expect(setup.hub.existingSession(botID: botID) == nil)
     }
 
-    @Test @MainActor func choosingTheSameEngineAgainLeavesTheBrowserAlone() async throws {
+    @Test @MainActor func choosingTheSameModeAgainLeavesTheBrowserAlone() async throws {
         let (model, botID) = model()
-        let setup = FakeBrowserSetup(engine: .chrome)
+        let setup = FakeBrowserSetup()
         model.browserHub = setup.hub
-        _ = try await setup.hub.session(botID: botID, engine: .chrome)
-        model.setBrowserEngine(.chrome, for: botID)
+        _ = try await setup.hub.session(botID: botID, mode: .background)
+        model.setBrowserMode(.background, for: botID)
         try await Task.sleep(for: .milliseconds(50))
         #expect(setup.driver.calls.isEmpty && setup.hub.existingSession(botID: botID) != nil)
     }
 
     /// The browser may have been started by another process (the tools server of a Claude Code turn): the app holds no session
-    /// for it, but the engine it leaves is closed all the same, through the session name the two share.
-    @Test func leavingAnEngineClosesTheBrowserAnotherProcessStarted() async {
+    /// for it, but it is closed all the same, through the session name the two share, and only the Orb's own.
+    @Test func closingTheOrbsBrowserClosesTheOneAnotherProcessStarted() async {
         let world = FakeBrowserWorld()
         let hub = world.hub()
         let botID = UUID(), otherOrb = UUID()
-        let chrome = AgentBrowserConfig.sessionName(botID: botID, engine: .chrome)
-        let cloak = AgentBrowserConfig.sessionName(botID: botID, engine: .cloak)
-        let others = AgentBrowserConfig.sessionName(botID: otherOrb, engine: .chrome)
-        for name in [chrome, cloak, others, "default"] { world.start(name) }
-        await hub.close(botID: botID, leaving: .chrome)
-        #expect(world.closed == [chrome], "only the Orb's session of the engine it left")
-        #expect(world.running == [cloak, others, "default"])
+        let mine = AgentBrowserConfig.sessionName(botID: botID)
+        let others = AgentBrowserConfig.sessionName(botID: otherOrb)
+        for name in [mine, others, "default"] { world.start(name) }
+        #expect(await hub.close(botID: botID))
+        #expect(world.closed == [mine], "only the Orb's session")
+        #expect(world.running == [others, "default"])
         // Nothing running by that name: nothing is closed (no command is sent for a browser that is not there).
-        await hub.close(botID: botID, leaving: .chrome)
-        #expect(world.closed == [chrome])
-        // The simple engine has no browser to close.
-        await hub.close(botID: botID, leaving: .simple)
-        #expect(world.closed == [chrome])
-    }
-
-    @Test func theSessionOfAnotherEngineIsNotClosedByMistake() async throws {
-        let setup = FakeBrowserSetup(engine: .obscura)
-        let botID = UUID()
-        _ = try await setup.hub.session(botID: botID, engine: .obscura)
-        await setup.hub.close(botID: botID, leaving: .cloak) // asks for the cloak session by name, not the obscura one
-        #expect(setup.hub.existingSession(botID: botID)?.engine == .obscura)
+        #expect(await hub.close(botID: botID) == false)
+        #expect(world.closed == [mine])
     }
 
     @Test @MainActor func theSearchProviderIsPerOrb() {

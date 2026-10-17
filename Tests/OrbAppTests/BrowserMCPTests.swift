@@ -60,14 +60,14 @@ struct BrowserMCPPermissionTests {
 }
 
 struct BrowserMCPPromptTests {
-    private func bot(_ engine: BrowserEngineKind) -> Bot {
+    private func bot(_ mode: BrowserMode) -> Bot {
         var bot = Bot(name: "Atlas", role: "", orb: OrbConfig())
-        bot.browserEngine = engine
+        bot.browserMode = mode
         return bot
     }
 
     @Test func theBrowserNoteNamesTheToolsPlainly() {
-        let native = BrowserPrompt.section(bot: bot(.chrome), availability: .browser, status: BrowserEngineStatus(engine: .chrome))
+        let native = BrowserPrompt.section(bot: bot(.background), availability: .browser, status: BrowserStatus())
         #expect(native.contains("browse_open") && !native.contains("mcp__") && !native.contains("WebFetch"))
     }
 }

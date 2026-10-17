@@ -121,9 +121,9 @@ enum Tip {
     static let skipQuestion = "Deixa a pergunta sem resposta: o Orb segue com o que puder decidir sozinho"
 
     // MARK: Orb panel: browser
-    static let browserEngine = "Qual navegador o Orb usa para páginas com JavaScript e logins"
+    static let browserMode = "Segundo plano não abre janela nem tira o foco; Visível mostra o navegador do Orb"
     static let searchProvider = "Onde o Orb pesquisa quando você pede uma busca na web"
-    static let installBrowserEngine = "Abre os Ajustes do navegador, onde está o comando de instalação"
+    static let installBrowser = "Abre os Ajustes do navegador, onde está o comando de instalação"
     static let addSearchKey = "Abre os Ajustes do navegador, onde a chave do TinyFish é guardada"
 
     // MARK: Menu bar panel
@@ -307,7 +307,7 @@ enum Tip {
          deleteKeepingMemory, profile(callName: "Ana"), profile(callName: nil),
          copyReply, copyMarkdown, redoReply, editMessage, cancelEdit, toggleOutput(isExpanded: true), toggleOutput(isExpanded: false), toggleRequest(isOpen: true), toggleRequest(isOpen: false), toggleActions(isOpen: true), toggleActions(isOpen: false), toggleWork(isOpen: true), toggleWork(isOpen: false),
          routineUseAuto, routineUseReadOnly, randomLook, denyWithNote, showAllActions, deny, allowOptions,
-         handoffDone, handoffCancel, browserEngine, searchProvider, installBrowserEngine, addSearchKey,
+         handoffDone, handoffCancel, browserMode, searchProvider, installBrowser, addSearchKey,
          menuBarItem, connectModel, openMainWindow, closeReply, openChatInApp, reviewRiskyInApp, allowOnce, allowBatchOnce,
          routineRequest, chooseOrb(named: "Orb"),
          importFromAssistant, importPickBot, importMarketplaceCategory, startFromKeptMemory, importBack, importCopyPrompt, importChooseFile, importReadLocal, importKind, importItem, importReview, importRemove,

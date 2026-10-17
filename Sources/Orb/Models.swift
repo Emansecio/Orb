@@ -95,8 +95,9 @@ struct Bot: Identifiable, Hashable, Codable, Sendable {
     var effort = ""
     var permissionMode = PermissionMode.ask
     var capabilities: Set<Capability> = [.terminal, .browser, .computerUse]
-    /// The browser behind "Navegar na web" (see `BrowserEngineKind`). Orbs saved before the engines existed get the default.
-    var browserEngine = BrowserEngineKind.default
+    /// How the browser behind "Navegar na web" runs (see `BrowserMode`). Orbs saved before the modes existed (when the Orb chose an
+    /// engine: Chrome, CloakBrowser, Obscura or only reading) get the background; the old `browserEngine` key is not read.
+    var browserMode = BrowserMode.default
     /// Where `web_search` goes.
     var searchProvider = SearchProvider.duckduckgo
     /// What the user chose "Sempre permitir" for, each grant narrowed by a scope (`PermissionRule`). Grants saved
@@ -135,7 +136,7 @@ extension Bot {
         effort = try c.value(.effort, default: "")
         permissionMode = try c.value(.permissionMode, default: .ask)
         capabilities = Set(try c.lossyArray(.capabilities, default: [.terminal, .browser]))
-        browserEngine = (try? c.decodeIfPresent(BrowserEngineKind.self, forKey: .browserEngine)) ?? .default
+        browserMode = (try? c.decodeIfPresent(BrowserMode.self, forKey: .browserMode)) ?? .default
         searchProvider = (try? c.decodeIfPresent(SearchProvider.self, forKey: .searchProvider)) ?? .duckduckgo
         permissionRules = try c.lossyArray(.permissionRules)
         if let old = try? decoder.container(keyedBy: LegacyKeys.self).decodeIfPresent([String].self, forKey: .allowedTools) {

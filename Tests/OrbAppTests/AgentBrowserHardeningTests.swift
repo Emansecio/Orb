@@ -46,10 +46,9 @@ private final class FakeCommandLine: @unchecked Sendable {
 }
 
 struct AgentBrowserSessionGuardTests {
-    private func config(_ engine: BrowserEngineKind = .chrome, state: URL? = nil, profile: String = "/p") -> AgentBrowserConfig {
-        AgentBrowserConfig(executable: "/x/agent-browser", session: "orb-test-\(engine.rawValue)", engine: engine,
-                           browserExecutable: engine == .chrome ? nil : "/bin/\(engine.rawValue)",
-                           profile: engine.keepsProfile ? URL(fileURLWithPath: profile) : nil, cloakSeed: 20_000, stateDirectory: state)
+    private func config(state: URL? = nil, profile: String = "/p", browser: BrowserProgram? = nil) -> AgentBrowserConfig {
+        AgentBrowserConfig(executable: "/x/agent-browser", session: "orb-test-chrome", browser: browser,
+                           profile: URL(fileURLWithPath: profile), stateDirectory: state)
     }
 
     private func stateFolder() -> URL {
@@ -93,7 +92,7 @@ struct AgentBrowserSessionGuardTests {
         let driver = AgentBrowserDriver(config: config(), environment: { nil }, run: line.runner)
         _ = try await driver.open("https://a.test/")
         _ = try await driver.read()
-        // Half an hour idle, `browse_close` from another process, an engine change in the middle of a Claude Code turn…
+        // Half an hour idle, `browse_close` from another process, a mode change in the middle of a Claude Code turn…
         line.sessions.withLock { $0 = [] }
         try await Task.sleep(for: AgentBrowserDriver.aliveWindow + .milliseconds(200))
         await #expect(throws: BrowserDriverError.noPage) { _ = try await driver.read() }
@@ -178,7 +177,7 @@ struct AgentBrowserSessionGuardTests {
         shown.headed = true
         #expect(shown.launchFingerprint == hidden, "an `open` must not close the window the person is using")
         var other = shown
-        other.browserExecutable = "/another/chrome"
+        other.browser = BrowserProgram(kind: .brave, executable: "/another/chrome", major: nil)
         #expect(other.launchFingerprint != hidden)
     }
 
@@ -203,11 +202,9 @@ struct AgentBrowserSessionGuardTests {
                      "HTTPS_PROXY": "http://proxy:3128", "NO_PROXY": "localhost", "HOME": "/Users/me"]
         let cleaned = AgentBrowserConfig.sanitized(shell)
         #expect(Set(cleaned.keys) == ["PATH", "HTTPS_PROXY", "NO_PROXY", "HOME"])
-        var obscura = config(.obscura)
-        obscura.allowPrivateNetwork = true
-        let environment = obscura.environment(base: shell)
+        let environment = config().environment(base: shell)
         #expect(environment["AGENT_BROWSER_PROFILE"] == nil && environment["AGENT_BROWSER_CONFIG"] == nil)
-        #expect(environment["AGENT_BROWSER_OBSCURA_STEALTH"] == "1" && environment["AGENT_BROWSER_IDLE_TIMEOUT_MS"] == "1800000", "what the app sets stays")
+        #expect(environment["AGENT_BROWSER_IDLE_TIMEOUT_MS"] == "1800000", "what the app sets stays")
         #expect(environment["HTTPS_PROXY"] == "http://proxy:3128")
     }
 
@@ -226,7 +223,7 @@ struct AgentBrowserSessionGuardTests {
         """.write(to: script, atomically: true, encoding: .utf8)
         try script.makeExecutable()
         let shell = ["PATH": "/usr/bin:/bin", "AGENT_BROWSER_PROFILE": "/Users/me/Chrome", "HTTPS_PROXY": "http://proxy:3128"]
-        let configuration = AgentBrowserConfig(executable: script.path, session: "orb-real", engine: .chrome, stateDirectory: state)
+        let configuration = AgentBrowserConfig(executable: script.path, session: "orb-real", stateDirectory: state)
         let driver = AgentBrowserDriver(config: configuration, environment: { shell })
         _ = try await driver.open("https://a.test/")
         _ = try await driver.read()
@@ -261,43 +258,36 @@ struct AgentBrowserSessionGuardTests {
         #expect(AgentBrowserDriver.isTabID("t12") && AgentBrowserDriver.isTabID("7") && !AgentBrowserDriver.isTabID("-7") && !AgentBrowserDriver.isTabID("t1\n"))
     }
 
-    // MARK: Finding 11: one seed
+    // MARK: One launcher
 
-    @Test func twoCallersAtTheSameTimeEndWithTheSameCloakSeed() {
+    @Test func twoCallersAtTheSameTimeEndWithTheSameWholeLauncher() throws {
         for _ in 0..<5 {
-            let profile = stateFolder()
-            defer { try? FileManager.default.removeItem(at: profile) }
-            let seeds = OSAllocatedUnfairLock<[Int]>(initialState: [])
-            DispatchQueue.concurrentPerform(iterations: 24) { _ in
-                let seed = CloakSeed.seed(inProfile: profile)
-                seeds.withLock { $0.append(seed) }
-            }
-            let all = seeds.withLock { $0 }
-            #expect(Set(all).count == 1 && CloakSeed.range.contains(all[0]), "\(Set(all))")
-            #expect(CloakSeed.seed(inProfile: profile) == all[0], "and it is the one written down")
-            let leftovers = (try? FileManager.default.contentsOfDirectory(atPath: profile.path))?.filter { $0 != CloakSeed.fileName } ?? []
+            let state = stateFolder()
+            defer { try? FileManager.default.removeItem(at: state) }
+            let program = BrowserProgram(kind: .chrome, executable: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", major: 155)
+            let config = config(state: state, browser: program)
+            DispatchQueue.concurrentPerform(iterations: 24) { _ in config.prepareState() }
+            let launcher = try #require(config.launcherURL)
+            #expect(try String(contentsOf: launcher, encoding: .utf8) == config.launcherScript)
+            #expect(FileManager.default.isExecutableFile(atPath: launcher.path))
+            let folder = launcher.deletingLastPathComponent().path
+            let leftovers = (try? FileManager.default.contentsOfDirectory(atPath: folder))?.filter { $0 != launcher.lastPathComponent } ?? []
             #expect(leftovers.isEmpty, "no drafts left behind: \(leftovers)")
         }
-        // A seed that is damaged is replaced.
-        let broken = stateFolder()
-        defer { try? FileManager.default.removeItem(at: broken) }
-        try? "not a number\n".write(to: broken.appending(path: CloakSeed.fileName), atomically: true, encoding: .utf8)
-        let fresh = CloakSeed.seed(inProfile: broken)
-        #expect(CloakSeed.range.contains(fresh) && CloakSeed.seed(inProfile: broken) == fresh)
     }
 
     @Test func theHubStartsOneSessionForTwoToolsThatAskAtTheSameTime() async throws {
         let configs = OSAllocatedUnfairLock<Int>(initialState: 0)
-        let hub = BrowserHub(profilesDirectory: nil, locate: { engine in
+        let hub = BrowserHub(profilesDirectory: nil, locate: {
             try? await Task.sleep(for: .milliseconds(30)) // the lookup is where the second caller catches up
-            return BrowserEngineStatus(engine: engine, agentBrowser: "/fake/agent-browser", browserExecutable: nil)
+            return BrowserStatus(agentBrowser: "/fake/agent-browser", program: BrowserProgram(kind: .chrome, executable: "/fake/chrome", major: 155))
         }, makeDriver: { _ in
             configs.withLock { $0 += 1 }
             return FakeBrowserDriver()
         })
         let botID = UUID()
         let sessions = try await withThrowingTaskGroup(of: BrowserSession.self) { group in
-            for _ in 0..<12 { group.addTask { try await hub.session(botID: botID, engine: .chrome) } }
+            for _ in 0..<12 { group.addTask { try await hub.session(botID: botID, mode: .background) } }
             var all: [BrowserSession] = []
             for try await session in group { all.append(session) }
             return all

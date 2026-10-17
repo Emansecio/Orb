@@ -44,13 +44,6 @@ struct BrowseToolTests {
         #expect(!fine.contains("NOTE"))
     }
 
-    @Test func aBrowserWithoutAWindowSaysSoInsteadOfBrowseShow() async throws {
-        let obscura = FakeBrowserSetup(engine: .obscura)
-        obscura.driver.state.withLock { $0.title = "Verify you are human" }
-        let text = try await BrowseOpenTool().run(.object(["url": .string("https://site.test/")]), context: obscura.context())
-        #expect(text.contains("no window") && !text.contains("call browse_show"))
-    }
-
     @Test func theSnapshotListsElementsAndNamesThemForTheApprovalCard() async throws {
         setup.driver.state.withLock {
             $0.snapshot = BrowserSnapshot(url: "https://shop.test/", tree: "- button \"Comprar\" [ref=e7]\n- link \"Ajuda\" [ref=e8]",
@@ -234,7 +227,7 @@ struct BrowseToolTests {
         let text = try await run(BrowseShowTool())
         #expect(setup.driver.calls.contains("setHeaded true"))
         #expect(text.contains("STOP") && text.contains("tell the user") && text.contains("reply"))
-        let session = try await setup.hub.session(botID: setup.botID, engine: .chrome)
+        let session = try await setup.hub.session(botID: setup.botID, mode: .background)
         #expect(session.isShowingWindow)
 
         let hidden = try await run(BrowseShowTool(), ["hide": .bool(true)])
@@ -256,7 +249,7 @@ struct BrowseToolTests {
         await #expect(throws: ToolError.self) { _ = try await task.value }
         // The cancelled task cannot run the commands that close the window: a task of the tool's own does.
         await waitUntil("the window to be hidden") { fake.driver.calls.contains("setHeaded false") }
-        let session = try await fake.hub.session(botID: fake.botID, engine: .chrome)
+        let session = try await fake.hub.session(botID: fake.botID, mode: .background)
         await waitUntil("the Orb to know it is hidden") { !session.isShowingWindow }
     }
 
@@ -319,11 +312,14 @@ struct BrowseToolTests {
         #expect(BrowseTabsTool().risk(.object([:])) == .safe)
     }
 
-    @Test func obscuraHasNoWindowToShow() async {
-        let obscura = FakeBrowserSetup(engine: .obscura)
-        let text = await message(BrowseShowTool(), context: obscura.context())
-        #expect(text.contains("no window") && text.contains("Chrome"))
-        #expect(!obscura.driver.calls.contains { $0.hasPrefix("setHeaded") })
+    @Test func anOrbSetToVisibleKeepsItsWindowAndBrowseShowNeitherOpensNorHidesIt() async throws {
+        let visible = FakeBrowserSetup(mode: .visible)
+        let hidden = await message(BrowseShowTool(), ["hide": .bool(true)], context: visible.context())
+        #expect(hidden.contains("Visível") && hidden.contains("stays open"))
+        // Asking for the person with no card to answer: the window was already there, so the page is not reloaded.
+        let shown = await message(BrowseShowTool(), context: visible.context())
+        #expect(shown.contains("The browser is open in a window") && shown.contains("STOP"))
+        #expect(!visible.driver.calls.contains { $0.hasPrefix("setHeaded") })
     }
 
     @Test func closeClosesTheBrowserOnce() async throws {
@@ -337,9 +333,9 @@ struct BrowseToolTests {
     @Test func withoutABrowserTheToolsSayWhatToUseInstead() async {
         let none = ToolContext(workingDirectory: FileManager.default.temporaryDirectory, botID: UUID())
         #expect(await message(BrowseOpenTool(), ["url": .string("https://a.test/")], context: none).contains("web_fetch"))
-        var simple = setup.context()
-        simple.browser.engine = .simple
-        #expect(await message(BrowseSnapshotTool(), context: simple).contains("not available"))
+        var fetchOnly = setup.context()
+        fetchOnly.browser.available = false
+        #expect(await message(BrowseSnapshotTool(), context: fetchOnly).contains("not available"))
     }
 
     @Test func aMissingInstallIsToldInsteadOfStartingAnything() async {
@@ -350,7 +346,7 @@ struct BrowseToolTests {
     }
 
     @Test func theCommandsOfOneBrowserNeverRunAtTheSameTime() async throws {
-        let session = try await setup.hub.session(botID: setup.botID, engine: .chrome)
+        let session = try await setup.hub.session(botID: setup.botID, mode: .background)
         let running = Counter()
         await withTaskGroup(of: Void.self) { group in
             for _ in 0..<12 {
@@ -366,13 +362,13 @@ struct BrowseToolTests {
         #expect(await running.maximum == 1)
     }
 
-    @Test func theHubKeepsTheBrowserOfAnOrbAndReplacesItWhenTheEngineChanges() async throws {
-        let first = try await setup.hub.session(botID: setup.botID, engine: .chrome)
-        #expect(try await setup.hub.session(botID: setup.botID, engine: .chrome) === first)
-        let other = try await setup.hub.session(botID: setup.botID, engine: .cloak)
-        #expect(other !== first && other.engine == .cloak)
+    @Test func theHubKeepsTheBrowserOfAnOrbAndReplacesItWhenTheModeChanges() async throws {
+        let first = try await setup.hub.session(botID: setup.botID, mode: .background)
+        #expect(try await setup.hub.session(botID: setup.botID, mode: .background) === first)
+        let other = try await setup.hub.session(botID: setup.botID, mode: .visible)
+        #expect(other !== first && other.mode == .visible)
         #expect(setup.driver.calls == ["close"], "the old browser was closed")
-        #expect(setup.configs.withLock { $0.map(\.engine) } == [.chrome, .cloak])
+        #expect(setup.configs.withLock { $0.map(\.headed) } == [false, true])
     }
 
     @Test func deletingTheOrbDeletesWhatItsBrowserKept() async throws {
@@ -381,7 +377,7 @@ struct BrowseToolTests {
         let fake = FakeBrowserSetup(profiles: folder)
         let profile = folder.appending(path: fake.botID.uuidString).appending(path: "chrome")
         try FileManager.default.createDirectory(at: profile, withIntermediateDirectories: true)
-        _ = try await fake.hub.session(botID: fake.botID, engine: .chrome)
+        _ = try await fake.hub.session(botID: fake.botID, mode: .background)
         await fake.hub.deleteData(botID: fake.botID)
         #expect(!FileManager.default.fileExists(atPath: profile.path))
         #expect(fake.driver.calls.contains("close"))

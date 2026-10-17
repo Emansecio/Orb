@@ -1,6 +1,6 @@
 import SwiftUI
 
-// The two pickers under "Navegar na web" in the Orb's panel: which browser the Orb uses and where it searches, each with
+// The two pickers under "Navegar na web" in the Orb's panel: how the Orb's browser runs and where it searches, each with
 // what is installed or missing said on the spot. The words and states are plain values (tested); the view only draws them.
 
 /// What the pickers say about the engine and the search provider.
@@ -10,18 +10,18 @@ enum BrowserPickerCopy {
 
     /// Where a status line sends the person, when it has something to do in Ajustes.
     enum Action: Equatable, Sendable {
-        case installEngine, addSearchKey
+        case installBrowser, addSearchKey
 
         var title: String {
             switch self {
-            case .installEngine: "Instalar em Ajustes"
+            case .installBrowser: "Instalar em Ajustes"
             case .addSearchKey: "Adicionar em Ajustes"
             }
         }
 
         var tip: String {
             switch self {
-            case .installEngine: Tip.installBrowserEngine
+            case .installBrowser: Tip.installBrowser
             case .addSearchKey: Tip.addSearchKey
             }
         }
@@ -44,14 +44,13 @@ enum BrowserPickerCopy {
     /// The pickers show while the Orb has "Navegar na web".
     static func showsPickers(_ capabilities: Set<Capability>) -> Bool { capabilities.contains(.browser) }
 
-    /// What the chosen engine has on this Mac. `status` is nil while it is being looked for.
-    static func engineLine(_ engine: BrowserEngineKind, status: BrowserEngineStatus?) -> Line {
-        guard engine.drivesABrowser else { return Line(text: "Não precisa instalar nada", tone: .ready) }
+    /// What the Orb's browser has on this Mac. `status` is nil while it is being looked for.
+    static func browserLine(status: BrowserStatus?) -> Line {
         guard let status else { return Line(text: "Conferindo o que está instalado…", tone: .neutral) }
-        guard !status.isReady else { return Line(text: "Pronto", tone: .ready) }
+        guard !status.isReady else { return Line(text: status.program.map { "Pronto · usa o \($0.label)" } ?? "Pronto", tone: .ready) }
         let missing = status.missing.map(\.name).joined(separator: " e ")
         return Line(text: "Não instalado: falta \(missing). Até lá, o Orb só lê e pesquisa em páginas simples.", tone: .warning,
-                    action: .installEngine)
+                    action: .installBrowser)
     }
 
     /// One line on what the provider is.
@@ -64,15 +63,14 @@ enum BrowserPickerCopy {
     }
 
     /// What the search provider needs and lacks, or nil when there is nothing to say. `hasKey` is nil while it is being read;
-    /// `browserIsReady` is whether the Orb's engine can run (Google needs it).
-    static func searchLine(_ provider: SearchProvider, engine: BrowserEngineKind, browserIsReady: Bool?, hasKey: Bool?) -> Line? {
+    /// `browserIsReady` is whether the Orb's browser can run (Google needs it).
+    static func searchLine(_ provider: SearchProvider, browserIsReady: Bool?, hasKey: Bool?) -> Line? {
         switch provider {
         case .duckduckgo:
             return nil
         case .google:
-            guard browserIsReady == false || !engine.drivesABrowser else { return nil }
-            return Line(text: "Sem navegador pronto, a busca vai para o DuckDuckGo.", tone: .warning,
-                        action: engine.drivesABrowser ? .installEngine : nil)
+            guard browserIsReady == false else { return nil }
+            return Line(text: "Sem navegador pronto, a busca vai para o DuckDuckGo.", tone: .warning, action: .installBrowser)
         case .tinyfish:
             switch hasKey {
             case nil: return nil
@@ -84,7 +82,7 @@ enum BrowserPickerCopy {
 }
 
 extension SettingsRouter {
-    /// The "Navegador" tab of Ajustes, where engines are installed and the TinyFish key is kept: its raw value is this.
+    /// The "Navegador" tab of Ajustes, where the browser is installed and the TinyFish key is kept: its raw value is this.
     static let browserTab = "browser"
 
     static func requestBrowser(defaults: UserDefaults = .standard) { defaults.set(browserTab, forKey: requestKey) }
@@ -100,14 +98,13 @@ struct BrowserPickerRows: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openSettings) private var openSettings
     let botID: UUID
-    /// What the engine has on this Mac, read in the background; read again when the app comes back to the front (the person
+    /// What the browser has on this Mac, read in the background; read again when the app comes back to the front (the person
     /// may have installed it in the Terminal meanwhile).
-    @State private var status: BrowserEngineStatus?
+    @State private var status: BrowserStatus?
     @State private var hasKey: Bool?
     @State private var comingBack = 0
 
     private struct Check: Hashable {
-        var engine: BrowserEngineKind
         var provider: SearchProvider
         var comingBack: Int
     }
@@ -116,27 +113,25 @@ struct BrowserPickerRows: View {
         if let live = model.liveBot(botID) {
             let bot = live.bot
             Group {
-                Picker("Navegador", selection: engineBinding) {
-                    ForEach(BrowserEngineKind.allCases) { Text($0.label).tag($0) }
+                Picker("Navegador", selection: modeBinding) {
+                    ForEach(BrowserMode.allCases) { Text($0.label).tag($0) }
                 }
-                .help(Tip.browserEngine)
-                caption(bot.browserEngine.summary)
-                statusLine(BrowserPickerCopy.engineLine(bot.browserEngine, status: status?.engine == bot.browserEngine ? status : nil))
+                .help(Tip.browserMode)
+                caption(bot.browserMode.summary)
+                statusLine(BrowserPickerCopy.browserLine(status: status))
 
                 Picker("Pesquisa", selection: providerBinding) {
                     ForEach(SearchProvider.allCases) { Text($0.label).tag($0) }
                 }
                 .help(Tip.searchProvider)
                 caption(BrowserPickerCopy.searchSummary(bot.searchProvider))
-                if let line = BrowserPickerCopy.searchLine(bot.searchProvider, engine: bot.browserEngine,
-                                                           browserIsReady: status?.engine == bot.browserEngine ? status?.isReady : nil,
-                                                           hasKey: hasKey) {
+                if let line = BrowserPickerCopy.searchLine(bot.searchProvider, browserIsReady: status?.isReady, hasKey: hasKey) {
                     statusLine(line)
                 }
             }
-            .task(id: Check(engine: bot.browserEngine, provider: bot.searchProvider, comingBack: comingBack)) {
-                let engine = bot.browserEngine, provider = bot.searchProvider
-                async let found = model.browserEngineStatus(for: engine)
+            .task(id: Check(provider: bot.searchProvider, comingBack: comingBack)) {
+                let provider = bot.searchProvider
+                async let found = model.browserStatus()
                 async let key = model.hasSearchKey(for: provider)
                 let (newStatus, newKey) = await (found, key)
                 guard !Task.isCancelled else { return }
@@ -147,9 +142,9 @@ struct BrowserPickerRows: View {
         }
     }
 
-    private var engineBinding: Binding<BrowserEngineKind> {
-        Binding(get: { model.liveBot(botID)?.bot.browserEngine ?? .default },
-                set: { model.setBrowserEngine($0, for: botID) })
+    private var modeBinding: Binding<BrowserMode> {
+        Binding(get: { model.liveBot(botID)?.bot.browserMode ?? .default },
+                set: { model.setBrowserMode($0, for: botID) })
     }
 
     private var providerBinding: Binding<SearchProvider> {
@@ -157,7 +152,7 @@ struct BrowserPickerRows: View {
                 set: { model.setSearchProvider($0, for: botID) })
     }
 
-    /// The engine's and the provider's descriptions: the same line as under "Terminal e arquivos" and its siblings.
+    /// The mode's and the provider's descriptions: the same line as under "Terminal e arquivos" and its siblings.
     private func caption(_ text: String) -> some View {
         Text(text)
             .capabilityCaption()

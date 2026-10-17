@@ -2,24 +2,21 @@ import Foundation
 import os
 
 /// How one Orb's browser is launched by `agent-browser`: the session (one browser per Orb, kept alive by agent-browser's
-/// own background process between commands), the engine, and the persistent profile folder where logins stay.
+/// own background process between commands), the Chrome it runs, and the persistent profile folder where logins stay.
 struct AgentBrowserConfig: Sendable, Equatable {
     var executable: String
     var session: String
-    var engine: BrowserEngineKind
-    /// Obscura's binary, or CloakBrowser's Chromium (`--executable-path`).
-    var browserExecutable: String?
-    /// The folder that keeps cookies and logins between runs (Chrome and CloakBrowser; Obscura has none).
+    /// The Chromium it launches (`--executable-path`); nil lets agent-browser look for one by itself.
+    var browser: BrowserProgram?
+    /// The folder that keeps cookies and logins between runs.
     var profile: URL?
-    /// A visible window instead of the background browser (only for the person to finish a login).
+    /// A visible window instead of the background browser.
     var headed = false
-    /// CloakBrowser's fingerprint seed (`--fingerprint=`): the same for the same profile, so a site sees one browser over time.
-    var cloakSeed = CloakSeed.range.lowerBound
+    /// Whether the Orb is set to the visible mode, so that a close and a new open stay visible (`headed` follows `browse_show`).
+    var visibleByDefault = false
     /// Lets the scripts of a `file://` page read other local files. Not needed to open one (Chrome opens `file://` pages without it),
-    /// so it is off; Obscura rejects it.
+    /// so it is off.
     var allowFileAccess = false
-    /// Lets Obscura reach `localhost` and private addresses (it blocks them by default); for tests of local pages only.
-    var allowPrivateNetwork = false
     /// The app's own folder for agent-browser (`navegador`): the config file it is told to read (so nothing of the user's own
     /// `~/.agent-browser/config.json` or `./agent-browser.json` applies), the folder its commands run in, and what it
     /// remembers about how each session was launched. Nil only in tests that need none of that.
@@ -28,22 +25,15 @@ struct AgentBrowserConfig: Sendable, Equatable {
     /// tests that must not see (or close) the sessions of the app running on the same Mac.
     var socketDirectory: URL?
 
-    /// The session of an Orb for an engine. Another engine is another browser, so it gets another session (a running browser
-    /// keeps the settings it was launched with).
-    static func sessionName(botID: UUID, engine: BrowserEngineKind) -> String {
-        botPrefix(botID) + engine.rawValue
-    }
+    /// The session of an Orb. (The suffix is what the first versions called the engine; keeping it means a browser a previous run of
+    /// the app left open is still found and closed by name.)
+    static func sessionName(botID: UUID) -> String { botPrefix(botID) + "chrome" }
 
     /// Every session name of the app starts with this (the person's own `agent-browser` sessions never do).
     static let sessionPrefix = "orb-"
 
-    /// What the names of one Orb's sessions (one per engine) start with.
+    /// What the names of one Orb's sessions start with.
     static func botPrefix(_ botID: UUID) -> String { "\(sessionPrefix)\(botID.uuidString.prefix(8).lowercased())-" }
-
-    /// The engine a session name of the app says it is for.
-    static func engine(ofSession name: String) -> BrowserEngineKind? {
-        name.hasPrefix(sessionPrefix) ? name.split(separator: "-").last.flatMap { BrowserEngineKind(rawValue: String($0)) } : nil
-    }
 
     /// Flags every command carries: which browser, JSON replies, and the config file of the app (an empty one: the user's own
     /// configuration, in their home folder or in the folder the command runs in, would add a proxy, extensions or a provider).
@@ -56,19 +46,20 @@ struct AgentBrowserConfig: Sendable, Equatable {
     }
     private var launchRecordFile: URL? { stateDirectory?.appending(path: "sessoes/\(session).launch") }
 
-    /// Makes the folder and the empty config file the commands need.
+    /// Makes the folder, the empty config file and the launcher script the commands need.
     func prepareState() {
         let fileManager = FileManager.default
         try? fileManager.createDirectory(at: workingDirectory, withIntermediateDirectories: true)
         if let configFile, !fileManager.fileExists(atPath: configFile.path) { try? Data("{}\n".utf8).write(to: configFile, options: .atomic) }
+        writeLauncher()
     }
 
-    /// What the browser of this session is launched with, as one text: the engine, the flags of the launch and the environment
+    /// What the browser of this session is launched with, as one text: the browser, the flags of the launch and the environment
     /// that changes the browser. A running browser started with another one is not reused (see `AgentBrowserDriver.open`). Whether
     /// the window is shown is not part of it: showing and hiding it is the person's, and an `open` must not close the window
     /// the person is using.
     var launchFingerprint: String {
-        ([engine.rawValue] + launchArguments.filter { $0 != "--headed" } + extraEnvironment.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" })
+        (["chrome"] + launchArguments.filter { $0 != "--headed" } + extraEnvironment.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" })
             .joined(separator: "\u{1F}")
     }
 
@@ -98,15 +89,36 @@ struct AgentBrowserConfig: Sendable, Equatable {
         Self.sanitized(base ?? ProcessInfo.processInfo.environment).merging(extraEnvironment) { _, new in new }
     }
 
-    /// What CloakBrowser's own wrapper passes to its Chromium on macOS (`get_default_stealth_args`), without its `--no-sandbox`: macOS
-    /// does not need it (checked: the browser starts and browses with the sandbox on), and in a window it shows a warning bar.
-    var cloakArguments: [String] { ["--fingerprint=\(cloakSeed)", "--fingerprint-platform=macos"] }
+    /// The user agent of a Chrome of this major version, as the same Chrome says it with a window (Chrome reports the minor numbers
+    /// as zeros). Headless Chrome says "HeadlessChrome" instead, in the page and in the service workers, which sites and the
+    /// robot checks read.
+    static func userAgent(major: Int) -> String {
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/\(major).0.0.0 Safari/537.36"
+    }
 
-    /// The user agent of the Chrome for Testing in a `chrome-<version>` folder, as the same Chrome says it with a window.
-    static func chromeUserAgent(executable: String?) -> String? {
-        guard let executable, let range = executable.range(of: #"chrome-(\d+)\."#, options: .regularExpression) else { return nil }
-        let major = executable[range].dropFirst("chrome-".count).prefix { $0.isNumber }
-        return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/\(major).0.0.0 Safari/537.36"
+    /// The script `--executable-path` points at: it starts the real browser and adds `--user-agent=<a real Chrome's>`. The flag
+    /// goes through a script because `agent-browser --args` splits on commas, and a user agent has one ("KHTML, like Gecko"); its
+    /// own `--user-agent` option goes by the DevTools protocol and leaves the service workers saying HeadlessChrome (measured in
+    /// docs/REVISAO-NAVEGADOR-2026-10-16.md). Nil without the app's folder or without a version to put in the user agent.
+    var launcherURL: URL? {
+        guard let stateDirectory, let browser, let major = browser.major else { return nil }
+        return stateDirectory.appending(path: "lancadores/\(browser.kind.rawValue)-\(major).sh")
+    }
+
+    /// The text of the launcher: `exec '<browser>' "$@" '--user-agent=…'`.
+    var launcherScript: String? {
+        guard let browser, let major = browser.major else { return nil }
+        func quoted(_ text: String) -> String { "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'" }
+        return "#!/bin/sh\nexec \(quoted(browser.executable)) \"$@\" \(quoted("--user-agent=" + Self.userAgent(major: major)))\n"
+    }
+
+    private func writeLauncher() {
+        guard let url = launcherURL, let script = launcherScript else { return }
+        let fileManager = FileManager.default
+        if (try? String(contentsOf: url, encoding: .utf8)) == script, fileManager.isExecutableFile(atPath: url.path) { return }
+        try? fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        guard (try? script.write(to: url, atomically: true, encoding: .utf8)) != nil else { return }
+        try? fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
     }
 
     /// What the `agent-browser` process (and the background process it starts) runs with besides the user's environment.
@@ -115,74 +127,22 @@ struct AgentBrowserConfig: Sendable, Equatable {
         // for a browser left behind when the app is killed instead of quit.
         var environment = ["AGENT_BROWSER_IDLE_TIMEOUT_MS": "1800000"]
         if let socketDirectory { environment["AGENT_BROWSER_SOCKET_DIR"] = socketDirectory.path }
-        if engine == .obscura {
-            // The stealth build of Obscura: one consistent fingerprint, and TLS like a real browser's.
-            environment["AGENT_BROWSER_OBSCURA_STEALTH"] = "1"
-            if allowPrivateNetwork { environment["OBSCURA_ALLOW_PRIVATE_NETWORK"] = "1" }
-        }
         return environment
     }
 
     /// Flags only the command that launches the browser (`open`) needs; a running browser keeps the ones it started with.
     var launchArguments: [String] {
         var arguments: [String] = []
-        switch engine {
-        case .simple:
-            break
-        case .chrome:
-            // The Chrome the app installed is named; without one agent-browser looks for a Chrome by itself.
-            if let browserExecutable { arguments += ["--executable-path", browserExecutable] }
-            // Chrome for Testing in the background says "HeadlessChrome" and `navigator.webdriver = true`, which DuckDuckGo and Google
-            // answer with a captcha (checked); a Chrome's own name and the flag that hides the automation make them answer.
-            if let agent = Self.chromeUserAgent(executable: browserExecutable) { arguments += ["--user-agent", agent] }
-            arguments += ["--args", "--disable-blink-features=AutomationControlled"]
-            if let profile { arguments += ["--profile", profile.path] }
-            if headed { arguments.append("--headed") }
-        case .obscura:
-            // Obscura has no profile and no window: agent-browser rejects both with it.
-            arguments += ["--engine", "obscura"]
-            if let browserExecutable { arguments += ["--executable-path", browserExecutable] }
-        case .cloak:
-            if let browserExecutable { arguments += ["--executable-path", browserExecutable] }
-            arguments += ["--args", cloakArguments.joined(separator: ",")]
-            if let profile { arguments += ["--profile", profile.path] }
-            if headed { arguments.append("--headed") }
-        }
-        if allowFileAccess, engine != .obscura { arguments.append("--allow-file-access") }
+        // The launcher when there is one (the app's folder and the version are known), else the browser itself.
+        if let launcherURL { arguments += ["--executable-path", launcherURL.path] }
+        else if let browser { arguments += ["--executable-path", browser.executable] }
+        // agent-browser turns the automation switch on: without this flag `navigator.webdriver` is true, which the bot checks and the
+        // search engines answer with a captcha (measured).
+        arguments += ["--args", "--disable-blink-features=AutomationControlled"]
+        if let profile { arguments += ["--profile", profile.path] }
+        if headed { arguments.append("--headed") }
+        if allowFileAccess { arguments.append("--allow-file-access") }
         return arguments
-    }
-}
-
-/// CloakBrowser keeps one fingerprint seed per profile in `<profile>/.cloakbrowser-seed` (a decimal number and a newline), so
-/// a login does not meet a new "device" every run. This reads and writes the same file its wrappers do.
-enum CloakSeed {
-    static let range = 10_000...99_999
-    static let fileName = ".cloakbrowser-seed"
-
-    private static func read(_ file: URL) -> Int? {
-        guard let text = try? String(contentsOf: file, encoding: .utf8),
-              let seed = Int(text.trimmingCharacters(in: .whitespacesAndNewlines)), range.contains(seed) else { return nil }
-        return seed
-    }
-
-    /// The seed of the profile, made once: the file is written whole in a file of its own and put in place with `link`, which
-    /// fails when the name is taken, so two callers (two tasks, or two runs of the app) that both
-    /// find no seed end up with the same one: the first to link wins and the other reads it.
-    static func seed(inProfile profile: URL) -> Int {
-        let file = profile.appending(path: fileName)
-        if let seed = read(file) { return seed }
-        let seed = Int.random(in: range)
-        let fileManager = FileManager.default
-        try? fileManager.createDirectory(at: profile, withIntermediateDirectories: true)
-        let draft = profile.appending(path: ".cloakbrowser-seed-\(UUID().uuidString)")
-        guard (try? "\(seed)\n".write(to: draft, atomically: false, encoding: .utf8)) != nil else { return seed }
-        defer { try? fileManager.removeItem(at: draft) }
-        if link(draft.path, file.path) == 0 { return seed }
-        // Taken (or an unreadable leftover): the one there counts; a broken one is replaced.
-        if let existing = read(file) { return existing }
-        try? fileManager.removeItem(at: file)
-        if link(draft.path, file.path) == 0 { return seed }
-        return read(file) ?? seed
     }
 }
 
@@ -222,8 +182,6 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
     private let closed = OSAllocatedUnfairLock(initialState: false)
     /// The environment the last command ran with, for the close that cannot wait for a task (`closeSynchronously`).
     private let lastEnvironment = OSAllocatedUnfairLock<[String: String]?>(initialState: nil)
-    /// The elements of the last snapshot, by ref: what Obscura needs to click a link its own click cannot reach.
-    private let knownRefs = OSAllocatedUnfairLock<[String: BrowserRef]>(initialState: [:])
     /// What this driver launched the browser with (`launchFingerprint`), once it did.
     private let launched = OSAllocatedUnfairLock<String?>(initialState: nil)
     /// Until when a command that worked proves the background process is there, so the next command need not ask.
@@ -260,7 +218,7 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
     /// one of its options (`--json`, `--headed`) for the option wherever it stands, and `--` does not stop that, so such text goes
     /// through `batch`, whose own quoting passes it as it is.
     ///
-    /// Only `open` (`launching`) starts a browser, with the flags of the Orb's profile and engine. Any other command first checks
+    /// Only `open` (`launching`) starts a browser, with the flags of the Orb's profile and browser. Any other command first checks
     /// that the session's background process is there: `agent-browser` starts a browser of its own choosing (the one in
     /// Applications, with no profile and no flags) for a command that finds none, which is not the Orb's browser. With no
     /// process the command throws `noPage` (the model opens the page again); `needsSession: false` is for `session list` and `close`.
@@ -422,72 +380,10 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
                 refs[id] = BrowserRef(role: entry["role"]?.string ?? "", name: entry["name"]?.string ?? "")
             }
         }
-        let found = refs
-        knownRefs.withLock { $0 = found }
         return BrowserSnapshot(url: data["origin"]?.string ?? "", tree: data["snapshot"]?.string ?? "", refs: refs)
     }
 
-    func click(_ ref: String) async throws {
-        do {
-            try await send(["click", "@" + ref])
-        } catch BrowserDriverError.failed(let message) where config.engine == .obscura && Self.isObscuraBoxModelFailure(message) {
-            // Obscura answers the position of a link with a fractional number its command line cannot read (`DOM.getBoxModel`),
-            // so the click is made in the page, on the element the snapshot called `ref`.
-            try await clickInPage(ref, original: message)
-        }
-    }
-
-    /// Obscura's reply to `DOM.getBoxModel` for an element that is not a block, which `agent-browser` fails to read.
-    static func isObscuraBoxModelFailure(_ message: String) -> Bool {
-        message.contains("DOM.getBoxModel") || (message.contains("Failed to deserialize CDP response") && message.contains("floating point"))
-    }
-
-    /// The click in the page finds the element by its role and name, which is a guess when several are alike: it clicks only
-    /// when exactly one element is, and fails otherwise (a wrong click on a page where the Orb is logged in is worse than none).
-    private func clickInPage(_ ref: String, original: String) async throws {
-        guard let known = knownRefs.withLock({ $0[ref] }), !known.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw BrowserDriverError.failed(original)
-        }
-        let alike = knownRefs.withLock { $0.values.filter { $0.role == known.role && $0.name == known.name }.count }
-        guard alike == 1 else { throw BrowserDriverError.failed(Self.ambiguousClick(known.name)) }
-        let script = Self.clickScript(role: known.role, name: known.name)
-        let result = try await send(["eval", script], text: true)["result"]?.string
-        switch result {
-        case "clicked": return
-        case "ambiguous": throw BrowserDriverError.failed(Self.ambiguousClick(known.name))
-        default: throw BrowserDriverError.failed(original)
-        }
-    }
-
-    static func ambiguousClick(_ name: String) -> String {
-        "Not clicked: more than one element is called “\(name.clipped(to: 60))” and this browser cannot click this one by its position. "
-            + "Take a fresh browse_snapshot with a `selector` that holds only the one you mean, or use another element."
-    }
-
-    /// Clicks the element of the role whose text, label or title is the name, when exactly one is: "clicked", "ambiguous" (more
-    /// than one is, and none is clicked) or "none".
-    static func clickScript(role: String, name: String) -> String {
-        let selectors: [String: String] = [
-            "link": "a[href], [role=link]", "button": "button, [role=button], input[type=button], input[type=submit], input[type=reset], summary",
-            "checkbox": "input[type=checkbox], [role=checkbox]", "radio": "input[type=radio], [role=radio]", "tab": "[role=tab]",
-            "menuitem": "[role=menuitem]", "option": "option, [role=option]",
-        ]
-        let selector = selectors[role] ?? "a[href], button, [role], input, summary"
-        return """
-        (() => {
-          const wanted = \(JSONValue.string(name).jsonString).replace(/\\s+/g, ' ').trim();
-          if (!wanted) return 'none';
-          const text = el => (el.getAttribute('aria-label') || el.innerText || el.value || el.title || el.alt || '').replace(/\\s+/g, ' ').trim();
-          const all = Array.from(document.querySelectorAll(\(JSONValue.string(selector).jsonString)));
-          let found = all.filter(e => text(e) === wanted);
-          if (found.length === 0) found = all.filter(e => text(e).includes(wanted));
-          if (found.length === 0) return 'none';
-          if (found.length > 1) return 'ambiguous';
-          found[0].click();
-          return 'clicked';
-        })()
-        """
-    }
+    func click(_ ref: String) async throws { try await send(["click", "@" + ref]) }
 
     func fill(_ ref: String, text: String) async throws { try await send(["fill", "@" + ref, text], text: true) }
 
@@ -639,7 +535,7 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
     }
 
     func close() async throws {
-        state.withLock { $0.headed = false }
+        state.withLock { $0.headed = $0.visibleByDefault }
         markClosed()
         config.forgetFingerprint()
         do {

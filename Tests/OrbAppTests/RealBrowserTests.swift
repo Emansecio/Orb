@@ -2,26 +2,11 @@ import Foundation
 import Testing
 @testable import Orb
 
-// Tests against real browsers. Nothing here runs without the browsers: the installation test needs an environment variable, and the
-// smoke tests of an engine run only when that engine is installed (in the app's own `navegador` folder, or anywhere the locator
-// looks). CI has none of them. Set ORB_SKIP_REAL_BROWSER_TESTS=1 to leave them out on a Mac that has them.
-//
-// Measured on an Apple silicon Mac (Wi-Fi, October 2026). "Cold" is the first command of a session, which starts the browser; the very
-// first launch of a Chrome or Chromium after it is installed is slower (macOS checks it: about 4 s for Chrome and CloakBrowser).
-//
-//                                  Chrome for Testing 155   Obscura 0.2.4 (stealth)   CloakBrowser (Chromium 145)
-//   cold start + open (local page)        1.1 s                  0.25 s                    1.2 s
-//   cold start + open (example.com)       0.9 s                  0.4 s                     1.0 s
-//   open again (example.com)              0.09 s                 0.07 s                    0.35 s
-//   snapshot / read                       0.01-0.02 s            0.01-0.02 s               0.01-0.02 s
-//   screenshot                            0.05 s                 0.02 s                    0.27 s
-//   back                                  0.55 s                 0.55 s                    0.65 s
-//   headed window (browse_show) / back    2.0 s / 2.5 s          not available             4.1 s / 2.2 s
-//   web_search (DuckDuckGo / Google)      2.0 s / 2.2 s          1.3 s / blocked           2.0-3.0 s / 2.4 s
-//   quit (close of an open browser)       about 1-2 s            about 1 s                 1.8 s
-//   install (agent-browser already there) 11 s (180 MB)          5 s (70 MB, with agent)   17 s (venv + 140 MB Chromium)
-//
-// On disk: bin/ 156 MB (agent-browser 16, obscura 75, obscura-worker 72), chrome/ 362 MB, cloak/ 509 MB (venv 157, Chromium 352).
+// Tests against the real browser. Nothing here runs without it: the installation test needs an environment variable, and the
+// smoke tests run only when `agent-browser` and a Chrome (or Brave) are found (in the app's own `navegador` folder, or anywhere the
+// locator looks). CI has none of them. Set ORB_SKIP_REAL_BROWSER_TESTS=1 to leave them out on a Mac that has them. Real browsers
+// run headless here, so they never take the focus of the Mac. The measurements that chose this browser are in
+// docs/REVISAO-NAVEGADOR-2026-10-16.md.
 
 enum RealBrowsers {
     static let environment = ProcessInfo.processInfo.environment
@@ -37,40 +22,38 @@ enum RealBrowsers {
 
     static let skipped = environment["ORB_SKIP_REAL_BROWSER_TESTS"] == "1"
 
-    static let locator = BrowserEngineLocator.live(path: environment["PATH"], managedRoot: root)
+    static let locator = BrowserLocator.live(path: environment["PATH"], managedRoot: root)
 
-    static func status(_ engine: BrowserEngineKind) -> BrowserEngineStatus { locator.status(for: engine) }
+    static func status() -> BrowserStatus { locator.status() }
 
-    /// Whether the engine can be started on this Mac.
-    static func isReady(_ engine: BrowserEngineKind) -> Bool { !skipped && status(engine).isReady }
+    /// Whether the browser can be started on this Mac.
+    static var isReady: Bool { !skipped && status().isReady }
 
-    /// The engines `ORB_INSTALL_BROWSERS` asks to install ("chrome,obscura,cloak", or "all").
-    static var toInstall: [BrowserEngineKind] {
+    /// What `ORB_INSTALL_BROWSERS` asks to install ("agent-browser,chrome", or "all").
+    static var toInstall: [BrowserComponent] {
         let wanted = (environment["ORB_INSTALL_BROWSERS"] ?? "").lowercased()
-        if wanted == "all" || wanted == "1" { return [.chrome, .obscura, .cloak] }
-        return wanted.split(separator: ",").compactMap { BrowserEngineKind(rawValue: String($0.trimmingCharacters(in: .whitespaces))) }
+        if wanted == "all" || wanted == "1" { return BrowserComponent.allCases }
+        return wanted.split(separator: ",").compactMap { text in
+            let name = text.trimmingCharacters(in: .whitespaces)
+            return BrowserComponent.allCases.first { $0.rawValue == name || ($0 == .chrome && name == "chrome") }
+        }
     }
 }
 
-/// Installs the engines for real, with the installer the app uses, into the app's own folder. Needs the network and downloads
-/// about 300 MB: only with `ORB_INSTALL_BROWSERS=all` (or a list: `chrome,obscura`).
+/// Installs the components for real, with the installer the app uses, into the app's own folder. Needs the network and downloads
+/// up to 200 MB: only with `ORB_INSTALL_BROWSERS=all` (or a list: `agentBrowser,chrome`).
 struct RealBrowserInstallTests {
     @Test(.enabled(if: !RealBrowsers.toInstall.isEmpty), .timeLimit(.minutes(30)))
-    func installsTheRequestedEnginesWithTheAppsInstaller() async throws {
+    func installsTheRequestedComponentsWithTheAppsInstaller() async throws {
         let installer = BrowserInstaller(layout: BrowserInstallLayout(root: RealBrowsers.root))
-        for engine in RealBrowsers.toInstall {
-            let started = Date()
-            let last = LockedBox<String>("")
-            try await installer.install(engine) { progress in
-                let line = "[\(engine.rawValue)] \(progress.text)"
-                if line != last.value, progress.phase != .downloading || progress.received == 0 { print(line) }
-                last.value = line
-            }
-            let seconds = Date().timeIntervalSince(started)
-            print("[\(engine.rawValue)] pronto em \(String(format: "%.1f", seconds)) s")
-            let status = RealBrowsers.status(engine)
-            #expect(status.isReady, "\(engine): \(status.userMessage ?? "")")
+        let started = Date()
+        let last = LockedBox<String>("")
+        try await installer.install(RealBrowsers.toInstall) { progress in
+            let line = "[\(progress.component.rawValue)] \(progress.text)"
+            if line != last.value, progress.phase != .downloading || progress.received == 0 { print(line) }
+            last.value = line
         }
+        print("pronto em \(String(format: "%.1f", Date().timeIntervalSince(started))) s")
         let records = installer.records()
         for (name, record) in records.sorted(by: { $0.key < $1.key }) { print("instalado \(name) \(record.version) \(record.detail ?? "")") }
     }

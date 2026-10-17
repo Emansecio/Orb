@@ -139,10 +139,10 @@ struct WebSearchToolTests {
         #expect(text.contains("no news filter"))
         #expect(hosts() == ["html.duckduckgo.com"], "Google is never asked over HTTP")
 
-        // The Orb has the browser but the engine is not installed: the context is the simple one, the same fallback.
+        // The Orb has the browser switch but it is not installed: the context has no browser, the same fallback.
         let notInstalled = FakeBrowserSetup(ready: false)
         var missing = notInstalled.context(provider: .google)
-        missing.browser.engine = .simple
+        missing.browser.available = false
         let tool = WebSearchTool(session: SearchStubProtocol.session(duck))
         let again = try await tool.run(.object(["query": .string("x")]), context: missing)
         #expect(again.contains("(DuckDuckGo)") && again.contains("not available"))
@@ -190,13 +190,6 @@ struct WebSearchToolTests {
         })
         #expect(blocked.message.contains("browse_show") && blocked.message.contains("Do not try to solve it"))
         #expect(!setup.driver.calls.contains { $0.hasPrefix("closeTab") }, "browse_show shows this page")
-
-        let obscura = FakeBrowserSetup(engine: .obscura)
-        obscura.driver.state.withLock { $0.evaluation = #"{"results":[],"url":"https://www.google.com/sorry/index"}"# }
-        let obscuraBlocked = try #require(await #expect(throws: SearchBlocked.self) {
-            _ = try await WebSearchTool().run(.object(["query": .string("x")]), context: obscura.context(provider: .google))
-        })
-        #expect(obscuraBlocked.message.contains("no window") && !obscuraBlocked.message.contains("Call browse_show"))
     }
 
     // MARK: TinyFish

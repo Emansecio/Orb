@@ -14,7 +14,7 @@ enum BrowseSupport {
         guard context.browser.drivesABrowser, let hub = context.browser.hub, let botID = context.botID else {
             throw ToolError("The Orb's browser is not available here. Use web_fetch to read a page and web_search to search.")
         }
-        return try await hub.session(botID: botID, engine: context.browser.engine)
+        return try await hub.session(botID: botID, mode: context.browser.mode)
     }
 
     /// A ref as `browse_snapshot` shows it (`e12`); `@e12` and `12` are accepted.
@@ -60,12 +60,10 @@ enum BrowseSupport {
     }
 
     /// The line that sends the model to `browse_show` when the page needs the person. Empty when it does not look like it.
-    static func handoffNote(url: String, title: String, text: String = "", canShowWindow: Bool) -> String {
+    static func handoffNote(url: String, title: String, text: String = "") -> String {
         guard let reason = BrowserHandoff.reason(url: url, title: title, text: text) else { return "" }
-        let next = canShowWindow
-            ? "call browse_show, tell the user what to do in the window, and stop until they reply"
-            : "this browser has no window: tell the user to switch the Orb's browser to Chrome or CloakBrowser (Ajustes), and stop"
-        return "\nNOTE: this looks like \(reason). Do not enter credentials or try to get past it yourself: \(next)."
+        return "\nNOTE: this looks like \(reason). Do not enter credentials or try to get past it yourself: "
+            + "call browse_show, tell the user what to do in the window, and stop until they reply."
     }
 }
 
@@ -158,7 +156,7 @@ struct BrowseOpenTool: BrowseTool {
         }
         if let botID = context.botID { context.browser.hub?.clearLabels(botID: botID) }
         var text = "Opened \(page.url)" + (page.title.isEmpty ? "" : " — “\(page.title)”")
-        text += BrowseSupport.handoffNote(url: page.url, title: page.title, canShowWindow: session.engine.canShowWindow)
+        text += BrowseSupport.handoffNote(url: page.url, title: page.title)
         return text + "\nNext: browse_snapshot (what to click or fill) or browse_read (the text)."
     }
 }
@@ -196,7 +194,7 @@ struct BrowseSnapshotTool: BrowseTool {
             session.remember(snapshot, text: tree)
             if let botID = context.botID { context.browser.hub?.setLabels(snapshot.refs, botID: botID) }
         }
-        let note = BrowseSupport.handoffNote(url: url, title: "", text: tree, canShowWindow: session.engine.canShowWindow)
+        let note = BrowseSupport.handoffNote(url: url, title: "", text: tree)
         guard !tree.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return "URL: \(url)\nNothing to list on this page (it may still be loading, or have no controls). Try browse_snapshot with full: true, "
                 + "browse_read, or browse_scroll." + note
@@ -232,7 +230,7 @@ struct BrowseReadTool: BrowseTool {
             url = readout.url
             session.rememberRead(text: text, url: url)
         }
-        let note = BrowseSupport.handoffNote(url: url, title: "", text: String(text.prefix(4_000)), canShowWindow: session.engine.canShowWindow)
+        let note = BrowseSupport.handoffNote(url: url, title: "", text: String(text.prefix(4_000)))
         let body = WebFetchTool.page(of: text, arguments: arguments, truncatedDownload: nil)
         return "URL: \(url)\n\(BrowseSupport.untrusted)\n\n" + body + note
     }
@@ -567,21 +565,25 @@ struct BrowseShowTool: BrowseTool {
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
         let session = try await BrowseSupport.session(context)
         let hide = arguments.flag("hide")
-        guard session.engine.canShowWindow else {
-            throw ToolError("This browser (\(session.engine.label)) has no window. Tell the user what needs a person and that they can switch the Orb's browser to Chrome or CloakBrowser in the Orb's settings (Ajustes); then stop.")
-        }
+        // An Orb set to "Visível" has its window open for good: there is nothing to open (or to hide), and the page stays as it is.
+        let keepsWindow = session.mode == .visible
         let page: BrowserPage
-        do {
-            page = try await session.exclusive {
-                session.forgetPage()
-                return try await session.driver.setHeaded(!hide)
+        if keepsWindow {
+            if hide { return "This Orb's browser is set to Visível in its settings, so its window stays open. Take a browse_snapshot to continue." }
+            page = BrowserPage(url: (try await session.exclusive { try await session.driver.currentURL() }) ?? "about:blank", title: "")
+        } else {
+            do {
+                page = try await session.exclusive {
+                    session.forgetPage()
+                    return try await session.driver.setHeaded(!hide)
+                }
+            } catch is CancellationError {
+                // Parar in the middle of opening the window: it may be up already, or about to be. Nobody wants it.
+                if !hide { Self.hideWindowInBackground(session) }
+                throw CancellationError()
             }
-        } catch is CancellationError {
-            // Parar in the middle of opening the window: it may be up already, or about to be. Nobody wants it.
-            if !hide { Self.hideWindowInBackground(session) }
-            throw CancellationError()
+            session.setShowingWindow(!hide)
         }
-        session.setShowingWindow(!hide)
         if let botID = context.botID { context.browser.hub?.clearLabels(botID: botID) }
         let location = Self.location(page)
         if hide { return "The browser is back in the background at \(location). Take a browse_snapshot to continue." }
@@ -593,7 +595,9 @@ struct BrowseShowTool: BrowseTool {
         guard await handoff(location) else {
             // Cancelar, or Parar: the window is not wanted any more. After Parar this task is cancelled, and a cancelled task cannot
             // run the commands that close the window (they would stop at once): a task of its own does, and nothing waits for it.
-            if Task.isCancelled {
+            if keepsWindow {
+                // Its window is the Orb's setting, not this call's: it stays.
+            } else if Task.isCancelled {
                 Self.hideWindowInBackground(session)
             } else {
                 _ = try? await session.exclusive {

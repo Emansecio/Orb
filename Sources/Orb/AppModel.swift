@@ -206,13 +206,13 @@ final class AppModel {
     @ObservationIgnored let outputsDirectory: URL
     /// The Orbs' browsers (`navegador/<id>/` in the data folder holds what each keeps, logins included).
     @ObservationIgnored var browserHub: BrowserHub
-    /// Ajustes → Navegador: installs, updates and removes the browsers the Orbs drive (`navegador/bin`, `chrome`, `cloak`).
+    /// Ajustes → Navegador: installs, updates and removes what the Orbs' browser needs (`navegador/bin`, `chrome`).
     @ObservationIgnored lazy var browserSetup: BrowserSetup = {
         let root = browserHub.profilesDirectory ?? store.directory.appending(path: "navegador")
         let installer = BrowserInstaller(layout: BrowserInstallLayout(root: root))
-        return BrowserSetup(installer: installer, status: { [weak self] engine in
-            await self?.browserHub.status(for: engine) ?? BrowserEngineStatus(engine: engine)
-        }, closeBrowsers: { [weak self] engine in await self?.browserHub.close(engine: engine) })
+        return BrowserSetup(installer: installer, status: { [weak self] in
+            await self?.browserHub.status() ?? BrowserStatus()
+        }, closeBrowsers: { [weak self] in await self?.browserHub.closeAll() })
     }()
     /// What the models are used for, kept by the hour (`uso/` in the data folder); see `recordUsage`.
     @ObservationIgnored let usageLog: UsageRecorder
@@ -1068,13 +1068,13 @@ final class AppModel {
         guard let index = bots.firstIndex(where: { $0.id == botID }) else { return }
         var bot = bots[index]
         let mode = bot.permissionMode
-        let engine = bot.browserEngine, hadBrowser = bot.capabilities.contains(.browser)
+        let browserMode = bot.browserMode, hadBrowser = bot.capabilities.contains(.browser)
         change(&bot)
         if bot != bots[index] { bots[index] = bot }
         if bot.permissionMode != mode { permissionModeChanged(botID, to: bot.permissionMode) }
-        // Another engine is another browser, and without "Navegar na web" there is none: the one that was open is closed now,
+        // Another mode is another browser, and without "Navegar na web" there is none: the one that was open is closed now,
         // not when the Orb next needs a browser.
-        if bot.browserEngine != engine || (hadBrowser && !bot.capabilities.contains(.browser)) {
+        if bot.browserMode != browserMode || (hadBrowser && !bot.capabilities.contains(.browser)) {
             let hub = browserHub
             Task { await hub.close(botID: botID) }
         }
@@ -1589,14 +1589,13 @@ final class AppModel {
                 return
             }
             let accessibilityGranted = !bot.capabilities.contains(.computerUse) || accessibilityProbe()
-            // The Orb's own browser: its tools come only when the engine it chose is installed.
-            let browserStatus = bot.capabilities.contains(.browser) && bot.browserEngine.drivesABrowser
-                ? await browserHub.status(for: bot.browserEngine) : nil
-            let browserAvailability = BrowserAvailability(capabilities: bot.capabilities, engine: bot.browserEngine, status: browserStatus)
+            // The Orb's own browser: its tools come only when it is installed.
+            let browserStatus = bot.capabilities.contains(.browser) ? await browserHub.status() : nil
+            let browserAvailability = BrowserAvailability(capabilities: bot.capabilities, status: browserStatus)
             var context = baseContext
             // A run nobody watches (a routine, a request from another Orb) waits for its commands to the end.
             if session.routineID == nil || session.sideKind == .group { context.release = release }
-            context.browser = BrowserAccess(hub: browserHub, engine: browserAvailability == .browser ? bot.browserEngine : .simple,
+            context.browser = BrowserAccess(hub: browserHub, available: browserAvailability == .browser, mode: bot.browserMode,
                                             searchProvider: bot.searchProvider, searchKeys: SearchKeys(vault: secretVault))
             // MARK: MultiOrb (WP3)
             if multi.propose { context.orbCreation = orbCreationSupport(for: bot) }
