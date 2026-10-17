@@ -425,9 +425,6 @@ private struct HangsAfterText: LLMClient {
         return 1
     }
 
-    /// `deaf` behind `cancellably`, as a function of its own: the CI's compiler cannot check that nested closure inside a `Task`.
-    private static func deafCancellably() async throws -> Int { try await cancellably { await deaf(5) } }
-
     @Test func aDeadlineGivesUpOnWorkThatNeverAnswers() async throws {
         #expect(try await withDeadline(5, "a conta") { 42 } == 42)
         let started = ContinuousClock.now
@@ -443,7 +440,8 @@ private struct HangsAfterText: LLMClient {
 
     @Test func stoppingStopsWaitingForWorkThatIgnoresIt() async {
         let started = ContinuousClock.now
-        let waiting = Task { try await Self.deafCancellably() }
+        // The type's name, not `Self`: the dynamic `Self` of a class in a `Task` is more than Swift 6.3's isolation checker can check.
+        let waiting = Task { try await cancellably { await TurnReliabilityTests.deaf(5) } }
         try? await Task.sleep(for: .milliseconds(100))
         waiting.cancel()
         let result = await waiting.result
