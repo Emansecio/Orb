@@ -53,7 +53,7 @@ struct ReadFileTool: AgentTool {
                 return try await runDetached { try DocumentReader.pdfText(data, pages: pages) }
             }
             if DocumentReader.isImage(url) {
-                return try await Task.detached(priority: .userInitiated) { try DocumentReader.describeImage(at: url, size: size) }.value
+                return try await Task.detached(priority: .userInitiated) { try await DocumentReader.describeImage(at: url, size: size) }.value
             }
             let office = OfficeReader.isOffice(url)
             let legacyExcel = LegacyExcelReader.isLegacyExcel(url)

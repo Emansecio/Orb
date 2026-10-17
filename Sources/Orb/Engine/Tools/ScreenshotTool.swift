@@ -152,7 +152,7 @@ struct ScreenshotTool: AgentTool {
 
         let wantsText = OCRPolicy.shouldRun(mode: ocrMode, labeledElements: nil)
         let text = wantsText ? (try? await withDeadline(Self.ocrDeadline, "a leitura do texto da imagem") {
-            try await runDetached { try TextRecognizer.recognize(imageAt: file) }
+            try await TextRecognizer.recognizeWithTables(imageAt: file)
         }) ?? "" : ""
         var report = "Captura salva em \(file.path) (\(size.width)×\(size.height) px)."
         if !hadAccess {
@@ -346,8 +346,10 @@ struct ScreenshotTool: AgentTool {
             guard wantsMarks, let axWindow, let frame = axWindow.frame else { return nil }
             let element = axWindow.element, prefix = "w\(axWindow.index + 1)"
             do {
+                // The walk stops by itself a little before the deadline: a slow app gives fewer marks, not none.
+                let limits = UIMarkCollector.Limits(seconds: max(0.1, UIReadTool.seconds(sessions.deadlines.read) - 0.5))
                 return .success(try await sessions.run(app, within: sessions.deadlines.read) {
-                    UIMarkCollector.collect(window: element, prefix: prefix, origin: frame.origin, size: frame.size)
+                    UIMarkCollector.collect(window: element, prefix: prefix, origin: frame.origin, size: frame.size, limits: limits)
                 })
             } catch {
                 return .failure(error)
@@ -386,7 +388,10 @@ struct ScreenshotTool: AgentTool {
         let wantsText = image != nil && OCRPolicy.shouldRun(mode: ocrMode, labeledElements: trusted && ax != nil ? reading?.labeled : nil)
         var text = ""
         if wantsText, let image {
-            text = (try? await Self.recognize(image)).map(TextRecognizer.format) ?? ""
+            if let found = try? await Self.recognize(image) {
+                // Tables first: they are what the lines cannot show, and the limit on the OCR cuts from the end.
+                text = (found.tables.map { $0 + "\nTexto corrido (com a posição):\n" } ?? "") + TextRecognizer.format(found.lines)
+            }
         }
 
         // The picture the model gets: the marks on it, as a JPEG that fits.
@@ -452,9 +457,19 @@ struct ScreenshotTool: AgentTool {
     private static let visionGate = AsyncGate(limit: 1)
 
     /// Vision that never answers lets go of the gate after `ocrDeadline` (the picture is still returned, without its text).
-    private static func recognize(_ image: CGImage) async throws -> [OCRLine] {
+    private static func recognize(_ image: CGImage) async throws -> (lines: [OCRLine], tables: String?) {
         try await visionGate.run {
-            try await withDeadline(ocrDeadline, "a leitura do texto da imagem") { try await runDetached { try TextRecognizer.recognize(image, fast: true) } }
+            try await withDeadline(ocrDeadline, "a leitura do texto da imagem") {
+                let start = ContinuousClock.now
+                let lines = try await runDetached { try TextRecognizer.recognize(image, fast: true) }
+                let boxes = lines.map { line in
+                    CGRect(x: line.box.minX / Double(image.width), y: line.box.minY / Double(image.height),
+                           width: line.box.width / Double(image.width), height: line.box.height / Double(image.height))
+                }
+                let tables = try await TableRecognizer.tables(in: image, boxes: boxes,
+                                                              budget: TableRecognizer.budget(deadline: ocrDeadline, since: start))
+                return (lines, tables)
+            }
         }
     }
 
@@ -584,15 +599,33 @@ struct OCRLine: Sendable, Equatable {
 
 /// On-device text recognition (Vision) for screenshots.
 enum TextRecognizer {
-    static func recognize(imageAt url: URL) throws -> String {
+    static func recognize(imageAt url: URL) throws -> String { try read(imageAt: url).text }
+
+    /// The text of a picture in reading order, and where each line sits (fractions of the picture).
+    static func read(imageAt url: URL) throws -> (text: String, boxes: [CGRect]) {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = true
         request.recognitionLanguages = ["pt-BR", "en-US"]
         try VNImageRequestHandler(url: url).perform([request])
-        return lines(from: (request.results ?? []).compactMap { observation in
+        let found = (request.results ?? []).compactMap { observation in
             observation.topCandidates(1).first.map { (text: $0.string, box: observation.boundingBox) }
-        })
+        }
+        return (lines(from: found), found.map(\.box))
+    }
+
+    /// `recognize(imageAt:)`, with the tables on the picture (rows and columns, markdown) ahead of the plain text when it
+    /// has any and the Mac can read them (`TableRecognizer`). `budget` is the OCR time allowed; the tables get what the text
+    /// left, up to `tableSeconds`.
+    static func recognizeWithTables(imageAt url: URL, budget: TimeInterval = ScreenshotTool.ocrDeadline,
+                                    tableSeconds: TimeInterval = TableRecognizer.maxSeconds) async throws -> String {
+        let start = ContinuousClock.now
+        let read = try await runDetached { try read(imageAt: url) }
+        guard TableRecognizer.looksTabular(read.boxes), let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
+              let tables = try await TableRecognizer.tables(in: image, boxes: read.boxes,
+                                                            budget: TableRecognizer.budget(deadline: budget, since: start, cap: tableSeconds)) else { return read.text }
+        return tables + "\nTexto corrido:\n" + read.text
     }
 
     /// Reading order: top to bottom, then left to right (Vision's origin is the bottom left).

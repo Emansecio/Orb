@@ -324,6 +324,27 @@ struct SyntheticInputTests {
         }
     }
 
+    @Test func stopArrivingBetweenAPressAndItsReleaseStillReleasesTheButton() async throws {
+        let sink = RecordingSink()
+        // Stop comes right after the first mouse-down: the release must follow, or the app keeps the button held.
+        sink.afterPost = { count in
+            if count == 1 { withUnsafeCurrentTask { $0?.cancel() } }
+        }
+        let live = input(sink: sink)
+        let single = Task { try await live.click(at: .zero, window: 1, button: .left, count: 1, to: 9) }
+        try await single.value
+        #expect(sink.events.map(\.type) == [.leftMouseDown, .leftMouseUp])
+
+        // In a double click the stop is honoured between the clicks, never inside one.
+        let again = RecordingSink()
+        again.afterPost = { count in
+            if count == 1 { withUnsafeCurrentTask { $0?.cancel() } }
+        }
+        let double = Task { try await input(sink: again).click(at: .zero, window: 1, button: .left, count: 2, to: 9) }
+        await #expect(throws: CancellationError.self) { try await double.value }
+        #expect(again.events.map(\.type) == [.leftMouseDown, .leftMouseUp])
+    }
+
     @Test func aDoubleClickCountsTheClicks() throws {
         let events = try SyntheticEventBuilder.clickEvents(at: .zero, window: 1, button: .left, count: 2, source: nil)
         #expect(events.map(\.type) == [.leftMouseDown, .leftMouseUp, .leftMouseDown, .leftMouseUp])

@@ -515,10 +515,30 @@ struct ScreenTakeoverTests {
 
     @Test func oneStepCannotTakeMoreThanItsOwnLimit() async throws {
         let rig = TakeoverRig(stepLimit: .milliseconds(80))
-        rig.world.poster.delay = .milliseconds(10)
+        rig.world.poster.delay = .milliseconds(150)
         await #expect(throws: TakeoverFailure.stepTimeout) {
             _ = try await rig.takeOver { hand in try await hand.type(String(repeating: "x", count: 4_000)) }
         }
+        #expect(rig.world.front?.pid == 10)
+    }
+
+    @Test func aSlowLastChunkIsNotCalledAFailureOnceTheTextIsWhole() async throws {
+        // The only chunk takes longer than the step limit, but it went out whole: failing now would make the model type it again.
+        let rig = TakeoverRig(stepLimit: .milliseconds(80))
+        rig.world.poster.delay = .milliseconds(150)
+        _ = try await rig.takeOver { hand in try await hand.type("xxxxx") }
+        #expect(rig.world.poster.events == [.text(Array("xxxxx".utf16))])
+        #expect(rig.world.front?.pid == 10)
+    }
+
+    @Test func aLongTextIsNotCutHalfwayByTheLimitOfOneStep() async throws {
+        // Each chunk is well within the step limit; only the text as a whole takes longer than it.
+        let rig = TakeoverRig(stepLimit: .milliseconds(400))
+        rig.world.poster.delay = .milliseconds(20)
+        let text = String(repeating: "x", count: 400)
+        _ = try await rig.takeOver { hand in try await hand.type(text) }
+        let typed = rig.world.poster.events.compactMap { event -> Int? in if case .text(let units) = event { units.count } else { nil } }
+        #expect(typed.reduce(0, +) == 400 && typed.count == 20, "\(typed.count) chunks")
         #expect(rig.world.front?.pid == 10)
     }
 

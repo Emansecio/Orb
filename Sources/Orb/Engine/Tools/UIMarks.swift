@@ -114,7 +114,9 @@ enum UIMarkCollector {
     struct Limits: Sendable {
         var maxVisited = 3_000
         var maxDepth = 16
-        var seconds: Double = 4
+        /// The walk ends by itself this long after it starts: the caller's deadline must be later, or a slow app is an error
+        /// instead of a partial reading.
+        var seconds: Double = 3.5
     }
 
     /// Roles that are controls whatever their actions say.
@@ -144,7 +146,7 @@ enum UIMarkCollector {
 
     private static func visit(_ element: any AccessibilityElement, id: String, depth: Int, origin: CGPoint, bounds: CGRect,
                               limits: Limits, walk: Walk) {
-        if Task.isCancelled { walk.reading.cancelled = true; return }
+        if AXWork.isCancelled { walk.reading.cancelled = true; return } // the walk runs on the app's queue, outside any task
         if walk.reading.failure != nil { return }
         if walk.reading.visited >= limits.maxVisited { walk.reading.cuts.insert(.visited); return }
         if Date().timeIntervalSince(walk.started) >= limits.seconds { walk.reading.cuts.insert(.time); return }

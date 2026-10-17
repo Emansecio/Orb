@@ -162,11 +162,15 @@ final class LiveTakeoverHand: TakeoverHand, @unchecked Sendable {
 
     private func begin() -> ContinuousClock.Instant { min(ContinuousClock.now.advanced(by: stepLimit), overall) }
 
-    private func tick(_ stepDeadline: ContinuousClock.Instant) throws {
-        try Task.checkCancellation()
+    private func checkTime(_ stepDeadline: ContinuousClock.Instant) throws {
         let now = ContinuousClock.now
         if now >= overall { throw TakeoverFailure.timeLimit }
         if now >= stepDeadline { throw TakeoverFailure.stepTimeout }
+    }
+
+    private func tick(_ stepDeadline: ContinuousClock.Instant) throws {
+        try Task.checkCancellation()
+        try checkTime(stepDeadline)
         try checkCursor()
         // Real input goes to whatever is in front: if it is not the app, nothing is sent.
         if let front = platform.frontmost(), front.pid != target.pid { throw TakeoverFailure.lostFront(target.name) }
@@ -242,21 +246,25 @@ final class LiveTakeoverHand: TakeoverHand, @unchecked Sendable {
     }
 
     func type(_ text: String) async throws {
-        let deadline = begin()
         var chunk: [UInt16] = []
-        func flush() async throws {
+        func flush(last: Bool) async throws {
             guard !chunk.isEmpty else { return }
+            // The step limit is for one chunk (one event and its wait), not for the whole text: a long text must not hit it
+            // halfway and be left half typed. The limit of the whole takeover still holds. A slow chunk stops the ones after
+            // it; after the last one the text is whole, and calling it a failure would make the model type it again.
+            let deadline = begin()
             try tick(deadline)
             poster.text(chunk)
             chunk.removeAll(keepingCapacity: true)
             try await Task.sleep(for: .milliseconds(4))
+            if !last { try checkTime(deadline) }
         }
         for character in text {
             let units = Array(String(character).utf16)
-            if chunk.count + units.count > Self.typeChunk { try await flush() }
+            if chunk.count + units.count > Self.typeChunk { try await flush(last: false) }
             chunk += units
         }
-        try await flush()
+        try await flush(last: true)
     }
 
     func key(_ stroke: KeyStroke) async throws {
@@ -513,8 +521,6 @@ struct LiveTakeoverPlatform: TakeoverPlatform {
     /// One call may wait this long for an app (seconds).
     static let messagingTimeout: Float = 1
 
-    init() {}
-
     func root(of app: AccessibilityApp) -> any AccessibilityElement {
         let ref = AXUIElementCreateApplication(app.pid)
         AXUIElementSetMessagingTimeout(ref, Self.messagingTimeout)
@@ -547,15 +553,6 @@ final class LiveTakeoverPoster: TakeoverEventPoster, @unchecked Sendable {
     private let lock = NSLock()
     private var characterKeys: [Character: UInt16]?
 
-    private static func flags(_ modifiers: KeyStroke.Modifiers) -> CGEventFlags {
-        var flags: CGEventFlags = []
-        if modifiers.contains(.command) { flags.insert(.maskCommand) }
-        if modifiers.contains(.shift) { flags.insert(.maskShift) }
-        if modifiers.contains(.option) { flags.insert(.maskAlternate) }
-        if modifiers.contains(.control) { flags.insert(.maskControl) }
-        return flags
-    }
-
     func mouse(_ event: TakeoverMouseEvent, at point: CGPoint, button: MouseButton, clickState: Int) {
         let cgButton: CGMouseButton
         let down: CGEventType, up: CGEventType, dragged: CGEventType
@@ -577,7 +574,7 @@ final class LiveTakeoverPoster: TakeoverEventPoster, @unchecked Sendable {
 
     func key(virtualKey: UInt16, down: Bool, modifiers: KeyStroke.Modifiers) {
         guard let cg = CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: down) else { return }
-        cg.flags = Self.flags(modifiers)
+        cg.flags = SyntheticEventBuilder.flags(for: modifiers)
         cg.post(tap: .cghidEventTap)
     }
 

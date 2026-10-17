@@ -334,6 +334,18 @@ lista e adicionar de novo. Depois de "Pedir agora" ou de ir aos Ajustes do Siste
   conhecido que está fechado é aberto escondido antes, para o aviso não cair dentro do tempo do script). App recusado falha na hora.
 - No **Automático**, enviar e-mail ou mensagem por AppleScript (ou apertar Return no WhatsApp/Telegram…), apagar vários itens de
   uma vez e abrir scripts, instaladores ou links que rodam Atalhos perguntam antes, como os outros comandos perigosos.
+- **Dicionário do app, só quando precisa**: antes de escrever um AppleScript para um app que não conhece bem, o Orb lê o dicionário dele
+  (`app_dictionary`, a partir do `sdef` do app): as suítes, as classes com propriedades e elementos e os comandos com parâmetros,
+  num resumo curto, filtrável por texto ou suíte e em páginas. Só lê, não pede permissão; fica em cache por app e versão. App sem
+  dicionário é dito como tal, com o caminho dos Atalhos ou da interface.
+- **Saber de antemão como controlar cada app**: a lista de apps abertos (`apps_list`) diz de cada um se aceita AppleScript, se a
+  Acessibilidade dele é boa ou fraca (apps feitos com Electron, Chromium, Qt ou Java mostram pouco da interface) e quais Atalhos têm o
+  nome do app. O Orb escolhe o caminho na primeira tentativa. Vem só do pacote do app e da lista de Atalhos (guardados em cache), sem
+  falar com o app: listar não acorda nem toma a tela de ninguém.
+- **Tabelas e formulários numa imagem**: ao ler uma captura de tela, uma imagem de arquivo ou a captura do navegador, se o texto
+  reconhecido está arrumado em linhas e colunas, o Orb pede ao macOS 26 ou mais novo que leia a tabela e recebe linhas e colunas
+  (uma tabela em markdown), na frente do texto corrido. Em macOS mais antigo, ou se não achar tabela, tudo segue como antes: só o texto.
+  Leva meio segundo num Mac folgado e nunca mais de 5 s, dentro do prazo de 20 s do OCR.
 - O Orb recebe receitas curtas para as tarefas comuns do Mac (datas sem depender do idioma, rascunho no Mail, Lembretes, Notas,
   Calendário, Música) e conselhos para os erros típicos do AppleScript.
 - No painel do Orb, a chave "Controlar apps do Mac" ligada traz o atalho **Permissões**.
@@ -349,6 +361,15 @@ usando o Mac e o app da frente, o foco e o cursor ficam onde estavam.
 - **O que funciona em segundo plano**: ler a interface do app (mesmo coberto, em outro Espaço ou minimizado), apertar botões,
   preencher campos, digitar, atalhos de teclado (pelo menu do app), escolher itens de menu, selecionar linhas, rolar e clicar em
   um ponto da janela quando o app aceita o primeiro clique. A captura de tela vem da própria janela, também quando está coberta.
+  Se um app não responde no prazo, o Orb diz isso e **não** faz depois o que tinha pedido (nada de clique atrasado); um
+  Parar no meio de um clique sempre solta o botão. Em tabelas muito longas, escolher uma linha pelo texto olha as primeiras
+  500 e diz até onde olhou; o Orb então usa a busca (`query`) da leitura.
+- **Abrir sem tirar você do que está fazendo**: `open` abre apps, arquivos e links **em segundo plano**; o app abre (ou recebe o
+  arquivo) atrás do que você está usando, e o Orb o opera dali. Ele só traz o app para a frente (`front: true`) quando você pede
+  para ver ou quando a tarefa não anda em segundo plano, e o cartão de permissão diz "Abrindo na frente".
+- **Se um app vem para a frente sozinho** depois de uma ação, o Orb devolve o app que estava na frente e passa a pedir o cartão
+  "Usar a tela" para focar ou digitar nele. Se foi **você** quem foi ao app (apertou uma tecla ou clicou nos últimos 2 s), ele
+  fica na frente, o Orb não o marca como app que rouba o foco e não digita nele enquanto você o usa.
 - **O cartão "Usar a tela"**: o que só funciona com o mouse e o teclado de verdade (arrastar e soltar, menus de contexto, passar o
   mouse, apps sem Acessibilidade) o Orb **pede** antes. Você aprova o cartão (ele lista as etapas), o Orb traz o app para a frente
   por até 10 s, faz o que precisa e **devolve** o app que estava na frente, a janela e o cursor. Um aviso "Orb está usando a tela

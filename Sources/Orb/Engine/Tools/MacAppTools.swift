@@ -265,13 +265,15 @@ struct RunningAppInfo: Sendable, Equatable {
     var isRegular: Bool
     /// When the process started: with the pid it tells a running app from a new one that reused the pid.
     var launchDate: Date? = nil
+    /// The `.app` on disk, to tell how the app can be controlled (`AppControlInfo`).
+    var bundleURL: URL? = nil
 
     @MainActor static func current(includeBackground: Bool) -> [RunningAppInfo] {
         NSWorkspace.shared.runningApplications.compactMap { app in
             let regular = app.activationPolicy == .regular
             guard regular || includeBackground, let name = app.localizedName else { return nil }
             return RunningAppInfo(name: name, bundleID: app.bundleIdentifier, pid: app.processIdentifier,
-                                  isActive: app.isActive, isHidden: app.isHidden, isRegular: regular, launchDate: app.launchDate)
+                                  isActive: app.isActive, isHidden: app.isHidden, isRegular: regular, launchDate: app.launchDate, bundleURL: app.bundleURL)
         }
     }
 }
@@ -303,7 +305,8 @@ enum RunningAppMatcher {
 }
 
 enum AppListFormatter {
-    static func format(_ apps: [RunningAppInfo]) -> String {
+    /// `control` and `shortcuts` (by pid and by app name) add how each app can be controlled; without them the line is as it was.
+    static func format(_ apps: [RunningAppInfo], control: [Int32: AppControlInfo] = [:], shortcuts: [String: [String]] = [:]) -> String {
         guard !apps.isEmpty else { return "Nenhum app aberto." }
         let lines = apps.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }.map { app in
             var line = "- \(app.name)"
@@ -312,6 +315,8 @@ enum AppListFormatter {
             if app.isActive { line += " · em primeiro plano" }
             if app.isHidden { line += " · oculto" }
             if !app.isRegular { line += " · em segundo plano" }
+            if let info = control[app.pid] { line += info.summary }
+            if let found = shortcuts[app.name], !found.isEmpty { line += " · Atalhos: " + found.joined(separator: ", ") }
             return line
         }
         return "\(apps.count) app\(apps.count == 1 ? "" : "s") aberto\(apps.count == 1 ? "" : "s"):\n" + lines.joined(separator: "\n")
@@ -323,7 +328,8 @@ struct AppsListTool: AgentTool {
         name: "apps_list",
         description: """
         List the running apps with bundle identifier, which is in front and which are hidden: what is open, or \
-        the exact name for app_quit and open. `include_background` adds menu bar apps and helper agents.
+        the exact name for app_quit and open. Each line tells how to control the app (AppleScript, Accessibility quality, \
+        Shortcuts with its name). `include_background` adds menu bar apps.
         """,
         parameters: .schema([
             "include_background": .property("boolean"),
@@ -338,7 +344,15 @@ struct AppsListTool: AgentTool {
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
         let background = arguments["include_background"]?.bool ?? false
         let apps = await MainActor.run { RunningAppInfo.current(includeBackground: background) }
-        return AppListFormatter.format(apps)
+        // From the bundles only (cached): no Apple Event, no Accessibility call, nothing that wakes an app.
+        var control: [Int32: AppControlInfo] = [:]
+        for app in apps {
+            try Task.checkCancellation()
+            if let url = app.bundleURL { control[app.pid] = await AppControlCache.shared.info(for: url) }
+        }
+        let names = await ShortcutNamesCache.shared.current()
+        let shortcuts = Dictionary(apps.map { ($0.name, ShortcutNamesCache.matching(app: $0.name, in: names)) }, uniquingKeysWith: { first, _ in first })
+        return AppListFormatter.format(apps, control: control, shortcuts: shortcuts)
     }
 }
 
@@ -520,6 +534,6 @@ enum TrashGuard {
 extension ToolBox {
     static let macAppTools: [any AgentTool] = [
         ShortcutsListTool(), ShortcutsRunTool(), ClipboardReadTool(), ClipboardWriteTool(), ScreenshotTool(),
-        NotifyTool(), AppsListTool(), AppQuitTool(), TrashTool(),
+        NotifyTool(), AppsListTool(), AppQuitTool(), TrashTool(), AppDictionaryTool(),
     ]
 }

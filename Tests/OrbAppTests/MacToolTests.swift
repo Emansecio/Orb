@@ -39,7 +39,7 @@ struct MacToolTests {
     @Test func registersEveryMacToolWithTheRightCapabilityAndRisk() {
         let tools = Dictionary(uniqueKeysWithValues: ToolBox.macTools.map { ($0.spec.name, $0) })
         let expected: [(name: String, risk: ToolRisk, capability: Capability?)] = [
-            ("shortcuts_list", .safe, .computerUse), ("shortcuts_run", .sensitive, .computerUse),
+            ("shortcuts_list", .safe, .computerUse), ("app_dictionary", .safe, .computerUse), ("shortcuts_run", .sensitive, .computerUse),
             ("clipboard_read", .safe, .computerUse), ("clipboard_write", .sensitive, .computerUse),
             ("screenshot", .safe, .computerUse), ("notify", .safe, nil),
             ("apps_list", .safe, .computerUse),
@@ -177,6 +177,40 @@ struct MacToolTests {
         #expect(missing.contains("Não encontrei o app"))
         let nothing = await message { try await run(OpenTool(), ["target": .string("arquivo-que-nao-existe-9271.txt")]) }
         #expect(nothing.contains("Não encontrei"))
+    }
+
+    @Test func everythingOpensInTheBackgroundUnlessFrontIsAsked() async throws {
+        let opener = RecordingOpener()
+        var tool = OpenTool()
+        tool.opener = opener
+        let page = try await run(tool, ["target": .string("https://example.com")])
+        #expect(page.contains("segundo plano") && opener.opened.last?.front == false && opener.opened.last?.app == nil)
+
+        // An app by bundle identifier, and a file with a given app: neither comes to the front.
+        let app = try await run(tool, ["target": .string("com.apple.calculator")])
+        #expect(app.contains("segundo plano") && opener.opened.last?.url.pathExtension == "app" && opener.opened.last?.front == false)
+        let file = FileManager.default.temporaryDirectory.appending(path: "orb-open-\(UUID().uuidString).txt")
+        try "oi".write(to: file, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let document = try await run(tool, ["target": .string(file.path), "app": .string("com.apple.TextEdit")])
+        #expect(document.contains("segundo plano") && opener.opened.last?.app?.lastPathComponent == "TextEdit.app")
+        #expect(opener.opened.last?.front == false)
+
+        // Only when asked.
+        let shown = try await run(tool, ["target": .string("https://example.com"), "front": .bool(true)])
+        #expect(shown.contains("na frente") && !shown.contains("segundo plano") && opener.opened.last?.front == true)
+        #expect(tool.summary(.object(["target": .string("x"), "front": .bool(true)])).title == "Abrindo na frente")
+        #expect(tool.summary(.object(["target": .string("x")])).title == "Abrindo")
+        #expect(tool.spec.parameters.jsonString.contains("front") && tool.spec.description.contains("background"))
+
+        opener.failure = ToolError("sem app para isso")
+        let failed = await message { try await run(tool, ["target": .string("https://example.com")]) }
+        #expect(failed.contains("Não consegui abrir") && failed.contains("sem app para isso"))
+    }
+
+    @Test func theAppNotOpenMessageSaysOpenKeepsItInTheBackground() {
+        let text = UIAppResolver.Failure.notRunning("Pages").message
+        #expect(text.contains("open") && text.contains("segundo plano"))
     }
 
     @Test func browserTabReadsTheFrontBrowserOnlyWhenOneIsInFront() {
@@ -650,5 +684,30 @@ struct MacToolTests {
         #expect(!(await asksUser(mode: .auto, tool: AppQuitTool(), arguments: normal)))
         #expect(await asksUser(mode: .ask, tool: AppQuitTool(), arguments: normal))
         #expect(!(await asksUser(mode: .bypass, tool: AppQuitTool(), arguments: force)))
+    }
+}
+
+/// Records what `open` would open, and how, without opening anything.
+final class RecordingOpener: URLOpening, @unchecked Sendable {
+    struct Opened {
+        var url: URL
+        var app: URL?
+        var front: Bool
+    }
+
+    private let lock = NSLock()
+    private var calls: [Opened] = []
+    private var error: ToolError?
+
+    var opened: [Opened] { lock.withLock { calls } }
+    /// When set, every opening fails with it.
+    var failure: ToolError? {
+        get { lock.withLock { error } }
+        set { lock.withLock { error = newValue } }
+    }
+
+    func open(_ url: URL, with app: URL?, front: Bool) async throws {
+        if let failure { throw failure }
+        lock.withLock { calls.append(Opened(url: url, app: app, front: front)) }
     }
 }

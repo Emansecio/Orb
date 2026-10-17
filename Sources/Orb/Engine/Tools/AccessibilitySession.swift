@@ -175,13 +175,15 @@ final class AXSessions: @unchecked Sendable {
                 self.release()
                 call.resolve(result)
             }
-            // The deadline; a no-op when the work came back first (the gate is resolved once).
+            // The deadline; a no-op when the work came back first (the gate is resolved once). Past it nobody is waiting for
+            // the work any more, so it is cancelled: it stops at the next element it would read, and an action it had not
+            // yet sent never goes out after the model was told the call timed out (the model would repeat it).
             let wait = Self.interval(ContinuousClock.now.duration(to: started + deadline))
             DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + wait) {
                 session.state.withLock { state in
                     if call.markOverdue() { state.overdue += 1 }
                 }
-                call.resolve(.failure(ToolError(AXSessionMessage.timedOut(app, after: deadline))))
+                if call.resolve(.failure(ToolError(AXSessionMessage.timedOut(app, after: deadline)))) { token.cancel() }
             }
             return try await call.value()
         } onCancel: {
@@ -255,14 +257,17 @@ private final class CallGate<T: Sendable>: @unchecked Sendable {
         }
     }
 
-    func resolve(_ outcome: Result<T, any Error>) {
-        let waiter: CheckedContinuation<T, any Error>? = lock.withLock {
-            guard result == nil else { return nil }
+    /// Settles the call with `outcome` unless something settled it first; true when this one did.
+    @discardableResult
+    func resolve(_ outcome: Result<T, any Error>) -> Bool {
+        let (settled, waiter): (Bool, CheckedContinuation<T, any Error>?) = lock.withLock {
+            guard result == nil else { return (false, nil) }
             result = outcome
             defer { continuation = nil }
-            return continuation
+            return (true, continuation)
         }
         waiter?.resume(with: outcome)
+        return settled
     }
 
     func value() async throws -> T {
@@ -364,10 +369,6 @@ final class UILiveElements: @unchecked Sendable {
 
     func forget(bot: UUID?, pid: Int32) {
         _ = lock.withLock { readings.removeValue(forKey: Key(bot: bot, pid: pid)) }
-    }
-
-    func removeAll() {
-        lock.withLock { readings.removeAll() }
     }
 
     /// Drops expired readings, then the least recently used ones until the references fit.

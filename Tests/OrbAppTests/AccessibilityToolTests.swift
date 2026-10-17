@@ -252,7 +252,7 @@ struct UIReadToolTests {
         #expect(try await read(tool, ["query": .string("zzz")]).contains("Nenhum elemento combina com “zzz”"))
         var instant = UIOutlineLimits()
         instant.seconds = 0 // the clock stops the walk before the first line
-        let blank = try UIReadTool.read(root: fakeApp(windows: [fake("AXWindow", title: "Vazia", [fakeButton("A")])]), app: notes, window: nil,
+        let blank = try UIReadTool.reading(root: fakeApp(windows: [fake("AXWindow", title: "Vazia", [fakeButton("A")])]), app: notes, window: nil,
                                         query: nil, includeMenus: false, limits: instant)
         #expect(blank.text.contains("Não consegui ler elementos desta janela.") && !blank.text.contains("combina com"))
         let shallow = try await read(tool, ["max_depth": .number(1)])

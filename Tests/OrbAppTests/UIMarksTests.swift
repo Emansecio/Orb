@@ -292,6 +292,22 @@ struct UIMarksTests {
         #expect(reading.candidates.map(\.label) == ["Fica"] && reading.failure == nil)
     }
 
+    @Test func theWalkOnTheAppsQueueStopsWhenItsCallWasCancelled() {
+        let buttons = (0..<5).map { element(fakeButton("B\($0)"), at: CGRect(x: 10, y: 10 + Double($0) * 30, width: 80, height: 24)) }
+        let doc = window(buttons)
+        // The work runs outside any task: what tells it to stop is the token of its session call (deadline passed, or Stop).
+        let token = AXWorkToken()
+        token.cancel()
+        let reading = AXWorkToken.$current.withValue(token) {
+            UIMarkCollector.collect(window: doc, prefix: "w1", origin: .zero, size: CGSize(width: 400, height: 300))
+        }
+        #expect(reading.cancelled && reading.candidates.isEmpty && doc.roundTrips == 0)
+    }
+
+    @Test func theWalkEndsBeforeTheReadDeadlineSoASlowAppGivesFewerMarksNotAnError() {
+        #expect(UIMarkCollector.Limits().seconds < UIReadTool.seconds(AXDeadlines.standard.read))
+    }
+
     @Test func eachElementCostsAtMostTwoRoundTripsAndTheBudgetsStopTheWalk() {
         let buttons = (0..<40).map { element(fakeButton("B\($0)"), at: CGRect(x: 10, y: 10 + Double($0) * 6, width: 80, height: 5.5)) }
         let groups = (0..<40).map { element(fake("AXGroup", title: "G\($0)"), at: CGRect(x: 200, y: 10 + Double($0) * 6, width: 80, height: 5.5)) }

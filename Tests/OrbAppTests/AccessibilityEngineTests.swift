@@ -232,6 +232,44 @@ struct AccessibilityLadderTests {
         #expect(shifted.contains("evento ao app") && mark.performed == ["AXPress"])
     }
 
+    @Test func theMenuSearchForAShortcutGivesUpOnASlowMenuAndTheKeyGoesAsAnEvent() async throws {
+        let items = (0..<30).map { index -> FakeElement in
+            let item = fakeMenuItem("Item \(index)")
+            item.stall = .milliseconds(30)
+            return item
+        }
+        let mark = fakeMenuItem("Marcar")
+        mark.attrs["AXMenuItemCmdChar"] = .string("K")
+        mark.attrs["AXMenuItemCmdModifiers"] = .number(0)
+        let root = fakeApp(windows: [fake("AXWindow", title: "A")], menus: [fakeMenu("Ações", items + [mark])])
+        let stroke = try KeyStroke.parse("cmd+k")
+        let found = UIMenu.item(for: stroke, root: root, seconds: 0.1)
+        #expect(found == nil, "30 items of 30 ms do not fit 0,1 s")
+        #expect(items.last?.roundTrips == 0, "it stopped before the end of the menu")
+        // With time enough the same menu finds it.
+        for item in items { item.stall = .zero }
+        #expect(UIMenu.item(for: stroke, root: root, seconds: 5)?.titles == ["Ações", "Marcar"])
+        // A cancelled call does not walk the menu at all.
+        let token = AXWorkToken()
+        token.cancel()
+        let none = AXWorkToken.$current.withValue(token) { UIMenu.item(for: stroke, root: root, seconds: 5) }
+        #expect(none == nil)
+    }
+
+    @Test func aRowSearchStopsAtItsBudgetAndSaysHowFarItLooked() {
+        let rows = (0..<50).map { index -> FakeElement in
+            let row = fake("AXRow", title: "Linha \(index)")
+            row.stall = .milliseconds(20)
+            return row
+        }
+        let none = UIActTool.findRow("zzz", in: rows, seconds: 0.1)
+        #expect(none.row == nil && none.examined > 0 && none.examined < 50, "\(none.examined) rows in 0,1 s")
+        for row in rows { row.stall = .zero }
+        let hit = UIActTool.findRow("linha 7", in: rows)
+        #expect(hit.row != nil && hit.examined == 8)
+        #expect(UIActTool.findRow("linha 49", in: rows, limit: 10).row == nil, "only the first rows are read")
+    }
+
     @Test func keysWithoutAMenuItemAreSentToTheApp() async throws {
         let bench = Bench(windows: [fake("AXWindow", title: "A")])
         let text = try await bench.act(["action": .string("key"), "app": .string("Notas"), "keys": .string("return, tab")])
@@ -482,6 +520,52 @@ struct AccessibilityRefusalTests {
         let focus = await failureMessage { try await bench.act(["action": .string("focus"), "id": .string("w1.2")]) }
         #expect(focus.hasPrefix(UIActTool.takeoverMarker))
         #expect(bench.system.activated.isEmpty)
+    }
+
+    @Test func anAppThePersonWentToStaysInFrontAndIsNotTakenForOneThatStealsFocus() async throws {
+        let button = fakeButton("Abrir")
+        let field = fake("AXTextField", title: "Nome")
+        field.settable = ["AXFocused"]
+        let bench = Bench(windows: [fake("AXWindow", title: "A", [button, field])])
+        let safari = fakeApp(windows: [])
+        safari.settable = ["AXFrontmost"]
+        bench.system.roots[200] = safari
+        bench.system.frontmost = 200
+        let system = bench.system
+        // While the press runs, the person clicks the app to watch: it is in front because of a click of theirs.
+        button.onPerform = { _ in system.frontmost = 100; system.userIdle = 0.5 }
+        try await bench.read()
+        let text = try await bench.act(["action": .string("press"), "id": .string("w1.1")])
+        #expect(text.contains("o usuário foi até ele") && !text.contains("sozinho"), Comment(rawValue: text))
+        #expect(safari.assignedValue("AXFrontmost") == nil && system.frontmost == 100, "the person's choice is not undone")
+        // Not remembered as an app that steals focus: with the person away again, focusing it goes in the background.
+        system.userIdle = .infinity
+        system.frontmost = 200
+        _ = try await bench.act(["action": .string("focus"), "id": .string("w1.2")])
+        #expect(field.assignedValue("AXFocused")?.bool == true)
+
+        // Past the 2 s it is the app that came by itself, as before.
+        button.onPerform = { _ in system.frontmost = 100; system.userIdle = 2.5 }
+        let late = try await bench.act(["action": .string("press"), "id": .string("w1.1")])
+        #expect(late.contains("veio para a frente sozinho") && safari.assignedValue("AXFrontmost")?.bool == true)
+    }
+
+    @Test func nothingIsTypedIntoAnAppThePersonJustWentTo() async throws {
+        let field = fake("AXTextField", title: "Nome")
+        field.settable = ["AXFocused"]
+        let bench = Bench(windows: [fake("AXWindow", title: "A", [field])])
+        bench.root.attrs["AXFocusedUIElement"] = .element(field)
+        let system = bench.system
+        let safari = fakeApp(windows: [])
+        safari.settable = ["AXFrontmost"]
+        system.roots[200] = safari
+        system.frontmost = 200
+        // The focus lands while the person clicks the app: it is in front, and the person may be typing in it.
+        field.onSet = { name, _ in if name == "AXFocused" { system.frontmost = 100; system.userIdle = 0.5 } }
+        try await bench.read()
+        let message = await failureMessage { try await bench.act(["action": .string("type"), "id": .string("w1.1"), "value": .string("oi")]) }
+        #expect(message.contains("está usando") && message.contains("o usuário foi até ele"), Comment(rawValue: message))
+        #expect(system.syntheticInput.events.isEmpty && safari.assignedValue("AXFrontmost") == nil && system.frontmost == 100)
     }
 }
 
@@ -927,6 +1011,7 @@ struct AccessibilityWaitTests {
         let bench = Bench(windows: [window])
         let pauses = OSAllocatedUnfairLock(initialState: [Duration]())
         var waiter = UIWaiter(system: bench.system, sessions: bench.sessions, store: bench.store, live: bench.live)
+        waiter.spacesLooksByCost = false // a look stretched by a loaded machine must not change the pauses counted here
         // After the fourth pause the text shows up (still without a notification), which ends the wait.
         waiter.onPause = { pause in
             let count = pauses.withLock { $0.append(pause); return $0.count }
@@ -939,6 +1024,18 @@ struct AccessibilityWaitTests {
         #expect(taken.count >= 4 && taken.allSatisfy { $0 <= .milliseconds(250) }, "\(taken)")
         #expect(taken.first == .milliseconds(50), "the first look again comes soon: \(taken)")
         #expect(waiter.tick(after: 0) == .milliseconds(50) && waiter.tick(after: 4) == .milliseconds(150) && waiter.tick(after: 9) == .milliseconds(250))
+    }
+
+    @Test func anExpensiveLookIsFollowedByAPauseAsLongAsTheLook() {
+        let waiter = UIWaiter(system: FakeAccessibility(), sessions: AXSessions(), store: UISnapshotStore(), live: UILiveElements())
+        #expect(waiter.pause(after: 0, took: .milliseconds(20)) == .milliseconds(50), "a cheap look keeps the usual rhythm")
+        #expect(waiter.pause(after: 9, took: .milliseconds(99)) == .milliseconds(250))
+        #expect(waiter.pause(after: 9, took: .milliseconds(600)) == .milliseconds(600), "half the time at most on a large window")
+        #expect(waiter.pause(after: 0, took: .milliseconds(150)) == .milliseconds(150))
+        #expect(waiter.pause(after: 9, took: .seconds(5)) == UIWaiter.maxBackoff)
+        var plain = waiter
+        plain.spacesLooksByCost = false
+        #expect(plain.pause(after: 9, took: .seconds(5)) == .milliseconds(250))
     }
 
     @Test func settleWaitsForTheFirstNotificationThenForQuiet() async {
@@ -1219,6 +1316,37 @@ struct AccessibilityHangTests {
         task.cancel()
         await #expect(throws: CancellationError.self) { try await task.value }
         #expect(started.duration(to: clock.now) < .seconds(25), "not the 30 s of the work")
+    }
+
+    @Test func pastTheDeadlineTheWorkIsToldToStopSoASlowActionNeverReachesTheApp() async throws {
+        let sessions = AXSessions()
+        let app = AccessibilityApp(name: "Lento", bundleID: nil, pid: 6_010)
+        let sawStop = OSAllocatedUnfairLock(initialState: false)
+        let acted = OSAllocatedUnfairLock(initialState: false)
+        // The reads before the action are slow: the deadline passes, the model hears "não respondeu", and the press that was
+        // about to follow must not go out afterwards (the model would repeat it).
+        await #expect(throws: ToolError.self) {
+            try await sessions.run(app, within: .milliseconds(100)) {
+                Thread.sleep(forTimeInterval: 0.5)
+                sawStop.withLock { $0 = AXWork.isCancelled }
+                try AXWork.checkCancellation()
+                acted.withLock { $0 = true }
+                return 1
+            }
+        }
+        try #require(await waitUntil("the work came back") { sessions.runningCount == 0 })
+        #expect(sawStop.withLock { $0 } && !acted.withLock { $0 })
+        #expect(!sessions.session(for: app.pid).isStuck, "the late work ended, so the app is not held as hung")
+    }
+
+    @Test func aCallThatFinishesBeforeItsDeadlineIsNotCancelledByIt() async throws {
+        let sessions = AXSessions()
+        let app = AccessibilityApp(name: "Rápido", bundleID: nil, pid: 6_011)
+        // The work hands back its own token, so the test sees what the deadline did to it once it passed.
+        let token = try await sessions.run(app, within: .milliseconds(400)) { AXWorkToken.current }
+        try await Task.sleep(for: .milliseconds(600))
+        #expect(token?.isCancelled == false, "the deadline came after the work and left it alone")
+        #expect(sessions.runningCount == 0 && !sessions.session(for: app.pid).isStuck)
     }
 
     @Test func workStoppedWhileWaitingInTheAppsQueueNeverRuns() async throws {
