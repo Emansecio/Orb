@@ -892,7 +892,7 @@ struct ToolGroupRow: View, Equatable {
     var body: some View {
         let calls = calls
         let isRunning = calls.contains { $0.state == .running }
-        let summary = ToolTally.summary(calls)
+        let summary = ToolTally.line(calls)
         let failures = ToolTally.failures(calls)
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {

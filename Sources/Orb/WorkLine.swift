@@ -120,7 +120,7 @@ enum WorkPhrase {
             return WorkLine(verb: "Procurando", target: first, style: isQuery ? .quoted : .code)
         case "Buscando no conteúdo":
             return WorkLine(verb: "Procurando", target: first, style: .quoted)
-        case "Lendo página":
+        case "Lendo página", "Abrindo página", "Abrindo uma aba":
             return WorkLine(verb: "Abrindo", target: host(of: first), style: .plain)
         case "Baixando arquivo":
             return WorkLine(verb: "Baixando de", target: host(of: first), style: .plain)

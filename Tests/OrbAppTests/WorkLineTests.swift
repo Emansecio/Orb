@@ -73,6 +73,8 @@ struct WorkPhraseTests {
 
     @Test func theWebIsNamedByItsHostOrItsQuery() {
         #expect(line("Lendo página", "https://www.github.com/x/y?tab=readme", kind: .browser).text == "Abrindo github.com")
+        #expect(line("Abrindo página", "https://www.gympass.com/login", kind: .browser).text == "Abrindo gympass.com")
+        #expect(line("Abrindo uma aba", "https://example.com/a", kind: .browser).text == "Abrindo example.com")
         #expect(line("Baixando arquivo", "https://example.com/a.zip\n→ ~/Downloads", kind: .browser).text == "Baixando de example.com")
         #expect(line("Pesquisando na web", "swiftui shimmer", kind: .browser).text == "Pesquisando “swiftui shimmer”")
         #expect(line("Delegando a um subagente", "revisar o diff", kind: .computer).text == "Delegando “revisar o diff”")

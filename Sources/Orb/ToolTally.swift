@@ -6,7 +6,7 @@ enum ToolTally {
     /// What an action did, for counting. Read from its title (the tools' own words, see `WorkPhrase`): a title not
     /// known here (a connector's, a new tool's) counts as an action.
     enum Act: Equatable {
-        case command, read, change, list, search, page, other
+        case command, read, change, list, search, page, click, fill, other
 
         init(_ call: ToolCall) {
             switch call.title {
@@ -15,7 +15,10 @@ enum ToolTally {
             case "Editando arquivo", "Gravando arquivo", "Movendo para a Lixeira": self = .change
             case "Listando pasta": self = .list
             case "Procurando arquivos", "Buscando no conteúdo", "Pesquisando na web", "Buscando na memória": self = .search
-            case "Lendo página", "Baixando arquivo", "Lendo a aba do navegador": self = .page
+            case "Lendo página", "Baixando arquivo", "Lendo a aba do navegador", "Abrindo página", "Abrindo uma aba": self = .page
+            // The Orb's browser names what it clicks or fills ("Clicando em “Verificar”", `BrowseClickTool`).
+            case let title where call.kind == .browser && title.hasPrefix("Clicando"): self = .click
+            case let title where call.kind == .browser && title.hasPrefix("Preenchendo"): self = .fill
             default: self = .other
             }
         }
@@ -30,6 +33,8 @@ enum ToolTally {
             case .list: "listou \(count) \(one ? "pasta" : "pastas")"
             case .search: "fez \(count) \(one ? "busca" : "buscas")"
             case .page: "abriu \(count) \(one ? "página" : "páginas")"
+            case .click: "clicou \(count) \(one ? "vez" : "vezes")"
+            case .fill: "preencheu \(count) \(one ? "campo" : "campos")"
             case .other: "fez \(count) \(one ? "ação" : "ações")"
             }
         }
@@ -85,6 +90,14 @@ enum ToolTally {
     static func work(_ calls: [ToolCall], seconds: Int?) -> String {
         let time = seconds.map { "Trabalhou por \(ElapsedFormat.text(seconds: $0))" } ?? "Trabalhou"
         return calls.isEmpty ? time : "\(time) · \(summary(calls, capitalized: false))"
+    }
+
+    /// The folded line of a run in the Orb's browser leads with the site it is on, the last one it opened ("gympass.com ·
+    /// Abriu 1 página, clicou 3 vezes e preencheu 2 campos"); any other run is its `summary`.
+    static func line(_ calls: [ToolCall]) -> String {
+        let opened = calls.last { $0.kind == .browser && ["Abrindo página", "Abrindo uma aba"].contains($0.title) }
+        guard let site = opened.flatMap({ WorkPhrase.host(of: WorkPhrase.firstLine(of: $0.detail)) }) else { return summary(calls) }
+        return "\(site) · \(summary(calls))"
     }
 
     /// The symbol of the row: the one of its actions when they are all of one kind, a stack otherwise.

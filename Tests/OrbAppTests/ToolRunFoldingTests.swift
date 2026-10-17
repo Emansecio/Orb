@@ -142,6 +142,16 @@ struct ToolRunFoldingTests {
         #expect(ToolTally.summary(many) == "Rodou 1 comando, leu 1 arquivo, alterou 1 arquivo e mais 3 ações")
     }
 
+    @Test func aRunInTheBrowserSaysTheSiteAndWhatWasDoneThere() {
+        func browse(_ title: String, _ detail: String = "") -> ToolCall { ToolCall(kind: .browser, title: title, detail: detail, state: .done) }
+        let calls = [browse("Abrindo página", "https://www.gympass.com/login"), browse("Olhando a página"),
+                     browse("Preenchendo “CPF”", "123"), browse("Clicando em “Verificar”", "e5"), browse("Clicando na página", "e9")]
+        #expect(ToolTally.line(calls) == "gympass.com · Abriu 1 página, preencheu 1 campo, clicou 2 vezes e mais 1 ação")
+        // A run that opened no page, or of other tools, is only its count; a command titled like a click is not one.
+        #expect(ToolTally.line(Array(calls.dropFirst())) == "Preencheu 1 campo, clicou 2 vezes e fez 1 outra ação")
+        #expect(ToolTally.line([call("Clicando em Salvar", .computer)]) == "Fez 1 ação")
+    }
+
     @Test func failuresAreSaidAndTheTimeIsTheWholeRunsOnceItEnds() {
         let start = Date(timeIntervalSince1970: 1_000)
         var first = call("Rodando no Terminal")
