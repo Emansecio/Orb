@@ -470,7 +470,8 @@ struct BrowsePermissionTests {
             for required in tool.spec.parameters["required"]?.array ?? [] {
                 #expect(tool.spec.parameters["properties"]?[required.string ?? ""] != nil, "\(tool.spec.name)")
             }
-            if tool.risk(.object(["action": .string("new")])) != .safe {
+            // `browse_run` and `browse_files` ask every time on purpose (BrowseMoreToolTests).
+            if tool.risk(.object(["action": .string("new")])) != .safe, !["browse_run", "browse_files"].contains(tool.spec.name) {
                 #expect(PermissionPolicy.family(ofTool: tool.spec.name, kind: tool.kind) != nil, "\(tool.spec.name)")
             }
         }

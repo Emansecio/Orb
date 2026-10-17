@@ -349,30 +349,60 @@ enum BrowseRunRules {
     static let refusedCommands: [String: String] = [
         "connect": "it would drive another browser than yours",
         "install": "the user installs the browser in Ajustes → Navegador", "upgrade": "the user updates it in Ajustes → Navegador",
+        "doctor": "the user checks the install in Ajustes → Navegador",
         "plugin": "plugins are not available", "plugins": "plugins are not available",
         "dashboard": "it opens a server and a window", "mcp": "it starts another server", "stream": "it opens a server",
         "chat": "it runs another model", "inspect": "it opens DevTools in a window", "auth": "stored logins are typed by the user (browse_show)",
         "session": "your browser is the only session you work in", "close": "use browse_close",
         "open": "use browse_open", "goto": "use browse_open", "navigate": "use browse_open",
+        "tab": "use browse_tabs, which keeps each conversation in its own tab",
+        "batch": "send the commands one by one, so each is checked",
+        "profiles": "it lists the user's own Chrome profiles",
+        "clipboard": "it reaches the Mac's clipboard (clipboard_read and clipboard_write do that, with their own permission)",
+        "confirm": "nothing in your session waits for a confirmation", "deny": "nothing in your session waits for a confirmation",
     ]
-    /// Options that would change which browser it is, where it keeps its profile or how it starts.
+    /// Options that would change which browser it is, where it keeps its profile, how it starts, or where it writes files (the
+    /// command line takes them exactly as written, anywhere in the command; they are compared the same way, ignoring case).
     static let refusedFlags: Set<String> = [
         "--cdp", "--session", "--profile", "--args", "--executable-path", "--headed", "--config", "--proxy", "--engine", "--provider", "-p",
-        "--auto-connect", "--extension", "--allow-file-access", "--session-name",
+        "--auto-connect", "--extension", "--allow-file-access", "--session-name", "--namespace", "--pin-tab", "--no-pin-tab",
+        "--download-path", "--screenshot-dir", "--init-script", "--enable", "--state", "--restore", "--restore-save", "--user-agent",
+        "--ignore-https-errors", "--ca-cert", "--no-ca-cert", "--use-system-ca", "--action-policy", "--confirm-actions",
+        "--confirm-interactive", "--allowed-domains", "--idle-timeout", "--proxy-bypass", "--webgpu", "--no-webmcp", "--device",
+        "--model", "--no-auto-dialog",
     ]
+    /// What `state` may do here: the files named in the command (checked like any other). Listing, showing, renaming and
+    /// cleaning reach the saved states of every session of agent-browser.
+    static let stateActions: Set<String> = ["save", "load"]
 
     /// Why the command is refused, or nil.
     static func refusal(_ words: [String]) -> String? {
         guard let first = words.first?.lowercased() else { return "Give the command in `args`, like [\"get\", \"title\"]." }
+        // The command line reads its options anywhere and the command is the first other word: one that starts with an option
+        // could hide the real command behind it (["--debug", "connect", …]).
+        if first.hasPrefix("-") { return "Start `args` with the command, like [\"get\", \"title\"]; its options come after it." }
         if let why = refusedCommands[first] { return "`\(first)` is not run here: \(why)." }
-        if first == "close" || words.contains("--all") { return "`--all` would reach other sessions." }
-        for word in words {
+        if first == "state", !stateActions.contains(words.dropFirst().first?.lowercased() ?? "") {
+            return "`state` here is only save or load (or browse_page state_save and state_load)."
+        }
+        for (index, word) in words.enumerated().dropFirst() {
             let flag = word.lowercased().split(separator: "=", maxSplits: 1).first.map(String.init) ?? ""
+            if flag == "--all" { return "`--all` would reach other sessions." }
             if refusedFlags.contains(flag) {
                 return "`\(flag)` is not accepted here: it would change which browser this is or how it starts."
             }
+            // `--params @file` reads a file of the Mac and hands it to the page.
+            if flag == "--params", index + 1 < words.count, words[index + 1].hasPrefix("@") {
+                return "`--params` takes the JSON itself here, not a file (@…)."
+            }
         }
         return nil
+    }
+
+    /// Why a call is risky enough to ask even in "Automático", or nil: a script that runs in every page the browser opens from
+    /// now on, other conversations' tabs included, until the browser closes.
+    static func danger(_ words: [String]) -> String? {
+        words.first?.lowercased() == "addinitscript" ? "roda um script em toda página que o navegador do Orb abrir, até ele fechar" : nil
     }
 
     /// Looks at the page or the browser's records without changing anything.
@@ -381,7 +411,6 @@ enum BrowseRunRules {
         func second() -> String? { words.dropFirst().first?.lowercased() }
         switch first {
         case "get", "is", "snapshot", "console", "errors": return true
-        case "tab": return words.count == 1 || second() == "list"
         case "cookies": return words.count == 1 || second() == "get"
         case "network": return second() == "requests"
         default: return false
@@ -439,7 +468,8 @@ enum BrowseRunRules {
 /// The manual `browse_run` shows on demand: the command line's own help, so it is the one of the version the app carries.
 enum BrowseRunManual {
     /// Sections of the help about what `browse_run` refuses or what the app does for the user.
-    private static let hidden = ["Streaming", "MCP", "Chat", "Dashboard", "Setup", "Plugins", "Sessions", "Confirmation", "Auth Vault", "WebMCP", "iOS"]
+    private static let hidden = ["Streaming", "MCP", "Chat", "Dashboard", "Setup", "Plugins", "Sessions", "Confirmation", "Auth Vault", "WebMCP", "iOS",
+                                         "Tabs", "Batch"]
 
     static func overview(fromHelp help: String) -> String {
         var kept: [String] = []
@@ -456,7 +486,7 @@ enum BrowseRunManual {
         return """
         agent-browser commands, for browse_run `args` (["get", "text", "@e3"]). Elements are the @e12 refs of browse_snapshot. \
         browse_run with `manual` set to one command's name shows how that command works. Some commands are refused \
-        (open, close, connect, session, and flags that change the browser itself).
+        (open, close, tab, batch, connect, session, and flags that change the browser itself).
 
         \(body)
         """
@@ -492,6 +522,7 @@ struct BrowseRunTool: BrowseTool {
     /// upload never takes a key or a saved password.
     func danger(_ arguments: JSONValue, context: ToolContext) -> String? {
         guard let words = BrowseRunRules.words(arguments) else { return nil }
+        if let reason = BrowseRunRules.danger(words) { return reason }
         let resolved = BrowseRunRules.resolved(words, context: context)
         let sensitive = DangerousCommand.SensitiveFiles()
         for (index, access) in BrowseRunRules.files(words) {

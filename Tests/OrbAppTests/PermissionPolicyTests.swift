@@ -477,8 +477,9 @@ struct HostAndConnectorScopeTests {
         for (name, family) in expected { #expect(PermissionPolicy.family(ofTool: name, kind: .computer) == family, "\(name)") }
         #expect(PermissionPolicy.family(ofTool: "Fake__echo", kind: .connector) == .connector)
         #expect(PermissionPolicy.family(ofTool: "grep", kind: .search) == nil)
-        // Every shipped tool that asks belongs to a family, so "Sempre permitir" can remember it.
-        for tool in ToolBox.all where tool.risk(.object([:])) != .safe {
+        // Every shipped tool that asks belongs to a family, so "Sempre permitir" can remember it. Except the two that ask every
+        // time on purpose: any command of the browser (a script, a file) and a file of the Mac handed to a site.
+        for tool in ToolBox.all where tool.risk(.object([:])) != .safe && !["browse_run", "browse_files"].contains(tool.spec.name) {
             #expect(PermissionPolicy.family(ofTool: tool.spec.name, kind: tool.kind) != nil, Comment(rawValue: tool.spec.name))
         }
     }

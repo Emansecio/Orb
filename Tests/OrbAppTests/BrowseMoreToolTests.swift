@@ -220,7 +220,15 @@ struct BrowseMoreToolTests {
         for words in [["connect", "9222"], ["open", "https://x.test"], ["close"], ["session", "list"], ["install"], ["dashboard"],
                       ["get", "title", "--cdp", "9222"], ["snapshot", "--profile=/tmp/x"], ["click", "@e1", "--headed"],
                       ["tab", "list", "--session", "other"], ["eval", "1", "--executable-path", "/bin/sh"], ["get", "title", "--args", "x"],
-                      ["close", "--all"], ["mcp"], ["stream", "enable"], ["chat", "hi"], ["inspect"], ["plugin", "list"], ["upgrade"]] {
+                      ["close", "--all"], ["mcp"], ["stream", "enable"], ["chat", "hi"], ["inspect"], ["plugin", "list"], ["upgrade"],
+                      // An option in front would hide the command behind it; `batch` runs commands this check would not see.
+                      ["--debug", "connect", "9222"], ["--json", "session"], ["batch", "connect 9222"], ["BATCH", "session list"],
+                      ["CONNECT", "9222"], ["get", "url", "--SESSION", "x"], ["get", "title", "--namespace", "other"],
+                      ["get", "title", "--pin-tab"], ["screenshot", "--screenshot-dir", "/tmp"], ["click", "@e1", "--download-path", "/tmp"],
+                      ["get", "title", "--state", "/tmp/s.json"], ["get", "title", "--init-script", "/tmp/x.js"], ["cookies", "clear", "--ALL"],
+                      ["tab"], ["tab", "list"], ["tab", "t2"], ["profiles"], ["clipboard", "read"], ["doctor", "--fix"],
+                      ["state", "list"], ["state", "clean", "--older-than", "1"], ["state", "show", "x.json"], ["state"],
+                      ["webmcp", "invoke", "tool", "--params", "@/etc/passwd"]] {
             let reason = BrowseRunRules.refusal(words)
             #expect(reason != nil, "\(words)")
             let text = await message(BrowseRunTool(), ["args": .array(words.map { .string($0) })])
@@ -231,7 +239,7 @@ struct BrowseMoreToolTests {
 
     @Test func runRiskIsSafeOnlyForWhatJustLooks() {
         let tool = BrowseRunTool()
-        for words in [["get", "title"], ["is", "visible", "@e1"], ["snapshot", "-i"], ["tab", "list"], ["tab"], ["cookies"], ["cookies", "get"],
+        for words in [["get", "title"], ["is", "visible", "@e1"], ["snapshot", "-i"], ["cookies"], ["cookies", "get"],
                       ["console"], ["errors"], ["network", "requests"]] {
             #expect(tool.risk(.object(["args": .array(words.map { .string($0) })])) == .safe, "\(words)")
         }
@@ -240,6 +248,11 @@ struct BrowseMoreToolTests {
             #expect(tool.risk(.object(["args": .array(words.map { .string($0) })])) == .sensitive, "\(words)")
         }
         #expect(tool.risk(.object(["manual": .string("wait")])) == .safe)
+        // A script for every page the browser opens from now on asks even in "Automático"; a script in this page is a sensitive call.
+        let context = setup.context()
+        #expect(tool.danger(.object(["args": .array([.string("addinitscript"), .string("1")])]), context: context) != nil)
+        #expect(tool.danger(.object(["args": .array([.string("eval"), .string("1")])]), context: context) == nil)
+        #expect(BrowseRunRules.refusal(["state", "save", "a.json"]) == nil && BrowseRunRules.refusal(["webmcp", "invoke", "t", "--params", "{}"]) == nil)
         #expect(tool.risk(.object(["args": .string("not a list")])) == .sensitive)
     }
 
@@ -295,8 +308,17 @@ struct BrowseMoreToolTests {
     // MARK: Permission and offer
 
     @Test func theNewToolsActInsideThePagesSoTheyAskLikeTheOthers() {
-        for name in ["browse_find", "browse_dialog", "browse_files", "browse_page", "browse_run"] {
+        for name in ["browse_find", "browse_dialog", "browse_page", "browse_proxy"] {
             #expect(PermissionPolicy.family(ofTool: name, kind: .browser) == .browserPage, "\(name)")
+        }
+        // Any command (a script, a file) and a file handed to a site are not covered by "Clicar e preencher": each one asks.
+        for name in ["browse_run", "browse_files"] {
+            #expect(PermissionPolicy.family(ofTool: name, kind: .browser) == nil, "\(name)")
+            let call = PermissionPolicy.call(for: name == "browse_run" ? BrowseRunTool() : BrowseFilesTool(),
+                                             arguments: .object(["args": .array([.string("eval"), .string("1")]), "action": .string("upload"),
+                                                                 "ref": .string("e1"), "path": .string("a.txt")]),
+                                             context: setup.context())
+            #expect(PermissionPolicy.suggestions(for: call).isEmpty, "\(name)")
         }
         #expect(PermissionPolicy.family(ofTool: "browse_wait", kind: .browser) == .web)
         #expect(ToolBox.browseToolNames.isSuperset(of: ["browse_wait", "browse_find", "browse_dialog", "browse_files", "browse_page", "browse_run"]))

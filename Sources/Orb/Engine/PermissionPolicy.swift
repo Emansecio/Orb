@@ -441,7 +441,10 @@ enum PermissionPolicy {
         case "shortcuts_run", "clipboard_write", "app_quit": return .macApps
         case "ui_read", "ui_act": return .appInterface
         case "browse_click", "browse_fill", "browse_select", "browse_press", "browse_show",
-             "browse_find", "browse_dialog", "browse_files", "browse_page", "browse_run", "browse_proxy": return .browserPage
+             "browse_find", "browse_dialog", "browse_page", "browse_proxy": return .browserPage
+        // Any command of the browser (a script in the page, a file written or read) and a file of the Mac handed to a site are
+        // not "clicking and filling": no standing rule covers them, each asks in "Perguntar antes".
+        case "browse_run", "browse_files": return nil
         case "remember", "recall": return .memory
         case "job_output", "job_stop": return .jobs
         case "schedule": return .schedule
