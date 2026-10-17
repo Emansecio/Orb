@@ -50,6 +50,58 @@ enum ImportSource: String, CaseIterable, Identifiable {
 
     /// Whether `imported` was read from this source.
     func made(_ imported: OrbImport) -> Bool { imported.link.isEmpty == (self == .assistant) }
+
+    /// The source the panel opens on: the one that made the preview it comes back to ("Revisar"), whichever it was;
+    /// without a preview, the source it was asked to open on.
+    static func opening(draft: OrbImport?, default fallback: ImportSource) -> ImportSource {
+        guard let draft else { return fallback }
+        return draft.link.isEmpty ? .assistant : .marketplace
+    }
+}
+
+/// What the panel does once a change of source has stopped the old source's reading and cleared what was not its own.
+enum ImportSourceSwitch {
+    struct Action: Equatable {
+        /// A file dropped on the panel while the other source was showing: read it now, after the reset that would have cancelled it.
+        var readsDrop: URL?
+        /// The pasted text (or the link) the field still holds, with no preview to show for it: read it again.
+        var rereadsText = false
+        var rereadsLink = false
+    }
+
+    static func after(switchingTo source: ImportSource, pasted: String, link: String, hasDraft: Bool, pendingDrop: URL?) -> Action {
+        if let pendingDrop, source == .assistant { return Action(readsDrop: pendingDrop) }
+        guard !hasDraft else { return Action() }
+        switch source {
+        case .assistant: return Action(rereadsText: !pasted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        case .marketplace: return Action(rereadsLink: !link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+    }
+}
+
+/// The marketplace page being read, for the spinner on its row. Each reading holds a token: one that is cancelled after a
+/// newer reading of the same page began must not clear that newer reading's spinner.
+struct LinkReading: Equatable {
+    private(set) var page: String?
+    private var current = 0
+
+    /// Starts reading `page`; the token is what `end` needs to clear it.
+    mutating func begin(_ page: String) -> Int {
+        current += 1
+        self.page = page
+        return current
+    }
+
+    /// Ends the reading that holds `token`; an older one's end leaves the newer reading as it is.
+    mutating func end(_ token: Int) {
+        if token == current { page = nil }
+    }
+
+    /// Whoever stopped the reading (another source, an empty field) clears it, whichever it is.
+    mutating func clear() {
+        current += 1
+        page = nil
+    }
 }
 
 struct ImportPanel: View {
@@ -66,8 +118,11 @@ struct ImportPanel: View {
     @State private var error: String?
     @State private var isReading = false
     /// The marketplace page being read (from the gallery or the link field), for the spinner on its row.
-    @State private var readingLink: String?
+    @State private var linkReading = LinkReading()
+    private var readingLink: String? { linkReading.page }
     @State private var reading: Task<Void, Never>?
+    /// A file dropped while the other source was showing, read once the panel has switched to the assistant source.
+    @State private var pendingDrop: URL?
     @State private var copied = CopiedFlash()
     @State private var isPicking = false
     @State private var isTargeted = false
@@ -115,7 +170,9 @@ struct ImportPanel: View {
             }
             .task { // "Revisar" comes back to a preview that already exists
                 guard let draft else { return }
-                if !draft.link.isEmpty { source = .marketplace } // its row in the gallery shows it chosen
+                // The source that made it, so the preview is in view (and what "Usar esta importação" imports is what is shown);
+                // in the marketplace its row in the gallery shows it chosen.
+                source = ImportSource.opening(draft: draft, default: source)
                 await Task.yield()
                 proxy.scrollTo(Self.previewID, anchor: .top)
             }
@@ -133,8 +190,13 @@ struct ImportPanel: View {
         .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: isTargeted)
         .dropDestination(for: URL.self) { urls, _ in
             guard let url = urls.first else { return false }
-            source = .assistant
-            read(url)
+            if source == .assistant {
+                read(url)
+            } else {
+                // Changing the source cancels the reading of the old one, so the file waits for that reset.
+                pendingDrop = url
+                source = .assistant
+            }
             return true
         } isTargeted: { isTargeted = $0 }
         .fileImporter(isPresented: $isPicking, allowedContentTypes: [.plainText, .json, .folder, UTType(filenameExtension: "md") ?? .plainText]) { result in
@@ -154,9 +216,16 @@ struct ImportPanel: View {
             // Each source keeps its own reading: what the other one was doing stops, and its preview is not this one's.
             reading?.cancel()
             isReading = false
-            readingLink = nil
+            linkReading.clear()
             error = nil
             if let draft, !source.made(draft) { self.draft = nil }
+            // What the fields of this source still hold is read again: the other source's reset took the preview away, not the text.
+            let hasDraft = draft.map(source.made) ?? false
+            let action = ImportSourceSwitch.after(switchingTo: source, pasted: pasted, link: link, hasDraft: hasDraft, pendingDrop: pendingDrop)
+            pendingDrop = nil
+            if let url = action.readsDrop { read(url) }
+            if action.rereadsText { readSoon() }
+            if action.rereadsLink { readLinkSoon(delay: .zero) }
         }
     }
 
@@ -326,7 +395,7 @@ struct ImportPanel: View {
         let text = link.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { // the preview stays: it may be a bot picked in the gallery
             isReading = false
-            readingLink = nil
+            linkReading.clear()
             error = nil
             return
         }
@@ -354,22 +423,23 @@ struct ImportPanel: View {
         // The same bot already in the preview ("Revisar", or Return on the same link) is not read again.
         if let draft, draft.link == page {
             isReading = false
-            readingLink = nil
+            linkReading.clear()
             return
         }
         isReading = true
-        readingLink = page
+        let token = linkReading.begin(page)
         let reading = Task.detached(priority: .userInitiated) { () -> Result<OrbImport, any Error> in
             do { return .success(try await GrokMarketplace.read(found)) } catch { return .failure(error) }
         }
         // Another link (or closing the panel) stops the request too, not only the wait for it.
         let outcome = await withTaskCancellationHandler { await reading.value } onCancel: { reading.cancel() }
         guard !Task.isCancelled else {
-            if readingLink == page { readingLink = nil }
+            // Only this reading's own spinner: a newer reading of the same page keeps its.
+            linkReading.end(token)
             return
         }
         isReading = false
-        readingLink = nil
+        linkReading.end(token)
         switch outcome {
         case .success(let imported):
             error = nil
