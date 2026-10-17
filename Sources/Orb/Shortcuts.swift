@@ -29,7 +29,8 @@ enum CommandName {
     static let connectors = "Conectores"
     static let skills = "Skills"
     static let globalShortcut = "Abrir o painel da barra de menus com ⌃⌥Espaço"
-    /// Shift-Return sends in a multi-line field on macOS; Option-Return is what breaks the line.
+    /// ⇧↩ breaks the line in the app's message fields (the field itself only knows ⌥↩; `NewLineKey` in ComposerView makes
+    /// ⇧↩ do the same instead of sending).
     static let newLineKeys = "⇧↩"
 }
 

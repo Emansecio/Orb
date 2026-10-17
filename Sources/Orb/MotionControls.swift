@@ -39,7 +39,7 @@ extension Motion {
 
 extension View {
     /// Text that is replaced by other text in place (a footer, a hint, a status): it cross-fades in `Motion.content`
-    /// (at once under Reduce Motion, no: in the 0.15 s fade) and nothing else around it is animated.
+    /// (in the 0.15 s `Motion.fade` under Reduce Motion) and nothing else around it is animated.
     func textSwap(_ value: some Equatable) -> some View {
         contentTransition(.opacity).motion(Motion.content, value: value)
     }
