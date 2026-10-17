@@ -336,6 +336,10 @@ lista e adicionar de novo. Depois de "Pedir agora" ou de ir aos Ajustes do Siste
   Acessibilidade dele é boa ou fraca (apps feitos com Electron, Chromium, Qt ou Java mostram pouco da interface) e quais Atalhos têm o
   nome do app. O Orb escolhe o caminho na primeira tentativa. Vem só do pacote do app e da lista de Atalhos (guardados em cache), sem
   falar com o app: listar não acorda nem toma a tela de ninguém.
+- **Tabelas e formulários numa imagem**: ao ler uma captura de tela, uma imagem de arquivo ou a captura do navegador, se o texto
+  reconhecido está arrumado em linhas e colunas, o Orb pede ao macOS 26 ou mais novo que leia a tabela e recebe linhas e colunas
+  (uma tabela em markdown), na frente do texto corrido. Em macOS mais antigo, ou se não achar tabela, tudo segue como antes: só o texto.
+  Usa o mesmo prazo de 20 s do OCR.
 - O Orb recebe receitas curtas para as tarefas comuns do Mac (datas sem depender do idioma, rascunho no Mail, Lembretes, Notas,
   Calendário, Música) e conselhos para os erros típicos do AppleScript.
 - No painel do Orb, a chave "Controlar apps do Mac" ligada traz o atalho **Permissões**.

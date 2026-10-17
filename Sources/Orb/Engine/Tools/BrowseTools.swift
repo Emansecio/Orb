@@ -277,7 +277,7 @@ struct BrowseScreenshotTool: BrowseTool {
                 // Falls through to the text on the picture.
             }
         }
-        let text = await Task.detached { (try? TextRecognizer.recognize(imageAt: file)) ?? "" }.value
+        let text = (try? await TextRecognizer.recognizeWithTables(imageAt: file)) ?? ""
         guard !text.isEmpty else { return ToolResult(text: header + " No readable text on it. Use browse_snapshot or browse_read.") }
         return ToolResult(text: header + "\n\(BrowseSupport.untrusted)\nText on the picture (OCR):\n" + text.truncated(to: 8_000))
     }

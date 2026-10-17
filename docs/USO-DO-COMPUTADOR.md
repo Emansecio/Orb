@@ -103,6 +103,13 @@ chamada AX, então não acorda nem trava o app; "poucas folhas na árvore" ficou
 Atalhos com o nome do app no nome). Cache por caminho + data do Info.plist (`AppControlCache`) e da lista de Atalhos por 5 min
 (`ShortcutNamesCache`, `shortcuts list` com prazo de 2 s; falha vale 1 min). Medido: primeira chamada 0,19 s (o `shortcuts list`), seguintes 25 ms.
 
+**Tabelas numa imagem** (`TableRecognizer.swift`): o OCR comum (`VNRecognizeTextRequest`) segue como caminho padrão e reserva. Se as caixas
+de texto parecem uma tabela (`looksTabular`: 3 linhas com 2 ou mais caixas e 2 bordas esquerdas que 3 linhas dividem, com 2% de tolerância),
+e o Mac tem macOS 26 (`#available`; o pacote mira o macOS 14), roda `RecognizeDocumentsRequest` e devolve cada tabela como markdown (até 60 linhas,
+12 colunas e 4.000 caracteres, com aviso do que faltou), antes do texto corrido. Valem para `screenshot` (janela e tela), `read_file` de imagem
+e a captura do `browse_screenshot`. O prazo é o do OCR (20 s): as tabelas só rodam com o que o texto deixou (menos 1 s; menos de 2 s, não
+rodam), cancelam com o ⌘. e uma falha do pedido volta ao texto simples. Formulários só saem se Vision os ler como tabela; a API não tem campo.
+
 **Specs:** teto total 18.950 caracteres (subiu com `task_plan`, com o `front` do `open`, com o `app_dictionary` e com o `apps_list`), sub-teto testado de 4.800 para
 `ui_read`+`ui_act`+`screenshot`.
 

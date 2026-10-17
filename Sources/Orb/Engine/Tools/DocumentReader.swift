@@ -99,14 +99,26 @@ enum DocumentReader {
 
     // MARK: Images
 
-    /// Pixel size plus the text Vision recognises (Portuguese and English).
-    static func describeImage(at url: URL, size: Int) throws -> String {
+    /// Pixel size plus the text Vision recognises (Portuguese and English), and the tables on the picture as markdown when
+    /// it has any (`TableRecognizer`).
+    static func describeImage(at url: URL, size: Int) async throws -> String {
+        let start = ContinuousClock.now
+        let reading = try await runDetached { try readImage(at: url, size: size) }
+        guard let image = reading.image,
+              let tables = try await TableRecognizer.tables(in: image, boxes: reading.boxes,
+                                                            budget: TableRecognizer.budget(deadline: ScreenshotTool.ocrDeadline, since: start))
+        else { return (reading.header + reading.body).truncated(to: maxCharacters) }
+        return (reading.header + "\n" + tables + reading.body).truncated(to: maxCharacters)
+    }
+
+    /// The part of `describeImage` that is plain Vision: the header, the OCR text (or why there is none), and what the tables need.
+    private static func readImage(at url: URL, size: Int) throws -> (header: String, body: String, image: CGImage?, boxes: [CGRect]) {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
             throw ToolError("Não consegui abrir a imagem \(url.lastPathComponent).")
         }
         let bytes = AttachmentKind.fileSize(Int64(size))
-        var output = "Imagem \(url.pathExtension.uppercased()): \(image.width)×\(image.height) px (\(bytes))."
+        let header = "Imagem \(url.pathExtension.uppercased()): \(image.width)×\(image.height) px (\(bytes))."
 
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
@@ -126,10 +138,11 @@ enum DocumentReader {
                 failure = error
             }
         }
-        if let failure { return output + "\nNão foi possível fazer OCR: \(failure.localizedDescription)" }
-        let lines = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
-        guard !lines.isEmpty else { return output + "\nNenhum texto reconhecido na imagem (OCR)." }
-        output += "\nTexto reconhecido (OCR):\n" + lines.joined(separator: "\n")
-        return output.truncated(to: maxCharacters)
+        if let failure { return (header, "\nNão foi possível fazer OCR: \(failure.localizedDescription)", nil, []) }
+        let found = (request.results ?? []).compactMap { observation in
+            observation.topCandidates(1).first.map { (text: $0.string, box: observation.boundingBox) }
+        }
+        guard !found.isEmpty else { return (header, "\nNenhum texto reconhecido na imagem (OCR).", nil, []) }
+        return (header, "\nTexto reconhecido (OCR):\n" + found.map(\.text).joined(separator: "\n"), image, found.map(\.box))
     }
 }
