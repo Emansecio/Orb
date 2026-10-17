@@ -17,7 +17,7 @@ enum ReadOnlyCommand {
         var directories = [directory.standardizedFileURL]
         if sensitive.reason(for: directories[0].path + "/x", patterns: false) != nil { return false }
         for segment in line.segments {
-            guard segment.separator != .background,
+            guard segment.separator != .background, !segment.runsInBackground,
                   isReadOnly(segment.words, directories: directories, home: home, sensitive: sensitive) else { return false }
             // `git status` and `git diff` run the programs a repository's config names (`core.fsmonitor`, `diff.external`,
             // textconv, clean filters, hooks), so a read of a repository that sets one is not exempt. The folders are the

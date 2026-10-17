@@ -17,6 +17,8 @@ struct ShellCommandLine: Equatable, Sendable {
         var hasSubstitution = false
         /// Writes through a redirection (`>`, `>>`) or reads a heredoc; `2>&1` and `>/dev/null` do not count.
         var redirects = false
+        /// Ended by a lone `&`: it runs in the background, even when nothing follows (`tail -f app.log &`).
+        var runsInBackground = false
     }
 
     var segments: [Segment]
@@ -51,6 +53,7 @@ struct ShellCommandLine: Equatable, Sendable {
         private var separator = Separator.start
         private var hasSubstitution = false
         private var redirects = false
+        private var endsInBackground = false
 
         init(_ chars: [Character]) { self.chars = chars }
 
@@ -72,8 +75,10 @@ struct ShellCommandLine: Equatable, Sendable {
         private mutating func endSegment(next: Separator) {
             endWord()
             if !words.isEmpty {
-                segments.append(Segment(words: words, separator: separator, hasSubstitution: hasSubstitution, redirects: redirects))
+                segments.append(Segment(words: words, separator: separator, hasSubstitution: hasSubstitution, redirects: redirects,
+                                        runsInBackground: endsInBackground))
             }
+            endsInBackground = false
             words = []
             hasSubstitution = false
             redirects = false
@@ -119,6 +124,7 @@ struct ShellCommandLine: Equatable, Sendable {
                         add(c)
                         index += 1
                     } else {
+                        endsInBackground = true
                         endSegment(next: .background)
                         index += 1
                     }
