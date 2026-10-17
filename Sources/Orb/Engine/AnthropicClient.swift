@@ -252,7 +252,12 @@ struct AnthropicStreamAssembler: AssemblingMapper {
     private var calls: [Int: ToolCallRequest] = [:]
     private var thinking: [Int: ReasoningPart] = [:]
     private var stop: String?
-    private(set) var usage: TokenUsage?
+    /// What the provider reported so far (see `usage`).
+    private var reported: TokenUsage?
+    /// Characters of text, tool arguments and thinking streamed so far: the output of a response that is cut off.
+    private var streamedCharacters = 0
+    /// The provider's closing output count arrived (`message_delta`): before it, the output is only a first guess.
+    private var hasFinalOutput = false
     /// `message_start` carries the input tokens.
     var reportsUsageUpFront: Bool { true }
     private(set) var isFinished = false
@@ -260,6 +265,13 @@ struct AnthropicStreamAssembler: AssemblingMapper {
     init(provider: String = "", model: String = "") {
         self.provider = provider
         self.model = model
+    }
+
+    /// What the response used. A response cut off before `message_delta` was still generated (and billed) up to the cut, and
+    /// `message_start` says only a token or two of output: what was streamed stands in for the rest.
+    var usage: TokenUsage? {
+        guard let reported else { return nil }
+        return hasFinalOutput ? reported : reported.withOutput(atLeastCharacters: streamedCharacters)
     }
 
     var toolCalls: [ToolCallRequest] { calls.sorted { $0.key < $1.key }.map(\.value) }
@@ -307,11 +319,18 @@ struct AnthropicStreamAssembler: AssemblingMapper {
             let delta = event["delta"]
             switch delta?["type"]?.string {
             case "text_delta":
-                if let text = delta?["text"]?.string, !text.isEmpty { return [.text(text)] }
+                if let text = delta?["text"]?.string, !text.isEmpty {
+                    streamedCharacters += text.count
+                    return [.text(text)]
+                }
             case "input_json_delta":
-                calls[index]?.arguments += delta?["partial_json"]?.string ?? ""
+                let piece = delta?["partial_json"]?.string ?? ""
+                streamedCharacters += piece.count
+                calls[index]?.arguments += piece
             case "thinking_delta":
-                thinking[index]?.text += delta?["thinking"]?.string ?? ""
+                let piece = delta?["thinking"]?.string ?? ""
+                streamedCharacters += piece.count
+                thinking[index]?.text += piece
             case "signature_delta":
                 if let signature = delta?["signature"]?.string { thinking[index]?.signature = signature }
             default:
@@ -320,6 +339,7 @@ struct AnthropicStreamAssembler: AssemblingMapper {
         case "message_delta":
             if let reason = event["delta"]?["stop_reason"]?.string { stop = reason }
             record(usage: event["usage"])
+            if TokenUsage.sane(event["usage"]?["output_tokens"]?.int) != nil { hasFinalOutput = true }
         case "message_stop":
             isFinished = true
         case "error":
@@ -336,12 +356,8 @@ struct AnthropicStreamAssembler: AssemblingMapper {
     /// `message_start` carries the input counts; `message_delta` the running output count (and sometimes more).
     private mutating func record(usage: JSONValue?) {
         guard let usage, case .object = usage else { return }
-        var total = self.usage ?? TokenUsage()
-        if let value = TokenUsage.sane(usage["input_tokens"]?.int) { total.input = value }
-        if let value = TokenUsage.sane(usage["output_tokens"]?.int) { total.output = value }
-        if let value = TokenUsage.sane(usage["cache_read_input_tokens"]?.int) { total.cacheRead = value }
-        if let value = TokenUsage.sane(usage["cache_creation_input_tokens"]?.int) { total.cacheWrite = value }
-        if let value = TokenUsage.sane(usage["cache_creation"]?["ephemeral_1h_input_tokens"]?.int) { total.cacheWrite1h = value }
-        self.usage = total
+        var total = reported ?? TokenUsage()
+        total.absorb(messages: usage)
+        reported = total
     }
 }

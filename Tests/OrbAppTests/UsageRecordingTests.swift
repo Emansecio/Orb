@@ -282,6 +282,26 @@ struct UsageEventsTests {
         #expect(found.first?.totals == UsageTotals(requests: 1, input: 150_000), "\(found)")
     }
 
+    /// REVISAO-TOKENS-CONTAGEM P1-2: the provider's first report says a token or two of output; the words already
+    /// written before the stop were billed too.
+    @Test func aCallStoppedMidAnswerCountsTheWordsAlreadyWritten() async {
+        let (model, id, root) = makeModel()
+        defer { removeTestFolder(root) }
+        let session = model.session(id)
+        let turn = session.beginTurn()
+        let (events, feed) = AsyncStream<TurnEvent>.makeStream()
+        let playing = Task { await session.play(events, turn: turn) }
+        session.turnTask = playing
+        feed.yield(.pendingUsage(TokenUsage(input: 150_000, output: 1)))
+        feed.yield(.text(String(repeating: "a", count: 3_500)))
+        feed.yield(.notice("lido"))
+        await waitUntil("the events to be read") { model.transcript(id).contains { $0.kind == .notice("lido") } }
+        session.stop()
+        await playing.value
+        let found = await rows(model, root: root)
+        #expect(found.first?.totals == UsageTotals(requests: 1, input: 150_000, output: ContextBudget.tokens(forCharacters: 3_500)), "\(found)")
+    }
+
     @Test func aStoppedRoutinesCallKeepsItsSourceEvenWhenTheTurnIsClosedFirst() async {
         let (model, id, root) = makeModel()
         defer { removeTestFolder(root) }

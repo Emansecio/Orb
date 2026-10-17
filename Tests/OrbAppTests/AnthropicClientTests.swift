@@ -118,6 +118,32 @@ struct AnthropicClientTests {
         #expect(assembler.usage == TokenUsage(input: 25, output: 42, cacheRead: 1200, cacheWrite: 300))
     }
 
+    /// REVISAO-TOKENS-CONTAGEM P1-1: a gateway that repeats zeros in `message_delta` wiped the prompt `message_start` reported.
+    @Test func aLaterEventNeverLowersWhatTheFirstOneReported() throws {
+        let (_, assembler) = try ingest([
+            #"{"type":"message_start","message":{"id":"m","usage":{"input_tokens":25,"output_tokens":1,"cache_creation_input_tokens":300,"cache_read_input_tokens":1200,"cache_creation":{"ephemeral_1h_input_tokens":200}}}}"#,
+            #"{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"output_tokens":42}}"#,
+            #"{"type":"message_stop"}"#,
+        ])
+        #expect(assembler.usage == TokenUsage(input: 25, output: 42, cacheRead: 1200, cacheWrite: 300, cacheWrite1h: 200))
+    }
+
+    /// REVISAO-TOKENS-CONTAGEM P1-2: a response cut before `message_delta` was billed for what it had written.
+    @Test func aResponseCutOffCountsWhatItHadWritten() throws {
+        let words = String(repeating: "a", count: 3_500)
+        let partial = [
+            #"{"type":"message_start","message":{"id":"m","usage":{"input_tokens":25,"output_tokens":1}}}"#,
+            #"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#,
+            #"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\#(words)"}}"#,
+        ]
+        let (_, cut) = try ingest(partial)
+        #expect(cut.usage?.input == 25)
+        #expect(cut.usage?.output == ContextBudget.tokens(forCharacters: 3_500))
+        // With the provider's own closing count that count stands, whatever the estimate says.
+        let (_, whole) = try ingest(partial + [#"{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}}"#])
+        #expect(whole.usage?.output == 7)
+    }
+
     @Test func mapsStopReasons() {
         let map = { (reason: String?, calls: Bool) in AnthropicStreamAssembler.stopReason(reason, hasToolCalls: calls) }
         #expect(map("end_turn", false) == .done)

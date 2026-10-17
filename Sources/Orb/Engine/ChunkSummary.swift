@@ -242,6 +242,8 @@ enum ChunkSummarizer {
     /// longer than it may be. A failed request gives no note, but keeps what the provider had already said it used.
     static func write(_ plan: Plan, client: any LLMClient, model: String) async -> Note {
         var text = "", usage: TokenUsage?, failed = false
+        // Past this, the rest of the reply would be clipped anyway.
+        let ceiling = ChunkSummary.maxLength + 400
         do {
             for try await event in client.forShortReply.stream(model: model, messages: prompt(for: plan), tools: [], toolChoice: .none) {
                 switch event {
@@ -255,12 +257,14 @@ enum ChunkSummarizer {
                 case .reasoning, .toolCalls:
                     break
                 }
-                if text.count > ChunkSummary.maxLength + 400 { break }
+                if text.count > ceiling { break }
             }
         } catch {
             failed = true
         }
         let note = ConversationLedger.clip(text, ChunkSummary.maxLength)
+        // Reading stopped at the limit above, before the provider's closing count: what was written until then was billed.
+        if text.count > ceiling { usage = usage?.withOutput(atLeastCharacters: text.count) }
         return Note(text: !failed && note.count >= minimumLength ? note : nil, usage: usage)
     }
 }

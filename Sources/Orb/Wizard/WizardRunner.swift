@@ -238,8 +238,8 @@ final class WizardRunner {
                 if tracksHistory { history.append(message) }
             case .requestUsage(let used):
                 record(UsageTotals(used), model: usedModel)
-            case .usage(let total):
-                if !tracksHistory { record(UsageTotals(total), model: usedModel) }
+            case .usage:
+                break // the turn's running sum: every call is recorded once, as `.requestUsage` arrives
             case .failed(let message):
                 failed = true
                 failure = message

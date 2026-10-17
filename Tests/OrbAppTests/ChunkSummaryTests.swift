@@ -353,7 +353,8 @@ struct ChunkCallTests {
         // The input the provider reported first is kept when the reply is cut before its end.
         let long = String(repeating: "palavra ", count: 700)
         let cut = await ChunkSummarizer.write(plan, client: CallScriptModel(always: [.usage(TokenUsage(input: 800, output: 0)), .text(long)]), model: "m")
-        #expect(cut.text != nil && cut.usage == TokenUsage(input: 800, output: 0))
+        // Reading stopped at the ceiling, before the closing count: what was written until then was billed (P1-2).
+        #expect(cut.text != nil && cut.usage == TokenUsage(input: 800, output: ContextBudget.tokens(forCharacters: long.count)))
         // A final report without numbers does not erase the ones already given.
         let unsaid = await ChunkSummarizer.write(plan, client: CallScriptModel(always: [.usage(TokenUsage(input: 700, output: 0)), .text("ok"), .finished(.done, nil)]), model: "m")
         #expect(unsaid.usage == TokenUsage(input: 700, output: 0))

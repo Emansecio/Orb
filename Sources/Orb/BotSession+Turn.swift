@@ -102,19 +102,27 @@ extension BotSession {
         // A call the provider already bills for (its input tokens are known) and that has not ended.
         // The model and source are kept with it: by the time the stream ends, a stop may already have started another turn.
         var unfinished: (usage: TokenUsage, label: UsageLabel?)?
+        // Characters of the reply shown since that call began: the provider's first report says a token or two of output.
+        var streamed = 0
         for await event in events {
             // A stopped stream still delivers queued events; `stop` already closed the turn.
             guard isCurrent(turn) else { break }
             switch event {
             case .failed: succeeded = false
-            case .pendingUsage(let used): unfinished = (used, usageLabel)
+            case .pendingUsage(let used):
+                unfinished = (used, usageLabel)
+                streamed = 0
             case .requestUsage: unfinished = nil
+            case .text(let delta): streamed += delta.count
             default: break
             }
             apply(event)
         }
-        // The user stopped the turn in the middle of a call: the engine can no longer report it, but the provider charges it.
-        if let unfinished { recordUsage(UsageTotals(unfinished.usage), label: unfinished.label) }
+        // The user stopped the turn in the middle of a call: the engine can no longer report it, but the provider charges it,
+        // for the input it announced and for the words it had already written.
+        if let unfinished {
+            recordUsage(UsageTotals(unfinished.usage.withOutput(atLeastCharacters: streamed)), label: unfinished.label)
+        }
         if !Task.isCancelled { finishTurn(turn, succeeded: succeeded) }
     }
 

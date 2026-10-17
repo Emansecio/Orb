@@ -74,7 +74,10 @@ private struct HangsAfterText: LLMClient {
         #expect(TurnSpend(tokens: 180_000).text == "180 mil tokens")
         #expect(TurnSpend(tokens: 2_100_000, dollars: 3.1).text == "2,1 milhões de tokens · US$ 3,10")
         #expect(TurnSpend(tokens: 60_000, dollars: 0).text == "60 mil tokens") // a plan or a free model: no price to say
-        #expect(TurnSpend(TokenUsage(input: 40_000, output: 2_000, cacheRead: 10_000, cacheWrite: 500)).tokens == 52_500)
+        // Cache reads are left out (REVISAO-TOKENS-CONTAGEM P3-2): six steps rereading a 48 thousand history are not a turn
+        // that costs 300 thousand tokens.
+        #expect(TurnSpend(TokenUsage(input: 40_000, output: 2_000, cacheRead: 10_000, cacheWrite: 500)).tokens == 42_500)
+        #expect(TurnSpend(TokenUsage(input: 600, output: 3_000, cacheRead: 280_000, cacheWrite: 12_000)).text == nil)
         #expect(WorkMeter.text(elapsed: "4 min", actions: 30, spend: TurnSpend(tokens: 75_000)) == "4 min · 30 ações · 75 mil tokens")
         #expect(WorkMeter.text(elapsed: "4 s", actions: 1, spend: TurnSpend(tokens: 900)) == "4 s")
     }

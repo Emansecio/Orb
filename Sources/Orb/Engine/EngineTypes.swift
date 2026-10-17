@@ -327,6 +327,33 @@ struct TokenUsage: Sendable, Equatable {
         return overflow ? (b > 0 ? Int.max : Int.min) : sum
     }
 
+    /// Folds in the `usage` object of a Messages-format event (`message_start`, `message_delta`; also Claude Code's stream). The
+    /// counts of one response only grow, so a later event never lowers one: a gateway that repeats `input_tokens: 0` and no cache
+    /// reads in its `message_delta` would otherwise wipe the prompt the first event had reported (and with it the cost, the
+    /// cache ratio and the context reading of the call).
+    mutating func absorb(messages usage: JSONValue) {
+        func grown(_ old: Int?, _ key: String, in object: JSONValue?) -> Int? {
+            guard let value = Self.sane(object?[key]?.int) else { return old }
+            return max(old ?? 0, value)
+        }
+        input = grown(input, "input_tokens", in: usage)
+        output = grown(output, "output_tokens", in: usage)
+        cacheRead = grown(cacheRead, "cache_read_input_tokens", in: usage)
+        cacheWrite = grown(cacheWrite, "cache_creation_input_tokens", in: usage)
+        cacheWrite1h = grown(cacheWrite1h, "ephemeral_1h_input_tokens", in: usage["cache_creation"])
+    }
+
+    /// The same usage with the output count raised to what `characters` of reply come to, for a response that was cut off
+    /// before the provider could report its output (Anthropic reports 1 or 2 at `message_start`, the rest at the end): the
+    /// provider bills what was generated until the connection closed, so counting the 1 would hide it. Estimated like the
+    /// history is (`ContextBudget.charactersPerToken`); never lowers a count the provider gave.
+    func withOutput(atLeastCharacters characters: Int) -> TokenUsage {
+        guard characters > 0 else { return self }
+        var copy = self
+        copy.output = max(output ?? 0, ContextBudget.tokens(forCharacters: characters))
+        return copy
+    }
+
     /// Whether the provider says anything about its cache. Servers that have none (or do not report it) leave both
     /// counts out; one that has a cache and missed reports 0.
     var reportsCache: Bool { cacheRead != nil || cacheWrite != nil }
