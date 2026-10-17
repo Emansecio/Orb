@@ -1,6 +1,6 @@
 import Foundation
 
-/// The proxy an Orb sends its browser through (`browse_proxy`). The Orb picks it, the app only passes it on (`--proxy`) and shows it:
+/// The proxy an Orb sends its browser through (`browse_proxy`). The Orb picks it, the app only passes it on (`AGENT_BROWSER_PROXY`) and shows it:
 /// it does not start or manage tunnels (a WireGuard or VPN client that listens on `socks5://127.0.0.1:1080` is the Orb's own business).
 enum BrowserProxy {
     static let schemes: Set<String> = ["http", "https", "socks4", "socks5", "socks5h"]
