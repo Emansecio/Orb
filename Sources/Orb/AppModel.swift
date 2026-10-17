@@ -382,7 +382,17 @@ final class AppModel {
             shown.lastUsed = .now
         }
         dataNotices = notices
-        if runsBackgroundWork && !devRun { welcomePreferences = UserDefaults.standard }
+        if runsBackgroundWork && !devRun {
+            welcomePreferences = UserDefaults.standard
+            // Once a week per Orb, with the app idle for a moment: the profile's caches (never the logins) are emptied when the Orb's
+            // browser is not running.
+            let hub = browserHub
+            let orbs = state.bots.map(\.id)
+            Task.detached(priority: .background) {
+                try? await Task.sleep(for: .seconds(60))
+                for id in orbs { await hub.cleanCachesIfDue(botID: id) }
+            }
+        }
         // Nothing will ever look at the connections in a model that is not the running app (tests, developer runs).
         hasCheckedConnections = !runsBackgroundWork || devRun
         // Orbs made by an earlier version: if they are all deleted, the welcome screen says "Hora de um Orb novo".
@@ -1605,7 +1615,8 @@ final class AppModel {
                                             proxy: bot.browserProxy,
                                             saveProxy: { [weak self] proxy in
                                                 await MainActor.run { self?.update(bot.id) { $0.browserProxy = proxy } }
-                                            })
+                                            },
+                                            scope: sessionID)
             // MARK: MultiOrb (WP3)
             if multi.propose { context.orbCreation = orbCreationSupport(for: bot) }
             // MARK: end MultiOrb (WP3)

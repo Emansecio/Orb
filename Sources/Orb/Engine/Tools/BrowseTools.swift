@@ -14,7 +14,7 @@ enum BrowseSupport {
         guard context.browser.drivesABrowser, let hub = context.browser.hub, let botID = context.botID else {
             throw ToolError("The Orb's browser is not available here. Use web_fetch to read a page and web_search to search.")
         }
-        return try await hub.session(botID: botID, mode: context.browser.mode)
+        return try await hub.session(botID: botID, mode: context.browser.mode, scope: context.browser.scope)
     }
 
     /// A ref as `browse_snapshot` shows it (`e12`); `@e12` and `12` are accepted.
@@ -609,6 +609,7 @@ struct BrowseTabsTool: BrowseTool {
             default:
                 break
             }
+            if action != "list" { await session.adoptCurrentTab() }
             let tabs = try await session.driver.tabs()
             guard !tabs.isEmpty else { return "No tabs open." }
             return tabs.map { "\($0.id)\($0.isActive ? " *" : "")  \($0.title.isEmpty ? "(no title)" : "“\($0.title)”")  \($0.url)" }.joined(separator: "\n")

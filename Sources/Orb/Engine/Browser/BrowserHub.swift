@@ -15,6 +15,9 @@ struct BrowserAccess: Sendable {
     /// The Orb's proxy as saved (nil: direct), and how `browse_proxy` saves a new one in the Orb.
     var proxy: String?
     var saveProxy: (@Sendable (String?) async -> Void)?
+    /// What the Orb is doing this browser work for (a chat, a routine run, a group turn): each gets a tab of its own, so two of them
+    /// at once on the same Orb do not take the page from each other. Nil: the browser's current tab, as it is.
+    var scope: String?
 
     /// Whether the Orb has a browser to drive (installed, and a hub that can start it).
     var drivesABrowser: Bool { hub != nil && available }
@@ -55,6 +58,92 @@ actor AsyncMutex {
     }
 }
 
+/// Which tab belongs to which conversation in one Orb's browser, and which one is current. A conversation gets a tab on its first
+/// call after another one used the browser; the first one keeps the tab the browser started with. A tab is switched to only when the
+/// conversation that calls is not the one that called last, so one conversation alone costs nothing extra.
+final class TabBook: @unchecked Sendable {
+    /// More than this many tabs of conversations: the one used longest ago is closed.
+    static let limit = 6
+
+    private struct State {
+        var current: String?
+        var tabs: [String: String] = [:]
+        /// Scopes, the one used last at the end.
+        var order: [String] = []
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
+
+    func tab(for scope: String) -> String? { state.withLock { $0.tabs[scope] } }
+
+    func adopt(_ tab: String, for scope: String) {
+        state.withLock {
+            $0.tabs[scope] = tab
+            $0.current = scope
+            $0.order.removeAll { $0 == scope }
+            $0.order.append(scope)
+        }
+    }
+
+    /// The name a conversation's tab gets (a label, so the browser finds it by name however the tabs are numbered).
+    static func label(for scope: String) -> String {
+        "c" + String(scope.lowercased().filter { $0.isLetter || $0.isNumber }.prefix(8))
+    }
+
+    /// Makes `scope`'s tab the current one. A failure here is not the call's: it goes on in the tab the browser has.
+    func activate(_ scope: String, driver: any BrowserDriver) async {
+        let plan = state.withLock { state -> (known: String?, first: Bool) in
+            state.order.removeAll { $0 == scope }
+            state.order.append(scope)
+            if state.current == scope { return (nil, false) }
+            return (state.tabs[scope], state.tabs.isEmpty && state.current == nil)
+        }
+        if state.withLock({ $0.current == scope }) { return }
+        if plan.first {
+            // The browser's own first tab (it is not even open yet when the first call is the `open`).
+            adopt("t1", for: scope)
+            return
+        }
+        if let known = plan.known {
+            do {
+                _ = try await driver.command(["tab", known])
+                state.withLock { $0.current = scope }
+                return
+            } catch BrowserDriverError.noPage {
+                reset()
+            } catch {
+                // That tab is gone (closed by the page or by hand): a new one below.
+                state.withLock { _ = $0.tabs.removeValue(forKey: scope) }
+            }
+        }
+        let label = Self.label(for: scope)
+        do {
+            _ = try await driver.command(["tab", "new", "--label", label])
+            adopt(label, for: scope)
+            await trim(keeping: scope, driver: driver)
+        } catch BrowserDriverError.noPage {
+            // No browser is open (it was closed): the next `open` starts one, and its first tab is this conversation's.
+            reset()
+            adopt("t1", for: scope)
+        } catch {
+            // The call goes on in the current tab, which is what there was before tabs of their own.
+        }
+    }
+
+    private func reset() { state.withLock { $0 = State() } }
+
+    private func trim(keeping scope: String, driver: any BrowserDriver) async {
+        let victim = state.withLock { state -> (scope: String, tab: String)? in
+            guard state.tabs.count > Self.limit,
+                  let old = state.order.first(where: { $0 != scope && state.tabs[$0] != "t1" }), let tab = state.tabs[old] else { return nil }
+            state.tabs.removeValue(forKey: old)
+            state.order.removeAll { $0 == old }
+            return (old, tab)
+        }
+        if let victim { _ = try? await driver.command(["tab", "close", victim.tab]) }
+    }
+}
+
 /// One Orb's open browser, and what the tools remember about it between calls: the elements of the last snapshot (to know what
 /// a ref is before acting on it) and the last text read (so `offset` continues it).
 final class BrowserSession: @unchecked Sendable {
@@ -63,7 +152,12 @@ final class BrowserSession: @unchecked Sendable {
     /// The proxy this browser was started with.
     let proxy: String?
     let driver: any BrowserDriver
-    private let mutex = AsyncMutex()
+    /// The conversation this view of the browser is for (nil: the browser as a whole, which has no tab of its own).
+    let scope: String?
+    /// The browser as a whole that a scoped view was made from.
+    let base: BrowserSession?
+    private let mutex: AsyncMutex
+    private let tabs: TabBook
     private let memory = OSAllocatedUnfairLock(initialState: Memory())
 
     struct Memory {
@@ -81,12 +175,32 @@ final class BrowserSession: @unchecked Sendable {
         self.mode = mode
         self.proxy = proxy
         self.driver = driver
+        scope = nil
+        base = nil
+        mutex = AsyncMutex()
+        tabs = TabBook()
     }
+
+    private init(sharing other: BrowserSession, scope: String) {
+        botID = other.botID
+        mode = other.mode
+        proxy = other.proxy
+        driver = other.driver
+        mutex = other.mutex
+        tabs = other.tabs
+        base = other
+        self.scope = scope
+    }
+
+    /// The same browser seen from one conversation: the same driver and the same one-at-a-time lock, its own tab, its own memory of
+    /// the elements it saw (a ref belongs to the tab it was read in).
+    func scoped(_ scope: String) -> BrowserSession { BrowserSession(sharing: self, scope: scope) }
 
     /// Runs `work` alone on this browser.
     func exclusive<T: Sendable>(_ work: @Sendable () async throws -> T) async throws -> T {
         await mutex.lock()
         do {
+            if let scope { await tabs.activate(scope, driver: driver) }
             let result = try await work()
             await mutex.unlock()
             return result
@@ -95,6 +209,15 @@ final class BrowserSession: @unchecked Sendable {
             throw error
         }
     }
+
+    /// The tab the person or the Orb just made current (`browse_tabs`) is this conversation's from now on.
+    func adoptCurrentTab() async {
+        guard let scope, let list = try? await driver.tabs(), let active = list.first(where: \.isActive) else { return }
+        tabs.adopt(active.id, for: scope)
+    }
+
+    /// The tab this conversation works in, if it has one yet (for tests and the tab list).
+    var tabName: String? { scope.flatMap { tabs.tab(for: $0) } }
 
     var snapshotMemory: (text: String, url: String) { memory.withLock { ($0.snapshotText, $0.snapshotURL) } }
     var readMemory: (text: String, url: String) { memory.withLock { ($0.readText, $0.readURL) } }
@@ -151,6 +274,7 @@ final class BrowserHub: Sendable {
     /// What the tools say a ref is ("Entrar" for e3), by Orb, readable without waiting (the approval card shows it).
     private let labels = OSAllocatedUnfairLock<[UUID: [String: String]]>(initialState: [:])
     private let proxies = OSAllocatedUnfairLock<[UUID: String]>(initialState: [:])
+    private let scoped = OSAllocatedUnfairLock<[UUID: [String: BrowserSession]]>(initialState: [:])
 
     init(profilesDirectory: URL?,
          locate: (@Sendable () async -> BrowserStatus)? = nil,
@@ -189,12 +313,12 @@ final class BrowserHub: Sendable {
         profilesDirectory?.appending(path: botID.uuidString).appending(path: "chrome")
     }
 
-    /// How the Orb's browser is launched for this mode and status.
     /// Where the Orb keeps the cookies and storage it saved by name (`browse_page state_save`), next to its profile.
     func stateFolder(botID: UUID) -> URL? {
         profilesDirectory?.appending(path: botID.uuidString).appending(path: "estado")
     }
 
+    /// How the Orb's browser is launched for this mode and status.
     func configuration(botID: UUID, mode: BrowserMode, status: BrowserStatus, proxy: String? = nil) -> AgentBrowserConfig {
         remember(status)
         Self.adoptOldProfile(for: botID, in: profilesDirectory)
@@ -219,6 +343,20 @@ final class BrowserHub: Sendable {
     }
 
     /// The Orb's browser, started on first use. Throws what is missing when it is not installed.
+    /// The Orb's browser as one conversation sees it (its own tab). Without a scope, the browser as a whole.
+    func session(botID: UUID, mode: BrowserMode, scope: String?) async throws -> BrowserSession {
+        let root = try await session(botID: botID, mode: mode)
+        guard let scope else { return root }
+        return scoped.withLock { views -> BrowserSession in
+            if let existing = views[botID]?[scope], existing.base === root {
+                return existing
+            }
+            let view = root.scoped(scope)
+            views[botID, default: [:]][scope] = view
+            return view
+        }
+    }
+
     func session(botID: UUID, mode: BrowserMode) async throws -> BrowserSession {
         if let existing = sessions.withLock({ $0[botID] }), existing.mode == mode, existing.proxy == proxy(botID: botID) { return existing }
         let status = await status()
@@ -317,6 +455,21 @@ final class BrowserHub: Sendable {
         let prefix = AgentBrowserConfig.botPrefix(botID)
         let others = await closeRunning(where: { $0.hasPrefix(prefix) }, skipping: held.map { [Self.name(of: $0)] } ?? [])
         return held != nil || others
+    }
+
+    /// Empties the caches of the Orb's profile when a week has passed since the last time (see `BrowserProfileCache`): logins, cookies
+    /// and storage stay. Never while the Orb's browser is running. Returns the bytes freed.
+    @discardableResult
+    func cleanCachesIfDue(botID: UUID, worth: Int64 = BrowserProfileCache.worthIt) async -> Int64 {
+        guard let profile = profileFolder(botID: botID), BrowserProfileCache.due(profile: profile),
+              existingSession(botID: botID) == nil else { return 0 }
+        if let executable = await agentBrowserPath() {
+            let prefix = AgentBrowserConfig.botPrefix(botID)
+            guard await runningSessions(executable: executable, where: { $0.hasPrefix(prefix) }).isEmpty else { return 0 }
+        }
+        // The browser may have been opened while the question was asked.
+        guard existingSession(botID: botID) == nil else { return 0 }
+        return BrowserProfileCache.cleanIfDue(profile: profile, worth: worth)
     }
 
     /// Closes every browser at once, without waiting for a task: for `willTerminate`, which cannot wait for one. A browser left

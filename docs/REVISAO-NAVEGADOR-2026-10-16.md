@@ -48,6 +48,14 @@ Limites da medição: uma rodada por montagem (um Mac, uma rede), páginas públ
 
 (Preenchido por etapa, abaixo.)
 
+### Etapa 4: uma aba por conversa e limpeza do cache
+
+- Desenho mais simples que `--pin-tab`: o navegador do Orb continua um só; `BrowserAccess.scope` leva o id da conversa (chat, rotina, grupo) e `hub.session(botID:mode:scope:)` devolve uma visão (`BrowserSession.scoped`) com o mesmo driver, o mesmo bloqueio de uma chamada por vez e a memória própria dos elementos (um ref pertence à aba em que foi lido). Dentro do `exclusive` o `TabBook` leva ao rótulo `c<id>` da conversa (`tab <rótulo>`; a primeira conversa fica com `t1`; `tab new --label` para as outras) somente quando mudou quem chama. Medido com o agent-browser 0.39.1 real: `tab new --label`, `tab <rótulo>` e `tab <id>` funcionam, e um rótulo desconhecido dá erro claro.
+- Navegador fechado ou aba sumida: o livro recomeça (a próxima chamada fica com `t1`) ou a conversa ganha uma aba nova. Máximo de 6 abas de conversas; a usada há mais tempo é fechada. A aba escolhida com `browse_tabs` passa a ser da conversa.
+- Limpeza (`BrowserProfileCache`): uma vez por semana por Orb, um minuto depois de o app abrir e só com o navegador do Orb fechado, esvazia Cache, Code Cache, GPUCache, Dawn, Cache Storage e ScriptCache de service workers, shader e GPU persistente, quando passa de 20 MB; nunca cookies, Login Data, Local Storage, IndexedDB nem preferências; não segue links simbólicos. Um perfil real tinha 412 MB, quase tudo Cache Storage (só lido, nada apagado). A data fica em `<Orb>/limpeza-de-cache`.
+- agent-browser 0.39.1 com SHA-256: feito na etapa 1.
+- Testes: `BrowserTabsPerConversationTests` e `BrowserProfileCacheTests`.
+
 ### Etapa 3: proxy escolhido pelo Orb
 
 - `browse_proxy` (`status`, `set`, `clear`): o Orb dá o endereço (`BrowserProxy.normalized`: http, https, socks4, socks5, host e porta; senha embutida aceita e nunca mostrada), o hub reabre a sessão com `--proxy` (o perfil é o mesmo, então os logins ficam), abre uma página que diz o IP de saída e devolve o endereço para o Orb contar ao usuário. Se a página não responde com um endereço, o proxy anterior volta e o erro diz por quê. A página que estava aberta é reaberta.
