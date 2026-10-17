@@ -143,6 +143,19 @@ import Testing
         #expect(await !bank.recall("tempo").isEmpty)
     }
 
+    @Test @MainActor func startingFromAFolderWithNothingLearnedKeepsTheInterviewEvenWithNotes() async throws {
+        let model = model()
+        try write("---\ntipo: sessao\ntitulo: Conversa\n---\nFalamos do tempo.",
+                  to: KeptMemories.folder(in: model.memory.root).appending(path: "Velho – 2026-01-02 03.04/sessoes/a.md"))
+        let kept = try #require(KeptMemories.list(in: model.memory.root).first)
+        let bot = model.createBot(name: "Velho", role: "", orb: OrbConfig(), model: "", mode: .ask, identity: "Responda em português.",
+                                  folder: .home, adopting: kept)
+
+        let bank = model.memory.bank(for: bot.id)
+        #expect(await waitUntil("the identity notes") { await bank.snapshot().identity.contains("Responda em português") })
+        #expect(await bank.snapshot().interviewPending)
+    }
+
     @Test @MainActor func whatYouWriteForTheNewOrbIsAddedToTheKeptIdentity() async throws {
         let model = model()
         let oldID = UUID()

@@ -84,7 +84,9 @@ enum MemoryConsolidation {
                 section = \.preferences
                 sawLayout = true
             } else if let section, text.hasPrefix("- ") {
-                let item = MemoryText.clip(MemoryText.flatten(String(text.dropFirst(2))), itemLength)
+                // A note keeps the length `remember` let it have (an Orb's procedure with its paths and commands); the preferences'
+                // pages longer than `itemLength` never get here.
+                let item = MemoryText.clip(MemoryText.flatten(String(text.dropFirst(2))), section == \.notes ? MemoryBank.maximumLength : itemLength)
                 if !item.isEmpty { result[keyPath: section].append(item) }
             }
         }
@@ -146,7 +148,7 @@ extension MemoryBank {
     /// written puts the old ones back. Returns whether it was done.
     @discardableResult
     func applyConsolidation(_ new: MemoryConsolidation.Pinned, replacing old: MemoryConsolidation.Pinned, now: Date = .now) -> Bool {
-        guard pinnedForConsolidation(now: now) == old else { return false }
+        guard !isClosed, pinnedForConsolidation(now: now) == old else { return false }
         let archive = directory.appending(path: "_arquivo/consolidacoes/\(Int(now.timeIntervalSince1970)).md")
         let text = "# Memória fixada antes da consolidação\n\n## Como funcionar\n" + old.notes.map { "- " + $0 }.joined(separator: "\n")
             + "\n\n## Preferências\n" + old.preferences.map { "- " + $0 }.joined(separator: "\n") + "\n"
