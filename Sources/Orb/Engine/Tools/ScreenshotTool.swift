@@ -620,12 +620,12 @@ enum TextRecognizer {
     static func recognizeWithTables(imageAt url: URL, budget: TimeInterval = ScreenshotTool.ocrDeadline,
                                     tableSeconds: TimeInterval = TableRecognizer.maxSeconds) async throws -> String {
         let start = ContinuousClock.now
-        let read = try await runDetached { try read(imageAt: url) }
-        guard TableRecognizer.looksTabular(read.boxes), let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+        let ocr = try await runDetached { try Self.read(imageAt: url) }
+        guard TableRecognizer.looksTabular(ocr.boxes), let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
-              let tables = try await TableRecognizer.tables(in: image, boxes: read.boxes,
-                                                            budget: TableRecognizer.budget(deadline: budget, since: start, cap: tableSeconds)) else { return read.text }
-        return tables + "\nTexto corrido:\n" + read.text
+              let tables = try await TableRecognizer.tables(in: image, boxes: ocr.boxes,
+                                                            budget: TableRecognizer.budget(deadline: budget, since: start, cap: tableSeconds)) else { return ocr.text }
+        return tables + "\nTexto corrido:\n" + ocr.text
     }
 
     /// Reading order: top to bottom, then left to right (Vision's origin is the bottom left).
