@@ -730,7 +730,7 @@ extension ToolBox {
     static let browseTools: [any AgentTool] = [
         BrowseOpenTool(), BrowseSnapshotTool(), BrowseReadTool(), BrowseScreenshotTool(), BrowseClickTool(), BrowseFillTool(),
         BrowseSelectTool(), BrowsePressTool(), BrowseScrollTool(), BrowseBackTool(), BrowseTabsTool(), BrowseShowTool(), BrowseCloseTool(),
-        BrowseWaitTool(), BrowseFindTool(), BrowseDialogTool(), BrowseFilesTool(), BrowsePageTool(), BrowseRunTool(),
+        BrowseWaitTool(), BrowseFindTool(), BrowseDialogTool(), BrowseFilesTool(), BrowsePageTool(), BrowseRunTool(), BrowseProxyTool(),
     ]
 
     static let browseToolNames: Set<String> = Set(browseTools.map(\.spec.name))

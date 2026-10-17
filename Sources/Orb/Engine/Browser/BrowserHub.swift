@@ -12,6 +12,9 @@ struct BrowserAccess: Sendable {
     var searchProvider: SearchProvider = .duckduckgo
     /// The keys of the providers that need one (TinyFish), read when a search needs them.
     var searchKeys: SearchKeys?
+    /// The Orb's proxy as saved (nil: direct), and how `browse_proxy` saves a new one in the Orb.
+    var proxy: String?
+    var saveProxy: (@Sendable (String?) async -> Void)?
 
     /// Whether the Orb has a browser to drive (installed, and a hub that can start it).
     var drivesABrowser: Bool { hub != nil && available }
@@ -57,6 +60,8 @@ actor AsyncMutex {
 final class BrowserSession: @unchecked Sendable {
     let botID: UUID
     let mode: BrowserMode
+    /// The proxy this browser was started with.
+    let proxy: String?
     let driver: any BrowserDriver
     private let mutex = AsyncMutex()
     private let memory = OSAllocatedUnfairLock(initialState: Memory())
@@ -71,9 +76,10 @@ final class BrowserSession: @unchecked Sendable {
         var showingWindow = false
     }
 
-    init(botID: UUID, mode: BrowserMode, driver: any BrowserDriver) {
+    init(botID: UUID, mode: BrowserMode, proxy: String? = nil, driver: any BrowserDriver) {
         self.botID = botID
         self.mode = mode
+        self.proxy = proxy
         self.driver = driver
     }
 
@@ -144,6 +150,7 @@ final class BrowserHub: Sendable {
     private let sessions = OSAllocatedUnfairLock<[UUID: BrowserSession]>(initialState: [:])
     /// What the tools say a ref is ("Entrar" for e3), by Orb, readable without waiting (the approval card shows it).
     private let labels = OSAllocatedUnfairLock<[UUID: [String: String]]>(initialState: [:])
+    private let proxies = OSAllocatedUnfairLock<[UUID: String]>(initialState: [:])
 
     init(profilesDirectory: URL?,
          locate: (@Sendable () async -> BrowserStatus)? = nil,
@@ -188,13 +195,14 @@ final class BrowserHub: Sendable {
         profilesDirectory?.appending(path: botID.uuidString).appending(path: "estado")
     }
 
-    func configuration(botID: UUID, mode: BrowserMode, status: BrowserStatus) -> AgentBrowserConfig {
+    func configuration(botID: UUID, mode: BrowserMode, status: BrowserStatus, proxy: String? = nil) -> AgentBrowserConfig {
         remember(status)
         Self.adoptOldProfile(for: botID, in: profilesDirectory)
         var config = AgentBrowserConfig(executable: status.agentBrowser ?? "agent-browser", session: AgentBrowserConfig.sessionName(botID: botID),
                                         browser: status.program, profile: profileFolder(botID: botID), stateDirectory: profilesDirectory)
         config.headed = mode == .visible
         config.visibleByDefault = mode == .visible
+        config.proxy = proxy
         return config
     }
 
@@ -212,20 +220,30 @@ final class BrowserHub: Sendable {
 
     /// The Orb's browser, started on first use. Throws what is missing when it is not installed.
     func session(botID: UUID, mode: BrowserMode) async throws -> BrowserSession {
-        if let existing = sessions.withLock({ $0[botID] }), existing.mode == mode { return existing }
+        if let existing = sessions.withLock({ $0[botID] }), existing.mode == mode, existing.proxy == proxy(botID: botID) { return existing }
         let status = await status()
         guard status.isReady else { throw BrowserDriverError.notInstalled(status.modelNote ?? "The browser is not installed.") }
         // Two calls for the same Orb can both get here (the tools of one turn run at the same time, and the lookup above waited):
         // the check and the installing of the session are one step, so the second finds the first one's and uses it.
         let (session, replaced) = sessions.withLock { sessions -> (BrowserSession, BrowserSession?) in
-            if let existing = sessions[botID], existing.mode == mode { return (existing, nil) }
-            let session = BrowserSession(botID: botID, mode: mode, driver: makeDriver(configuration(botID: botID, mode: mode, status: status)))
+            let wanted = proxy(botID: botID)
+            if let existing = sessions[botID], existing.mode == mode, existing.proxy == wanted { return (existing, nil) }
+            let session = BrowserSession(botID: botID, mode: mode, proxy: wanted,
+                                         driver: makeDriver(configuration(botID: botID, mode: mode, status: status, proxy: wanted)))
             return (session, sessions.updateValue(session, forKey: botID))
         }
         // Another mode is another browser (a running one keeps the flags it was launched with): the old one is closed (best effort).
         if let replaced, replaced !== session { try? await replaced.driver.close() }
         return session
     }
+
+    /// The proxy of the Orb's next browser. The Orb's own setting is copied here when a turn starts and when `browse_proxy` changes it;
+    /// a session started with another one is closed by the next `session` call.
+    func setProxy(_ proxy: String?, botID: UUID) {
+        proxies.withLock { if let proxy { $0[botID] = proxy } else { $0.removeValue(forKey: botID) } }
+    }
+
+    func proxy(botID: UUID) -> String? { proxies.withLock { $0[botID] } }
 
     func existingSession(botID: UUID) -> BrowserSession? { sessions.withLock { $0[botID] } }
 

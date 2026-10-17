@@ -1069,13 +1069,17 @@ final class AppModel {
         var bot = bots[index]
         let mode = bot.permissionMode
         let browserMode = bot.browserMode, hadBrowser = bot.capabilities.contains(.browser)
+        let browserProxy = bot.browserProxy
         change(&bot)
         if bot != bots[index] { bots[index] = bot }
         if bot.permissionMode != mode { permissionModeChanged(botID, to: bot.permissionMode) }
         // Another mode is another browser, and without "Navegar na web" there is none: the one that was open is closed now,
         // not when the Orb next needs a browser.
-        if bot.browserMode != browserMode || (hadBrowser && !bot.capabilities.contains(.browser)) {
+        // The same goes for the proxy, unless `browse_proxy` already reopened the browser through it (the hub has it by then).
+        let proxyChanged = bot.browserProxy != browserProxy && browserHub.proxy(botID: botID) != bot.browserProxy
+        if bot.browserMode != browserMode || (hadBrowser && !bot.capabilities.contains(.browser)) || proxyChanged {
             let hub = browserHub
+            hub.setProxy(bot.browserProxy, botID: botID)
             Task { await hub.close(botID: botID) }
         }
     }
@@ -1595,8 +1599,13 @@ final class AppModel {
             var context = baseContext
             // A run nobody watches (a routine, a request from another Orb) waits for its commands to the end.
             if session.routineID == nil || session.sideKind == .group { context.release = release }
+            browserHub.setProxy(bot.browserProxy, botID: bot.id)
             context.browser = BrowserAccess(hub: browserHub, available: browserAvailability == .browser, mode: bot.browserMode,
-                                            searchProvider: bot.searchProvider, searchKeys: SearchKeys(vault: secretVault))
+                                            searchProvider: bot.searchProvider, searchKeys: SearchKeys(vault: secretVault),
+                                            proxy: bot.browserProxy,
+                                            saveProxy: { [weak self] proxy in
+                                                await MainActor.run { self?.update(bot.id) { $0.browserProxy = proxy } }
+                                            })
             // MARK: MultiOrb (WP3)
             if multi.propose { context.orbCreation = orbCreationSupport(for: bot) }
             // MARK: end MultiOrb (WP3)

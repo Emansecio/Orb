@@ -24,8 +24,8 @@ struct ToolSpecEconomyTests {
     /// The tools of the Orb's own browser are offered only when an engine is installed, so they have a ceiling of their own.
     /// 4,200 for the first 13 tools. The second step (docs/REVISAO-NAVEGADOR-2026-10-16.md) brought every command of the browser:
     /// the 13 grew to 4,519 (click, press and scroll took actions) and six tools came, grouped by action (wait 447, find 634,
-    /// dialog 295, files 373, page 659, run 592), measured at 7,519 in all.
-    private static let browseSpecCharsCeiling = 7_600
+    /// dialog 295, files 373, page 659, run 592), measured at 7,519 in all; `browse_proxy` (414, the third step) makes it 7,933.
+    private static let browseSpecCharsCeiling = 8_000
 
     @Test func theToolSpecsStayWellUnderTheirOldSize() {
         let now = specChars(ToolBox.all.filter { !ToolBox.browseToolNames.contains($0.spec.name) })

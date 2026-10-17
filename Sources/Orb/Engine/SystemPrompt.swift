@@ -224,6 +224,7 @@ enum BrowserPrompt {
                     + "user's logins between runs. "
                     + (bot.browserMode == .visible ? "Its window is open on the user's screen for them to watch. "
                                                    : "It runs in the background, with no window, so it never takes over the user's screen. ")
+                    + (bot.browserProxy.map { "It goes through the proxy \(BrowserProxy.display($0)) (browse_proxy changes or clears it). " } ?? "")
                     + "web_search and web_fetch are lighter for public pages; use the browser for JavaScript pages, logins and forms.",
                 "A login, a 2FA code, a captcha, a consent wall or anything else only the person can do is theirs: never type a password "
                     + "or card number, never try to solve a captcha or get around a block.",

@@ -48,6 +48,14 @@ Limites da medição: uma rodada por montagem (um Mac, uma rede), páginas públ
 
 (Preenchido por etapa, abaixo.)
 
+### Etapa 3: proxy escolhido pelo Orb
+
+- `browse_proxy` (`status`, `set`, `clear`): o Orb dá o endereço (`BrowserProxy.normalized`: http, https, socks4, socks5, host e porta; senha embutida aceita e nunca mostrada), o hub reabre a sessão com `--proxy` (o perfil é o mesmo, então os logins ficam), abre uma página que diz o IP de saída e devolve o endereço para o Orb contar ao usuário. Se a página não responde com um endereço, o proxy anterior volta e o erro diz por quê. A página que estava aberta é reaberta.
+- `Bot.browserProxy` (opcional; Orbs salvos antes decodificam sem proxy); o `AppModel` o copia para o `BrowserHub` no começo de cada turno e `browse_proxy` o grava de volta (`BrowserAccess.saveProxy`) sem fechar o navegador recém-aberto. `--proxy` entra na impressão digital do lançamento: um navegador aberto com outro proxy não é reaproveitado.
+- O painel do Orb mostra "Proxy: …" com **Remover** (fecha o navegador); o prompt cita o proxy atual. O app não gerencia túneis; o exemplo do Orb "Atendente AcessosFit 2" (Mullvad com wireproxy em `socks5://127.0.0.1:1080`, `scripts/proxy_ip.py`) é do próprio Orb e fica como está.
+- Custo: `browse_proxy` soma 414 caracteres (20 ferramentas, 7.933; teto 8.000).
+- Testes: `BrowserProxyTests` e `BrowserProxyModelTests`.
+
 ### Etapa 2: comandos de cara e `browse_run`
 
 - Ferramentas por ação, para o custo não crescer uma por comando: `browse_click` (click, dblclick, hover, check, uncheck, focus, scrollintoview, drag), `browse_press` (com `text`/`insert`), `browse_scroll` (com `ref`), e seis novas: `browse_wait`, `browse_find`, `browse_dialog`, `browse_files`, `browse_page` (frame, pdf, state save/load, mouse) e `browse_run` (qualquer comando, manual sob demanda). `BrowserDriver` ganhou `command(_:text:)` e `manual(_:)`.

@@ -17,6 +17,9 @@ struct AgentBrowserConfig: Sendable, Equatable {
     /// Lets the scripts of a `file://` page read other local files. Not needed to open one (Chrome opens `file://` pages without it),
     /// so it is off.
     var allowFileAccess = false
+    /// Where the browser's traffic goes (`--proxy`), chosen by the Orb. It is part of how the browser is launched, so a running
+    /// browser with another one is not reused.
+    var proxy: String?
     /// The app's own folder for agent-browser (`navegador`): the config file it is told to read (so nothing of the user's own
     /// `~/.agent-browser/config.json` or `./agent-browser.json` applies), the folder its commands run in, and what it
     /// remembers about how each session was launched. Nil only in tests that need none of that.
@@ -142,6 +145,7 @@ struct AgentBrowserConfig: Sendable, Equatable {
         if let profile { arguments += ["--profile", profile.path] }
         if headed { arguments.append("--headed") }
         if allowFileAccess { arguments.append("--allow-file-access") }
+        if let proxy { arguments += ["--proxy", proxy] }
         return arguments
     }
 }

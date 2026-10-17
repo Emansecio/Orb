@@ -98,6 +98,8 @@ struct Bot: Identifiable, Hashable, Codable, Sendable {
     /// How the browser behind "Navegar na web" runs (see `BrowserMode`). Orbs saved before the modes existed (when the Orb chose an
     /// engine: Chrome, CloakBrowser, Obscura or only reading) get the background; the old `browserEngine` key is not read.
     var browserMode = BrowserMode.default
+    /// The proxy the Orb's browser goes through (`scheme://host:port`), chosen by the Orb with `browse_proxy`; nil is direct.
+    var browserProxy: String?
     /// Where `web_search` goes.
     var searchProvider = SearchProvider.duckduckgo
     /// What the user chose "Sempre permitir" for, each grant narrowed by a scope (`PermissionRule`). Grants saved
@@ -137,6 +139,7 @@ extension Bot {
         permissionMode = try c.value(.permissionMode, default: .ask)
         capabilities = Set(try c.lossyArray(.capabilities, default: [.terminal, .browser]))
         browserMode = (try? c.decodeIfPresent(BrowserMode.self, forKey: .browserMode)) ?? .default
+        browserProxy = (try? c.decodeIfPresent(String.self, forKey: .browserProxy)).flatMap { $0 }
         searchProvider = (try? c.decodeIfPresent(SearchProvider.self, forKey: .searchProvider)) ?? .duckduckgo
         permissionRules = try c.lossyArray(.permissionRules)
         if let old = try? decoder.container(keyedBy: LegacyKeys.self).decodeIfPresent([String].self, forKey: .allowedTools) {

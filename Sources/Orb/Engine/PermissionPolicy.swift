@@ -441,7 +441,7 @@ enum PermissionPolicy {
         case "shortcuts_run", "clipboard_write", "app_quit": return .macApps
         case "ui_read", "ui_act": return .appInterface
         case "browse_click", "browse_fill", "browse_select", "browse_press", "browse_show",
-             "browse_find", "browse_dialog", "browse_files", "browse_page", "browse_run": return .browserPage
+             "browse_find", "browse_dialog", "browse_files", "browse_page", "browse_run", "browse_proxy": return .browserPage
         case "remember", "recall": return .memory
         case "job_output", "job_stop": return .jobs
         case "schedule": return .schedule

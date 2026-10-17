@@ -9,6 +9,11 @@ extension AppModel {
         update(botID) { $0.browserMode = mode }
     }
 
+    /// Takes the proxy off the Orb's browser (the panel's "Remover"); the browser is closed and the next page opens direct.
+    func removeBrowserProxy(for botID: UUID) {
+        update(botID) { $0.browserProxy = nil }
+    }
+
     func setSearchProvider(_ provider: SearchProvider, for botID: UUID) {
         update(botID) { $0.searchProvider = provider }
     }

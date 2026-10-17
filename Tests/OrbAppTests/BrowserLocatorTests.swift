@@ -100,7 +100,7 @@ struct BrowserLocatorTests {
             Set(ToolBox.offered(for: capabilities, accessibilityGranted: false, browser: availability).map(\.spec.name))
         }
         let browse = ToolBox.browseToolNames
-        #expect(browse.contains("browse_open") && browse.contains("browse_show") && browse.count == 19)
+        #expect(browse.contains("browse_open") && browse.contains("browse_show") && browse.count == 20)
 
         let withBrowser = names([.browser], .browser)
         #expect(browse.isSubset(of: withBrowser) && withBrowser.contains("web_fetch") && withBrowser.contains("web_search"))

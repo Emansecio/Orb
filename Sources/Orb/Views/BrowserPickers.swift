@@ -119,6 +119,16 @@ struct BrowserPickerRows: View {
                 .help(Tip.browserMode)
                 caption(bot.browserMode.summary)
                 statusLine(BrowserPickerCopy.browserLine(status: status))
+                if let proxy = bot.browserProxy {
+                    HStack {
+                        Text("Proxy: \(BrowserProxy.display(proxy))").font(.caption).foregroundStyle(.secondary)
+                            .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                        Spacer()
+                        Button("Remover") { model.removeBrowserProxy(for: botID) }.buttonStyle(.link).font(.caption)
+                            .help(Tip.removeBrowserProxy)
+                    }
+                    caption("Escolhido pelo Orb. O navegador dele passa por esse proxy; remover o deixa direto.")
+                }
 
                 Picker("Pesquisa", selection: providerBinding) {
                     ForEach(SearchProvider.allCases) { Text($0.label).tag($0) }
