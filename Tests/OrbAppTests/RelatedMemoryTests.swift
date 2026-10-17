@@ -5,6 +5,11 @@ import Testing
 
 /// The memories that go with each message: only the ones that fit it, not the ones the conversation already carries.
 @Suite final class RelatedMemoryTests {
+    /// Telling nouns from verbs needs the Mac's Portuguese tagging (word classes and lemmas), a language asset a machine
+    /// may lack (the GitHub runner does): without it every word counts, as before the tagger, and the tests of the
+    /// tagger have nothing to check.
+    static let tagsPortuguese = !MemoryText.topicNouns("o que eu faço", tagger: NLTagger(tagSchemes: [.lexicalClass, .lemma])).contains("faco")
+
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbRelated-\(UUID().uuidString)")
     let day: TimeInterval = 86_400
 
@@ -306,7 +311,7 @@ import Testing
         return bank
     }
 
-    @Test func verbsAndAdverbsDoNotRaiseTheBar() async {
+    @Test(.enabled(if: RelatedMemoryTests.tagsPortuguese, "o NLTagger desta máquina não lê português (sem lema para “faço”)")) func verbsAndAdverbsDoNotRaiseTheBar() async {
         let bank = await everyday()
         for (message, title) in [("o Thor tá doente, o que faço?", "Thor"),
                                  ("preciso levar o cachorro no veterinário amanhã", "Thor"),
@@ -331,7 +336,7 @@ import Testing
         }
     }
 
-    @Test func aMessageWithSubjectsNeedsOneOfThemNotJustAVerb() async {
+    @Test(.enabled(if: RelatedMemoryTests.tagsPortuguese, "o NLTagger desta máquina não lê português (sem lema para “faço”)")) func aMessageWithSubjectsNeedsOneOfThemNotJustAVerb() async {
         let bank = await everyday()
         await bank.remember("Amanhã tenho dentista às 15h.", title: "Dentista amanhã")
         let titles = await bank.related(to: "configurar o servidor e testar o deploy amanhã").map(\.title)
@@ -339,7 +344,7 @@ import Testing
         #expect(titles.contains { $0.contains("deploy") || $0.contains("publicar") }, "got: \(titles)")
     }
 
-    @Test func theTaggerKeepsNounsAndNamesNotVerbs() {
+    @Test(.enabled(if: RelatedMemoryTests.tagsPortuguese, "o NLTagger desta máquina não lê português (sem lema para “faço”)")) func theTaggerKeepsNounsAndNamesNotVerbs() {
         let nouns = MemoryText.topicNouns("o Thor tá doente, o que faço com o checkout?", tagger: NLTagger(tagSchemes: [.lexicalClass, .lemma]))
         #expect(nouns.contains("thor") && nouns.contains("checkout"))
         #expect(!nouns.contains("faco") && !nouns.contains("ta"))
