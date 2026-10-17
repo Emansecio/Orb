@@ -522,7 +522,7 @@ struct ComposerView: View {
     }
 }
 
-/// What the composer's card holds besides the field: the three things whose coming and going changes its height.
+/// What the composer's card holds besides the field: the things whose coming and going changes its height.
 private struct CardParts: Equatable {
     var suggestions: Bool
     var strip: Bool
@@ -755,8 +755,6 @@ enum ComposerHint {
     }
 }
 
-/// Whether the composer's ⌘V monitor takes a key press. The monitor sees every key of the app, so it must be sure the
-/// press is for the composer's window (not the menu bar panel, Settings or a sheet over the chat) and its field.
 /// ⇧↩ in a message field: a new line where the cursor is, as ⌥↩ makes, never a send.
 enum NewLineKey {
     static func isShiftReturn(_ event: NSEvent) -> Bool {
@@ -773,6 +771,8 @@ enum NewLineKey {
     }
 }
 
+/// Whether the composer's ⌘V monitor takes a key press. The monitor sees every key of the app, so it must be sure the
+/// press is for the composer's window (not the menu bar panel, Settings or a sheet over the chat) and its field.
 enum PasteGate {
     static func takes(eventIsInComposerWindow: Bool, isKey: Bool, hasSheet: Bool, isFocused: Bool) -> Bool {
         eventIsInComposerWindow && isKey && !hasSheet && isFocused
