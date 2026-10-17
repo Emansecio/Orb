@@ -93,6 +93,18 @@ struct OnceAndCronScheduleTests {
         #expect(Schedule.cron(expression: "0 9 * * *", timeZone: "America/Sao_Paulo").problem() == nil)
     }
 
+    @Test func theMinimumGapBetweenRunsCountsTheHoursToo() throws {
+        // 08:00 and 08:50 are 50 minutes apart (the next hour is not selected), and 20:00 is far from both.
+        for fine in ["0,50 8 * * *", "0,50 8,20 * * *", "0 8,20 * * *", "0,30 8 * * *"] {
+            #expect(throws: Never.self, "\(fine)") { try CronExpression(fine) }
+            #expect(Schedule.cron(expression: fine, timeZone: nil).problem() == nil, "\(fine)")
+        }
+        // 08:50 to 09:00 is only 10 minutes.
+        for bad in ["0,50 8,9 * * *", "0,10 8 * * *"] {
+            #expect(throws: CronExpression.Invalid.self, "\(bad)") { try CronExpression(bad) }
+        }
+    }
+
     @Test func aOneTimeScheduleRunsAtItsMomentAndThenNeverAgain() throws {
         let moment = date("2026-10-14T09:00:00Z")
         #expect(Schedule.once(moment).next(after: moment.addingTimeInterval(-60)) == moment)
