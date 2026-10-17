@@ -249,9 +249,10 @@ enum OrbDesignSheet {
     /// each size at its real size (the two big ones shrunk), and the small ones again magnified without smoothing (128 ×2, the rest ×4). Written at 1× (no 2× pass),
     /// so what is seen is what the Dock and Finder get.
     private static func appIcon(to url: URL) {
-        let pixels = [1024, 512, 256, 128, 64, 32, 16]
+        let pixels = iconSizes
         let icons = pixels.map { ($0, AppIcon.image(pixels: $0)) }
-        let band = CGSize(width: 1040, height: 520)
+        let band = iconBand
+        let layout = iconLayout(pixels: pixels)
         let space = CGColorSpace(name: CGColorSpace.sRGB)!
         guard let ctx = CGContext(data: nil, width: Int(band.width), height: Int(band.height) * 2, bitsPerComponent: 8,
                                   bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
@@ -260,25 +261,44 @@ enum OrbDesignSheet {
             let y0 = CGFloat(1 - index) * band.height
             ctx.setFillColor(CGColor(srgbRed: wallpaper.0, green: wallpaper.1, blue: wallpaper.2, alpha: 1))
             ctx.fill(CGRect(x: 0, y: y0, width: band.width, height: band.height))
-            var x: CGFloat = 20
             // Row 1 (top): every size, 1024 and 512 shrunk to fit; the rest at their real size (256 included).
             for (px, icon) in icons {
-                let shown: CGFloat = px >= 512 ? 180 : CGFloat(px)
+                guard let rect = layout.row1[px] else { continue }
                 ctx.interpolationQuality = px >= 512 ? .high : .none
-                ctx.draw(icon, in: CGRect(x: x, y: y0 + band.height - 20 - shown, width: shown, height: shown))
-                x += shown + 24
+                ctx.draw(icon, in: rect.offsetBy(dx: 0, dy: y0))
             }
             // Row 2: the small sizes magnified without smoothing.
-            x = 20
-            for (px, icon) in icons where px <= 128 {
-                let shown = CGFloat(px) * (px == 128 ? 2 : 4)
-                ctx.interpolationQuality = .none
-                ctx.draw(icon, in: CGRect(x: x, y: y0 + 20, width: shown, height: shown))
-                x += shown + 24
+            ctx.interpolationQuality = .none
+            for (px, icon) in icons {
+                guard let rect = layout.row2[px] else { continue }
+                ctx.draw(icon, in: rect.offsetBy(dx: 0, dy: y0))
             }
         }
         guard let image = ctx.makeImage() else { return }
         try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: url)
+    }
+
+    static let iconSizes = [1024, 512, 256, 128, 64, 32, 16]
+    /// One wallpaper band of the icon sheet: tall enough for the 256 px icon of row 1 to clear the magnified 64 px of row 2.
+    static let iconBand = CGSize(width: 1040, height: 560)
+
+    /// Where each size is drawn inside one band (origin at the band's bottom left): row 1 at real size (1024 and 512 shrunk),
+    /// row 2 the small ones magnified (128 x2, the rest x4). The rows never overlap.
+    static func iconLayout(pixels: [Int]) -> (row1: [Int: CGRect], row2: [Int: CGRect]) {
+        var row1: [Int: CGRect] = [:], row2: [Int: CGRect] = [:]
+        var x: CGFloat = 20
+        for px in pixels {
+            let shown: CGFloat = px >= 512 ? 180 : CGFloat(px)
+            row1[px] = CGRect(x: x, y: iconBand.height - 20 - shown, width: shown, height: shown)
+            x += shown + 24
+        }
+        x = 20
+        for px in pixels where px <= 128 {
+            let shown = CGFloat(px) * (px == 128 ? 2 : 4)
+            row2[px] = CGRect(x: x, y: 20, width: shown, height: shown)
+            x += shown + 24
+        }
+        return (row1, row2)
     }
 
     // MARK: Helpers
