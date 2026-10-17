@@ -327,6 +327,9 @@ struct MemoryIntentTests {
     @Test func explicitRequestsAreRecognizedWithWhatToKeep() {
         let cases: [(String, String?)] = [
             ("Memorize que meu aniversário é 3 de maio", "meu aniversário é 3 de maio"),
+            ("Memorize que o desconto é de 10%", "o desconto é de 10%"),
+            ("Memorize que eu estudo C#", "eu estudo C#"),
+            ("Memorize que o apelido é (Rafa)", "o apelido é (Rafa)"),
             ("lembre-se de que eu prefiro café sem açúcar", "eu prefiro café sem açúcar"),
             ("Meu cachorro se chama Thor, memorize isso tbm", "Meu cachorro se chama Thor"),
             ("memorize isso", nil),

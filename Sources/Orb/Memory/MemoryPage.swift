@@ -374,7 +374,8 @@ enum MemoryText {
     /// that came from a conversation before it goes into a title or the prompt, so it can't fake a section.
     static func flatten(_ text: String) -> String {
         let cleaned = String(String.UnicodeScalarView(text.unicodeScalars.filter {
-            !CharacterSet.controlCharacters.contains($0) || $0 == "\n" || $0 == "\t"
+            // A control character that is also a space (a lone CR, a form feed) separates words: it is not dropped.
+            !CharacterSet.controlCharacters.contains($0) || $0.properties.isWhitespace
         }))
         let line = cleaned.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ")
         // A heading's marks at the start only: "Aprender C#" and "F#" keep theirs.
