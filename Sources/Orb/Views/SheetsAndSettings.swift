@@ -428,10 +428,17 @@ struct NewBotSheet: View {
         draft = nil
     }
 
+    /// The role a new Orb is made with: what was typed, trimmed like the name, or "Assistente pessoal" when nothing is left
+    /// (a role of only spaces would show as a blank line under the name).
+    static func finalRole(_ role: String) -> String {
+        let trimmed = role.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Assistente pessoal" : trimmed
+    }
+
     private func create() {
         guard !trimmedName.isEmpty else { return }
         let bot = model.createBot(name: trimmedName,
-                                  role: role.isEmpty ? "Assistente pessoal" : role,
+                                  role: Self.finalRole(role),
                                   orb: orb, model: modelName, mode: mode, identity: identity, interview: interview,
                                   folder: folder, adopting: chosenMemory, importing: imported)
         // MARK: MultiOrb (WP4)

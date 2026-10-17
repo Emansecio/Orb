@@ -129,7 +129,7 @@ final class WizardRunner {
     @discardableResult
     func create(look: OrbConfig = OrbConfig()) -> Bot? {
         guard let model, !isFinished, draft.canCreate else { return nil }
-        let bot = model.createBot(name: draft.name, role: draft.role.isEmpty ? "Assistente pessoal" : draft.role, orb: look,
+        let bot = model.createBot(name: draft.name, role: NewBotSheet.finalRole(draft.role), orb: look,
                                   model: "", mode: draft.mode, identity: draft.instructions, interview: false, folder: .own,
                                   base: orbsBase)
         let capabilities = draft.capabilities.subtracting([.connectors])
