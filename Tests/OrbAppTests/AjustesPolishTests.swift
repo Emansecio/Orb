@@ -34,6 +34,13 @@ struct PaletteContrastTests {
         }
     }
 
+    @Test func faintsContrastIsWhatItsCommentSays() {
+        // The comment on `Palette.faint` says "about 5.6:1 on canvas and on chrome".
+        for surface in [Palette.canvas, Palette.chrome] {
+            #expect((5.4...5.7).contains(contrast(Palette.faint, over: surface)))
+        }
+    }
+
     @Test func hintStaysQuieterThanFaint() {
         #expect(contrast(Palette.hint, over: Palette.canvas) < 4.5)
         #expect(contrast(Palette.hint, over: Palette.canvas) < contrast(Palette.faint, over: Palette.canvas))

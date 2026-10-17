@@ -37,7 +37,7 @@ enum Palette {
     static let ink = Color(hex: 0xFCFCFC)
     static let secondary = Color(hex: 0xFCFCFC, opacity: 0.74)
     static let muted = Color(hex: 0xFCFCFC, opacity: 0.6)
-    /// Quietest ink that still reads as text: about 5.3:1 on `canvas` and 4.9:1 on `chrome` (AA for 11-12 pt).
+    /// Quietest ink that still reads as text: about 5.6:1 on `canvas` and on `chrome` (AA for 11-12 pt).
     /// Use it for details, durations, placeholders and section titles.
     static let faint = Color(hex: 0xFCFCFC, opacity: 0.52)
     /// Decorative only (icons that repeat a label, hover hints, dim fills): about 3:1, below what text needs.
@@ -153,11 +153,9 @@ extension View {
     }
 
     /// Sweeping highlight across dim text, used for "working" states (steady text under Reduce Motion).
-    /// `keepsColors`: for text whose runs have colors of their own (some translucent): they stay as they are
-    /// and the band brightens them, instead of the text being redrawn in the shimmer's colors.
     /// `pulses`: the text also breathes, softly (a command is running).
-    func shimmer(active: Bool = true, keepsColors: Bool = false, pulses: Bool = false) -> some View {
-        modifier(Shimmer(active: active, keepsColors: keepsColors, pulses: pulses))
+    func shimmer(active: Bool = true, pulses: Bool = false) -> some View {
+        modifier(Shimmer(active: active, pulses: pulses))
     }
 
     /// Animates what changes along with `value` (rows appearing, states settling) with the app's one
@@ -187,17 +185,12 @@ enum ShimmerSweep {
 
 private struct Shimmer: ViewModifier {
     let active: Bool
-    let keepsColors: Bool
     let pulses: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
         if active && reduceMotion {
             content.foregroundStyle(Palette.muted)
-        } else if active && keepsColors {
-            // The text stays as it is; the band is only a highlight over it, masked by the text, so the
-            // translucent runs gain alpha under the band (as when the text was drawn a second time over itself).
-            content.overlay { ShimmerBand(fillsBackground: false).mask { content.foregroundStyle(.white) } }
         } else if active {
             // The text is laid out once, invisibly (it keeps the size and the accessibility label), and
             // drawn through a Core Animation band that sweeps across it: nothing in SwiftUI changes per frame.
@@ -214,11 +207,9 @@ private struct Shimmer: ViewModifier {
 /// work; the app's main thread does none). Used as the fill of the text it is masked with. The sweep stops
 /// while the window is hidden or occluded.
 private struct ShimmerBand: NSViewRepresentable {
-    /// Dim fill under the band (the text takes its color from it), or only the band.
-    var fillsBackground = true
     var pulses = false
 
-    func makeNSView(context: Context) -> ShimmerBandView { ShimmerBandView(fillsBackground: fillsBackground, pulses: pulses) }
+    func makeNSView(context: Context) -> ShimmerBandView { ShimmerBandView(fillsBackground: true, pulses: pulses) }
     func updateNSView(_ view: ShimmerBandView, context: Context) { view.pulses = pulses }
 }
 
