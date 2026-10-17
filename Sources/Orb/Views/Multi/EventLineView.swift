@@ -36,7 +36,7 @@ struct EventLineView: View {
             .accessibilityIdentifier("event-line")
             .sheet(isPresented: $showsExchange) {
                 let found = ExchangeSource.messages(chain: chain, of: asker.id, in: model)
-                ExchangeSheet(messages: found, parties: ExchangeSource.parties(of: found))
+                ExchangeSheet(messages: found, parties: ExchangeSource.parties(of: found, event: event))
             }
         } else if event.kind == .routineRun {
             RoutineRunLine(event: event)

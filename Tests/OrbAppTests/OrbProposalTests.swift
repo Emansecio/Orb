@@ -371,6 +371,29 @@ struct ProposalSpeechTests {
         #expect(ProposalSpeech.excerpt("Acabou!!!\nmais\nmais\nmais", maxLines: 1) == "Acabou…")
     }
 
+    @Test func theExcerptKeepsWhatOpensTheText() {
+        #expect(ProposalSpeech.excerpt("- a\n- b\n- c\n- d") == "- a\n- b\n- c…")
+        #expect(ProposalSpeech.excerpt("“Você é um revisor”, e deve olhar cada trecho com cuidado antes de responder qualquer coisa", maxCharacters: 40).hasPrefix("“Você"))
+        #expect(ProposalSpeech.excerpt("(Nota) um\ndois\ntrês\nquatro").hasPrefix("(Nota)"))
+    }
+
+    @Test func aCreatedCardDoesNotNameTheNextFreeFolder() throws {
+        let base = FileManager.default.temporaryDirectory.appending(path: "OrbFolders-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: base) }
+        try FileManager.default.createDirectory(at: base.appending(path: "Pesquisador"), withIntermediateDirectories: true)
+        #expect(ProposalSpeech.folderFact(name: "Pesquisador", base: base, wasCreated: true) == nil)
+        #expect(ProposalSpeech.folderFact(name: "Pesquisador", base: base, wasCreated: false)?.hasSuffix("Pesquisador 2") == true)
+    }
+
+    @Test func aNameThatClipsToNothingCannotBeCreated() {
+        var proposal = OrbProposal(creator: OrbRef(id: UUID(), name: "Atlas"), name: "Lia")
+        #expect(proposal.canCreate)
+        proposal.name = "   "
+        #expect(!proposal.canCreate)
+        proposal.name = ""
+        #expect(!proposal.canCreate)
+    }
+
     @Test func theCardIsReadAsOneSentence() {
         let proposal = OrbProposal(creator: OrbRef(id: UUID(), name: "Atlas"), name: "Pesquisador", role: "Cuida de pesquisas",
                                    capabilities: [.terminal, .browser])

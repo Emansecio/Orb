@@ -120,6 +120,9 @@ struct TranscriptFoldingTests {
         #expect(TranscriptFolding.exchangeTitle(asks, botID: atlas.id) == "Pediu ajuda a 2 Orbs")
         let one = [message(.ask, from: atlas, to: researcher, chain: chain), message(.reply, .reply, from: researcher, to: atlas, chain: chain)]
         #expect(TranscriptFolding.exchangeTitle(one, botID: atlas.id) == "2 mensagens com Pesquisador")
+        // Notices (tell) are sent too, but nobody asked for help.
+        let tells = [message(.tell, from: atlas, to: researcher, chain: chain), message(.tell, from: atlas, to: reviewer, chain: chain)]
+        #expect(TranscriptFolding.exchangeTitle(tells, botID: atlas.id) == "2 mensagens com 2 Orbs")
     }
 
     @Test("Uma linha de ferramenta entre duas mensagens não quebra a troca; fica depois dela")

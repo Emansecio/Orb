@@ -2,7 +2,8 @@ import SwiftUI
 
 /// The read-only view of one exchange between Orbs: the two Orbs at the top, linked by a still dotted line, and every
 /// message of the exchange as the Orb's bubble on the left (the same as a group's, docs/historico/MULTI-ORBS.md 8.3 and 8.10). Nothing
-/// here answers or changes anything; "Ver o trabalho" of the one who answered is offered only when `onOpenWork` is given.
+/// here answers or changes anything; "Ver o trabalho" of the one who answered is offered when the request still
+/// has a side conversation to show (`work`) or when `onOpenWork` is given (the snapshots).
 struct ExchangeSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -119,10 +120,15 @@ struct ExchangeSheet: View {
                 Button("Ver o trabalho \(Self.ofThe(answered.name))") { if let onOpenWork { onOpenWork() } else { showsWork = true } }
                     .buttonStyle(SecondaryPillStyle())
             }
-            Button("Voltar \(Self.toThe(parties.first?.name ?? ""))") { dismiss() }
+            Button(Self.backLabel(parties)) { dismiss() }
                 .buttonStyle(PrimaryPillStyle())
                 .keyboardShortcut(.defaultAction)
         }
+    }
+
+    /// "Voltar ao Atlas": back to the one whose chat it is; plain "Voltar" with no party to name.
+    static func backLabel(_ parties: [OrbRef]) -> String {
+        parties.first.map { "Voltar \(toThe($0.name))" } ?? "Voltar"
     }
 
     /// "do Pesquisador", "da Lia": the name with its article after "de".

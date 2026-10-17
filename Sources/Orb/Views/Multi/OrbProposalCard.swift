@@ -46,8 +46,17 @@ enum ProposalSpeech {
             cut = true
         }
         guard cut else { return text }
-        let trimmed = kept.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters).subtracting(CharacterSet(charactersIn: ")]}\"”»")))
-        return trimmed + "…"
+        // Only the end is cleaned: a list's "- ", a "(" or a quote opening the text belong to it.
+        let dropped = CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters).subtracting(CharacterSet(charactersIn: ")]}\"”»"))
+        var scalars = Substring(kept).drop(while: \.isWhitespace).unicodeScalars
+        while let last = scalars.last, dropped.contains(last) { scalars = scalars.dropLast() }
+        return String(scalars) + "…"
+    }
+
+    /// The "Pasta …" line of the card, when it has one: the folder a pending card's Orb would get. Once the Orb is created that
+    /// folder exists, so asking again would name the next free one ("Pesquisador 2") and the line is left out.
+    static func folderFact(name: String, base: URL, wasCreated: Bool) -> String? {
+        wasCreated ? nil : "Pasta " + OrbFolder.display(OrbFolder.availableURL(for: name, in: base))
     }
 
     /// "Atlas propõe criar o Orb Pesquisador, Cuida de pesquisas. Pode usar terminal e web. Botões: Criar, Editar antes, Não criar."
@@ -278,11 +287,11 @@ struct OrbProposalCard: View {
 
     /// The model, the folder and the connectors: read only, even when editing.
     private var facts: some View {
-        let folder = OrbFolder.display(OrbFolder.availableURL(for: shown.name, in: model.proposedOrbFolderBase))
+        let folder = ProposalSpeech.folderFact(name: shown.name, base: model.proposedOrbFolderBase, wasCreated: wasCreated)
         let taken = isPending ? model.isOrbNameTaken(draft.name) : proposal.nameTaken
         return VStack(alignment: .leading, spacing: 3) {
             fact("Mesmo modelo que \(creator)", symbol: "cpu")
-            fact("Pasta \(folder)", symbol: "folder")
+            if let folder { fact(folder, symbol: "folder") }
             if taken {
                 fact("Já existe um Orb com esse nome: a pasta ganha outro nome", symbol: "exclamationmark.circle", tint: Palette.warn)
             }
@@ -447,7 +456,7 @@ struct OrbProposalCard: View {
         .opacity(pressed == .allow ? 0.85 : 1)
         .scaleEffect(pressed == .allow ? ApprovalShortcut.pressScale : 1)
         .animation(Motion.press, value: pressed)
-        .disabled(isEditing && OrbProposal.clippedName(draft.name).isEmpty)
+        .disabled(!draft.canCreate)
         .help("Criar \(shown.name) (\(AppShortcut.commandReturn.label))")
         .accessibilityLabel("Criar")
         .accessibilityHint("Atalho: ⌘↩")
@@ -541,7 +550,7 @@ struct OrbProposalCard: View {
 
     /// "Criar": what was edited is kept on the card first, then the card is answered.
     private func create() {
-        guard isPending else { return }
+        guard isPending, draft.canCreate else { return }
         if draft != proposal { model.updateProposal(draft, approvalID: request.id, botID: botID) }
         model.decide(.once, approvalID: request.id, botID: botID)
     }

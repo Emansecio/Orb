@@ -245,7 +245,7 @@ enum TranscriptFolding {
     static func exchangeTitle(_ items: [TranscriptItem], botID: UUID) -> String {
         let partners = partners(of: items, botID: botID)
         let onlyAsks = items.allSatisfy { item in
-            if case .orbMessage(let message) = item.kind { return message.direction == .sent }
+            if case .orbMessage(let message) = item.kind { return message.direction == .sent && message.kind == .ask }
             return false
         }
         let count = items.count

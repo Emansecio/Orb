@@ -96,6 +96,28 @@ struct MultiOrbRoundTripTests {
     }
 }
 
+struct ExchangePartiesTests {
+    @Test @MainActor func anExchangeWithNothingToReadNamesTheTwoOrbsOfTheEventLine() {
+        let atlas = OrbRef(id: UUID(), name: "Atlas"), researcher = OrbRef(id: UUID(), name: "Pesquisador")
+        let event = OrbEvent(kind: .delegationReceived, actor: atlas, subject: researcher, chainID: UUID())
+        #expect(ExchangeSource.parties(of: [], event: event) == [atlas, researcher])
+        #expect(ExchangeSheet.backLabel([]) == "Voltar")
+        #expect(ExchangeSheet.backLabel([atlas]) == "Voltar ao Atlas")
+    }
+}
+
+struct CreatedByLineTests {
+    @Test @MainActor func theLineNamesTheCreatorAsItIsCalledNowAndAsItWasOnceItIsGone() {
+        var child = Bot(name: "Pesquisador", role: "", orb: OrbConfig())
+        child.createdBy = UUID()
+        child.createdByName = "Atlas"
+        let renamed = Bot(name: "Atlas Pro", role: "", orb: OrbConfig())
+        #expect(CreatedByLine.displayName(bot: child, creator: renamed) == "Atlas Pro")
+        #expect(CreatedByLine.displayName(bot: child, creator: nil) == "Atlas")
+        #expect(CreatedByLine.displayName(bot: Bot(name: "Solto", role: "", orb: OrbConfig()), creator: renamed) == nil)
+    }
+}
+
 // MARK: - Old and newer files
 
 struct MultiOrbCompatibilityTests {
