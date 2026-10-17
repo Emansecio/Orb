@@ -104,12 +104,11 @@ enum DangerousCommand {
                 }
             }
             guard patterns else { return nil }
-            let lowered = name
-            if lowered == ".env" || (lowered.hasPrefix(".env.") && !Self.envExamples.contains(lowered)) { return Self.message }
-            if let dot = lowered.lastIndex(of: "."), Self.secretExtensions.contains(String(lowered[lowered.index(after: dot)...])) {
+            if name == ".env" || (name.hasPrefix(".env.") && !Self.envExamples.contains(name)) { return Self.message }
+            if let dot = name.lastIndex(of: "."), Self.secretExtensions.contains(String(name[name.index(after: dot)...])) {
                 return Self.message
             }
-            if ["id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"].contains(lowered) { return Self.message }
+            if ["id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"].contains(name) { return Self.message }
             return nil
         }
 
@@ -172,15 +171,27 @@ enum DangerousCommand {
             directories = [(scope?.directory ?? directory ?? home).standardizedFileURL]
         }
 
+        /// A line of `cd x && cd ..` pairs would double the list at every step, so repeats are dropped and the list stops
+        /// at `maxDirectories`; past it, relative words stand for any folder (`known` turns false), the safe side.
+        static let maxDirectories = 32
+
+        private mutating func add(_ more: [URL]) {
+            var seen = Set(directories)
+            for url in more where seen.insert(url).inserted {
+                if directories.count >= Self.maxDirectories { known = false; return }
+                directories.append(url)
+            }
+        }
+
         mutating func move(_ command: (name: String, arguments: [String]), home: URL) {
             switch command.name {
             case "cd", "chdir", "pushd":
                 // Without a target `cd` goes home; `-P`, `-L` and `--` only change how the path is followed.
                 let words = command.arguments.drop { $0.hasPrefix("-") && $0 != "-" }
                 if let target = words.first {
-                    if let moved = directory(afterCD: target, from: directories, home: home) { directories += moved } else { known = false }
+                    if let moved = directory(afterCD: target, from: directories, home: home) { add(moved) } else { known = false }
                 } else {
-                    directories.append(home.standardizedFileURL)
+                    add([home.standardizedFileURL])
                 }
             case "popd":
                 known = false
@@ -245,6 +256,7 @@ enum DangerousCommand {
 
     private static func checkCommand(_ command: (name: String, arguments: [String]), scope: Scope?, home: URL, depth: Int, place: Place,
                                      viaXargs: Bool) -> String? {
+        if command.name == tooManyPrefixes { return "usa prefixos demais para conferir o comando" }
         let args = Arguments(command.arguments)
         switch command.name {
         case "sudo", "doas":
@@ -262,9 +274,10 @@ enum DangerousCommand {
             return "apaga arquivos de forma definitiva (sem passar pela Lixeira) fora da pasta do Orb"
         case "find":
             if command.arguments.contains("-delete") { return "apaga os arquivos encontrados" }
-            if let exec = command.arguments.firstIndex(where: { ["-exec", "-execdir", "-ok", "-okdir"].contains($0) }) {
+            // Every `-exec` runs its own command (`-exec echo {} \; -exec rm {} \;`), not only the first.
+            for exec in command.arguments.indices where ["-exec", "-execdir", "-ok", "-okdir"].contains(command.arguments[exec]) {
                 let inner = command.arguments[(exec + 1)...].prefix { $0 != ";" && $0 != "+" }
-                return checkWords(Array(inner), scope: scope, home: home, depth: depth, place: place, viaXargs: true)
+                if let reason = checkWords(Array(inner), scope: scope, home: home, depth: depth, place: place, viaXargs: true) { return reason }
             }
             return nil
         case "xargs":
@@ -283,7 +296,11 @@ enum DangerousCommand {
         case "dd":
             return command.arguments.contains { $0.hasPrefix("of=/dev/") } ? "grava direto num disco" : nil
         case "diskutil":
-            let sub = command.arguments.first(where: { !$0.hasPrefix("-") })?.lowercased() ?? ""
+            let verbs = command.arguments.filter { !$0.hasPrefix("-") }.map { $0.lowercased() }
+            let sub = verbs.first ?? ""
+            // `diskutil apfs deleteVolume|deleteContainer|eraseVolume` and `diskutil coreStorage delete` destroy volumes too.
+            if sub == "apfs" || sub == "corestorage", let verb = verbs.dropFirst().first,
+               verb.hasPrefix("delete") || verb.hasPrefix("erase") { return "formata ou apaga um disco" }
             return sub.hasPrefix("erase") || ["partitiondisk", "zerodisk", "secureerase", "reformat"].contains(sub)
                 ? "formata ou apaga um disco" : nil
         case "shutdown", "reboot", "halt", "poweroff":
@@ -360,7 +377,8 @@ enum DangerousCommand {
     /// `definition`, a function definition is skipped to reach its body.
     private static func effective(_ words: [String], definition: Bool = false) -> (name: String, arguments: [String])? {
         var rest = words[...]
-        for _ in 0..<12 {
+        // Every assignment, keyword and wrapper takes a turn, so the allowance follows the length of the line.
+        for _ in 0..<(words.count + 12) {
             guard let first = rest.first else { return nil }
             let word = first.trimmingCharacters(in: CharacterSet(charactersIn: "({"))
             if word.isEmpty || keywords.contains(word) || isAssignment(word) {
@@ -389,8 +407,12 @@ enum DangerousCommand {
             }
             rest = rest.dropFirst(wrapperOperands[name] ?? 0)
         }
-        return nil
+        // Words are left and the turns ran out: a command the detector never read must not pass as safe.
+        return rest.isEmpty ? nil : (tooManyPrefixes, [])
     }
+
+    /// Stands for a line with more prefixes than `effective` can unwrap; `checkCommand` turns it into a reason.
+    private static let tooManyPrefixes = "\u{0}too-many-prefixes"
 
     /// The command words in an `env` option that carries them (`-S`), and how many words the option used.
     private static func splitString(_ option: String, next: String?) -> (words: [String], consumed: Int)? {
@@ -656,14 +678,14 @@ enum DangerousCommand {
         (#"\bwith\s+administrator\s+privileges\b"#, "roda como administrador"),
     ]
 
-    /// Apps whose scripted `send` (or Return in their window) delivers something to other people and cannot be taken back.
-    /// Matched against the whole text of a string literal (a name or a bundle id), so a longer sentence that mentions
-    /// an app does not count.
     /// `scriptRules` compiled once.
     private static let compiledScriptRules: [(regex: NSRegularExpression, reason: String)] = scriptRules.compactMap { rule in
         (try? NSRegularExpression(pattern: rule.pattern, options: [.caseInsensitive])).map { ($0, rule.reason) }
     }
 
+    /// Apps whose scripted `send` (or Return in their window) delivers something to other people and cannot be taken back.
+    /// Matched against the whole text of a string literal (a name or a bundle id), so a longer sentence that mentions
+    /// an app does not count.
     private static let messagingApps = #"^(?:mail|messages|mensagens|(?:microsoft )?outlook|whatsapp|telegram|slack|signal|discord|microsoft teams|com\.apple\.mail|com\.apple\.MobileSMS|com\.microsoft\.Outlook|net\.whatsapp\.WhatsApp|ru\.keepcoder\.Telegram|com\.tinyspeck\.slackmacgap)(?:\.app)?$"#
 
     /// A script split into what runs and what is only text: `code` has its comments removed and every string literal
