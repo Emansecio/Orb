@@ -35,7 +35,7 @@ extension AppModel {
     }
 }
 
-/// A group's chat: the thread of what the person and the members said, the header with the budget while a request runs,
+/// A group's chat: the thread of what the person and the members said, the header with what the request has spent while it runs,
 /// the presence line and the composer. Reads the group, its thread and its live state; the Orbs' own rows are not drawn here.
 struct GroupChatView: View {
     @Environment(AppModel.self) private var model
@@ -97,7 +97,7 @@ private struct GroupPresenceBar: View {
     }
 }
 
-/// The thread: the person's messages, the members' answers, the assignments, the events and the budget's pause.
+/// The thread: the person's messages, the members' answers, the assignments, the events and, in an old conversation, the card of a budget's pause.
 private struct GroupThreadView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
