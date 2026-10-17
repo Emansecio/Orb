@@ -473,6 +473,8 @@ final class BrowserHub: Sendable {
     /// What the tools say a ref is ("Entrar" for e3), by Orb, readable without waiting (the approval card shows it).
     private let labels = OSAllocatedUnfairLock<[UUID: [String: String]]>(initialState: [:])
     private let proxies = OSAllocatedUnfairLock<[UUID: String]>(initialState: [:])
+    /// The close of the browser an Orb's session replaced, until it is done.
+    private let closings = OSAllocatedUnfairLock<[UUID: Task<Void, Never>]>(initialState: [:])
     private let scoped = OSAllocatedUnfairLock<[UUID: [String: BrowserSession]]>(initialState: [:])
     /// The Orbs whose profile caches are being emptied now (`cleanCachesIfDue`): their browser waits.
     private let cleaning = OSAllocatedUnfairLock<Set<UUID>>(initialState: [])
@@ -543,7 +545,6 @@ final class BrowserHub: Sendable {
         }
     }
 
-    /// The Orb's browser, started on first use. Throws what is missing when it is not installed.
     /// The Orb's browser as one conversation sees it (its own tab). Without a scope, the browser as a whole.
     func session(botID: UUID, mode: BrowserMode, scope: String?) async throws -> BrowserSession {
         let root = try await session(botID: botID, mode: mode)
@@ -558,24 +559,41 @@ final class BrowserHub: Sendable {
         }
     }
 
+    /// The Orb's browser, started on first use. Throws what is missing when it is not installed.
     func session(botID: UUID, mode: BrowserMode) async throws -> BrowserSession {
         // The profile's caches are being emptied (a moment): the browser opens after, not on top of it.
         while cleaning.withLock({ $0.contains(botID) }) { try await Task.sleep(for: .milliseconds(100)) }
-        if let existing = sessions.withLock({ $0[botID] }), existing.mode == mode, existing.proxy == proxy(botID: botID) { return existing }
+        if let existing = sessions.withLock({ $0[botID] }), existing.mode == mode, existing.proxy == proxy(botID: botID) {
+            await settleClosing(botID: botID)
+            return existing
+        }
         let status = await status()
         guard status.isReady else { throw BrowserDriverError.notInstalled(status.modelNote ?? "The browser is not installed.") }
         // Two calls for the same Orb can both get here (the tools of one turn run at the same time, and the lookup above waited):
         // the check and the installing of the session are one step, so the second finds the first one's and uses it.
-        let (session, replaced) = sessions.withLock { sessions -> (BrowserSession, BrowserSession?) in
+        let session = sessions.withLock { sessions -> BrowserSession in
             let wanted = proxy(botID: botID)
-            if let existing = sessions[botID], existing.mode == mode, existing.proxy == wanted { return (existing, nil) }
+            if let existing = sessions[botID], existing.mode == mode, existing.proxy == wanted { return existing }
             let session = BrowserSession(botID: botID, mode: mode, proxy: wanted,
                                          driver: makeDriver(configuration(botID: botID, mode: mode, status: status, proxy: wanted)))
-            return (session, sessions.updateValue(session, forKey: botID))
+            // Another mode is another browser (a running one keeps the flags it was launched with): the old one is closed (best
+            // effort). Both browsers have the same session name, so a call that finds the new session in the meantime must not open
+            // a page before that close is done, or the close would take the new browser too (`settleClosing`).
+            if let replaced = sessions.updateValue(session, forKey: botID) {
+                let closing = Task<Void, Never> { try? await replaced.driver.close() }
+                closings.withLock { $0[botID] = closing }
+            }
+            return session
         }
-        // Another mode is another browser (a running one keeps the flags it was launched with): the old one is closed (best effort).
-        if let replaced, replaced !== session { try? await replaced.driver.close() }
+        await settleClosing(botID: botID)
         return session
+    }
+
+    /// Waits for the close of the browser the Orb's session replaced, if one is going on.
+    private func settleClosing(botID: UUID) async {
+        guard let closing = closings.withLock({ $0[botID] }) else { return }
+        await closing.value
+        closings.withLock { if $0[botID] == closing { $0[botID] = nil } }
     }
 
     /// The proxy of the Orb's next browser. The Orb's own setting is copied here when a turn starts and when `browse_proxy` changes it;
@@ -646,7 +664,7 @@ final class BrowserHub: Sendable {
         return !names.isEmpty
     }
 
-    /// Closes the browser this hub holds for the Orb (and forgets it); true when there was one.
+    /// Closes the browser this hub holds for the Orb (and forgets it); the session it held, if any.
     private func closeHeld(botID: UUID) async -> BrowserSession? {
         let held = sessions.withLock { $0.removeValue(forKey: botID) }
         if let held { try? await held.driver.close() }

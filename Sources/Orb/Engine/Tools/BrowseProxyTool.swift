@@ -1,7 +1,7 @@
 import Foundation
 
 /// `browse_proxy`: the Orb decides where its browser's traffic goes (a local SOCKS port of a VPN client it runs, a proxy service) and
-/// the app does the rest: reopens the browser with `--proxy` keeping the profile and the logins, proves it by reading the address the
+/// the app does the rest: reopens the browser through it (`AGENT_BROWSER_PROXY`) keeping the profile and the logins, proves it by reading the address the
 /// web sees, and keeps the choice for the Orb. Starting the tunnel itself is the Orb's work; the app manages none.
 struct BrowseProxyTool: BrowseTool {
     let spec = ToolSpec(
