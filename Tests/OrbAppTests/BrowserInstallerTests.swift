@@ -289,6 +289,11 @@ import Testing
         #expect(installer.updatable(BrowserUpdateCheck(checkedAt: start, latest: ["agentBrowser": agentVersion, "chrome": "155.0.8059.39"])).isEmpty)
         let older = InstalledRecords(uniqueKeysWithValues: [("agentBrowser", InstalledComponent(version: "0.39.0", installedAt: start))])
         #expect(installer.updatable(first, records: older).contains(.agentBrowser))
+        // A look cached by an older app (or by a newer one, before going back) does not decide: the pin of this app does.
+        let stale = BrowserUpdateCheck(checkedAt: start, latest: ["agentBrowser": "0.39.0"])
+        #expect(installer.updatable(stale, records: older).contains(.agentBrowser))
+        let ahead = BrowserUpdateCheck(checkedAt: start, latest: ["agentBrowser": "9.0.0"])
+        #expect(!installer.updatable(ahead).contains(.agentBrowser))
     }
 
     @Test func withoutNetworkTheLookForUpdatesKeepsWhatWasKnown() async throws {

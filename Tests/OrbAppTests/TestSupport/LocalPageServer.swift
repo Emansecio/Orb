@@ -2,7 +2,7 @@ import Foundation
 import Network
 
 /// A web server on `127.0.0.1` for the tests of real browsers: a few fixed pages, answered with `Connection: close`. It is a
-/// stand-in for the Internet (Obscura cannot open `file://` pages), so it needs no network and no Python.
+/// stand-in for the Internet (real addresses, not `file://` pages, as a site would be), so it needs no network and no Python.
 final class LocalPageServer: @unchecked Sendable {
     struct Page: Sendable {
         var body: String

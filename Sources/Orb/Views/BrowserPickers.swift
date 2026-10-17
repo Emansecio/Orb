@@ -120,13 +120,18 @@ struct BrowserPickerRows: View {
                 caption(bot.browserMode.summary)
                 statusLine(BrowserPickerCopy.browserLine(status: status))
                 if let proxy = bot.browserProxy {
-                    HStack {
-                        Text("Proxy: \(BrowserProxy.display(proxy))").font(.caption).foregroundStyle(.secondary)
+                    // The same shape as the status line above it: a caption with its icon, and the action under it as a link.
+                    VStack(alignment: .leading, spacing: 3) {
+                        Label("Proxy: \(BrowserProxy.display(proxy))", systemImage: "network")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                             .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
-                        Spacer()
-                        Button("Remover") { model.removeBrowserProxy(for: botID) }.buttonStyle(.link).font(.caption)
+                        Button("Remover") { model.removeBrowserProxy(for: botID) }
+                            .buttonStyle(.link)
+                            .font(.caption)
                             .help(Tip.removeBrowserProxy)
                     }
+                    .accessibilityElement(children: .contain)
                     caption("Escolhido pelo Orb. O navegador dele passa por esse proxy; remover o deixa direto.")
                 }
 

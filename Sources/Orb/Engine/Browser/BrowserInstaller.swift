@@ -222,13 +222,16 @@ final class BrowserInstaller: Sendable {
         }
     }
 
-    /// The components whose installed version is older than the newest known.
+    /// The components whose installed version is older than the newest known. The agent-browser's newest is the app's own pin,
+    /// never a day-old look: an app that brings a new pin shows the update at once, and one that went back to an older pin does not
+    /// offer the newer version a cached look remembers.
     func updatable(_ check: BrowserUpdateCheck?, records: InstalledRecords? = nil) -> Set<BrowserComponent> {
         guard let check else { return [] }
         let records = records ?? self.records()
         return Set(BrowserComponent.allCases.filter { component in
+            let newest = component == .agentBrowser ? BrowserPlatform.agentBrowserVersion : check.latest[component.rawValue]
             guard isInstalled(component), let installed = records[component.rawValue]?.version,
-                  let latest = check.latest[component.rawValue] else { return false }
+                  let latest = newest else { return false }
             return BrowserVersion.isNewer(latest, than: installed)
         })
     }
