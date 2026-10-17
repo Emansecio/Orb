@@ -306,14 +306,23 @@ private struct ExploreSkills: View {
         guard term.count >= 2 else { results = []; return }
         isLoading = true
         error = nil
-        defer { isLoading = false }
+        // "Tentar de novo" runs this outside `.task(id:)`, so nothing cancels it when the person types on: what it brings
+        // counts only while its term is still the one in the field.
+        defer { if ExploreSearch.accepts(term: term, currentQuery: query) { isLoading = false } }
         do {
             let found = try await SkillCatalog.shared.search(term)
-            if !Task.isCancelled { results = found }
+            if !Task.isCancelled, ExploreSearch.accepts(term: term, currentQuery: query) { results = found }
         } catch {
             // A newer search cancels this one; only real failures are shown.
-            if !Task.isCancelled { self.error = error.localizedDescription }
+            if !Task.isCancelled, ExploreSearch.accepts(term: term, currentQuery: query) { self.error = error.localizedDescription }
         }
+    }
+}
+
+enum ExploreSearch {
+    /// Whether the answer to a search for `term` still belongs on the page: the field still holds that term (spaces aside).
+    static func accepts(term: String, currentQuery: String) -> Bool {
+        term == currentQuery.trimmingCharacters(in: .whitespaces)
     }
 }
 
@@ -613,7 +622,8 @@ struct SkillEditor: View {
         skill.slug = finalSlug
         skill.name = skill.name.trimmingCharacters(in: .whitespaces)
         if let index = model.skills.firstIndex(where: { $0.id == skill.id }) {
-            model.skills[index] = skill
+            // Only what the editor edits: the count of uses and the rest may have changed while the sheet was open.
+            model.skills[index] = model.skills[index].applyingEdits(from: skill)
         } else {
             model.skills.append(skill)
         }
