@@ -62,6 +62,11 @@ struct AppDictionaryTests {
         #expect(notes.enumerations == [.init(name: "save options", values: ["yes", "no"])])
     }
 
+    @Test func warningsAheadOfTheXMLAreSkipped() {
+        let parsed = AppDictionary.parse(Data(("sdef: warning: something\n" + Self.sdef).utf8))
+        #expect(parsed?.suites.map(\.name) == ["Notes Suite", "Mail Suite"])
+    }
+
     @Test func notXMLIsNotADictionary() {
         #expect(AppDictionary.parse(Data("sdef: couldn't get sdef".utf8)) == nil)
     }

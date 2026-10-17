@@ -51,8 +51,10 @@ struct AppDictionary: Sendable, Equatable {
 
     /// Reads the XML `sdef` prints. Hidden items are left out. Returns nil when it is not XML at all.
     static func parse(_ data: Data) -> AppDictionary? {
+        // `sdef` can print warnings (its stderr is merged into the output) ahead of the XML.
+        let start = data.range(of: Data("<?xml".utf8)) ?? data.range(of: Data("<dictionary".utf8))
         let reader = Reader()
-        let parser = XMLParser(data: data)
+        let parser = XMLParser(data: start.map { Data(data[$0.lowerBound...]) } ?? data)
         parser.shouldProcessNamespaces = false
         parser.delegate = reader
         guard parser.parse() || !reader.dictionary.suites.isEmpty else { return nil }
@@ -266,7 +268,9 @@ struct AppDictionaryTool: AgentTool {
 
     static func liveSdef(_ app: URL) async throws -> Data? {
         let result = try await ProcessRunner.run("/usr/bin/sdef", [app.path], timeout: .seconds(20), outputLimit: 8_000_000)
-        guard !result.timedOut, result.status == 0 else { return nil }
+        // A timeout is not "no dictionary": it must not be remembered as one.
+        if result.timedOut { throw ToolError("O sdef de \(app.deletingPathExtension().lastPathComponent) passou de 20 s. Tente de novo.") }
+        guard result.status == 0 else { return nil }
         return Data(result.output.utf8)
     }
 
