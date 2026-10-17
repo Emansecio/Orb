@@ -15,4 +15,7 @@ struct MultiOrbOffering: Sendable, Equatable {
     var groupCreate = false
     /// `ask_user`: only in an Orb's own chat, where the person is to answer (a routine or a request reports what it needs).
     var askUser = false
+    /// The turn is a run nobody watches (a routine, a request from another Orb, a group's turn): `schedule` comes in its short
+    /// form, since only listing and pausing work there.
+    var sideRun = false
 }

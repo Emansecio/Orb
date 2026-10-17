@@ -150,6 +150,27 @@ struct ToolSpecEconomyTests {
         #expect(given - held > 1_500)
     }
 
+    /// The multi-Orb tools (`orbs`, `orb_propose`, `group_*`, `ask_user`) were measured at 3,705 characters in all
+    /// (docs/REVISAO-TOKENS-PROMPT-2026-10-17.md); they had no ceiling of their own.
+    @Test func theMultiOrbToolSpecsStayWithinTheirOwnCeiling() {
+        #expect(specChars(ToolBox.multiOrbTools + [AskUserTool()]) <= 3_800)
+    }
+
+    /// A run nobody watches (a routine, a request from another Orb, a group's turn) can only list and pause tasks: `schedule`
+    /// is offered there in a short form (about 330 characters, against 1,476), and nothing else changes in the list.
+    @Test func aRunNobodyWatchesGetsTheShortScheduleTool() throws {
+        let full = ToolBox.offered(for: everything, accessibilityGranted: true)
+        let side = ToolBox.offered(for: everything, accessibilityGranted: true, multi: MultiOrbOffering(sideRun: true))
+        #expect(side.map(\.spec.name) == full.map(\.spec.name))
+        let fullSchedule = try #require(full.first { $0.spec.name == "schedule" })
+        let shortSchedule = try #require(side.first { $0.spec.name == "schedule" })
+        #expect(specChars([shortSchedule]) < 400 && specChars([fullSchedule]) > 1_400)
+        #expect(shortSchedule.spec.description.contains("pause"))
+        #expect(specChars(side) < specChars(full) - 1_000)
+        // Only `schedule` differs.
+        for (a, b) in zip(full, side) where a.spec.name != "schedule" { #expect(a.spec.description == b.spec.description) }
+    }
+
     @Test func theNoteTellsWhereToAllowItAndWhatToUseMeanwhile() {
         let note = ToolBox.accessibilityUnavailableNote
         #expect(note.contains("ui_read") && note.contains("ui_act") && note.contains("Acessibilidade"))

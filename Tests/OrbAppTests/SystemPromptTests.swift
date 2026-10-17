@@ -98,7 +98,8 @@ struct SystemPromptTests {
         // went to when to keep a task_plan; ~140 more went to showing a picture in a reply with ![…](path); ~60 more went to reading an app's dictionary with
         // app_dictionary before scripting one the model does not know well). The prompt is
         // cached across turns.
-        #expect(system.count < 5_600, "the native system prompt is \(system.count) characters")
+        // Tightened from 5,600 on 2026-10-17 (docs/REVISAO-TOKENS-PROMPT-2026-10-17.md), after the "Mac apps" line that repeated the hints went.
+        #expect(system.count < 5_550,"the native system prompt is \(system.count) characters")
         for rule in ["Reply in the user's language", "Be brief", "Use tools to find out", "read before you change things",
                      "say in one short sentence what you are about to do", "never retry what the user denied",
                      "Do not emulate a switched-off capability", "sudo cannot work", "prefer the trash tool over rm",

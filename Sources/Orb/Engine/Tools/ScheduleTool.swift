@@ -129,7 +129,28 @@ enum ScheduleCommand: Equatable {
 
 /// Lets the Orb schedule tasks that repeat on their own (a task is a routine of the Orb, see `Routine`).
 struct ScheduleTool: AgentTool {
-    let spec = ToolSpec(
+    /// What `schedule` is in a run nobody watches (a routine's, a request from another Orb, a group's turn): the app refuses
+    /// create, update, resume, run and delete there (`AppModel.sideRunRefusal`), so only list and pause are described, in a
+    /// fifth of the characters (docs/REVISAO-TOKENS-PROMPT-2026-10-17.md). The same tool answers either way.
+    static let sideRunSpec = ToolSpec(
+        name: "schedule",
+        description: """
+        Your scheduled tasks (routines). From a run you can only list them and pause one (name); to create, change or \
+        delete one, propose it in your final message and the user does it in the chat.
+        """,
+        parameters: .schema([
+            "action": .object(["type": .string("string"), "enum": .array(["list", "pause"].map(JSONValue.string))]),
+            "name": .property("string"),
+        ], required: ["action"]))
+
+    /// `sideRun`: the short description for a run nobody watches (`ToolBox.offered`).
+    init(sideRun: Bool = false) {
+        spec = sideRun ? Self.sideRunSpec : Self.fullSpec
+    }
+
+    let spec: ToolSpec
+
+    private static let fullSpec = ToolSpec(
         name: "schedule",
         description: """
         Your scheduled tasks (routines), run while the app is open. create: prompt is what each run does, self-contained \

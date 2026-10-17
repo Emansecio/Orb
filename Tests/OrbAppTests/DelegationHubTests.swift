@@ -915,6 +915,9 @@ private final class Hooks: GroupTurnHooks {
         await waitUntil("the request to run") { team.request(from: team.atlas, to: team.pesquisador)?.state == .running }
         let first = try #require(await team.log.calls(by: "Atlas").first)
         #expect(first.tools.contains("orbs"))
+        // The request runs unattended in the teammate (short `schedule`); Atlas's own chat is not a side run.
+        #expect(model.multiOrbOffering(for: team.pesquisador.id).sideRun)
+        #expect(!model.multiOrbOffering(for: team.atlas.id).sideRun)
         model.orbsCanTalk = false // switching it off stops the chain
         #expect(team.request(from: team.atlas, to: team.pesquisador)?.state == .cancelled)
         #expect(!model.isWorking(team.pesquisador.id))
