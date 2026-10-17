@@ -106,7 +106,8 @@ struct BrowseFindTool: BrowseTool {
         if action == "fill" {
             let text = try arguments.requiredString("text", allowEmpty: true)
             guard !text.hasPrefix("-") else { throw ToolError("To type text that starts with “-” use browse_fill with a ref.") }
-            let name = arguments.nonEmptyString("name") ?? value
+            // `name` only goes to the page for `by: role`; for any other locator the text that finds the field is `value`.
+            let name = by == "role" ? (arguments.nonEmptyString("name") ?? value) : value
             if let reason = SecretField.reason(role: by == "role" ? value : "", name: name) { throw ToolError(SecretField.refusal(reason)) }
             built.append(text)
         }
@@ -460,7 +461,7 @@ enum BrowseRunRules {
     /// The `args` of a call, or nil when they are not a list of words.
     static func words(_ arguments: JSONValue) -> [String]? {
         guard let list = arguments["args"]?.array else { return nil }
-        let words = list.compactMap { $0.string ?? $0.number.map { $0 == $0.rounded() ? String(Int($0)) : String($0) } }
+        let words = list.compactMap { $0.string ?? $0.number.map { number in Int(exactly: number).map(String.init) ?? String(number) } }
         return words.count == list.count ? words : nil
     }
 }

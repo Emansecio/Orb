@@ -556,6 +556,15 @@ struct MultiOrbPermissionTests {
         #expect(verdict(.ask, preference, grants: grants) == .ask(.instructs))
     }
 
+    @Test func aKindWrittenWithCapitalsIsStillAPreferenceThatAsks() {
+        for tipo in ["Preferencia", "PREFERENCIA", " preferencia "] {
+            let call = PermissionPolicy.call(for: GroupRememberTool(), arguments: .object(["fact": .string("x"), "tipo": .string(tipo)]),
+                                             context: ToolContext(workingDirectory: home), home: home)
+            #expect(call.risk == .instructs, Comment(rawValue: tipo))
+            #expect(GroupRememberTool().summary(.object(["fact": .string("x"), "tipo": .string(tipo)])).title.contains("preferência"), Comment(rawValue: tipo))
+        }
+    }
+
 }
 
 // MARK: - The Orb's face
