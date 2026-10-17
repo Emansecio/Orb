@@ -673,6 +673,17 @@ struct SchedulePermissionTests {
         #expect(try run(model, atlas, call("list")) == "Nenhuma tarefa agendada.")
     }
 
+    @Test @MainActor func aOneTimeTaskWhoseMomentPassedStaysOffWhenTurnedOn() throws {
+        let (model, atlas, _) = setUp()
+        model.routines.append(Routine(name: "Passada", botID: atlas.id, prompt: "x", schedule: .once(.now.addingTimeInterval(-3600)),
+                                      isEnabled: false, createdAt: .now.addingTimeInterval(-86_400)))
+        let id = model.routines[0].id
+        #expect(!model.setRoutineEnabled(id, true))
+        #expect(!model.routines[0].isEnabled)
+        #expect(try run(model, atlas, call("resume", name: "Passada")).hasPrefix("Não retomei “Passada”"))
+        #expect(!model.routines[0].isEnabled)
+    }
+
     @Test @MainActor func theHighlightGoesAwayByItself() async throws {
         let (model, atlas, _) = setUp()
         model.selection = .bot(atlas.id)

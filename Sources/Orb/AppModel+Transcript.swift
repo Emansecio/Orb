@@ -104,6 +104,12 @@ enum NoticeAction: Equatable, Sendable {
         return slug.isEmpty ? nil : String(slug)
     }
 
+    /// Whether a notice shows buttons: it has actions AND it is the chat's last word with nothing running. `offers` is read only
+    /// when there are actions: it reads the chat's items and the Orb's state, and a notice that only informs must not depend on them.
+    static func showsButtons(actions: [NoticeAction], offers: @autoclosure () -> Bool) -> Bool {
+        !actions.isEmpty && offers()
+    }
+
     /// The actions that fit a notice, most useful first; none for the notices that only inform.
     static func actions(for notice: String) -> [NoticeAction] {
         if notice.hasPrefix("Conecte um modelo") { return [.openSettings] }

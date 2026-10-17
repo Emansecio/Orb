@@ -70,6 +70,33 @@ import Testing
         #expect(SkillBadge.learned(by: nil) == "Aprendida")
     }
 
+    @Test func savingTheEditorKeepsWhatMovedWhileItWasOpen() {
+        var opened = Skill(slug: "resumir", name: "Resumir", summary: "", instructions: "x")
+        opened.uses = 3
+        var edited = opened // the editor's copy, taken when the sheet opened
+        edited.name = "Resumir texto"
+        edited.slug = "resumir-texto"
+        edited.summary = "Resume"
+        edited.instructions = "y"
+        edited.orbIDs = [UUID()]
+        var now = opened // a routine expanded the skill and the person switched it off meanwhile
+        now.uses = 4
+        now.isEnabled = false
+        let saved = now.applyingEdits(from: edited)
+        #expect(saved.uses == 4 && !saved.isEnabled)
+        #expect(saved.id == opened.id && saved.name == "Resumir texto" && saved.slug == "resumir-texto" && saved.summary == "Resume")
+        #expect(saved.instructions == "y" && saved.orbIDs == edited.orbIDs)
+    }
+
+    // MARK: Catalog search
+
+    @Test func aSearchAnswerBelongsOnlyToTheTermStillInTheField() {
+        #expect(!ExploreSearch.accepts(term: "pdf", currentQuery: "pdfs"))
+        #expect(ExploreSearch.accepts(term: "pdf", currentQuery: "pdf "))
+        #expect(ExploreSearch.accepts(term: "pdf", currentQuery: " pdf"))
+        #expect(!ExploreSearch.accepts(term: "pdf", currentQuery: ""))
+    }
+
     // MARK: Catalog tabs
 
     @Test func onlyTheSelectedTabIsAnnouncedAsSelected() {

@@ -66,6 +66,7 @@ struct ResetExecutor {
             remove(url, report: &report)
         }
         if plan.options.memories == .keep { removeLeftovers(of: memories, report: &report) }
+        removeBrowserData(report: &report)
 
         for account in plan.secretAccounts { vault.remove(account) }
         preferences.removeAll(keeping: ResetGuard.keepsPreference)
@@ -102,6 +103,21 @@ struct ResetExecutor {
             let name = url.lastPathComponent
             if name == KeptMemories.folderName || report.failures.contains("memoria/\(name)") { continue }
             remove(url, report: &report)
+        }
+    }
+
+    // MARK: Browser
+
+    /// What the Orbs' browsers kept in `navegador/` (BrowserHub): a folder per Orb, named by its id (profile with logins and
+    /// cookies, saved states), and `sessoes/` (how each browser was launched). Deleting an Orb removes its folder, so a reset
+    /// does too: the new Orbs have other ids and the old logins would stay on the disk for ever. The tools the installer put
+    /// there (`bin/`, `chrome/`, `instalados.json`, `atualizacoes.json`, `agent-browser.json`, `lancadores/`) are not data and stay.
+    private func removeBrowserData(report: inout ResetReport) {
+        let browser = directory.appending(path: "navegador", directoryHint: .isDirectory)
+        for url in (try? files.contentsOfDirectory(at: browser, includingPropertiesForKeys: nil)) ?? [] {
+            let name = url.lastPathComponent
+            guard UUID(uuidString: name) != nil || name == "sessoes" else { continue }
+            do { try files.removeItem(at: url) } catch { report.failures.append("navegador/\(name)") }
         }
     }
 

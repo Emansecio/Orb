@@ -217,6 +217,28 @@ import Testing
         #expect(read("dentro.txt", in: data.appending(path: "Outra pasta")) == "meu")
     }
 
+    @Test func theLoginsOfEachOrbsBrowserGoButTheInstalledToolsStay() throws {
+        let vault = MemoryVault()
+        try seed(vault: vault)
+        let browser = data.appending(path: "navegador")
+        try write("cookies", to: browser.appending(path: "\(atlas.id.uuidString)/chrome/Cookies"))
+        try write("{}", to: browser.appending(path: "\(atlas.id.uuidString)/estado/x.json"))
+        // An Orb that no longer exists left its profile too.
+        try write("cookies", to: browser.appending(path: "\(UUID().uuidString)/chrome/Cookies"))
+        try write("x", to: browser.appending(path: "sessoes/a.launch"))
+        for tool in ["bin/agent-browser", "chrome/chrome-1/app", "instalados.json", "atualizacoes.json", "agent-browser.json", "lancadores/chrome.sh"] {
+            try write("ferramenta", to: browser.appending(path: tool))
+        }
+
+        let report = executor(vault).run(plan(ResetOptions(memories: .erase, leavesProviders: true)))
+
+        #expect(report.isComplete)
+        #expect(Set(try FileManager.default.contentsOfDirectory(atPath: browser.path))
+            == ["bin", "chrome", "instalados.json", "atualizacoes.json", "agent-browser.json", "lancadores"])
+        #expect(read("bin/agent-browser", in: browser) == "ferramenta")
+        #expect(read("chrome/chrome-1/app", in: browser) == "ferramenta")
+    }
+
     /// The Keychain's own paths (`Keychain.lookup`, `Keychain.write`) on a dictionary: the vault the app uses, without
     /// the real Keychain. OpenBot's old items are in the same dictionary, under their service.
     private final class FakeKeychain: KeychainItems, SecretVault, @unchecked Sendable {

@@ -48,6 +48,23 @@ struct PaletteContrastTests {
     }
 }
 
+// MARK: Login item
+
+struct LoginItemStateTests {
+    @Test func theSwitchIsOnOnlyWhenEnabledAndASilentOffIsNeverLeftUnexplained() {
+        let enabled = LoginItemState(.enabled)
+        #expect(enabled.isOn && enabled.message == nil)
+        let off = LoginItemState(.notRegistered)
+        #expect(!off.isOn && off.message == nil)
+        // The person turned the Orb off in the System Settings: register() does not throw, the status waits for approval.
+        let waiting = LoginItemState(.requiresApproval)
+        #expect(!waiting.isOn && waiting.needsApproval)
+        #expect(waiting.approvalMessage?.contains("Itens de Início") == true)
+        let missing = LoginItemState(.notFound)
+        #expect(!missing.isOn && missing.message?.isEmpty == false && missing.approvalMessage == nil)
+    }
+}
+
 // MARK: Providers
 
 struct ProviderPresentationTests {

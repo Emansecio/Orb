@@ -21,6 +21,18 @@ import Testing
         #expect(NoticeAction.reviewSkill.title == "Revisar" && NoticeAction.reviewSkill.symbol == "wand.and.stars")
     }
 
+    @Test func aNoticeThatOnlyInformsNeverAsksWhetherItIsTheLastOne() {
+        var reads = 0
+        func offers() -> Bool { reads += 1; return true }
+        let informs = NoticeAction.actions(for: "Você interrompeu esta resposta")
+        #expect(informs.isEmpty)
+        let showsWithout = NoticeAction.showsButtons(actions: informs, offers: offers())
+        #expect(!showsWithout)
+        #expect(reads == 0, "the chat's items and state are not read for a notice without actions")
+        let showsWith = NoticeAction.showsButtons(actions: [.retry], offers: offers())
+        #expect(showsWith && reads == 1)
+    }
+
     @Test func aFailureOffersToTryAgain() {
         #expect(NoticeAction.actions(for: "Não deu certo: Sem conexão com o provedor: tempo esgotado") == [.retry])
         #expect(NoticeAction.actions(for: "Não deu certo: O modelo não respondeu.") == [.retry])
@@ -359,6 +371,8 @@ import Testing
         #expect(TranscriptSpeech.user(text: "veja", attachmentCount: 3) == "Você: veja, com 3 anexos")
         #expect(TranscriptSpeech.reply(of: "Atlas") == "Resposta de Atlas")
         #expect(TranscriptSpeech.notice("Pausei") == "Aviso: Pausei")
+        #expect(TranscriptSpeech.tool(title: "Rodou", detail: "ls -la", state: .failed) == "Rodou ls -la, falhou")
+        #expect(!TranscriptSpeech.tool(title: "Rodou", detail: "ls -la", state: .done).contains("falhou"))
         #expect(TranscriptSpeech.approval(botName: "Atlas", title: "Rodando no Terminal") == "Atlas pede permissão: Rodando no Terminal")
     }
 }

@@ -431,7 +431,9 @@ até o fim:
    termina), `BackgroundJobs.killAllNow()`, e então, na ordem: move a memória de cada Orb para `_guardadas` com o perfil (ou, em
    "Apagar tudo", remove `memoria/` inteira); remove **só o que o app grava** na pasta de dados (`ResetGuard.removes(entry:)`:
    `state.json` e suas cópias `state.json.…`, `rascunhos.json`, `conversations/`, `memoria/`, `anexos/`, `conectores/`, `saidas/`, `perfil/`, `uso/`; qualquer outro arquivo, como
-   `.migrado-do-openbot`, fica); apaga os segredos pelo cofre injetável (`SecretVault.remove` = `Keychain.set("")`, o mesmo
+   `.migrado-do-openbot`, fica); e, em `navegador/`, só os dados dos navegadores dos Orbs (uma pasta por id de Orb, com perfil, logins,
+   cookies e estados salvos, e `sessoes/`), como apagar um Orb faz: `bin/`, `chrome/` (Chrome for Testing), `instalados.json`,
+   `atualizacoes.json`, `agent-browser.json` e `lancadores/` são ferramentas e ficam; apaga os segredos pelo cofre injetável (`SecretVault.remove` = `Keychain.set("")`, o mesmo
    caminho público de apagar chave: conectores e, com "Também sair dos provedores", uma conta por provedor mais `chatgpt`;
    nunca o Claude Code); devolve as preferências ao padrão (`UserDefaults` do próprio app, menos `LegacyKeychainLedger.key`);
    grava um `state.json` novo só com os provedores, o modelo padrão e as janelas aprendidas quando eles ficam; e, se a pasta do

@@ -54,6 +54,12 @@ enum QuickAskReplyText {
         return nil
     }
 
+    /// Whether the header says what the Orb is doing instead of "respondeu": before any reply and while one is written, and also
+    /// while the Orb still works after a message it already closed ("Vou ver o que tem lá." and then commands).
+    static func showsWork(reply: Reply?, isWorking: Bool) -> Bool {
+        reply == nil || reply?.isStreaming == true || isWorking
+    }
+
     /// The last `maxLines` lines that have text, with the blank line between paragraphs kept (one, however many there
     /// were), and whether something was left out at the start. A list's "- " becomes a bullet.
     static func excerpt(_ text: String, maxLines: Int = 6) -> (text: String, isCut: Bool) {
@@ -377,7 +383,7 @@ struct QuickAskReply: View {
             HStack(spacing: 8) {
                 // Rests when the Orb is idle (the finished reply stays on screen for a while).
                 BotAvatar(live: live, size: 18, paused: live.activity == .idle)
-                if let work = live.shownWork, reply == nil || reply?.isStreaming == true {
+                if let work = live.shownWork, QuickAskReplyText.showsWork(reply: reply, isWorking: live.isWorking) {
                     Text("\(live.look.name): \(work.text)")
                         .shimmer(active: work.shimmers, pulses: work.runsCommand)
                         .font(.system(size: 12, weight: .medium))

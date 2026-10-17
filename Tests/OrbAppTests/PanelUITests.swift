@@ -227,4 +227,11 @@ import Testing
         #expect(NewBotSheetLayout.height(windowHeight: 300) == NewBotSheetLayout.minimumHeight)
         #expect(NewBotSheetLayout.height(preferred: 720, windowHeight: 2_000) == 720)
     }
+
+    @Test func theRoleOfANewOrbIsTrimmedAndOnlySpacesMeanTheDefault() {
+        #expect(NewBotSheet.finalRole("   ") == "Assistente pessoal")
+        #expect(NewBotSheet.finalRole("") == "Assistente pessoal")
+        #expect(NewBotSheet.finalRole(" \n ") == "Assistente pessoal")
+        #expect(NewBotSheet.finalRole(" Cuida da agenda ") == "Cuida da agenda")
+    }
 }

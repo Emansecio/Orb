@@ -147,6 +147,34 @@ private func drafting(_ json: String) -> [LLMEvent] {
         #expect(calls.count == 2 && calls[1].messages.filter { $0.role == .user }.count == 1)
     }
 
+    @MainActor @Test func aReplyCutMidwayLeavesNoHalfSentenceInTheChatToBeRepeatedOnRetry() async {
+        let dropped = LLMError.network(code: URLError.networkConnectionLost.rawValue, message: "The network connection was lost.")
+        // Two cuts end the turn (the first is carried on by the engine); then the retry is answered whole.
+        let script = CallScript(replies: [.failing(dropped, after: [.text("Entendi, vou")]), .failing(dropped, after: [.text("Entendi, vou")]),
+                                          .say("Voltei.")])
+        let (_, runner) = setUp(script)
+        runner.send("quero um Orb")
+        await settled(runner)
+        #expect(runner.failure != nil && runner.liveText.isEmpty)
+        #expect(botTexts(runner) == [WizardPrompt.firstLine], "the cut sentence is not left in the chat")
+        runner.retry()
+        await settled(runner)
+        #expect(botTexts(runner) == [WizardPrompt.firstLine, "Voltei."])
+        #expect(runner.userMessageCount == 1)
+    }
+
+    @MainActor @Test func leavingForTheFormAfterATextFlushedByAToolDropsThatTextToo() async {
+        let script = CallScript([[.text("Vou ver."), .toolCalls([ToolCallRequest(id: "t1", name: "orb_draft", arguments: #"{"name":"Maia"}"#)]),
+                                  .finished(.toolUse, nil)], said("Voltei.")], holdsCall: 2)
+        let (_, runner) = setUp(script)
+        runner.send("quero um Orb")
+        await waitUntil("the second call") { await script.calls.count == 2 }
+        #expect(botTexts(runner).contains("Vou ver."))
+        runner.stopTalking()
+        #expect(botTexts(runner) == [WizardPrompt.firstLine])
+        await script.release()
+    }
+
     @MainActor @Test func leavingForTheFormMidAnswerOffersTryAgainForTheUnansweredMessage() async {
         let script = CallScript([said("Voltei.")], holdsCall: 1)
         let (_, runner) = setUp(script)

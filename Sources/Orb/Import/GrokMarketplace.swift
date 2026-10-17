@@ -157,6 +157,8 @@ enum GrokMarketplace {
             let listed = bots(inPage: try await fetch(home))
             guard !listed.isEmpty else { throw MarketplaceFailure.unreadable }
             guard let found = listed.first(where: { $0.addHref == "/bot/\(id)" }), !found.id.isEmpty else { throw MarketplaceFailure.notFound }
+            // The id comes from the site's HTML: it becomes part of an address, so it must look like one (as in `catalog`).
+            guard isToken(found.id) else { throw MarketplaceFailure.unreadable }
             slug = found.id
         }
         let html = try await fetch(Link.page(slug).url)

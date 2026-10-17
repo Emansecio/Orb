@@ -339,6 +339,21 @@ struct UsagePricingTests {
 
 @MainActor
 struct UsagePriceCorrectionTests {
+    @Test func theEditorStartsFromTheTablePriceNotFromTheHoursFactor() throws {
+        let book = PriceBook()
+        let base = try #require(PriceTable.price(forModel: "deepseek-v4-pro"))
+        // A Saturday, off-peak for DeepSeek: the price of that moment is half, and must not be what gets frozen as a correction.
+        let saturday = Date(timeIntervalSince1970: 1_792_238_400)
+        #expect(!PriceTable.isDeepSeekPeak(saturday))
+        #expect(PriceTable.price(forModel: "deepseek-v4-pro", at: saturday) != base)
+        let baseline = try #require(PriceDraft.baseline(for: "openrouter/deepseek/deepseek-v4-pro", in: book))
+        #expect(baseline.price == base && baseline.source == .table)
+        #expect(PriceDraft(baseline.price).input == UsageFormat.priceText(base.input))
+        // A Gemini Flash whose price doubles in 2027.
+        let gemini = try #require(PriceTable.price(forModel: "gemini-3.6-flash"))
+        #expect(PriceDraft.baseline(for: "openrouter/google/gemini-3.6-flash", in: book)?.price == gemini)
+    }
+
     @Test func correctingAPriceSavesItAndRestoringRemovesIt() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "OrbPriceFix-\(UUID().uuidString)")
         defer { removeTestFolder(root) }

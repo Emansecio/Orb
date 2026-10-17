@@ -115,7 +115,7 @@ struct UsageReport: Equatable, Sendable {
     static let seriesLimit = 5
     static let othersID = "outros"
 
-    /// `names`: the Orbs the app has now, by id (a deleted Orb keeps the name the history remembers, `rememberedNames`).
+    /// `orbNames`: the Orbs the app has now, by id (a deleted Orb keeps the name the history remembers, `rememberedNames`).
     static func make(buckets: [UsageBucket], period: UsagePeriod, now: Date, calendar: Calendar = .current, book: PriceBook,
                      orbNames: [UUID: String], rememberedNames: [UUID: String] = [:]) -> UsageReport {
         let interval = period.interval(now: now, calendar: calendar)

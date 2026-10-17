@@ -734,7 +734,7 @@ Ajustes → Geral → Seus dados → **Redefinir o Orb…** volta o app ao prime
 
 Sempre somem: os Orbs, as conversas (atuais, anteriores e de rotinas), os rascunhos não enviados, os anexos e as saídas de ferramentas, o seu perfil (texto e
 foto; nunca vai para as memórias guardadas), o histórico de uso e custos, as rotinas, os
-conectores e os segredos deles no Keychain, as skills instaladas ou criadas, as liberações ("Sempre permitir") e os ajustes do
+conectores e os segredos deles no Keychain, os perfis dos navegadores dos Orbs (logins e cookies; o agent-browser e o Chrome que o Orb instalou ficam), as skills instaladas ou criadas, as liberações ("Sempre permitir") e os ajustes do
 app (voltam ao padrão, inclusive o primeiro uso). Nada fora da pasta de dados e do Keychain do app é tocado (dentro da pasta de
 dados, só o que o Orb mesmo grava), e a migração do OpenBot não roda de novo: as chaves que o Orb apagou não voltam do Keychain
 antigo. Se `ORB_DATA_DIR` aponta para uma pasta que não parece do Orb (sem `state.json`) ou para `~/Orbs`, a redefinição recusa.

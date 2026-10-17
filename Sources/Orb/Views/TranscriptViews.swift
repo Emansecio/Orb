@@ -143,6 +143,11 @@ enum TranscriptSpeech {
 
     static func notice(_ text: String) -> String { "Aviso: \(text)" }
 
+    /// A tool's line: what it did, and that it failed (the label of the button replaces the mark's own "Falhou").
+    static func tool(title: String, detail: String, state: ToolCall.State) -> String {
+        "\(title) \(detail)" + (state == .failed ? ", falhou" : "")
+    }
+
     static func approval(botName: String, title: String) -> String { "\(botName) pede permissão: \(title)" }
     static func handoff(title: String) -> String { "\(title). Termine no navegador e responda Pronto ou Cancelar" }
 }
@@ -650,13 +655,13 @@ struct ReplyGrewAction: Equatable {
     static func == (lhs: ReplyGrewAction, rhs: ReplyGrewAction) -> Bool { lhs.id == rhs.id }
 }
 
-/// The parsed Markdown of text that is done changing, so a row the LazyVStack recreates while scrolling (or a
-/// paragraph that moves from "being written" to "finished") is not parsed again. Two generations: when the newer one
-/// is full the older is dropped, so memory stays bounded and what was used lately survives. Inline text
-/// (`attributed`) and the blocks of a text (`blocks`) are kept apart.
 /// UTF-8 bytes of source text a generation of `MarkdownCache` holds.
 private let markdownGenerationBytes = 512 * 1024
 
+/// The parsed Markdown of text that is done changing (the final text of an answer; the streaming rows use `cached: false`
+/// and do not fill it), so a row the LazyVStack recreates while scrolling is not parsed again. Two generations: when the
+/// newer one is full the older is dropped, so memory stays bounded and what was used lately survives. Inline text
+/// (`attributed`) and the blocks of a text (`blocks`) are kept apart.
 @MainActor
 enum MarkdownCache {
     private struct Key: Hashable {
@@ -804,7 +809,7 @@ struct ToolCallLine: View {
             .help(call.output == nil ? "" : Tip.toggleOutput(isExpanded: isExpanded))
             // Running -> done or failed: the mark of the state comes in (see `stateMark`).
             .motion(Motion.enter, value: call.state)
-            .accessibilityLabel("\(call.title) \(call.detail)")
+            .accessibilityLabel(TranscriptSpeech.tool(title: call.title, detail: call.detail, state: call.state))
             .accessibilityValue(call.output == nil ? "" : (isExpanded ? "expandido" : "recolhido"))
             .accessibilityHint(call.output == nil ? "" : "Mostra a saída")
 
@@ -1121,7 +1126,7 @@ private struct NoticeLine: View {
         }
         // The buttons come with the notice's turn to be the last thing in the chat (and go when something follows): the
         // transition was there, the trigger was not (§2.13).
-        .motion(Motion.content, value: offersActions && !actions.isEmpty)
+        .motion(Motion.content, value: NoticeAction.showsButtons(actions: actions, offers: offersActions))
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 4)
         .alignedWithReplyText()

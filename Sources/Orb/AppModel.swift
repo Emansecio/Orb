@@ -1249,6 +1249,13 @@ final class AppModel {
         connectorSync?.cancel()
         let mcp = mcp
         ending.append(Task { await mcp.sync([]) })
+        // The Orbs' browsers close too (as when an Orb is deleted): the reset removes their profiles, and a Chrome still running
+        // would write into them again.
+        let browsers = browserHub
+        for bot in bots {
+            let id = bot.id
+            ending.append(Task { _ = await browsers.close(botID: id) })
+        }
         let finished = OSAllocatedUnfairLock(initialState: false)
         Task {
             for task in ending { await task.value }

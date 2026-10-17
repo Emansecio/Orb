@@ -38,6 +38,9 @@ final class WizardRunner {
     /// Where the new Orb's own folder is made (`~/Orbs`; a test puts a temporary one).
     @ObservationIgnored var orbsBase = OrbFolder.defaultBase
     @ObservationIgnored private var historyMark = 0
+    /// How many messages the chat had when the turn began (the person's own included): what the turn wrote after that goes
+    /// when it fails or is stopped, so "Tentar de novo" does not show the same answer twice.
+    @ObservationIgnored private var messagesMark = 0
 
     init(model: AppModel? = nil) {
         self.model = model
@@ -71,9 +74,6 @@ final class WizardRunner {
         guard isThinking else { return .idle }
         return liveText.isEmpty ? .thinking : .speaking
     }
-
-    /// Whether the assistant can talk at all: the app's default model is connected and on.
-    static func canConverse(_ model: AppModel) -> Bool { model.isProviderReady }
 
     func attach(_ model: AppModel) {
         guard self.model == nil else { return }
@@ -114,6 +114,7 @@ final class WizardRunner {
         isThinking = false
         failure = Self.interrupted
         if history.count > historyMark { history.removeSubrange(historyMark...) }
+        dropTurnMessages()
     }
 
     /// "Voltar a conversar" on the final card.
@@ -128,7 +129,7 @@ final class WizardRunner {
     @discardableResult
     func create(look: OrbConfig = OrbConfig()) -> Bot? {
         guard let model, !isFinished, draft.canCreate else { return nil }
-        let bot = model.createBot(name: draft.name, role: draft.role.isEmpty ? "Assistente pessoal" : draft.role, orb: look,
+        let bot = model.createBot(name: draft.name, role: NewBotSheet.finalRole(draft.role), orb: look,
                                   model: "", mode: draft.mode, identity: draft.instructions, interview: false, folder: .own,
                                   base: orbsBase)
         let capabilities = draft.capabilities.subtracting([.connectors])
@@ -198,6 +199,7 @@ final class WizardRunner {
         isThinking = true
         liveText = ""
         historyMark = history.count
+        messagesMark = messages.count
         let usedModel = ref.text
         // Every provider, Claude Code's included, goes through the native engine (`account.client` picks the transport).
         turn = Task { [weak self] in await self?.runNative(prompt: prompt, ref: ref, account: account, usedModel: usedModel) }
@@ -220,11 +222,11 @@ final class WizardRunner {
                                   maxSteps: Self.maxSteps,
                                   permissions: { PermissionState(mode: .readOnly, rules: []) },
                                   supportsImages: false, picksUpTask: false, onlyTools: [OrbDraftTool.name])
-        await consume(model.engine.run(request), usedModel: usedModel, tracksHistory: true)
+        await consume(model.engine.run(request), usedModel: usedModel)
     }
 
     /// Reads a turn's events into the chat.
-    private func consume(_ events: AsyncStream<TurnEvent>, usedModel: String, tracksHistory: Bool) async {
+    private func consume(_ events: AsyncStream<TurnEvent>, usedModel: String) async {
         var failed = false
         var reachedStepLimit = false
         for await event in events {
@@ -235,7 +237,7 @@ final class WizardRunner {
             case .toolStarted:
                 flushLiveText()
             case .message(let message):
-                if tracksHistory { history.append(message) }
+                history.append(message)
             case .requestUsage(let used):
                 record(UsageTotals(used), model: usedModel)
             case .usage:
@@ -250,14 +252,17 @@ final class WizardRunner {
             }
         }
         guard !Task.isCancelled, !isFinished else { return }
-        flushLiveText()
         isThinking = false
         turn = nil
         if failed {
-            // The turn's own messages leave the history: "Tentar de novo" sends the same message to the same state.
-            if tracksHistory, history.count > historyMark { history.removeSubrange(historyMark...) }
+            // The turn's own messages leave the history and the chat, and what had streamed is dropped: "Tentar de novo"
+            // sends the same message to the same state (the answer starts over, it does not follow a cut sentence).
+            liveText = ""
+            if history.count > historyMark { history.removeSubrange(historyMark...) }
+            dropTurnMessages()
             return
         }
+        flushLiveText()
         if reachedStepLimit || userMessageCount >= Self.maxUserMessages { closeWithWhatThereIs() }
     }
 
@@ -265,6 +270,11 @@ final class WizardRunner {
         failure = message
         isThinking = false
         turn = nil
+    }
+
+    /// The turn's words that already became messages of the chat (a tool call flushes them) go: it is being redone.
+    private func dropTurnMessages() {
+        if messages.count > messagesMark { messages.removeSubrange(messagesMark...) }
     }
 
     /// The answer's streamed words become a message of the chat.

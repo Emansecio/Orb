@@ -213,6 +213,20 @@ struct OrbDesignTests {
 
     // MARK: Motion
 
+    #if DEBUG || ORB_DEV_TOOLS
+    @Test @MainActor func theIconSheetRowsDoNotCoverEachOther() {
+        let layout = OrbDesignSheet.iconLayout(pixels: OrbDesignSheet.iconSizes)
+        let band = CGRect(origin: .zero, size: OrbDesignSheet.iconBand)
+        for (first, top) in layout.row1 {
+            #expect(band.contains(top), "\(first)")
+            for (second, bottom) in layout.row2 {
+                #expect(!top.intersects(bottom), "the \(first) px icon of row 1 and the magnified \(second) px of row 2")
+            }
+        }
+        #expect(layout.row1.count == 7 && layout.row2.count == 4)
+    }
+    #endif
+
     @Test func happinessIsABurstThatCalmsDown() {
         func peak(_ range: ClosedRange<Double>) -> Double {
             stride(from: range.lowerBound, through: range.upperBound, by: 0.005)

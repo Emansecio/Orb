@@ -65,6 +65,7 @@ enum Tip {
     static let routinePermissions = "Define como a rotina pede permissão, já que ninguém responde"
     static let allRoutines = "Abre a página Rotinas, com as de todos os Orbs"
     static func routineToggle(isOn: Bool) -> String { isOn ? "Pausa esta rotina" : "Ativa esta rotina" }
+    static let routineDatePassed = "A data desta rotina já passou. Edite a data para ligar de novo"
 
     // MARK: Orb panel
 
@@ -213,6 +214,7 @@ enum Tip {
     // MARK: Ajustes
 
     static let launchAtLogin = "Abre o Orb sozinho quando você entra no Mac"
+    static let openLoginItems = "Abre Itens de Início, nos Ajustes do Sistema, onde o Orb espera a sua aprovação"
     static let notifyWhenDone = "Mostra uma notificação quando um Orb termina ou precisa de você"
     static let proposeSkills = "Deixa o Orb propor skills; nada é salvo sem a sua aprovação"
     static let summarizeSessions = "Pede ao modelo um resumo das conversas longas guardadas; uma chamada curta por conversa"
@@ -303,7 +305,7 @@ enum Tip {
          manageGrants, adjustContext, chooseModel, forgetWindow, suggestion, routineIdea, queueAfterTask, steerNow,
          newRoutine, editRoutine, deleteRoutine, runRoutineNow, runRoutineAgain, queuedRoutine, routineConversation,
          copyReport, openReportFile, runOnceNow, routinePermissions, allRoutines,
-         routineToggle(isOn: true), routineToggle(isOn: false),
+         routineToggle(isOn: true), routineToggle(isOn: false), routineDatePassed,
          customizeOrb, refreshFolder, removeGrant, removeAllGrants, recreateFolder, changeFolder, manageConnectors, cancelLogin,
          macPermissions, showInstructions, openFolderInFinder("Orb"), openFolderInTerminal("Orb"),
          createFirstOrb, showWelcome, skillsPage, keptMemoryInFinder, dismissNotice, deleteWithMemory,
@@ -323,7 +325,7 @@ enum Tip {
          createAtlas, startWithClaudeCode, otherWaysToConnect(isShowing: true), otherWaysToConnect(isShowing: false),
          newRoutineCreatingAtlas, newRoutineNeedingModel, routineTemplateCreatingAtlas, allKeptMemories, continueFromMemory, modelSettings, useClaudeCode, signInClaudeCode, signInChatGPT,
          pasteKey, stopConnecting, retryConnecting, useLocalServer("Ollama"), createOrbSheet(),
-         launchAtLogin, notifyWhenDone, proposeSkills, summarizeSessions, reviewDictation, orbsCanTalk, orbsCanStartGroups, dataFolder, keptMemoriesFolder, orbsFolder, resetOrb,
+         launchAtLogin, openLoginItems, notifyWhenDone, proposeSkills, summarizeSessions, reviewDictation, orbsCanTalk, orbsCanStartGroups, dataFolder, keptMemoriesFolder, orbsFolder, resetOrb,
          openSystemNotifications, askNotifications, globalShortcut,
          profilePhotoAvatar, profilePhotoChoose, profilePhotoRemove,
          addProvider, refreshModels, removeProvider, signOutChatGPT, replaceKey, deleteKey, saveKey, keepKey, getKey, listAllModels,

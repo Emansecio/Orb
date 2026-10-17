@@ -881,7 +881,8 @@ private struct RoutineRow: View {
                     .toggleStyle(.switch)
                     .labelsHidden()
                     .controlSize(.mini)
-                    .help(Tip.routineToggle(isOn: current.isEnabled))
+                    .disabled(!current.canBeEnabled())
+                    .help(current.canBeEnabled() ? Tip.routineToggle(isOn: current.isEnabled) : Tip.routineDatePassed)
             }
             if let goal = current.goal { GoalProgressView(goal: goal, font: .system(size: 12), showsNote: false) }
             VStack(alignment: .leading, spacing: 6) {

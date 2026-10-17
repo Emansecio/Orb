@@ -232,6 +232,13 @@ import Testing
         #expect(v3.name == "Nova" && v3.identity?.text == "Nô voa.")
     }
 
+    @Test func aCharacterNameWithTemplateCharactersIsWrittenAsItIs() throws {
+        for name in ["Cash$0", "Ana\\Bia", "R$1 \\$2"] {
+            let found = try OrbImportReader.read(text: json(["name": name, "description": "{{char}} voa."]))
+            #expect(found.identity?.text == "\(name) voa.", "\(name)")
+        }
+    }
+
     @Test func jsonThatIsNoCardFailsWithAMessage() {
         #expect(throws: ImportFailure.notACard) { try OrbImportReader.read(text: "{ não é json") }
         #expect(throws: ImportFailure.notACard) { try OrbImportReader.read(text: "{\"description\": \"sem nome\"}") }

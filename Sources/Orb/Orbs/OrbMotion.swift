@@ -176,7 +176,8 @@ struct SpringPoint: Equatable {
 }
 
 /// Natural blinking: irregular intervals, quick close and slower open, and an occasional double blink. A blink asked for
-/// (the face changes, a wide glance) waits until the last one ended `minimumGap` ago, so changes in a row do not flutter.
+/// (the face changes, a wide glance) is ignored unless the last one ended at least `minimumGap` ago (it is not postponed),
+/// so changes in a row do not flutter.
 struct Blinker {
     private(set) var nextBlink: Double
     private var start: Double?

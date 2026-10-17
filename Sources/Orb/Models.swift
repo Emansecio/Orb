@@ -552,6 +552,15 @@ struct Routine: Identifiable, Codable, Sendable {
         if enabled && !isEnabled { lastRun = now }
         isEnabled = enabled
     }
+
+    /// Whether turning it on would leave it a next run. A routine for one moment that has already passed would not: it would
+    /// show as on and never run (its date has to change first).
+    func canBeEnabled(now: Date = .now) -> Bool {
+        guard !isEnabled else { return true }
+        var switched = self
+        switched.setEnabled(true, now: now)
+        return switched.nextRun != .distantFuture
+    }
 }
 
 extension Routine {
@@ -742,6 +751,18 @@ extension Skill {
 
     /// `source` of the skills an Orb proposed and you approved (`SkillProposal`).
     static let learnedSource = "aprendida"
+
+    /// This skill with what the editor changes (name, command, summary, instructions, which Orbs) taken from `edited`; everything
+    /// else (uses, switch, source) stays as it is now, even if it moved while the editor was open on an older copy.
+    func applyingEdits(from edited: Skill) -> Skill {
+        var skill = self
+        skill.name = edited.name
+        skill.slug = edited.slug
+        skill.summary = edited.summary
+        skill.instructions = edited.instructions
+        skill.orbIDs = edited.orbIDs
+        return skill
+    }
 
     /// An Orb may propose a better version of it: written by you or learned, not shipped with the app or installed from the catalog.
     var isImprovable: Bool { source == nil || source == Self.learnedSource }
