@@ -318,6 +318,17 @@ struct WebSearchToolTests {
         #expect(keys.tinyFish == nil && vault.get("search-tinyfish") == nil)
     }
 
+    @Test func anEmptyFieldNeverReachesTheKeychain() {
+        let keys = SearchKeys(vault: vault)
+        #expect(keys.setTinyFish("tf-123"))
+        for typed in ["", "   ", "\n"] {
+            #expect(SearchKeyCopy.valueToSave(typed) == nil, "Return on an empty field stores nothing and deletes nothing")
+            if let value = SearchKeyCopy.valueToSave(typed) { keys.setTinyFish(value) }
+        }
+        #expect(keys.tinyFish == "tf-123")
+        #expect(SearchKeyCopy.valueToSave(" abc ") == "abc")
+    }
+
     @Test func resetRemovesTheKeyWithTheProvidersKeys() {
         #expect(ResetPlan.providerAccounts.contains(SearchKeys.tinyFishAccount))
     }
