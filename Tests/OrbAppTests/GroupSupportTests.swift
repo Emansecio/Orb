@@ -315,11 +315,46 @@ struct GroupMemoryTests {
         #expect(!page.title.contains("\n") && page.title.count <= 71)
     }
 
+    @Test func aHeadingKeepsItsTrailingHashInTheSessionPage() {
+        let page = GroupBoard.sessionPage(request: "x", result: "# Aprender C#\n#1 prioridade: entregar\n## Nota #", members: [], turns: 1,
+                                          tokens: 1, group: "g", started: Date(timeIntervalSince1970: 1_000_000))
+        #expect(page.body.contains("## Resultado\nAprender C#\n1 prioridade: entregar\nNota #"))
+    }
+
     @Test func usageReadsLikeTheClosingLine() {
         #expect(GroupUsageText.summary(turns: 1, tokens: 1) == "1 turno · 1 token")
         #expect(GroupUsageText.summary(turns: 5, tokens: 999) == "5 turnos · 999 tokens")
         #expect(GroupUsageText.summary(turns: 12, tokens: 42_400) == "12 turnos · 42 mil tokens")
         #expect(GroupUsageText.summary(turns: 3, tokens: 1_500) == "3 turnos · 2 mil tokens")
+    }
+
+    @Test func aMillionTokensIsNotSaidAsAThousandThousand() {
+        #expect(GroupUsageText.summary(turns: 20, tokens: 1_250_000) == "20 turnos · 1,3 milhão de tokens")
+        #expect(GroupUsageText.summary(turns: 2, tokens: 2_000_000) == "2 turnos · 2 milhões de tokens")
+        #expect(!GroupUsageText.tokens(999_600).contains("1000"))
+        #expect(GroupUsageText.tokens(999_400) == "999 mil tokens")
+    }
+}
+
+struct GroupBoardSavingTests {
+    @Test @MainActor func anObjectiveTheBankRefusesSaysSo() async {
+        let world = GroupWorld()
+        await world.model.saveGroupObjective(String(repeating: "a", count: MemoryBank.identityMaximumLength + 1), of: world.groupID)
+        #expect(world.model.dataNotices.count == 1)
+        #expect(world.model.groupBoard(world.groupID).identity.isEmpty)
+        await world.model.saveGroupObjective("Entregar o relatório.", of: world.groupID)
+        #expect(world.model.dataNotices.count == 1)
+        #expect(world.model.groupBoard(world.groupID).identity.contains("Entregar o relatório."))
+    }
+
+    @Test @MainActor func anAgreementThatCouldNotBeWrittenSaysSo() async {
+        let world = GroupWorld()
+        await world.model.saveGroupAgreement("Escrever em tópicos.", of: world.groupID)
+        #expect(world.model.dataNotices.isEmpty)
+        let bank = world.model.memory.groupBank(for: world.groupID)
+        bank.close()
+        await world.model.saveGroupAgreement("Outro combinado.", of: world.groupID)
+        #expect(world.model.dataNotices.count == 1)
     }
 }
 

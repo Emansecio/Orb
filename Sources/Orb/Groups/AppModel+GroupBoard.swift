@@ -15,19 +15,29 @@ extension AppModel {
 
     /// Writes the objective (the board's identity note).
     func setGroupObjective(_ id: UUID, to text: String) {
-        Task {
-            await setGroupObjective(text, of: id)
-            await refreshGroupBoard(id)
+        Task { await saveGroupObjective(text, of: id) }
+    }
+
+    /// The body of `setGroupObjective(_:to:)`: a refused or failed write says so (the field would otherwise look saved).
+    func saveGroupObjective(_ text: String, of id: UUID) async {
+        if await !setGroupObjective(text, of: id) {
+            addNotice(StoreNotice(message: "Não consegui salvar o objetivo do grupo: o texto passa de \(MemoryBank.identityMaximumLength / 1000) mil caracteres ou a pasta não aceitou a gravação."))
         }
+        await refreshGroupBoard(id)
     }
 
     /// Adds an agreement the person made: a preference of the board, written as theirs.
     func rememberGroupAgreement(_ id: UUID, text: String) {
         guard group(id) != nil else { return }
-        Task {
-            _ = await memory.groupBank(for: id).remember(text, kind: .preferencia, origin: .voce)
-            await refreshGroupBoard(id)
+        Task { await saveGroupAgreement(text, of: id) }
+    }
+
+    /// The body of `rememberGroupAgreement(_:text:)`: a write that failed says so.
+    func saveGroupAgreement(_ text: String, of id: UUID) async {
+        if await memory.groupBank(for: id).remember(text, kind: .preferencia, origin: .voce) == .failed {
+            addNotice(StoreNotice(message: "Não consegui salvar o combinado do grupo: a pasta não aceitou a gravação."))
         }
+        await refreshGroupBoard(id)
     }
 
     /// "Esquecer" on the board; the page is kept for the "Desfazer" that follows.
