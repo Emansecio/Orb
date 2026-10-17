@@ -155,6 +155,8 @@ final class ToolTests {
             // The Orb's own browser: they look at the page it already has open (which asked first), and "Só leitura" refuses them
             // all the same (`PermissionCall.readsLivePage`).
             "browse_snapshot", "browse_read", "browse_screenshot", "browse_scroll", "browse_back", "browse_tabs", "browse_close",
+            // Without an action they only look: waiting, finding text, the dialog's and the proxy's status, the manual.
+            "browse_wait", "browse_find", "browse_dialog", "browse_proxy", "browse_run",
         ])
     }
 
