@@ -280,6 +280,15 @@ import Testing
         #expect(QuickAskReplyText.latestReply(in: [old, user, tool, fresh])?.isStreaming == true)
     }
 
+    @Test func theHeaderNamesTheWorkWhileTheOrbWorksEvenAfterAClosedMessage() {
+        let closed = QuickAskReplyText.Reply(itemID: UUID(), text: "Vou ver o que tem lá.", isStreaming: false)
+        let writing = QuickAskReplyText.Reply(itemID: UUID(), text: "Vou", isStreaming: true)
+        #expect(QuickAskReplyText.showsWork(reply: closed, isWorking: true))
+        #expect(!QuickAskReplyText.showsWork(reply: closed, isWorking: false))
+        #expect(QuickAskReplyText.showsWork(reply: nil, isWorking: false))
+        #expect(QuickAskReplyText.showsWork(reply: writing, isWorking: true))
+    }
+
     @Test func excerptKeepsTheLastLines() {
         let text = (1...10).map { "linha \($0)" }.joined(separator: "\n\n")
         let cut = QuickAskReplyText.excerpt(text, maxLines: 3)
