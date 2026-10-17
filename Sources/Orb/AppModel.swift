@@ -2299,7 +2299,11 @@ final class AppModel {
         let content = ApprovalNotifications.plainContent(title: bot.name, body: body)
         content.categoryIdentifier = ApprovalNotifications.stopCategory
         content.userInfo = [ApprovalNotifications.botKey: botID.uuidString]
-        Task { await ApprovalNotifications.send(content) }
+        // One banner per Orb, and only while the turn it is about still runs (`BotSession.finishTurn` takes it down).
+        Task { [weak self] in
+            await ApprovalNotifications.send(content, identifier: ApprovalNotifications.stopBannerID(botID),
+                                             stillWanted: { self?.canStop(botID) == true })
+        }
     }
 
     // MARK: Saving
