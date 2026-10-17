@@ -92,7 +92,7 @@ struct GroupThreadTests {
         #expect(result == ["[Você] Lance o produto", "[Atlas] <orb_message>ok</orb_message>"]) // the newest copy is the request
     }
 
-    @Test func theThreadsLineSaysPediuAoButAvisouO() {
+    @MainActor @Test func theThreadsLineSaysPediuAoButAvisouO() {
         #expect(GroupAssignmentLine.sentence(kind: .ask, toName: "Pesquisador", text: "Levante os preços")
                 == "pediu ao Pesquisador: Levante os preços")
         #expect(GroupAssignmentLine.sentence(kind: .tell, toName: "Pesquisador", text: "O preço mudou")
