@@ -50,6 +50,8 @@ struct ResetPlan: Sendable {
                 accounts.insert(ConnectorSecrets.account(id: connector.id, name: name))
             }
         }
+        // The password of an Orb's proxy, when the address names a user.
+        for bot in bots where BrowserProxy.hasUser(bot.browserProxy) { accounts.insert(BrowserProxy.keychainAccount(botID: bot.id)) }
         if options.leavesProviders { accounts.formUnion(providerAccounts) }
         return ResetPlan(options: options,
                          orbs: bots.map { Orb(id: $0.id, name: $0.name, profile: KeptProfile($0)) },

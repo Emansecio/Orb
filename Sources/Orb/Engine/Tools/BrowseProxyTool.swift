@@ -44,37 +44,56 @@ struct BrowseProxyTool: BrowseTool {
         }
     }
 
+    /// The longest the page that tells the exit address is waited for: a proxy that swallows the connection fails here, not after
+    /// the browser's own timeouts.
+    static let checkTimeout: TimeInterval = 40
+
     /// Reopens the browser with the new proxy and reads the address from the web; with a proxy that does not work, goes back to the
-    /// one it had and says so.
+    /// one it had and says so. Every page is opened and read under the browser's lock, in this conversation's tab.
     private func apply(_ proxy: String?, replacing old: String?, hub: BrowserHub, botID: UUID, context: ToolContext) async throws -> String {
-        let before = hub.existingSession(botID: botID)
-        let returnTo = before == nil ? nil : (try? await before?.driver.currentURL()).flatMap { $0 }
+        let scope = context.browser.scope, mode = context.browser.mode
+        let returnTo = await Self.currentPage(hub: hub, botID: botID, mode: mode, scope: scope)
         hub.setProxy(proxy, botID: botID)
-        let session = try await hub.session(botID: botID, mode: context.browser.mode)
         let address: String
         do {
-            address = try await session.exclusive {
-                _ = try await session.driver.open(BrowserProxy.ipCheckURL)
-                let readout = try await session.driver.read()
-                guard let found = BrowserProxy.address(in: readout.content) else {
-                    throw ToolError("the page that tells the exit address answered with something else: “\(readout.content.clipped(to: 120))”")
+            let session = try await hub.session(botID: botID, mode: mode, scope: scope)
+            address = try await withDeadline(Self.checkTimeout, "the page that tells the exit address") {
+                try await session.exclusive {
+                    session.forgetPage()
+                    _ = try await session.driver.open(BrowserProxy.ipCheckURL)
+                    let readout = try await session.driver.read()
+                    guard let found = BrowserProxy.address(in: readout.content) else {
+                        throw ToolError("the page that tells the exit address answered with something else: “\(readout.content.clipped(to: 120))”")
+                    }
+                    return found
                 }
-                return found
             }
         } catch {
             hub.setProxy(old, botID: botID)
-            let restored = try? await hub.session(botID: botID, mode: context.browser.mode)
-            restored?.forgetPage()
-            if let restored, let returnTo { _ = try? await restored.driver.open(returnTo) }
-            let why = (error as? ToolError)?.message ?? error.localizedDescription
-            throw ToolError("The browser could not load pages through \(proxy.map(BrowserProxy.display) ?? "a direct connection"): \(why). "
-                + "It is back to \(old.map(BrowserProxy.display) ?? "direct"). Check that the tunnel or proxy is up, then try again.")
+            if let restored = try? await hub.session(botID: botID, mode: mode, scope: scope) {
+                restored.forgetPage()
+                if let returnTo { _ = try? await restored.exclusive { try await restored.driver.open(returnTo) } }
+            }
+            if error is CancellationError { throw error }
+            let why = error is DeadlineExceeded ? "it did not answer in \(Int(Self.checkTimeout)) s"
+                : (error as? ToolError)?.message ?? error.localizedDescription
+            throw ToolError("The browser could not load pages through \(proxy.map(BrowserProxy.display) ?? "a direct connection"): "
+                + "\(BrowserProxy.redacting(BrowserProxy.redacting(why, proxy: proxy), proxy: old)). It is back to \(old.map(BrowserProxy.display) ?? "direct"). "
+                + "Check that the tunnel or proxy is up, then try again.")
         }
+        let session = try await hub.session(botID: botID, mode: mode, scope: scope)
         session.forgetPage()
-        if let returnTo, returnTo.hasPrefix("http") { _ = try? await session.driver.open(returnTo) }
+        if let returnTo { _ = try? await session.exclusive { try await session.driver.open(returnTo) } }
         await context.browser.saveProxy?(proxy)
         let route = proxy.map { "goes through \(BrowserProxy.display($0))" } ?? "goes direct again"
         return "Your browser \(route). Sites see the address \(address). Logins and cookies stayed. "
             + (returnTo.map { "Reopened \($0). " } ?? "") + "Tell the user what you set and the address."
+    }
+
+    /// The page this conversation had open, read in its own tab (nil: no browser running, or nothing worth reopening).
+    private static func currentPage(hub: BrowserHub, botID: UUID, mode: BrowserMode, scope: String?) async -> String? {
+        guard hub.existingSession(botID: botID) != nil, let session = try? await hub.session(botID: botID, mode: mode, scope: scope),
+              let url = try? await session.exclusive({ try await session.driver.currentURL() }) else { return nil }
+        return url.hasPrefix("http") ? url : nil
     }
 }

@@ -1086,10 +1086,11 @@ final class AppModel {
         // Another mode is another browser, and without "Navegar na web" there is none: the one that was open is closed now,
         // not when the Orb next needs a browser.
         // The same goes for the proxy, unless `browse_proxy` already reopened the browser through it (the hub has it by then).
-        let proxyChanged = bot.browserProxy != browserProxy && browserHub.proxy(botID: botID) != bot.browserProxy
+        // (The file keeps the address without the password: the hub's is compared the same way.)
+        let proxyChanged = bot.browserProxy != browserProxy && browserHub.proxy(botID: botID).map { BrowserProxy.split($0).address } != bot.browserProxy
         if bot.browserMode != browserMode || (hadBrowser && !bot.capabilities.contains(.browser)) || proxyChanged {
             let hub = browserHub
-            hub.setProxy(bot.browserProxy, botID: botID)
+            if proxyChanged { hub.setProxy(Self.browserProxy(of: bot, vault: secretVault), botID: botID) }
             Task { await hub.close(botID: botID) }
         }
     }
@@ -1156,6 +1157,7 @@ final class AppModel {
         }
         let browsers = browserHub
         Task { await browsers.deleteData(botID: botID) }
+        if BrowserProxy.hasUser(bot(botID)?.browserProxy) { secretVault.remove(BrowserProxy.keychainAccount(botID: botID)) }
         session.memoryIdle?.cancel()
         session.memoryIdle = nil
         session.skillReview?.cancel()
@@ -1609,12 +1611,16 @@ final class AppModel {
             var context = baseContext
             // A run nobody watches (a routine, a request from another Orb) waits for its commands to the end.
             if session.routineID == nil || session.sideKind == .group { context.release = release }
-            browserHub.setProxy(bot.browserProxy, botID: bot.id)
+            // The password of the proxy, when it has one, is read from the Keychain off the main thread.
+            let vault = secretVault, proxyBot = bot
+            let browserProxy = BrowserProxy.hasUser(bot.browserProxy)
+                ? await Task.detached { Self.browserProxy(of: proxyBot, vault: vault) }.value : bot.browserProxy
+            browserHub.setProxy(browserProxy, botID: bot.id)
             context.browser = BrowserAccess(hub: browserHub, available: browserAvailability == .browser, mode: bot.browserMode,
                                             searchProvider: bot.searchProvider, searchKeys: SearchKeys(vault: secretVault),
-                                            proxy: bot.browserProxy,
+                                            proxy: browserProxy,
                                             saveProxy: { [weak self] proxy in
-                                                await MainActor.run { self?.update(bot.id) { $0.browserProxy = proxy } }
+                                                await MainActor.run { self?.saveBrowserProxy(proxy, for: bot.id) }
                                             },
                                             scope: sessionID)
             // MARK: MultiOrb (WP3)

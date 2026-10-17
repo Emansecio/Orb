@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import os
 
@@ -17,7 +18,7 @@ struct AgentBrowserConfig: Sendable, Equatable {
     /// Lets the scripts of a `file://` page read other local files. Not needed to open one (Chrome opens `file://` pages without it),
     /// so it is off.
     var allowFileAccess = false
-    /// Where the browser's traffic goes (`--proxy`), chosen by the Orb. It is part of how the browser is launched, so a running
+    /// Where the browser's traffic goes (`proxyVariable`), chosen by the Orb. It is part of how the browser is launched, so a running
     /// browser with another one is not reused.
     var proxy: String?
     /// The app's own folder for agent-browser (`navegador`): the config file it is told to read (so nothing of the user's own
@@ -61,10 +62,22 @@ struct AgentBrowserConfig: Sendable, Equatable {
     /// that changes the browser. A running browser started with another one is not reused (see `AgentBrowserDriver.open`). Whether
     /// the window is shown is not part of it: showing and hiding it is the person's, and an `open` must not close the window
     /// the person is using.
+    /// The proxy goes in as a hash: the text is written to a file (`sessoes/<session>.launch`), and a proxy may carry a password.
     var launchFingerprint: String {
-        (["chrome"] + launchArguments.filter { $0 != "--headed" } + extraEnvironment.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" })
-            .joined(separator: "\u{1F}")
+        let environment = extraEnvironment.sorted { $0.key < $1.key }.map { entry in
+            entry.key == Self.proxyVariable ? "\(entry.key)=\(Self.digest(entry.value))" : "\(entry.key)=\(entry.value)"
+        }
+        return (["chrome"] + launchArguments.filter { $0 != "--headed" } + environment).joined(separator: "\u{1F}")
     }
+
+    private static func digest(_ text: String) -> String {
+        SHA256.hash(data: Data(text.utf8)).prefix(12).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// How the proxy reaches `agent-browser`: by its environment, not by `--proxy`, so a password in it is not in the list of
+    /// processes (`ps`) for as long as the command runs. The browser itself gets the address without it (`--proxy-server`, measured
+    /// with 0.39.1).
+    static let proxyVariable = "AGENT_BROWSER_PROXY"
 
     func recordedFingerprint() -> String? {
         launchRecordFile.flatMap { try? String(contentsOf: $0, encoding: .utf8) }
@@ -130,6 +143,7 @@ struct AgentBrowserConfig: Sendable, Equatable {
         // for a browser left behind when the app is killed instead of quit.
         var environment = ["AGENT_BROWSER_IDLE_TIMEOUT_MS": "1800000"]
         if let socketDirectory { environment["AGENT_BROWSER_SOCKET_DIR"] = socketDirectory.path }
+        if let proxy { environment[Self.proxyVariable] = proxy }
         return environment
     }
 
@@ -145,7 +159,6 @@ struct AgentBrowserConfig: Sendable, Equatable {
         if let profile { arguments += ["--profile", profile.path] }
         if headed { arguments.append("--headed") }
         if allowFileAccess { arguments.append("--allow-file-access") }
-        if let proxy { arguments += ["--proxy", proxy] }
         return arguments
     }
 }
@@ -286,7 +299,7 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
             }
             if output.timedOut { throw BrowserDriverError.timedOut(command.first ?? "command") }
             guard let reply = AgentBrowserReply.parse(output.output) else {
-                let text = output.output.trimmingCharacters(in: .whitespacesAndNewlines)
+                let text = BrowserProxy.redacting(output.output.trimmingCharacters(in: .whitespacesAndNewlines), proxy: current.proxy)
                 throw Self.classify(text.isEmpty ? "agent-browser ended with status \(output.status) and no output." : String(text.prefix(600)))
             }
             guard reply.success else {
@@ -297,7 +310,7 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
                     try await Task.sleep(for: Self.connectRetryDelay)
                     continue
                 }
-                throw Self.classify(reply.error ?? "agent-browser reported an error.")
+                throw Self.classify(BrowserProxy.redacting(reply.error ?? "agent-browser reported an error.", proxy: current.proxy))
             }
             return reply.data ?? .null
         }

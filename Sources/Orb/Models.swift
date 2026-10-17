@@ -98,7 +98,8 @@ struct Bot: Identifiable, Hashable, Codable, Sendable {
     /// How the browser behind "Navegar na web" runs (see `BrowserMode`). Orbs saved before the modes existed (when the Orb chose an
     /// engine: Chrome, CloakBrowser, Obscura or only reading) get the background; the old `browserEngine` key is not read.
     var browserMode = BrowserMode.default
-    /// The proxy the Orb's browser goes through (`scheme://host:port`), chosen by the Orb with `browse_proxy`; nil is direct.
+    /// The proxy the Orb's browser goes through (`scheme://[user@]host:port`), chosen by the Orb with `browse_proxy`; nil is direct.
+    /// Never the password: that is in the Keychain (`BrowserProxy.keychainAccount`, see `AppModel.saveBrowserProxy`).
     var browserProxy: String?
     /// Where `web_search` goes.
     var searchProvider = SearchProvider.duckduckgo

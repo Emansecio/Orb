@@ -45,13 +45,48 @@ struct BrowserProxyTests {
         #expect(BrowserProxy.address(in: "<html>Blocked</html>") == nil && BrowserProxy.address(in: "") == nil && BrowserProxy.address(in: "12") == nil)
     }
 
-    @Test func theLaunchCarriesTheProxyAndItChangesTheFingerprint() {
+    @Test func theLaunchCarriesTheProxyInItsEnvironmentAndTheFingerprintOnlyAHashOfIt() {
         var config = AgentBrowserConfig(executable: "/x/agent-browser", session: "orb-1-chrome")
         let direct = config.launchFingerprint
-        #expect(!config.launchArguments.contains("--proxy"))
-        config.proxy = "socks5://127.0.0.1:1080"
-        #expect(config.launchArguments.suffix(2) == ["--proxy", "socks5://127.0.0.1:1080"])
-        #expect(config.launchFingerprint != direct)
+        #expect(config.extraEnvironment[AgentBrowserConfig.proxyVariable] == nil)
+        config.proxy = "socks5://u:s3cretpw@127.0.0.1:1080"
+        // Not an argument (the list of processes shows those) and not in the file the fingerprint is written to.
+        #expect(!config.launchArguments.contains { $0.contains("1080") || $0 == "--proxy" })
+        #expect(config.extraEnvironment[AgentBrowserConfig.proxyVariable] == "socks5://u:s3cretpw@127.0.0.1:1080")
+        #expect(config.environment(base: ["AGENT_BROWSER_PROXY": "http://evil:1"])[AgentBrowserConfig.proxyVariable] == config.proxy)
+        #expect(config.launchFingerprint != direct && !config.launchFingerprint.contains("s3cretpw") && !config.launchFingerprint.contains("1080"))
+        let other = { var copy = config; copy.proxy = "socks5://u:other@127.0.0.1:1080"; return copy.launchFingerprint }()
+        #expect(other != config.launchFingerprint)
+    }
+
+    @Test func thePasswordIsSplitOffForTheKeychainAndPutBack() {
+        let (address, password) = BrowserProxy.split("http://user:p%40ss@host.test:3128")
+        #expect(address == "http://user@host.test:3128" && password == "p%40ss")
+        #expect(BrowserProxy.joined(address, password: password) == "http://user:p%40ss@host.test:3128")
+        #expect(BrowserProxy.split("socks5://127.0.0.1:1080") == ("socks5://127.0.0.1:1080", nil))
+        #expect(BrowserProxy.joined("socks5://127.0.0.1:1080", password: "x") == "socks5://127.0.0.1:1080")
+        #expect(BrowserProxy.joined(address, password: nil) == address)
+        #expect(BrowserProxy.hasUser(address) && !BrowserProxy.hasUser("socks5://127.0.0.1:1080") && !BrowserProxy.hasUser(nil))
+        let said = BrowserProxy.redacting("proxy http://user:p%40ss@host.test:3128 refused p@ss and p%40ss", proxy: "http://user:p%40ss@host.test:3128")
+        #expect(!said.contains("p%40ss") && !said.contains("p@ss") && said.contains("host.test:3128"))
+    }
+
+    @Test func theBrowserWordsNeverCarryThePassword() async throws {
+        setup.hub.setProxy("http://u:s3cretpw@h.test:80", botID: setup.botID)
+        setup.driver.state.withLock { $0.readContent = "407 for http://u:s3cretpw@h.test:80 (s3cretpw)" }
+        let message: String
+        do { message = try await run(["action": .string("set"), "proxy": .string("http://u:0therpw@h.test:81")]) } catch { message = error.localizedDescription }
+        #expect(message.contains("could not load pages") && !message.contains("0therpw") && !message.contains("s3cretpw"))
+        let driver = AgentBrowserDriver(config: AgentBrowserConfig(executable: "/x/agent-browser", session: "orb-1-chrome", proxy: "http://u:s3cretpw@h.test:80"),
+                                        environment: { [:] }, run: { _, _, _, _ in
+            ProcessOutput(status: 1, output: #"{"success":false,"error":"proxy http://u:s3cretpw@h.test:80 said no"}"#, timedOut: false)
+        })
+        do {
+            _ = try await driver.send(["get", "title"], needsSession: false)
+            Issue.record("the command should fail")
+        } catch {
+            #expect(!error.localizedDescription.contains("s3cretpw") && error.localizedDescription.contains("h.test:80"))
+        }
     }
 
     // MARK: The tool
@@ -156,6 +191,35 @@ struct BrowserProxyTests {
         #expect(model.bot(botID)?.browserProxy == nil)
         #expect(setup.hub.proxy(botID: botID) == nil)
         await waitUntil("the browser to close") { setup.driver.calls.contains("close") }
+    }
+
+    @Test @MainActor func thePasswordOfTheProxyGoesToTheKeychainNotToTheFile() async throws {
+        let (model, botID) = model()
+        let vault = try #require(model.secretVault as? MemoryVault)
+        let setup = FakeBrowserSetup()
+        model.browserHub = setup.hub
+        let account = BrowserProxy.keychainAccount(botID: botID)
+        // What `browse_proxy` saves: the browser already goes through it (the hub has it, password and all).
+        setup.hub.setProxy("http://u:s3cretpw@h.test:8080", botID: botID)
+        model.saveBrowserProxy("http://u:s3cretpw@h.test:8080", for: botID)
+        let bot = try #require(model.bot(botID))
+        #expect(bot.browserProxy == "http://u@h.test:8080" && vault.get(account) == "s3cretpw")
+        #expect(!String(decoding: try JSONEncoder().encode(model.bots), as: UTF8.self).contains("s3cretpw"))
+        #expect(AppModel.browserProxy(of: bot, vault: vault) == "http://u:s3cretpw@h.test:8080")
+        // The browser that went through it is not closed by saving it.
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(!setup.driver.calls.contains("close"))
+        // Removing it removes the password too; one with no user never touches the Keychain.
+        model.removeBrowserProxy(for: botID)
+        #expect(vault.get(account) == nil && model.bot(botID)?.browserProxy == nil)
+        model.saveBrowserProxy("socks5://127.0.0.1:1080", for: botID)
+        #expect(vault.accounts.isEmpty && model.bot(botID)?.browserProxy == "socks5://127.0.0.1:1080")
+        // The reset takes the password of a proxy that names a user.
+        var withUser = bot
+        withUser.browserProxy = "http://u@h.test:8080"
+        let plan = ResetPlan.make(bots: [withUser], connectors: [], providers: [], defaultModel: "", learnedContexts: [:],
+                                  options: ResetOptions(memories: .keep, leavesProviders: false))
+        #expect(plan.secretAccounts == [account])
     }
 
     @Test @MainActor func theOrbSettingAfterTheToolChangedItDoesNotCloseTheNewBrowser() async throws {
