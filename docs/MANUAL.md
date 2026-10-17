@@ -339,7 +339,7 @@ lista e adicionar de novo. Depois de "Pedir agora" ou de ir aos Ajustes do Siste
 - **Tabelas e formulários numa imagem**: ao ler uma captura de tela, uma imagem de arquivo ou a captura do navegador, se o texto
   reconhecido está arrumado em linhas e colunas, o Orb pede ao macOS 26 ou mais novo que leia a tabela e recebe linhas e colunas
   (uma tabela em markdown), na frente do texto corrido. Em macOS mais antigo, ou se não achar tabela, tudo segue como antes: só o texto.
-  Usa o mesmo prazo de 20 s do OCR.
+  Leva meio segundo num Mac folgado e nunca mais de 5 s, dentro do prazo de 20 s do OCR.
 - O Orb recebe receitas curtas para as tarefas comuns do Mac (datas sem depender do idioma, rascunho no Mail, Lembretes, Notas,
   Calendário, Música) e conselhos para os erros típicos do AppleScript.
 - No painel do Orb, a chave "Controlar apps do Mac" ligada traz o atalho **Permissões**.

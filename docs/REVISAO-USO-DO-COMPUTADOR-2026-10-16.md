@@ -39,8 +39,20 @@ Pedido do usuário: o Orb sabe que algo existe e onde buscar; o detalhe só entr
 | Item | O que mudou | Teste |
 |---|---|---|
 | 1 | `app_dictionary` (`.safe`): o dicionário AppleScript do app, lido do `sdef` só quando o Orb pede, em resumo compacto (suítes, classes com propriedades e elementos, comandos com parâmetros), filtrável por `search`/`suite`, em páginas de 6.000 caracteres (`offset`), em cache por app e versão. App sem dicionário: diz isso e sugere Atalhos ou `ui_read`/`ui_act`. A descrição do `applescript` e o prompt ganham uma frase. Teto das specs 18.400 para 18.900. | `AppDictionaryTests` (fixture de sdef, cache, sem dicionário, páginas) |
-| 2 | `apps_list` diz, por app, se aceita AppleScript, se o AX é bom ou fraco (Electron, Chromium, Qt, Java) e quais Atalhos têm o nome dele; tudo do pacote do app e da lista de Atalhos, em cache, sem chamada ao app. Primeira chamada 0,19 s, seguintes 25 ms. Teto das specs 18.900 para 18.950. | `AppControlInfoTests` |
+| 2 | `apps_list` diz, por app, se aceita AppleScript, se o AX é bom ou fraco (Electron, Chromium, Qt, Java) e quais Atalhos têm o nome dele; tudo do pacote do app e da lista de Atalhos, em cache, sem chamada ao app. Primeira chamada 0,19 s, seguintes 25 ms. Cabe no teto de 18.900 depois de encurtar as duas descrições na revisão (18.861). | `AppControlInfoTests` |
 | 3 | Tabelas e formulários em grade numa imagem: `RecognizeDocumentsRequest` (macOS 26, atrás de `#available`) devolve linhas e colunas como markdown quando as caixas do OCR comum parecem uma tabela; o OCR comum segue como padrão e reserva; vale para `screenshot`, `read_file` de imagem e `browse_screenshot`, no prazo de 20 s. Sem custo de spec. | `TableRecognizerTests` (inclui uma tabela desenhada em memória e lida pelo Vision de verdade) |
+
+**Revisão da fase 3 (16/10).** O `app_dictionary` foi rodado de verdade, sem abrir app nenhum: Notes 8,6 KB de sdef → 1,1 mil caracteres
+(1 página), Finder 43 KB → 10,6 mil (2), Mail 57 KB → 9,2 mil (2), Safari 8,7 KB → 0,8 mil (1), Music 46 KB → 8,9 mil (2), Xcode 43 KB →
+6,1 mil (2), System Events 112 KB → 21,8 mil (4); de 20 a 90 ms na primeira vez (1,6 s uma vez, o Script Editor com a máquina carregada)
+e menos de 5 ms do cache; Calculadora diz que não tem dicionário. Juntar as páginas pelo `offset` devolve exatamente as linhas, sem perda
+nem repetição. Corrigido: o `Bundle(url:)` guardava o Info.plist da primeira leitura, e um app atualizado com o Orb aberto seguia com o
+dicionário velho (a chave agora vem do Info.plist e da data dele); classe com centenas de propriedades vira várias linhas `(cont.)`; a
+página do meio repete a suíte; offset além do fim e caminho com `/` no fim; "1 suíte". No `apps_list`, os Atalhos casam por palavra inteira
+(Mail não pega "Email do dia"), Java inclui o `jbr` da JetBrains e o `jpackage`, e o Parar no meio do `shortcuts list` não fica lembrado
+como falha; nenhum app da Apple nem o Safari cai como AX fraco (conferido nos apps instalados). Nas tabelas, o pedido do Vision passou a
+ter teto de 5 s (numa medição com a máquina carregada levou 37 s, que a captura esperaria quase inteiros) e as bordas em comum precisam
+estar nas mesmas linhas. Testes: `AppDictionaryTests`, `AppControlInfoTests`, `TableRecognizerTests`.
 
 **Novidades do macOS 26 e 27 conferidas (só sugestão, nada implementado).** Duas buscas na web não acharam nada concreto sobre App Intents executáveis sem Atalho, Acessibilidade ou ScreenCaptureKit que sirva a este desenho. Nos cabeçalhos do SDK 27, o ScreenCaptureKit trouxe só coisas de gravação de vídeo (buffer de clipes, microfone, erro de armazenamento), sem uso aqui. O que apareceu e valeu foi o `RecognizeDocumentsRequest` do Vision (item 3, feito). Sugestão para depois, a confirmar na documentação da Apple antes de gastar tempo: ver se o app com App Intents aparece no `shortcuts list` como ação própria (aí `app_dictionary` e `apps_list` poderiam citar as ações do app); não tentei, porque exige abrir apps e a regra era só ler.
 

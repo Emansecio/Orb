@@ -615,14 +615,16 @@ enum TextRecognizer {
     }
 
     /// `recognize(imageAt:)`, with the tables on the picture (rows and columns, markdown) ahead of the plain text when it
-    /// has any and the Mac can read them (`TableRecognizer`). `budget` is the OCR time allowed; the tables get what the text left.
-    static func recognizeWithTables(imageAt url: URL, budget: TimeInterval = ScreenshotTool.ocrDeadline) async throws -> String {
+    /// has any and the Mac can read them (`TableRecognizer`). `budget` is the OCR time allowed; the tables get what the text
+    /// left, up to `tableSeconds`.
+    static func recognizeWithTables(imageAt url: URL, budget: TimeInterval = ScreenshotTool.ocrDeadline,
+                                    tableSeconds: TimeInterval = TableRecognizer.maxSeconds) async throws -> String {
         let start = ContinuousClock.now
         let read = try await runDetached { try read(imageAt: url) }
         guard TableRecognizer.looksTabular(read.boxes), let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
               let tables = try await TableRecognizer.tables(in: image, boxes: read.boxes,
-                                                            budget: TableRecognizer.budget(deadline: budget, since: start)) else { return read.text }
+                                                            budget: TableRecognizer.budget(deadline: budget, since: start, cap: tableSeconds)) else { return read.text }
         return tables + "\nTexto corrido:\n" + read.text
     }
 

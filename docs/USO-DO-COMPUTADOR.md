@@ -94,23 +94,30 @@ só quando a pessoa pediu para ver. A saída diz "em segundo plano" ou "na frent
 (20 s, cancelável), lê o XML com `XMLParser` (itens `hidden` saem) e devolve uma linha por comando (`cmd show <tipo> param?:tipo -> resultado`),
 classe (`class note (item): name:text, id:text ro; elements: …`; `+` é extensão) e enumeração, com a descrição cortada em 70 caracteres.
 `search` mantém o que casa (de uma classe, só as propriedades que casam); páginas de 6.000 caracteres, com `offset` para continuar. A Standard Suite
-(`xi:include`, que o `sdef` não expande) vira uma linha. Cache por caminho + versão + build (40 apps). Sem dicionário: diz isso e sugere
+(`xi:include`, que o `sdef` não expande) vira uma linha. Uma classe com centenas de propriedades (Office, Adobe) segue em linhas
+`(cont.)` de até 1.500 caracteres, e a página que começa no meio de uma suíte repete o nome dela com "(continuação)"; offset além do fim
+diz quantas linhas há. Cache por caminho + versão + build + data do Info.plist (40 apps), lidos do Info.plist e não do `Bundle(url:)`, que
+guardaria a versão antiga de um app atualizado com o Orb aberto; tempo esgotado não entra no cache. Sem dicionário: diz isso e sugere
 `shortcuts_list` ou `ui_read`/`ui_act`. A descrição do `applescript` e o prompt mandam lê-lo antes de escrever para um app desconhecido.
 
 **`apps_list`** (`AppControlInfo.swift`): cada app ganha ` · AppleScript` ou ` · sem AppleScript` (`NSAppleScriptEnabled` verdadeiro, Boolean ou
-texto "YES", ou `OSAScriptingDefinition`, no Info.plist), ` · AX bom` ou ` · AX fraco (Electron|Chromium|Qt|Java)` (por frameworks no pacote: nenhuma
+texto "YES", ou `OSAScriptingDefinition`, no Info.plist), ` · AX bom` ou ` · AX fraco (Electron|Chromium|Qt|Java)` (por frameworks no pacote, e para Java também o `jbr` da JetBrains e o runtime do `jpackage`: nenhuma
 chamada AX, então não acorda nem trava o app; "poucas folhas na árvore" ficou de fora porque exigiria ler a árvore) e ` · Atalhos: …` (até 3
-Atalhos com o nome do app no nome). Cache por caminho + data do Info.plist (`AppControlCache`) e da lista de Atalhos por 5 min
-(`ShortcutNamesCache`, `shortcuts list` com prazo de 2 s; falha vale 1 min). Medido: primeira chamada 0,19 s (o `shortcuts list`), seguintes 25 ms.
+Atalhos com o nome do app como palavra inteira: Mail não casa com "Email do dia"). Cache por caminho + data do Info.plist (`AppControlCache`) e da lista de Atalhos por 5 min
+(`ShortcutNamesCache`, `shortcuts list` com prazo de 2 s; falha vale 1 min, mas o Parar no meio não conta como falha). Medido: primeira chamada 0,19 s (o `shortcuts list`), seguintes 25 ms.
 
 **Tabelas numa imagem** (`TableRecognizer.swift`): o OCR comum (`VNRecognizeTextRequest`) segue como caminho padrão e reserva. Se as caixas
-de texto parecem uma tabela (`looksTabular`: 3 linhas com 2 ou mais caixas e 2 bordas esquerdas que 3 linhas dividem, com 2% de tolerância),
+de texto parecem uma tabela (`looksTabular`: 3 linhas que começam caixas em 2 ou mais das mesmas bordas esquerdas, com 2% de tolerância),
 e o Mac tem macOS 26 (`#available`; o pacote mira o macOS 14), roda `RecognizeDocumentsRequest` e devolve cada tabela como markdown (até 60 linhas,
 12 colunas e 4.000 caracteres, com aviso do que faltou), antes do texto corrido. Valem para `screenshot` (janela e tela), `read_file` de imagem
 e a captura do `browse_screenshot`. O prazo é o do OCR (20 s): as tabelas só rodam com o que o texto deixou (menos 1 s; menos de 2 s, não
-rodam), cancelam com o ⌘. e uma falha do pedido volta ao texto simples. Formulários só saem se Vision os ler como tabela; a API não tem campo.
+rodam) e nunca mais de 5 s (`TableRecognizer.maxSeconds`; leva 0,3 a 0,6 s num Mac folgado, mas uma vez levou 37 s com a máquina
+carregada), cancelam com o ⌘. e uma falha do pedido volta ao texto simples. Janelas comuns (listas, Ajustes) também parecem tabela: 5 das
+12 capturas de `docs/readme` pagam esse meio segundo, e só uma tinha tabela de fato. O texto corrido continua inteiro depois da tabela,
+mesmo repetindo as células: a tabela tem teto de 4.000 caracteres, e tirar do texto o que caiu nela arriscaria perder o que o Vision
+não pôs em célula nenhuma (títulos, legendas) e, na captura de janela, a posição para clicar. Formulários só saem se Vision os ler como tabela; a API não tem campo.
 
-**Specs:** teto total 18.950 caracteres (subiu com `task_plan`, com o `front` do `open`, com o `app_dictionary` e com o `apps_list`), sub-teto testado de 4.800 para
+**Specs:** teto total 18.900 caracteres, 18.861 medidos (subiu com `task_plan`, com o `front` do `open`, com o `app_dictionary` e com o `apps_list`), sub-teto testado de 4.800 para
 `ui_read`+`ui_act`+`screenshot`.
 
 ## 3. Desempenho e confiabilidade

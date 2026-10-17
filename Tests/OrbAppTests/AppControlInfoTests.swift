@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Testing
 @testable import Orb
 
@@ -71,13 +72,33 @@ struct AppControlInfoTests {
         #expect(ShortcutNamesCache.matching(app: "Spotify", in: names) == ["Abrir spotify", "Pausar Spotify", "Spotify 3"])
         #expect(ShortcutNamesCache.matching(app: "Musica", in: names) == ["Música: tocar"])
         #expect(ShortcutNamesCache.matching(app: "Ab", in: names).isEmpty, "a two-letter name matches too much")
+        // A whole word only: Mail is not in "Email do dia", Music is not in "Musical".
+        #expect(ShortcutNamesCache.matching(app: "Mail", in: ["Email do dia", "Mail: limpar", "Musical", "Abrir Mail"]) == ["Mail: limpar", "Abrir Mail"])
+        #expect(ShortcutNamesCache.matching(app: "Music", in: ["Musical", "Tocar no Music"]) == ["Tocar no Music"])
     }
 
-    private final class Calls: @unchecked Sendable {
-        private let lock = NSLock()
-        private var value = 0
-        func bump() { lock.lock(); value += 1; lock.unlock() }
-        var count: Int { lock.lock(); defer { lock.unlock() }; return value }
+    @Test func aCancelledLoadIsNotRememberedAsAFailure() async {
+        let cache = ShortcutNamesCache()
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return await cache.current(load: { nil })
+        }
+        #expect(await task.value.isEmpty)
+        #expect(await cache.current(load: { ["Abrir Notas"] }) == ["Abrir Notas"], "the next call asks again")
+    }
+
+    @Test func javaRuntimesInsideTheBundleMakeAccessibilityWeak() throws {
+        let jetbrains = try bundle([:], folders: ["Contents/jbr"])
+        let jpackage = try bundle([:], folders: ["Contents/runtime/Contents/Home"])
+        defer { [jetbrains, jpackage].forEach(remove) }
+        #expect(AppControlInfo.inspect(bundle: jetbrains).weakAccessibility == "Java")
+        #expect(AppControlInfo.inspect(bundle: jpackage).weakAccessibility == "Java")
+    }
+
+    private struct Calls: Sendable {
+        private let value = OSAllocatedUnfairLock(initialState: 0)
+        func bump() { value.withLock { $0 += 1 } }
+        var count: Int { value.withLock { $0 } }
     }
 
     @Test func theShortcutNamesAreAskedOnceWhileFreshAndAFailureIsNotRetriedAtOnce() async {
@@ -121,6 +142,6 @@ struct AppControlInfoTests {
         print("apps_list: frio \(cold), quente \(warm), \(text.split(separator: "\n").count) linhas")
         #expect(text.contains("AX bom") || text.contains("AX fraco") || text == "Nenhum app aberto.")
         // Only a ceiling that a loaded machine keeps too; the measured times (0,19 s cold, 25 ms after) are in the REVISAO.
-        #expect(cold < .seconds(10) && warm < .seconds(3))
+        #expect(cold < .seconds(15) && warm < .seconds(5))
     }
 }

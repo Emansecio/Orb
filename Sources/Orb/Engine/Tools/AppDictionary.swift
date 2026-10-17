@@ -157,6 +157,8 @@ struct AppDictionary: Sendable, Equatable {
 extension AppDictionary {
     /// Characters of one answer; the rest is asked for with `offset`.
     static let pageCharacters = 6_000
+    /// Where a class's properties continue on a new line.
+    static let lineCharacters = 1_500
 
     /// The Standard Suite lives in a system file that `sdef` leaves as an include; its commands are the same in every app.
     static let standardSuiteNote = "Standard Suite (included, same in every app): open, close, save, print, quit, count, delete, "
@@ -189,8 +191,16 @@ extension AppDictionary {
                 let kept = whole ? cls.properties : cls.properties.filter { matches($0.name, $0.type) }
                 guard whole || !kept.isEmpty else { continue }
                 var line = "- class \(cls.name)" + (cls.isExtension ? "+" : "") + (cls.inherits.map { " (\($0))" } ?? "")
-                if !kept.isEmpty {
-                    line += ": " + kept.map { "\($0.name):\($0.type)\($0.readOnly ? " ro" : "")" }.joined(separator: ", ")
+                // A class with hundreds of properties (Office, Adobe) goes on several lines, so a page stays near its size.
+                var separator = ": "
+                for property in kept.map({ "\($0.name):\($0.type)\($0.readOnly ? " ro" : "")" }) {
+                    if separator == ", ", line.count + property.count + 2 > Self.lineCharacters {
+                        body.append(line)
+                        line = "- class \(cls.name) (cont.)"
+                        separator = ": "
+                    }
+                    line += separator + property
+                    separator = ", "
                 }
                 if whole, !cls.elements.isEmpty { line += "; elements: " + cls.elements.joined(separator: ", ") }
                 body.append(line + (whole ? Self.note(cls.detail) : ""))
@@ -245,8 +255,8 @@ struct AppDictionaryTool: AgentTool {
     let spec = ToolSpec(
         name: "app_dictionary",
         description: """
-        Read an app's AppleScript dictionary (commands, classes with properties and elements) before writing a script \
-        for it. Compact; `search` or `suite` narrow it, `offset` continues a long one.
+        An app's AppleScript dictionary (commands, classes, properties, elements), to read before scripting it. \
+        `search` or `suite` narrow it; `offset` continues.
         """,
         parameters: .schema([
             "app": .property("string", "App name, bundle identifier or .app path."),
@@ -279,10 +289,14 @@ struct AppDictionaryTool: AgentTool {
         guard let url = await Self.appURL(name) else {
             throw ToolError("Não encontrei o app \"\(name)\" neste Mac. Use apps_list para ver os nomes.")
         }
-        let bundle = Bundle(url: url)
-        let display = bundle?.object(forInfoDictionaryKey: "CFBundleName") as? String ?? url.deletingPathExtension().lastPathComponent
-        let key = [url.path, bundle?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
-                   bundle?.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""].joined(separator: "|")
+        // The Info.plist itself, not `Bundle(url:)`: a Bundle keeps the first one it read for a path, and an app updated
+        // while the Orb runs would keep its old key.
+        let plistURL = url.appending(path: "Contents/Info.plist")
+        let info = NSDictionary(contentsOf: plistURL)
+        let display = info?["CFBundleName"] as? String ?? url.deletingPathExtension().lastPathComponent
+        let stamp = (try? FileManager.default.attributesOfItem(atPath: plistURL.path))?[.modificationDate] as? Date
+        let key = [url.standardizedFileURL.path, info?["CFBundleShortVersionString"] as? String ?? "",
+                   info?["CFBundleVersion"] as? String ?? "", stamp.map { "\($0.timeIntervalSince1970)" } ?? ""].joined(separator: "|")
         let dictionary: AppDictionary?
         if let cached = await AppDictionaryCache.shared.lookup(key) {
             dictionary = cached
@@ -304,11 +318,19 @@ struct AppDictionaryTool: AgentTool {
             return "Nada no dicionário de \(display) combina com \"\(search ?? arguments.nonEmptyString("suite") ?? "")\". Suítes: \(suites)."
         }
         let offset = arguments.integer("offset", default: 0, in: 0...Int.max)
+        guard offset < lines.count else {
+            return "O dicionário de \(display) tem \(lines.count) linhas: offset \(offset) passou do fim. Use um offset menor."
+        }
         let page = AppDictionary.page(lines, offset: offset)
-        var text = "Dicionário de \(display) (\(lines.count) linhas"
-            + (search == nil && arguments.nonEmptyString("suite") == nil ? ", \(dictionary.suites.count) suítes" : "") + "). "
+        let suites = dictionary.suites.count
+        var text = "Dicionário de \(display) (\(lines.count) linha\(lines.count == 1 ? "" : "s")"
+            + (search == nil && arguments.nonEmptyString("suite") == nil ? ", \(suites) suíte\(suites == 1 ? "" : "s")" : "") + "). "
             + "cmd <direct> param:tipo ?=opcional; class (herda de); + estende; ro somente leitura.\n"
-            + page.text
+        // A page that starts inside a suite says which one it is in.
+        if offset > 0, !lines[offset].hasPrefix("## "), let header = lines[..<offset].last(where: { $0.hasPrefix("## ") }) {
+            text += (header.components(separatedBy: "  # ").first ?? header) + " (continuação)\n"
+        }
+        text += page.text
         if offset == 0, dictionary.includesStandardSuite { text += "\n" + AppDictionary.standardSuiteNote }
         if let next = page.next { text += "\n[... mais \(lines.count - next) linhas; offset \(next) continua, ou use search ou suite ...]" }
         return text
@@ -316,8 +338,9 @@ struct AppDictionaryTool: AgentTool {
 
     /// A path to an app, or a name the way `open` finds one.
     static func appURL(_ name: String) async -> URL? {
-        let text = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        var text = name.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.hasPrefix("/") || text.hasPrefix("~") {
+            while text.count > 1, text.hasSuffix("/") { text.removeLast() }
             let path = (text as NSString).expandingTildeInPath
             return path.hasSuffix(".app") && FileManager.default.fileExists(atPath: path) ? URL(fileURLWithPath: path) : nil
         }

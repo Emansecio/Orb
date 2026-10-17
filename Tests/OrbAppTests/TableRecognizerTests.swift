@@ -70,11 +70,27 @@ struct TableRecognizerTests {
         #expect(huge.count < TableRecognizer.maxCharacters + 100 && huge.contains("tabelas cortadas"))
     }
 
-    @Test func theBudgetIsWhatTheTextLeftMinusOneSecond() {
-        let budget = TableRecognizer.budget(deadline: 20, since: ContinuousClock.now)
-        #expect(budget > 18.5 && budget <= 19)
+    @Test func theBudgetIsWhatTheTextLeftMinusOneSecondUpToTheCap() {
+        // Loose bounds: a loaded machine can stall between the two clock readings.
+        let budget = TableRecognizer.budget(deadline: 20, since: ContinuousClock.now, cap: 60)
+        #expect(budget > 15 && budget <= 19)
+        #expect(TableRecognizer.budget(deadline: 20, since: ContinuousClock.now) == TableRecognizer.maxSeconds,
+                "the tables never take more than their cap, however much of the OCR time is left")
         let late = ContinuousClock.now - .seconds(30)
         #expect(TableRecognizer.budget(deadline: 20, since: late) < 0)
+    }
+
+    @Test func edgesSharedByDifferentRowsAreNotATable() {
+        // A sidebar lined up at 0.02 on rows 0-2 and text lined up at 0.5 on rows 3-5: each edge has 3 rows, no row has both.
+        let sidebar = (0..<3).flatMap { (row: Int) -> [CGRect] in
+            [CGRect(x: 0.02, y: 0.9 - CGFloat(row) * 0.1, width: 0.1, height: 0.04),
+             CGRect(x: 0.3 + CGFloat(row) * 0.07, y: 0.9 - CGFloat(row) * 0.1, width: 0.1, height: 0.04)]
+        }
+        let text = (3..<6).flatMap { (row: Int) -> [CGRect] in
+            [CGRect(x: 0.15 + CGFloat(row) * 0.04, y: 0.9 - CGFloat(row) * 0.1, width: 0.05, height: 0.04),
+             CGRect(x: 0.5, y: 0.9 - CGFloat(row) * 0.1, width: 0.3, height: 0.04)]
+        }
+        #expect(!TableRecognizer.looksTabular(sidebar + text))
     }
 
     private func blankImage() -> CGImage {
@@ -136,7 +152,8 @@ struct TableRecognizerTests {
         let file = FileManager.default.temporaryDirectory.appending(path: "orb-table-\(UUID().uuidString).png")
         defer { try? FileManager.default.removeItem(at: file) }
         try tableImage(at: file)
-        let text = try await TextRecognizer.recognizeWithTables(imageAt: file)
+        // Generous times: Vision under load took tens of seconds once, and this test is about the table, not the cap.
+        let text = try await TextRecognizer.recognizeWithTables(imageAt: file, budget: 180, tableSeconds: 120)
         #expect(text.contains("Caderno") && text.contains("Mochila"), "the plain text is always there")
         if #available(macOS 26.0, *) {
             #expect(text.hasPrefix("Tabela 1 (5 linhas × 3 colunas):\n| Produto | Quantidade | Preco |\n| --- | --- | --- |\n| Caneta | 12 | 3,50 |"))

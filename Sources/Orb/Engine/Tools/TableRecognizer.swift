@@ -10,11 +10,14 @@ enum TableRecognizer {
     static let maxRows = 60
     static let maxColumns = 12
     static let maxCharacters = 4_000
+    /// The most the tables may add to a reading: about half a second on an idle Mac, but tens of seconds under load were seen,
+    /// and a screenshot must not wait that long for an extra.
+    static let maxSeconds: TimeInterval = 5
 
     // MARK: Is it a table?
 
     /// Whether text boxes (fractions of the picture, any vertical direction) are laid out as a table: at least 3 rows with 2 or
-    /// more boxes each, and at least 2 left edges that 3 of those rows share. Cheap, and wrong sometimes: a wrong yes costs one more
+    /// more boxes each that start at 2 or more of the same left edges. Cheap, and wrong sometimes: a wrong yes costs one more
     /// Vision request, a wrong no leaves the plain text, which is what the model had before.
     static func looksTabular(_ boxes: [CGRect]) -> Bool {
         guard boxes.count >= 6 else { return false }
@@ -40,7 +43,11 @@ enum TableRecognizer {
                 }
             }
         }
-        return columns.filter { $0.rows.count >= 3 }.count >= 2
+        // The shared edges must meet in the same rows: a sidebar whose items line up on the left and text that lines up on
+        // its own rows elsewhere share two edges, but no row holds both.
+        let shared = columns.filter { $0.rows.count >= 3 }
+        guard shared.count >= 2 else { return false }
+        return wide.indices.filter { row in shared.filter { $0.rows.contains(row) }.count >= 2 }.count >= 3
     }
 
     // MARK: The table as text
@@ -127,9 +134,9 @@ enum TableRecognizer {
         }
     }
 
-    /// Seconds of an OCR deadline still free for the tables after `elapsed`, keeping one for the answer.
-    static func budget(deadline: TimeInterval, since start: ContinuousClock.Instant) -> TimeInterval {
+    /// Seconds of an OCR deadline still free for the tables after `elapsed`, keeping one for the answer, and never more than `cap`.
+    static func budget(deadline: TimeInterval, since start: ContinuousClock.Instant, cap: TimeInterval = maxSeconds) -> TimeInterval {
         let elapsed = start.duration(to: .now)
-        return deadline - Double(elapsed.components.seconds) - Double(elapsed.components.attoseconds) / 1e18 - 1
+        return min(cap, deadline - Double(elapsed.components.seconds) - Double(elapsed.components.attoseconds) / 1e18 - 1)
     }
 }

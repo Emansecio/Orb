@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Testing
 @testable import Orb
 
@@ -111,6 +112,17 @@ struct AppDictionaryTests {
         #expect(AppDictionary.page(lines, offset: 99, limit: 350).text.isEmpty)
     }
 
+    @Test func aClassWithHundredsOfPropertiesGoesOnSeveralLines() {
+        let properties = (0..<400).map { AppDictionary.Property(name: "property number \($0)", type: "text", readOnly: false) }
+        let big = AppDictionary(suites: [.init(name: "Word Suite", classes: [.init(name: "document", properties: properties, elements: ["paragraph"])])])
+        let lines = big.lines()
+        #expect(lines.count > 5 && lines.allSatisfy { $0.count <= AppDictionary.lineCharacters + 100 })
+        #expect(lines[1].hasPrefix("- class document: property number 0:text") && lines[2].hasPrefix("- class document (cont.): "))
+        #expect(lines.last?.hasSuffix("; elements: paragraph") == true)
+        let all = lines.joined(separator: "\n")
+        #expect((0..<400).allSatisfy { all.contains("property number \($0):text") }, "no property is lost between lines")
+    }
+
     // MARK: The tool
 
     private func fakeApp(named name: String, version: String = "1.0") throws -> URL {
@@ -122,11 +134,10 @@ struct AppDictionaryTests {
         return app
     }
 
-    private final class Counter: @unchecked Sendable {
-        private let lock = NSLock()
-        private var value = 0
-        func bump() { lock.lock(); value += 1; lock.unlock() }
-        var count: Int { lock.lock(); defer { lock.unlock() }; return value }
+    private struct Counter: Sendable {
+        private let value = OSAllocatedUnfairLock(initialState: 0)
+        func bump() { value.withLock { $0 += 1 } }
+        var count: Int { value.withLock { $0 } }
     }
 
     @Test func theToolAnswersWithTheListingAndCachesByVersion() async throws {
@@ -141,6 +152,36 @@ struct AppDictionaryTests {
         let again = try await tool.run(.object(["app": .string(app.path), "search": .string("body")]), context: context)
         #expect(again.contains("body:text") && !again.contains("cmd show"))
         #expect(reads.count == 1, "the second call came from the cache")
+    }
+
+    /// `Bundle(url:)` keeps the first Info.plist it read for a path, so an app updated while the Orb runs looked unchanged.
+    @Test func anUpdatedAppIsReadAgain() async throws {
+        let app = try fakeApp(named: "Fake Updated", version: "7")
+        defer { try? FileManager.default.removeItem(at: app.deletingLastPathComponent()) }
+        let reads = Counter()
+        let tool = AppDictionaryTool(readSdef: { _ in reads.bump(); return Data(Self.sdef.utf8) })
+        let context = ToolContext(workingDirectory: FileManager.default.temporaryDirectory)
+        _ = try await tool.run(.object(["app": .string(app.path)]), context: context)
+        let plist: [String: Any] = ["CFBundleName": "Fake Updated", "CFBundleShortVersionString": "8", "CFBundleVersion": "8"]
+        try (plist as NSDictionary).write(to: app.appending(path: "Contents/Info.plist"))
+        _ = try await tool.run(.object(["app": .string(app.path)]), context: context)
+        #expect(reads.count == 2, "a new version is a new dictionary")
+    }
+
+    @Test func aLaterPageNamesItsSuiteAndAnOffsetPastTheEndSaysSo() async throws {
+        let app = try fakeApp(named: "Fake Big")
+        defer { try? FileManager.default.removeItem(at: app.deletingLastPathComponent()) }
+        let commands = (0..<200).map { "<command name=\"do thing \($0)\" code=\"xxxx\(String(format: "%04d", $0))\" description=\"\(String(repeating: "d", count: 60))\"/>" }
+        let xml = "<?xml version=\"1.0\"?><dictionary><suite name=\"Big Suite\" code=\"bigs\" description=\"Big things\">" + commands.joined() + "</suite></dictionary>"
+        let tool = AppDictionaryTool(readSdef: { _ in Data(xml.utf8) })
+        let context = ToolContext(workingDirectory: FileManager.default.temporaryDirectory)
+        let first = try await tool.run(.object(["app": .string(app.path + "/")]), context: context)
+        #expect(first.contains("(201 linhas, 1 suíte)"), "a path with a trailing slash is found too")
+        let next = try #require(first.firstMatch(of: /offset (\d+) continua/).map { Int($0.1)! })
+        let second = try await tool.run(.object(["app": .string(app.path), "offset": .number(Double(next))]), context: context)
+        #expect(second.contains("## Big Suite (continuação)\n- cmd do thing \(next - 1) "))
+        let past = try await tool.run(.object(["app": .string(app.path), "offset": .number(500)]), context: context)
+        #expect(past.contains("201 linhas: offset 500 passou do fim"))
     }
 
     @Test func anAppWithoutADictionarySaysSoAndPointsElsewhere() async throws {

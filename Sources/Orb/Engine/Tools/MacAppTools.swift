@@ -328,8 +328,8 @@ struct AppsListTool: AgentTool {
         name: "apps_list",
         description: """
         List the running apps with bundle identifier, which is in front and which are hidden: what is open, or \
-        the exact name for app_quit and open. Each says if it has AppleScript, how good its Accessibility is and \
-        which Shortcuts carry its name: pick the way to control it from that. `include_background` adds menu bar apps.
+        the exact name for app_quit and open. Each line tells how to control the app (AppleScript, Accessibility quality, \
+        Shortcuts with its name). `include_background` adds menu bar apps.
         """,
         parameters: .schema([
             "include_background": .property("boolean"),

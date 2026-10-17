@@ -36,8 +36,9 @@ struct AppControlInfo: Sendable, Equatable {
                                          ("Chromium Embedded Framework.framework", "Chromium"),
                                          ("QtCore.framework", "Qt")]
         for (file, name) in signs where fm.fileExists(atPath: frameworks.appending(path: file).path) { return name }
-        if fm.fileExists(atPath: url.appending(path: "Contents/Java").path)
-            || fm.fileExists(atPath: url.appending(path: "Contents/MacOS/JavaAppLauncher").path) { return "Java" }
+        // Java: the old app bundler, JetBrains' own runtime (IntelliJ, Android Studio) and jpackage's.
+        let java = ["Contents/Java", "Contents/MacOS/JavaAppLauncher", "Contents/jbr", "Contents/runtime/Contents/Home"]
+        if java.contains(where: { fm.fileExists(atPath: url.appending(path: $0).path) }) { return "Java" }
         return nil
     }
 
@@ -71,7 +72,10 @@ actor ShortcutNamesCache {
     func current(ttl: TimeInterval = 300, load: @Sendable () async -> [String]? = ShortcutNamesCache.live) async -> [String] {
         if let loadedAt, Date().timeIntervalSince(loadedAt) < ttl { return names }
         // A failure is remembered for a minute only, so a slow or locked Shortcuts does not cost 2 s on every call.
-        if let fresh = await load() { names = fresh; loadedAt = Date() } else { names = []; loadedAt = Date().addingTimeInterval(60 - ttl) }
+        let fresh = await load()
+        // Parar in the middle is not Shortcuts failing: nothing is remembered, and the next call asks again.
+        if Task.isCancelled, fresh == nil { return names }
+        if let fresh { names = fresh; loadedAt = Date() } else { names = []; loadedAt = Date().addingTimeInterval(60 - ttl) }
         return names
     }
 
@@ -81,10 +85,24 @@ actor ShortcutNamesCache {
         return result.output.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
     }
 
-    /// Shortcuts whose name has the app's name, at most `limit`: "Abrir Spotify", "Spotify: pausar".
+    /// Shortcuts whose name has the app's name as a whole word, at most `limit`: "Abrir Spotify", "Spotify: pausar"; not
+    /// "Email do dia" for Mail.
     static func matching(app: String, in names: [String], limit: Int = 3) -> [String] {
         let app = app.trimmingCharacters(in: .whitespaces)
         guard app.count >= 3 else { return [] }
-        return Array(names.filter { $0.range(of: app, options: [.caseInsensitive, .diacriticInsensitive]) != nil }.prefix(limit))
+        return Array(names.filter { hasWord(app, in: $0) }.prefix(limit))
+    }
+
+    private static func hasWord(_ word: String, in text: String) -> Bool {
+        var from = text.startIndex
+        while let found = text.range(of: word, options: [.caseInsensitive, .diacriticInsensitive], range: from..<text.endIndex) {
+            let before = found.lowerBound == text.startIndex ? nil : text[text.index(before: found.lowerBound)]
+            let after = found.upperBound == text.endIndex ? nil : text[found.upperBound]
+            if !(before?.isLetter ?? false) && !(before?.isNumber ?? false) && !(after?.isLetter ?? false) && !(after?.isNumber ?? false) {
+                return true
+            }
+            from = text.index(after: found.lowerBound)
+        }
+        return false
     }
 }
