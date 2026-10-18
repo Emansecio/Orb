@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import os
 
 /// What the installer needs from the network, so tests answer without one.
 protocol InstallNetwork: Sendable {
@@ -119,6 +120,10 @@ struct URLSessionInstallNetwork: InstallNetwork {
         let redirects = HTTPSOnlyRedirects()
         init(progress: @escaping @Sendable (Int64, Int64?) -> Void) { self.progress = progress }
 
+        /// didWriteData fires hundreds of times a second: pass on at most ~10 a second, or when the fraction moves 1%.
+        /// The first and the last (everything received) always go through. Callbacks arrive serially on the session queue.
+        private let throttle = OSAllocatedUnfairLock(initialState: (at: ContinuousClock.Instant?.none, fraction: -1.0))
+
         func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                         newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
             redirects.urlSession(session, task: task, willPerformHTTPRedirection: response, newRequest: request, completionHandler: completionHandler)
@@ -126,7 +131,16 @@ struct URLSessionInstallNetwork: InstallNetwork {
 
         func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
                         totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
-            progress(totalBytesWritten, totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : nil)
+            let total: Int64? = totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : nil
+            let fraction = total.map { Double(totalBytesWritten) / Double($0) } ?? -1
+            let now = ContinuousClock.now
+            let pass = throttle.withLock { state -> Bool in
+                let isLast = total != nil && totalBytesWritten >= total!
+                guard state.at == nil || isLast || now - state.at! >= .milliseconds(100) || fraction - state.fraction >= 0.01 else { return false }
+                state = (now, fraction)
+                return true
+            }
+            if pass { progress(totalBytesWritten, total) }
         }
 
         func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {}

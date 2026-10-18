@@ -58,20 +58,28 @@ final class MacPermissionsModel {
     }
 
     /// Reads the statuses again without prompting. Safe to call whenever the tab appears or the app comes back to the front.
-    func refresh(_ kinds: [MacPermissionKind] = MacPermissionChecker.allKinds) async {
+    /// `includingNotifications: false` skips the notifications read (an XPC call); the watch loop uses it.
+    func refresh(_ kinds: [MacPermissionKind] = MacPermissionChecker.allKinds, includingNotifications: Bool = true) async {
         let fresh = await checker.statuses(of: kinds)
-        // A request in flight owns its row; its own refresh follows.
-        statuses.merge(fresh.filter { !asking.contains($0.key) }) { _, new in new }
-        awaitsRelaunch = awaitsRelaunch.filter { statuses[$0] != .granted }
-        tests = tests.filter { statuses[$0.key] == .granted }
-        notifications = await readNotifications()
+        // A request in flight owns its row; its own refresh follows. Assign only what changed, so the observers stay quiet.
+        var merged = statuses
+        merged.merge(fresh.filter { !asking.contains($0.key) }) { _, new in new }
+        if merged != statuses { statuses = merged }
+        let relaunch = awaitsRelaunch.filter { statuses[$0] != .granted }
+        if relaunch != awaitsRelaunch { awaitsRelaunch = relaunch }
+        let kept = tests.filter { statuses[$0.key] == .granted }
+        if kept != tests { tests = kept }
+        if includingNotifications {
+            let current = await readNotifications()
+            if current != notifications { notifications = current }
+        }
     }
 
     /// Reads the `watched` rows every `interval` until the task is cancelled (the tab went away). System Settings does
     /// not bring the Orb back to the front, so this is how a switch turned there shows up here.
     func watch(every interval: Duration = .seconds(2)) async {
         while (try? await Task.sleep(for: interval)) != nil {
-            await refresh(Self.watched)
+            await refresh(Self.watched, includingNotifications: false)
         }
     }
 

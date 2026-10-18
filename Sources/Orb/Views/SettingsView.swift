@@ -106,10 +106,13 @@ struct GeneralSettings: View {
     @AppStorage(SessionNote.settingKey) private var summarizeSessions = false
     @AppStorage(DictationReview.settingKey) private var reviewDictation = true
     @AppStorage(GlobalHotKey.defaultsKey) private var globalShortcut = false
-    @State private var launchAtLogin = LoginItemState(SMAppService.mainApp.status).isOn
+    /// Starts from the last reading (false the first time): asking the system on every init made each tab switch query it.
+    /// `refresh()` reads the real state as soon as the tab appears and updates the cache.
+    @MainActor private static var lastLoginItem: LoginItemState?
+    @State private var launchAtLogin = GeneralSettings.lastLoginItem?.isOn ?? false
     @State private var loginError: String?
     /// What the Mac still waits for before the Orb opens at login (nil when nothing).
-    @State private var loginApproval = LoginItemState(SMAppService.mainApp.status).approvalMessage
+    @State private var loginApproval = GeneralSettings.lastLoginItem?.approvalMessage
     @State private var notifications: NotificationPermission?
     @State private var keptCount = 0
     @State private var hasOrbsFolder = false
@@ -340,9 +343,9 @@ struct GeneralSettings: View {
     }
 
     private func refresh() async {
+        readLoginItem() // the item may have been changed in the System Settings meanwhile (before any await: no flicker)
         learnedWindows = model.learnedWindowRows()
         notifications = await NotificationPermission.current()
-        readLoginItem() // the item may have been changed in the System Settings meanwhile
         // A look at the disk, once, off the render path.
         let memories = model.memory.root
         keptCount = await Task.detached(priority: .utility) { KeptMemories.count(in: memories) }.value
@@ -389,8 +392,9 @@ struct GeneralSettings: View {
     @discardableResult
     private func readLoginItem() -> LoginItemState {
         let state = LoginItemState(SMAppService.mainApp.status)
-        launchAtLogin = state.isOn
-        loginApproval = state.approvalMessage
+        Self.lastLoginItem = state
+        if launchAtLogin != state.isOn { launchAtLogin = state.isOn }
+        if loginApproval != state.approvalMessage { loginApproval = state.approvalMessage }
         return state
     }
 }

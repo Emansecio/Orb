@@ -11,6 +11,18 @@ struct BrowserComponentRow: Equatable, Identifiable, Sendable {
         case installed(managed: Bool)
         case installing(BrowserInstallProgress)
         case failed(String)
+
+        /// Which case this is, ignoring the payload: what the row animates on (the progress ticks must not).
+        enum Kind: Equatable { case checking, notInstalled, installed, installing, failed }
+        var kind: Kind {
+            switch self {
+            case .checking: .checking
+            case .notInstalled: .notInstalled
+            case .installed: .installed
+            case .installing: .installing
+            case .failed: .failed
+            }
+        }
     }
 
     var component: BrowserComponent
