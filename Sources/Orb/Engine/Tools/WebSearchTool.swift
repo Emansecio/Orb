@@ -245,6 +245,11 @@ enum TinyFishSearch {
         }
     }
 
+    /// `URLComponents` leaves a "+" in a query as it is, and search engines read that as a space: "C++" would be searched as "C".
+    static func encodePlus(in components: inout URLComponents) {
+        components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+    }
+
     static func request(key: String, query: String, count: Int, site: String?, news: Bool, locale: Locale = .current) -> URLRequest {
         var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)!
         var items = [URLQueryItem(name: "query", value: query)]
@@ -253,6 +258,7 @@ enum TinyFishSearch {
         if let site { items.append(URLQueryItem(name: "include_domains", value: site)) }
         if news { items.append(URLQueryItem(name: "domain_type", value: "news")) }
         components.queryItems = items
+        Self.encodePlus(in: &components)
         var request = URLRequest(url: components.url!, timeoutInterval: 20)
         request.setValue(key, forHTTPHeaderField: "X-API-Key")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -424,6 +430,7 @@ struct WebSearchTool: AgentTool {
                                      URLQueryItem(name: "num", value: "10")]
             if search.news { components.queryItems?.append(URLQueryItem(name: "tbm", value: "nws")) }
         }
+        TinyFishSearch.encodePlus(in: &components)
         return components.url!
     }
 
