@@ -43,7 +43,7 @@ actor SkillCatalog {
     /// and GitHub allows few listings an hour without an account).
     private var trees: [String: Task<[String], Error>] = [:]
     /// The SKILL.md files already read, by "owner/repo/path": a search reads the same ones for several cards.
-    private var files: [String: Task<String?, Never>] = [:]
+    private var files: [String: Task<(text: String?, answered: Bool), Never>] = [:]
 
     init(session: URLSession = .shared) {
         send = { request in
@@ -142,14 +142,25 @@ actor SkillCatalog {
         }
     }
 
-    /// A file of `repo` at HEAD, or nil when it is not there.
+    /// A file of `repo` at HEAD, or nil when it is not there. Only an answer is kept (the file, or a 404): a timeout, a 5xx, a refusal
+    /// or no network is tried again by the next call, not remembered as "not there" until the app restarts.
     private func file(_ repo: String, _ path: String) async -> String? {
         let key = "\(repo)/\(path)"
-        if let reading = files[key] { return await reading.value }
+        if let reading = files[key] { return await reading.value.text }
         let url = Self.raw.appending(path: "\(repo)/HEAD/\(path)")
-        let reading = Task { [self] in (try? await fetch(url)).flatMap { String(data: $0, encoding: .utf8) } }
+        let reading = Task { [self] () -> (text: String?, answered: Bool) in
+            do {
+                return (String(data: try await fetch(url), encoding: .utf8), true)
+            } catch CatalogError.http(404) {
+                return (nil, true)
+            } catch {
+                return (nil, false)
+            }
+        }
         files[key] = reading
-        return await reading.value
+        let result = await reading.value
+        if !result.answered, files[key] == reading { files[key] = nil }
+        return result.text
     }
 
     // MARK: Network
