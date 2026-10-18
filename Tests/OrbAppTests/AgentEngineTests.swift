@@ -1337,6 +1337,16 @@ struct ModelTests {
         #expect(SystemPrompt.expandSkill(in: "sem barra", skills: skills) == nil)
     }
 
+    @Test func aSkillIsExpandedWhenALineBreakOrTabFollowsTheSlug() throws {
+        let skills = Skill.starters
+        for separator in ["\n", "\t"] {
+            let expanded = try #require(SystemPrompt.expandSkill(in: "/resumir" + separator + "texto longo", skills: skills))
+            #expect(expanded.skill.slug == "resumir")
+            #expect(expanded.prompt.contains("User request: texto longo"))
+        }
+        #expect(try #require(SystemPrompt.expandSkill(in: "/resumir\n", skills: skills)).prompt.contains("User request: (none)"))
+    }
+
     @Test func scheduleNextRun() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = try #require(TimeZone(identifier: "America/Sao_Paulo"))
