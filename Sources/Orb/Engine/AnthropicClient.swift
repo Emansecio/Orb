@@ -164,7 +164,10 @@ extension AnthropicClient {
                    trace.isReusable(format: .messages, provider: provider, model: model) {
                     blocks += trace.parts.compactMap(thinkingBlock)
                 }
-                if !message.content.isEmpty { blocks.append(.object(["type": .string("text"), "text": .string(message.content)])) }
+                // The API refuses a text block of only whitespace; the history keeps the text as it came.
+                if !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    blocks.append(.object(["type": .string("text"), "text": .string(message.content)]))
+                }
                 for call in message.toolCalls {
                     let input = JSONValue.parse(call.arguments).flatMap { value -> JSONValue? in
                         if case .object = value { value } else { nil }

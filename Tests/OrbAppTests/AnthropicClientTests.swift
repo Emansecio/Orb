@@ -54,6 +54,21 @@ struct AnthropicClientTests {
         }
     }
 
+    @Test func whitespaceOnlyAssistantTextIsNotSentAsATextBlock() throws {
+        // The API answers 400 to a text block with nothing but whitespace, and the message stays in the history.
+        func assistantBlocks(_ text: String) throws -> [String?] {
+            let call = ToolCallRequest(id: "t1", name: "look", arguments: "{}")
+            let body = AnthropicClient.requestBody(model: "m", messages: [
+                .system("s"), .user("oi"), ChatMessage(role: .assistant, content: text, toolCalls: [call]), .tool("t1", "ok"),
+            ], tools: [], maxTokens: 10)
+            let turns = try #require(body["messages"]?.array)
+            return try #require(turns[1]["content"]?.array).map { $0["type"]?.string }
+        }
+        #expect(try assistantBlocks("\n\n") == ["tool_use"])
+        #expect(try assistantBlocks(" \t\n") == ["tool_use"])
+        #expect(try assistantBlocks("Vou olhar") == ["text", "tool_use"])
+    }
+
     @Test func marksTheCacheablePrefixWithAtMostFourMarkers() throws {
         let tools = [ToolSpec(name: "a", description: "A", parameters: .schema([:])), ToolSpec(name: "b", description: "B", parameters: .schema([:]))]
         let body = AnthropicClient.requestBody(model: "m", messages: [.system("s"), .user("1"), .user("2")], tools: tools, maxTokens: 10)

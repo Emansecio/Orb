@@ -245,6 +245,7 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
         }
         do {
             Self.sweepStaleRuns(in: folders.scratch)
+            Self.sweepStaleRuns(in: folders.projectDirectory, onlySessionFiles: true)
             try fileManager.createDirectory(at: runFolder, withIntermediateDirectories: true)
             try fileManager.createDirectory(at: folders.workingDirectory, withIntermediateDirectories: true)
 
@@ -299,12 +300,14 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
         }
     }
 
-    /// Run folders a crashed app left behind (older than a day).
-    private static func sweepStaleRuns(in scratch: URL) {
+    /// Run folders a crashed app left behind (older than a day). With `onlySessionFiles`, the folder is the CLI's project folder
+    /// of the neutral cwd, and what a crash leaves there is a `<session>.jsonl` with the whole conversation, which "forget"
+    /// promises not to keep.
+    static func sweepStaleRuns(in scratch: URL, onlySessionFiles: Bool = false) {
         let fileManager = FileManager.default
         guard let entries = try? fileManager.contentsOfDirectory(at: scratch, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
         let limit = Date().addingTimeInterval(-24 * 3600)
-        for url in entries {
+        for url in entries where !onlySessionFiles || url.pathExtension == "jsonl" {
             if let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate, modified < limit {
                 try? fileManager.removeItem(at: url)
             }

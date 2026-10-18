@@ -67,6 +67,13 @@ struct LedgerOriginalTests {
         #expect(ledger.goal == "agora ajuste o módulo de login")
     }
 
+    @Test func aPictureAloneDoesNotReplaceTheGoal() {
+        let picture = ImageAttachment(path: "/tmp/captura.png", mediaType: "image/png", width: 10, height: 10)
+        let ledger = ledger(of: step("refatore o módulo de pagamentos para usar o novo cliente") + [.user("", images: [picture]), assistant("Vi a captura.")])
+        #expect(ledger.goal == "refatore o módulo de pagamentos para usar o novo cliente")
+        #expect(ledger.render().contains("refatore o módulo de pagamentos para usar o novo cliente"))
+    }
+
     @Test func theGoalIsNotRepeatedWhenItIsTheNewestLineOfTheTimeline() {
         let ledger = ledger(of: step(longRequest) + step("agora ajuste o módulo de login"))
         let text = ledger.render()
@@ -190,6 +197,15 @@ struct LedgerDecisionTests {
         var later = withUser
         later.absorb([.user("SQLite"), assistant("Certo.")])
         #expect(later.openQuestion == nil)
+    }
+
+    @Test func aQuestionKeepsItsFileNamesAndVersionsWhole() {
+        func question(_ reply: String) -> String? {
+            ConversationLedger().absorbing(step(longRequest) + [.user("e agora?"), assistant(reply)], followedByUser: true).openQuestion
+        }
+        #expect(question("Posso renomear o arquivo config.json para settings.json?") == "Posso renomear o arquivo config.json para settings.json?")
+        #expect(question("Atualizo para a versão 2.5 agora?") == "Atualizo para a versão 2.5 agora?")
+        #expect(question("Feito. Abro https://exemplo.com/a?") == "Abro https://exemplo.com/a?")
     }
 
     @Test func decisionsOutliveOrdinaryRequestsWhenThereAreTooMany() {

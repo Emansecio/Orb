@@ -328,7 +328,7 @@ enum SystemPrompt {
     /// Expands "/slug rest" into the skill's instructions plus the request; nil if no skill matches.
     static func expandSkill(in prompt: String, skills: [Skill]) -> (skill: Skill, prompt: String)? {
         guard prompt.hasPrefix("/") else { return nil }
-        let parts = prompt.dropFirst().split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+        let parts = prompt.dropFirst().split(maxSplits: 1, omittingEmptySubsequences: true, whereSeparator: \.isWhitespace)
         guard let slug = parts.first, let skill = skills.first(where: { $0.slug == slug }) else { return nil }
         let rest = parts.count > 1 ? String(parts[1]) : ""
         let files = skill.folderURL.map { "\n\n(Files this skill refers to are in \($0.absoluteString); fetch them if needed.)" } ?? ""

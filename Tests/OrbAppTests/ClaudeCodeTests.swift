@@ -110,6 +110,23 @@ struct ClaudeCodeProcessTests {
         #expect(environment["CLAUDECODE"] == nil)
     }
 
+    @Test func aClaudeInstalledThroughTheZshrcPathIsFound() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        // npm, nvm, fnm and Volta extend the PATH in `.zshrc`, which the login (not interactive) probe never reads.
+        let bin = directory.appending(path: "nvm/bin")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        try writeExecutable("#!/bin/sh\necho claude\n", to: bin.appending(path: "claude"))
+        let home = directory.appending(path: "home")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let login = try FakeShell.make(in: directory, name: "loginshell", preamble: "PATH=/usr/bin:/bin; export PATH")
+        let rc = try FakeShell.make(in: directory, exports: ["PATH": "\(bin.path):/usr/bin:/bin"])
+        let shell = ShellEnvironment(shell: rc, base: ["PATH": "/usr/bin:/bin", "HOME": home.path], timeout: .seconds(60))
+        let installation = try #require(await ClaudeCode().installation(refresh: true, shell: shell, environment: ["SHELL": login], home: home.path))
+        #expect(installation.executable.path == bin.appending(path: "claude").path)
+        #expect(installation.path.hasPrefix(bin.path))
+    }
+
     @Test func theProvidersCredentialsOfTheUsersShellDoNotReachTheCLI() async throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

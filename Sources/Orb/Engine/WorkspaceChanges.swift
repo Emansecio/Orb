@@ -21,8 +21,11 @@ extension WorkspaceSnapshot {
         guard modelHasSnapshot, let lastHash else { return .full }
         if lastHash == hash {
             // The hash leaves the recently changed files out, so edits to files already there only show in `changes`.
-            guard let seen, let delta = changes(since: seen) else { return .nothing }
-            return .changes(delta)
+            guard let seen else { return .nothing }
+            if let delta = changes(since: seen) { return .changes(delta) }
+            // No block: either nothing differs, or the block came out nearly as long as the snapshot (a tiny folder). In the
+            // second case the edit would be lost for good (the next turn compares against this one), so send it whole.
+            return hasEdits(since: seen) ? .full : .nothing
         }
         guard let seen, let delta = changes(since: seen) else { return .full }
         return .changes(delta)
@@ -94,6 +97,13 @@ extension WorkspaceSnapshot {
         let wrapped = Self.changesOpenTag + "\n" + Self.fenced(text) + "\n" + Self.changesCloseTag
         // Nothing gained when the changes are nearly as long as the snapshot: send that instead.
         return wrapped.count * 10 > self.text.count * 7 ? nil : wrapped
+    }
+
+    /// Whether a recently changed file was edited after the newest one of `previous` (what the "Edited since" line lists).
+    private func hasEdits(since previous: WorkspaceSnapshot) -> Bool {
+        guard path == previous.path, state == .scanned, previous.state == .scanned,
+              let newest = previous.recentFiles.first?.modified else { return false }
+        return recentFiles.contains { $0.modified > newest }
     }
 
     /// What changed in the last commits, newest first. "New commits" only when the old list is the tail of the new one (commits
