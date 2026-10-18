@@ -118,6 +118,13 @@ struct AppControlInfoTests {
         #expect(await expired.current(ttl: 0, load: { ["new"] }) == ["new"])
     }
 
+    @Test func aFailedRereadKeepsTheNamesAlreadyKnown() async {
+        let cache = ShortcutNamesCache()
+        #expect(await cache.current(ttl: 0, load: { ["A"] }) == ["A"])
+        #expect(await cache.current(ttl: 0, load: { nil }) == ["A"], "Shortcuts failing once does not hide the list")
+        #expect(await cache.current(ttl: 0, load: { ["B"] }) == ["A"], "and the failure is still remembered for a minute")
+    }
+
     @Test func theInfoIsCachedUntilTheInfoPlistChanges() async throws {
         let app = try bundle(["NSAppleScriptEnabled": false])
         defer { remove(app) }

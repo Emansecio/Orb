@@ -218,6 +218,18 @@ struct AccessibilityLadderTests {
         #expect(bench.system.syntheticInput.typed(to: 100) == "gatos")
     }
 
+    @Test func clearingAFieldThatRefusesAXValueDeletesWithTheKeyboard() async throws {
+        let field = fake("AXTextField", title: "Busca", value: .string("velho"))
+        field.settable = ["AXFocused"]
+        let bench = Bench(windows: [fake("AXWindow", title: "A", [field])])
+        bench.root.attrs["AXFocusedUIElement"] = .element(field)
+        try await bench.read()
+        let text = try await bench.act(["action": .string("set_value"), "id": .string("w1.1"), "value": .string("")])
+        #expect(bench.system.syntheticInput.events == [.keys([KeyStroke(.character("a"), modifiers: [.command]), KeyStroke(.named(.delete))], pid: 100)],
+                "an empty text is select all and delete, not zero chunks")
+        #expect(text.hasPrefix("Limpei") && !text.contains("Escrevi") && !text.contains("digitei o texto"))
+    }
+
     @Test func aShortcutIsPressedAsItsMenuItemWithoutAnyKeyEvent() async throws {
         let mark = fakeMenuItem("Marcar")
         mark.attrs["AXMenuItemCmdChar"] = .string("K")
@@ -279,6 +291,18 @@ struct AccessibilityLadderTests {
         #expect(bad.contains("Modificador desconhecido"))
         let unnamed = await failureMessage { try await bench.act(["action": .string("key"), "keys": .string("return")]) }
         #expect(unnamed.contains("Diga em qual app"), "without a reading, key needs the app")
+    }
+
+    @Test func theCommaIsAKeyWhenItIsTheShortcutNotTheSeparator() throws {
+        func keys(_ text: String) throws -> [KeyStroke] {
+            try UIActTool.Step.parse(.object(["action": .string("key"), "keys": .string(text)])).keys
+        }
+        let comma = KeyStroke(.character(","), modifiers: [.command])
+        #expect(try keys("cmd+,") == [comma])
+        #expect(try keys("cmd+s, return") == [KeyStroke(.character("s"), modifiers: [.command]), KeyStroke(.named(.return))])
+        #expect(try keys("cmd+s,cmd+,") == [KeyStroke(.character("s"), modifiers: [.command]), comma])
+        #expect(try keys(",") == [KeyStroke(.character(","))])
+        #expect(try keys("return,,") == [KeyStroke(.named(.return)), KeyStroke(.character(","))])
     }
 
     @Test func scrollMovesTheScrollBarAndFallsBackToAScrollEvent() async throws {
@@ -1002,6 +1026,27 @@ struct AccessibilityWaitTests {
         #expect(text.contains("apareceu “Exportado”"))
     }
 
+    @Test func anEmptyWaitIsNoWaitAndTheActionStillSettles() async throws {
+        let box = fake("AXCheckBox", title: "Fixar", value: .number(0), actions: ["AXPress"])
+        var bench = Bench(windows: [fake("AXWindow", title: "A", [box])])
+        // The app answers 100 ms after the press, with a notification: only the settle after the action sees the new value.
+        bench.settle = UISettle(first: .seconds(120), quiet: .milliseconds(60), fallback: .zero, cap: .seconds(120))
+        let events = bench.system.axEvents
+        try await bench.read()
+        for (index, empty) in [JSONValue.string(""), JSONValue.null].enumerated() {
+            box.attrs["AXValue"] = .number(0)
+            box.onPerform = { _ in
+                Task {
+                    try? await Task.sleep(for: .milliseconds(100))
+                    box.attrs["AXValue"] = .number(1)
+                    events.emit(.valueChanged, pid: 100)
+                }
+            }
+            let text = try await bench.act(["action": .string("press"), "id": .string("w1.1"), "wait": empty])
+            #expect(!text.contains("Nada visível mudou") && text.contains("valor “1”"), "a blank wait (\(index)) is no wait: the action settles as without it")
+        }
+    }
+
     @Test func aSilentAppIsLookedAtAgainWithinAQuarterSecondNotAfterOne() async throws {
         // The app is subscribed (the stream is alive) but says nothing, as when a label changes without a notification
         // reaching the app's observer: the wait must not sleep a whole second between looks (it did: 1 s whenever the
@@ -1681,6 +1726,8 @@ struct AccessibilityFormattingTests {
 
     @Test func waitConditionsNeedWhatTheyWatch() throws {
         #expect(try UIWaitCondition(mode: "appears", query: "x", id: nil) == .appears("x"))
+        #expect(try UIWaitCondition(mode: " Appears\t", query: "x", id: nil) == .appears("x"), "spaces around the mode do not turn it into disappears")
+        #expect(try UIWaitCondition(mode: " disappears ", query: "x", id: nil) == .disappears("x"))
         #expect(try UIWaitCondition(mode: "changes", query: nil, id: "w1.2") == .changes("w1.2"))
         #expect(throws: ToolError.self) { try UIWaitCondition(mode: "disappears", query: nil, id: nil) }
         #expect(throws: ToolError.self) { try UIWaitCondition(mode: "later", query: "x", id: nil) }

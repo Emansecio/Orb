@@ -442,4 +442,14 @@ final class ToolOutputSizeTests {
         #expect(capture.report(ocrLimit: 1_500) == "Captura.\nNão achei texto legível na imagem.")
         #expect(capture.report(ocrLimit: 8_000) == capture.report(ocrLimit: 1_500))
     }
+
+    @Test func aReadingThatFailedDoesNotClaimThereIsNoText() {
+        let failed = ScreenshotTool.Capture(header: "Captura.", ocr: "", file: URL(fileURLWithPath: "/tmp/a.png"), ocrFailed: true)
+        for limit in [1_500, 8_000] {
+            let report = failed.report(ocrLimit: limit)
+            #expect(report.contains("Não consegui ler o texto da imagem") && !report.contains("Não achei texto legível"))
+        }
+        // Text that was read is shown whatever else happened.
+        #expect(ScreenshotTool.Capture(header: "Captura.", ocr: "oi", file: nil, ocrFailed: true).report(ocrLimit: 1_500).contains("Texto na imagem (OCR):\noi"))
+    }
 }

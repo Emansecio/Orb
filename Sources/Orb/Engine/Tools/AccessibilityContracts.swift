@@ -46,14 +46,11 @@ struct AXEvent: Sendable {
     var pid: Int32
     /// The element it is about; nil when the app did not say.
     var element: (any AccessibilityElement)?
-    var receivedAt: ContinuousClock.Instant
 
-    init(_ notification: AXNotification, pid: Int32, element: (any AccessibilityElement)? = nil,
-         receivedAt: ContinuousClock.Instant = .now) {
+    init(_ notification: AXNotification, pid: Int32, element: (any AccessibilityElement)? = nil) {
         self.notification = notification
         self.pid = pid
         self.element = element
-        self.receivedAt = receivedAt
     }
 }
 

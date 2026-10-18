@@ -224,6 +224,31 @@ final class FileToolTests {
         }
     }
 
+    @Test func readAnRTFDPackageAsADocumentNotAFolder() async throws {
+        let attributed = NSAttributedString(string: "Relatório mensal\nTotal: 42\n")
+        let package = try #require(try attributed.fileWrapper(from: NSRange(location: 0, length: attributed.length),
+                                                               documentAttributes: [.documentType: NSAttributedString.DocumentType.rtfd]))
+        try package.write(to: workspace.url("nota.rtfd"), options: .atomic, originalContentsURL: nil)
+        #expect(workspace.url("nota.rtfd").isExistingDirectory)
+        let text = try await run(ReadFileTool(), ["path": .string("nota.rtfd")])
+        #expect(text.contains("Relatório mensal") && text.contains("convertido em texto"))
+        // A plain folder is still a folder.
+        try FileManager.default.createDirectory(at: workspace.url("pasta"), withIntermediateDirectories: true)
+        #expect(await workspace.failure(ReadFileTool(), ["path": .string("pasta")]).contains("é uma pasta"))
+    }
+
+    @Test func readImageStopsWaitingWhenTheTurnIsCancelled() async throws {
+        try workspace.write("sign.png", try Fixtures.png(text: "HELLO WORLD"))
+        let context = workspace.context
+        let task = Task { () -> String in
+            // Parar is pressed before the reading ends: the call must come back with the cancellation, not wait for Vision.
+            while !Task.isCancelled { await Task.yield() }
+            return try await ReadFileTool().run(.object(["path": .string("sign.png")]), context: context)
+        }
+        task.cancel()
+        await #expect(throws: CancellationError.self) { try await task.value }
+    }
+
     @Test func htmlIsReadAsSource() async throws {
         try workspace.write("page.html", "<h1>Oi</h1>\n")
         #expect(try await run(ReadFileTool(), ["path": .string("page.html")]).hasSuffix("1\t<h1>Oi</h1>"))
