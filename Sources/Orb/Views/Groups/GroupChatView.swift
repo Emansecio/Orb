@@ -46,7 +46,7 @@ struct GroupChatView: View {
     var body: some View {
         if let group = model.groups.first(where: { $0.id == groupID }) {
             Group {
-                if let session = loaded ?? model.loadedGroupSession(groupID) {
+                if let session = model.loadedGroupSession(groupID) ?? loaded {
                     GroupConversation(group: group, session: session, live: model.groupLive(groupID))
                 } else {
                     LoadingTranscript()

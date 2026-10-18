@@ -58,8 +58,7 @@ final class MacPermissionsModel {
     }
 
     /// Reads the statuses again without prompting. Safe to call whenever the tab appears or the app comes back to the front.
-    /// `includingNotifications: false` skips the notifications read (an XPC call); the watch loop uses it.
-    func refresh(_ kinds: [MacPermissionKind] = MacPermissionChecker.allKinds, includingNotifications: Bool = true) async {
+    func refresh(_ kinds: [MacPermissionKind] = MacPermissionChecker.allKinds) async {
         let fresh = await checker.statuses(of: kinds)
         // A request in flight owns its row; its own refresh follows. Assign only what changed, so the observers stay quiet.
         var merged = statuses
@@ -69,17 +68,16 @@ final class MacPermissionsModel {
         if relaunch != awaitsRelaunch { awaitsRelaunch = relaunch }
         let kept = tests.filter { statuses[$0.key] == .granted }
         if kept != tests { tests = kept }
-        if includingNotifications {
-            let current = await readNotifications()
-            if current != notifications { notifications = current }
-        }
+        // Read on the watch too: the notifications row also changes in System Settings, which does not bring the Orb back.
+        let current = await readNotifications()
+        if current != notifications { notifications = current }
     }
 
     /// Reads the `watched` rows every `interval` until the task is cancelled (the tab went away). System Settings does
     /// not bring the Orb back to the front, so this is how a switch turned there shows up here.
     func watch(every interval: Duration = .seconds(2)) async {
         while (try? await Task.sleep(for: interval)) != nil {
-            await refresh(Self.watched, includingNotifications: false)
+            await refresh(Self.watched)
         }
     }
 
