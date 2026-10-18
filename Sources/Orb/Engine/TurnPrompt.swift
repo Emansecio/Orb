@@ -136,7 +136,11 @@ enum TurnPreface {
     /// Whether `history` already holds a whole workspace snapshot the model can read (a block of changes does not count:
     /// it says what differs from a snapshot, so it means nothing without one).
     static func hasSnapshot(in history: [ChatMessage]) -> Bool {
-        history.contains { $0.role == .user && $0.content.hasPrefix(openTag) && $0.content.contains(WorkspaceSnapshot.openTag) }
+        history.contains { message in
+            // Only the preface: a snapshot tag in the message itself (a pasted block, an attached source file) is not the app's.
+            guard message.role == .user, message.content.hasPrefix(openTag), let close = message.content.range(of: closeTag) else { return false }
+            return message.content[..<close.lowerBound].contains(WorkspaceSnapshot.openTag)
+        }
     }
 
     /// How many of the latest user messages a related-memory line counts as still "in front of" the model, so it is not
