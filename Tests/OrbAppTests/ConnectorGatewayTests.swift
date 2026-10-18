@@ -134,6 +134,11 @@ struct ConnectorGatewayTests {
 
         let some = try await tool.run(.object(["connector": .string("GitHub"), "tools": .array([.string("list_issues"), .string("nope")])]), context: context)
         #expect(some.hasPrefix("list_issues — ") && !some.contains("create_issue") && some.hasSuffix("GitHub não tem: nope."))
+        // Models also send the names as JSON text or separated by commas.
+        let json = try await tool.run(.object(["connector": .string("GitHub"), "tools": .string(#"["list_issues"]"#)]), context: context)
+        #expect(json.hasPrefix("list_issues — ") && json.contains("args: ") && !json.contains("create_issue") && !json.contains("não tem"))
+        let commas = try await tool.run(.object(["connector": .string("GitHub"), "tools": .string("list_issues, nope")]), context: context)
+        #expect(commas.hasPrefix("list_issues — ") && !commas.contains("create_issue") && commas.hasSuffix("GitHub não tem: nope."))
         // It read the catalog: no server was started.
         #expect(await !fixture.manager.isRunning(github.id))
     }

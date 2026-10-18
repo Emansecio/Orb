@@ -138,6 +138,17 @@ enum ConnectorGateway {
         }
     }
 
+    /// The `tools` of a connector_tools call: a list, or text that holds one (JSON like `arguments`, or names separated by
+    /// commas or line breaks). nil lists everything.
+    static func requestedNames(_ value: JSONValue?) -> [String]? {
+        if let list = value?.array { return list.compactMap(\.string) }
+        guard let text = value?.string else { return nil }
+        if case .array(let items)? = JSONValue.parse(text) { return items.compactMap(\.string) }
+        let names = text.split(whereSeparator: { $0 == "," || $0.isNewline })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        return names.isEmpty ? nil : names
+    }
+
     static func invalidArguments(_ text: String) -> String {
         "arguments precisa ser um objeto JSON ({\"campo\": valor}); recebi: \(text.prefix(200)). Corrija e chame de novo."
     }
@@ -188,7 +199,7 @@ struct ConnectorToolsTool: AgentTool {
         guard let catalog = await manager.catalog(config.id) else {
             throw ToolError("O conector \(config.name) não listou as ferramentas.")
         }
-        let names = arguments["tools"]?.array?.compactMap(\.string) ?? arguments["tools"]?.string.map { [$0] }
+        let names = ConnectorGateway.requestedNames(arguments["tools"])
         return ConnectorGateway.render(catalog, connector: config.name, only: names)
     }
 }
