@@ -548,6 +548,16 @@ struct EmptyChatContentTests {
         #expect(own.contains("O que tem na sua pasta? Me dê um resumo"))
     }
 
+    @Test func theHomeFolderWrittenOutIsStillTheHomeFolder() {
+        let home = "/Users/teste"
+        let written = bot(folder: home)
+        #expect(EmptyChatContent.folderText(for: written, home: home) == "Trabalha na pasta pessoal")
+        #expect(EmptyChatContent.suggestions(for: written, interviewPending: false, home: home).first?.text == "Organize minha pasta Downloads")
+        #expect(EmptyChatContent.folderText(for: bot(folder: home + "/Orbs/Atlas"), home: home) == "Trabalha em ~/Orbs/Atlas")
+        let own = EmptyChatContent.suggestions(for: bot(folder: home + "/Orbs/Atlas"), interviewPending: false, home: home)
+        #expect(own.first?.text == "O que tem na sua pasta? Me dê um resumo")
+    }
+
     @Test func aCapabilityThatIsOffOffersNothingThatNeedsIt() {
         let terminalOnly = EmptyChatContent.suggestions(for: bot(.init([.terminal])), interviewPending: false).map(\.symbol)
         #expect(!terminalOnly.contains("globe") && !terminalOnly.contains("calendar"))
@@ -601,6 +611,9 @@ struct ModelSearchTests {
     @Test func returnWithNothingTypedPicksTheDefaultWhenThereIsOne() {
         #expect(ModelSearch.submitted(choices(""), query: "", allowsDefault: true) == "")
         #expect(ModelSearch.submitted(choices(""), query: "", allowsDefault: false) == nil)
+        // A space is nothing typed either.
+        #expect(ModelSearch.submitted(choices("  "), query: "  ", allowsDefault: true) == "")
+        #expect(ModelSearch.submitted(choices("  "), query: "  ", allowsDefault: false) == nil)
     }
 
     @Test func returnWithNoMatchDoesNothing() {

@@ -110,6 +110,12 @@ import Testing
         #expect(Phase.of(isSearching: true, isLoading: false, error: nil, isEmpty: false) == .results)
     }
 
+    @Test func aSearchRetriedBeforeTheTextChangedDoesNotAnswerForTheNewText() {
+        #expect(RegistryQuery.isCurrent("banco", query: " banco "))
+        #expect(!RegistryQuery.isCurrent("banco", query: "calendário"))
+        #expect(!RegistryQuery.isCurrent("banco", query: ""))
+    }
+
     // MARK: Small values
 
     @Test func aSpinnerWaitsOneHundredFiftyMilliseconds() {

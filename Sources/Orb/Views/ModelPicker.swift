@@ -119,7 +119,7 @@ enum ModelSearch {
     /// What Return picks in the search field: the first model shown, or the app's default (tag "") when nothing was typed
     /// and the list offers one. Nil when there is nothing to pick.
     static func submitted(_ shown: [(account: ProviderAccount, models: [ProviderModel])], query: String, allowsDefault: Bool) -> String? {
-        if query.isEmpty { return allowsDefault ? "" : nil }
+        if query.trimmingCharacters(in: .whitespaces).isEmpty { return allowsDefault ? "" : nil }
         return shown.first.flatMap { choice in choice.models.first.map { ModelRef(provider: choice.account.kind, model: $0.id).text } }
     }
 }

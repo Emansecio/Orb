@@ -176,6 +176,46 @@ struct GrokMarketplaceTests {
         #expect(ImportSource.marketplace.made(imported) && !ImportSource.assistant.made(imported))
     }
 
+    @Test func thePanelOpensOnTheSourceThatMadeThePreview() {
+        var imported = OrbImport(source: "ChatGPT")
+        #expect(ImportSource.opening(draft: imported, default: .marketplace) == .assistant, "a pasted text is not hidden behind the marketplace")
+        #expect(ImportSource.opening(draft: nil, default: .marketplace) == .marketplace)
+        #expect(ImportSource.opening(draft: nil, default: .assistant) == .assistant)
+        imported.link = "https://x.ai/bot/marketplace/bots/a"
+        #expect(ImportSource.opening(draft: imported, default: .assistant) == .marketplace)
+    }
+
+    @Test func aFileDroppedOnTheOtherSourceIsReadAfterTheSwitchNotCancelledByIt() {
+        let file = URL(fileURLWithPath: "/tmp/hermes")
+        let dropped = ImportSourceSwitch.after(switchingTo: .assistant, pasted: "- gosto de café", link: "", hasDraft: false, pendingDrop: file)
+        #expect(dropped == .init(readsDrop: file))
+        // A plain switch has no file to read.
+        #expect(ImportSourceSwitch.after(switchingTo: .assistant, pasted: "", link: "", hasDraft: false, pendingDrop: nil) == .init())
+    }
+
+    @Test func comingBackToASourceReadsAgainWhatItsFieldStillHolds() {
+        let back = ImportSourceSwitch.after(switchingTo: .assistant, pasted: "- gosto de café", link: "", hasDraft: false, pendingDrop: nil)
+        #expect(back.rereadsText && !back.rereadsLink && back.readsDrop == nil)
+        let link = ImportSourceSwitch.after(switchingTo: .marketplace, pasted: "", link: " https://x.ai/bot/a ", hasDraft: false, pendingDrop: nil)
+        #expect(link.rereadsLink && !link.rereadsText)
+        #expect(ImportSourceSwitch.after(switchingTo: .assistant, pasted: "  \n", link: "", hasDraft: false, pendingDrop: nil) == .init(), "empty field, nothing to read")
+        #expect(ImportSourceSwitch.after(switchingTo: .assistant, pasted: "texto", link: "", hasDraft: true, pendingDrop: nil) == .init(), "a preview already there is kept")
+    }
+
+    @Test func aCancelledReadingDoesNotClearTheSpinnerOfTheNewerReadingOfTheSamePage() {
+        var state = LinkReading()
+        let first = state.begin("p")
+        let second = state.begin("p")
+        state.end(first)
+        #expect(state.page == "p", "the older reading ended; the newer one is still going")
+        state.end(second)
+        #expect(state.page == nil)
+        let third = state.begin("q")
+        state.clear()
+        state.end(third)
+        #expect(state.page == nil)
+    }
+
     @Test func theGalleryFiltersAndGroupsTheList() {
         let bots = [
             MarketplaceBot(id: "a", name: "Researchy", creatorName: "Farzad", summary: "A research desk.", categories: ["Engineering"]),

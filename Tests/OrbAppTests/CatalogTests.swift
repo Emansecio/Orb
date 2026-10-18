@@ -88,9 +88,18 @@ struct CatalogTests {
         #expect(connector.isEnabled)
     }
 
+    @Test func theSlowHintOnlyComesFromAWaitThatRanToTheEnd() async {
+        #expect(await SlowHint.arrives(after: .milliseconds(1)))
+        let cancelled = Task { await SlowHint.arrives(after: .seconds(30)) }
+        cancelled.cancel()
+        #expect(await cancelled.value == false, "a search that ended or was replaced must not leave the hint armed")
+    }
+
     @Test func installCountsReadNaturally() {
         #expect(206_559.installsLabel == "207 mil instalações")
         #expect(1.installsLabel == "1 instalação")
+        #expect(999_700.installsLabel == "1 mi instalações", "never \"1.000 mil\"")
+        #expect(999_499.installsLabel == "999 mil instalações")
         #expect(1_250_000.installsLabel.hasPrefix("1,2") || 1_250_000.installsLabel.hasPrefix("1.2"))
     }
 }

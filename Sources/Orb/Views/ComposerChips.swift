@@ -243,10 +243,11 @@ struct SkillsPopover: View {
         .onAppear { isSearching = true }
     }
 
-    /// The popover's height: the search field and divider (`chrome`, measured at about 46 pt) over the whole list of skills, at most 380. Before the
-    /// list is measured, an estimate of 52 pt a skill; it depends on the Orb's skills, never on the filtered ones.
+    /// The search field and divider (about 48 pt, measured).
     private static let chrome: CGFloat = 48
 
+    /// The popover's height: `chrome` over the whole list of skills, at most 380. Before the
+    /// list is measured, an estimate of 52 pt a skill; it depends on the Orb's skills, never on the filtered ones.
     static func height(skillCount: Int, listHeight: CGFloat?) -> CGFloat {
         min(380, (listHeight ?? CGFloat(max(skillCount, 1)) * 52) + chrome)
     }

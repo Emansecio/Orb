@@ -48,6 +48,9 @@ enum SkillSearch {
         guard !words.isEmpty else { return skills }
         let options: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
         func score(_ skill: Skill) -> Int? {
+            // The slug typed in full comes first, so it is never cut from the few suggestions shown
+            // (and Return sends it) behind longer slugs that merely start the same way.
+            if words.count == 1, skill.slug.compare(words[0], options: .caseInsensitive) == .orderedSame { return -1 }
             var total = 0
             for word in words {
                 if skill.slug.range(of: word, options: options.union(.anchored)) != nil
@@ -193,7 +196,13 @@ struct ModelListing: Equatable {
         }
     }
 
-    /// The first model a search brings up, for Return in the search field.
+    /// What Return in the search field picks: the first model a search brings up, and nothing while nothing is typed (an empty
+    /// field lists every model, and its first is not what the person sees selected or asked for).
+    func submitted(query: String) -> String? {
+        query.trimmingCharacters(in: .whitespaces).isEmpty ? nil : first
+    }
+
+    /// The first model of the list.
     var first: String? {
         guard let group = groups.first, let model = group.models.first else { return nil }
         return ModelRef(provider: group.provider, model: model.id).text

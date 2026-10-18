@@ -159,7 +159,7 @@ private struct SearchKeySection: View {
                         }
                         .buttonStyle(.borderless)
                         .help(Tip.replaceKey)
-                        Button("Apagar") { save("") }
+                        Button("Apagar") { store("") }
                             .buttonStyle(.borderless)
                             .help(Tip.deleteKey)
                     }
@@ -195,8 +195,17 @@ private struct SearchKeySection: View {
         .task { hasKey = await Self.read(keys) }
     }
 
-    private func save(_ value: String) {
+    /// Return and "Salvar" only store something typed: an empty field never reaches the Keychain,
+    /// because an empty value to `setTinyFish` means "delete", and that is the "Apagar" button's job.
+    private func save(_ typed: String) {
+        guard let value = SearchKeyCopy.valueToSave(typed) else { return }
+        store(value)
+    }
+
+    /// An empty `value` deletes the key; when the Keychain refuses, what was typed goes back in the field.
+    private func store(_ value: String) {
         let keys = keys
+        let typed = key
         key = ""
         failure = nil
         Task {
@@ -205,6 +214,7 @@ private struct SearchKeySection: View {
                 hasKey = await Self.read(keys)
                 isReplacing = false
             } else {
+                if !value.isEmpty, key.isEmpty { key = typed }
                 failure = "O Keychain não guardou a chave. Tente de novo."
             }
         }
@@ -218,6 +228,13 @@ private struct SearchKeySection: View {
 /// The words around the TinyFish key.
 enum SearchKeyCopy {
     static let keyPage = URL(string: "https://agent.tinyfish.ai/api-keys")
+
+    /// What a submit of the key field stores: nil for an empty or whitespace-only field (nothing is
+    /// stored and nothing is deleted), the trimmed key otherwise.
+    static func valueToSave(_ typed: String) -> String? {
+        let value = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
 
     static let footer = "O TinyFish é grátis e não pede cartão: crie a conta em agent.tinyfish.ai e cole a chave aqui."
     static let footerMore = "A chave fica no Keychain deste Mac. Sem chave, ou quando a cota do dia acaba, a pesquisa usa o DuckDuckGo."

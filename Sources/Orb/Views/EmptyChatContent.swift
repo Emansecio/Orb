@@ -40,10 +40,11 @@ enum EmptyChatContent {
     /// Prompts for what this Orb can do and where it works. A folder of its own or a chosen folder gets prompts about
     /// that folder; the home folder gets the everyday ones; a capability that is off offers nothing that needs it. An
     /// Orb with no routine yet (`offersRoutines`) also gets an idea or two of what it could do on its own, last.
-    static func suggestions(for bot: Bot, interviewPending: Bool, offersRoutines: Bool = false) -> [EmptyChatSuggestion] {
+    static func suggestions(for bot: Bot, interviewPending: Bool, offersRoutines: Bool = false,
+                            home: String = NSHomeDirectory()) -> [EmptyChatSuggestion] {
         var lists: [[EmptyChatSuggestion]] = []
         if bot.capabilities.contains(.terminal) {
-            lists.append(bot.workingDirectory.isEmpty ? homeFiles : ownFolder)
+            lists.append(usesHome(bot, home: home) ? homeFiles : ownFolder)
         }
         if bot.capabilities.contains(.browser) { lists.append(web) }
         if bot.capabilities.contains(.computerUse) { lists.append(macApps) }
@@ -81,10 +82,16 @@ enum EmptyChatContent {
         return ideas
     }
 
+    /// Whether the Orb works in the home folder: no folder set, or the home folder written out (older Orbs, or one the person
+    /// picked in the chooser), as the delete sheet also reads it.
+    static func usesHome(_ bot: Bot, home: String = NSHomeDirectory()) -> Bool {
+        bot.workingDirectory.isEmpty || OrbFolder.display(bot.workingURL, home: home) == "~"
+    }
+
     /// "Trabalha em ~/Orbs/Atlas" or the home folder; nil for an Orb without "Terminal e arquivos", which uses no folder.
-    static func folderText(for bot: Bot) -> String? {
+    static func folderText(for bot: Bot, home: String = NSHomeDirectory()) -> String? {
         guard bot.capabilities.contains(.terminal) else { return nil }
-        return bot.workingDirectory.isEmpty ? "Trabalha na pasta pessoal" : "Trabalha em \(OrbFolder.display(bot.workingURL))"
+        return usesHome(bot, home: home) ? "Trabalha na pasta pessoal" : "Trabalha em \(OrbFolder.display(bot.workingURL, home: home))"
     }
 
     /// What the Orb is allowed to use, in the app's words ("Terminal e arquivos · Navegar na web").
