@@ -113,13 +113,12 @@ struct NewBotSheet: View {
     /// "Criar conversando | Formulário" at the top of the left column; off, with its reason, while no model is connected.
     private var modePicker: some View {
         // Going from the assistant to the form carries the draft over (name, role, instructions, mode, what it may use).
-        Picker("Como criar o Orb", selection: Binding(get: { creation }, set: { new in
+        // The quiet form of the pills above (`PillTabs`): one kind of switch in the sheet, a step softer for the inner one.
+        PillTabs(selection: Binding(get: { creation }, set: { new in
             if new == .form && creation == .assistant { passDraftToForm() } else { userMode = new }
-        })) {
-            ForEach(OrbCreationMode.allCases) { Text($0.title).tag($0) }
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
+        }), items: OrbCreationMode.allCases.map { .init(value: $0, title: $0.title, symbol: "") }, isQuiet: true)
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .contain)
         .disabled(!model.canCreateByConversing)
         .help(model.canCreateByConversing ? "Conversar com o assistente ou preencher o formulário" : OrbCreationMode.needsModel)
         .accessibilityLabel("Como criar o Orb")
@@ -161,8 +160,8 @@ struct NewBotSheet: View {
 
     /// "Quem ele é | Aparência", full width at the top of the sheet.
     private var tabPicker: some View {
-        // The pill switch of the catalog pages, not a segmented control: "Criar conversando | Formulário" below is one,
-        // and two segmented controls one inside the other read as the same level.
+        // The pill switch of the catalog pages. "Criar conversando | Formulário" below is its quiet form (gray, no icons):
+        // the same kind of switch, and still a level under this one.
         PillTabs(selection: Binding(get: { tab }, set: { tab = $0 }),
                  items: NewOrbTab.allCases.map { .init(value: $0, title: $0.title, symbol: $0.symbol) })
         .frame(maxWidth: .infinity)

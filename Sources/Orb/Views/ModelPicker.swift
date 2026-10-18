@@ -132,10 +132,7 @@ struct ModelSearchField: View {
 
     var body: some View {
         TextField("Buscar modelo", text: $query)
-            .textFieldStyle(.plain)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(Palette.raised, in: .rect(cornerRadius: 8))
+            .popoverSearchField()
             .focused($isFocused)
             .onSubmit(onSubmit)
             .padding(10)

@@ -220,7 +220,7 @@ struct BotInspector: View {
     /// "Personalizar…" line, so they take no row of their own.
     private func quickActions(_ bot: Bot) -> some View {
         let folderIsMissing = listing?.folder == .missing
-        return HStack(spacing: 2) {
+        return HStack(spacing: 4) {
             quickAction("Abrir no Finder", "folder", help: Tip.openFolderInFinder(bot.name)) {
                 OrbFolder.showInFinder(bot.workingURL)
             }
@@ -230,13 +230,13 @@ struct BotInspector: View {
         }
         .foregroundStyle(folderIsMissing ? Palette.hint : Palette.secondary)
         .disabled(folderIsMissing)
-        .padding(.trailing, -4) // the circles' hover fill hangs past the edge the cards below share
+        .padding(.trailing, -3) // the circles' hover fill hangs past the edge the cards below share
     }
 
     private func quickAction(_ title: String, _ symbol: String, help: String, action: @escaping () -> Void) -> some View {
         Button(title, systemImage: symbol, action: action)
             .labelStyle(.iconOnly)
-            .buttonStyle(CircleGhostStyle(side: 26, fontSize: 12))
+            .buttonStyle(CircleGhostStyle(side: 22, fontSize: 12))
             .help(help)
     }
 
@@ -955,10 +955,10 @@ private struct RoutineRow: View {
                 .controlSize(.small)
                 .animateChanges(of: RoutineRunState(isRunning: model.isRoutineRunning(routine.id), isQueued: model.isRoutineQueued(routine.id)))
                 Spacer(minLength: 4)
+                // A ghost with its word, as on the Rotinas page: the pill on the left is not left facing a lone pencil.
                 Button("Editar", systemImage: "pencil", action: edit)
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(CircleGhostStyle(side: 26, fontSize: 12))
-                    .foregroundStyle(Palette.secondary)
+                    .buttonStyle(GhostStyle())
+                    .controlSize(.small)
                     .help(Tip.editRoutine)
                 Button("Apagar “\(current.name)”", systemImage: "trash") { isConfirmingDelete = true }
                     .labelStyle(.iconOnly)
@@ -1010,11 +1010,16 @@ private struct RoutineNextLine: View {
     var body: some View {
         if routine.isEnabled {
             TimelineView(.periodic(from: .now, by: 60)) { context in
+                let isLate = RoutineText.isLate(routine.nextRun, now: context.date)
                 Label {
-                    // "em 9 h 57 min" never breaks inside.
-                    Text("Próxima: \(RoutineText.dayAndTime(routine.nextRun, now: context.date)) · \(RoutineText.relative(until: routine.nextRun, now: context.date).replacing(" ", with: "\u{A0}"))")
+                    if isLate {
+                        Text(RoutineText.late(routine.nextRun, now: context.date))
+                    } else {
+                        // "em 9 h 57 min" never breaks inside.
+                        Text("Próxima: \(RoutineText.dayAndTime(routine.nextRun, now: context.date)) · \(RoutineText.relative(until: routine.nextRun, now: context.date).replacing(" ", with: "\u{A0}"))")
+                    }
                 } icon: {
-                    Image(systemName: "arrow.forward.circle")
+                    Image(systemName: isLate ? "clock.badge.exclamationmark" : "arrow.forward.circle")
                 }
                 .font(.system(size: 12))
                 .foregroundStyle(Palette.secondary)

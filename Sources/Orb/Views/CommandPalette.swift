@@ -38,6 +38,8 @@ struct PaletteEntry: Identifiable, Equatable {
     var action: Action
     /// Words that find the entry besides its title ("pasta" finds "Abrir pasta no Finder" and also "Finder").
     var keywords = ""
+    /// An Orb's look: its row shows its avatar, as the sidebar does, instead of `symbol`.
+    var orb: OrbConfig? = nil
 }
 
 enum PaletteSearch {
@@ -96,7 +98,8 @@ enum PaletteBuilder {
         for (index, look) in orbs.enumerated() {
             list.append(PaletteEntry(id: "bot-\(look.id)", title: look.name, subtitle: look.role.isEmpty ? nil : look.role,
                                      symbol: "circle.hexagongrid.fill", section: .orbs,
-                                     shortcut: index < 9 ? AppShortcut.bot(at: index).label : nil, action: .bot(look.id), keywords: "orb conversa"))
+                                     shortcut: index < 9 ? AppShortcut.bot(at: index).label : nil, action: .bot(look.id), keywords: "orb conversa",
+                                     orb: look.orb))
         }
         let name = orbs.first { $0.id == current }?.name
         if current != nil {
@@ -295,11 +298,18 @@ private struct PaletteRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: entry.symbol)
-                .font(.system(size: 13))
-                .frame(width: 22)
-                .foregroundStyle(isSelected ? Palette.ink : Palette.muted)
-                .accessibilityHidden(true)
+            Group {
+                if let orb = entry.orb {
+                    // Still: a list the arrows run through is no place for twenty faces blinking at once.
+                    BotAvatar(orb: orb, size: 22, animated: false)
+                } else {
+                    Image(systemName: entry.symbol)
+                        .font(.system(size: 13))
+                        .foregroundStyle(isSelected ? Palette.ink : Palette.muted)
+                }
+            }
+            .frame(width: 22)
+            .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 Text(entry.title)
                     .font(.system(size: 13, weight: .medium))
@@ -346,17 +356,27 @@ struct ShortcutsSheet: View {
                             .foregroundStyle(Palette.faint)
                             .accessibilityAddTraits(.isHeader)
                         ForEach(group.items) { item in
-                            HStack(spacing: 12) {
+                            let lines = ShortcutItem.lines(item.title)
+                            HStack(alignment: .firstTextBaseline, spacing: 12) {
                                 Text(item.keys)
                                     .font(.system(size: 12, weight: .medium, design: .rounded))
                                     .foregroundStyle(Palette.ink)
                                     .padding(.horizontal, 7)
                                     .padding(.vertical, 2)
                                     .background(Palette.raised, in: .rect(cornerRadius: 6))
-                                    .frame(width: 96, alignment: .leading)
-                                Text(item.title)
-                                    .font(.system(size: 13))
-                                    .foregroundStyle(Palette.secondary)
+                                    .fixedSize()
+                                    .frame(width: 76, alignment: .leading)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(lines.main)
+                                        .font(.system(size: 13))
+                                        .foregroundStyle(Palette.secondary)
+                                    if let note = lines.note {
+                                        Text(note)
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(Palette.faint)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                }
                                 Spacer(minLength: 0)
                             }
                             .accessibilityElement(children: .combine)

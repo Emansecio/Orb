@@ -218,7 +218,7 @@ struct SkillsPopover: View {
         let shown = SkillSearch.matches(skills, query)
         VStack(spacing: 0) {
             TextField("Buscar skill", text: $query)
-                .textFieldStyle(.roundedBorder)
+                .popoverSearchField()
                 .focused($isSearching)
                 .onSubmit { if let first = shown.first { pick(first.slug) } }
                 .padding(10)
@@ -243,8 +243,9 @@ struct SkillsPopover: View {
         .onAppear { isSearching = true }
     }
 
-    /// The search field and divider (about 48 pt, measured).
-    private static let chrome: CGFloat = 48
+    /// The search field and divider (about 54 pt: the popovers' search field, `popoverSearchField`, is 6 pt taller than
+    /// the system's rounded one it replaced, which measured 48).
+    private static let chrome: CGFloat = 54
 
     /// The popover's height: `chrome` over the whole list of skills, at most 380. Before the
     /// list is measured, an estimate of 52 pt a skill; it depends on the Orb's skills, never on the filtered ones.

@@ -226,6 +226,15 @@ extension View {
         buttonStyle(.bordered).controlSize(.small).font(.system(size: 12)).labelStyle(FixedIconLabelStyle())
     }
 
+    /// The search field at the top of a popover's list (models, skills): plain text on the app's raised gray, rounded, so
+    /// every popover searches with the same field.
+    func popoverSearchField() -> some View {
+        textFieldStyle(.plain)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(Palette.raised, in: .rect(cornerRadius: 8))
+    }
+
     /// The gray line under a switch or a picker in the Orb's panel ("Rodar comandos e ler e escrever arquivos").
     func capabilityCaption() -> some View {
         font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)

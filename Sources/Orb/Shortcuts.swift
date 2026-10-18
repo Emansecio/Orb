@@ -129,6 +129,15 @@ struct ShortcutItem: Identifiable, Equatable {
 
 extension ShortcutItem {
     init(_ command: ShortcutCommand, _ shortcut: KeyboardShortcut, _ title: String) { self.init(command: command, keys: shortcut.label, title: title) }
+
+    /// A title as the lists draw it: what the key does, and the condition in parentheses at its end as a gray line under
+    /// it ("Parar e enviar agora" over "Orb trabalhando e algo escrito…"), not one long line. The catalog keeps one string.
+    static func lines(_ title: String) -> (main: String, note: String?) {
+        guard title.hasSuffix(")"), let open = title.range(of: " (") else { return (title, nil) }
+        let note = title[open.upperBound...].dropLast()
+        guard !note.isEmpty else { return (title, nil) }
+        return (String(title[..<open.lowerBound]), note.prefix(1).uppercased() + note.dropFirst())
+    }
 }
 
 struct ShortcutGroup: Identifiable, Equatable {

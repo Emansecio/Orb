@@ -123,6 +123,8 @@ struct DeleteOrbSheet: View {
                             destructiveHelp: Tip.deleteWithMemory, primaryHelp: Tip.deleteKeepingMemory,
                             primary: { model.confirmDelete(botID, keepMemory: true) })
             }
+            // As tall as what it says (three lines and the buttons), not the sheets' usual height with a gap under them.
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

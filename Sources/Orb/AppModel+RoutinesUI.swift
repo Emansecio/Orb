@@ -164,10 +164,11 @@ enum RoutineText {
         return days == 1 ? "em 1 dia" : "em \(days) dias"
     }
 
-    /// "hoje", "amanhã", "sexta" (within the week) or "12 de out.".
+    /// "hoje", "amanhã", "sexta" (within the week), "ontem" (a time a late routine missed) or "12 de out.".
     static func day(_ date: Date, now: Date = .now, calendar: Calendar = .current) -> String {
         let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: date)).day ?? 0
         switch days {
+        case -1: return "ontem"
         case 0: return "hoje"
         case 1: return "amanhã"
         case 2...6: return weekdayName(date, calendar: calendar)
@@ -201,8 +202,20 @@ enum RoutineText {
     static func nextRun(of routine: Routine, now: Date = .now, calendar: Calendar = .current) -> String? {
         let date = routine.nextRun
         guard routine.isEnabled, date != .distantFuture else { return nil }
+        if isLate(date, now: now) { return late(date, now: now, calendar: calendar) }
         // The day first, then how long until it: the same order as the Orb's panel and the editor's preview.
         return "Próxima: \(dayAndTime(date, now: now, calendar: calendar)) · \(relative(until: date, now: now))"
+    }
+
+    /// A time that passed more than a minute ago without its run (the app was closed, the Mac asleep): the next pass of
+    /// `runDueRoutines` runs it, so it is said as late, not as "Próxima" with a date already gone.
+    static func isLate(_ date: Date, now: Date = .now) -> Bool {
+        date != .distantFuture && now.timeIntervalSince(date) >= 60
+    }
+
+    /// "Atrasada: era ontem às 18:00 · roda em instantes".
+    static func late(_ date: Date, now: Date = .now, calendar: Calendar = .current) -> String {
+        "Atrasada: era \(dayAndTime(date, now: now, calendar: calendar)) · roda\u{A0}em\u{A0}instantes" // never broken inside
     }
 
     /// The editor's preview of a schedule that has not been saved: "Próxima execução: amanhã às 09:00 (em 3 h)".

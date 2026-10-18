@@ -122,13 +122,17 @@ private struct IdentityBlock: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(memory.identity.isEmpty ? "Ainda sem notas sobre como \(name) deve funcionar."
-                 : memory.identity.replacingOccurrences(of: "## ", with: ""))
-                .font(.callout)
-                .foregroundStyle(memory.identity.isEmpty ? .secondary : Palette.secondary)
-                .lineLimit(5)
-                .truncationMode(.middle)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if memory.identity.isEmpty {
+                PanelEmptyNote("Nenhuma nota ainda", systemImage: "person.text.rectangle",
+                               detail: "Diga como \(name) deve trabalhar com você: o tom, o que evitar, o que lembrar sempre.")
+            } else {
+                Text(memory.identity.replacingOccurrences(of: "## ", with: ""))
+                    .font(.callout)
+                    .foregroundStyle(Palette.secondary)
+                    .lineLimit(5)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             if memory.identity.count > MemoryBank.identityShare {
                 Text("Longa: em cada conversa vão cerca de \(MemoryBank.identityShare) caracteres; as notas mais antigas saem primeiro.")
                     .font(.caption)
@@ -353,11 +357,8 @@ struct MemorySheet: View {
 
         Form {
             // Nothing stored: no search or filter to offer, and the subtitle already says it is empty, so the body
-            // explains how the memory fills instead.
-            if memory.items.isEmpty {
-                Text("A memória cresce a cada conversa: preferências, fatos, procedimentos e um resumo de cada uma.")
-                    .foregroundStyle(.secondary)
-            } else {
+            // explains how the memory fills instead (the overlay below).
+            if !memory.items.isEmpty {
                 Section {
                     MemorySearchField(query: $query)
                     Picker("Mostrar", selection: $kind) {
@@ -388,6 +389,17 @@ struct MemorySheet: View {
             .animateChanges(of: memory.items.map(\.id))
         }
         .formStyle(.grouped)
+        // The same empty page as Conectores and Skills: a symbol, a line and what fills it, centered in the sheet.
+        .overlay {
+            if memory.items.isEmpty {
+                ContentUnavailableView {
+                    Label("A memória cresce a cada conversa", systemImage: "brain")
+                } description: {
+                    Text("Preferências, fatos, procedimentos e um resumo de cada conversa aparecem aqui.")
+                }
+                .transition(.quiet)
+            }
+        }
         .orbSheet("Memória de \(name)", subtitle: MemoryGroups.summary(memory.items), size: .large) {
             SheetFooterBar {
                 Button("Abrir pasta da memória", systemImage: "folder") {

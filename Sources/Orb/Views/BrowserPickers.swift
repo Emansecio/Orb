@@ -112,13 +112,18 @@ struct BrowserPickerRows: View {
     var body: some View {
         if let live = model.liveBot(botID) {
             let bot = live.bot
+            // Each picker is one row of the form with its description and status under it: not a row (and a hairline) for
+            // every line, which made the card twice as long as the switches around it.
             Group {
-                Picker("Navegador", selection: modeBinding) {
-                    ForEach(BrowserMode.allCases) { Text($0.label).tag($0) }
+                VStack(alignment: .leading, spacing: 4) {
+                    Picker("Navegador", selection: modeBinding) {
+                        ForEach(BrowserMode.allCases) { Text($0.label).tag($0) }
+                    }
+                    .help(Tip.browserMode)
+                    caption(bot.browserMode.summary)
+                    statusLine(BrowserPickerCopy.browserLine(status: status))
+                        .padding(.top, 2)
                 }
-                .help(Tip.browserMode)
-                caption(bot.browserMode.summary)
-                statusLine(BrowserPickerCopy.browserLine(status: status))
                 if let proxy = bot.browserProxy {
                     // The same shape as the status line above it: a caption with its icon, and the action under it as a link.
                     VStack(alignment: .leading, spacing: 3) {
@@ -135,13 +140,16 @@ struct BrowserPickerRows: View {
                     caption("Escolhido pelo Orb. O navegador dele passa por esse proxy; remover o deixa direto.")
                 }
 
-                Picker("Pesquisa", selection: providerBinding) {
-                    ForEach(SearchProvider.allCases) { Text($0.label).tag($0) }
-                }
-                .help(Tip.searchProvider)
-                caption(BrowserPickerCopy.searchSummary(bot.searchProvider))
-                if let line = BrowserPickerCopy.searchLine(bot.searchProvider, browserIsReady: status?.isReady, hasKey: hasKey) {
-                    statusLine(line)
+                VStack(alignment: .leading, spacing: 4) {
+                    Picker("Pesquisa", selection: providerBinding) {
+                        ForEach(SearchProvider.allCases) { Text($0.label).tag($0) }
+                    }
+                    .help(Tip.searchProvider)
+                    caption(BrowserPickerCopy.searchSummary(bot.searchProvider))
+                    if let line = BrowserPickerCopy.searchLine(bot.searchProvider, browserIsReady: status?.isReady, hasKey: hasKey) {
+                        statusLine(line)
+                            .padding(.top, 2)
+                    }
                 }
             }
             .task(id: Check(provider: bot.searchProvider, comingBack: comingBack)) {

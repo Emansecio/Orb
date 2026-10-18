@@ -261,10 +261,14 @@ struct GeneralSettings: View {
             ForEach(ShortcutCatalog.groups) { group in
                 Section("Atalhos · \(group.title)") {
                     ForEach(group.items) { item in
-                        LabeledContent(item.titleInGeneral ?? item.title) {
+                        let lines = ShortcutItem.lines(item.titleInGeneral ?? item.title)
+                        LabeledContent {
                             Text(item.keys)
                                 .font(.system(size: 12, design: .monospaced))
                                 .foregroundStyle(Palette.muted)
+                        } label: {
+                            Text(lines.main)
+                            if let note = lines.note { Text(note).capabilityCaption() }
                         }
                     }
                 }

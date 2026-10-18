@@ -87,7 +87,11 @@ struct PillTabs<Value: Hashable>: View {
 
     @Binding var selection: Value
     let items: [Item]
+    /// A switch inside a part already chosen by louder pills ("Criar conversando | Formulário" under "Quem ele é"): the
+    /// same track, the chosen one in gray instead of white, and no icons.
+    var isQuiet = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isEnabled) private var isEnabled
     @Namespace private var pillSpace
 
     var body: some View {
@@ -97,6 +101,7 @@ struct PillTabs<Value: Hashable>: View {
         .animation(Motion.selection(reduceMotion: reduceMotion), value: selection)
         .padding(3)
         .background(Color.white.opacity(0.06), in: .capsule)
+        .opacity(isEnabled ? 1 : 0.5)
     }
 
     private func pill(_ item: Item) -> some View {
@@ -104,15 +109,21 @@ struct PillTabs<Value: Hashable>: View {
         return Button {
             selection = item.value
         } label: {
-            Label(item.title, systemImage: item.symbol)
-                .labelStyle(FixedIconLabelStyle())
+            Group {
+                if isQuiet {
+                    Text(item.title)
+                } else {
+                    Label(item.title, systemImage: item.symbol)
+                        .labelStyle(FixedIconLabelStyle())
+                }
+            }
                 .font(.system(size: 12, weight: .medium))
                 .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .foregroundStyle(isSelected ? Palette.onInk : Palette.secondary)
+                .padding(.vertical, isQuiet ? 4 : 6)
+                .foregroundStyle(isSelected ? (isQuiet ? Palette.ink : Palette.onInk) : Palette.secondary)
                 .background {
                     if isSelected {
-                        Capsule().fill(Palette.ink).matchedGeometryEffect(id: "pilula", in: pillSpace)
+                        Capsule().fill(isQuiet ? Palette.ghostSelected : Palette.ink).matchedGeometryEffect(id: "pilula", in: pillSpace)
                     }
                 }
                 .contentShape(.capsule)

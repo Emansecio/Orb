@@ -272,10 +272,14 @@ private struct RoutineCard: View {
                 RunHistory(runs: routine.runs, onOpen: onOpenRun)
             }
             Spacer(minLength: 0)
-            HStack(spacing: Spacing.controlGap) {
+            // The same buttons as the routine's card in the Orb's panel: ghosts for what opens something, a pill for the run.
+            HStack(spacing: 2) {
                 Button("Editar", systemImage: "pencil", action: onEdit)
+                    .buttonStyle(GhostStyle())
                     .help(Tip.editRoutine)
+                    .hangsOnLeadingEdge()
                 Button("Ver conversa", systemImage: "text.bubble", action: onOpen)
+                    .buttonStyle(GhostStyle())
                     .help(Tip.routineConversation)
                 Spacer()
                 // "Rodar agora", "Rodando…" and "Na fila" swap in place: one over the other, cross-fading, for the
@@ -290,13 +294,15 @@ private struct RoutineCard: View {
                             .transition(.opacity)
                     } else {
                         Button("Rodar agora", systemImage: "play.fill", action: onRun)
+                            .buttonStyle(SecondaryPillStyle())
                             .help(Tip.runRoutineNow)
                             .transition(.opacity)
                     }
                 }
+                .font(.system(size: 12))
                 .animateChanges(of: RoutineRunState(isRunning: isRunning, isQueued: isQueued))
             }
-            .chipButton()
+            .controlSize(.small)
         }
         .padding(Spacing.cardPadding)
         // The cards of one row are as tall as the tallest, with their buttons on the same line at the bottom.

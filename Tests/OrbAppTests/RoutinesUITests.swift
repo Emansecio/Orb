@@ -73,6 +73,22 @@ struct RoutinesUITests {
         #expect(RoutineText.relative(until: now.addingTimeInterval(3 * 86_400 + 600), now: now) == "em 3 dias")
     }
 
+    /// A routine whose time went by without its run (app closed, Mac asleep) is said as late, with the time it missed,
+    /// not as "Próxima" with a date already gone; within a minute of its time it is still "em instantes".
+    @Test func aLateRoutineIsSaidAsLate() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/Sao_Paulo")!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 10, day: 18, hour: 3, minute: 42))!
+        let missed = calendar.date(from: DateComponents(year: 2026, month: 10, day: 17, hour: 18, minute: 0))!
+        #expect(RoutineText.isLate(missed, now: now))
+        #expect(!RoutineText.isLate(now.addingTimeInterval(-30), now: now))
+        #expect(!RoutineText.isLate(.distantFuture, now: now))
+        #expect(RoutineText.late(missed, now: now, calendar: calendar) == "Atrasada: era ontem às 18:00 · roda\u{A0}em\u{A0}instantes")
+        var routine = Routine(name: "Mesa em ordem", botID: UUID(), prompt: "", schedule: .daily(hour: 18, minute: 0))
+        routine.lastRun = Date.now.addingTimeInterval(-3 * 86_400) // its next time is two days gone
+        #expect(RoutineText.nextRun(of: routine)?.hasPrefix("Atrasada: era ") == true)
+    }
+
     @Test func daysAreTodayTomorrowTheWeekdayOrTheDate() {
         #expect(RoutineText.dayAndTime(date(2026, 10, 8, 18, 5), now: now, calendar: calendar) == "hoje às 18:05")
         #expect(RoutineText.dayAndTime(date(2026, 10, 9, 9, 0), now: now, calendar: calendar) == "amanhã às 09:00")
