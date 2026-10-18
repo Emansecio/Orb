@@ -137,9 +137,7 @@ struct WebFetchTool: AgentTool {
         // A type that can only be saved (audio, video, an archive…) is answered from the headers: an endless stream of
         // one would otherwise be read up to the limit just to say it is not text.
         if !Self.isReadable(mimeType, wantsImage: wantsImage) {
-            let size = response.expectedContentLength > 0
-                ? AttachmentKind.fileSize(response.expectedContentLength) + " " : ""
-            return ToolResult(text: header + "\nConteúdo \(mimeType) de \(size)(não é texto). Use save_to para baixá-lo.")
+            return ToolResult(text: header + "\n" + Self.notTextMessage(mimeType: mimeType, length: response.expectedContentLength))
         }
         // A generic type may hide a PDF, so it is read up to the PDF limit until the first bytes show it is not one.
         let generic = !mimeType.contains("pdf") && Self.isGeneric(mimeType)
@@ -348,13 +346,19 @@ struct WebFetchTool: AgentTool {
         return "O site respondeu HTTP \(status) para \(url.absoluteString)." + (hint.isEmpty ? "" : " " + hint)
     }
 
-    /// A network failure in Portuguese, with the host and what to do about it.
+    /// What the model is told for a type that can only be saved: its size when the server announced one (`length` > 0).
+    static func notTextMessage(mimeType: String, length: Int64) -> String {
+        let size = length > 0 ? " de \(AttachmentKind.fileSize(length))" : ""
+        return "Conteúdo \(mimeType)\(size) (não é texto). Use save_to para baixá-lo."
+    }
+
     /// What the model is told when a redirect was not followed: where the site points to, and how to go there with the permission
     /// for that address asked as usual.
     static func redirectMessage(from url: URL, to target: URL) -> String {
         "\(url.host() ?? url.absoluteString) redirecionou para outro endereço (\(target.absoluteString)), e o web_fetch não segue redirecionamentos para outro site nem de https para http. Se quiser ir até lá, chame web_fetch com essa URL; assim a permissão para o novo endereço é avaliada normalmente."
     }
 
+    /// A network failure in Portuguese, with the host and what to do about it.
     static func explain(_ error: URLError, url: URL) -> ToolError {
         let host = url.host() ?? url.absoluteString
         switch error.code {
@@ -407,7 +411,8 @@ struct WebFetchTool: AgentTool {
                     try handle.write(contentsOf: buffer)
                     buffer.removeAll(keepingCapacity: true)
                 }
-                if buffer.count % 1_024 == 0, ContinuousClock.now > ends {
+                // Every byte: a stream that sends one now and then would never reach a multiple of 1,024 before the deadline.
+                if ContinuousClock.now > ends {
                     throw ToolError(Self.downloadTooSlow(deadline, bytes: total + buffer.count))
                 }
                 if total + buffer.count > maxDownloadBytes {
@@ -478,8 +483,6 @@ actor WebPageCache {
         entries.append((address, entry))
         if entries.count > Self.capacity { entries.removeFirst(entries.count - Self.capacity) }
     }
-
-    func clear() { entries.removeAll() }
 }
 
 extension ToolBox {

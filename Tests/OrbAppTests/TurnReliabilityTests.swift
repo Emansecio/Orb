@@ -506,6 +506,23 @@ private struct HangsAfterText: LLMClient {
         #expect(try FileManager.default.contentsOfDirectory(atPath: folder.path).isEmpty)
     }
 
+    /// A server that sends a byte now and then never reaches the next multiple of 1,024 bytes: the deadline is the clock's, not the count's.
+    @Test func aDownloadTrickingInAByteAtATimeIsGivenUpAtTheDeadline() async throws {
+        let server = try await TrickleServer(script: [], forever: .init(after: .milliseconds(50), text: "x"))
+        let folder = root.appending(path: "gotejar-\(UUID().uuidString.prefix(6))")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let (bytes, _) = try await URLSession.shared.bytes(from: server.baseURL)
+        let started = ContinuousClock.now
+        do {
+            _ = try await WebFetchTool.download(bytes, to: folder.appending(path: "arquivo.bin"), deadline: .milliseconds(400))
+            Issue.record("no deadline")
+        } catch let error as ToolError {
+            #expect(error.message.hasPrefix("O download passou de 0 min"))
+        }
+        #expect(started.duration(to: .now) < .seconds(5))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: folder.path).isEmpty)
+    }
+
     @Test func aSearchThatRanOutOfTimeSaysTheListMayBeIncomplete() throws {
         let partial = ProcessOutput(status: 15, signal: 15, output: "/Users/a/um.txt\n/Users/a/dois.txt", timedOut: true)
         let answer = try SearchFilesTool.answer(partial, limit: 50)
