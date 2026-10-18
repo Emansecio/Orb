@@ -18,11 +18,16 @@ final class WizardRunner {
     /// The stand-in Orb's id: its usage and its temporary folder are named for it.
     let id = UUID()
     /// What the chat shows: only the person's messages and the assistant's words (`.user` / `.bot`).
-    private(set) var messages: [TranscriptItem]
+    private(set) var messages: [TranscriptItem] { didSet { userMessageCount = Self.userCount(in: messages) } }
     private(set) var draft = OrbDraft()
     private(set) var isThinking = false
     /// The assistant's words as they stream, until a tool call or the end of the answer makes them a message.
-    private(set) var liveText = ""
+    private(set) var liveText = "" {
+        didSet { if liveText.isEmpty == isSpeaking { isSpeaking = !liveText.isEmpty } }
+    }
+    /// Whether any words have streamed: written only when `liveText` goes empty or non-empty, so what reads it (`activity`)
+    /// is not redone for every token.
+    private(set) var isSpeaking = false
     private(set) var failure: String?
     /// What the model has been told.
     private(set) var history: [ChatMessage] = []
@@ -45,6 +50,7 @@ final class WizardRunner {
     init(model: AppModel? = nil) {
         self.model = model
         messages = [TranscriptItem(.bot(text: WizardPrompt.firstLine, isStreaming: false))]
+        userMessageCount = Self.userCount(in: messages)
     }
 
     /// A runner in a given state, for the review snapshots: it never calls a model.
@@ -53,6 +59,8 @@ final class WizardRunner {
         self.draft = draft
         self.isThinking = isThinking
         self.liveText = liveText
+        isSpeaking = !liveText.isEmpty
+        userMessageCount = Self.userCount(in: messages)
         self.failure = failure
     }
 
@@ -60,8 +68,12 @@ final class WizardRunner {
 
     // MARK: State the views read
 
-    /// How many messages the person has sent.
-    var userMessageCount: Int { messages.filter { if case .user = $0.kind { true } else { false } }.count }
+    /// How many messages the person has sent, kept up to date where `messages` changes (`canSend` reads it on every render).
+    private(set) var userMessageCount = 0
+
+    private static func userCount(in messages: [TranscriptItem]) -> Int {
+        messages.filter { if case .user = $0.kind { true } else { false } }.count
+    }
 
     /// The chips under the first line: only while nothing else was said.
     var offersSuggestions: Bool { messages.count == 1 && !isThinking && failure == nil && !isFinished }
@@ -72,7 +84,7 @@ final class WizardRunner {
     /// What the Orb on the preview does.
     var activity: OrbActivity {
         guard isThinking else { return .idle }
-        return liveText.isEmpty ? .thinking : .speaking
+        return isSpeaking ? .speaking : .thinking
     }
 
     func attach(_ model: AppModel) {
