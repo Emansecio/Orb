@@ -75,7 +75,13 @@ actor ShortcutNamesCache {
         let fresh = await load()
         // Parar in the middle is not Shortcuts failing: nothing is remembered, and the next call asks again.
         if Task.isCancelled, fresh == nil { return names }
-        if let fresh { names = fresh; loadedAt = Date() } else { names = []; loadedAt = Date().addingTimeInterval(60 - ttl) }
+        if let fresh {
+            names = fresh
+            loadedAt = Date()
+        } else {
+            // The names read before stay (a new cache has none): a failed reread does not hide what was known.
+            loadedAt = Date().addingTimeInterval(60 - ttl)
+        }
         return names
     }
 
