@@ -74,7 +74,7 @@ struct ContextGaugeDriver: View {
 
 // MARK: - Ring
 
-/// A thin ring that fills clockwise. Decorative: the words next to it, or the button's value, say the same.
+/// A thin rim with a slice that fills clockwise. Decorative: the words next to it, or the button's value, say the same.
 struct ContextRing: View {
     let fraction: Double
     let tone: ContextTone
@@ -82,17 +82,49 @@ struct ContextRing: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
+        // A pie in a thin rim: a short arc in a faint ring read as the system's spinner (something loading), a slice
+        // filled from twelve o'clock reads as an amount.
         ZStack {
-            Circle().stroke(Palette.lineStrong, lineWidth: 2)
-            Circle()
-                .trim(from: 0, to: min(max(fraction, 0), 1))
-                .stroke(tone.color, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                .rotationEffect(.degrees(-90))
+            Circle().strokeBorder(Palette.faint, lineWidth: 1.25)
+            ContextSlice(fraction: Self.shown(fraction))
+                .fill(tone.color)
+                .padding(2.5)
         }
         .frame(width: size - 2, height: size - 2)
         .frame(width: size, height: size)
         .animation(Motion.availability(reduceMotion: reduceMotion), value: fraction)
         .accessibilityHidden(true)
+    }
+
+    /// The slice as drawn: never thinner than `minimumSlice` once something is in the conversation, or a few percent
+    /// would be a hairline, like a clock's hand. The number (on hover and in the popover) is the exact one.
+    static func shown(_ fraction: Double) -> Double {
+        guard fraction > 0 else { return 0 }
+        return min(max(fraction, minimumSlice), 1)
+    }
+
+    static let minimumSlice = 0.08
+}
+
+/// The filled part of `ContextRing`: a slice from twelve o'clock, clockwise; it grows smoothly when `fraction` animates.
+private struct ContextSlice: Shape {
+    var fraction: Double
+
+    var animatableData: Double {
+        get { fraction }
+        set { fraction = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        var path = Path()
+        guard fraction > 0 else { return path }
+        if fraction >= 1 { return Path(ellipseIn: rect) }
+        path.move(to: center)
+        path.addArc(center: center, radius: min(rect.width, rect.height) / 2, startAngle: .degrees(-90),
+                    endAngle: .degrees(-90 + 360 * fraction), clockwise: false)
+        path.closeSubpath()
+        return path
     }
 }
 

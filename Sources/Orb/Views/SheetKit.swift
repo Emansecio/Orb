@@ -219,8 +219,7 @@ struct FormFootnote<Content: View>: View {
 }
 
 extension View {
-    /// The small bordered button the Orb's panel uses everywhere (its quick actions, the folder, the memory, the
-    /// routines): one style and one size, so no row has a taller or plainer button than the next.
+    /// The small bordered button the Orb's panel uses everywhere (the folder, the grants, the memory, the instructions): one style and one size, so no row has a taller or plainer button than the next.
     func chipButton() -> some View {
         // The size is said out loud: inside a grouped Form the buttons keep the form's body font whatever the control size,
         // and would come out larger than the same chips in the panel's header.

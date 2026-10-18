@@ -35,17 +35,16 @@ struct MemoryTab: View {
 
         Section {
             if memory.items.isEmpty {
-                Text("Ainda não guardou nada. A memória cresce a cada conversa: preferências, fatos, procedimentos e um resumo de cada uma.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                PanelEmptyNote("Nada guardado ainda", systemImage: "brain",
+                               detail: "A memória cresce a cada conversa: preferências, fatos, procedimentos e um resumo de cada uma.")
                     .transition(.quiet)
             } else if memory.items.count > MemoryGroups.searchableAbove {
                 MemorySearchField(query: $query)
             }
             if !memory.items.isEmpty && groups.isEmpty {
                 Text("Nada na memória com “\(query)”.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.muted)
             }
         } header: {
             Text("Memória")
@@ -74,24 +73,42 @@ struct MemoryTab: View {
         .animateChanges(of: memory.items.map(\.id))
 
         Section {
+            // One line of chips when they fit (one under the other in a narrow panel); "Ver tudo…" only once there is
+            // something to see.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    memoryButtons(isEmpty: memory.items.isEmpty)
+                    Spacer(minLength: 0)
+                }
+                VStack(alignment: .leading, spacing: 8) { memoryButtons(isEmpty: memory.items.isEmpty) }
+            }
+        } footer: { FormFootnote {
+            // The sentence and the link read as one run of text, as "Saiba mais" in Ajustes (`LearnMoreNote`).
+            (Text("Só \(name) vê isso. São arquivos .md na sua pasta de dados. ") + Text("Como funciona").foregroundColor(.accentColor))
+                .fixedSize(horizontal: false, vertical: true)
+                .contentShape(.rect)
+                .onTapGesture { isShowingHelp = true }
+                .accessibilityAddTraits(.isButton)
+                .accessibilityHint("Mostra como a memória funciona")
+                .help(Tip.memoryHow)
+                .popover(isPresented: $isShowingHelp, arrowEdge: .top) { MemoryHelp(name: name) }
+        } }
+    }
+}
+
+extension MemoryTab {
+    @ViewBuilder
+    fileprivate func memoryButtons(isEmpty: Bool) -> some View {
+        if !isEmpty {
             Button("Ver tudo…", systemImage: "list.bullet.rectangle") { showAll(nil) }
                 .chipButton()
                 .help(Tip.memoryShowAll)
-                .disabled(memory.items.isEmpty)
-            Button("Abrir pasta da memória", systemImage: "folder") {
-                NSWorkspace.shared.open(model.memory.directory(for: botID))
-            }
-            .chipButton()
-            .help(Tip.memoryFolder)
-        } footer: { FormFootnote {
-            HStack(spacing: 4) {
-                Text("Só \(name) vê isso. São arquivos .md na sua pasta de dados.")
-                Button("Como funciona") { isShowingHelp = true }
-                    .buttonStyle(.link)
-                    .help(Tip.memoryHow)
-                    .popover(isPresented: $isShowingHelp, arrowEdge: .top) { MemoryHelp(name: name) }
-            }
-        } }
+        }
+        Button("Abrir pasta da memória", systemImage: "folder") {
+            NSWorkspace.shared.open(model.memory.directory(for: botID))
+        }
+        .chipButton()
+        .help(Tip.memoryFolder)
     }
 }
 

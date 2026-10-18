@@ -42,7 +42,6 @@ struct BotInspector: View {
             let bot = live.bot
             VStack(spacing: 0) {
                 header(bot)
-                quickActions(bot)
                 InspectorTabBar(selection: $tab)
                 // The tab's content swaps in a ZStack, cross-fading (§2.13): a grouped Form's own diff is unpredictable, so
                 // each tab is a Form of its own. The scroll returns to the top with every tab, and the tasks below live on
@@ -189,62 +188,56 @@ struct BotInspector: View {
                 .buttonStyle(QuietTextStyle())
                 .fixedSize()
                 .help("\(Tip.customizeOrb) (\(summary))")
-                // Who made it beside "Personalizar…" when both fit on the line; under it otherwise, never a name broken in two.
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 6) {
-                        customize
-                        if bot.createdByName != nil {
-                            Text("·").foregroundStyle(Palette.hint).accessibilityHidden(true)
+                HStack(alignment: .center, spacing: 6) {
+                    // Who made it beside "Personalizar…" when both fit on the line; under it otherwise, never a name broken in two.
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 6) {
+                            customize
+                            if bot.createdByName != nil {
+                                Text("·").foregroundStyle(Palette.hint).accessibilityHidden(true)
+                            }
+                            CreatedByLine(bot: bot).fixedSize() // MultiOrb (WP3)
                         }
-                        CreatedByLine(bot: bot).fixedSize() // MultiOrb (WP3)
+                        VStack(alignment: .leading, spacing: 3) {
+                            customize
+                            CreatedByLine(bot: bot)
+                        }
                     }
-                    VStack(alignment: .leading, spacing: 3) {
-                        customize
-                        CreatedByLine(bot: bot)
-                    }
+                    .font(.system(size: 11))
+                    Spacer(minLength: 4)
+                    quickActions(bot)
                 }
-                .font(.system(size: 11))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        // The same side padding as the form's cards below, so the header, the buttons, the tabs and the cards share edges.
+        // The same side padding as the form's cards below, so the header, the tabs and the cards share edges.
         .padding(.horizontal, Spacing.xl)
         .padding(.top, 18)
         .padding(.bottom, 14)
     }
 
-    /// What people do most with an Orb's folder, one click each from any tab: two quiet buttons of one line, side by side.
+    /// What people do most with an Orb's folder, one click each from any tab: two round icon buttons at the end of the
+    /// "Personalizar…" line, so they take no row of their own.
     private func quickActions(_ bot: Bot) -> some View {
         let folderIsMissing = listing?.folder == .missing
-        return HStack(spacing: 8) {
-            quickAction("Finder", "folder", help: Tip.openFolderInFinder(bot.name)) {
+        return HStack(spacing: 2) {
+            quickAction("Abrir no Finder", "folder", help: Tip.openFolderInFinder(bot.name)) {
                 OrbFolder.showInFinder(bot.workingURL)
             }
-            .disabled(folderIsMissing)
-            quickAction("Terminal", "terminal", help: Tip.openFolderInTerminal(bot.name)) {
+            quickAction("Abrir no Terminal", "terminal", help: Tip.openFolderInTerminal(bot.name)) {
                 OrbFolder.openInTerminal(bot.workingURL)
             }
-            .disabled(folderIsMissing)
         }
-        .padding(.horizontal, Spacing.xl)
-        .padding(.bottom, 12)
+        .foregroundStyle(folderIsMissing ? Palette.hint : Palette.secondary)
+        .disabled(folderIsMissing)
+        .padding(.trailing, -4) // the circles' hover fill hangs past the edge the cards below share
     }
 
     private func quickAction(_ title: String, _ symbol: String, help: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: symbol)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Palette.muted)
-                Text(title)
-                    .font(.system(size: 12))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            }
-        }
-        .buttonStyle(QuickActionTileStyle())
-        .help(help)
-        .accessibilityLabel(title)
+        Button(title, systemImage: symbol, action: action)
+            .labelStyle(.iconOnly)
+            .buttonStyle(CircleGhostStyle(side: 26, fontSize: 12))
+            .help(help)
     }
 
     /// The folder was replaced: what the panel knew about the old one no longer applies.
@@ -374,13 +367,7 @@ struct BotInspector: View {
     @ViewBuilder
     private func folderTab(_ bot: Bot) -> some View {
         Section {
-            Text(OrbFolder.display(bot.workingURL))
-                .font(.caption.monospaced())
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.head)
-                .textSelection(.enabled)
-                .help(bot.workingURL.path)
+            folderRow(bot)
             folderControls(bot)
         } header: {
             Text("Pasta")
@@ -417,9 +404,8 @@ struct BotInspector: View {
 
         Section {
             if bot.permissionRules.isEmpty {
-                Text("Nenhuma ainda. Ao aprovar um pedido, escolha “Sempre permitir…” e ela aparece aqui.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                PanelEmptyNote("Nenhuma liberação ainda", systemImage: "checkmark.shield",
+                               detail: "Ao aprovar um pedido, escolha “Sempre permitir…” e ela aparece aqui.")
                     .transition(.quiet)
             }
             ForEach(bot.permissionRules, id: \.self) { rule in
@@ -447,10 +433,62 @@ struct BotInspector: View {
         // Bound to the rules themselves (a short list), so only a grant coming or going moves anything.
         .animateChanges(of: bot.permissionRules)
 
-        filesSection
+        filesSection(bot)
     }
 
-    /// Where the Orb works and what can be done with it: open it, move it, give the Orb a folder of its own.
+    /// The folder the Orb works in, said as a place: its name ("Pasta pessoal" for the home folder) over its path, and
+    /// "Mudar…" at the end of the line.
+    private func folderRow(_ bot: Bot) -> some View {
+        let isHome = EmptyChatContent.usesHome(bot)
+        return HStack(spacing: 10) {
+            Image(systemName: isHome ? "house" : "folder")
+                .foregroundStyle(Palette.muted)
+                .frame(width: 20)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(isHome ? "Pasta pessoal" : bot.workingURL.lastPathComponent)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(isHome ? bot.workingURL.path : OrbFolder.display(bot.workingURL))
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+                    .textSelection(.enabled)
+            }
+            .help(bot.workingURL.path)
+            Spacer(minLength: 4)
+            changeFolderMenu(bot)
+        }
+    }
+
+    /// "Mudar…": choose another folder, or switch between the home folder and one of the Orb's own.
+    private func changeFolderMenu(_ bot: Bot) -> some View {
+        let state = listing?.folder
+        return Menu {
+            Button("Escolher pasta…", systemImage: "folder.badge.gearshape") { isPickingFolder = true }
+            if state == .ownFolder {
+                Button("Usar a pasta pessoal", systemImage: "house") {
+                    model.useHomeFolder(of: bot.id)
+                    folderChanged()
+                }
+            } else if state == .noOwnFolder {
+                Button("Criar pasta própria", systemImage: "folder.badge.plus") { attempt { try model.createOwnFolder(for: bot.id) } }
+            }
+        } label: {
+            Text("Mudar…")
+        }
+        .menuStyle(.button)
+        // Without the system's blue arrow, the same chip as "Recriar" and the others; the "…" says it opens more.
+        .menuIndicator(.hidden)
+        .chipButton()
+        .fixedSize()
+        .help(Tip.changeFolder)
+        .accessibilityLabel("Mudar pasta")
+    }
+
+    /// What goes with the folder's line: the warning when it is gone (and the way to bring it back), and what "Mudar…"
+    /// offers besides choosing another.
     @ViewBuilder
     private func folderControls(_ bot: Bot) -> some View {
         let state = listing?.folder
@@ -467,26 +505,7 @@ struct BotInspector: View {
                 .help(Tip.recreateFolder)
                 .transition(.quiet)
         }
-        // A folder that is there opens from the Finder and Terminal buttons over the tabs.
-        Menu {
-            Button("Escolher pasta…", systemImage: "folder.badge.gearshape") { isPickingFolder = true }
-            if state == .ownFolder {
-                Button("Usar a pasta pessoal", systemImage: "house") {
-                    model.useHomeFolder(of: bot.id)
-                    folderChanged()
-                }
-            } else if state == .noOwnFolder {
-                Button("Criar pasta própria", systemImage: "folder.badge.plus") { attempt { try model.createOwnFolder(for: bot.id) } }
-            }
-        } label: {
-            Text("Mudar pasta…")
-        }
-        .menuStyle(.button)
-        // Without the system's blue arrow, the same chip as "Recriar" and the others; the "…" says it opens more.
-        .menuIndicator(.hidden)
-        .chipButton()
-        .fixedSize()
-        .help(Tip.changeFolder)
+        // A folder that is there opens from the Finder and Terminal buttons in the header.
         if state == .ownFolder {
             Text("Se usar a pasta pessoal, \(bot.name) volta a trabalhar nela. A pasta atual e o que há nela ficam como estão.")
                 .font(.caption)
@@ -502,17 +521,16 @@ struct BotInspector: View {
 
     /// Changed (git) and recently modified files of the Orb's folder. Not shown for the home folder, which is not scanned.
     @ViewBuilder
-    private var filesSection: some View {
+    private func filesSection(_ bot: Bot) -> some View {
         if let listing, listing.folder != .missing, listing.snapshot != .home {
             Section {
                 if listing.snapshot == .unreadable {
-                    Text("Sem acesso à pasta. O macOS pode estar bloqueando: libere em Ajustes do Sistema → Privacidade e Segurança.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+                    PanelEmptyNote("Sem acesso à pasta", systemImage: "lock",
+                                   detail: "O macOS pode estar bloqueando: libere em Ajustes do Sistema → Privacidade e Segurança.")
                         .transition(.quiet)
                 } else if listing.files.isEmpty {
-                    Text("Nada por aqui ainda.")
-                        .foregroundStyle(.secondary)
+                    PanelEmptyNote("Nenhum arquivo ainda", systemImage: "doc",
+                                   detail: "O que \(bot.name) criar ou mudar nesta pasta aparece aqui.")
                         .transition(.quiet)
                 }
                 // The git column only when some file has a marker: a folder without git lists names from the edge.
@@ -548,16 +566,8 @@ struct BotInspector: View {
         // Each routine is a card of its own, with no heading: "Rotinas" is already the tab's name right above.
         if routines.isEmpty {
             Section {
-                VStack(alignment: .leading, spacing: 6) {
-                    Label("Nenhuma rotina ainda", systemImage: "clock.badge")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Palette.ink)
-                    Text("Peça a \(bot.name) no chat, como “verifique meus e-mails a cada 30 minutos”, ou crie uma aqui.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Palette.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.vertical, 4)
+                PanelEmptyNote("Nenhuma rotina ainda", systemImage: "clock.badge",
+                               detail: "Peça a \(bot.name) no chat, como “verifique meus e-mails a cada 30 minutos”, ou crie uma aqui.")
             }
         }
         ForEach(routines) { routine in
@@ -1129,21 +1139,31 @@ private struct IdentityEditor: View {
     }
 }
 
-/// One of the panel's quick actions: an equal-width tile with a soft fill, lighter on hover, dimmed when disabled.
-private struct QuickActionTileStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-    @State private var isHovering = false
+/// What a section of the Orb's panel says while it has nothing to list: a short title with its symbol and one gray
+/// line on what will fill it (the same in Rotinas, Liberações, Arquivos and Memória).
+struct PanelEmptyNote: View {
+    let title: String
+    let symbol: String
+    let detail: String
 
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(isEnabled ? Palette.ink : Palette.faint)
-            .padding(.horizontal, 8)
-            .frame(maxWidth: .infinity, minHeight: 28)
-            .hoverFill(isEnabled && (configuration.isPressed || isHovering), pressed: configuration.isPressed,
-                       in: .rect(cornerRadius: 7), color: Palette.ghostSelected, resting: Palette.surface)
-            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Palette.line))
-            .contentShape(.rect(cornerRadius: 7))
-            .onHover { isHovering = $0 }
+    init(_ title: String, systemImage: String, detail: String) {
+        self.title = title
+        self.symbol = systemImage
+        self.detail = detail
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(title, systemImage: symbol)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Palette.ink)
+            Text(detail)
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
     }
 }
 

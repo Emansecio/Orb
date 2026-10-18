@@ -138,9 +138,11 @@ struct ComposerView: View {
                 attachmentStrip(lane).transition(.adapted(.unfold, reduceMotion: reduceMotion))
             }
             if let error = lane.error {
-                Text(error)
+                // Said as the app's other warnings are: the mark, then the sentence, wrapping under itself.
+                Label(error, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
                     .foregroundStyle(Palette.danger)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 4)
                     .transition(.adapted(.unfold, reduceMotion: reduceMotion))
             }
