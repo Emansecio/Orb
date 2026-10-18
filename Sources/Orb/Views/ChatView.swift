@@ -448,7 +448,10 @@ private struct TranscriptList: View {
             .modifier(RowEntrance(id: row.id, style: items[0].kind.entrance, isNew: entrances.isNew(row.id), entrances: entrances))
             .transition(.identity)
         case .work(let items, let seconds):
-            WorkGroupRow(items: items, seconds: seconds, isOpen: openRuns.contains(row.id) || ToolGroupRow.opensInSnapshots) {
+            let isOpen = openRuns.contains(row.id) || ToolGroupRow.opensInSnapshots
+            WorkGroupRow(items: items, seconds: seconds, isOpen: isOpen,
+                         inputs: isOpen ? .init(openRuns: openRuns, lastReplyID: lastReplyID, redoID: redoID, dropping: dropping,
+                                                find: found, orb: look.orb) : nil) {
                 if openRuns.remove(row.id) == nil { openRuns.insert(row.id) }
             } content: {
                 // Opened: the request's work as it was while it ran (its runs of actions folded as usual).
@@ -456,6 +459,7 @@ private struct TranscriptList: View {
                     AnyView(foldedRow(inner, lastReplyID: lastReplyID, redoID: redoID, dropping: dropping, found: found))
                 }
             }
+            .equatable()
             .transition(.identity)
         }
     }
@@ -728,7 +732,7 @@ struct BottomFollowing: ViewModifier {
 
 /// Stands in for the conversation while it is read from disk (a fraction of a second even for a long one). Blank at
 /// first, so a quick read shows nothing at all, then a small spinner.
-private struct LoadingTranscript: View {
+struct LoadingTranscript: View {
     @State private var isVisible = false
 
     var body: some View {

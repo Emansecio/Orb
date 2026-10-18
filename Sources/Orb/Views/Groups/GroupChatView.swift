@@ -40,11 +40,25 @@ extension AppModel {
 struct GroupChatView: View {
     @Environment(AppModel.self) private var model
     let groupID: UUID
+    /// The thread once it is read; set by the task, so the body never touches the disk.
+    @State private var loaded: GroupSession?
 
     var body: some View {
-        if let group = model.groups.first(where: { $0.id == groupID }), let session = model.groupSession(groupID) {
-            GroupConversation(group: group, session: session, live: model.groupLive(groupID))
-                .navigationTitle(group.name)
+        if let group = model.groups.first(where: { $0.id == groupID }) {
+            Group {
+                if let session = loaded ?? model.loadedGroupSession(groupID) {
+                    GroupConversation(group: group, session: session, live: model.groupLive(groupID))
+                } else {
+                    LoadingTranscript()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        .background(Palette.canvas)
+                }
+            }
+            .navigationTitle(group.name)
+            .task(id: groupID) {
+                loaded = nil
+                loaded = await model.loadGroupSession(groupID)
+            }
         }
     }
 }

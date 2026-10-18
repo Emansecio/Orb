@@ -93,8 +93,10 @@ struct AttachmentInfo: Equatable, Sendable {
         cache.object(forKey: path as NSString)?.info ?? quick(path: path)
     }
 
-    /// Reads the size and looks for the file, off the main thread.
+    /// Reads the size and looks for the file, off the main thread. A file already found is not read again (the cache
+    /// serves it); one that was missing is looked for again, as it may have been written since.
     static func load(path: String) async -> AttachmentInfo {
+        if let cached = cache.object(forKey: path as NSString)?.info, cached.state == .ok { return cached }
         let info = await Task.detached { read(path) }.value
         cache.setObject(Box(info), forKey: path as NSString)
         return info
