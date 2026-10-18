@@ -57,6 +57,34 @@ final class SearchToolTests {
         #expect(output.contains("parou antes de varrer tudo"))
     }
 
+    /// What a file gave before the time ran out is kept: "nothing found" would be false.
+    @Test func grepKeepsMatchesFoundBeforeTheTimeBudgetRanOut() async throws {
+        let needles = (1...5).map { "needle \($0)\n" }.joined()
+        let runaway = String(repeating: "a", count: 60) + "b\n"
+        try workspace.write("achados.txt", needles + runaway)
+        let output = try await GrepTool(timeBudget: .milliseconds(400)).run(
+            .object(["pattern": .string("needle|(a+)+$")]), context: workspace.context)
+        #expect(lines(output).prefix(5).map { $0 } == (1...5).map { "achados.txt:\($0): needle \($0)" }, Comment(rawValue: output))
+        #expect(output.contains("parou antes de varrer tudo") && !output.contains("Nenhum resultado"))
+
+        // The same in a big file named as the path, read in a stream.
+        var text = needles
+        while text.utf8.count < 6_000_000 { text += "line all good with some padding to make it longer\n" }
+        try workspace.write("grande.log", text + runaway)
+        let streamed = try await GrepTool(timeBudget: .milliseconds(400)).run(
+            .object(["pattern": .string("needle|(a+)+$"), "path": .string("grande.log")]), context: workspace.context)
+        #expect(streamed.contains("grande.log:1: needle 1") && streamed.contains("parou antes de varrer tudo") && !streamed.contains("Nenhum resultado"),
+                Comment(rawValue: streamed))
+    }
+
+    @Test func grepAnswersInTheSingularForOneFileOrOneLine() async throws {
+        try workspace.write("a.txt", "x\ny\n")
+        let count = try await run(GrepTool(), ["pattern": .string("x"), "mode": .string("count"), "path": .string("a.txt")])
+        #expect(lines(count) == ["a.txt: 1", "Total: 1 linha em 1 arquivo."])
+        let none = try await run(GrepTool(), ["pattern": .string("zzz"), "path": .string("a.txt")])
+        #expect(none.contains("(1 arquivo de texto pesquisado)"))
+    }
+
     @Test func grepUsesRegexAndCaseOption() async throws {
         try workspace.write("a.txt", "Error: 404\nerror: 500\nfine\n")
         let sensitive = try await run(GrepTool(), ["pattern": .string(#"^Error: \d+"#)])
@@ -240,7 +268,7 @@ final class SearchToolTests {
                                    "big.log-89999- line 89999 all good with some padding to make it longer", "big.log:90000: line 90000 ERRO needle",
                                    "big.log-90001- line 90001 all good with some padding to make it longer"])
         #expect(lines(try await run(GrepTool(), ["pattern": .string("ERRO"), "path": .string("big.log"), "mode": .string("count")]))
-                == ["big.log: 2", "Total: 2 linhas em 1 arquivos."])
+                == ["big.log: 2", "Total: 2 linhas em 1 arquivo."])
         #expect(lines(try await run(GrepTool(), ["pattern": .string("ERRO"), "path": .string("big.log"), "mode": .string("files")])) == ["big.log"])
         #expect(try await run(GrepTool(), ["pattern": .string("never appears"), "path": .string("big.log")]).contains("Nenhum resultado"))
     }
