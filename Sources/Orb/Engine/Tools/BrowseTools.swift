@@ -17,6 +17,11 @@ enum BrowseSupport {
         return try await hub.session(botID: botID, mode: context.browser.mode, scope: context.browser.scope)
     }
 
+    /// The names this conversation kept for its refs go with the page they were read in.
+    static func forgetLabels(_ context: ToolContext) {
+        if let botID = context.botID { context.browser.hub?.clearLabels(botID: botID, scope: context.browser.scope) }
+    }
+
     /// A ref as `browse_snapshot` shows it (`e12`); `@e12` and `12` are accepted.
     static func ref(_ arguments: JSONValue, key: String = "ref") throws -> String {
         var text = try arguments.requiredString(key).trimmingCharacters(in: .whitespaces)
@@ -145,7 +150,7 @@ extension BrowseTool {
     /// The name the user knows an element by, when the last snapshot said it ("Entrar").
     func label(ofRef arguments: JSONValue, context: ToolContext) -> String? {
         guard let ref = try? BrowseSupport.ref(arguments), let botID = context.botID else { return nil }
-        return context.browser.hub?.label(ofRef: ref, botID: botID)
+        return context.browser.hub?.label(ofRef: ref, botID: botID, scope: context.browser.scope)
     }
 }
 
@@ -171,7 +176,7 @@ struct BrowseOpenTool: BrowseTool {
             session.forgetPage()
             return try await session.driver.open(address)
         }
-        if let botID = context.botID { context.browser.hub?.clearLabels(botID: botID) }
+        BrowseSupport.forgetLabels(context)
         var text = "Opened \(page.url)" + (page.title.isEmpty ? "" : " — “\(page.title)”")
         text += BrowseSupport.handoffNote(url: page.url, title: page.title)
         return text + "\nNext: browse_snapshot (what to click or fill) or browse_read (the text)."
@@ -208,7 +213,7 @@ struct BrowseSnapshotTool: BrowseTool {
             tree = snapshot.tree
             url = snapshot.url
             session.remember(snapshot, text: tree)
-            if let botID = context.botID { context.browser.hub?.setLabels(snapshot.refs, botID: botID) }
+            if let botID = context.botID { context.browser.hub?.setLabels(snapshot.refs, botID: botID, scope: context.browser.scope) }
         }
         let note = BrowseSupport.handoffNote(url: url, title: "", text: tree)
         guard !tree.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -555,6 +560,7 @@ struct BrowseBackTool: BrowseTool {
             session.forgetPage()
             return try await session.driver.back()
         }
+        BrowseSupport.forgetLabels(context)
         return "Back at \(page.url)" + (page.title.isEmpty ? "" : " — “\(page.title)”") + "."
     }
 }
@@ -608,11 +614,13 @@ struct BrowseTabsTool: BrowseTool {
                 let address = try arguments.nonEmptyString("url").map(BrowseSupport.address)
                 try await session.driver.newTab(address)
                 session.forgetPage()
+                BrowseSupport.forgetLabels(context)
                 await session.adoptCurrentTab()
             case "select":
                 let tab = try await mine(try arguments.requiredString("tab"))
                 try await session.driver.selectTab(tab.id)
                 session.forgetPage()
+                BrowseSupport.forgetLabels(context)
                 await session.adoptCurrentTab()
             case "close":
                 guard session.closesTabs else {
@@ -628,6 +636,7 @@ struct BrowseTabsTool: BrowseTool {
                     session.forgetTab(tab)
                 }
                 session.forgetPage()
+                BrowseSupport.forgetLabels(context)
             default:
                 break
             }
@@ -678,7 +687,7 @@ struct BrowseShowTool: BrowseTool {
             }
             session.setShowingWindow(!hide)
         }
-        if let botID = context.botID { context.browser.hub?.clearLabels(botID: botID) }
+        BrowseSupport.forgetLabels(context)
         let location = Self.location(page)
         if hide { return "The browser is back in the background at \(location). Take a browse_snapshot to continue." }
         guard let handoff = context.handoff else {
@@ -703,7 +712,7 @@ struct BrowseShowTool: BrowseTool {
             throw ToolError(Self.declined)
         }
         session.forgetPage()
-        if let botID = context.botID { context.browser.hub?.clearLabels(botID: botID) }
+        BrowseSupport.forgetLabels(context)
         return Self.finished
     }
 

@@ -470,8 +470,10 @@ final class BrowserHub: Sendable {
     private let locate: @Sendable () async -> BrowserStatus
     private let makeDriver: @Sendable (AgentBrowserConfig) -> any BrowserDriver
     private let sessions = OSAllocatedUnfairLock<[UUID: BrowserSession]>(initialState: [:])
-    /// What the tools say a ref is ("Entrar" for e3), by Orb, readable without waiting (the approval card shows it).
-    private let labels = OSAllocatedUnfairLock<[UUID: [String: String]]>(initialState: [:])
+    /// What the tools say a ref is ("Entrar" for e3), by Orb and conversation (a ref belongs to the tab it was read in), readable
+    /// without waiting (the approval card shows it).
+    private let labels = OSAllocatedUnfairLock<[LabelKey: [String: String]]>(initialState: [:])
+    private struct LabelKey: Hashable { let botID: UUID; let scope: String? }
     private let proxies = OSAllocatedUnfairLock<[UUID: String]>(initialState: [:])
     /// The close of the browser an Orb's session replaced, until it is done.
     private let closings = OSAllocatedUnfairLock<[UUID: Task<Void, Never>]>(initialState: [:])
@@ -620,13 +622,17 @@ final class BrowserHub: Sendable {
 
     // MARK: Labels
 
-    func setLabels(_ refs: [String: BrowserRef], botID: UUID) {
-        labels.withLock { $0[botID] = refs.mapValues { Self.label(of: $0) } }
+    func setLabels(_ refs: [String: BrowserRef], botID: UUID, scope: String? = nil) {
+        labels.withLock { $0[LabelKey(botID: botID, scope: scope)] = refs.mapValues { Self.label(of: $0) } }
     }
 
-    func clearLabels(botID: UUID) { labels.withLock { _ = $0.removeValue(forKey: botID) } }
+    /// Forgets the names of one conversation's refs.
+    func clearLabels(botID: UUID, scope: String?) { labels.withLock { _ = $0.removeValue(forKey: LabelKey(botID: botID, scope: scope)) } }
 
-    func label(ofRef ref: String, botID: UUID) -> String? { labels.withLock { $0[botID]?[ref] } }
+    /// Forgets the names of every conversation's refs (the Orb's browser closed).
+    func clearLabels(botID: UUID) { labels.withLock { labels in labels = labels.filter { $0.key.botID != botID } } }
+
+    func label(ofRef ref: String, botID: UUID, scope: String? = nil) -> String? { labels.withLock { $0[LabelKey(botID: botID, scope: scope)]?[ref] } }
 
     private static func label(of ref: BrowserRef) -> String {
         let name = ref.name.split(whereSeparator: \.isWhitespace).joined(separator: " ").clipped(to: 60)

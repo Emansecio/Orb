@@ -216,6 +216,17 @@ struct WebSearchToolTests {
         #expect(request.url?.host() == "api.search.tinyfish.ai" && request.value(forHTTPHeaderField: "X-API-Key") == "k")
     }
 
+    /// A "+" in the query is part of the words ("C++"); left as it is, the search engine reads it as a space.
+    @Test func aPlusInTheQueryReachesTheSearchEngineEncoded() {
+        let search = WebSearchTool.Request(query: "C++ templates", count: 8, site: nil, news: false)
+        for provider in [SearchProvider.duckduckgo, .google] {
+            let address = WebSearchTool.address(for: search, provider: provider).absoluteString
+            #expect(address.contains("q=C%2B%2B%20templates") && !address.contains("C++"), "\(provider)")
+        }
+        let request = TinyFishSearch.request(key: "k", query: "C++", count: 5, site: nil, news: false)
+        #expect(request.url?.query?.contains("query=C%2B%2B") == true)
+    }
+
     @Test func whenTinyFishCannotAnswerTheSearchGoesToDuckDuckGoAndSaysWhy() async throws {
         let cases: [(status: Int, note: String, requests: Int)] = [
             (401, "rejected the saved key", 1),

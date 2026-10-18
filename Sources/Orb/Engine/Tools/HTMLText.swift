@@ -646,6 +646,8 @@ enum HTMLText {
         "amp": "&", "lt": "<", "gt": ">", "quot": "\"", "apos": "'", "nbsp": " ", "mdash": "—", "ndash": "–",
         "hellip": "…", "lsquo": "‘", "rsquo": "’", "ldquo": "“", "rdquo": "”", "laquo": "«", "raquo": "»",
         "bull": "•", "middot": "·", "copy": "©", "reg": "®", "trade": "™", "euro": "€", "ordm": "º", "ordf": "ª",
+        "deg": "°", "sect": "§", "para": "¶", "times": "×", "divide": "÷", "plusmn": "±", "frac12": "½", "frac14": "¼", "frac34": "¾",
+        "rarr": "→", "larr": "←", "uarr": "↑", "darr": "↓", "szlig": "ß", "oslash": "ø", "Oslash": "Ø", "aelig": "æ", "AElig": "Æ",
     ]
 
     /// Accented Latin letters such as `&atilde;` and `&ccedil;`, built from a base letter and a combining mark.
@@ -658,6 +660,8 @@ enum HTMLText {
         if name.hasPrefix("#") {
             let digits = name.dropFirst()
             let code = digits.first == "x" || digits.first == "X" ? UInt32(digits.dropFirst(), radix: 16) : UInt32(digits)
+            // Browsers read 128-159 as Windows-1252 (curly quotes, the dash), not as control characters.
+            if let code, (0x80...0x9F).contains(code), let text = String(data: Data([UInt8(code)]), encoding: .windowsCP1252) { return text }
             return code.flatMap(Unicode.Scalar.init).map { String(Character($0)) }
         }
         if let value = namedEntities[name] { return value }

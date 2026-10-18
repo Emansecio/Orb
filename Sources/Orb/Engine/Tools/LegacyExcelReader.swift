@@ -851,13 +851,12 @@ private final class SpreadsheetML: NSObject, XMLParserDelegate {
     private var value = ""
     private var dataDepth = 0
     private var commentDepth = 0
-    private var stopped = false
 
     static func sheets(_ data: Data, name: String) throws -> [LegacyExcelReader.Sheet] {
         let delegate = SpreadsheetML()
         let parser = XMLParser(data: data)
         parser.delegate = delegate
-        if !parser.parse(), !delegate.stopped, delegate.sheets.isEmpty {
+        if !parser.parse(), delegate.sheets.isEmpty {
             throw ToolError("Não consegui ler \(name): o XML do Excel 2003 está malformado.")
         }
         return delegate.sheets
@@ -912,13 +911,10 @@ private final class SpreadsheetML: NSObject, XMLParserDelegate {
             type = ""
         case "Row" where inSheet:
             if let last = cells.keys.max() {
-                rows.append(SheetParser.Row(number: rowNumber, cells: (0...last).map { cells[$0] ?? "" }))
-                if rows.count > OfficeReader.maxRows {
-                    // Enough to tell the sheet has more than is shown: keep it and stop reading.
-                    sheets.append(LegacyExcelReader.Sheet(name: sheetName, rows: rows, cutColumns: cutColumns))
-                    inSheet = false
-                    stopped = true
-                    parser.abortParsing()
+                // One row past the limit is enough to tell the sheet has more than is shown; the rest are skipped, and the
+                // sheets after this one are still read.
+                if rows.count <= OfficeReader.maxRows {
+                    rows.append(SheetParser.Row(number: rowNumber, cells: (0...last).map { cells[$0] ?? "" }))
                 }
             }
         case "Worksheet":

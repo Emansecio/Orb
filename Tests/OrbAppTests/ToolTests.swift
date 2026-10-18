@@ -140,6 +140,12 @@ final class ToolTests {
         #expect(page.text == "# Hello world\n\nSee the docs (https://example.com) now — ok A.\n\n• One\n• Two")
     }
 
+    @Test func htmlTextDecodesDegreeTimesArrowAndWindows1252References() {
+        let page = HTMLText.convert("<p>25&deg;C &times; 3 &rarr; &#150; &#146; &#x96;</p>")
+        #expect(page.text == "25°C × 3 → – ’ –")
+        #expect(!page.text.contains("&deg;") && !page.text.unicodeScalars.contains { (0x80...0x9F).contains($0.value) })
+    }
+
     // MARK: Catalog
 
     /// Anything that can change the Mac or send data out (web, open, saving to memory) must go through the

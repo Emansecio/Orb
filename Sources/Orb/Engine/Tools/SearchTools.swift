@@ -279,13 +279,17 @@ struct GrepTool: AgentTool {
                 continue
             }
             searched += 1
-            if scanned.timedOut {
-                // A pattern that backtracks without end would otherwise run past the time budget unchecked.
+            // A pattern that backtracks without end would otherwise run past the time budget unchecked. What the file gave
+            // before the time ran out is kept, and the search stops after it.
+            let ranOutOfTime = scanned.timedOut
+            if ranOutOfTime {
                 try Task.checkCancellation()
                 truncated = true
-                break scan
             }
-            guard scanned.hitCount > 0 else { continue }
+            guard scanned.hitCount > 0 else {
+                if ranOutOfTime { break scan }
+                continue
+            }
             if results >= limit {
                 // Something more exists beyond the limit, so the output is truncated rather than just full.
                 limitReached = true
@@ -309,6 +313,7 @@ struct GrepTool: AgentTool {
                 results += kept.count
                 output += contentLines(name: name, lineCount: scanned.lineCount, line: scanned.line, hits: kept, context: contextLines)
             }
+            if ranOutOfTime { break scan }
         }
 
         // However many results the limit allows, one call stays a page the model gets whole (see `ToolOutputBudget`).
@@ -322,14 +327,14 @@ struct GrepTool: AgentTool {
         }
 
         guard !output.isEmpty else {
-            var message = "Nenhum resultado para \"\(patternText)\" em \(FileWalker.display(root, "", workingDirectory: workingDirectory)) (\(searched) arquivos de texto pesquisados)."
+            var message = "Nenhum resultado para \"\(patternText)\" em \(FileWalker.display(root, "", workingDirectory: workingDirectory)) (\(searched) \(searched == 1 ? "arquivo de texto pesquisado" : "arquivos de texto pesquisados"))."
             if truncated { message += " A busca parou antes de varrer tudo (tempo ou número de arquivos); restrinja path ou include." }
             // An empty answer must not read as "not there" when a file that could hold it was skipped.
             if let sizeNote { message += "\n" + sizeNote }
             return message
         }
         if mode == "count" {
-            output.append("Total\(limitReached || cutBySize ? " (até o limite)" : ""): \(totalLines) linhas em \(matchedFiles) arquivos.")
+            output.append("Total\(limitReached || cutBySize ? " (até o limite)" : ""): \(totalLines) \(totalLines == 1 ? "linha" : "linhas") em \(matchedFiles) \(matchedFiles == 1 ? "arquivo" : "arquivos").")
         }
         if limitReached {
             output.append("[... resultados truncados em \(limit); refine o padrão, use path ou include, ou aumente max_results ...]")
@@ -361,7 +366,11 @@ struct GrepTool: AgentTool {
         for (index, line) in lines.enumerated() {
             var timedOut = false
             guard let range = firstMatch(of: regex, in: line, deadline: deadline, timedOut: &timedOut) else {
-                if timedOut { scanned.timedOut = true; return scanned }
+                if timedOut {
+                    scanned.timedOut = true
+                    scanned.hitCount = scanned.hits.count
+                    return scanned
+                }
                 continue
             }
             scanned.hits.append((index, range.location))

@@ -200,6 +200,9 @@ struct MacToolTests {
         let shown = try await run(tool, ["target": .string("https://example.com"), "front": .bool(true)])
         #expect(shown.contains("na frente") && !shown.contains("segundo plano") && opener.opened.last?.front == true)
         #expect(tool.summary(.object(["target": .string("x"), "front": .bool(true)])).title == "Abrindo na frente")
+        let typed = try await run(tool, ["target": .string("https://example.com"), "front": .string("true")])
+        #expect(typed.contains("na frente") && opener.opened.last?.front == true)
+        #expect(tool.summary(.object(["target": .string("x"), "front": .string("true")])).title == "Abrindo na frente")
         #expect(tool.summary(.object(["target": .string("x")])).title == "Abrindo")
         #expect(tool.spec.parameters.jsonString.contains("front") && tool.spec.description.contains("background"))
 

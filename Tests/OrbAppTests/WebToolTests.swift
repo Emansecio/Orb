@@ -730,6 +730,12 @@ final class EndlessResponseTests {
         #expect((EndlessStreamProtocol.stream(host)?.served ?? .max) < WebFetchTool.maxBytes)
     }
 
+    @Test func theNotTextAnswerReadsWellWithAndWithoutASize() {
+        let unknown = WebFetchTool.notTextMessage(mimeType: "audio/mpeg", length: -1)
+        #expect(unknown.hasPrefix("Conteúdo audio/mpeg (não é texto)") && !unknown.contains(" de (não é"))
+        #expect(WebFetchTool.notTextMessage(mimeType: "application/zip", length: 1_024).hasPrefix("Conteúdo application/zip de \(AttachmentKind.fileSize(1_024)) (não é texto)"))
+    }
+
     @Test func unreadableTypesAreRecognisedFromTheirMimeType() {
         for readable in ["", "text/plain", "text/event-stream", "application/json", "application/pdf", "application/xhtml+xml", "image/svg+xml",
                          "application/octet-stream", "application/javascript", "binary/octet-stream", "application/force-download",

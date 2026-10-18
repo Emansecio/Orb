@@ -45,6 +45,16 @@ struct SpawnedProcessTests {
         #expect(exits.all == [ChildExit(status: 0, signaled: false)])
     }
 
+    /// An environment the system cannot take is refused before anything starts (and the arguments copied for it are freed).
+    @Test func aNullByteInTheEnvironmentIsRefused() throws {
+        let null = FileHandle(forWritingAtPath: "/dev/null")!
+        defer { try? null.close() }
+        let error = try #require(#expect(throws: ToolError.self) {
+            _ = try SpawnedProcess.start("/bin/echo", ["oi"], directory: nil, environment: ["X": "a\u{0}b"], output: null.fileDescriptor)
+        })
+        #expect(error.message.contains("byte nulo"))
+    }
+
     @Test func theExitCodeIsReported() async throws {
         let exits = Exits()
         SpawnedProcess.watch(try spawn("/bin/sh", ["-c", "exit 7"])) { exits.add($0) }

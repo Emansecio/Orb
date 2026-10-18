@@ -23,9 +23,11 @@ enum SpawnedProcess {
     static func start(_ executable: String, _ arguments: [String], directory: URL?, environment: [String: String]?,
                       output: Int32, error: Int32? = nil, input: Int32? = nil) throws -> pid_t {
         let environment = environment ?? ProcessInfo.processInfo.environment
+        // Each is freed as soon as it exists: if the environment is refused, the arguments already copied must not leak.
         let argv = try cStrings([executable] + arguments)
+        defer { argv.forEach { free($0) } }
         let envp = try cStrings(environment.map { "\($0.key)=\($0.value)" })
-        defer { (argv + envp).forEach { free($0) } }
+        defer { envp.forEach { free($0) } }
 
         var attributes: posix_spawnattr_t?
         var actions: posix_spawn_file_actions_t?

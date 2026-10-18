@@ -472,6 +472,23 @@ final class LegacyExcelReaderTests {
         """, Comment(rawValue: output))
     }
 
+    /// A first sheet past the row limit is cut, not the reading: the sheets after it are still listed.
+    @Test func spreadsheetMLWithAHugeFirstSheetStillReadsTheNextSheets() throws {
+        let rows = (1...(OfficeReader.maxRows + 5)).map { "<Row><Cell><Data ss:Type=\"Number\">\($0)</Data></Cell></Row>" }.joined()
+        let xml = """
+        <?xml version="1.0"?>
+        <Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+         <Worksheet ss:Name="Grande"><Table>\(rows)</Table></Worksheet>
+         <Worksheet ss:Name="Pequena"><Table>
+          <Row><Cell><Data ss:Type="String">a</Data></Cell></Row><Row><Cell><Data ss:Type="String">b</Data></Cell></Row>
+         </Table></Worksheet>
+        </Workbook>
+        """
+        let output = try read(html(xml))
+        #expect(output.contains("## Aba 1: Grande (mais de \(OfficeReader.maxRows) linhas com dados)"), Comment(rawValue: String(output.prefix(200))))
+        #expect(output.contains("## Aba 2: Pequena (2 linhas com dados)\n1: a\n2: b"), Comment(rawValue: String(output.suffix(200))))
+    }
+
     // MARK: read_file
 
     @Test func readFileReadsAnXlsAndPagesIt() async throws {

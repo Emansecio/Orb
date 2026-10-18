@@ -115,6 +115,38 @@ final class OfficeReaderTests {
         #expect(lines[third + 1].hasSuffix("Fim"))
     }
 
+    /// PowerPoint numbers the notes parts among the slides that have notes: the slide's relationships say which one is its own.
+    @Test func readPowerPointNotesFollowTheSlideRelationship() async throws {
+        func slide(_ text: String) -> String {
+            "<p:sld xmlns:p=\"p\" xmlns:a=\"a\"><a:p><a:r><a:t>\(text)</a:t></a:r></a:p></p:sld>"
+        }
+        let schema = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+        try zip("notas.pptx", [
+            "ppt/slides/slide1.xml": slide("Um"),
+            "ppt/slides/slide2.xml": slide("Dois"),
+            "ppt/slides/slide3.xml": slide("Três"),
+            "ppt/notesSlides/notesSlide1.xml": slide("Nota do três"),
+            "ppt/slides/_rels/slide3.xml.rels": """
+            <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+            <Relationship Id="rId1" Type="\(schema)/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>
+            <Relationship Id="rId2" Type="\(schema)/notesSlide" Target="../notesSlides/notesSlide1.xml"/>
+            </Relationships>
+            """,
+            "ppt/slides/_rels/slide1.xml.rels": """
+            <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+            <Relationship Id="rId1" Type="\(schema)/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>
+            </Relationships>
+            """,
+        ])
+        let output = try await workspace.run(ReadFileTool(), ["path": .string("notas.pptx")])
+        let lines = output.split(separator: "\n").map(String.init)
+        func line(_ index: Int) -> String { lines.indices.contains(index) ? lines[index] : "" }
+        let first = try #require(lines.firstIndex { $0.hasSuffix("## Slide 1") })
+        #expect(line(first + 1).hasSuffix("Um") && line(first + 3).hasSuffix("## Slide 2"), Comment(rawValue: output))
+        let third = try #require(lines.firstIndex { $0.hasSuffix("## Slide 3") })
+        #expect(line(third + 2).hasSuffix("[Notas do apresentador]") && line(third + 3).hasSuffix("Nota do três"), Comment(rawValue: output))
+    }
+
     @Test func aFileThatIsNotAZipSaysSo() async throws {
         try workspace.write("falso.xlsx", "isto não é um zip")
         let error = try #require(await #expect(throws: ToolError.self, "expected an error") {
