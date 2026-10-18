@@ -1,3 +1,4 @@
+import Carbon.HIToolbox
 import CoreGraphics
 import Foundation
 import Testing
@@ -45,7 +46,13 @@ final class FakeTakeoverWorld: TakeoverPlatform, @unchecked Sendable {
     }
 
     func root(of app: AccessibilityApp) -> any AccessibilityElement { FakeApplicationElement(world: self, app: app) }
-    func frontmost() -> TakeoverFront? { front }
+    func frontmost() -> TakeoverFront? {
+        lock.withLock { frontmostAsked += 1 }
+        return front
+    }
+    /// How many times the front app was asked for.
+    var frontmostCalls: Int { lock.withLock { frontmostAsked } }
+    private var frontmostAsked = 0
     func cursorLocation() -> CGPoint {
         lock.withLock {
             if let (point, left) = pending {
@@ -326,6 +333,24 @@ struct ScreenTakeoverTests {
         // And the lock was not left held.
         let report = try await rig.takeOver { _ in 2 }
         #expect(report.value == 2)
+    }
+
+    @Test func cancellingWhileTheAppComesForwardIsCancellationNotCouldNotBringToFront() async throws {
+        let rig = TakeoverRig(activationTimeout: .seconds(3))
+        rig.world.ignoresFrontmost = [20]
+        let task = Task { try await rig.takeOver { _ in Issue.record("the body must not run"); return 1 } }
+        try await Task.sleep(for: .milliseconds(150))
+        task.cancel()
+        await #expect(throws: CancellationError.self) { _ = try await task.value }
+        // Waiting looks every 15 ms; spinning without a pause would ask thousands of times in the same time.
+        #expect(rig.world.frontmostCalls < 200, "\(rig.world.frontmostCalls) asks")
+        #expect(rig.world.front?.pid == 10)
+        #expect(rig.indicator.calls == ["began", "ended"])
+    }
+
+    @Test func theLayoutTranslationAsksForNoDeadKeys() {
+        #expect(LiveTakeoverPoster.translateOptions == OptionBits(kUCKeyTranslateNoDeadKeysMask))
+        #expect(LiveTakeoverPoster.translateOptions != 0, "the Bit constant is 0: it would ask for nothing")
     }
 
     @Test func anAppThatDoesNotComeForwardFailsWithNothingDone() async throws {

@@ -394,6 +394,8 @@ struct LiveScreenOwner: ScreenOwner {
         }
         if front?.pid != app.pid {
             guard await Self.waitUntil(activationTimeout, notifications: activated, { platform.frontmost()?.pid == app.pid }) else {
+                // Parar is not the app refusing to come forward: the cancellation goes on, the screen is given back.
+                try Task.checkCancellation()
                 throw TakeoverFailure.couldNotBringToFront(app.name)
             }
         }
@@ -414,7 +416,8 @@ struct LiveScreenOwner: ScreenOwner {
         var iterator = wake.stream.makeAsyncIterator()
         while true {
             if await TakeoverQueue.run(check) { return true }
-            if ContinuousClock.now >= deadline { return false }
+            // A cancelled task makes `next()` answer at once: without this the loop would spin until the deadline.
+            if ContinuousClock.now >= deadline || Task.isCancelled { return false }
             let nap = Task {
                 try? await Task.sleep(for: .milliseconds(15))
                 if !Task.isCancelled { wake.continuation.yield() }
@@ -596,6 +599,10 @@ final class LiveTakeoverPoster: TakeoverEventPoster, @unchecked Sendable {
         return map[character]
     }
 
+    /// Asks `UCKeyTranslate` for no dead keys, so the ` ~ ^ ´ keys of the Brazilian and International layouts give their
+    /// character instead of waiting for the next one. The option is the Mask (1), not the Bit (0), which would ask for nothing.
+    static let translateOptions = OptionBits(kUCKeyTranslateNoDeadKeysMask)
+
     /// Characters → key codes on the current (ASCII-capable) layout, by asking `UCKeyTranslate` for each key; the
     /// Text Services calls want the main thread. Falls back to the US layout if the layout cannot be read.
     private static func currentLayout() -> [Character: UInt16] {
@@ -614,7 +621,7 @@ final class LiveTakeoverPoster: TakeoverEventPoster, @unchecked Sendable {
                 var length = 0
                 var chars = [UniChar](repeating: 0, count: 4)
                 let status = UCKeyTranslate(layout, UInt16(code), UInt16(kUCKeyActionDown), 0, UInt32(LMGetKbdType()),
-                                            OptionBits(kUCKeyTranslateNoDeadKeysBit), &dead, 4, &length, &chars)
+                                            translateOptions, &dead, 4, &length, &chars)
                 guard status == noErr, length == 1, let scalar = Unicode.Scalar(chars[0]), map[Character(scalar)] == nil,
                       !scalar.properties.isWhitespace || scalar == " " else { continue }
                 map[Character(scalar)] = UInt16(code)
