@@ -2,7 +2,8 @@ import AppKit
 import UserNotifications
 
 // The Orb's hands on the Mac: Shortcuts, clipboard, notifications, running apps, processes, Trash.
-// Everything here needs the "Controlar apps do Mac" capability except `notify`.
+// Everything here needs the "Controlar apps do Mac" capability except `notify` (no capability) and `trash`
+// ("Terminal e arquivos" is enough; "Controlar apps do Mac" offers it too).
 
 // MARK: - Shortcuts
 
