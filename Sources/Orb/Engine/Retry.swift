@@ -5,7 +5,7 @@ import Foundation
 enum Retry {
     /// Backoff before the first retry; doubles each time.
     static let baseDelay: TimeInterval = 1
-    /// Longest backoff we choose ourselves.
+    /// Longest backoff we choose ourselves for a passing failure (a usage limit follows `rateLimitBackoff`, which goes to 60 s).
     static let maxBackoff: TimeInterval = 30
     /// Longest wait we accept when the provider names one: a longer `Retry-After` is a quota, not a hiccup.
     static let maxServerDelay: TimeInterval = 120
@@ -76,7 +76,7 @@ enum Retry {
     }
 
     /// Seconds to wait after `attempt` (1-based) failed: the provider's `Retry-After` when given, else exponential
-    /// backoff with jitter, never above `maxBackoff`. nil when the provider asks for more than we will wait.
+    /// backoff with jitter, never above `maxBackoff` (except usage limits, which follow `rateLimitBackoff`). nil when the provider asks for more than we will wait.
     /// `rateLimited`: the failure was a usage limit (`isRateLimit`), whose waits are `rateLimitBackoff`.
     static func delay(afterAttempt attempt: Int, retryAfter: TimeInterval?, jitter: Double, rateLimited: Bool = false) -> TimeInterval? {
         if let retryAfter {

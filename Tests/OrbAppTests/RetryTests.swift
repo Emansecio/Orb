@@ -79,6 +79,13 @@ struct RetryTests {
         #expect(Retry.delay(afterAttempt: 100, retryAfter: nil, jitter: 1) == 30)
     }
 
+    @Test func aUsageLimitWaitsLongerThanTheCapOfPassingFailures() {
+        // What the docs of `maxBackoff` and `delay` say: the cap is for passing failures, usage limits follow rateLimitBackoff.
+        let longest = Retry.delay(afterAttempt: 4, retryAfter: nil, jitter: 1, rateLimited: true)
+        #expect(longest == Retry.rateLimitBackoff.last)
+        #expect((longest ?? 0) > Retry.maxBackoff)
+    }
+
     @Test func honorsRetryAfterFromTheProvider() async {
         let limited = LLMError.http(status: 429, message: "slow", retryAfter: 9)
         let outcome = await run(failing: [limited, limited], jitter: 0)
