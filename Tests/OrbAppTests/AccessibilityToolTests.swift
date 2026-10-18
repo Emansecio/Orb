@@ -577,7 +577,7 @@ struct UIActToolTests {
 
     @Test func destructiveWordsAreRecognizedWhateverTheLanguageOrAccent() {
         let dangerous = ["Excluir", "excluir conta", "Apagar tudo", "Deletar", "Delete", "Remove", "Remover item", "Esvaziar Lixeira…",
-                         "Empty Trash…", "Esvaziar a Lixeira", "Comprar", "Buy now", "Pagar", "Pay", "Sair sem salvar", "Don't Save",
+                         "Empty Trash…", "Esvaziar a Lixeira", "Esvaziar Lixo…", "Esvaziar o Lixo", "Comprar", "Buy now", "Pagar", "Pay", "Sair sem salvar", "Don't Save",
                          "Don’t Save", "Não Salvar", "Nao salvar", "Formatar…", "Erase Disk", "Descartar alterações"]
         for label in dangerous {
             #expect(UIDanger.reason(forLabel: label, appName: "Finder", bundleID: nil) != nil, Comment(rawValue: label))
@@ -650,6 +650,7 @@ struct UIActToolTests {
             return rig.act.danger(.object(arguments))
         }
         #expect(danger(["Finder", "Esvaziar Lixeira…"]) != nil)
+        #expect(danger(["Finder", "Esvaziar Lixo…"]) != nil, "the item is called Lixo on a Mac in Brazilian Portuguese")
         #expect(danger(["Arquivo", "Mover para a Lixeira"]) == nil)
         // A menu called "Formatar" is only the way there; bold is not an erase.
         #expect(danger(["Formatar", "Negrito"]) == nil)

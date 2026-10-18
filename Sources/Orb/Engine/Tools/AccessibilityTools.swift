@@ -389,10 +389,11 @@ enum UIWaitCondition: Sendable, Equatable {
     case changes(String?)
 
     init(mode: String, query: String?, id: String?) throws {
-        switch mode.trimmingCharacters(in: .whitespaces).lowercased() {
+        let normalized = mode.trimmingCharacters(in: .whitespaces).lowercased()
+        switch normalized {
         case "appears", "disappears":
             guard let query else { throw ToolError("wait \(mode) precisa de query: o texto que deve aparecer ou sumir.") }
-            self = mode.lowercased() == "appears" ? .appears(query) : .disappears(query)
+            self = normalized == "appears" ? .appears(query) : .disappears(query)
         case "changes":
             self = .changes(id)
         default:
@@ -979,7 +980,7 @@ enum UIDanger {
     private static let rules: [Rule] = [
         Rule(phrases: ["excluir", "apagar", "deletar", "delete", "remove", "remover", "eliminar"],
              reason: "apaga ou remove algo, e talvez não dê para desfazer"),
-        Rule(phrases: ["esvaziar lixeira", "esvaziar a lixeira", "empty trash", "empty the trash"],
+        Rule(phrases: ["esvaziar lixeira", "esvaziar a lixeira", "esvaziar lixo", "esvaziar o lixo", "empty trash", "empty the trash"],
              reason: "esvazia a Lixeira, o que não dá para desfazer"),
         Rule(phrases: ["enviar", "send"], reason: "envia uma mensagem ou e-mail, que não dá para desfazer", onlyInMessaging: true),
         Rule(phrases: ["comprar", "buy", "pagar", "pay", "purchase", "place order", "finalizar compra"],
@@ -1132,6 +1133,30 @@ struct UIActTool: AgentTool {
         var direction: String?
         var amount = 1
 
+        /// Cuts "cmd+s, return" into its shortcuts at the commas, except the comma that is the key itself ("cmd+,", ",").
+        /// A comma is the key when it comes right after a "+", or when it starts a piece that nothing follows but
+        /// another comma; any other comma separates.
+        static func splitKeys(_ text: String) -> [String] {
+            var pieces: [String] = []
+            var current = ""
+            let characters = Array(text)
+            for (index, character) in characters.enumerated() {
+                guard character == "," else { current.append(character); continue }
+                let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.hasSuffix("+") {
+                    current.append(character)
+                } else if trimmed.isEmpty {
+                    let next = characters[(index + 1)...].first { !$0.isWhitespace }
+                    if next == nil || next == "," { current.append(character) }
+                } else {
+                    pieces.append(current)
+                    current = ""
+                }
+            }
+            pieces.append(current)
+            return pieces.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        }
+
         static func parse(_ arguments: JSONValue) throws -> Step {
             let actionName = try arguments.requiredString("action")
             guard let action = Action(rawValue: actionName) else {
@@ -1155,11 +1180,12 @@ struct UIActTool: AgentTool {
                 step.value = try arguments.requiredString("value")
             case .key:
                 step.keysText = try arguments.requiredString("keys")
-                step.keys = try step.keysText.split(separator: ",").map { piece in
-                    do { return try KeyStroke.parse(String(piece)) } catch let error as KeyStroke.ParseError {
+                step.keys = try Self.splitKeys(step.keysText).map { piece in
+                    do { return try KeyStroke.parse(piece) } catch let error as KeyStroke.ParseError {
                         throw ToolError(error.errorDescription ?? "Atalho inválido.")
                     }
                 }
+                if step.keys.isEmpty { throw ToolError(KeyStroke.ParseError.empty.errorDescription ?? "Atalho vazio.") }
             case .click:
                 func coordinate(_ key: String) -> Int? {
                     arguments[key]?.int ?? arguments[key]?.string.flatMap { Int($0.trimmingCharacters(in: .whitespaces)) }
@@ -1397,7 +1423,7 @@ struct UIActTool: AgentTool {
         var last: Performed?
         for (index, step) in steps.enumerated() {
             do {
-                let performed = try await perform(step, app: app, context: context, approved: approved, waitsAfter: index == steps.count - 1 && arguments["wait"] != nil)
+                let performed = try await perform(step, app: app, context: context, approved: approved, waitsAfter: index == steps.count - 1 && arguments.nonEmptyString("wait") != nil)
                 done.append(steps.count == 1 ? performed.text : "\(index + 1). \(performed.text)")
                 last?.watcher.cancel()
                 last = performed
@@ -1678,6 +1704,15 @@ struct UIActTool: AgentTool {
                       checkFront: @Sendable (Int32?) async throws -> Void) async throws -> [String] {
         try await focus(target, app: app, replace: replace)
         try await checkFront(await system.frontmostPID())
+        if text.isEmpty, replace {
+            // Nothing to type: replacing with nothing is select all and delete (the selection `focus` made may not exist).
+            do {
+                try await system.input.keys([KeyStroke(.character("a"), modifiers: [.command]), KeyStroke(.named(.delete))], to: app.pid)
+            } catch {
+                throw Self.needsScreen(what, because: Self.reason(error))
+            }
+            return []
+        }
         let chunks = Self.chunks(text)
         let total = text.count
         var sent = 0
@@ -1894,7 +1929,8 @@ struct UIActTool: AgentTool {
                 guard textRoles.contains(target.live.role), !request.stealsFocus else {
                     throw missing(target, "receber um valor (não é um campo editável)", target.element.actionNames())
                 }
-                return Acted(summary: "Escrevi em \(target.name) (\(target.id)).", target: target.element, before: state,
+                return Acted(summary: value.isEmpty ? "Limpei \(target.name) (\(target.id))." : "Escrevi em \(target.name) (\(target.id)).",
+                             target: target.element, before: state,
                              input: .text(value, target: target.element, replace: true), inputWhat: "escrever em \(target.name)")
             }
             let newValue = settableValue(value, current: target.live.secure ? nil : target.element.attribute("AXValue"))
@@ -1902,9 +1938,10 @@ struct UIActTool: AgentTool {
             // Fields driven by a page's script ignore AXValue: then the text is typed.
             if case .string(let wanted) = newValue, !target.live.secure, textRoles.contains(target.live.role),
                let back = target.element.attribute("AXValue")?.string, back != wanted, !request.stealsFocus {
-                return Acted(summary: "Escrevi em \(target.name) (\(target.id)).", target: target.element, before: state,
+                return Acted(summary: value.isEmpty ? "Limpei \(target.name) (\(target.id))." : "Escrevi em \(target.name) (\(target.id)).",
+                             target: target.element, before: state,
                              input: .text(value, target: target.element, replace: true), inputWhat: "escrever em \(target.name)",
-                             notes: ["O campo ignorou o valor por Acessibilidade; digitei o texto."])
+                             notes: ["O campo ignorou o valor por Acessibilidade; " + (value.isEmpty ? "apaguei o texto com o teclado." : "digitei o texto.")])
             }
             return Acted(summary: "Escrevi em \(target.name) (\(target.id)).", target: target.element, before: state)
 
