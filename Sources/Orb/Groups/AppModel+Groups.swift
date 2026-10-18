@@ -28,7 +28,29 @@ extension AppModel {
             session.lastUsed = .now
             return session
         }
-        let read = store.readGroupConversation(group: id)
+        return installGroupSession(id, from: store.readGroupConversation(group: id))
+    }
+
+    /// The group's thread if it is already in memory (no disk read, nothing written): what a view's body may ask.
+    func loadedGroupSession(_ id: UUID) -> GroupSession? {
+        guard group(id) != nil else { return nil }
+        return groupSessions[id]
+    }
+
+    /// Like `groupSession`, but the file is read off the main actor, so opening a group whose thread was let go of does not
+    /// stall drawing. Nil for a group that does not exist.
+    func loadGroupSession(_ id: UUID) async -> GroupSession? {
+        guard group(id) != nil else { return nil }
+        if let session = groupSessions[id] { return session }
+        let store = store
+        let read = await Task.detached(priority: .userInitiated) { store.readGroupConversation(group: id) }.value
+        // Someone may have loaded or deleted it meanwhile (the hub asks for the thread too).
+        guard group(id) != nil else { return nil }
+        if let session = groupSessions[id] { return session }
+        return installGroupSession(id, from: read)
+    }
+
+    private func installGroupSession(_ id: UUID, from read: StoreRead<Conversation>) -> GroupSession {
         addNotice(read.notice)
         var conversation = read.value?.closingInterruptedTurn() ?? Conversation()
         // A request in flight does not survive the app closing: an assignment still open is lost.

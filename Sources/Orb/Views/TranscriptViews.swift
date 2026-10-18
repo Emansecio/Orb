@@ -369,13 +369,12 @@ private struct BotMessage: View {
                 // Beside the bubble, in the space the right padding leaves; the row's hover keeps it up while the
                 // pointer travels to it.
                 // Shown while something is selected too: "Citar" is for the selection.
-                if live == nil {
-                    let shows = hovering || selection != nil
+                // Not mounted at all otherwise: a long chat does not carry a hidden set of buttons on every reply.
+                if live == nil, hovering || selection != nil {
                     MessageActions(text: text, botID: botID, offersRedo: offersRedo, selection: selection)
                         .fixedSize()
                         .alignmentGuide(.trailing) { $0[.leading] - 6 }
-                        .opacity(shows ? 1 : 0)
-                        .allowsHitTesting(shows)
+                        .transition(.opacity)
                 }
             }
             .environment(\.proseSelection, live == nil ? ProseSelectionAction(
@@ -996,13 +995,30 @@ struct ToolGroupRow: View, Equatable {
 /// The work of a finished request before its answer, on one line: how long it took and what was done ("Trabalhou por 1
 /// min 05 s · rodou 11 comandos e leu 1 arquivo"), and how many actions failed. A click puts back what the Orb said while it
 /// worked and its actions, as they were (`content`); the answer stays below, always in view.
-struct WorkGroupRow<Content: View>: View {
+struct WorkGroupRow<Content: View>: View, Equatable {
+    /// What `content` draws from outside the row (the open runs inside, the find result, the Orb). Only filled in while
+    /// the row is open, so a closed one is not drawn again for what only its hidden content would show.
+    struct ContentInputs: Equatable {
+        var openRuns: Set<UUID>
+        var lastReplyID: UUID?
+        var redoID: UUID?
+        var dropping: Set<UUID>
+        var find: FindFocus?
+        var orb: OrbConfig
+    }
+
     let items: [TranscriptItem]
     let seconds: Int?
     let isOpen: Bool
+    var inputs: ContentInputs?
     let toggle: () -> Void
     @ViewBuilder let content: () -> Content
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// The closures (`toggle`, `content`) stay out: they are made again on every pass and say nothing the rest does not.
+    nonisolated static func == (lhs: WorkGroupRow, rhs: WorkGroupRow) -> Bool {
+        lhs.items == rhs.items && lhs.seconds == rhs.seconds && lhs.isOpen == rhs.isOpen && lhs.inputs == rhs.inputs
+    }
 
     var body: some View {
         let calls = items.compactMap { if case .tool(let call) = $0.kind { call } else { nil } }
