@@ -70,15 +70,31 @@ enum OfficeReader {
             try Task.checkCancellation()
             guard let data = part(url, path) else { continue }
             var block = "## Slide \(index + 1)\n" + (DrawingTextParser.parse(data).joined(separator: "\n"))
-            // Speaker notes sit in a part with the same number.
-            let number = path.dropFirst("ppt/slides/slide".count).dropLast(".xml".count)
-            if let notes = part(url, "ppt/notesSlides/notesSlide\(number).xml") {
+            if let notes = notesPart(url, slidePath: path).flatMap({ part(url, $0) }) {
                 let text = DrawingTextParser.parse(notes).filter { Int($0) == nil }.joined(separator: "\n")
                 if !text.isEmpty { block += "\n[Notas do apresentador]\n" + text }
             }
             blocks.append(block)
         }
         return blocks.joined(separator: "\n\n")
+    }
+
+    /// The part with a slide's speaker notes: the one its relationships file points to (PowerPoint numbers the notes parts in
+    /// sequence among the slides that have notes, so slide 3 may own `notesSlide1.xml`). Without a relationships file, the part
+    /// with the slide's own number.
+    private static func notesPart(_ url: URL, slidePath: String) -> String? {
+        let file = slidePath.dropFirst("ppt/slides/".count)
+        guard let data = part(url, "ppt/slides/_rels/\(file).rels") else {
+            let number = slidePath.dropFirst("ppt/slides/slide".count).dropLast(".xml".count)
+            return "ppt/notesSlides/notesSlide\(number).xml"
+        }
+        guard let target = RelationshipsParser.targets(ofType: "/notesSlide", in: data).first else { return nil }
+        if target.hasPrefix("/") { return String(target.dropFirst()) }
+        var parts = ["ppt", "slides"]
+        for component in target.split(separator: "/") {
+            if component == ".." { _ = parts.popLast() } else if component != "." { parts.append(String(component)) }
+        }
+        return parts.joined(separator: "/")
     }
 
     // MARK: Zip
@@ -184,18 +200,28 @@ private final class WorkbookParser: NSObject, XMLParserDelegate {
 /// `Id → Target` of a relationships file.
 private final class RelationshipsParser: NSObject, XMLParserDelegate {
     private var targets: [String: String] = [:]
+    /// Type and Target of each relationship, in file order.
+    private var typed: [(type: String, target: String)] = []
 
-    static func parse(_ data: Data) -> [String: String] {
+    static func parse(_ data: Data) -> [String: String] { run(data).targets }
+
+    /// The targets whose relationship type ends with `suffix` (".../relationships/notesSlide").
+    static func targets(ofType suffix: String, in data: Data) -> [String] {
+        run(data).typed.filter { $0.type.hasSuffix(suffix) }.map(\.target)
+    }
+
+    private static func run(_ data: Data) -> RelationshipsParser {
         let delegate = RelationshipsParser()
         let parser = XMLParser(data: data)
         parser.delegate = delegate
         parser.parse()
-        return delegate.targets
+        return delegate
     }
 
     func parser(_ parser: XMLParser, didStartElement name: String, namespaceURI: String?, qualifiedName: String?, attributes: [String: String]) {
-        guard name == "Relationship", let id = attributes["Id"], let target = attributes["Target"] else { return }
-        targets[id] = target
+        guard name == "Relationship", let target = attributes["Target"] else { return }
+        if let id = attributes["Id"] { targets[id] = target }
+        if let type = attributes["Type"] { typed.append((type, target)) }
     }
 }
 
