@@ -203,6 +203,45 @@ private final class Hooks: GroupTurnHooks {
         #expect(model.live(team.pesquisador.id).followNudge == 0 && model.live(team.pesquisador.id).scrollNudge == 0)
     }
 
+    /// The request ran in a conversation of its own: the target's chat, when the person writes there next, is told what it
+    /// asked and what was answered (once), and the person's words read back as they were typed.
+    @Test func theTargetsChatKnowsTheRequestItHandledOnItsNextTurn() async throws {
+        let team = Team { seen in
+            switch seen.who {
+            case "Atlas":
+                if seen.user.contains("<orb_reply") { return say("O Pesquisador achou 42.") }
+                if seen.toolResult != nil { return say("Pedi ao Pesquisador.") }
+                return orbsCall("ask", to: "Pesquisador", "Pesquise o número.")
+            case "Pesquisador":
+                if seen.user.contains("<orb_request from") { return say("Achei 42.") }
+                return say("Ok.")
+            default: return say("?")
+            }
+        }
+        defer { team.cleanUp() }
+        let model = team.model
+        model.send("peça ao Pesquisador", to: team.atlas.id, fromUser: true)
+        await waitUntil("the asker to answer the person") { team.botTexts(team.atlas).contains("O Pesquisador achou 42.") }
+        await team.settle()
+
+        model.send("é o pedido do Atlas", to: team.pesquisador.id, fromUser: true)
+        await waitUntil("the chat to answer") { team.botTexts(team.pesquisador) == ["Ok."] }
+        await team.settle()
+        let chat = try #require(await team.log.calls(by: "Pesquisador").last)
+        #expect(chat.user.contains(HandledRequests.openTag) && chat.user.contains("<request from=\"Atlas\" status=\"replied\">"))
+        #expect(chat.user.contains("Pesquise o número.") && chat.user.contains("Achei 42."))
+        #expect(chat.user.hasSuffix("é o pedido do Atlas"))
+        let stored = try #require(model.sessions[team.pesquisador.id]?.conversation?.messages.last { $0.role == .user })
+        #expect(TurnPreface.requestWords(stored.content) == "é o pedido do Atlas")
+
+        // The next turn of the chat has it in the history already: it is not handed again.
+        model.send("e agora?", to: team.pesquisador.id, fromUser: true)
+        await waitUntil("the second answer") { team.botTexts(team.pesquisador).count == 2 }
+        await team.settle()
+        let next = try #require(await team.log.calls(by: "Pesquisador").last)
+        #expect(!next.user.contains(HandledRequests.openTag))
+    }
+
     @Test func theAskerWaitsOnScreenWhileTheTargetWorks() async throws {
         let valve = TestGate()
         let team = Team { seen in

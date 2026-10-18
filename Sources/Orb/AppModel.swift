@@ -1557,7 +1557,11 @@ final class AppModel {
         let paused = session.conversation?.isTaskPaused ?? false
         // The message and what goes before it (workspace snapshot, memory notes) take room too.
         let attachmentRoom = AttachmentText.room(historyCharacters: budget.characters)
+        // A turn of the chat learns what the Orb did for other Orbs since its last turn here (each request ran on its own).
+        let handledIDs = session.routineID == nil
+            ? HandledRequests.pending(in: session.conversation?.items.prefix(itemsBeforeMessage) ?? []) : []
         let reserve = prompt.count + Self.prefaceAllowance
+            + handledIDs.count * (HandledRequests.requestLimit + HandledRequests.replyLimit)
             + AttachmentText.estimate(for: attachments, texts: attachmentTexts.cached(attachments), room: attachmentRoom)
         let attachmentTexts = attachmentTexts
         yieldStretchNote(to: botID, provider: ref.provider)
@@ -1606,7 +1610,8 @@ final class AppModel {
                                          canSave: bot.permissionMode != .readOnly, alreadySent: sentMemories,
                                          profile: profile.promptSection)
             let inputs = await TurnPromptInputs.gather(bot: bot, skills: skills, brief: brief)
-            let message = prompt + AttachmentText.block(for: attachments, texts: await files, room: attachmentRoom)
+            var message = prompt + AttachmentText.block(for: attachments, texts: await files, room: attachmentRoom)
+            if let handled = await handledRequests(handledIDs, of: botID) { message = handled + "\n\n" + message }
             guard session.isCurrent(turn) else { return } // stopped while preparing
             let built = TurnPrompt.native(inputs, history: history, lastWorkspaceHash: lastWorkspaceHash, lastWorkspace: lastWorkspace,
                                           memoryInPrompt: memoryInPrompt, plan: plan)

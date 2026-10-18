@@ -87,8 +87,13 @@ enum TurnPreface {
 
     /// `content` without its preface.
     static func stripped(_ content: String) -> String {
-        guard content.hasPrefix(openTag), let end = content.range(of: closeTag) else { return content }
-        return String(content[end.upperBound...].drop { $0.isNewline })
+        var text = Substring(content)
+        if text.hasPrefix(openTag), let end = text.range(of: closeTag) { text = text[end.upperBound...].drop { $0.isNewline } }
+        // What the Orb did for other Orbs since its last turn here (`HandledRequests`) is not the user's either.
+        if text.hasPrefix(HandledRequests.openTag), let end = text.range(of: HandledRequests.closeTag) {
+            text = text[end.upperBound...].drop { $0.isNewline }
+        }
+        return String(text)
     }
 
     /// What the app adds after the user's words (the lists of files and pictures, the instruction to save a memory).
