@@ -66,6 +66,29 @@ struct BrowseToolTests {
         #expect(setup.driver.calls.last == "snapshot interactive=false selector=#main")
     }
 
+    /// A ref belongs to the conversation (and the page) it was read in: another conversation's snapshot does not rename it.
+    @Test func theApprovalCardNamesTheRefOfItsOwnConversation() async throws {
+        func snapshot(_ name: String) {
+            setup.driver.state.withLock {
+                $0.snapshot = BrowserSnapshot(url: "https://shop.test/", tree: "- button \"\(name)\" [ref=e7]", refs: ["e7": BrowserRef(role: "button", name: name)])
+            }
+        }
+        var chat = setup.context(), routine = setup.context()
+        chat.browser.scope = "chat"
+        routine.browser.scope = "rotina"
+        snapshot("Comprar")
+        _ = try await BrowseSnapshotTool().run(.object([:]), context: chat)
+        snapshot("Cancelar")
+        _ = try await BrowseSnapshotTool().run(.object([:]), context: routine)
+        let click = BrowseClickTool()
+        #expect(click.summary(.object(["ref": .string("e7")]), context: chat).title == "Clicando em “Comprar”")
+        #expect(click.summary(.object(["ref": .string("e7")]), context: routine).title == "Clicando em “Cancelar”")
+        // Going back leaves the old page: its names go, as they do on browse_open.
+        _ = try await BrowseBackTool().run(.object([:]), context: chat)
+        #expect(click.summary(.object(["ref": .string("e7")]), context: chat).title == "Clicando na página")
+        #expect(click.summary(.object(["ref": .string("e7")]), context: routine).title == "Clicando em “Cancelar”")
+    }
+
     @Test func aLongSnapshotIsPagedAndTheOffsetContinuesTheSameOne() async throws {
         let lines = (1...3_000).map { "- link \"Item número \($0)\" [ref=e\($0)]" }
         setup.driver.state.withLock { $0.snapshot = BrowserSnapshot(url: "https://list.test/", tree: lines.joined(separator: "\n"), refs: [:]) }
