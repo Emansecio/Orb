@@ -56,26 +56,36 @@ actor ClaudeCode {
 
     // MARK: Installation
 
-    /// Finds `claude`: `ORB_CLAUDE_PATH` (dev/tests), then the login shell, then the usual install folders.
-    func installation(refresh: Bool = false) async -> Installation? {
+    /// Finds `claude`: `ORB_CLAUDE_PATH` (dev/tests), then the login shell, then the usual install folders, and last the PATH of
+    /// the user's interactive shell (where `.zshrc` puts npm, nvm, fnm or Volta, which the plain login probe never reads).
+    /// `environment` and `home` are the app's own; they are parameters so a test can stand in for them.
+    func installation(refresh: Bool = false, shell: ShellEnvironment = .shared,
+                      environment: [String: String] = ProcessInfo.processInfo.environment,
+                      home: String = FileManager.default.homeDirectoryForCurrentUser.path) async -> Installation? {
         if let cached, !refresh, FileManager.default.isExecutableFile(atPath: cached.executable.path) { return cached }
-        let shell = ShellEnvironment.loginShell(in: ProcessInfo.processInfo.environment)
+        let loginShell = ShellEnvironment.loginShell(in: environment)
         let script = "printf '\(Self.marker)claude=%s\\n' \"$(command -v claude)\"; printf '\(Self.marker)path=%s\\n' \"$PATH\""
-        let probe = try? await ProcessRunner.run(shell, ["-l", "-c", script], timeout: .seconds(15))
+        let probe = try? await ProcessRunner.run(loginShell, ["-l", "-c", script], timeout: .seconds(15))
         let found = Self.parseShellProbe(probe?.output ?? "")
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let candidates = [ProcessInfo.processInfo.environment["ORB_CLAUDE_PATH"], found.claude,
-                          "\(home)/.local/bin/claude", "\(home)/.claude/local/claude",
-                          "/opt/homebrew/bin/claude", "/usr/local/bin/claude"]
-        guard let executable = candidates.compactMap({ $0 }).first(where: { $0.hasPrefix("/") && FileManager.default.isExecutableFile(atPath: $0) })
-        else {
+        func executable(in candidates: [String?]) -> String? {
+            candidates.compactMap({ $0 }).first(where: { $0.hasPrefix("/") && FileManager.default.isExecutableFile(atPath: $0) })
+        }
+        var interactivePath: String?
+        var located = executable(in: [environment["ORB_CLAUDE_PATH"], found.claude,
+                                      "\(home)/.local/bin/claude", "\(home)/.claude/local/claude",
+                                      "/opt/homebrew/bin/claude", "/usr/local/bin/claude"])
+        if located == nil {
+            interactivePath = await shell.resolved().environment["PATH"]
+            located = executable(in: (interactivePath ?? "").split(separator: ":").map { "\($0)/claude" })
+        }
+        guard let located else {
             cached = nil
             return nil
         }
-        let directory = (executable as NSString).deletingLastPathComponent
-        var path = found.path ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        let directory = (located as NSString).deletingLastPathComponent
+        var path = found.path ?? interactivePath ?? "/usr/bin:/bin:/usr/sbin:/sbin"
         if !path.split(separator: ":").contains(Substring(directory)) { path = directory + ":" + path }
-        cached = Installation(executable: URL(fileURLWithPath: executable), path: path)
+        cached = Installation(executable: URL(fileURLWithPath: located), path: path)
         return cached
     }
 
