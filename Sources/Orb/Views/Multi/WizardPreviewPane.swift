@@ -42,6 +42,9 @@ struct WizardPreviewPane: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     static let orbSize: CGFloat = 168
+    /// With the final card at the foot: a smaller Orb, so the name, the chips and "Como funciona" fit over the card without
+    /// scrolling.
+    static let readyOrbSize: CGFloat = 128
 
     private var hasDraft: Bool { draft.revision > 0 }
 
@@ -118,7 +121,7 @@ struct WizardPreviewPane: View {
 
     private var stage: some View {
         let palette = OrbCatalog.shared.palette(look.color)
-        let size = Self.orbSize
+        let size = draft.ready ? Self.readyOrbSize : Self.orbSize
         let curve = Motion.adapted(Motion.crossFade, reduceMotion: reduceMotion)
         return ZStack {
             // A soft spotlight behind the Orb and the pool of light on the floor under it, in the Orb's own color. The color

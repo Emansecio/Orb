@@ -82,7 +82,7 @@ struct MarketplaceGallery: View {
                     .foregroundStyle(Palette.faint)
                     .contentTransition(.numericText())
                 Spacer(minLength: 0)
-                Button("Ver no site") { NSWorkspace.shared.open(GrokMarketplace.home) }
+                Button("Ver no site", systemImage: "arrow.up.right") { NSWorkspace.shared.open(GrokMarketplace.home) }
                     .buttonStyle(GhostStyle())
                     .hangsOnTrailingEdge()
                     .help(Tip.importOpenMarketplace)

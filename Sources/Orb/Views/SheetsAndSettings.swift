@@ -269,6 +269,8 @@ struct NewBotSheet: View {
                 Rectangle().fill(Palette.line).frame(width: 1)
                 // The preview, in the assistant and in the form: the Orb with the look the person chose.
                 previewPane
+                    // Without the tabs over it (the import panel is open) the Orb would touch the sheet's top edge.
+                    .padding(.top, isImporting ? 24 : 0)
                     .id(creation)
                     .transition(.opacity)
                     .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: creation)
@@ -284,7 +286,8 @@ struct NewBotSheet: View {
         .buttonStyle(.plain)
         .foregroundStyle(Palette.accentText)
         .help(Tip.importFromAssistant)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // Centered under the pills above it, as one header for the chat.
+        .frame(maxWidth: .infinity, alignment: .center)
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
     }
@@ -483,14 +486,25 @@ private struct NewBotFolderSection: View {
 
     var body: some View {
         Section {
-            HStack(spacing: 8) {
-                Text(shownPath)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .textSelection(.enabled)
-                    .help(shownPath)
+            // The same line as the folder in the Orb's panel: what the place is called, its path under it, "Mudar…" at the end.
+            HStack(spacing: 10) {
+                Image(systemName: choice == .home ? "house" : "folder")
+                    .foregroundStyle(Palette.muted)
+                    .frame(width: 20)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(shownName)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSwap(shownName)
+                    Text(shownPath)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                }
+                .help(shownPath)
                 Spacer(minLength: 4)
                 Menu("Mudar…") {
                     Button("Escolher outra pasta…", systemImage: "folder") { isPicking = true }
@@ -502,11 +516,12 @@ private struct NewBotFolderSection: View {
                     }
                 }
                 .menuStyle(.button)
-                // Without the system's blue arrow: a plain small button like the others in the sheet, the "…" says it opens more.
+                // Without the system's blue arrow: the panel's chip, the "…" says it opens more.
                 .menuIndicator(.hidden)
-                .controlSize(.small)
+                .chipButton()
                 .fixedSize()
                 .help(Tip.changeFolder)
+                .accessibilityLabel("Mudar pasta")
             }
         } header: {
             Text("Pasta")
@@ -524,8 +539,20 @@ private struct NewBotFolderSection: View {
             name.trimmingCharacters(in: .whitespaces).isEmpty
                 ? "~/Orbs/…"
                 : OrbFolder.display(OrbFolder.availableURL(for: name, in: OrbFolder.defaultBase))
-        case .home: "~ (pasta pessoal)"
+        case .home: "~"
         case .existing(let url): OrbFolder.display(url)
+        }
+    }
+
+    /// The folder's name over its path: the Orb's own one is named after it as soon as it has a name.
+    private var shownName: String {
+        switch choice {
+        case .own:
+            name.trimmingCharacters(in: .whitespaces).isEmpty
+                ? "Pasta própria"
+                : OrbFolder.availableURL(for: name, in: OrbFolder.defaultBase).lastPathComponent
+        case .home: "Pasta pessoal"
+        case .existing(let url): url.lastPathComponent
         }
     }
 

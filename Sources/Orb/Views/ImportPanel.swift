@@ -247,12 +247,11 @@ struct ImportPanel: View {
     }
 
     private var sourcePicker: some View {
-        Picker("Importar de", selection: $source) {
-            ForEach(ImportSource.allCases) { Text($0.label).tag($0) }
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .help(Tip.importSource)
+        // The quiet pills of the sheet's other inner switch ("Criar conversando | Formulário").
+        PillTabs(selection: $source, items: ImportSource.allCases.map { .init(value: $0, title: $0.label, symbol: "") }, isQuiet: true)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Importar de")
+            .help(Tip.importSource)
     }
 
     private var marketplaceStep: some View {
@@ -263,19 +262,23 @@ struct ImportPanel: View {
                 .foregroundStyle(Palette.muted)
                 .fixedSize(horizontal: false, vertical: true)
             MarketplaceGallery(chosen: draft?.link, reading: readingLink) { bot in read(link: .page(bot.id)) }
-            TextField("Link do bot", text: $link, prompt: Text("Ou cole o link de um bot: https://x.ai/bot/…"))
-                .textFieldStyle(.roundedBorder)
-                .font(.system(size: 12))
-                .onSubmit { readLinkSoon(delay: .zero) }
-                .overlay(alignment: .trailing) {
-                    ZStack {
-                        if isReading, let readingLink, GrokMarketplace.link(in: link)?.url.absoluteString == readingLink {
-                            DelayedSpinner().transition(.opacity)
-                        }
+            // Drawn like the gallery's search field above it: one kind of field in the panel.
+            HStack(spacing: 8) {
+                Image(systemName: "link").foregroundStyle(Palette.faint).accessibilityHidden(true)
+                TextField("Link do bot", text: $link, prompt: Text("Ou cole o link de um bot: https://x.ai/bot/…"))
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .onSubmit { readLinkSoon(delay: .zero) }
+                ZStack {
+                    if isReading, let readingLink, GrokMarketplace.link(in: link)?.url.absoluteString == readingLink {
+                        DelayedSpinner().transition(.opacity)
                     }
-                    .padding(.trailing, 6)
-                    .motion(Motion.content, value: isReading)
                 }
+                .motion(Motion.content, value: isReading)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .card(radius: 10)
             if let error {
                 Text(error)
                     .font(.system(size: 12))
@@ -330,10 +333,13 @@ struct ImportPanel: View {
             HStack(spacing: 8) {
                 Button("Escolher arquivo…") { isPicking = true }
                     .buttonStyle(SecondaryPillStyle())
+                    .fixedSize()
                     .help(Tip.importChooseFile)
-                Text("ou solte um arquivo ou pasta aqui")
+                Text("ou solte arquivo ou pasta aqui")
                     .font(.system(size: 11))
                     .foregroundStyle(Palette.faint)
+                    .lineLimit(1)
+                    .layoutPriority(1)
                 Spacer(minLength: 0)
                 ZStack {
                     if isReading { DelayedSpinner().transition(.opacity) }
@@ -681,9 +687,10 @@ struct ImportSummaryRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             HStack(spacing: 4) {
-                Button("Revisar", action: review).buttonStyle(GhostStyle())
+                // With their icons, so the two read as buttons and not as words of the line above.
+                Button("Revisar", systemImage: "doc.text.magnifyingglass", action: review).buttonStyle(GhostStyle())
                     .help(Tip.importReview)
-                Button("Remover", action: remove).buttonStyle(GhostStyle())
+                Button("Remover", systemImage: "xmark", action: remove).buttonStyle(GhostStyle())
                     .help(Tip.importRemove)
             }
             .hangsOnLeadingEdge()
