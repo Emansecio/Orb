@@ -120,10 +120,20 @@ import Testing
 
         // One that downloads right but does not start is not kept either.
         let (failing, _) = makeInstaller(FakeInstallRunner { _, _ in FakeInstallRunner.failed("killed", status: 137) }, platform: platform())
-        await #expect(throws: BrowserInstallError.broken("agent-browser", detail: "saiu com o código 137")) {
+        await #expect(throws: BrowserInstallError.updateRolledBack("agent-browser", detail: "saiu com o código 137")) {
             try await failing.install([.agentBrowser])
         }
         #expect(try Data(contentsOf: layout.agentBrowser) == before)
+        // Said as what it is: the one that was installed is still there, nothing was removed.
+        #expect(BrowserInstallError.updateRolledBack("agent-browser", detail: "x").errorDescription?.contains("continua como estava") == true)
+    }
+
+    @Test func aFirstInstallThatDoesNotStartIsToldAsBroken() async throws {
+        let (failing, _) = makeInstaller(FakeInstallRunner { _, _ in FakeInstallRunner.failed("killed", status: 137) }, platform: platform())
+        await #expect(throws: BrowserInstallError.broken("agent-browser", detail: "saiu com o código 137")) {
+            try await failing.install([.agentBrowser])
+        }
+        #expect(!FileManager.default.fileExists(atPath: layout.agentBrowser.path))
     }
 
     @Test func aBinaryThatSaysAnotherVersionIsNotKept() async throws {

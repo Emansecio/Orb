@@ -84,9 +84,15 @@ final class BrowserInstaller: Sendable {
             }
             report(BrowserInstallProgress(component: component, phase: .preparing))
             let installed: InstalledComponent
-            switch component {
-            case .agentBrowser: installed = try await installAgentBrowser(report)
-            case .chrome: installed = try await installChrome(report)
+            let wasInstalled = isInstalled(component)
+            do {
+                switch component {
+                case .agentBrowser: installed = try await installAgentBrowser(report)
+                case .chrome: installed = try await installChrome(report)
+                }
+            } catch BrowserInstallError.broken(let name, let detail) where wasInstalled {
+                // The new one is tried in the work folder, before it takes the place of the old: the old is still there and works.
+                throw BrowserInstallError.updateRolledBack(name, detail: detail)
             }
             try record(component, installed)
         }
