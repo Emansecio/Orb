@@ -342,6 +342,23 @@ struct ClaudeCodeClientTests {
         #expect(rig.scratchEntries.isEmpty)
     }
 
+    @Test func sessionFilesAKilledAppLeftInTheProjectFolderAreSwept() async throws {
+        let rig = try Rig(scenario: "text")
+        defer { rig.cleanUp() }
+        // A crash skips `ClaudePipeRun.stop`, so the copy of the conversation stays in ~/.claude/projects until the next run clears it.
+        let project = rig.folders.projectDirectory
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        let old = project.appending(path: "old.jsonl"), recent = project.appending(path: "new.jsonl"), other = project.appending(path: "notes.txt")
+        for url in [old, recent, other] { try Data("{}\n".utf8).write(to: url) }
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-2 * 24 * 3600)], ofItemAtPath: old.path)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-2 * 24 * 3600)], ofItemAtPath: other.path)
+        _ = try await collect(rig.client().stream(model: "claude-x", messages: [.system("s"), .user("oi")], tools: [], toolChoice: .auto))
+        #expect(!FileManager.default.fileExists(atPath: old.path))
+        #expect(FileManager.default.fileExists(atPath: recent.path))
+        // Only the CLI's session files: the folder may hold what is not ours.
+        #expect(FileManager.default.fileExists(atPath: other.path))
+    }
+
     // MARK: Tool steps
 
     @Test func aToolStepParksTheProcessAndTheResultsContinueItWithoutANewLaunch() async throws {
