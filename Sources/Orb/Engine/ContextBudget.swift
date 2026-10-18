@@ -242,7 +242,7 @@ extension ContextOverflow {
     private static let windowExpressions: [NSRegularExpression] = [
         #"maximum context length (?:is|of)? ?(\d{4,8})"#,
         #"\d{4,8} tokens? ?> ?(\d{4,8})"#,
-        #"context (?:length|window|size)(?: limit)?[:=]? ?(?:is |of )?(\d{4,8})"#,
+        #"context (?:length|window|size)(?: limit)?[:=]? ?(?:is |of )?(?:only )?(\d{4,8})"#,
         #"n_ctx(?:_seq)? ?[=:] ?(\d{4,8})"#,
         #"(?:limit|maximum|max)(?: is| of|:|=)? ?(\d{4,8}) tokens"#,
     ].compactMap { try? NSRegularExpression(pattern: $0) }

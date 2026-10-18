@@ -491,6 +491,7 @@ struct ReportedWindowTests {
         #expect(window("context length: 4096") == 4_096)
         #expect(window("truncating input prompt n_ctx=2048") == 2_048)
         #expect(window("exceeds the limit of 131072 tokens") == 131_072)
+        #expect(window("Trying to keep the first 6000 tokens when context the overflows. However, the model is loaded with context length of only 4096 tokens and cannot proceed.") == 4_096)
     }
 
     @Test func messagesWithoutAWindowGiveNothing() {
