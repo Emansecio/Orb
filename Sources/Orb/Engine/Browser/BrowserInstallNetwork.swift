@@ -19,13 +19,6 @@ enum Checksum {
         while let chunk = try handle.read(upToCount: 1 << 20), !chunk.isEmpty { hasher.update(data: chunk) }
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
-
-    /// "sha256:abc..." (GitHub's `digest` of a release asset) -> "abc...", nil for anything else.
-    static func parseDigest(_ digest: String?) -> String? {
-        guard let digest, digest.lowercased().hasPrefix("sha256:") else { return nil }
-        let hex = digest.dropFirst("sha256:".count).trimmingCharacters(in: .whitespaces).lowercased()
-        return hex.count == 64 && hex.allSatisfy(\.isHexDigit) ? hex : nil
-    }
 }
 
 /// The real network: `URLSession`, with a download that reports its progress and survives being cancelled.

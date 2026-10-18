@@ -88,7 +88,6 @@ final class BrowserSetup {
     /// The component being installed, updated or removed now.
     private(set) var working: BrowserComponent?
     private(set) var updates: Set<BrowserComponent> = []
-    private(set) var lastCheck: Date?
 
     @ObservationIgnored let installer: BrowserInstaller
     @ObservationIgnored private let status: @Sendable () async -> BrowserStatus
@@ -105,8 +104,6 @@ final class BrowserSetup {
         // Until the first look, every row is "checking", never "not installed" with an Install button that would be wrong.
         rows = BrowserComponent.allCases.map { BrowserComponentRow(component: $0, phase: .checking) }
     }
-
-    var isBusy: Bool { working != nil }
 
     func row(_ component: BrowserComponent) -> BrowserComponentRow? { rows.first { $0.component == component } }
 
@@ -252,7 +249,6 @@ final class BrowserSetup {
     func checkForUpdates(force: Bool = false) async {
         let installer = installer
         guard let check = try? await installer.checkForUpdates(force: force) else { return }
-        lastCheck = check.checkedAt
         let found = installer.updatable(check)
         guard found != updates else { return }
         updates = found
