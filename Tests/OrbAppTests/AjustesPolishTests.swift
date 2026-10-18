@@ -587,6 +587,9 @@ struct ModelSearchTests {
     @Test func returnWithNothingTypedPicksTheDefaultWhenThereIsOne() {
         #expect(ModelSearch.submitted(choices(""), query: "", allowsDefault: true) == "")
         #expect(ModelSearch.submitted(choices(""), query: "", allowsDefault: false) == nil)
+        // A space is nothing typed either.
+        #expect(ModelSearch.submitted(choices("  "), query: "  ", allowsDefault: true) == "")
+        #expect(ModelSearch.submitted(choices("  "), query: "  ", allowsDefault: false) == nil)
     }
 
     @Test func returnWithNoMatchDoesNothing() {

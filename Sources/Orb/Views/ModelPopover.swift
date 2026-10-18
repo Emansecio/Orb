@@ -21,7 +21,7 @@ struct ModelPopover: View {
         let listing = ModelListing(choices: model.modelChoices, recents: recents.ids, query: query)
         let isSearch = !query.trimmingCharacters(in: .whitespaces).isEmpty
         VStack(spacing: 0) {
-            ModelSearchField(query: $query) { if let first = listing.first { choose(first) } }
+            ModelSearchField(query: $query) { if let first = listing.submitted(query: query) { choose(first) } }
             Divider()
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {

@@ -196,7 +196,13 @@ struct ModelListing: Equatable {
         }
     }
 
-    /// The first model a search brings up, for Return in the search field.
+    /// What Return in the search field picks: the first model a search brings up, and nothing while nothing is typed (an empty
+    /// field lists every model, and its first is not what the person sees selected or asked for).
+    func submitted(query: String) -> String? {
+        query.trimmingCharacters(in: .whitespaces).isEmpty ? nil : first
+    }
+
+    /// The first model of the list.
     var first: String? {
         guard let group = groups.first, let model = group.models.first else { return nil }
         return ModelRef(provider: group.provider, model: model.id).text

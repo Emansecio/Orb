@@ -337,6 +337,12 @@ struct ComposerSupportTests {
         return [(ProviderAccount(kind: .openai), models(["GPT-5", "GPT-5 mini"])), (ProviderAccount(kind: .xai), models(["Grok 4"]))]
     }
 
+    @Test func returnInTheComposersModelSearchPicksNothingUntilSomethingIsTyped() {
+        #expect(ModelListing(choices: choices(), recents: [], query: "").submitted(query: "") == nil)
+        #expect(ModelListing(choices: choices(), recents: [], query: "  ").submitted(query: "  ") == nil)
+        #expect(ModelListing(choices: choices(), recents: [], query: "mini").submitted(query: "mini") == "openai/gpt-5 mini")
+    }
+
     @Test func theModelListGroupsByProviderAndLeadsWithRecentOnes() {
         let listing = ModelListing(choices: choices(), recents: ["xai/grok 4", "openai/apagado"], query: "")
         #expect(listing.groups.map(\.provider) == [.openai, .xai])
