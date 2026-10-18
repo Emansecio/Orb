@@ -81,18 +81,25 @@ private struct BrowserComponentRowView: View {
             Button(isFailed ? "Tentar de novo" : "Instalar") { setup.install(row.component) }
                 .disabled(!row.canInstall)
                 .help(isFailed ? "Tenta instalar de novo" : "Baixa e instala na pasta do Orb")
+                .chipButton()
         case .installing:
             Button("Cancelar") { setup.cancel() }
                 .help("Interrompe a instalação e descarta o que já foi baixado")
+                .buttonStyle(GhostStyle())
+                .controlSize(.small)
+                .hangsOnTrailingEdge()
         case .installed:
             if row.versionText != nil {
                 if row.canUpdate {
                     Button("Atualizar") { setup.update(row.component) }
                         .help("Instala a versão mais nova")
+                        .chipButton()
                 }
                 Button("Remover…", role: .destructive) { isConfirmingRemoval = true }
                     .disabled(!row.canRemove)
-                    .buttonStyle(.borderless)
+                    .buttonStyle(GhostStyle())
+                    .controlSize(.small)
+                    .hangsOnTrailingEdge()
                     .help("Tira do Mac o que o Orb instalou, perguntando antes")
             }
         }
@@ -157,12 +164,12 @@ private struct SearchKeySection: View {
                             isReplacing = true
                             focused = true
                         }
-                        .buttonStyle(.borderless)
                         .help(Tip.replaceKey)
                         Button("Apagar") { store("") }
-                            .buttonStyle(.borderless)
                             .help(Tip.deleteKey)
                     }
+                    .buttonStyle(GhostStyle())
+                    .controlSize(.small)
                 } else {
                     HStack {
                         SecureField("Chave", text: $key, prompt: Text("Cole a chave"))
@@ -172,9 +179,12 @@ private struct SearchKeySection: View {
                         if !key.isEmpty {
                             Button("Salvar") { save(key) }
                                 .help(Tip.saveKey)
+                                .chipButton()
                         } else if isReplacing {
                             Button("Cancelar") { isReplacing = false }
                                 .help(Tip.keepKey)
+                                .buttonStyle(GhostStyle())
+                                .controlSize(.small)
                         } else if let page = SearchKeyCopy.keyPage {
                             Link("Obter chave", destination: page)
                                 .help(Tip.getKey)

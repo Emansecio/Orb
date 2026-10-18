@@ -314,8 +314,11 @@ struct BotInspector: View {
         }
 
         Section {
-            Button("Apagar \(bot.name)…", role: .destructive) { model.askToDelete(bot.id) } // one sheet for the sidebar and here (DeleteOrbDialog.swift)
-                .foregroundStyle(Palette.danger)
+            // One sheet for the sidebar and here (DeleteOrbDialog.swift). A red ghost, as the app's other destructive actions: the
+            // form's own button ignores the red and comes out a plain gray one. Its label lines up with the rows above.
+            Button("Apagar \(bot.name)…", role: .destructive) { model.askToDelete(bot.id) }
+                .buttonStyle(GhostStyle(tint: Palette.danger))
+                .hangsOnLeadingEdge()
         }
     }
 

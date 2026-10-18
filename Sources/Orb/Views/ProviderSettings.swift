@@ -246,11 +246,14 @@ private struct ProviderRow: View {
             }
             .help(Tip.refreshModels)
             .disabled(isWorking || health.isChecking(kind) || !canRefresh(account))
+            .hangsOnLeadingEdge()
             Spacer()
             Button("Remover…", role: .destructive) { isConfirmingRemoval = true }
                 .help(Tip.removeProvider)
+                .hangsOnTrailingEdge()
         }
-        .buttonStyle(.borderless)
+        .buttonStyle(GhostStyle())
+        .controlSize(.small)
         if let error {
             Label(error, systemImage: "exclamationmark.triangle.fill")
                 .font(.caption)
@@ -293,7 +296,9 @@ private struct ProviderRow: View {
                 HStack {
                     Text(email ?? "ChatGPT").foregroundStyle(.secondary)
                     Button("Sair") { isConfirmingSignOut = true }
-                        .buttonStyle(.borderless) // as "Trocar" and "Remover…" in the other rows
+                        .buttonStyle(GhostStyle()) // as "Trocar" and "Remover…" in the other rows
+                        .controlSize(.small)
+                        .hangsOnTrailingEdge()
                         .help(Tip.signOutChatGPT)
                 }
             }
@@ -306,7 +311,9 @@ private struct ProviderRow: View {
             LabeledContent {
                 HStack(spacing: 10) {
                     if isWorking {
-                        Button("Cancelar") { signInTask?.cancel() }.buttonStyle(GhostStyle())
+                        Button("Cancelar") { signInTask?.cancel() }
+                            .buttonStyle(GhostStyle())
+                            .controlSize(.small)
                             .help(Tip.stopConnecting)
                     }
                     Button(isWorking ? "Aguardando o navegador…" : "Entrar com ChatGPT") {
@@ -317,6 +324,7 @@ private struct ProviderRow: View {
                     }
                     .help(Tip.signInChatGPT)
                     .disabled(isWorking)
+                    .chipButton()
                 }
             } label: {
                 Text("Abre o navegador para você entrar. Precisa de ChatGPT Plus ou Pro.")
@@ -339,14 +347,14 @@ private struct ProviderRow: View {
                         isReplacingKey = true
                         keyFocused = true
                     }
-                    .buttonStyle(.borderless)
                     .help(Tip.replaceKey)
                     if kind == .custom { // the gateway's key is optional: it can go without removing the provider
                         Button("Apagar") { run(inStatus: true) { try await model.setKey("", for: kind) } }
-                            .buttonStyle(.borderless)
                             .help(Tip.deleteKey)
                     }
                 }
+                .buttonStyle(GhostStyle())
+                .controlSize(.small)
             } else {
                 HStack {
                     SecureField("Chave", text: $key, prompt: Text("Cole a chave"))
@@ -356,9 +364,12 @@ private struct ProviderRow: View {
                     if !key.isEmpty {
                         Button("Salvar", action: saveKey).disabled(isWorking)
                             .help(Tip.saveKey)
+                            .chipButton()
                     } else if isReplacingKey {
                         Button("Cancelar") { isReplacingKey = false }
                             .help(Tip.keepKey)
+                            .buttonStyle(GhostStyle())
+                            .controlSize(.small)
                     } else if let page = kind.keyPage {
                         Link("Obter chave", destination: page)
                             .help(Tip.getKey)

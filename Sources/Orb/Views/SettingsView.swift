@@ -151,6 +151,7 @@ struct GeneralSettings: View {
                     LabeledContent {
                         Button("Abrir Ajustes do Sistema") { SMAppService.openSystemSettingsLoginItems() }
                             .help(Tip.openLoginItems)
+                            .chipButton()
                     } label: {
                         Label(loginApproval, systemImage: "exclamationmark.triangle.fill")
                             .font(.caption)
@@ -292,6 +293,7 @@ struct GeneralSettings: View {
             LabeledContent {
                 Button("Abrir Ajustes do Sistema") { NSWorkspace.shared.open(NotificationPermission.settingsURL) }
                     .help(Tip.openSystemNotifications)
+                    .chipButton()
             } label: {
                 Label("O macOS está bloqueando as notificações do Orb.", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
@@ -302,6 +304,7 @@ struct GeneralSettings: View {
             LabeledContent {
                 Button("Pedir agora") { Task { notifications = await NotificationPermission.request() } }
                     .help(Tip.askNotifications)
+                    .chipButton()
             } label: {
                 Text("O macOS ainda não deixou o Orb avisar.")
                     .font(.caption)
@@ -327,6 +330,7 @@ struct GeneralSettings: View {
             }
             .help(help)
             .disabled(!isEnabled)
+            .chipButton()
         } label: {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)

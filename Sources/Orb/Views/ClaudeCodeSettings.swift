@@ -18,12 +18,16 @@ struct ClaudeCodeAccountRow: View {
                 line("exclamationmark.triangle.fill", Palette.warn, "Claude Code não encontrado neste Mac") {
                     Button("Verificar de novo") { run { await model.refreshConnections() } }.disabled(isWorking)
                         .help(Tip.checkClaudeCode)
+                        .chipButton()
                     if let page = ClaudeCode.setupPage { Link("Como instalar", destination: page).help(Tip.installClaudeCode) }
                 }
             } else if model.claudeCode.isLoggedIn {
                 line("checkmark.circle.fill", Palette.ok, "Conectado como \(model.claudeCode.accountLabel)\(modelCount)") {
                     Button("Sair") { isConfirmingSignOut = true }.disabled(isWorking)
                         .help(Tip.signOutClaudeCode)
+                        .buttonStyle(GhostStyle())
+                        .controlSize(.small)
+                        .hangsOnTrailingEdge()
                 }
             } else {
                 line("person.crop.circle.badge.questionmark", Palette.muted, "Entre na sua conta Claude (Pro ou Max)") {
@@ -32,6 +36,7 @@ struct ClaudeCodeAccountRow: View {
                     }
                     .help(Tip.signInClaudeCode)
                     .disabled(isWorking)
+                    .chipButton()
                 }
                 Text("O próprio Claude Code abre o navegador para você entrar.")
                     .font(.caption)

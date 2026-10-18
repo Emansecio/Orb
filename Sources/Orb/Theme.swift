@@ -361,19 +361,28 @@ struct PrimaryPillStyle: ButtonStyle {
     /// Red with white text, for a primary action that destroys something (delete, reset, a risky command): white says
     /// "do this", red says "this cannot be taken back".
     var isDestructive = false
+    @State private var isHovering = false
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.controlSize) private var controlSize
 
     func makeBody(configuration: Configuration) -> some View {
         let metrics = PillMetrics.of(controlSize)
+        let pressed = configuration.isPressed
+        let hovering = isHovering && isEnabled
         configuration.label
             .font(metrics.font)
             .foregroundStyle(isDestructive ? Color.white : Palette.onInk)
             .padding(.horizontal, metrics.horizontal)
             .frame(minHeight: metrics.height)
-            .background((isDestructive ? Palette.danger : Palette.ink)
-                .opacity(configuration.isPressed ? 0.8 : (isEnabled ? 1 : 0.3)), in: .capsule)
+            .background {
+                // Under the pointer the pill eases a little toward the canvas, pressed a little more; only the fill moves.
+                Capsule()
+                    .fill(isDestructive ? Palette.danger : Palette.ink)
+                    .opacity(pressed ? 0.8 : (!isEnabled ? 0.3 : (hovering ? 0.9 : 1)))
+                    .animation(Motion.fill(visible: pressed || hovering, pressed: pressed), value: pressed || hovering)
+            }
             .contentShape(.capsule)
+            .onHover { isHovering = $0 }
     }
 }
 
@@ -406,19 +415,25 @@ struct HeroPillStyle: ButtonStyle {
 
 /// Subtle filled pill: secondary action.
 struct SecondaryPillStyle: ButtonStyle {
+    @State private var isHovering = false
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.controlSize) private var controlSize
 
     func makeBody(configuration: Configuration) -> some View {
         let metrics = PillMetrics.of(controlSize)
+        let pressed = configuration.isPressed
         configuration.label
             .font(metrics.font)
-            .foregroundStyle(Palette.ink)
+            // A destructive one ("Remover todas") says it in red, on the same gray.
+            .foregroundStyle(configuration.role == .destructive ? Palette.danger : Palette.ink)
             .padding(.horizontal, metrics.horizontal)
             .frame(minHeight: metrics.height)
-            .background(Color.white.opacity(configuration.isPressed ? 0.16 : 0.1), in: .capsule)
+            // Resting at 0.1 of white, 0.14 under the pointer, 0.18 pressed (`hoverFill` cross-fades them).
+            .hoverFill(pressed || (isHovering && isEnabled), pressed: pressed, in: .capsule,
+                       color: Color.white.opacity(pressed ? 0.18 : 0.14), resting: Color.white.opacity(0.1))
             .contentShape(.capsule)
             .opacity(isEnabled ? 1 : 0.4)
+            .onHover { isHovering = $0 }
     }
 }
 
@@ -456,7 +471,7 @@ extension View {
 
 /// Text-only ghost button with hover fill (in fast, out slow: `hoverFill`).
 struct GhostStyle: ButtonStyle {
-    /// A color for the label instead of the usual gray (red for a destructive action).
+    /// A color for the label instead of the usual gray. A button with the destructive role is red without it.
     var tint: Color?
     @State private var isHovering = false
     @Environment(\.controlSize) private var controlSize
@@ -465,7 +480,7 @@ struct GhostStyle: ButtonStyle {
         let metrics = PillMetrics.of(controlSize)
         configuration.label
             .font(metrics.font)
-            .foregroundStyle(tint ?? Palette.secondary)
+            .foregroundStyle(tint ?? (configuration.role == .destructive ? Palette.danger : Palette.secondary))
             .padding(.horizontal, Spacing.ghostInset)
             .frame(minHeight: metrics.height)
             .hoverFill(configuration.isPressed || isHovering, pressed: configuration.isPressed, in: .capsule,

@@ -31,9 +31,11 @@ struct ProfileSettings: View {
                     HStack(spacing: 10) {
                         Button(model.profile.photo.isEmpty ? "Escolher foto…" : "Trocar foto…") { isImporting = true }
                             .help(Tip.profilePhotoChoose)
+                            .chipButton()
                         if !model.profile.photo.isEmpty {
                             Button("Remover foto") { model.removeProfilePhoto(); photoError = nil }
-                                .foregroundStyle(.secondary)
+                                .buttonStyle(GhostStyle())
+                                .controlSize(.small)
                                 .help(Tip.profilePhotoRemove)
                         }
                     }

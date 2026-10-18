@@ -81,7 +81,9 @@ struct CustomProviderFields<KeyRow: View>: View {
                 ModelChips(models: Array(account.models.prefix(chipsShown)), remove: remove)
                 if account.models.count > chipsShown {
                     Button("Ver todos os \(account.models.count) modelos…", systemImage: "list.bullet") { isListingAll = true }
-                        .buttonStyle(.borderless)
+                        .buttonStyle(GhostStyle())
+                        .controlSize(.small)
+                        .hangsOnLeadingEdge()
                         .help(Tip.listAllModels)
                 }
             }
@@ -90,6 +92,7 @@ struct CustomProviderFields<KeyRow: View>: View {
                     .onSubmit(addModel)
                 Button("Adicionar", action: addModel).disabled(newModel.trimmingCharacters(in: .whitespaces).isEmpty)
                     .help(Tip.addModelByID)
+                    .chipButton()
             }
         }
         .task(id: account.kind) { headersText = serialize(account.headers) }

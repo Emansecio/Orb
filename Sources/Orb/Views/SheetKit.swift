@@ -219,11 +219,10 @@ struct FormFootnote<Content: View>: View {
 }
 
 extension View {
-    /// The small bordered button the Orb's panel uses everywhere (the folder, the grants, the memory, the instructions): one style and one size, so no row has a taller or plainer button than the next.
+    /// The small button the Orb's panel uses everywhere (the folder, the grants, the memory, the instructions): the app's
+    /// gray pill at its compact size, one style and one size, so no row has a taller or plainer button than the next.
     func chipButton() -> some View {
-        // The size is said out loud: inside a grouped Form the buttons keep the form's body font whatever the control size,
-        // and would come out larger than the same chips in the panel's header.
-        buttonStyle(.bordered).controlSize(.small).font(.system(size: 12)).labelStyle(FixedIconLabelStyle())
+        buttonStyle(SecondaryPillStyle()).controlSize(.small).labelStyle(FixedIconLabelStyle())
     }
 
     /// The search field at the top of a popover's list (models, skills): plain text on the app's raised gray, rounded, so

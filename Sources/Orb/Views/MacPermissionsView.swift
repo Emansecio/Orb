@@ -389,7 +389,7 @@ private struct MacPermissionsHeader: View {
             }
             Spacer()
             Button("Verificar de novo", action: recheck)
-                .controlSize(.small)
+                .chipButton()
                 .help(Tip.recheckPermissions)
         }
         .accessibilityElement(children: .combine)
@@ -411,7 +411,7 @@ private struct MacPermissionRow: View {
                 StatusBadge(badge: row.badge)
                 ForEach(row.actions, id: \.title) { action in
                     Button(action.title) { perform(action) }
-                        .controlSize(.small)
+                        .chipButton()
                         .help(Tip.permissionAction(action))
                         .disabled(isBusy)
                 }
@@ -458,11 +458,12 @@ private struct NotificationRow: View {
                 StatusBadge(badge: state.map { .status($0.status) } ?? .loading)
                 switch state {
                 case .notDetermined?:
-                    Button("Pedir agora") { Task { await model.askNotifications() } }.controlSize(.small)
+                    Button("Pedir agora") { Task { await model.askNotifications() } }
+                        .chipButton()
                         .help(Tip.askNotifications)
                 case .denied?:
                     Button("Abrir Ajustes do Sistema") { NSWorkspace.shared.open(NotificationPermission.settingsURL) }
-                        .controlSize(.small)
+                        .chipButton()
                         .help(Tip.openSystemNotifications)
                 default:
                     ActionSlot()
@@ -484,7 +485,7 @@ private struct NotificationRow: View {
 private struct ActionSlot: View {
     var body: some View {
         Button("Testar") {}
-            .controlSize(.small)
+            .chipButton()
             .hidden()
             .accessibilityHidden(true)
     }
