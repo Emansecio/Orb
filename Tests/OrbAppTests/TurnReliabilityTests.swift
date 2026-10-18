@@ -165,12 +165,13 @@ private struct HangsAfterText: LLMClient {
     }
 
     @Test func aSlowButLiveResponseIsNeverCutOff() async throws {
-        // Each real event comes well inside the window, the whole response well past it.
-        let words = (0..<8).map { _ in TrickleServer.Piece(after: .milliseconds(250), text: #"data: {"choices":[{"delta":{"content":"a "}}]}"# + "\n\n") }
+        // Each real event comes well inside the window (150 ms in 1.2 s, so a loaded runner has a second to spare),
+        // the whole response (1.8 s) well past it.
+        let words = (0..<12).map { _ in TrickleServer.Piece(after: .milliseconds(150), text: #"data: {"choices":[{"delta":{"content":"a "}}]}"# + "\n\n") }
         let server = try await TrickleServer(script: words + [.init(after: .zero, text: "data: [DONE]\n\n")])
-        let (events, error) = await drain(OpenAIClient(baseURL: server.baseURL, apiKey: nil), timeout: 0.6)
+        let (events, error) = await drain(OpenAIClient(baseURL: server.baseURL, apiKey: nil), timeout: 1.2)
         #expect(error == nil)
-        #expect(events.filter { if case .text = $0 { true } else { false } }.count == 8)
+        #expect(events.filter { if case .text = $0 { true } else { false } }.count == 12)
     }
 
     @Test func aQuietProviderIsTriedOnceMoreNotThreeTimes() async {
