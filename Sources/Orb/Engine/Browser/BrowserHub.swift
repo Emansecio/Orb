@@ -582,19 +582,24 @@ final class BrowserHub: Sendable {
             // effort). Both browsers have the same session name, so a call that finds the new session in the meantime must not open
             // a page before that close is done, or the close would take the new browser too (`settleClosing`).
             if let replaced = sessions.updateValue(session, forKey: botID) {
-                // A close still going on (a second replacement right after the first) is waited for, so the closes do not overlap.
-                closings.withLock { closings in
-                    let before = closings[botID]
-                    closings[botID] = Task<Void, Never> {
-                        await before?.value
-                        try? await replaced.driver.close()
-                    }
-                }
+                scheduleClose(botID: botID, driver: replaced.driver)
             }
             return session
         }
         await settleClosing(botID: botID)
         return session
+    }
+
+    /// Starts the close of a browser the Orb no longer holds and records it in `closings`, so a call that opens the next one waits for it
+    /// (`settleClosing`). A close still going on (a second one right after the first) is waited for, so the closes do not overlap.
+    private func scheduleClose(botID: UUID, driver: any BrowserDriver) {
+        closings.withLock { closings in
+            let before = closings[botID]
+            closings[botID] = Task<Void, Never> {
+                await before?.value
+                try? await driver.close()
+            }
+        }
     }
 
     /// Waits for the close of the browser the Orb's session replaced, if one is going on.
@@ -678,8 +683,14 @@ final class BrowserHub: Sendable {
 
     /// Closes the browser this hub holds for the Orb (and forgets it); the session it held, if any.
     private func closeHeld(botID: UUID) async -> BrowserSession? {
-        let held = sessions.withLock { $0.removeValue(forKey: botID) }
-        if let held { try? await held.driver.close() }
+        // Leaving `sessions` and being recorded in `closings` is one step: a `session` call in between would open a browser with the
+        // same name that this close then takes.
+        let held = sessions.withLock { sessions -> BrowserSession? in
+            let held = sessions.removeValue(forKey: botID)
+            if let held { scheduleClose(botID: botID, driver: held.driver) }
+            return held
+        }
+        if held != nil { await settleClosing(botID: botID) }
         return held
     }
 

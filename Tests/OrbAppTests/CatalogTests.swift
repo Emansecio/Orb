@@ -108,6 +108,8 @@ struct CatalogTests {
 private final class StubRepository: @unchecked Sendable {
     let files: [String: String]
     var listingStatus = 200
+    /// Paths answered with a server error (500) while they are listed here.
+    var failing: Set<String> = []
     private let lock = NSLock()
     private var asked: [String: Int] = [:]
 
@@ -124,6 +126,7 @@ private final class StubRepository: @unchecked Sendable {
             return (Data("{\"tree\":[\(tree)]}".utf8), 200)
         }
         let path = url.components(separatedBy: "/HEAD/").last ?? ""
+        if failing.contains(path) { return (Data(), 500) }
         return files[path].map { (Data($0.utf8), 200) } ?? (Data("404".utf8), 404)
     }
 }
@@ -179,6 +182,23 @@ struct SkillLocatingTests {
         }
         repo.listingStatus = 200
         #expect(try await catalog.document(for: skill("design-taste-frontend")).description == "Frontend.")
+    }
+
+    @Test func aTransientFileFailureIsTriedAgain() async throws {
+        let repo = StubRepository(["skills/pdf/SKILL.md": markdown("pdf", "PDF.")])
+        repo.failing = ["skills/pdf/SKILL.md"]
+        let catalog = SkillCatalog { (repo.fetch($0)) }
+        await #expect(throws: CatalogError.self) { try await catalog.document(for: skill("pdf")) }
+        repo.failing = []
+        #expect(try await catalog.document(for: skill("pdf")).description == "PDF.")
+    }
+
+    @Test func aFileThatIsNotThereIsNotAskedForAgain() async throws {
+        let repo = StubRepository(["skills/impeccable/SKILL.md": markdown("impeccable", "Design.")])
+        let catalog = SkillCatalog { (repo.fetch($0)) }
+        await #expect(throws: CatalogError.self) { try await catalog.document(for: skill("frontend-design")) }
+        await #expect(throws: CatalogError.self) { try await catalog.document(for: skill("frontend-design")) }
+        #expect(repo.count("/HEAD/skills/frontend-design/SKILL.md") == 1)
     }
 }
 

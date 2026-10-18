@@ -135,8 +135,6 @@ enum BrowserInstallError: LocalizedError, Equatable, Sendable {
     case rateLimited
     case checksumMismatch(String)
     case diskFull(needed: Int64?)
-    case unsupportedMac(String)
-    case assetMissing(String)
     case needsAgentBrowser
     case broken(String, detail: String)
     /// The new version did not work in its place, and the one that was installed came back.
@@ -157,10 +155,6 @@ enum BrowserInstallError: LocalizedError, Equatable, Sendable {
             } else {
                 "O disco ficou sem espaço. Libere espaço e tente de novo."
             }
-        case .unsupportedMac(let detail):
-            "Este Mac não tem versão disponível: \(detail)."
-        case .assetMissing(let name):
-            "A versão mais nova do \(name) não publica o arquivo para este Mac. Tente de novo mais tarde."
         case .needsAgentBrowser:
             "Falta o agent-browser, que dirige os navegadores. Instale-o primeiro."
         case .broken(let name, let detail):

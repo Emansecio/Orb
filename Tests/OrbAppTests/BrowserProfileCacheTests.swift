@@ -79,6 +79,16 @@ struct BrowserProfileCacheTests {
         #expect(!BrowserProfileCache.due(profile: profile, now: later.addingTimeInterval(24 * 3600)))
     }
 
+    @Test func aNoteFromTheFutureDoesNotSwitchTheCleaningOff() throws {
+        let profile = try makeProfile()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let now = Date.now
+        // The clock was ahead when the note was written and has been corrected since.
+        let future = now.addingTimeInterval(30 * 24 * 3600).timeIntervalSince1970
+        try String(future).write(to: BrowserProfileCache.stamp(for: profile), atomically: true, encoding: .utf8)
+        #expect(BrowserProfileCache.due(profile: profile, now: now))
+    }
+
     @Test func aMissingProfileIsLeftAlone() {
         #expect(BrowserProfileCache.cleanIfDue(profile: root.appending(path: "nope/chrome"), worth: 0) == 0)
     }

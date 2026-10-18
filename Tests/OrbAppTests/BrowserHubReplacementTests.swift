@@ -88,4 +88,35 @@ struct BrowserHubReplacementTests {
         try await second.value
         #expect(returned.withLock { $0 } == 2)
     }
+
+    @Test func aCallDuringCloseBotIDWaitsForTheCloseToFinish() async throws {
+        let old = SlowClosingDriver(), fresh = SlowClosingDriver()
+        let made = OSAllocatedUnfairLock(initialState: 0)
+        let hub = BrowserHub(profilesDirectory: nil, locate: { BrowserStatus(agentBrowser: "/x/ab") }, makeDriver: { _ in
+            made.withLock { count in
+                count += 1
+                return count == 1 ? old : fresh
+            }
+        })
+        let botID = UUID()
+        _ = try await hub.session(botID: botID, mode: .background)
+
+        let closing = Task { await hub.close(botID: botID) }
+        for _ in 0..<200 where !old.closeStarted.withLock({ $0 }) { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(old.closeStarted.withLock { $0 })
+        // The session already left the hub's table, but its browser is still closing: the name is the same, so a new call waits.
+        let returned = OSAllocatedUnfairLock(initialState: 0)
+        let opening = Task { () -> Bool in
+            _ = try await hub.session(botID: botID, mode: .background)
+            returned.withLock { $0 += 1 }
+            return true
+        }
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(returned.withLock { $0 } == 0, "no call returns while the closed browser is still closing")
+
+        old.release()
+        #expect(await closing.value)
+        _ = try await opening.value
+        #expect(returned.withLock { $0 } == 1)
+    }
 }
