@@ -18,6 +18,8 @@ struct LiveBotAvatar: View {
     var restsWhenIdle = false
     /// Off for the Orb on a stage with room around it (the empty chat): a big hair or hat keeps its full size there.
     var fits = true
+    /// An interactive Orb that rests when idle wakes while the pointer is on it, so its gaze and click still work.
+    @State private var hovering = false
 
     var body: some View {
         let live = model.live(botID)
@@ -25,7 +27,8 @@ struct LiveBotAvatar: View {
         let hearing = model.dictation.botID == botID && model.dictation.phase == .listening
         let activity = hearing && [.idle, .attentive].contains(live.activity) ? OrbActivity.listening : live.activity
         BotAvatar(orb: orb, size: size, activity: activity, celebration: live.celebration,
-                  paused: paused || (restsWhenIdle && activity == .idle), ack: live.poke, landing: landing,
+                  paused: paused || (restsWhenIdle && activity == .idle && !hovering), ack: live.poke, landing: landing,
                   cue: live.cue, interactive: interactive, fits: fits)
+            .onHover { if interactive && restsWhenIdle { hovering = $0 } }
     }
 }

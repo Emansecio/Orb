@@ -75,16 +75,22 @@ struct BotInspector: View {
                 // Always read the folder again: the cached snapshot (up to a minute old) may not show what changed
                 // outside the app while the panel was closed.
                 let result = await WorkspaceFiles.load(botID: bot.id, folder: bot.workingURL, refresh: true)
-                if !Task.isCancelled { listing = result }
+                if !Task.isCancelled && result != listing { listing = result }
             }
             // While the panel is open the list follows the folder: what the Orb (or anyone) writes or deletes shows up
-            // in a moment, not only at the end of the turn.
-            .task(id: bot.workingDirectory) {
+            // in a moment, not only at the end of the turn. Only the folder tab shows the files (the header needs just
+            // the folder's state, read once above), so the other tabs neither watch nor reread.
+            .task(id: FolderWatch(folder: bot.workingDirectory, isShown: tab == .folder)) {
+                guard tab == .folder else { return }
                 for await _ in FolderWatcher.changes(in: bot.workingURL) { filesRefresh += 1 }
             }
             // The turn may have created or changed files.
             .onChange(of: live.isWorking) { wasWorking, isWorking in
-                if wasWorking && !isWorking { filesRefresh += 1 }
+                if wasWorking && !isWorking && tab == .folder { filesRefresh += 1 }
+            }
+            // Changes made while another tab was open are read on coming back to this one.
+            .onChange(of: tab) { _, new in
+                if new == .folder { filesRefresh += 1 }
             }
             // The file may have been edited while the panel stayed open: read it again on coming back to the app.
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -164,6 +170,11 @@ struct BotInspector: View {
         if let requested = model.takeTabRequest(of: botID) { tab = requested }
     }
 
+    private struct FolderWatch: Hashable {
+        var folder: String
+        var isShown: Bool
+    }
+
     private struct FilesKey: Hashable {
         var bot: UUID
         var folder: String
@@ -177,7 +188,7 @@ struct BotInspector: View {
     private func header(_ bot: Bot) -> some View {
         let summary = AppearanceSummary.text(for: bot.orb)
         return HStack(alignment: .center, spacing: 14) {
-            LiveBotAvatar(botID: bot.id, orb: bot.orb, size: 56, interactive: true) // the only part that follows the activity
+            LiveBotAvatar(botID: bot.id, orb: bot.orb, size: 56, interactive: true, restsWhenIdle: true) // the only part that follows the activity
             VStack(alignment: .leading, spacing: 5) {
                 InspectorHeader(bot: bot)
                     .id(bot.id)
@@ -1013,13 +1024,15 @@ private struct RoutineNextLine: View {
     var body: some View {
         if routine.isEnabled {
             TimelineView(.periodic(from: .now, by: 60)) { context in
-                let isLate = RoutineText.isLate(routine.nextRun, now: context.date)
+                // `nextRun` walks the cron expression: once per tick, not once per use.
+                let next = routine.nextRun
+                let isLate = RoutineText.isLate(next, now: context.date)
                 Label {
                     if isLate {
-                        Text(RoutineText.late(routine.nextRun, now: context.date))
+                        Text(RoutineText.late(next, now: context.date))
                     } else {
                         // "em 9 h 57 min" never breaks inside.
-                        Text("Próxima: \(RoutineText.dayAndTime(routine.nextRun, now: context.date)) · \(RoutineText.relative(until: routine.nextRun, now: context.date).replacing(" ", with: "\u{A0}"))")
+                        Text("Próxima: \(RoutineText.dayAndTime(next, now: context.date)) · \(RoutineText.relative(until: next, now: context.date).replacing(" ", with: "\u{A0}"))")
                     }
                 } icon: {
                     Image(systemName: isLate ? "clock.badge.exclamationmark" : "arrow.forward.circle")
