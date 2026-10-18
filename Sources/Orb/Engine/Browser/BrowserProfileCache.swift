@@ -28,7 +28,8 @@ enum BrowserProfileCache {
 
     static func due(profile: URL, now: Date = .now) -> Bool {
         guard let last = lastCleaned(profile: profile) else { return true }
-        return now.timeIntervalSince(last) >= interval
+        // A note from the future (the clock was ahead when it was written) would keep the cleaning off until the clock caught up.
+        return now.timeIntervalSince(last) >= interval || last > now
     }
 
     /// The size of what `clean` would remove.
