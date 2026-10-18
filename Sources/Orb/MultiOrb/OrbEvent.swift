@@ -5,7 +5,7 @@ import Foundation
 struct OrbEvent: Codable, Equatable, Sendable {
     enum Kind: String, Codable, Sendable {
         case orbCreated, joinedGroup, leftGroup, groupCreated, routineCreated, renamed
-        case chainStopped, groupRunDone, groupStopped, delegationReceived, routineRun, tellFailed, unknown
+        case chainStopped, groupRunDone, groupStopped, delegationReceived, routineRun, tellFailed, groupWorked, unknown
 
         /// A kind from a newer version reads as `unknown`.
         init(from decoder: Decoder) throws { self = try decoder.rawValue(Self.self, fallback: .unknown) }
@@ -28,6 +28,11 @@ struct OrbEvent: Codable, Equatable, Sendable {
     var note: String?
     var file: String?
     var outcome: Outcome?
+    /// For `routineRun`: the run (`RoutineRun.id`), whose report the chat's next turn is told (`SinceLastTurn`).
+    var runID: UUID?
+    /// For `groupWorked`: what the Orb's chat is told of its work in the group (the request, what it said, the result). Never
+    /// shown: the line is the sentence.
+    var context: String?
 
     /// The line as the chat shows it ("Atlas criou o Pesquisador"). Pure: the same event always reads the same.
     var sentence: String {
@@ -65,6 +70,8 @@ struct OrbEvent: Codable, Equatable, Sendable {
             return headline + (note.map { ": " + $0 } ?? "")
         case .tellFailed:
             return "\(actorName) não conseguiu fazer o que você pediu" + (detail.isEmpty ? "" : ": " + detail)
+        case .groupWorked:
+            return "\(subject?.name ?? "Um Orb") trabalhou no grupo \(detail)"
         case .unknown:
             return detail
         }
@@ -96,6 +103,8 @@ extension OrbEvent {
         note = (try? c.decodeIfPresent(String.self, forKey: .note)) ?? nil
         file = (try? c.decodeIfPresent(String.self, forKey: .file)) ?? nil
         outcome = (try? c.decodeIfPresent(Outcome.self, forKey: .outcome)) ?? nil
+        runID = (try? c.decodeIfPresent(UUID.self, forKey: .runID)) ?? nil
+        context = (try? c.decodeIfPresent(String.self, forKey: .context)) ?? nil
     }
 
     /// A run told as text by versions before the event: "Rotina “X” terminou: … (relatório em …)". nil for any other notice.

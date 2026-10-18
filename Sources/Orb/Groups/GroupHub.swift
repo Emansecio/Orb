@@ -323,6 +323,17 @@ final class GroupHub: GroupTurnHooks {
         let page = GroupBoard.sessionPage(request: run.request, result: run.finalText ?? run.lastText ?? "",
                                           members: run.participants.map { name(of: $0) }, turns: run.turnsUsed,
                                           tokens: run.tokensUsed, group: group.name, started: run.startedAt, ended: now())
+        // Each member's own chat gets a line, and its next turn what the member did here (the thread is not its chat).
+        for member in run.participants {
+            let said = session.conversation.items.compactMap { item -> String? in
+                guard case .orbMessage(let post) = item.kind, post.direction == .post, post.chainID == run.id,
+                      post.from.id == member else { return nil }
+                return post.text
+            }
+            let work = SinceLastTurn.groupWork(request: run.request, said: said, result: run.finalText ?? run.lastText)
+            model.appendToChat(.event(OrbEvent(kind: .groupWorked, subject: model.orbRef(member), detail: group.name, chainID: run.id,
+                                               groupID: groupID, context: work)), of: member)
+        }
         let bank = model.memory.groupBank(for: groupID)
         Task {
             if await !bank.saveSession(page) {

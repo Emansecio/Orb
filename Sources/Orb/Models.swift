@@ -243,6 +243,9 @@ struct Conversation: Codable, Sendable {
     /// A turn was running when this was saved (set when it begins, cleared when it ends): read back after a crash, the
     /// chat says the turn was cut off even when the disk caught it at a quiet moment (nothing streaming or running).
     var turnOpen: Bool?
+    /// When the chat's last turn was handed what happened outside it (`SinceLastTurn`): lines after it are new to the model.
+    /// nil in conversations from before it was kept (they count from their last turn).
+    var contextHandedAt: Date?
 
     /// After a quit or crash mid-turn: nothing is streaming, running or waiting anymore. `notice` goes at the end when a turn
     /// was cut off there (something was still going, or your message got no answer), so the chat says what happened.
@@ -321,6 +324,7 @@ extension Conversation {
         // A plan this version cannot read is dropped; the calls that made it are still in `messages`.
         taskPlan = (try? c.decodeIfPresent(TaskPlan.self, forKey: .taskPlan)) ?? nil
         turnOpen = (try? c.decodeIfPresent(Bool.self, forKey: .turnOpen)) ?? nil
+        contextHandedAt = (try? c.decodeIfPresent(Date.self, forKey: .contextHandedAt)) ?? nil
     }
 
     /// Where a position in the stored list lands once the elements that could not be read (nil) are left out.

@@ -192,7 +192,7 @@ enum TranscriptFolding {
     static func foldableEventKind(of item: TranscriptItem) -> OrbEvent.Kind? {
         guard case .event(let event) = item.kind else { return nil }
         switch event.kind {
-        case .orbCreated, .joinedGroup, .leftGroup, .routineCreated, .routineRun: return event.kind
+        case .orbCreated, .joinedGroup, .leftGroup, .routineCreated, .routineRun, .groupWorked: return event.kind
         default: return nil
         }
     }
@@ -202,7 +202,7 @@ enum TranscriptFolding {
     private static func sameFoldKey(_ lhs: TranscriptItem, _ rhs: TranscriptItem) -> Bool {
         guard case .event(let a) = lhs.kind, case .event(let b) = rhs.kind else { return false }
         guard a.actor?.id == b.actor?.id else { return false }
-        if [.joinedGroup, .leftGroup, .routineRun].contains(a.kind) { return a.detail == b.detail }
+        if [.joinedGroup, .leftGroup, .routineRun, .groupWorked].contains(a.kind) { return a.detail == b.detail }
         return true
     }
 
@@ -228,6 +228,8 @@ enum TranscriptFolding {
             return "\(names) \(count == 1 ? "entrou" : "entraram") no grupo \(group)"
         case .leftGroup:
             return "\(names) \(count == 1 ? "saiu" : "saíram") do grupo \(group)"
+        case .groupWorked:
+            return "\(first.subject?.name ?? "Um Orb") trabalhou \(count) vezes no grupo \(group)"
         case .routineCreated:
             if let who { return "\(who) criou \(count) rotinas" }
             return "\(count) rotinas criadas"

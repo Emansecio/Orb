@@ -149,6 +149,8 @@ final class BotSession {
     // MARK: end MultiOrb (WP1)
     /// The snapshot and rules marks of the running turn, recorded on its conversation once the model has been given them.
     @ObservationIgnored var pendingMarks: DeliveryMarks?
+    /// When the chat's turn being sent was handed what happened outside the chat: recorded with its message (`SinceLastTurn`).
+    @ObservationIgnored var pendingContextCursor: Date?
     /// The running turn folded older turns into the summary: the conversation is saved to memory when it ends.
     @ObservationIgnored var compactedInTurn = false
     /// The model's notes that folds made during this turn carried into the summary (they go to the memory at its end).

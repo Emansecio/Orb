@@ -105,6 +105,18 @@ private final class Team {
 
     deinit { QuietNotifications.release() }
 
+    /// A new app on the same folder, as after quitting and opening it again, with the same script for the model.
+    func reopened(rule: @escaping @Sendable (Seen) async -> [LLMEvent]) -> AppModel {
+        model.saveNow()
+        let again = AppModel(store: Store(directory: root), runsBackgroundWork: false)
+        again.preferences = UserDefaults(suiteName: suite) ?? .standard
+        again.providers = [ProviderAccount(kind: .custom)]
+        again.defaultModel = "custom/modelo"
+        let brain = Brain(log: log, names: ["Atlas", "Pesquisador", "Revisor"] + others.map(\.name), rule: rule)
+        again.clientOverride = { brain }
+        return again
+    }
+
     func cleanUp() {
         UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
         removeTestFolder(root)
@@ -228,7 +240,7 @@ private final class Hooks: GroupTurnHooks {
         await waitUntil("the chat to answer") { team.botTexts(team.pesquisador) == ["Ok."] }
         await team.settle()
         let chat = try #require(await team.log.calls(by: "Pesquisador").last)
-        #expect(chat.user.contains(HandledRequests.openTag) && chat.user.contains("<request from=\"Atlas\" status=\"replied\">"))
+        #expect(chat.user.contains(SinceLastTurn.openTag) && chat.user.contains("<request from=\"Atlas\" status=\"replied\">"))
         #expect(chat.user.contains("Pesquise o número.") && chat.user.contains("Achei 42."))
         #expect(chat.user.hasSuffix("é o pedido do Atlas"))
         let stored = try #require(model.sessions[team.pesquisador.id]?.conversation?.messages.last { $0.role == .user })
@@ -239,7 +251,7 @@ private final class Hooks: GroupTurnHooks {
         await waitUntil("the second answer") { team.botTexts(team.pesquisador).count == 2 }
         await team.settle()
         let next = try #require(await team.log.calls(by: "Pesquisador").last)
-        #expect(!next.user.contains(HandledRequests.openTag))
+        #expect(!next.user.contains(SinceLastTurn.openTag))
     }
 
     @Test func theAskerWaitsOnScreenWhileTheTargetWorks() async throws {
@@ -449,6 +461,45 @@ private final class Hooks: GroupTurnHooks {
         #expect(await team.log.calls(by: "Pesquisador").count == 2)
     }
 
+    /// A waiting routine can end while its Orb works on another Orb's request: its line goes to the chat, not into the request.
+    @Test func aRoutineEndingWhileItsOrbHandlesARequestTellsTheChat() async throws {
+        let valve = TestGate(), busy = TestGate()
+        let team = Team { seen in
+            switch seen.who {
+            case "Pesquisador":
+                if seen.user.contains("<orb_request from") {
+                    await busy.wait()
+                    return say("Fiz o pedido do Atlas.")
+                }
+                if seen.toolResult != nil { return say("Aguardo o Revisor.") }
+                return orbsCall("ask", to: "Revisor", "Revise o texto de hoje.")
+            case "Revisor":
+                await valve.wait()
+                return say("Achei 3 erros.")
+            default: return say("Ok.")
+            }
+        }
+        defer { team.cleanUp() }
+        let model = team.model, hub = model.delegation
+        let routine = Routine(name: "Revisão diária", botID: team.pesquisador.id, prompt: "Peça a revisão do texto de hoje.",
+                              schedule: .daily(hour: 9, minute: 0))
+        model.routines = [routine]
+        model.runRoutine(routine.id)
+        await waitUntil("the run to wait") { hub.isWaiting(routine: routine.id) }
+        let asked = try hub.submit(from: team.atlas.id, to: "Pesquisador", text: "Junte as notas.", kind: .ask, messageID: UUID(),
+                                   groupID: nil)
+        await waitUntil("the request to run") { model.sessions[team.pesquisador.id]?.parkedChat != nil }
+        let chain = try #require(team.request(from: team.pesquisador, to: team.revisor)?.envelope.chainID)
+        hub.cancelChain(chain, by: .user)
+        await busy.open()
+        await valve.open()
+        await team.settle()
+        #expect(team.events(team.pesquisador).contains { $0.kind == .routineRun && $0.outcome == .failed })
+        let request = try #require(model.store.readSideConversation(prefix: Store.pedidoPrefix, id: asked.id,
+                                                                    for: team.pesquisador.id).value)
+        #expect(!request.items.contains { if case .event(let event) = $0.kind { event.kind == .routineRun } else { false } })
+    }
+
     @Test func theOpenTalksOutsideGroupsSayWhoWhatWhereAndStopWithParar() async throws {
         let valve = TestGate()
         let team = Team { seen in
@@ -547,11 +598,13 @@ private final class Hooks: GroupTurnHooks {
         await team.settle()
         let calls = await team.log.calls(by: "Revisor")
         #expect(calls.count == 2)
-        let notice = try #require(calls[0].user.range(of: "<orb_notice from=\"Atlas\""))
+        let notice = try #require(calls[0].user.range(of: "<notice from=\"Atlas\""))
         let message = try #require(calls[0].user.range(of: "o que mudou?"))
         #expect(notice.lowerBound < message.lowerBound && calls[0].user.contains("Já mudei o README."))
-        #expect(!calls[1].user.contains("orb_notice"))
-        #expect(model.delegation.notices.isEmpty)
+        #expect(calls[0].user.contains(SinceLastTurn.openTag) && !calls[1].user.contains("<notice"))
+        // The notice is not the person's words: "Refazer" and "Voltar" still find the message by what was typed.
+        let stored = try #require(model.sessions[team.revisor.id]?.conversation?.messages.first { $0.role == .user })
+        #expect(TurnPreface.requestWords(stored.content) == "o que mudou?")
     }
 
     @Test func aTellToABusyOrbWaitsForItsNextTurnAndNeverTimesOut() async throws {
@@ -572,7 +625,7 @@ private final class Hooks: GroupTurnHooks {
         _ = try hub.submit(from: team.atlas.id, to: "Revisor", text: "Já mudei o README.", kind: .tell, messageID: UUID(), groupID: nil)
         hub.sweep(now: .now.addingTimeInterval(DelegationLimits.workTimeout + 60))
         #expect(!team.events(team.atlas).contains { $0.kind == .tellFailed }) // nothing to time out
-        #expect(hub.notices[team.revisor.id]?.count == 1)
+        #expect(team.orbMessages(team.revisor).filter { $0.kind == .tell }.count == 1)
         await valve.open()
         await team.settle()
         #expect(await team.log.count(by: "Revisor") == 1) // its own turn only
@@ -586,12 +639,74 @@ private final class Hooks: GroupTurnHooks {
         defer { team.cleanUp() }
         let model = team.model, hub = model.delegation
         _ = try hub.submit(from: team.atlas.id, to: "Revisor", text: "Já mudei o README.", kind: .tell, messageID: UUID(), groupID: nil)
-        #expect(hub.notices[team.revisor.id]?.count == 1)
         model.orbsCanTalk = false
-        #expect(hub.notices.isEmpty)
+        // The line stays in the chat, cancelled, and the next turn is not handed it.
+        #expect(team.orbMessages(team.revisor).map(\.state) == [.cancelled])
         model.send("oi", to: team.revisor.id, fromUser: true)
         await team.settle()
-        #expect(await team.log.calls(by: "Revisor").first?.user.contains("orb_notice") == false)
+        #expect(await team.log.calls(by: "Revisor").first?.user.contains("Já mudei o README.") == false)
+    }
+
+    /// A notice is a line of the chat, saved with it: a request's run reads it without taking it, and it reaches the chat's
+    /// next turn even after the app quit in between.
+    @Test func aNoticeIsNotTakenByARequestAndOutlivesTheApp() async throws {
+        let rule: @Sendable (Seen) async -> [LLMEvent] = { seen in
+            switch seen.who {
+            case "Revisor": return say(seen.user.contains("<orb_request from") ? "Revisei." : "Vi.")
+            default: return say("Ok.")
+            }
+        }
+        let team = Team(rule: rule)
+        defer { team.cleanUp() }
+        let hub = team.model.delegation
+        _ = try hub.submit(from: team.atlas.id, to: "Revisor", text: "Já mudei o README.", kind: .tell, messageID: UUID(), groupID: nil)
+        _ = try hub.submit(from: team.pesquisador.id, to: "Revisor", text: "Revise o texto.", kind: .ask, messageID: UUID(),
+                           groupID: nil)
+        await team.settle()
+        let request = try #require(await team.log.calls(by: "Revisor").first)
+        #expect(request.user.contains(RequestBackground.openTag) && request.user.contains("Já mudei o README."))
+
+        let model = team.reopened(rule: rule)
+        #expect(model.send("oi", to: team.revisor.id, fromUser: true))
+        await waitUntil("the chat to answer") { model.sessions[team.revisor.id]?.turnTask == nil
+            && model.transcript(team.revisor.id).contains { if case .bot(let text, _) = $0.kind { text == "Vi." } else { false } } }
+        let chat = try #require(await team.log.calls(by: "Revisor").last)
+        #expect(chat.user.contains("<notice from=\"Atlas\">") && chat.user.contains("Já mudei o README."))
+        // The request it handled meanwhile is told too, and the notice is not the person's words.
+        #expect(chat.user.contains("<request from=\"Pesquisador\"") && chat.user.hasSuffix("oi"))
+    }
+
+    /// The request's run begins from an empty conversation, but not knowing nothing: it is told what the same Orb asked before
+    /// (and what it answered) and where its own chat stands.
+    @Test func aSecondRequestKnowsTheFirstAndTheChat() async throws {
+        let team = Team { seen in
+            switch seen.who {
+            case "Revisor":
+                if seen.user.contains("Ajuste aquilo") { return say("Ajustei.") }
+                if seen.user.contains("<orb_request from") { return say("Revisei a introdução.") }
+                return say("Ok, capítulo 3.")
+            default: return say("Ok.")
+            }
+        }
+        defer { team.cleanUp() }
+        let model = team.model, hub = model.delegation
+        model.send("estamos revisando o capítulo 3", to: team.revisor.id, fromUser: true)
+        await team.settle()
+        _ = try hub.submit(from: team.atlas.id, to: "Revisor", text: "Revise a introdução.", kind: .ask, messageID: UUID(), groupID: nil)
+        await team.settle()
+        _ = try hub.submit(from: team.atlas.id, to: "Revisor", text: "Ajuste aquilo que te pedi.", kind: .ask, messageID: UUID(),
+                           groupID: nil)
+        await team.settle()
+        let calls = await team.log.calls(by: "Revisor")
+        let first = try #require(calls.first { $0.user.contains("Revise a introdução.") && $0.user.contains("<orb_request from") })
+        #expect(first.user.contains("<your_chat>") && !first.user.contains("<earlier_request"))
+        let second = try #require(calls.last { $0.user.contains("Ajuste aquilo") })
+        #expect(second.user.hasPrefix(TurnPreface.openTag) || second.user.hasPrefix(RequestBackground.openTag))
+        #expect(second.user.contains("<earlier_request status=\"replied\">") && second.user.contains("Revise a introdução."))
+        #expect(second.user.contains("Revisei a introdução.") && second.user.contains("estamos revisando o capítulo 3"))
+        #expect(second.user.contains("Ok, capítulo 3."))
+        let open = try #require(second.user.range(of: RequestBackground.openTag)), ask = try #require(second.user.range(of: "<orb_request"))
+        #expect(open.lowerBound < ask.lowerBound)
     }
 
     @Test func aCardNobodyAnsweredForADayIsNotCalledYourStop() async throws {
@@ -1208,6 +1323,16 @@ private actor Names {
         #expect(team.botTexts(team.pesquisador).isEmpty && team.botTexts(team.revisor).isEmpty)
         let side = team.model.store.readSideConversation(prefix: Store.grupoPrefix, id: group.id, for: team.pesquisador.id).value
         #expect(side != nil)
+        // Each member's chat gets one line that opens the group, and its next turn what the member did there.
+        let worked = team.events(team.revisor).filter { $0.kind == .groupWorked }
+        #expect(worked.count == 1 && worked[0].groupID == group.id && worked[0].sentence == "Revisor trabalhou no grupo Lançamento")
+        #expect(team.events(team.atlas).contains { $0.kind == .groupWorked })
+        #expect(team.model.send("como foi no grupo?", to: team.revisor.id, fromUser: true))
+        await team.settle()
+        let chat = try #require(await team.log.calls(by: "Revisor").last)
+        #expect(chat.user.contains("<group_work group=\"Lançamento\">") && chat.user.contains("Preparar o lançamento"))
+        #expect(chat.user.contains("Estão coerentes.") && chat.user.contains("Pronto: mercado levantado e texto revisado."))
+        #expect(chat.user.hasSuffix("como foi no grupo?"))
     }
 
     @Test func theAnswerWakesTheOrchestratorWithNoPauseHoweverManyTurns() async throws {

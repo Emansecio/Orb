@@ -148,6 +148,27 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
     }
 
     /// The `schedule` tool's run and run_now start the same run as the Rotinas page's button.
+    /// The run happened in a conversation of its own: the chat's next turn is told its report (once), so "o que a rotina
+    /// achou?" has an answer.
+    @Test @MainActor func theChatsNextTurnIsToldTheRoutinesReport() async throws {
+        let stub = StubModel(reply: "Achei 3 arquivos novos.\nO maior é vendas.csv.")
+        let (model, bot, routine) = setUp(stub)
+        model.runRoutine(routine.id)
+        await model.routineStarted()
+        await waitUntilIdle(model, bot.id)
+
+        #expect(model.send("o que a rotina achou?", to: bot.id, fromUser: true))
+        await waitUntilIdle(model, bot.id)
+        let asked = try #require(await stub.calls.received.last?.last { $0.role == .user }?.content)
+        #expect(asked.contains(SinceLastTurn.openTag) && asked.contains("<routine_run name=\"Resumo da manhã\" outcome=\"finished\""))
+        #expect(asked.contains("O maior é vendas.csv.") && asked.hasSuffix("o que a rotina achou?"))
+
+        #expect(model.send("e agora?", to: bot.id, fromUser: true))
+        await waitUntilIdle(model, bot.id)
+        let next = try #require(await stub.calls.received.last?.last { $0.role == .user }?.content)
+        #expect(!next.contains(SinceLastTurn.openTag))
+    }
+
     @Test @MainActor func theOrbCanRunATaskNowOrCreateOneThatRunsAtOnce() async throws {
         let (model, bot, routine) = setUp()
         let said = try model.schedule(.object(["action": .string("run"), "name": .string("Resumo da manhã")]), orb: bot.id)

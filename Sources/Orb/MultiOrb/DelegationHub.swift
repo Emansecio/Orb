@@ -26,6 +26,8 @@ final class DelegationHub: DelegationService {
         var cancelled = false
         var recent: [String: Date] = [:]
         var touched = Date.now
+        /// The Orbs this chain left notices (`tell`): stopping the chain takes back the ones their chats were not handed yet.
+        var noticed: Set<UUID> = []
     }
 
     private(set) var requests: [UUID: DelegationRequest] = [:]
@@ -33,9 +35,6 @@ final class DelegationHub: DelegationService {
     private(set) var queues: [UUID: [UUID]] = [:]
     /// Per Orb: the answers waiting to be handed to it.
     private(set) var inbox: [UUID: [OrbEnvelope]] = [:]
-    /// Per Orb: the notices (`tell`) other Orbs left it outside a group, oldest first. A notice wakes nobody: it goes on top of
-    /// the next message the Orb gets, whatever starts its next turn (`takeNotices`).
-    private(set) var notices: [UUID: [OrbEnvelope]] = [:]
     private(set) var chainStates: [UUID: ChainState] = [:]
     /// The last `seenLimit` message ids, to tell a repeat from a new message.
     private(set) var seenMessageIDs: [UUID] = []
@@ -57,8 +56,6 @@ final class DelegationHub: DelegationService {
     private(set) var waitingRoutines: [UUID: RoutineWait] = [:]
 
     static let seenLimit = 500
-    /// Notices kept per Orb until its next turn (the oldest go first).
-    static let noticeLimit = 10
     static let keptRequests = 300
     static let chainRetention: TimeInterval = 2 * 3600
 
@@ -127,7 +124,8 @@ final class DelegationHub: DelegationService {
     }
 
     /// A notice (`tell`) runs no turn. In a group it is a post in the thread, which the member's next turn reads with the rest
-    /// of the thread; elsewhere it waits in the target's box for its next turn, and the target's chat shows it at once.
+    /// of the thread; elsewhere it is a line of the target's chat, saved with it, which the chat's next turn is handed
+    /// (`SinceLastTurn`) and a request's run reads meanwhile (`RequestBackground`).
     private func leaveNotice(_ envelope: OrbEnvelope, session: BotSession) -> OrbEnvelope {
         guard let model else { return envelope }
         let line = OrbMessageItem(direction: .sent, kind: .tell, state: .replied, from: envelope.from, to: envelope.to,
@@ -136,9 +134,7 @@ final class DelegationHub: DelegationService {
         if envelope.groupID != nil {
             groupHooks?.noticePosted(envelope)
         } else {
-            var box = notices[envelope.to.id] ?? []
-            box.append(envelope)
-            notices[envelope.to.id] = Array(box.suffix(Self.noticeLimit))
+            chainStates[envelope.chainID]?.noticed.insert(envelope.to.id)
             var received = line
             received.direction = .received
             appendToChat(of: envelope.to.id, .orbMessage(received))
@@ -146,13 +142,6 @@ final class DelegationHub: DelegationService {
         }
         model.live(envelope.from.id).poked()
         return envelope
-    }
-
-    /// The notices waiting for the Orb, as the top of the message that starts its turn; nil when there are none. They are
-    /// handed once. A group's turn takes none: they belong to the Orb's own work, not to the group's thread.
-    func takeNotices(for botID: UUID) -> String? {
-        let waiting = (notices.removeValue(forKey: botID) ?? []).filter { chainStates[$0.chainID]?.cancelled != true }
-        return waiting.isEmpty ? nil : OrbEnvelopeText.notices(waiting)
     }
 
     /// A turn of a member of a group: the group's runtime asks the hub for it so the target's queue, its own conversation and the
@@ -577,10 +566,7 @@ final class DelegationHub: DelegationService {
                 groupHooks?.turnFinished(requests[envelope.id] ?? request, reply: nil, outcome: .cancelled)
             }
         }
-        for botID in Array(notices.keys) {
-            notices[botID]?.removeAll { $0.chainID == id }
-            if notices[botID]?.isEmpty == true { notices[botID] = nil }
-        }
+        for botID in chain.noticed { dropUnreadNotices(of: id, for: botID) }
         for botID in Array(inbox.keys) {
             let before = inbox[botID]?.count ?? 0
             inbox[botID]?.removeAll { $0.chainID == id }
@@ -648,8 +634,6 @@ final class DelegationHub: DelegationService {
         }
         inbox[id] = nil
         queues[id] = nil
-        notices[id] = nil
-        for botID in Array(notices.keys) { notices[botID]?.removeAll { $0.from.id == id } }
         for botID in running { model?.session(botID).stop(startsQueuedRoutines: false) }
         for (routineID, wait) in waitingRoutines where wait.botID == id { waitingRoutines[routineID] = nil }
         refresh(Array(Set(affected.flatMap { [$0.envelope.from.id, $0.envelope.to.id] })))
@@ -1091,6 +1075,36 @@ final class DelegationHub: DelegationService {
         if let parked = session.parkedChat, has(parked.items) {
             session.parkedChat?.items.settingSent(requestID, to: state)
             if let chat = session.parkedChat { model.store.save(chat, for: asker) }
+        }
+    }
+
+    /// The notices of the chain that the chat of `botID` was not handed yet now read cancelled: its next turn does not get them
+    /// (the line stays, as a stopped request's does).
+    private func dropUnreadNotices(of chainID: UUID, for botID: UUID) {
+        guard let model, model.bot(botID) != nil else { return }
+        let session = model.session(botID)
+        if session.isUnloaded { session.ensureLoaded() }
+        func unread(_ chat: Conversation) -> [Int] {
+            SinceLastTurn.pendingIndices(in: chat.items, since: chat.contextHandedAt).filter { index in
+                if case .orbMessage(let m) = chat.items[index].kind { m.kind == .tell && m.chainID == chainID } else { false }
+            }
+        }
+        func cancel(_ items: inout [TranscriptItem], at indices: [Int]) {
+            for index in indices {
+                guard case .orbMessage(var message) = items[index].kind else { continue }
+                message.state = .cancelled
+                items[index].kind = .orbMessage(message)
+            }
+        }
+        if var parked = session.parkedChat {
+            let indices = unread(parked)
+            guard !indices.isEmpty else { return }
+            cancel(&parked.items, at: indices)
+            session.parkedChat = parked
+            model.store.save(parked, for: botID)
+        } else if let chat = session.conversation {
+            let indices = unread(chat)
+            if !indices.isEmpty { session.mutateItems { cancel(&$0, at: indices) } }
         }
     }
 

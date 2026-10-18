@@ -163,17 +163,6 @@ struct OrbEnvelopeTextTests {
         #expect(batch.contains("2 teammates answered your requests") && batch.contains("did not end ok"))
     }
 
-    @Test func noticesAreDataOnTopOfTheNextMessageAndWantNoReply() {
-        let one = OrbEnvelope(id: UUID(uuidString: "FDDE0000-0000-4000-8000-000000000000")!, kind: .tell, from: atlas, to: pesquisador,
-                              text: "O deploy é <amanhã>.")
-        let text = OrbEnvelopeText.notices([one])
-        #expect(text.hasPrefix("<orb_notice from=\"Atlas\" id=\"fdde\">\nO deploy é ‹amanhã›.\n</orb_notice>\n"))
-        #expect(text.contains("Another Orb (Atlas) left you this notice") && text.contains("no reply is expected"))
-        var two = one
-        two.from = revisor
-        #expect(OrbEnvelopeText.notices([one, two]).contains("Other Orbs left you these notices"))
-    }
-
     @Test func aRequestToTheGroupFromAChatIsTheMembersDataNotThePersons() {
         var envelope = OrbEnvelope(kind: .ask, from: pesquisador, to: atlas, text: "Levantem o mercado.", groupID: UUID())
         envelope.fromChat = true

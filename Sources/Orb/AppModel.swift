@@ -1545,8 +1545,6 @@ final class AppModel {
             prompt += Self.pictureNote(pictures, modelSees: sees)
         }
         prompt = unattendedPrompt(prompt, for: botID, origin: origin)
-        // What other Orbs left it (`orbs tell`) goes on top of the message, once; a group's turn reads its thread instead.
-        if session.sideKind != .group, let notices = delegation.takeNotices(for: botID) { prompt = notices + "\n\n" + prompt }
         if intent != nil {
             prompt += MemoryIntent.instruction(tool: rememberTool)
         }
@@ -1557,11 +1555,11 @@ final class AppModel {
         let paused = session.conversation?.isTaskPaused ?? false
         // The message and what goes before it (workspace snapshot, memory notes) take room too.
         let attachmentRoom = AttachmentText.room(historyCharacters: budget.characters)
-        // A turn of the chat learns what the Orb did for other Orbs since its last turn here (each request ran on its own).
-        let handledIDs = session.routineID == nil
-            ? HandledRequests.pending(in: session.conversation?.items.prefix(itemsBeforeMessage) ?? []) : []
-        let reserve = prompt.count + Self.prefaceAllowance
-            + handledIDs.count * (HandledRequests.requestLimit + HandledRequests.replyLimit)
+        // A turn of the chat learns what happened outside it since its last turn here (requests, routines, groups, notices);
+        // a request's run learns where its Orb stands (`RequestBackground`).
+        let outside = outsideContext(of: session, itemsBefore: itemsBeforeMessage, origin: origin)
+        session.pendingContextCursor = session.routineID == nil ? .now : nil
+        let reserve = prompt.count + Self.prefaceAllowance + outside.room
             + AttachmentText.estimate(for: attachments, texts: attachmentTexts.cached(attachments), room: attachmentRoom)
         let attachmentTexts = attachmentTexts
         yieldStretchNote(to: botID, provider: ref.provider)
@@ -1611,7 +1609,7 @@ final class AppModel {
                                          profile: profile.promptSection)
             let inputs = await TurnPromptInputs.gather(bot: bot, skills: skills, brief: brief)
             var message = prompt + AttachmentText.block(for: attachments, texts: await files, room: attachmentRoom)
-            if let handled = await handledRequests(handledIDs, of: botID) { message = handled + "\n\n" + message }
+            if let told = await outsideText(outside, of: botID) { message = told + "\n\n" + message }
             guard session.isCurrent(turn) else { return } // stopped while preparing
             let built = TurnPrompt.native(inputs, history: history, lastWorkspaceHash: lastWorkspaceHash, lastWorkspace: lastWorkspace,
                                           memoryInPrompt: memoryInPrompt, plan: plan)
@@ -2133,8 +2131,9 @@ final class AppModel {
         recordRun(run, routineID: routineID)
         let outcome: OrbEvent.Outcome = !succeeded ? .failed : run.check?.status == .done ? .goalReached
             : run.check?.status == .attention ? .attention : .finished
-        append(.event(OrbEvent(kind: .routineRun, actor: OrbRef(bot), detail: routine.name, note: run.summary,
-                               file: run.reportFile, outcome: outcome)), to: botID)
+        // In the chat itself: a run that waited can end while the Orb works on another Orb's request, its chat parked.
+        appendToChat(.event(OrbEvent(kind: .routineRun, actor: OrbRef(bot), detail: routine.name, note: run.summary,
+                                     file: run.reportFile, outcome: outcome, runID: run.id)), of: botID)
     }
 
     /// Writes a finished run's conversation. One that could not be written (a full disk) is kept here, the only copy,

@@ -273,6 +273,10 @@ extension BotSession {
             if message.role == .user {
                 conversation?.taskPaused = false
                 recordMarks()
+                if let cursor = pendingContextCursor {
+                    pendingContextCursor = nil
+                    conversation?.contextHandedAt = cursor
+                }
             }
             scheduleSave(delay: Self.streamingSaveInterval)
         case .failed(let message):

@@ -76,15 +76,4 @@ extension AppModel {
 
     /// Who asked the request the Orb is working on, for the working line ("Pedido de Atlas"); nil outside a request.
     func requesterName(of botID: UUID) -> String? { delegation.requesterName(of: botID) }
-
-    /// The block that tells the chat's turn what the Orb did for other Orbs (`HandledRequests`), read from each request's own
-    /// conversation; nil when there is none or none can be read (an old request pruned from the folder says nothing).
-    func handledRequests(_ ids: [UUID], of botID: UUID) async -> String? {
-        var handled: [HandledRequests.Handled] = []
-        for id in ids {
-            let read = await store.readSideConversationAsync(prefix: Store.pedidoPrefix, id: id, for: botID)
-            if let conversation = read.value, let item = HandledRequests.handled(conversation, request: id) { handled.append(item) }
-        }
-        return HandledRequests.text(handled)
-    }
 }

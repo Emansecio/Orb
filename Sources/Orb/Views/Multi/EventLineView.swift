@@ -60,7 +60,7 @@ struct EventLineView: View {
 
     /// In an Orb's chat, the line about a group that still exists opens it.
     private var openableGroup: UUID? {
-        guard !centered, event.kind == .groupCreated || event.kind == .joinedGroup, let id = event.groupID,
+        guard !centered, [.groupCreated, .joinedGroup, .groupWorked].contains(event.kind), let id = event.groupID,
               model.group(id) != nil else { return nil }
         return id
     }
@@ -92,7 +92,7 @@ struct EventLineView: View {
     static func symbol(for kind: OrbEvent.Kind) -> String {
         switch kind {
         case .orbCreated: "sparkles"
-        case .joinedGroup, .leftGroup, .groupCreated: "person.2"
+        case .joinedGroup, .leftGroup, .groupCreated, .groupWorked: "person.2"
         case .routineCreated, .routineRun: "clock.arrow.circlepath"
         case .renamed: "pencil"
         case .chainStopped, .groupStopped: "stop.circle"
