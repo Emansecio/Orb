@@ -479,6 +479,41 @@ struct ModelRefreshBackoffTests {
         #expect(model.providers[0].models.isEmpty)
     }
 
+    @Test @MainActor func aCheckThatWasCancelledIsNotRecordedAsTheProvidersFailure() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "OrbModelRefresh-\(UUID().uuidString)")
+        defer { removeTestFolder(root) }
+        let model = AppModel(store: Store(directory: root), runsBackgroundWork: false)
+        model.providers = [ProviderAccount(kind: .ollama)]
+        let health = ProviderHealth()
+        for stopped in [CancellationError(), URLError(.cancelled)] as [any Error] {
+            model.loadModels = { _ in throw stopped }
+            try? await health.refresh(.ollama, model: model)
+            #expect(health.failure(of: .ollama) == nil && !health.isChecking(.ollama))
+        }
+        // A real failure is still recorded, and a later success forgets it.
+        model.loadModels = { _ in throw URLError(.cannotConnectToHost) }
+        try? await health.refresh(.ollama, model: model)
+        #expect(health.failure(of: .ollama) == .unreachable)
+    }
+
+    @Test @MainActor func theRowLeavesTheReplaceModeEvenWhenLoadingTheModelsFails() async {
+        let root = FileManager.default.temporaryDirectory.appending(path: "OrbModelRefresh-\(UUID().uuidString)")
+        defer { removeTestFolder(root) }
+        let model = AppModel(store: Store(directory: root), runsBackgroundWork: false, devRun: false)
+        let stored = OSAllocatedUnfairLock(initialState: Set<ProviderKind>())
+        model.connectionSources = ConnectionSources(keyedProviders: { stored.withLock { $0 } },
+                                                    storeKey: { key, kind in stored.withLock { if key.isEmpty { $0.remove(kind) } else { $0.insert(kind) } } },
+                                                    hasChatGPTCredential: { false }, signOutOfChatGPT: {}, claudeCodeStatus: nil)
+        model.providers = [ProviderAccount(kind: .openai)]
+        model.loadModels = { _ in throw LLMError.http(status: 401, message: "Incorrect API key") }
+        var replacing = true
+        await #expect(throws: LLMError.self) {
+            try await KeyEntry.save("sk-new", for: .openai, model: model) { replacing = false }
+        }
+        #expect(!replacing, "the key is saved; the row says so instead of waiting for another")
+        #expect(model.storedKeys.contains(.openai))
+    }
+
     @Test @MainActor func aRefusedKeyIsNotAskedForAgainForSixHours() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "OrbModelRefresh-\(UUID().uuidString)")
         defer { removeTestFolder(root) }

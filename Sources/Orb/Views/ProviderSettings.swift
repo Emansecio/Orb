@@ -19,9 +19,14 @@ final class ProviderHealth {
             try await model.refreshModels(kind)
             failures[kind] = nil
         } catch {
-            failures[kind] = ProviderCheck.failure(from: error)
+            // A check that was stopped (the tab closed, the providers changed) says nothing about the provider.
+            if !Self.isCancellation(error) { failures[kind] = ProviderCheck.failure(from: error) }
             throw error
         }
+    }
+
+    static func isCancellation(_ error: Error) -> Bool {
+        error is CancellationError || (error as? URLError)?.code == .cancelled || Task.isCancelled
     }
 
     /// Remembers a failure (nil: forgets it).
@@ -32,6 +37,7 @@ final class ProviderHealth {
     func checkServers(model: AppModel) async {
         for account in model.providers where account.isEnabled && (account.kind.isLocalServer || account.kind == .custom)
             && (account.kind.isLocalServer || GatewayForm.urlState(account.baseURL) == .valid) {
+            guard !Task.isCancelled else { return }
             try? await refresh(account.kind, model: model)
         }
     }
@@ -367,8 +373,7 @@ private struct ProviderRow: View {
         guard !value.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         key = ""
         run(inStatus: true) {
-            try await model.setKey(value, for: kind)
-            isReplacingKey = false
+            try await KeyEntry.save(value, for: kind, model: model) { isReplacingKey = false }
         }
     }
 
@@ -389,6 +394,18 @@ private struct ProviderRow: View {
             }
             isWorking = false
         }
+    }
+}
+
+/// Saving the key a row was given.
+enum KeyEntry {
+    /// Stores the key and loads the models; the row leaves the "Trocar" mode however that ends. The key is already in the
+    /// Keychain when the list fails to load (no network, a refused key), so the row must say "Chave salva" or
+    /// "Chave recusada" with the reason, not wait for a key it already has.
+    @MainActor
+    static func save(_ value: String, for kind: ProviderKind, model: AppModel, endReplacing: @MainActor () -> Void) async throws {
+        defer { endReplacing() }
+        try await model.setKey(value, for: kind)
     }
 }
 
