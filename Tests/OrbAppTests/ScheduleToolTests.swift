@@ -246,6 +246,17 @@ struct ScheduleCommandTests {
         }
     }
 
+    /// The schema says boolean, but a model that writes "false" as text still means it: the task must not start running.
+    @Test func aCreateReadsEnabledAndRunNowGivenAsText() throws {
+        #expect(try ScheduleCommand(call("create", name: "A", prompt: "x", when: daily9, extra: ["enabled": .string("false")]))
+                == .create(name: "A", prompt: "x", schedule: .daily(hour: 9, minute: 0), enabled: false))
+        #expect(try ScheduleCommand(call("create", name: "A", prompt: "x", when: daily9, extra: ["run_now": .string("true")]))
+                == .create(name: "A", prompt: "x", schedule: .daily(hour: 9, minute: 0), runNow: true))
+        #expect(throws: ToolError.self) {
+            try ScheduleCommand(call("create", name: "A", prompt: "x", when: daily9, extra: ["enabled": .string("false"), "run_now": .string("true")]))
+        }
+    }
+
     @Test func anUpdateChangesOnlyWhatItGives() throws {
         #expect(try ScheduleCommand(call("update", name: "A", when: every(minutes: 30))) == .update(name: "A", schedule: .everyMinutes(30)))
         #expect(try ScheduleCommand(call("update", name: "A", prompt: "  novo  ", goal: "")) == .update(name: "A", prompt: "novo", goal: ""))

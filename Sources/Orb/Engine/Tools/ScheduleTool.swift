@@ -27,8 +27,8 @@ enum ScheduleCommand: Equatable {
             let prompt = try Self.prompt(try arguments.requiredString("prompt"))
             let name = RoutineText.resolvedName(MemoryText.flatten(arguments["name"]?.string ?? ""), prompt: prompt)
             let goal = Self.goal(arguments["goal"]?.string ?? "")
-            let runNow = arguments["run_now"]?.bool ?? false
-            let enabled = arguments["enabled"]?.bool ?? true
+            let runNow = arguments.flag("run_now")
+            let enabled = arguments.flag("enabled", default: true)
             guard enabled || !runNow else { throw ToolError("Uma tarefa criada pausada não roda agora: use enabled ou run_now, não os dois.") }
             self = .create(name: String(name.prefix(Self.nameLimit)), prompt: prompt, schedule: try Self.schedule(arguments["when"]),
                            goal: goal.isEmpty ? nil : goal, enabled: enabled, runNow: runNow)
