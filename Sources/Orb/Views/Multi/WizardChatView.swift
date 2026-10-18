@@ -38,10 +38,8 @@ struct WizardChatView: View {
                             .padding(.leading, 40)
                             .transition(.opacity)
                     }
-                    if !runner.liveText.isEmpty {
-                        WizardBotRow(orb: look) {
-                            MarkdownChunk(source: runner.liveText, streaming: true, cached: false)
-                        }
+                    if runner.isSpeaking {
+                        WizardLiveRow(runner: runner, look: look) { scrollToEnd(proxy, animated: false) }
                     } else if runner.isThinking {
                         writing.transition(.opacity)
                     }
@@ -62,7 +60,6 @@ struct WizardChatView: View {
             .onChange(of: runner.messages.count) { scrollToEnd(proxy) }
             .onChange(of: runner.isThinking) { scrollToEnd(proxy) }
             .onChange(of: runner.failure) { scrollToEnd(proxy) }
-            .onChange(of: runner.liveText.count) { scrollToEnd(proxy, animated: false) }
         }
     }
 
@@ -187,6 +184,22 @@ private struct WizardBotRow<Content: View>: View {
         .padding(.trailing, 24)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Resposta do assistente")
+    }
+}
+
+/// The assistant's words as they stream. The only view that reads `liveText`, so a token redoes this row and not the whole
+/// chat; the scroll to the end follows at most every 200 ms.
+private struct WizardLiveRow: View {
+    let runner: WizardRunner
+    let look: OrbConfig
+    let scrollToEnd: @MainActor () -> Void
+    @State private var follower = BottomFollower()
+
+    var body: some View {
+        WizardBotRow(orb: look) {
+            MarkdownChunk(source: runner.liveText, streaming: true, cached: false)
+        }
+        .onChange(of: runner.liveText.utf8.count) { follower.follow(scrollToEnd) }
     }
 }
 

@@ -87,6 +87,8 @@ struct OrbProposalCard: View {
     @State private var draft: OrbProposal
     @State private var isEditing: Bool
     @State private var showsAll = false
+    /// The "Pasta …" line, looked up off the main thread when the name changes: asking the disk in `body` would repeat on every keystroke.
+    @State private var folderLine: String?
     /// The card has come in (`Motion.emphasis`) and the Orb has dropped onto its stage.
     @State private var entered = false
     @State private var dropped = false
@@ -287,7 +289,7 @@ struct OrbProposalCard: View {
 
     /// The model, the folder and the connectors: read only, even when editing.
     private var facts: some View {
-        let folder = ProposalSpeech.folderFact(name: shown.name, base: model.proposedOrbFolderBase, wasCreated: wasCreated)
+        let folder = wasCreated ? nil : folderLine
         let taken = isPending ? model.isOrbNameTaken(draft.name) : proposal.nameTaken
         return VStack(alignment: .leading, spacing: 3) {
             fact("Mesmo modelo que \(creator)", symbol: "cpu")
@@ -298,6 +300,20 @@ struct OrbProposalCard: View {
             fact("Sem conectores", symbol: "puzzlepiece.extension")
         }
         .padding(.top, 2)
+        .task(id: FolderKey(name: shown.name, wasCreated: wasCreated)) {
+            guard !wasCreated else { return folderLine = nil }
+            let (name, base) = (shown.name, model.proposedOrbFolderBase)
+            // A short pause while typing; the first lookup goes at once.
+            if folderLine != nil { try? await Task.sleep(for: .milliseconds(150)) }
+            guard !Task.isCancelled else { return }
+            let line = await Task.detached { ProposalSpeech.folderFact(name: name, base: base, wasCreated: false) }.value
+            if !Task.isCancelled { folderLine = line }
+        }
+    }
+
+    private struct FolderKey: Equatable {
+        let name: String
+        let wasCreated: Bool
     }
 
     private func fact(_ text: String, symbol: String, tint: Color = Palette.faint) -> some View {

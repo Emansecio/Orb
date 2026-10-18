@@ -450,8 +450,18 @@ private struct BotRow: Equatable {
     var landing = 0
 }
 
+private struct SelectionRest: Hashable {
+    var selected: Bool
+    var idle: Bool
+    var glance: Int
+}
+
 private struct BotRowContent: View, Equatable {
     let row: BotRow
+    /// The selected row has looked at the chat and nothing has happened since: it rests like the others.
+    @State private var selectionSettled = false
+
+    nonisolated static func == (a: BotRowContent, b: BotRowContent) -> Bool { a.row == b.row }
 
     /// The ring around the avatar: amber while the Orb waits for you (even mid-exchange: you come first), the partner's
     /// color while two Orbs exchange messages (MultiOrb, WP2), blue while it works.
@@ -466,7 +476,7 @@ private struct BotRowContent: View, Equatable {
         HStack(spacing: 8) {
             // Only the selected bot and bots with something going on move; the rest rest (no frames at all).
             BotAvatar(orb: look.orb, size: 30, activity: activity, celebration: row.celebration,
-                      paused: !row.isSelected && activity == .idle, ack: row.ack, landing: row.landing, glance: row.glance, cue: row.cue)
+                      paused: activity == .idle && (!row.isSelected || selectionSettled), ack: row.ack, landing: row.landing, glance: row.glance, cue: row.cue)
                 // A 1.5 pt ring that says what is going on at a glance. It fades in and out (opacity only, so it is the same
                 // under Reduce Motion).
                 .overlay {
@@ -478,6 +488,13 @@ private struct BotRowContent: View, Equatable {
                     }
                 }
                 .animation(Motion.fade, value: ring)
+                // The selected Orb stays awake for its glance, then rests too (an idle Orb that never stops costs frames forever).
+                .task(id: SelectionRest(selected: row.isSelected, idle: activity == .idle, glance: row.glance)) {
+                    selectionSettled = false
+                    guard row.isSelected, activity == .idle else { return }
+                    try? await Task.sleep(for: .seconds(6))
+                    if !Task.isCancelled { selectionSettled = true }
+                }
             VStack(alignment: .leading, spacing: 1) {
                 Text(look.name)
                     .font(.system(size: 13, weight: .medium))

@@ -483,6 +483,11 @@ private struct NewBotFolderSection: View {
     let name: String
     @Binding var choice: OrbFolderChoice
     @State private var isPicking = false
+    /// The Orb's own folder as it would be named ("Atlas 2" when "Atlas" is taken), looked up off the main thread when the
+    /// name changes: asking the disk in `body` would repeat on every keystroke.
+    @State private var ownURL: URL?
+
+    private var ownFallback: URL { OrbFolder.defaultBase.appending(path: OrbFolder.folderName(for: name), directoryHint: .isDirectory) }
 
     var body: some View {
         Section {
@@ -531,6 +536,14 @@ private struct NewBotFolderSection: View {
         .fileImporter(isPresented: $isPicking, allowedContentTypes: [.folder]) { result in
             if case .success(let url) = result { choice = .existing(url) }
         }
+        .task(id: name) {
+            // A short pause while typing; the first lookup goes at once.
+            if ownURL != nil { try? await Task.sleep(for: .milliseconds(150)) }
+            guard !Task.isCancelled else { return }
+            let name = name
+            let url = await Task.detached { OrbFolder.availableURL(for: name, in: OrbFolder.defaultBase) }.value
+            if !Task.isCancelled { ownURL = url }
+        }
     }
 
     private var shownPath: String {
@@ -538,7 +551,7 @@ private struct NewBotFolderSection: View {
         case .own:
             name.trimmingCharacters(in: .whitespaces).isEmpty
                 ? "~/Orbs/…"
-                : OrbFolder.display(OrbFolder.availableURL(for: name, in: OrbFolder.defaultBase))
+                : OrbFolder.display(ownURL ?? ownFallback)
         case .home: "~"
         case .existing(let url): OrbFolder.display(url)
         }
@@ -550,7 +563,7 @@ private struct NewBotFolderSection: View {
         case .own:
             name.trimmingCharacters(in: .whitespaces).isEmpty
                 ? "Pasta própria"
-                : OrbFolder.availableURL(for: name, in: OrbFolder.defaultBase).lastPathComponent
+                : (ownURL ?? ownFallback).lastPathComponent
         case .home: "Pasta pessoal"
         case .existing(let url): url.lastPathComponent
         }
