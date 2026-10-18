@@ -38,9 +38,11 @@ struct ReadFileTool: AgentTool {
         if requested.isInLinkLoop { throw ToolError("Link simbólico em loop (aponta de volta para si mesmo): \(requested.path)") }
         let url = requested.resolvingLinkChain
         guard FileManager.default.fileExists(atPath: url.path) else { throw ToolError.notFound("Arquivo não encontrado", url) }
-        guard !url.isExistingDirectory else { throw ToolError("\(url.path) é uma pasta; use list_directory.") }
-        try url.requireRegularFile()
-        let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        // An .rtfd (a TextEdit note with pictures) is a package: a folder to the file system, one document to the user.
+        let isRTFDPackage = url.pathExtension.lowercased() == "rtfd" && url.isExistingDirectory
+        guard isRTFDPackage || !url.isExistingDirectory else { throw ToolError("\(url.path) é uma pasta; use list_directory.") }
+        if !isRTFDPackage { try url.requireRegularFile() }
+        let size = try isRTFDPackage ? Self.packageSize(url) : (url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0)
 
         if DocumentReader.isPDF(url) || DocumentReader.isImage(url) || DocumentReader.isDocument(url) || OfficeReader.isOffice(url)
             || LegacyExcelReader.isLegacyExcel(url) {
@@ -53,11 +55,13 @@ struct ReadFileTool: AgentTool {
                 return try await runDetached { try DocumentReader.pdfText(data, pages: pages) }
             }
             if DocumentReader.isImage(url) {
-                return try await Task.detached(priority: .userInitiated) { try await DocumentReader.describeImage(at: url, size: size) }.value
+                // ⌘. stops waiting for the reading (Vision cannot be interrupted midway; it finishes on its own, unread).
+                return try await cancellably { try await DocumentReader.describeImage(at: url, size: size) }
             }
             let office = OfficeReader.isOffice(url)
             let legacyExcel = LegacyExcelReader.isLegacyExcel(url)
-            let key = DocumentTextCache.Key(url, size: size)
+            // A package's own date does not change when a file inside it is rewritten: its text is not cached.
+            let key = isRTFDPackage ? nil : DocumentTextCache.Key(url, size: size)
             // A system converter cannot be interrupted midway: ⌘. stops waiting for it (it finishes on its own, unread).
             let text = try await cancellably { try await runDetached {
                 try FileAccess.translating(url, writing: false) {
@@ -84,6 +88,17 @@ struct ReadFileTool: AgentTool {
         if file.invalidUTF8Bytes > 0 { notes.append("UTF-8 com \(file.invalidUTF8Bytes) bytes inválidos (mostrados como \u{FFFD})") }
         if file.lineEnding == .crlf { notes.append("linhas CRLF") }
         return Self.numbered(TextFile.lines(of: file.text), arguments: arguments, note: notes.isEmpty ? nil : notes.joined(separator: ", "))
+    }
+
+    /// The bytes of the files inside a package folder (an .rtfd).
+    private static func packageSize(_ package: URL) -> Int {
+        let files = FileManager.default.enumerator(at: package, includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey])
+        var total = 0
+        while let file = files?.nextObject() as? URL {
+            let values = try? file.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+            if values?.isRegularFile == true { total += values?.fileSize ?? 0 }
+        }
+        return total
     }
 
     /// `cat -n` style page of `lines`, stopping at the line limit or the character budget.
