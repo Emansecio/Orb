@@ -282,7 +282,7 @@ struct GroupNoLimitTests {
         #expect(world.live.usage == GroupUsage(turnsUsed: 31, tokensUsed: 3_000_000))
         await world.fake.wake(first, reply: "Tudo pronto.")
         await world.waitForFinish()
-        #expect(world.events.last?.kind == .groupRunDone && world.events.last?.detail == "32 turnos · 3000 mil tokens")
+        #expect(world.events.last?.kind == .groupRunDone && world.events.last?.detail == "32 turnos · 3 milhões de tokens")
     }
 }
 
