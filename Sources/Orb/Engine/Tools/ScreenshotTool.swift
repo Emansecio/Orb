@@ -97,12 +97,18 @@ struct ScreenshotTool: AgentTool {
         var legend = ""
         /// The OCR was not asked for, or `auto` found the Accessibility tree enough: nothing to say about it.
         var ocrSkipped = false
+        /// The OCR was asked for and failed or ran out of time: "no text" would be a false statement about the picture.
+        var ocrFailed = false
 
         func report(ocrLimit: Int) -> String {
             var text = header
             if !legend.isEmpty { text += "\n" + legend }
             if ocrSkipped { return text }
-            return text + (ocr.isEmpty ? "\nNão achei texto legível na imagem." : "\nTexto na imagem (OCR):\n" + ocr.truncated(to: ocrLimit))
+            if ocr.isEmpty {
+                return text + (ocrFailed ? "\nNão consegui ler o texto da imagem (a leitura falhou ou demorou demais); isso não quer dizer que não haja texto nela."
+                                         : "\nNão achei texto legível na imagem.")
+            }
+            return text + "\nTexto na imagem (OCR):\n" + ocr.truncated(to: ocrLimit)
         }
     }
 
@@ -151,15 +157,21 @@ struct ScreenshotTool: AgentTool {
         }
 
         let wantsText = OCRPolicy.shouldRun(mode: ocrMode, labeledElements: nil)
-        let text = wantsText ? (try? await withDeadline(Self.ocrDeadline, "a leitura do texto da imagem") {
-            try await TextRecognizer.recognizeWithTables(imageAt: file)
-        }) ?? "" : ""
+        var text = ""
+        var ocrFailed = false
+        if wantsText {
+            do {
+                text = try await withDeadline(Self.ocrDeadline, "a leitura do texto da imagem") {
+                    try await TextRecognizer.recognizeWithTables(imageAt: file)
+                }
+            } catch { ocrFailed = true }
+        }
         var report = "Captura salva em \(file.path) (\(size.width)×\(size.height) px)."
         if !hadAccess {
             report += "\nWarning: Orb does not have Screen Recording yet, so the capture may show only the wallpaper, without "
                 + "windows. " + ScreenshotImage.permissionAdvice
         }
-        return Capture(header: report, ocr: text, file: file, ocrSkipped: !wantsText)
+        return Capture(header: report, ocr: text, file: file, ocrSkipped: !wantsText, ocrFailed: ocrFailed)
     }
 
     // MARK: A window
@@ -387,11 +399,13 @@ struct ScreenshotTool: AgentTool {
         // OCR on the raw picture (badges would be read as text), only when the tree says too little.
         let wantsText = image != nil && OCRPolicy.shouldRun(mode: ocrMode, labeledElements: trusted && ax != nil ? reading?.labeled : nil)
         var text = ""
+        var ocrFailed = false
         if wantsText, let image {
-            if let found = try? await Self.recognize(image) {
+            do {
+                let found = try await Self.recognize(image)
                 // Tables first: they are what the lines cannot show, and the limit on the OCR cuts from the end.
                 text = (found.tables.map { $0 + "\nTexto corrido (com a posição):\n" } ?? "") + TextRecognizer.format(found.lines)
-            }
+            } catch { ocrFailed = true }
         }
 
         // The picture the model gets: the marks on it, as a JPEG that fits.
@@ -436,7 +450,7 @@ struct ScreenshotTool: AgentTool {
         } else if wantsMarks, reading != nil {
             legend = "Nenhum elemento clicável visível nesta janela."
         }
-        return Capture(header: header, ocr: text, file: file, legend: legend, ocrSkipped: !wantsText)
+        return Capture(header: header, ocr: text, file: file, legend: legend, ocrSkipped: !wantsText, ocrFailed: ocrFailed)
     }
 
     private static func message(_ error: any Error) -> String {
