@@ -242,7 +242,9 @@ struct ConversationLedger: Codable, Sendable, Equatable {
 
     private mutating func absorbUser(_ message: ChatMessage) {
         var text = MemoryText.flatten(TurnPreface.userWords(message.content))
-        if text.isEmpty, !message.images.isEmpty { text = "(imagem anexada)" }
+        // A picture alone is worth a line in the timeline, but it is not a new task: the goal stays.
+        let isPlaceholder = text.isEmpty && !message.images.isEmpty
+        if isPlaceholder { text = "(imagem anexada)" }
         let question = openQuestion
         openQuestion = nil
         guard !text.isEmpty else { return }
@@ -264,7 +266,7 @@ struct ConversationLedger: Codable, Sendable, Equatable {
             return
         }
         add(Entry(text: Self.clip(text, Self.requestLimit), isDecision: false))
-        if text.count >= Self.minimumGoal { goal = Self.clip(text, Self.goalLimit) }
+        if text.count >= Self.minimumGoal, !isPlaceholder { goal = Self.clip(text, Self.goalLimit) }
     }
 
     private mutating func add(_ entry: Entry) {
@@ -465,7 +467,9 @@ struct ConversationLedger: Codable, Sendable, Equatable {
         let paragraph = text.components(separatedBy: "\n\n").last { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? text
         let flat = MemoryText.flatten(paragraph)
         var start = flat.startIndex
-        for index in flat.indices where index < flat.index(before: flat.endIndex) && ".!?".contains(flat[index]) {
+        // A sentence ends at punctuation followed by a space, so "settings.json?" and "2.5" stay whole (as in `sentences(of:)`).
+        for index in flat.indices where index < flat.index(before: flat.endIndex) && ".!?".contains(flat[index])
+            && flat[flat.index(after: index)].isWhitespace {
             start = flat.index(after: index)
         }
         return clip(String(flat[start...]), questionLimit)
@@ -570,17 +574,15 @@ struct ConversationLedger: Codable, Sendable, Equatable {
 
 // MARK: - What a tool call touches
 
-/// A tool call as the ledger needs it: what it is called, which files it writes, which it only reads, and a key
+/// A tool call as the ledger needs it: which files it writes, which it only reads, and a key
 /// to recognize the same action again (so a failure is forgotten when a later attempt works).
 private struct ToolReference {
-    var name: String
     var key: String
     var label: String
     var written: [String] = []
     var consulted: [String] = []
 
     init(_ call: ToolCallRequest) {
-        name = call.name
         let arguments = JSONValue.parse(call.arguments) ?? .object([:])
         let path = arguments["path"]?.string.flatMap { $0.isEmpty ? nil : $0 }
         switch call.name {
