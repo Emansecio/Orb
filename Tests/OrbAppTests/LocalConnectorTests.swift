@@ -1,3 +1,4 @@
+import EventKit
 import Foundation
 import Testing
 @testable import Orb
@@ -319,6 +320,27 @@ struct CalendarConnectorTests {
         #expect(early.hasPrefix("Nenhum evento"))
         #expect(connector.tools.first { $0.name == "search_events" }?.description.contains("Finds events") == true)
         #expect(LocalDates.hasTime("2026-10-10T08:00") && !LocalDates.hasTime(" 2026-10-10 "))
+    }
+
+    /// Confirming all_day or moving only the start of a multi-day all-day event keeps the days it spans.
+    @Test func updatingAMultiDayAllDayEventKeepsItsLength() throws {
+        func makeEvent() -> EKEvent {
+            let event = EKEvent(eventStore: EKEventStore())
+            event.isAllDay = true
+            event.startDate = at("2026-10-10")
+            event.endDate = at("2026-10-12T23:59:59")
+            return event
+        }
+        let calendar = Calendar.current
+        let confirmed = makeEvent()
+        try EventKitBackend.apply(EventDraft(title: "x", isAllDay: true), to: confirmed, creating: false)
+        #expect(calendar.isDate(confirmed.endDate, inSameDayAs: at("2026-10-12")))
+        let moved = makeEvent()
+        try EventKitBackend.apply(EventDraft(start: at("2026-10-11")), to: moved, creating: false)
+        #expect(calendar.isDate(moved.startDate, inSameDayAs: at("2026-10-11")) && calendar.isDate(moved.endDate, inSameDayAs: at("2026-10-13")))
+        let created = EKEvent(eventStore: EKEventStore())
+        try EventKitBackend.apply(EventDraft(title: "n", start: at("2026-10-10"), isAllDay: true), to: created, creating: true)
+        #expect(calendar.isDate(created.endDate, inSameDayAs: at("2026-10-10")))
     }
 
     @Test func badPeriodsAreExplained() async {

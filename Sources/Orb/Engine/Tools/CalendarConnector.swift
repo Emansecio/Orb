@@ -372,7 +372,7 @@ final class EventKitBackend: CalendarBackend, @unchecked Sendable {
         return gone
     }
 
-    private static func apply(_ draft: EventDraft, to event: EKEvent, creating: Bool) throws {
+    static func apply(_ draft: EventDraft, to event: EKEvent, creating: Bool) throws {
         if let title = draft.title { event.title = title }
         if let location = draft.location { event.location = location }
         if let notes = draft.notes { event.notes = notes }
@@ -388,7 +388,13 @@ final class EventKitBackend: CalendarBackend, @unchecked Sendable {
         if let finish = draft.end {
             end = event.isAllDay ? endOfDay(finish) : finish // an all-day event ends at the end of its last day
         } else if event.isAllDay {
-            end = endOfDay(start)
+            if !creating, let oldStart, let oldEnd {
+                // moving the start (or confirming all_day) keeps the number of days the event spans
+                let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: oldStart), to: calendar.startOfDay(for: oldEnd)).day ?? 0
+                end = endOfDay(calendar.date(byAdding: .day, value: max(days, 0), to: start) ?? start)
+            } else {
+                end = endOfDay(start)
+            }
         } else if !creating, let oldStart, let oldEnd {
             end = start.addingTimeInterval(max(oldEnd.timeIntervalSince(oldStart), 60)) // moving the start keeps the length
         } else {
