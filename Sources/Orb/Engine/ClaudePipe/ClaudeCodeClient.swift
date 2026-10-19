@@ -41,6 +41,13 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
         "MAX_MCP_OUTPUT_TOKENS": "200000",
     ]
 
+    /// The CLI's environment: the launch's, plus ours, plus the cache lifetime when the caller chose one.
+    static func environment(_ base: [String: String], cacheTTL: String?) -> [String: String] {
+        var added = pipeEnvironment
+        if let cacheTTL { added["CLAUDE_CODE_PROMPT_CACHE_TTL"] = cacheTTL }
+        return base.merging(added) { _, ours in ours }
+    }
+
     private let launch: LaunchProvider
     private let orbBinary: URL
     private let folders: ClaudePipeFolders
@@ -48,6 +55,11 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
     private let parkTimeout: Duration
     /// Sent as `--effort` (a level the model lists, see `ReasoningEffort.sent`); nil leaves the CLI's default.
     private let effort: String?
+    /// Sent as `CLAUDE_CODE_PROMPT_CACHE_TTL` ("5m" or "1h"); nil leaves the CLI's own choice (an hour on a subscription).
+    private let cacheTTL: String?
+    /// A short tag of the conversation for the cache metrics, when the caller has an id (see `ClaudePipeMetric.tag`).
+    private let conversationTag: String?
+    private let metrics: ClaudePipeMetricsLog
 
     /// What a step left behind: the live process waiting at the model's tool calls, and the messages of the call that got there.
     private struct Parked {
@@ -69,9 +81,13 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
 
     init(launch: @escaping LaunchProvider = ClaudeCodeClient.installedLaunch, orbBinary: URL = ClaudeCodeClient.currentBinary,
          folders: ClaudePipeFolders = .standard, initializeTimeout: Duration = .seconds(60), parkTimeout: Duration = .seconds(30 * 60),
-         effort: String? = nil) {
+         effort: String? = nil, cacheTTL: String? = nil, conversationID: String? = nil) {
         self.launch = launch
         self.effort = effort
+        self.cacheTTL = cacheTTL
+        self.conversationTag = conversationID.map(ClaudePipeMetric.tag(of:))
+        // Next to `cwd` and `runs`, so a test's folders keep its metrics out of the real data folder.
+        self.metrics = ClaudePipeMetricsLog(file: folders.scratch.deletingLastPathComponent().appending(path: "cache-metrics.jsonl"))
         self.orbBinary = orbBinary
         self.folders = folders
         self.initializeTimeout = initializeTimeout
@@ -95,7 +111,7 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
 
     private enum Plan {
         case resume(ClaudePipeRun, results: [(id: String, result: ClaudePipeToolResult)], extras: [ChatMessage])
-        case fresh
+        case fresh(ClaudePipeMetric.FreshReason)
     }
 
     func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
@@ -119,13 +135,13 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
             return (state.parked, state.active, state.generation)
         }
         superseded?.stop(interrupt: true)
-        guard let parked else { return (.fresh, generation) }
+        guard let parked else { return (.fresh(.noParked), generation) }
         parked.expiry.cancel()
         if toolChoice == .auto, let found = Self.continuation(of: messages, after: parked.previous, toolIDs: parked.toolIDs) {
             return (.resume(parked.run, results: found.results, extras: found.extras), generation)
         }
         parked.run.stop(interrupt: false)
-        return (.fresh, generation)
+        return (.fresh(toolChoice == .auto ? .notContinuation : .toolChoice), generation)
     }
 
     /// Whether `messages` is exactly what the engine sends after running the parked tool calls: the previous call's messages, the
@@ -150,6 +166,7 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
     private func produce(_ plan: Plan, generation: Int, model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice,
                          into continuation: AsyncThrowingStream<LLMEvent, Error>.Continuation) async {
         var started: ClaudePipeRun?
+        var freshReason: ClaudePipeMetric.FreshReason?
         do {
             let run: ClaudePipeRun
             switch plan {
@@ -158,7 +175,8 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
                 started = parked
                 guard register(parked, generation: generation) else { throw CancellationError() }
                 try await parked.resume(results: results, extras: extras)
-            case .fresh:
+            case .fresh(let reason):
+                freshReason = reason
                 run = try await begin(model: model, messages: messages, tools: tools, toolChoice: toolChoice)
                 started = run
                 guard register(run, generation: generation) else { throw CancellationError() }
@@ -166,6 +184,9 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
             }
             let step = try await run.readStep { continuation.yield($0) }
             try Task.checkCancellation()
+            metrics.record(ClaudePipeMetric(timestamp: Date(), conversation: conversationTag, model: model, fresh: freshReason,
+                                            messageCount: messages.count, characterCount: messages.reduce(0) { $0 + $1.content.count },
+                                            usage: step.usage))
             if step.stop == .toolUse, !step.calls.isEmpty {
                 // Parked before the engine hears of the calls: its next `stream` call may come at once.
                 guard park(run, messages: messages, toolIDs: step.calls.map(\.id), generation: generation) else { throw CancellationError() }
@@ -286,7 +307,7 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
             let prompt = split.prompt.isEmpty && split.images.isEmpty ? "continue" : split.prompt
             let firstLine = try ClaudePipeSession.userLine(prompt, images: split.images)
             let process = try LineProcess(executable: launch.executable, arguments: arguments, directory: folders.workingDirectory,
-                                          environment: launch.environment.merging(Self.pipeEnvironment) { _, ours in ours })
+                                          environment: Self.environment(launch.environment, cacheTTL: cacheTTL))
             let run = ClaudePipeRun(process: process, mailbox: mailbox, cleanup: created, firstLine: firstLine)
             do {
                 try await run.initialize(timeout: initializeTimeout)

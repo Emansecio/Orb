@@ -628,6 +628,12 @@ final class AppModel {
     /// Observable per Orb (the status line is set for exactly as long as a turn runs).
     func isWorking(_ botID: UUID) -> Bool { live(botID).isWorking }
 
+    /// The cache lifetime a routine's own run asks of Claude Code (see `Schedule.cacheTTL`); nil for chat, groups and requests.
+    private func routineCacheTTL(of session: BotSession) -> String? {
+        guard let id = session.routineID, session.sideKind == nil || session.sideKind == .routine else { return nil }
+        return routines.first { $0.id == id }?.schedule.cacheTTL()
+    }
+
     func routines(for botID: UUID) -> [Routine] { routines.filter { $0.botID == botID } }
 
     var enabledSkills: [Skill] { skills.filter(\.isEnabled) }
@@ -1618,7 +1624,8 @@ final class AppModel {
                 guard let made = clientOverride?() ?? account.client(for: modelInfo, credentials: Self.credentials(for: ref.provider),
                                                                       conversationID: sessionID,
                                                                       effort: ReasoningEffort.sent(bot.effort, for: modelInfo),
-                                                                      replyTokens: budget.replyTokens) else { throw LLMError.notConfigured }
+                                                                      replyTokens: budget.replyTokens,
+                                                                      cacheTTL: routineCacheTTL(of: session)) else { throw LLMError.notConfigured }
                 client = made
             } catch {
                 session.failSetup(error, turn: turn)
