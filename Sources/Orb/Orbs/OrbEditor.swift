@@ -122,21 +122,19 @@ struct OrbEditor: View {
     // MARK: Stage
 
     private var stage: some View {
-        let palette = OrbCatalog.shared.palette(config.color)
         let orb = stageOrb, compact = isCompact
         let spot = 230 * orb / Self.stageOrb
         return VStack(spacing: compact ? 8 : 10) {
             OrbView(config: config, activity: previewActivity, size: orb, poke: poke, interactive: true,
                     accessibilityText: "Prévia do Orb: \(config.summary). \(previewActivity.label).")
                 .background {
-                    // A soft spotlight in the Orb's own glow color, so each palette is shown in its best light.
+                    // A soft neutral spotlight: the satin Orb has no glow of its own to spill around it.
                     // (A circle stretched sideways, so the gradient fades out exactly at its edge.)
                     Circle()
-                        .fill(RadialGradient(colors: [palette.glow.opacity(0.2), palette.core.opacity(0.06), .clear],
+                        .fill(RadialGradient(colors: [Color.white.opacity(0.07), Color.white.opacity(0.02), .clear],
                                              center: .center, startRadius: 0, endRadius: spot / 2))
                         .frame(width: spot, height: spot)
                         .scaleEffect(x: 1.55, y: 1)
-                        .animation(reduceMotion ? nil : .easeInOut(duration: 0.45), value: config.color)
                         .accessibilityHidden(true)
                 }
                 .padding(.top, OrbStageRoom.headroom(for: orb))

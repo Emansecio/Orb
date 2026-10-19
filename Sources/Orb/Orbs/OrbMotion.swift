@@ -135,7 +135,11 @@ enum OrbStageRoom {
 
 /// Contact shadow under the orb: narrower, flatter and fainter the higher the orb is, wider while it squashes
 /// or grows under the pointer. Scales are relative to the orb size; at rest it is 1.05 × 0.2 at full opacity.
+/// Neutral (black), not the palette's color: the satin Orb has no glow to cast on the floor.
 enum OrbShadow {
+    /// Black's opacity at the center and halfway out, then clear at the edge.
+    static let stops = [0.44, 0.1]
+
     static func ground(for pose: OrbPose) -> (width: Double, height: Double, opacity: Double) {
         let air = max(0, pose.lift)
         let width = 1.05 * max(0.2, 1 - pose.lift * 2) * (1 + 0.8 * pose.squash + 0.04 * pose.hover)

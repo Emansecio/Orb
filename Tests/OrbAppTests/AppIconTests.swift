@@ -35,6 +35,9 @@ import Testing
         #expect(below > 0 && below < 120)
         #expect(above < below)
         #expect(pixel(data, width: 1024, x: 512, y: 1020).a == 0)
+        // No hairline: the tile's outermost row is the tile color (macOS 26+ draws its own rim over it).
+        let edge = pixel(data, width: 1024, x: 512, y: 101), inside = pixel(data, width: 1024, x: 512, y: 140)
+        #expect(edge.r == inside.r && edge.g == inside.g && edge.b == inside.b)
     }
 
     @Test func theTileIsGraphiteTheOrbIndigoAndTheRingCrossesIt() {

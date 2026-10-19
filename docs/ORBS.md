@@ -1,8 +1,8 @@
 # Orbs
 
-No app Orb, cada assistente é um **Orb**: uma esfera de gel translúcido e brilhante, iluminada como um objeto
-3D macio (luz do alto à esquerda, reflexo de janela, aro fosco, brilho que sai pela base) e animada ao vivo no
-app. Todos os Orbs têm o mesmo formato redondo; a identidade vem da cor, do rosto, do cabelo e dos acessórios.
+No app Orb, cada assistente é um **Orb**: uma esfera **acetinada**, como vinil de toque macio, iluminada como um objeto
+3D (luz difusa do alto à esquerda com sombra de forma, aro fosco fino, um lustro largo e baixo; sem reflexo de janela,
+ponto de luz, aura nem brilho saindo pela base) e animada ao vivo no app. Todos os Orbs têm o mesmo formato redondo; a identidade vem da cor, do rosto, do cabelo e dos acessórios.
 
 Este documento cobre o lado do app: opções, atividades, jeito, movimento, onde os Orbs aparecem e o sistema de animação
 (desempenho incluído). **A arte e o gerador estão descritos em [art/README.md](../art/README.md)**; é lá que se vê como as
@@ -89,7 +89,7 @@ orb.hair = "tufinho"; orb.accessories = ["laco"]; orb.accentColor = 0xFF4F8B
 - **Novo Orb** (⌘N): o formulário (nome, papel, modelo, pasta e opções avançadas) à esquerda e o editor à direita.
 - **Painel do Orb** (⌥⌘B): no cabeçalho, **"Personalizar…"** abre o mesmo editor numa folha. O menu de contexto do Orb na
   barra lateral também tem "Personalizar…" (`AppModel.showLookEditor`).
-- O editor (`OrbEditor`) tem um palco ao vivo de 144 pt com holofote na cor do Orb (clicável, com prévia de
+- O editor (`OrbEditor`) tem um palco ao vivo de 144 pt com holofote neutro (clicável, com prévia de
   cada atividade), categorias em três grupos (**Corpo**: Cor, Jeito; **Rosto**: Olhos, Boca, Sobrancelhas,
   Bochechas, Bigode; **Estilo**: Cabelo, Acessórios), miniaturas que enquadram o que mudam (close do rosto para
   os traços, cabeça com espaço em cima para cabelo e chapéus; animam ao passar o mouse), cores com nome (anel
@@ -131,7 +131,7 @@ A atividade de cada Orb é calculada no `BotLive` do Orb (`BotLive.activity`, um
 | Tarefa que parou no meio, resposta cortada | um suspiro (`OrbCue.sigh`), sem alegria | — | — | respira fundo | — |
 | Rotina pausada (cartão na página Rotinas) | `sleepy` | “sono” | baixo | inclinado, respirando | z |
 
-O brilho (aura e sombra no chão) pulsa enquanto o Orb trabalha (`0,89 + 0,11·sin(2,4 t)`: abaixo de 1, para a opacidade
+A sombra no chão (neutra, preta, não na cor do Orb; `OrbShadow.stops`) pulsa enquanto o Orb trabalha (`0,89 + 0,11·sin(2,4 t)`: abaixo de 1, para a opacidade
 não saturar, e devagar o bastante para um quadro a 10 fps mudar menos de ¼ de pixel). "Conectores" e "memória" (`remember`/`recall`) mostram
 `thinking`, como o raciocínio; ler arquivos mostra `reading`; `search_files`, `grep` e `glob` mostram `searching`.
 

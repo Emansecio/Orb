@@ -80,6 +80,8 @@ struct HairRenderer: Sendable {
     let style: HairStyle
 
     private static let hitEpsilon = 0.0006
+    /// How much of the strand highlight is kept (1 was the glossy gel look).
+    static let satin = 0.35
 
     func render() -> (base: Canvas, shine: Canvas) {
         let base = Canvas.render { u, v in shade(u, v).base }
@@ -214,7 +216,8 @@ struct HairRenderer: Sendable {
         }
         spec *= mix(0.15, 1, shadow) * clamp(dot(n, Light.key) + 0.4)
         let rim = pow(1 - clamp(n.z), 3) * clamp(dot(n, Light.rim) + 0.5) * 0.16
-        let a = clamp(spec + rim)
+        // A third of the old shine, to sit on the satin body: a sheen on the strands, not wet-look hair.
+        let a = clamp(spec + rim) * Self.satin
         return Pixel(a, a, a, a)
     }
 

@@ -111,11 +111,9 @@ final class OrbAnimationView: NSView {
     // Layers (bottom-left origin, like AppKit)
     private let stage = CALayer()
     private let ground = CAGradientLayer()
-    private let aura = CAGradientLayer()
     private let orb = CALayer()
     private let bubble = CATextLayer()
     private var placed: [Placed] = []
-    private var shownColor = ""
     private var shownBubble: String?
     /// Backing scale the layers were built for (a window moving to another display rebuilds them).
     private var builtScale: CGFloat = 0
@@ -234,13 +232,11 @@ final class OrbAnimationView: NSView {
         super.init(frame: frame)
         wantsLayer = true
         layer?.masksToBounds = false
-        for item in [ground, aura] {
-            item.type = .radial
-            item.startPoint = CGPoint(x: 0.5, y: 0.5)
-            item.endPoint = CGPoint(x: 1, y: 1)
-        }
+        ground.type = .radial
+        ground.startPoint = CGPoint(x: 0.5, y: 0.5)
+        ground.endPoint = CGPoint(x: 1, y: 1)
         ground.locations = [0, 0.5, 1]
-        aura.locations = [0, 0.4, 1]
+        ground.colors = OrbShadow.stops.map { NSColor.black.withAlphaComponent($0).cgColor } + [NSColor.clear.cgColor]
         bubble.alignmentMode = .center
         bubble.masksToBounds = true
         // Nearly opaque, so it reads as in front of the orb: the bow and the hat brim sit right behind it.
@@ -250,7 +246,7 @@ final class OrbAnimationView: NSView {
         bubble.isHidden = true
         stage.masksToBounds = false
         orb.masksToBounds = false
-        [ground, aura, orb, bubble].forEach(stage.addSublayer)
+        [ground, orb, bubble].forEach(stage.addSublayer)
         layer?.addSublayer(stage)
     }
 
@@ -460,13 +456,6 @@ final class OrbAnimationView: NSView {
             shownBubble = nil
         }
 
-        if resize || shownColor != config.color {
-            shownColor = config.color
-            let core = NSColor(OrbCatalog.shared.palette(config.color).core)
-            ground.colors = [core.withAlphaComponent(0.55).cgColor, core.withAlphaComponent(0.12).cgColor, NSColor.clear.cgColor]
-            aura.colors = [core.withAlphaComponent(0.28).cgColor, core.withAlphaComponent(0.28).cgColor, NSColor.clear.cgColor]
-        }
-
         let current = placed.map(\.layer)
         if resize || layers != current {
             let fades = waited || (!current.isEmpty && !resize)
@@ -532,7 +521,6 @@ final class OrbAnimationView: NSView {
         stage.frame = stageFrame
         ground.bounds = CGRect(x: 0, y: 0, width: size, height: size)
         ground.position = CGPoint(x: side / 2, y: side / 2 - size * 0.5)
-        aura.bounds = CGRect(x: 0, y: 0, width: size * 1.5, height: size * 1.5)
         orb.bounds = CGRect(x: 0, y: 0, width: side, height: side)
         orb.anchorPoint = CGPoint(x: 0.5, y: 1 - OrbGeometry.orbBottom)
     }
@@ -982,8 +970,6 @@ final class OrbAnimationView: NSView {
         let shadow = OrbShadow.ground(for: pose)
         ground.transform = CATransform3DMakeScale(shadow.width, shadow.height, 1)
         ground.opacity = Float(shadow.opacity)
-        aura.position = CGPoint(x: mid, y: mid + lift)
-        aura.opacity = Float(pose.glow)
 
         // Body: squash/tilt around the orb's bottom, then lift, shake and hover
         orb.position = CGPoint(x: mid + pose.shake * size, y: side * (1 - OrbGeometry.orbBottom) + lift)

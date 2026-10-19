@@ -120,24 +120,17 @@ struct WizardPreviewPane: View {
     }
 
     private var stage: some View {
-        let palette = OrbCatalog.shared.palette(look.color)
         let size = draft.ready ? Self.readyOrbSize : Self.orbSize
         let curve = Motion.adapted(Motion.crossFade, reduceMotion: reduceMotion)
         return ZStack {
-            // A soft spotlight behind the Orb and the pool of light on the floor under it, in the Orb's own color. The color
-            // changes on the same curve as the look.
+            // A soft neutral spotlight behind the Orb (the satin Orb has no glow of its own; its shadow on the floor is
+            // drawn by OrbView).
             Ellipse()
-                .fill(RadialGradient(colors: [palette.glow.opacity(0.2), palette.core.opacity(0.06), .clear],
+                .fill(RadialGradient(colors: [Color.white.opacity(0.07), Color.white.opacity(0.02), .clear],
                                      center: .center, startRadius: 0, endRadius: 150))
                 .frame(width: 360, height: 300)
                 .offset(y: -6)
                 .allowsHitTesting(false).accessibilityHidden(true) // light only: it spills past the stage onto Desenhar/Aleatório
-            Rectangle()
-                .fill(EllipticalGradient(colors: [palette.glow.opacity(0.34), palette.core.opacity(0.1), palette.core.opacity(0)],
-                                         center: .center, startRadiusFraction: 0, endRadiusFraction: 0.5))
-                .frame(width: 340, height: 76)
-                .offset(y: size / 2 + 2)
-                .allowsHitTesting(false).accessibilityHidden(true)
             ZStack {
                 OrbView(config: look, activity: shownActivity, size: size, poke: poke, interactive: true,
                         accessibilityText: "Prévia do Orb: \(look.summary). \(shownActivity.label).")

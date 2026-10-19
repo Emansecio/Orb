@@ -181,25 +181,17 @@ private struct OrbPainter {
 
     @MainActor
     func draw(in context: inout GraphicsContext) {
-        let palette = OrbCatalog.shared.palette(config.color)
         let center = CGPoint(x: side / 2, y: side / 2)
         let lift = pose.lift * size
 
-        // Ground glow (soft ellipse that shrinks and fades while the orb is in the air), as in the live orb
+        // Ground shadow (soft ellipse that shrinks and fades while the orb is in the air), as in the live orb
         let shadow = OrbShadow.ground(for: pose)
         var ground = context
         ground.translateBy(x: center.x, y: center.y + size * 0.5)
         ground.scaleBy(x: shadow.width, y: shadow.height)
         ground.fill(Path(ellipseIn: CGRect(x: -size / 2, y: -size / 2, width: size, height: size)),
-                    with: .radialGradient(Gradient(colors: [palette.core.opacity(0.55 * shadow.opacity),
-                                                            palette.core.opacity(0.12 * shadow.opacity), .clear]),
+                    with: .radialGradient(Gradient(colors: OrbShadow.stops.map { Color.black.opacity($0 * shadow.opacity) } + [.clear]),
                                           center: .zero, startRadius: 0, endRadius: size / 2))
-        // Aura
-        let aura = CGRect(x: center.x - size * 0.75, y: center.y - lift - size * 0.75, width: size * 1.5, height: size * 1.5)
-        context.fill(Path(ellipseIn: aura),
-                     with: .radialGradient(Gradient(colors: [palette.core.opacity(0.28 * pose.glow), .clear]),
-                                           center: CGPoint(x: aura.midX, y: aura.midY),
-                                           startRadius: size * 0.3, endRadius: size * 0.75))
 
         // Body transform: squash/tilt around the orb's bottom, then lift, shake and hover
         var orb = context

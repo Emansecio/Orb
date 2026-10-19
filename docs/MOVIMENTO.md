@@ -375,8 +375,8 @@ O que usa cada padrão:
 - **Paleta ⌘K e popover de modelos.** "Nada encontrado" e a lista em `.quiet`; recolher um provedor gira a seta em `Motion.content` (sem giro com Reduzir
   movimento) e as linhas saem em `.quiet`. A digitação e as setas seguem instantâneas.
 - **Botões do aviso do chat** (`NoticeLine`): a transição já existia, agora há o gatilho (`offersActions && !actions.isEmpty`).
-- **Curvas literais.** Saíram todas as de página; ficam só o pulso do banner e do cartão de conectar (`easeOut(0.25)`, raro), o holofote do Orb no editor
-  (0,45 s) e o `.snappy` do próprio Orb, que são da zona do Orb.
+- **Curvas literais.** Saíram todas as de página; ficam só o pulso do banner e do cartão de conectar (`easeOut(0.25)`, raro) e o `.snappy`
+  do próprio Orb, que é da zona do Orb. (O holofote do editor era animado ao trocar de cor; desde o acetinado ele é neutro e não muda.)
 
 **Do sistema, sem mexer:** apresentação de toda `.sheet`; `NSAlert`, alertas e `confirmationDialog`; paleta ⌘K abrindo e fechando; a janela e as abas de
 Ajustes (incluindo o redimensionamento); popovers; `Menu` e `contextMenu`; `fileImporter`, `NSOpenPanel`, Quick Look e notificações; o `MenuBarExtra`; tooltips;

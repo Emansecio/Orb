@@ -1,6 +1,6 @@
 # Orbs: personagens 3D do app Orb
 
-Esferas de gel translúcido com luz de objeto 3D macio. A arte das camadas vem de duas ferramentas:
+Esferas acetinadas (vinil de toque macio) com luz de objeto 3D: difusa, sombra de forma, aro fosco fino e um lustro largo, sem reflexo nem brilho saindo pela base; o brilho dos fios do cabelo é um terço do antigo (`HairRenderer.satin`). A arte das camadas vem de duas ferramentas:
 
 - **`orbgen/`** (Swift, CPU, reproduzível): o **corpo** iluminado de cada cor, os **cabelos** (campos de
   distância, com camada `-brilho` sem tinta e versão `-chapeu`), o **assentamento** dos traços planos (sombra de
@@ -8,7 +8,7 @@ Esferas de gel translúcido com luz de objeto 3D macio. A arte das camadas vem d
 - **Blender (Cycles)** por script (`orbs.py`): os **traços planos** (olhos, bocas, sobrancelhas, bochechas,
   bigodes, visemas, acessórios), gravados em `orbgen/flat/`.
 
-O visual do gel foi calibrado lado a lado com `reference/orb-ref.png`.
+O gel brilhante de antes foi calibrado com `reference/orb-ref.png`; o acetinado (2026-10) troca o reflexo, o ponto de luz e a luz da base por luz difusa e um lustro baixo (`Body.swift`).
 
 ```bash
 G="swift run -c release --package-path art/orbgen orbgen"

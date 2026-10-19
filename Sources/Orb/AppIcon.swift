@@ -46,8 +46,6 @@ enum AppIcon {
 
     enum Colors {
         static let tile: UInt32 = 0x121216
-        /// The hairline inside the tile's edge, so it holds on a dark wallpaper.
-        static let hairline: UInt32 = 0x2E2E38
         static let orb: UInt32 = 0x4A3AF0
         static let face: UInt32 = 0xFFFFFF
         static let ring: UInt32 = 0xFFFFFF
@@ -92,7 +90,8 @@ enum AppIcon {
         drawEyes(ctx, orb: orb, scale: small ? (pixels <= 16 ? 1.25 : 1.1) : 1)
         if !small { drawRing(ctx, space: space, around: center, width: ringWidth, front: true) }
         ctx.restoreGState()
-        drawEdge(ctx, tile: squircle)
+        // No hairline along the edge: macOS 26+ draws its own light rim on every icon, and a line of ours under it
+        // made that rim brighter than on the other icons in the Dock.
         return ctx.makeImage()!
     }
 
@@ -144,19 +143,6 @@ enum AppIcon {
             ctx.addPath(CGPath(roundedRect: rect, cornerWidth: width / 2, cornerHeight: width / 2, transform: nil))
             ctx.fillPath()
         }
-    }
-
-    /// The hairline along the tile's edge, on top of everything, inside the tile.
-    private static func drawEdge(_ ctx: CGContext, tile squircle: CGPath) {
-        ctx.saveGState()
-        // Clipped to the tile: only the inner half of the line is drawn.
-        ctx.addPath(squircle)
-        ctx.clip()
-        ctx.addPath(squircle)
-        ctx.setLineWidth(6)
-        ctx.setStrokeColor(color(Colors.hairline))
-        ctx.strokePath()
-        ctx.restoreGState()
     }
 
     private static func color(_ hex: UInt32, _ alpha: CGFloat = 1) -> CGColor {
