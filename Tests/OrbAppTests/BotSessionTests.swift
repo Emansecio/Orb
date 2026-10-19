@@ -379,6 +379,48 @@ private struct WritingModel: LLMClient {
         #expect(Array(model.transcript(a).prefix(chat.items.count)).map(\.id) == chat.items.map(\.id))
     }
 
+    @Test @MainActor func aMessageWrittenDuringARoutineWaitsForItsEndAndThenGoes() async throws {
+        let gates = Gates()
+        let (model, a, _, routines) = setUp(gates)
+        await model.loadRemainingConversations()
+        defer { Task { await gates.openAll(allKeys) } }
+
+        model.runRoutine(routines[0].id)
+        await model.routineStarted()
+        await modelCalls(gates, 1)
+        #expect(!model.canSteer(a) && model.canQueue(a)) // it cannot join the run, but it can wait for it
+        #expect(model.submit("PEDIDO-A", to: a))
+        #expect(model.composerLane(a).queued.map(\.delivery) == [.afterTask]) // never into the routine's task
+        #expect(model.drafts[a, default: ""].isEmpty)
+
+        await gates.open("PEDIDO-RA")
+        await gates.open("PEDIDO-A")
+        // Sent as the chat's next request once the run ended (the reply's token may be the run's, which the turn is told of).
+        await waitUntil("the queued message to be answered in the chat") { texts(model, a).bot.count == 1 }
+        await waitUntilIdle(model, a)
+        #expect(model.composerLane(a).queued.isEmpty)
+        #expect(texts(model, a).user == ["PEDIDO-A"])
+        let ownRun = try #require(store.readRoutineConversation(routine: routines[0].id, for: a).value)
+        #expect(!ownRun.messages.contains { $0.content.contains("PEDIDO-A") })
+    }
+
+    @Test @MainActor func stoppingARoutineGivesBackWhatWaitedForIt() async throws {
+        let gates = Gates()
+        let (model, a, _, routines) = setUp(gates)
+        await model.loadRemainingConversations()
+        defer { Task { await gates.openAll(allKeys) } }
+
+        model.runRoutine(routines[0].id)
+        await model.routineStarted()
+        await modelCalls(gates, 1)
+        #expect(model.submit("PEDIDO-A", to: a))
+        model.stopTurn(a)
+        await waitUntilIdle(model, a)
+        #expect(model.composerLane(a).queued.isEmpty)
+        #expect(model.drafts[a] == "PEDIDO-A") // back in the composer, not sent
+        #expect(texts(model, a).user.isEmpty)
+    }
+
     @Test @MainActor func aRoutineWaitingForPermissionCanBeAnsweredFromTheApp() async throws {
         let gates = Gates()
         let (model, a, _, routines) = setUp(gates)

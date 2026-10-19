@@ -761,7 +761,8 @@ struct SteeringEngineTests {
         #expect(model.runningRoutineName(bot.id) == nil)
     }
 
-    @Test @MainActor func aRoutineRunCannotTakeYourMessages() async throws {
+    /// A message cannot join a routine's run: it waits for the run's end (`AppModel.canQueue`), never steering it.
+    @Test @MainActor func aRoutineRunQueuesYourMessagesForAfterIt() async throws {
         let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
@@ -772,10 +773,12 @@ struct SteeringEngineTests {
         #expect(model.isWorking(bot.id))
         #expect(!model.canSteer(bot.id))
         model.setDraft("oi", for: bot.id)
-        #expect(!model.queueMessage("oi", to: bot.id))
-        #expect(model.composerLane(bot.id).queued.isEmpty)
+        #expect(model.queueMessage("oi", to: bot.id, delivery: .steer))
+        #expect(model.composerLane(bot.id).queued.map(\.delivery) == [.afterTask])
+        model.switchDelivery(try #require(model.composerLane(bot.id).queued.first).id, botID: bot.id)
+        #expect(model.composerLane(bot.id).queued.map(\.delivery) == [.afterTask]) // cannot be turned into a steer
         await gate.open()
-        await waitUntilIdle(model, bot.id)
+        await waitUntil("the queued message to leave the queue") { model.composerLane(bot.id).queued.isEmpty }
     }
 }
 

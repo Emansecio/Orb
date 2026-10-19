@@ -47,7 +47,7 @@ struct ComposerView: View {
     /// A message can be sent: any time the Orb is free, and while it works on your chat (it is queued). Not while a
     /// picture is still being prepared: it would miss this message and ride along with the next one.
     private var canSend: Bool {
-        ComposerAction.canSend(hasContent: hasContent, isWorking: isWorking, canSteer: model.canSteer(botID),
+        ComposerAction.canSend(hasContent: hasContent, isWorking: isWorking, canQueue: model.canQueue(botID),
                                pendingPictures: lane.pendingPictures)
     }
     private var isQueueing: Bool { isWorking && model.canSteer(botID) }
@@ -228,7 +228,7 @@ struct ComposerView: View {
             return ComposerHint.queueing(needsYou: model.live(botID).needsYou,
                                          typesInComposer: isFocused && hasText, compact: isCompact)
         }
-        if isWorking { return "" }
+        if isWorking { return hasContent && model.canQueue(botID) ? "↩ envia quando a rotina terminar" : "" }
         // "Esc cancela" is said once, in the banner above the field, with its button.
         if isEditing { return "↩ envia a edição" }
         if isFocused, !hasContent, !lane.hasAttachments { return "↩ envia · \(CommandName.newLineKeys) nova linha" }
@@ -305,7 +305,7 @@ struct ComposerView: View {
                     .labelStyle(.iconOnly)
                     .buttonStyle(CircleGhostStyle(side: 28, fontSize: 11))
                     .foregroundStyle(Palette.secondary)
-                    .help("\(CommandName.stop) (\(AppShortcut.stop.label))")
+                    .help(ComposerAction.stop.help(isRoutine: routine != nil))
                     .transition(.opacity)
             }
             mainButton(action, routine: routine)
@@ -648,10 +648,10 @@ enum ComposerAction: Equatable {
     /// There is something to send: text, or an attachment of any kind (a file alone is a message: "veja isto").
     static func hasContent(hasText: Bool, pictures: Int, files: Int) -> Bool { hasText || pictures > 0 || files > 0 }
 
-    /// A message can be sent: something is written, the Orb is free or working on your chat (the message is queued),
-    /// and no picture is still being prepared.
-    static func canSend(hasContent: Bool, isWorking: Bool, canSteer: Bool, pendingPictures: Int) -> Bool {
-        hasContent && pendingPictures == 0 && (!isWorking || canSteer)
+    /// A message can be sent: something is written, the Orb is free or the message can wait in the queue (it works on your
+    /// chat or runs a routine, `AppModel.canQueue`), and no picture is still being prepared.
+    static func canSend(hasContent: Bool, isWorking: Bool, canQueue: Bool, pendingPictures: Int) -> Bool {
+        hasContent && pendingPictures == 0 && (!isWorking || canQueue)
     }
 
     /// ⌘↩ "stop and send" works with something to send: what is typed, or what already waits in the queue (the
@@ -696,9 +696,10 @@ enum ComposerAction: Equatable {
         return isPlain && isQueueing && canSend ? .queueAfterTask : .ignore
     }
 
-    /// The field's placeholder while a routine runs (which a message cannot join).
+    /// The field's placeholder while a routine runs (which a message cannot join: it waits for the run's end).
     static func routinePlaceholder(routineName: String?) -> String {
-        routineName.map { "A rotina “\($0)” está rodando. Envie quando ela terminar." } ?? "Uma rotina está rodando. Envie quando ela terminar."
+        routineName.map { "A rotina “\($0)” está rodando. O que você escrever vai depois dela." }
+            ?? "Uma rotina está rodando. O que você escrever vai depois dela."
     }
 
     /// `waitsOnChain` (MultiOrb, WP2): the Orb is idle but waits on other Orbs' answers; with nothing typed the button stops that chain.
@@ -728,12 +729,23 @@ enum ComposerAction: Equatable {
 
     /// Stopping during a routine says so: it ends the routine's run. Queueing says "Direcionar": the Orb takes the
     /// message in the middle of the task, which is what ↩ does there; ⇥ is the queue.
+    /// During a routine queueing does not steer: the message waits for the run's end.
     func title(isRoutine: Bool) -> String {
-        self == .stop && isRoutine ? "Parar a rotina" : title
+        guard isRoutine else { return title }
+        switch self {
+        case .send: return title
+        case .queue: return "Enviar depois da rotina"
+        case .stop: return "Parar a rotina"
+        }
     }
 
     func help(isRoutine: Bool) -> String {
-        self == .stop && isRoutine ? "Parar a rotina (\(AppShortcut.stop.label))" : help
+        guard isRoutine else { return help }
+        switch self {
+        case .send: return help
+        case .queue: return "Enviar quando a rotina terminar (↩)"
+        case .stop: return "Parar a rotina (\(AppShortcut.stop.label))"
+        }
     }
 
     /// Stop keeps its own (dark) button next to the queueing one, so a turn can still be ended with a message typed.

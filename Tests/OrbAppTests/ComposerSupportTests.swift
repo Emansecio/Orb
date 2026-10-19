@@ -9,7 +9,7 @@ struct ComposerSupportTests {
         #expect(ComposerAction.hasContent(hasText: false, pictures: 1, files: 0))
         #expect(!ComposerAction.hasContent(hasText: false, pictures: 0, files: 0))
         let canSend = ComposerAction.canSend(hasContent: ComposerAction.hasContent(hasText: false, pictures: 0, files: 1),
-                                             isWorking: true, canSteer: true, pendingPictures: 0)
+                                             isWorking: true, canQueue: true, pendingPictures: 0)
         #expect(ComposerAction.current(isWorking: true, canSend: canSend) == .queue)
     }
 
@@ -59,7 +59,7 @@ struct ComposerSupportTests {
 
     @Test func aMessageWaitsForThePicturesStillBeingPrepared() {
         func canSend(content: Bool = true, working: Bool = false, steer: Bool = false, pending: Int = 0) -> Bool {
-            ComposerAction.canSend(hasContent: content, isWorking: working, canSteer: steer, pendingPictures: pending)
+            ComposerAction.canSend(hasContent: content, isWorking: working, canQueue: steer, pendingPictures: pending)
         }
         #expect(canSend())
         #expect(!canSend(pending: 1)) // text typed, the picture not in yet
@@ -101,8 +101,8 @@ struct ComposerSupportTests {
     }
 
     @Test func theComposerNamesTheRoutineThatHoldsTheOrb() {
-        #expect(ComposerAction.routinePlaceholder(routineName: "Resumo diário") == "A rotina “Resumo diário” está rodando. Envie quando ela terminar.")
-        #expect(ComposerAction.routinePlaceholder(routineName: nil) == "Uma rotina está rodando. Envie quando ela terminar.")
+        #expect(ComposerAction.routinePlaceholder(routineName: "Resumo diário") == "A rotina “Resumo diário” está rodando. O que você escrever vai depois dela.")
+        #expect(ComposerAction.routinePlaceholder(routineName: nil) == "Uma rotina está rodando. O que você escrever vai depois dela.")
         #expect(ComposerAction.stop.title(isRoutine: false) == "Parar" && ComposerAction.stop.title(isRoutine: true) == "Parar a rotina")
         #expect(ComposerAction.stop.help(isRoutine: true) == "Parar a rotina (\(AppShortcut.stop.label))")
         #expect(ComposerAction.stop.help(isRoutine: false) == "\(CommandName.stop) (\(AppShortcut.stop.label))")
@@ -129,7 +129,7 @@ struct ComposerSupportTests {
 
     @Test func tabQueuesForAfterTheTaskOnlyWithTheOrbWorkingAndSomethingToSend() {
         func tab(slash: Bool = false, working: Bool = true, content: Bool = true, steer: Bool = true, pending: Int = 0, plain: Bool = true) -> ComposerAction.TabKey {
-            let canSend = ComposerAction.canSend(hasContent: content, isWorking: working, canSteer: steer, pendingPictures: pending)
+            let canSend = ComposerAction.canSend(hasContent: content, isWorking: working, canQueue: steer, pendingPictures: pending)
             return ComposerAction.tab(slashIsOpen: slash, isQueueing: working && steer, canSend: canSend, isPlain: plain)
         }
         #expect(tab() == .queueAfterTask)

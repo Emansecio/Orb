@@ -203,6 +203,14 @@ extension AppModel {
         return session.turnTask != nil && session.routineID == nil
     }
 
+    /// Whether a message written now can wait in the queue: while the Orb works on your chat (`canSteer`), and while it runs
+    /// one of your routines, after which it goes as the next request (the run's own conversation cannot take it).
+    func canQueue(_ botID: UUID) -> Bool {
+        if canSteer(botID) { return true }
+        guard let session = sessions[botID] else { return false }
+        return session.turnTask != nil && session.routineID != nil && (session.sideKind == nil || session.sideKind == .routine)
+    }
+
     /// The name of the routine whose run holds this Orb, if one does.
     func runningRoutineName(_ botID: UUID) -> String? {
         sessions[botID]?.routineID.flatMap { id in routines.first { $0.id == id }?.name }
@@ -215,7 +223,7 @@ extension AppModel {
         let lane = composerLane(botID)
         guard lane.pendingPictures == 0 else { return false } // a picture still on its way would miss this message
         if lane.editing != nil { return submitEdit(text, to: botID) } // the composer holds a message being edited
-        if !canSteer(botID) {
+        if !canSteer(botID), !canQueue(botID) {
             let sent = send(text, attachments: lane.files.map(\.url), images: lane.pictures, to: botID, fromUser: true)
             if sent {
                 lane.files.removeAll()
@@ -226,7 +234,7 @@ extension AppModel {
         }
         // The Orb waits on a question of its own (`ask_user`): what is written answers it, instead of waiting behind it. Not a
         // command, nor a message with files or longer than an answer keeps: those stay messages.
-        if delivery == .steer, lane.files.isEmpty, lane.pictures.isEmpty, CompactionCommand.parse(text) == nil,
+        if delivery == .steer, canSteer(botID), lane.files.isEmpty, lane.pictures.isEmpty, CompactionCommand.parse(text) == nil,
            text.count <= OrbQuestion.answerLimit, let reply = OrbQuestion.clean(text), let question = openQuestion(of: botID) {
             decide(.once, reply: reply, approvalID: question, botID: botID)
             setDraft("", for: botID)
@@ -247,8 +255,9 @@ extension AppModel {
     func queueMessage(_ text: String, to botID: UUID, delivery: SteeringDelivery = .steer) -> Bool {
         let lane = composerLane(botID)
         let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard canSteer(botID), !typed.isEmpty || !lane.pictures.isEmpty || !lane.files.isEmpty else { return false }
-        enqueue(typed, files: lane.files.map(\.url), pictures: lane.pictures, delivery: delivery, to: botID)
+        guard canQueue(botID), !typed.isEmpty || !lane.pictures.isEmpty || !lane.files.isEmpty else { return false }
+        // A routine's run takes no message into its task: it waits for the run's end.
+        enqueue(typed, files: lane.files.map(\.url), pictures: lane.pictures, delivery: canSteer(botID) ? delivery : .afterTask, to: botID)
         // Attachments alone (nothing typed) must not take a draft with real text along; a blank one is cleared.
         if !typed.isEmpty || (drafts[botID] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { setDraft("", for: botID) }
         lane.files.removeAll()

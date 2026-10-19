@@ -442,7 +442,13 @@ extension BotSession {
             model.setUnread(model.live(id).unread + 1, for: id)
         }
         if routineID == nil { scheduleSave(delay: 0) } // a routine's was written by `finishRoutineRun`
-        if routineID == nil { model.settleSteering(id, succeeded: succeeded) } // what you said during the turn, if anything
+        if routineID == nil {
+            model.settleSteering(id, succeeded: succeeded) // what you said during the turn, if anything
+        } else if !isOrbRun {
+            // What you wrote while a routine ran waited for it (`canQueue`): it goes now, as the chat is back, whatever the
+            // run's outcome. Stopped by you, it comes back to the composer, as a stopped chat turn's queue does.
+            model.settleSteering(id, succeeded: !userStopped)
+        }
         if startsQueuedRoutines { model.startNextQueuedWork(for: id) }
         // Last, so a message or a routine that took the Orb at once is not met by a review. A proposal the turn made
         // (you asked for a skill, or the Orb proposed one) is told now; the review comes in the background.
