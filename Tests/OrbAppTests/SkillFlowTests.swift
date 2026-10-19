@@ -431,4 +431,73 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
         await waitUntil("the proposal to go") { !(await model.hasSkillProposal("publicar-site", of: botID)) }
         #expect(model.skills.count == before)
     }
+
+    // MARK: The gate before the review
+
+    /// An Orb whose account has a cheap model of its maker (the gate's), so the gate runs before the review.
+    @MainActor private func setUpGated(_ script: CallScript) -> (AppModel, UUID) {
+        let (model, botID) = setUp(script)
+        var account = ProviderAccount(kind: .custom)
+        account.models = ["claude-sonnet-4", "claude-haiku-4-5"].map { ProviderModel(id: $0, name: $0, format: .chat) }
+        model.providers = [account]
+        model.defaultModel = "custom/claude-sonnet-4"
+        return (model, botID)
+    }
+
+    @Test @MainActor func aNoFromTheGateSpendsNoReview() async throws {
+        let counted = said("NÃO").map { event -> LLMEvent in
+            if case .finished(let reason, nil) = event { .finished(reason, TokenUsage(input: 7, output: 1)) } else { event }
+        }
+        let script = CallScript(steps(10) + [said("pronto"), counted, said("Nothing to save.")])
+        let (model, botID) = setUpGated(script)
+        model.skills = [Skill(slug: "meu", name: "Meu", summary: "", instructions: "y", source: Skill.learnedSource)]
+        #expect(model.send("publica o site", to: botID))
+        await waitUntilIdle(model, botID)
+        await waitUntil("the gate to answer") { await script.calls.count == 12 && model.session(botID).skillReview == nil }
+        try? await Task.sleep(for: .milliseconds(100))
+        let calls = await script.calls
+        #expect(calls.count == 12)
+        #expect(calls[11].model == "claude-haiku-4-5" && calls[11].tools.isEmpty)
+        #expect(calls[11].system == SkillReview.gateInstructions)
+        #expect(calls[11].messages.last?.content.contains("/meu") == true)
+        #expect(model.session(botID).stepsSinceSkill == 0)
+        await waitUntil("the gate's usage") {
+            model.usageLog.flush()
+            model.store.flush()
+            let found = await model.store.readUsage(from: .now.addingTimeInterval(-86_400), to: .now.addingTimeInterval(86_400)).buckets
+            return found.contains { $0.key.source == .auxiliary && $0.key.model == "custom/claude-haiku-4-5" && $0.totals.input == 7 }
+        }
+    }
+
+    @Test @MainActor func aYesFromTheGateRunsTheReviewAsAlways() async throws {
+        let script = CallScript(steps(10) + [said("pronto"), said("SIM"), said("Nothing to save.")])
+        let (model, botID) = setUpGated(script)
+        #expect(model.send("publica o site", to: botID))
+        await waitUntilIdle(model, botID)
+        await waitUntil("the review to end") { await script.calls.count == 13 && model.session(botID).skillReview == nil }
+        let calls = await script.calls
+        #expect(calls[12].messages.last?.content == SkillReview.prompt)
+        #expect(calls[12].model == "claude-sonnet-4")
+    }
+
+    @Test @MainActor func aGateThatFailsOrBabblesLeavesTheReviewToRun() async throws {
+        for gate in [ModelReply.failing(LLMError.notConfigured), ModelReply.say("talvez, não sei dizer")] {
+            let replies = (steps(10) + [said("pronto")]).map { ModelReply($0) } + [gate, ModelReply.say("Nothing to save.")]
+            let script = CallScript(replies: replies)
+            let (model, botID) = setUpGated(script)
+            #expect(model.send("publica o site", to: botID))
+            await waitUntilIdle(model, botID)
+            await waitUntil("the review to end") { await script.calls.count == 13 && model.session(botID).skillReview == nil }
+            #expect(await script.calls[12].messages.last?.content == SkillReview.prompt)
+        }
+    }
+
+    @Test @MainActor func withoutACheapModelThereIsNoGate() async {
+        let script = CallScript(steps(10) + [said("pronto"), said("Nothing to save.")])
+        let (model, botID) = setUp(script)
+        #expect(model.send("publica o site", to: botID))
+        await waitUntilIdle(model, botID)
+        await waitUntil("the review to end") { await script.calls.count == 12 && model.session(botID).skillReview == nil }
+        #expect(await script.calls[11].messages.last?.content == SkillReview.prompt)
+    }
 }

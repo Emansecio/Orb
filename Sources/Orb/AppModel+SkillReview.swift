@@ -52,6 +52,7 @@ extension AppModel {
         // turn's last call sent whole is sent whole again (and the provider's cache holds).
         request.promptOnlySteers = true
         let botID = session.id
+        let reviewFrom = session.reviewFrom
         let usedModel = session.turnModel ?? modelRef(for: current)?.text
         session.skillReview = Task {
             // No room for another proposal: the review could only end in a refusal, and it would be paid for first.
@@ -60,6 +61,14 @@ extension AppModel {
                 if !Task.isCancelled { session.skillReview = nil }
                 return
             }
+            // The gate: one short call on the cheap model decides whether the full review (the whole history again, and
+            // almost always "Nothing to save.") is worth paying for. Without a cheap model, or without a clear answer,
+            // the review runs as it always did.
+            if let ref = modelRef(for: current), await askSkillGate(botID: botID, ref: ref, messages: messages[reviewFrom...]) == false {
+                if !Task.isCancelled { session.skillReview = nil }
+                return
+            }
+            guard !Task.isCancelled else { return }
             // Nothing of it reaches the chat or the history, but what it costs is real: each call goes to the usage
             // history as the app's own (`auxiliary`), so the Uso page shows it apart from the chat's.
             // A call stopped midway (the user wrote) is billed for the input the provider already reported, as in a turn.
@@ -118,6 +127,30 @@ extension AppModel {
         let skill = Skill(slug: command, name: proposal.name, summary: proposal.summary, instructions: proposal.instructions,
                           source: Skill.learnedSource, orbIDs: [botID], learnedBy: botID)
         return SkillDraft(skill: skill, slug: slug, botID: botID, orbName: orb, isUpdate: false)
+    }
+
+    /// The gate's verdict on the turn: true or false, nil when there is none (no cheap model, a failure, an unreadable
+    /// answer) and the review should run. Cancelled, it also gives nil: the caller leaves on `Task.isCancelled`.
+    private func askSkillGate(botID: UUID, ref: ModelRef, messages: ArraySlice<ChatMessage>) async -> Bool? {
+        guard let account = account(ref.provider), account.isEnabled, isUsable(account),
+              let model = Self.skillGate(in: account, orb: ref.model),
+              let client = clientOverride?() ?? account.client(for: account.models.first { $0.id == model },
+                                                               credentials: Self.credentials(for: ref.provider),
+                                                               conversationID: botID.uuidString + "-porteiro") else { return nil }
+        let transcript = ChunkSummarizer.transcript(of: messages, characters: SkillReview.gateCharacters)
+        let prompt = SkillReview.gatePrompt(transcript: transcript, skillNames: skills(for: botID).map { "/" + $0.slug })
+        let verdict = await SkillReview.askGate(prompt, client: client, model: model)
+        if let usage = verdict.usage, !isResetting, bot(botID) != nil {
+            recordAuxiliaryUsage(usage, botID: botID, model: ModelRef(provider: ref.provider, model: model).text)
+        }
+        return Task.isCancelled ? nil : verdict.yes
+    }
+
+    /// Which model decides: Haiku on Claude Code (whose list has it under that name), else the cheap one of the Orb's
+    /// maker (`ChunkSummarizer.model`). nil when there is none: the gate does not run and the review does.
+    static func skillGate(in account: ProviderAccount, orb: String) -> String? {
+        if account.kind == .claudeCode { return account.models.first { $0.id.lowercased().contains("haiku") }?.id }
+        return ChunkSummarizer.model(in: account, orb: orb)?.id
     }
 
     /// You decided: the proposal goes away. Saved, it is also said (VoiceOver) and the Orb is pleased.

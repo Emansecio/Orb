@@ -127,8 +127,8 @@ enum ChunkSummarizer {
 
     /// The stretch as plain text for the model, condensed like the copy a request carries (`ContextCondensing`): what
     /// the user wrote, what the assistant said and did, and a start and end of what each tool returned. At most
-    /// `inputTokens`, the middle left out of what is longer.
-    static func transcript(of messages: ArraySlice<ChatMessage>) -> String {
+    /// `inputTokens` (or `characters`, when the caller needs less), the middle left out of what is longer.
+    static func transcript(of messages: ArraySlice<ChatMessage>, characters: Int? = nil) -> String {
         var calls: [String: String] = [:]
         var lines: [String] = []
         for message in messages {
@@ -153,7 +153,7 @@ enum ChunkSummarizer {
                 break
             }
         }
-        return ContextText.preview(lines.joined(separator: "\n"), limit: Int(Double(inputTokens) * ContextBudget.charactersPerToken))
+        return ContextText.preview(lines.joined(separator: "\n"), limit: characters ?? Int(Double(inputTokens) * ContextBudget.charactersPerToken))
     }
 
     static let instructions = """
