@@ -489,8 +489,8 @@ ORB_DATA_DIR=/tmp/orb-design .build/debug/Orb --snapshot editor-hair /tmp/editor
 # acessorios, olhos, bocas, detalhes, cores, tamanhos (18/30/60/96/132 pt, fundo escuro e claro), quadros, reacoes, polimento, icone
 ORB_DATA_DIR=/tmp/orb-design .build/debug/Orb --render-orbs /tmp/cabelos.png cabelos
 
-# O ícone do app é desenhado pelo próprio app (AppIcon): `--render-icon <png> [pixels]` (padrão 1024; até 64 px sai a variante
-# simples, sem poça de luz e com o rosto maior). A folha "icone" mostra 1024/512/256/128/64/32/16 no tamanho real e ampliados, sobre
+# O ícone do app é desenhado pelo próprio app (AppIcon): `--render-icon <png> [pixels]` (padrão 1024; em 16 px sai a variante
+# sem anel, com o Orb e os olhos maiores). A folha "icone" mostra 1024/512/256/128/64/32/16 no tamanho real e ampliados, sobre
 # papel de parede claro e escuro.
 ORB_DATA_DIR=/tmp/orb-design .build/debug/Orb --render-icon /tmp/icone-128.png 128
 ORB_DATA_DIR=/tmp/orb-design .build/debug/Orb --render-orbs /tmp/icone.png icone
@@ -545,7 +545,7 @@ Swift, exceto quando ela precisa de uma cor padrão (`OrbConfig.autoAccentColor(
 | `Orbs/OrbSpeech.swift` | visemas (`OrbViseme`, com boca reserva) e ritmo das sílabas (`Syllables`) |
 | `Orbs/OrbEditor.swift` | editor de personalização |
 | `Orbs/OrbDesignSheets.swift` | folhas de revisão de design (`--render-orbs saída.png <folha>`) |
-| `AppIcon.swift` | o ícone do app e o `GelShader` (corpo do gel por pixel, igual ao `BodyShader` do orbgen) |
+| `AppIcon.swift` | o ícone do app: Orb índigo chapado com anel inclinado num ladrilho grafite |
 | `Orbs/OrbBench.swift` | bench de CPU dos Orbs (`--render-orbs bench`) |
 | `BotLive.swift` | `BotLive.activity` (a atividade de cada Orb), "digitando" (`noteComposing`, `ComposingDeadline`), a olhada ao ser escolhido (`glance`), o nível da comemoração (`celebration`), os sinais de parar e de suspirar (`cue`) e o contador que rola o chat (`scrollNudge`) |
 | `Views/LiveBotAvatar.swift` | avatar que lê só a atividade, o envio, a comemoração e os sinais do Orb (painel, chat vazio, linha "trabalhando") |

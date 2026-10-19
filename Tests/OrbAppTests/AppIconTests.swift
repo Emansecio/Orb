@@ -3,9 +3,9 @@ import Foundation
 import Testing
 @testable import Orb
 
-/// The app icon is drawn by the app (`AppIcon`): the grid, the sizes, the small variant, and the gel shader against the art.
+/// The app icon is drawn by the app (`AppIcon`): the grid, the sizes, the ring and the small variant without it.
 @Suite @MainActor struct AppIconTests {
-    /// The full-size icon, drawn once for the tests that read it (a drawing at 1024 px takes about a second of the main thread).
+    /// The full-size icon, drawn once for the tests that read it.
     private static let full = AppIcon.image(pixels: 1024)
 
     /// Premultiplied RGBA bytes of an image, redrawn into sRGB.
@@ -37,13 +37,20 @@ import Testing
         #expect(pixel(data, width: 1024, x: 512, y: 1020).a == 0)
     }
 
-    @Test func theGlassIsLightAndTheOrbFillsIt() {
+    @Test func theTileIsGraphiteTheOrbIndigoAndTheRingCrossesIt() {
         let data = bytes(Self.full)
         func brightness(_ x: Int, _ y: Int) -> Int { let p = pixel(data, width: 1024, x: x, y: y); return p.r + p.g + p.b }
-        // Pearl glass in the corners of the tile, never a dark tile.
-        for (x, y) in [(170, 170), (854, 170), (170, 854), (854, 854)] { #expect(brightness(x, y) > 3 * 215, "(\(x), \(y))") }
-        // The Orb is 690 wide, centered at (512, 494): the gel is there, darker than the glass, from side to side.
-        for (x, y) in [(512, 300), (190, 494), (834, 494)] { #expect(brightness(x, y) < brightness(512, 112), "(\(x), \(y))") }
+        // A dark tile, flat to its corners: no glass, no glow.
+        for (x, y) in [(170, 170), (854, 170), (170, 854), (854, 854)] { #expect(brightness(x, y) < 3 * 30, "(\(x), \(y))") }
+        // The Orb (500 wide, at the center) is indigo, the same at its top and bottom: flat, no gel.
+        let top = pixel(data, width: 1024, x: 512, y: 300), bottom = pixel(data, width: 1024, x: 512, y: 720)
+        #expect(top.b > 200 && top.r < 100)
+        #expect(top.r == bottom.r && top.g == bottom.g && top.b == bottom.b)
+        // The front of the ring, outside the Orb on the lower left, is white; at its left end it has turned toward the
+        // back's grey, gradually: lighter than the tile, darker than the front.
+        let front = brightness(252, 671), end = brightness(192, 632)
+        #expect(front > 3 * 240)
+        #expect(end > 3 * 100 && end < front - 3 * 40)
     }
 
     @Test func itDrawsEverySizeTheBundleNeeds() {
@@ -54,11 +61,11 @@ import Testing
     }
 
     @Test func theSmallVariantStillShowsTheFace() {
-        // At 16 px (the small variant, no smile) the pixel of an eye is lighter than the body next to it.
+        // At 16 px (the Orb alone, 600 wide at (512, 516)) the pixel of an eye is lighter than the body next to it.
         let data = bytes(AppIcon.image(pixels: 16))
         func brightness(_ x: Int, _ y: Int) -> Int { let p = pixel(data, width: 16, x: x, y: y); return p.r + p.g + p.b }
-        // Eyes sit at x = 512 ± 0.151·1.12·760 ≈ ±129 of 1024 (80 wide), y = 512 - 380 + 0.42·760 ≈ 451 of 1024.
-        let eyeX = Int((512.0 - 129) / 64), eyeY = Int(451.0 / 64)
+        // Eyes sit at x = 512 ± 0.155·600 ≈ ±93 of 1024, y = 516 - 0.07·600 ≈ 474 of 1024.
+        let eyeX = Int((512.0 - 93) / 64), eyeY = Int(474.0 / 64)
         #expect(brightness(eyeX, eyeY) > brightness(8, 10) + 40)
         // And the icon is not a flat square: the middle of the tile is the opaque Orb.
         #expect(pixel(data, width: 16, x: 8, y: 8).a == 255)
@@ -70,27 +77,5 @@ import Testing
         AppIcon.render(to: url, pixels: 128)
         let rep = try #require(NSBitmapImageRep(data: Data(contentsOf: url)))
         #expect(rep.pixelsWide == 128 && rep.pixelsHigh == 128)
-    }
-
-    /// Off the main actor (`async`, so it does not run on the suite's actor): the shader is plain maths, and shading
-    /// 640 px held the main thread for over a second.
-    @Test nonisolated func theGelShaderMatchesTheArtOfTheBrandOrb() async throws {
-        // Same frame as art/orbgen: 640 px, centered, x radius 168.5 px.
-        let hexes = OrbCatalog.shared.palette("indigo").hexes
-        let mine = GelShader(hexes: hexes).pixels(side: 640, center: 320, scale: 168.5)
-        let art = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appending(path: "Sources/Orb/Resources/Orbs/body/indigo.png")
-        let source = try #require(CGImageSourceCreateWithURL(art as CFURL, nil))
-        let image = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
-        #expect(image.width == 640)
-        let reference = bytes(image)
-        var total = 0, count = 0
-        for i in stride(from: 0, to: mine.count, by: 4) where mine[i + 3] > 0 || reference[i + 3] > 0 {
-            for channel in 0..<4 { total += abs(Int(mine[i + channel]) - Int(reference[i + channel])) }
-            count += 4
-        }
-        #expect(count > 0)
-        #expect(Double(total) / Double(count) < 3)
     }
 }
