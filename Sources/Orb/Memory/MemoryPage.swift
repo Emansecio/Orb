@@ -160,7 +160,7 @@ enum MemoryText {
     }
 
     static func fold(_ text: String) -> String {
-        text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "pt_BR"))
+        text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .app)
     }
 
     /// Words for comparing and searching: lowercase, no accents, without common stopwords. Numbers and two-letter

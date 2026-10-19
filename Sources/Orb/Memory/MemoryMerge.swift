@@ -143,8 +143,9 @@ extension MemoryBank {
     /// The facts and procedures the Orb wrote (not yours, not compacted), newest first.
     func mergeCandidates(now: Date = .now) -> [MemorySnapshot.Item] {
         prepare(now: now)
+        let origins = pageOrigins(of: [.fato, .procedimento])
         return (items(.fato, limit: 1_000) + items(.procedimento, limit: 1_000)).filter {
-            !$0.compacted && read($0.path)?.origin != .voce
+            !$0.compacted && origins[$0.path] != .voce
         }
     }
 

@@ -95,6 +95,10 @@ actor MemoryBank {
     /// Reused across messages (`related`); the actor serializes its use.
     private let tagger = NLTagger(tagSchemes: [.lexicalClass, .lemma])
     private var lastBump: [String: Date] = [:]
+    /// Each page's origin, by path, with the date of the version it was read from (a hand edit changes the date and it is
+    /// read again): `mergeCandidates` and `consolidablePreferences` ask after every turn, and reading one file per page took
+    /// ~0.1 s a turn at 1 200 pages.
+    private var origins: [String: (mtime: Double, origin: MemoryOrigin)] = [:]
     /// Set when the Orb is deleted (or its memory kept elsewhere): nothing is written here anymore, so a late task
     /// can't bring the folder back.
     private let closedState = OSAllocatedUnfairLock(initialState: false)
@@ -231,6 +235,7 @@ actor MemoryBank {
         case .identidade:
             var page = identity() ?? MemoryPage(path: Self.identityPath, kind: .identidade, title: "Identidade",
                                                 body: "", created: now, updated: now, origin: .voce)
+            let wasInterviewPending = page.interviewPending
             page.interviewPending = false
             let note = MemoryText.flatten(text)
             var lines = page.body.components(separatedBy: "\n")
@@ -240,6 +245,9 @@ actor MemoryBank {
             let outcome: RememberOutcome
             if let index = lines[notes].firstIndex(where: { $0.hasPrefix("- ") && Self.isUpdate(of: String($0.dropFirst(2)), by: note) }) {
                 if MemoryText.fold(String(lines[index].dropFirst(2))) == MemoryText.fold(note) {
+                    // Already there and the interview was over: left as it is, as for the other kinds (the file is not even
+                    // rewritten, so its date does not move and the panel is not refreshed for nothing).
+                    guard wasInterviewPending else { return .alreadyKnown(page.path) }
                     outcome = .alreadyKnown(page.path)
                 } else {
                     guard keepVersion(of: page, now: now) else { return .failed }
@@ -416,7 +424,12 @@ actor MemoryBank {
             let length = MemoryText.flatten($0.body).count
             return length <= preferenceLayout.each || length <= 400
         }.map(\.path))
-        let related = relatedHits(to: message, context: context, limit: Self.relatedLimit, excluding: shown,
+        // The newest session is "where you left off", not a related memory: a line of it (a snippet) would take the place of the
+        // whole section (the requests, the decisions, what was left open), which says where the conversation stopped.
+        let lastSession = conversationIsNew ? items(.sessao, limit: 1).first : nil
+        var excluding = shown
+        if let lastSession { excluding.insert(lastSession.path) }
+        let related = relatedHits(to: message, context: context, limit: Self.relatedLimit, excluding: excluding,
                                   isSent: { hit in Self.isSent(Self.relatedHeader(hit), in: alreadySent) }, now: now)
         var relatedLines: [String] = []
         for hit in related {
@@ -430,7 +443,7 @@ actor MemoryBank {
             brief.related = relatedLines.joined(separator: "\n")
             take("### Related to the user's message\n" + brief.related, into: &notes)
         }
-        if conversationIsNew, let last = items(.sessao, limit: 1).first, !shown.contains(last.path) {
+        if let last = lastSession {
             shown.insert(last.path)
             take("### Where you left off (\(Self.dayFormat.string(from: last.date)))\n" + Self.leftOff(last.body), into: &notes)
         }
@@ -569,6 +582,7 @@ actor MemoryBank {
         try? FileManager.default.removeItem(at: directory.appending(path: "_arquivo/" + path))
         if !keepingVersions { try? FileManager.default.removeItem(at: directory.appending(path: Self.versionsFolder(of: path))) }
         index?.run("DELETE FROM pages WHERE path = ?", [.text(path)])
+        origins[path] = nil
         return true
     }
 
@@ -701,9 +715,29 @@ actor MemoryBank {
     /// The preference pages a `MemoryConsolidation` may rewrite, newest first: not the ones you wrote, nor the long ones.
     func consolidablePreferences(now: Date = .now) -> [MemorySnapshot.Item] {
         prepare(now: now)
+        let origins = pageOrigins(of: [.preferencia])
         return items(.preferencia, limit: 1_000).filter {
-            $0.body.count <= MemoryConsolidation.itemLength && read($0.path)?.origin != .voce
+            $0.body.count <= MemoryConsolidation.itemLength && origins[$0.path] != .voce
         }
+    }
+
+    /// The origin of the pages of `kinds`, read from the files only for the versions not seen yet (see `origins`). A page
+    /// whose file cannot be read has no origin here, as it had none before: it stays a candidate.
+    func pageOrigins(of kinds: [MemoryKind]) -> [String: MemoryOrigin] {
+        let marks = kinds.map { _ in "?" }.joined(separator: ", ")
+        var known: [String: MemoryOrigin] = [:]
+        for row in index?.rows("SELECT path, mtime FROM pages WHERE kind IN (\(marks))", kinds.map { .text($0.rawValue) }) ?? [] {
+            let path = row.text(0), mtime = row.double(1) ?? 0
+            if let cached = origins[path], abs(cached.mtime - mtime) < 0.001 {
+                known[path] = cached.origin
+            } else if let page = read(path) {
+                origins[path] = (mtime, page.origin)
+                known[path] = page.origin
+            } else {
+                origins[path] = nil
+            }
+        }
+        return known
     }
 
     /// Newest first; pages saved in the same instant keep one order (by path), because the pinned memory is part of the
@@ -746,6 +780,7 @@ actor MemoryBank {
     }
 
     private func upsert(_ page: MemoryPage, mtime: Double) {
+        origins[page.path] = (mtime, page.origin)
         let stored = index?.run("""
             INSERT INTO pages(path, kind, title, body, created, updated, compacted, mtime) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(path) DO UPDATE SET kind = excluded.kind, title = excluded.title, body = excluded.body,

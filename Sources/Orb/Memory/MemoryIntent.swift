@@ -25,18 +25,34 @@ struct MemoryIntent: Equatable, Sendable {
     /// The request in `message`, if there is one.
     static func detect(_ message: String) -> MemoryIntent? {
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Matching runs on a lowercase, accent-free copy with the same characters, so ranges map back. Typographic
-        // apostrophes ("Don’t forget", as Notes and macOS smart quotes write them) become the straight one.
-        let folded = String(text.map { character -> Character in
-            if character == "’" || character == "‘" { return "'" }
-            let plain = String(character).folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "pt_BR"))
-            return plain.count == 1 ? Character(plain) : character
-        })
-        guard folded.count == text.count else { return nil }
+        guard let folded = matchingText(text) else { return nil }
         for match in trigger.matches(in: folded, range: NSRange(folded.startIndex..., in: folded)) {
             if let range = Range(match.range, in: folded), let intent = intent(at: range, text: text, folded: folded) { return intent }
         }
         return nil
+    }
+
+    /// `text` as matching reads it: lowercase, without accents, and with typographic apostrophes ("Don’t forget", as Notes
+    /// and macOS smart quotes write them) as the straight one; the same characters, so ranges map back. One `folding` call
+    /// for the whole text: folding each character alone (to keep the copy the same length) builds a `String` and a `Locale`
+    /// per character, which took ~0.2 s on a 200 000-character paste, on the main thread as the message is sent. A text whose
+    /// folding changes its length (a ligature) takes the character-by-character way, as before.
+    private static func matchingText(_ text: String) -> String? {
+        let folded = text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .app)
+            .replacingOccurrences(of: "’", with: "'")
+            .replacingOccurrences(of: "‘", with: "'")
+        if folded.count == text.count { return folded }
+        var kept = String()
+        kept.reserveCapacity(text.count)
+        for character in text {
+            if character == "’" || character == "‘" {
+                kept.append("'")
+                continue
+            }
+            let plain = String(character).folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .app)
+            kept.append(plain.count == 1 ? plain : String(character))
+        }
+        return kept.count == text.count ? kept : nil
     }
 
     /// The request that the trigger found at `foldedRange`, unless it isn't one (negation, a pasted text, a question).
