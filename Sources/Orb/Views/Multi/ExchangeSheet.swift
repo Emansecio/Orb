@@ -68,6 +68,8 @@ struct ExchangeSheet: View {
             .padding(.vertical, Spacing.l)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        // Opens at the latest message, as a chat does (a long exchange used to open at its first).
+        .modifier(KeepsBottom(follows: true))
         .orbSheet(title, subtitle: "Somente leitura", size: .medium, onClose: { dismiss() }) {
             footer
         }
@@ -186,6 +188,10 @@ struct SideWorkSheet: View {
             }
             .padding(20)
         }
+        // Opens at the end, the latest of the work, as a chat does; a new scroll view once the saved work arrives (it
+        // is read after the sheet opens), so it starts at its end instead of the empty list's top.
+        .modifier(KeepsBottom(follows: true))
+        .id(items.isEmpty)
         .overlay {
             if items.isEmpty {
                 if isLoading { DelayedSpinner() } else { ContentUnavailableView("Sem registro do trabalho", systemImage: "text.bubble") }

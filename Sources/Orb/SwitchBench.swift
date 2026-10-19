@@ -13,6 +13,7 @@ enum SwitchBench {
         try? await Task.sleep(for: .seconds(4)) // the window settles, the first chat loads
         var times: [Double] = []
         var unfocused = 0
+        var shortOfEnd = 0
         // `ORB_BENCH_COLD=1`: every other conversation is let go before each change, as after five idle minutes.
         let cold = environment["ORB_BENCH_COLD"] == "1"
         if cold { model.conversationKeepAlive = .zero }
@@ -31,16 +32,32 @@ enum SwitchBench {
                 // (The window's own first responder: the measuring app is not the active one, so it has no key window.)
                 let typing = NSApp.windows.contains { $0.isVisible && $0.firstResponder is NSTextView }
                 if !typing { unfocused += 1 }
-                FileHandle.standardError.write(Data(String(format: "switch round %d %@ %.1f ms%@\n", round, bot.name, elapsed,
-                                                           typing ? "" : " (the field has no focus)").utf8))
+                // The chat opens at its end: how far above it the view stopped, if it did.
+                let short = chatDistanceFromEnd()
+                if short > 2 { shortOfEnd += 1 }
+                FileHandle.standardError.write(Data(String(format: "switch round %d %@ %.1f ms%@%@\n", round, bot.name, elapsed,
+                                                           typing ? "" : " (the field has no focus)",
+                                                           short > 2 ? String(format: " (%.0f pt above the end)", short) : "").utf8))
             }
         }
         let sorted = times.sorted()
         let median = sorted.isEmpty ? 0 : sorted[sorted.count / 2]
         let worst = sorted.last ?? 0
-        FileHandle.standardError.write(Data(String(format: "switch median %.1f ms, worst %.1f ms (%d changes, %d without focus)\n",
-                                                   median, worst, sorted.count, unfocused).utf8))
+        FileHandle.standardError.write(Data(String(format: "switch median %.1f ms, worst %.1f ms (%d changes, %d without focus, %d short of the end)\n",
+                                                   median, worst, sorted.count, unfocused, shortOfEnd).utf8))
         NSApp.terminate(nil)
+    }
+
+    /// How far the chat's scroll view is from the end of the conversation: the tallest scrolling view of the window.
+    private static func chatDistanceFromEnd() -> CGFloat {
+        func scrollViews(in view: NSView) -> [NSScrollView] {
+            (view as? NSScrollView).map { [$0] } ?? view.subviews.flatMap(scrollViews)
+        }
+        let all = NSApp.windows.filter(\.isVisible).compactMap(\.contentView).flatMap(scrollViews)
+        guard let chat = all.max(by: { ($0.documentView?.frame.height ?? 0) < ($1.documentView?.frame.height ?? 0) }),
+              let document = chat.documentView else { return 0 }
+        let visible = chat.contentView.documentVisibleRect
+        return document.isFlipped ? document.frame.height - visible.maxY : visible.minY
     }
 
     /// Resumes once the main run loop is about to wait: after the frame the change produced has been committed (the
