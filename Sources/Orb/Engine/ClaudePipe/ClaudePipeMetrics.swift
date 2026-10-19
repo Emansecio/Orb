@@ -49,7 +49,8 @@ final class ClaudePipeMetricsLog: @unchecked Sendable {
 
     private let file: URL
     private let limit: Int
-    private let queue = DispatchQueue(label: "orb.claude-pipe.metrics", qos: .utility)
+    /// One queue for every client: two Orbs working at once never interleave their lines in the file.
+    private static let queue = DispatchQueue(label: "orb.claude-pipe.metrics", qos: .utility)
 
     init(file: URL, limit: Int = ClaudePipeMetricsLog.defaultLimit) {
         self.file = file
@@ -58,11 +59,11 @@ final class ClaudePipeMetricsLog: @unchecked Sendable {
 
     func record(_ metric: ClaudePipeMetric) {
         let line = metric.line + "\n"
-        queue.async { Self.append(line, to: self.file, limit: self.limit) }
+        Self.queue.async { Self.append(line, to: self.file, limit: self.limit) }
     }
 
     /// Blocks until what was recorded is written (tests).
-    func flush() { queue.sync {} }
+    func flush() { Self.queue.sync {} }
 
     static func append(_ line: String, to file: URL, limit: Int) {
         let fileManager = FileManager.default
