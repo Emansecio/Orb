@@ -280,35 +280,80 @@ struct TableBlockView: View, Equatable {
     /// Rows per piece of a long table while it streams.
     nonisolated static let pieceRows = 20
 
+    /// Space between columns and around the table.
+    private static let columnSpacing: CGFloat = 18
+    private static let inset: CGFloat = 10
+
     var body: some View {
-        Grid(alignment: .topLeading, horizontalSpacing: 18, verticalSpacing: 6) {
+        // Each column is at least as wide as its longest word, so a narrow chat (inspector open, small window) never
+        // breaks words letter by letter; when even that does not fit, the table scrolls sideways.
+        let floors = Self.columnFloors(of: table)
+        let needed = floors.reduce(0, +) + Self.columnSpacing * CGFloat(max(floors.count - 1, 0)) + Self.inset * 2
+        ViewThatFits(in: .horizontal) {
+            grid(floors).frame(minWidth: needed, idealWidth: needed, maxWidth: .infinity, alignment: .leading)
+            ScrollView(.horizontal) {
+                grid(floors).frame(width: needed)
+            }
+        }
+    }
+
+    private func grid(_ floors: [CGFloat]) -> some View {
+        Grid(alignment: .topLeading, horizontalSpacing: Self.columnSpacing, verticalSpacing: 6) {
             GridRow {
                 ForEach(Array(table.header.enumerated()), id: \.offset) { column, cell in
-                    TableCell(source: cell, alignment: table.alignments.alignment(at: column), cached: true, highlight: highlight).fontWeight(.semibold)
+                    TableCell(source: cell, alignment: table.alignments.alignment(at: column), minWidth: floors.floor(at: column), cached: true, highlight: highlight).fontWeight(.semibold)
                 }
             }
             Divider().gridCellUnsizedAxes(.horizontal).overlay(Palette.line)
-            rows
+            rows(floors)
         }
         .font(.system(size: 13))
-        .padding(10)
+        .padding(Self.inset)
         .background(Palette.raised.opacity(0.7), in: .rect(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Palette.line, lineWidth: 1))
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
+
+    /// The narrowest each column may get: its longest word (header in semibold), up to `maxFloor` so a long link or
+    /// path still wraps. Only the longest word of each column is measured.
+    nonisolated static func columnFloors(of table: MarkdownTable) -> [CGFloat] {
+        let columns = max(table.header.count, table.rows.map(\.count).max() ?? 0)
+        let regular = NSFont.systemFont(ofSize: 13)
+        let semibold = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        return (0..<columns).map { column in
+            let header = longestWord(table.header.indices.contains(column) ? [table.header[column]] : [])
+            let body = longestWord(table.rows.compactMap { $0.indices.contains(column) ? $0[column] : nil })
+            let headerWidth = (header as NSString).size(withAttributes: [.font: semibold]).width
+            let bodyWidth = (body as NSString).size(withAttributes: [.font: regular]).width
+            return min(ceil(max(headerWidth, bodyWidth)) + 2, maxFloor)
+        }
+    }
+
+    /// The longest word of some cells, without the `**` and backticks of their Markdown.
+    private nonisolated static func longestWord(_ cells: [String]) -> String {
+        var longest: Substring = ""
+        for cell in cells {
+            let plain = cell.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "`", with: "")
+            for word in plain.split(whereSeparator: \.isWhitespace) where word.count > longest.count {
+                longest = word
+            }
+        }
+        return String(longest)
+    }
+
+    nonisolated static let maxFloor: CGFloat = 160
 
     /// The rows in one `Grid`, so the columns stay aligned. While a long table streams the closed pieces of `pieceRows`
     /// rows are Equatable views that keep what was evaluated of them (no `.equatable()` on them: it would make each piece
     /// a cell of the grid instead of its rows), and only the last piece is evaluated again at each
     /// flush; the cells of the row being written are not kept in `MarkdownCache` (each half-written state would be).
-    @ViewBuilder private var rows: some View {
+    @ViewBuilder private func rows(_ floors: [CGFloat]) -> some View {
         if streaming, let pieces = Self.pieces(of: table.rows) {
             ForEach(Array(pieces.closed.enumerated()), id: \.offset) { _, piece in
-                TableRows(rows: piece, alignments: table.alignments, writing: false)
+                TableRows(rows: piece, alignments: table.alignments, floors: floors, writing: false)
             }
-            TableRows(rows: pieces.tail, alignments: table.alignments, writing: true)
+            TableRows(rows: pieces.tail, alignments: table.alignments, floors: floors, writing: true)
         } else {
-            TableRows(rows: table.rows, alignments: table.alignments, writing: streaming, highlight: highlight)
+            TableRows(rows: table.rows, alignments: table.alignments, floors: floors, writing: streaming, highlight: highlight)
         }
     }
 
@@ -325,6 +370,7 @@ struct TableBlockView: View, Equatable {
 private struct TableRows: View, Equatable {
     let rows: [[String]]
     let alignments: [MarkdownTable.Alignment]
+    let floors: [CGFloat]
     let writing: Bool
     var highlight: String?
 
@@ -332,7 +378,7 @@ private struct TableRows: View, Equatable {
         ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
             GridRow {
                 ForEach(Array(row.enumerated()), id: \.offset) { column, cell in
-                    TableCell(source: cell, alignment: alignments.alignment(at: column), cached: !(writing && index == rows.count - 1), highlight: highlight)
+                    TableCell(source: cell, alignment: alignments.alignment(at: column), minWidth: floors.floor(at: column), cached: !(writing && index == rows.count - 1), highlight: highlight)
                 }
             }
         }
@@ -342,13 +388,18 @@ private struct TableRows: View, Equatable {
 private struct TableCell: View {
     let source: String
     let alignment: Alignment
+    let minWidth: CGFloat
     let cached: Bool
     var highlight: String?
 
     var body: some View {
         Text(markdownText(source, cached: cached, highlight: highlight))
-            .frame(maxWidth: .infinity, alignment: alignment)
+            .frame(minWidth: minWidth, maxWidth: .infinity, alignment: alignment)
     }
+}
+
+private extension [CGFloat] {
+    func floor(at column: Int) -> CGFloat { indices.contains(column) ? self[column] : 0 }
 }
 
 private extension [MarkdownTable.Alignment] {

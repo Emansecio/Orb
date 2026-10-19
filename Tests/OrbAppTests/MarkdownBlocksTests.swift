@@ -128,6 +128,19 @@ import Testing
         #expect(padded.rows == [["x", ""]])
     }
 
+    @Test func aTableColumnIsNeverNarrowerThanItsLongestWordUpToACap() {
+        let table = MarkdownTable(header: ["Nota", "Página"],
+                                  rows: [["8", "**acima** da média"], ["10", "https://exemplo.com.br/um/caminho/muito/comprido/mesmo"]],
+                                  alignments: [.leading, .leading])
+        let floors = TableBlockView.columnFloors(of: table)
+        let semibold = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        #expect(floors.count == 2)
+        // "Nota" in the header is the longest word of the first column.
+        #expect(floors[0] >= ("Nota" as NSString).size(withAttributes: [.font: semibold]).width)
+        // A long link does not stretch its column past the cap: it wraps.
+        #expect(floors[1] == TableBlockView.maxFloor)
+    }
+
     @Test func aWholeReplyIsThePiecesItHadWhileStreaming() {
         let reply = """
             Olá **mundo**.
