@@ -631,6 +631,15 @@ enum Schedule: Codable, Hashable, Sendable {
     /// What `everyMinutes` accepts: never under 15, or a task would keep the Orb (and the provider's bill) busy.
     static let minuteRange = 15...720
 
+    /// The prompt-cache lifetime worth asking Claude Code for in a run of this schedule: "5m" when the run after it comes more than
+    /// an hour later (or never), since an hour-long cache would expire unused and costs more to write; nil otherwise.
+    func cacheTTL(after date: Date = .now, calendar: Calendar = .current) -> String? {
+        if case .once = self { return "5m" }
+        let first = next(after: date, calendar: calendar)
+        guard first < .distantFuture else { return "5m" }
+        return next(after: first, calendar: calendar).timeIntervalSince(first) > 3600 ? "5m" : nil
+    }
+
     func next(after date: Date, calendar: Calendar = .current) -> Date {
         switch self {
         case .daily(let hour, let minute):

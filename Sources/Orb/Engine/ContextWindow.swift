@@ -187,12 +187,20 @@ struct ContextWindow: Sendable, Equatable {
         let condensedUpTo = max(0, condensing - origin)
         let newestSnapshot = ContextCondensing.snapshotIndex(in: raw)
 
+        let snapshotCalls = Set(raw.flatMap(\.toolCalls).filter { $0.name == "browse_snapshot" }.map(\.id))
+
         /// `raw` shortened at level `rung`.
         func prepared(_ rung: Int) -> [ChatMessage] {
             let level = rungs[rung]
             let fresh = Set(taskOutputs[settled...])
             let freshCalls = Set(fresh.compactMap { raw[$0].toolCallID })
             var messages = raw
+            // A browse_snapshot that a newer one (also no longer whole) has replaced: its refs are dead. The fresh
+            // boundary only moves in batches, so this changes exactly where a batch already rewrites the history.
+            let snapshots = raw.indices.filter {
+                raw[$0].role == .tool && !raw[$0].isError && !fresh.contains($0) && raw[$0].toolCallID.map(snapshotCalls.contains) == true
+            }
+            let superseded = Set(snapshots.dropLast())
             for index in messages.indices {
                 let condensed = index < condensedUpTo
                 switch messages[index].role {
@@ -207,7 +215,12 @@ struct ContextWindow: Sendable, Equatable {
                     var allowed = level.oldOutputs
                     if condensed { allowed = min(allowed, ContextCondensing.outputLimit) }
                     allowed = max(allowed, messages[index].isError ? ContextCondensing.errorLimit : 0)
-                    messages[index].content = ContextText.preview(messages[index].content, limit: allowed)
+                    // Only where the preview cuts it anyway, so a short snapshot is not rewritten for nothing.
+                    if superseded.contains(index), messages[index].content.count > allowed + 80 {
+                        messages[index].content = ContextText.supersededSnapshot(messages[index].content)
+                    } else {
+                        messages[index].content = ContextText.preview(messages[index].content, limit: allowed)
+                    }
                 case .assistant:
                     if condensed { messages[index] = ContextCondensing.condensed(messages[index], keepingSnapshot: false) }
                     for call in messages[index].toolCalls.indices where !freshCalls.contains(messages[index].toolCalls[call].id) {
@@ -400,6 +413,13 @@ enum ContextText {
     static let savedNoteOpen = "\n[full output saved at "
     private static let maxSavedNote = 600
 
+    /// One line for a browse_snapshot a newer one replaced (its first line is `URL: <page>`, kept when short).
+    static func supersededSnapshot(_ text: String) -> String {
+        let first = text.prefix { $0 != "\n" }
+        let page = first.hasPrefix("URL: ") && first.count <= 140 ? " de " + first.dropFirst(5) : ""
+        return "[Instantâneo antigo\(page): substituído por um mais novo; as refs dele já não valem. Peça browse_snapshot de novo se precisar.]"
+    }
+
     /// The start and end of `text` with a marker for what is left out, `limit` characters in all (plus the marker).
     /// Text that already carries such a marker keeps its count: what it left out is added to what is cut now, and
     /// whatever follows the marker (like the path of a saved output) stays at the end.
@@ -588,7 +608,7 @@ extension Conversation {
             seeded.focus = focus
             base = seeded
         }
-        let foldAbove = now.map(isCacheCold) == true ? ContextBudget.coldFoldShare : 1
+        let foldAbove = now.map { isCacheCold(now: $0, after: budget.coldAfter) } == true ? ContextBudget.coldFoldShare : 1
         func startingCut() -> ContextCut {
             var cut = ContextCut(summary: summary, ledger: base)
             cut.chunks = pendingChunks(after: covered)
@@ -628,8 +648,9 @@ extension Conversation {
     /// more. The next request pays for the whole history anyway, so folding the start now costs no cache; the history
     /// is folded already at `coldFoldShare` of the budget (what `prepareHistory` does with `now`). A conversation with
     /// no recorded call is not cold.
-    func isCacheCold(now: Date) -> Bool {
-        lastModelCall.map { now.timeIntervalSince($0) >= ContextBudget.cacheColdAfter } ?? false
+    /// `after`: how long this provider keeps the cache (`ContextBudget.coldAfter`).
+    func isCacheCold(now: Date, after: TimeInterval = ContextBudget.cacheColdAfter) -> Bool {
+        lastModelCall.map { now.timeIntervalSince($0) >= after } ?? false
     }
 
     /// How many of `messages` the summary stands for.

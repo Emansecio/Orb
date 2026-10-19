@@ -77,9 +77,16 @@ struct ContextBudget: Sendable, Equatable {
     /// Providers keep the start of a request in cache for about this long (seconds) after the last call: past it the
     /// next request pays for the whole history anyway.
     static let cacheColdAfter: TimeInterval = 300
+    /// Claude Code (subscription) caches the whole history for 1 h, not 5 min: between the two the cache is still warm
+    /// and folding early would rewrite tens of thousands of tokens at twice the input price. A margin under the hour
+    /// covers clock differences.
+    static let claudeCodeCacheColdAfter: TimeInterval = 3_300
     /// With a cold cache the history is folded to the low-water mark once it passes this share of the budget.
     static let coldFoldShare = 0.6
 
+    /// How long without a call makes the provider's cache of the history cold (see `cacheColdAfter`); longer for
+    /// Claude Code.
+    var coldAfter: TimeInterval = ContextBudget.cacheColdAfter
     /// Tokens of history: the level at which a compaction starts.
     var tokens: Int
     /// The model's whole window, when known.
@@ -141,6 +148,7 @@ struct ContextBudget: Sendable, Equatable {
         }
         if let learnedWindow, learnedWindow > 0 { window = min(window, learnedWindow) }
         self.init(modelWindow: window, replyTokens: Self.replyTokens(window: window, format: wire), level: level)
+        if provider == .claudeCode || wire == .claudeCode { coldAfter = Self.claudeCodeCacheColdAfter }
     }
 
     /// Room for the reply: up to 16,000 output tokens in the Messages format, which sends it as its cap (see
