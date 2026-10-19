@@ -68,7 +68,7 @@ struct ExchangeSheet: View {
             .padding(.vertical, Spacing.l)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .orbSheet(title, subtitle: "Somente leitura", size: .medium) {
+        .orbSheet(title, subtitle: "Somente leitura", size: .medium, onClose: { dismiss() }) {
             footer
         }
         .sheet(isPresented: $showsWork) {
@@ -120,15 +120,22 @@ struct ExchangeSheet: View {
                 Button("Ver o trabalho \(Self.ofThe(answered.name))") { if let onOpenWork { onOpenWork() } else { showsWork = true } }
                     .buttonStyle(SecondaryPillStyle())
             }
-            Button(Self.backLabel(parties)) { dismiss() }
+            Button(Self.backLabel(parties, viewing: viewing)) { dismiss() }
                 .buttonStyle(PrimaryPillStyle())
                 .keyboardShortcut(.defaultAction)
         }
     }
 
-    /// "Voltar ao Atlas": back to the one whose chat it is; plain "Voltar" with no party to name.
-    static func backLabel(_ parties: [OrbRef]) -> String {
-        parties.first.map { "Voltar \(toThe($0.name))" } ?? "Voltar"
+    /// The Orb whose chat is open behind the sheet (the exchange shows in both Orbs' chats).
+    private var viewing: UUID? {
+        if case .bot(let id) = model.selection { id } else { nil }
+    }
+
+    /// "Voltar ao Atlas": back to the one whose chat is open (`viewing`), else the one who asked; plain "Voltar" with
+    /// no party to name.
+    static func backLabel(_ parties: [OrbRef], viewing: UUID? = nil) -> String {
+        let back = parties.first { $0.id == viewing } ?? parties.first
+        return back.map { "Voltar \(toThe($0.name))" } ?? "Voltar"
     }
 
     /// "do Pesquisador", "da Lia": the name with its article after "de".

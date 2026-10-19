@@ -24,8 +24,10 @@ extension View {
     /// `icon` puts a service's tile before the title (the connector sheets).
     func orbSheet<Footer: View>(_ title: String, subtitle: String? = nil, size: SheetSize = .medium,
                                 maxHeight: CGFloat = SheetSize.maxHeight, icon: ServiceMark? = nil,
+                                onClose: (() -> Void)? = nil,
                                 @ViewBuilder footer: () -> Footer) -> some View {
-        modifier(OrbSheetFrame(title: title, subtitle: subtitle, size: size, maxHeight: maxHeight, icon: icon, footer: footer()))
+        modifier(OrbSheetFrame(title: title, subtitle: subtitle, size: size, maxHeight: maxHeight, icon: icon,
+                               onClose: onClose, footer: footer()))
     }
 
     func orbSheet(_ title: String, subtitle: String? = nil, size: SheetSize = .medium) -> some View {
@@ -44,6 +46,8 @@ private struct OrbSheetFrame<Footer: View>: ViewModifier {
     let size: SheetSize
     let maxHeight: CGFloat
     let icon: ServiceMark?
+    /// An X at the right of the header, for a sheet whose footer has no plain "Fechar" (Esc does the same).
+    let onClose: (() -> Void)?
     let footer: Footer
 
     // On the sheet's first appearance its parts come in one after another (`sheetSection`): the heading, what it holds,
@@ -63,6 +67,17 @@ private struct OrbSheetFrame<Footer: View>: ViewModifier {
                             .foregroundStyle(Palette.muted)
                             .fixedSize(horizontal: false, vertical: true)
                     }
+                }
+                if let onClose {
+                    Spacer(minLength: 0)
+                    Button("Fechar", systemImage: "xmark", action: onClose)
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.plain)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Palette.muted)
+                        .frame(width: 24, height: 24)
+                        .contentShape(.rect)
+                        .help("Fechar (Esc)")
                 }
             }
             .padding(.horizontal, Spacing.sheetEdge)

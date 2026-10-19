@@ -103,6 +103,9 @@ struct ExchangePartiesTests {
         #expect(ExchangeSource.parties(of: [], event: event) == [atlas, researcher])
         #expect(ExchangeSheet.backLabel([]) == "Voltar")
         #expect(ExchangeSheet.backLabel([atlas]) == "Voltar ao Atlas")
+        // Opened from the chat of the Orb that was asked, the button goes back to that chat, not the asker's.
+        #expect(ExchangeSheet.backLabel([atlas, researcher], viewing: researcher.id) == "Voltar ao Pesquisador")
+        #expect(ExchangeSheet.backLabel([atlas, researcher], viewing: UUID()) == "Voltar ao Atlas")
     }
 }
 
