@@ -165,6 +165,18 @@ struct BrowserHandoffEngineTests {
         #expect(toolFinished(events) == .done)
     }
 
+    @Test func aRoutinesRunGetsNoCardAndNoWindowAndIsToldToReportTheStep() async {
+        // Before, the card waited for a Pronto nobody would click, holding the Orb and the routines after it.
+        let engine = AgentEngine()
+        var turn = request()
+        turn.unattended = true
+        let events = await drive(engine, turn) { _ in Issue.record("no card in a routine's run") }
+        #expect(cards(events).isEmpty)
+        #expect(toolResult(events) == BrowseShowTool.unattended && toolFinished(events) == .done)
+        #expect(setup.driver.calls.isEmpty, "the window is not opened: \(setup.driver.calls)")
+        #expect(await engine.gate.openIDs(for: turn.bot.id).isEmpty)
+    }
+
     @Test func withoutAHandlerTheToolFallsBackToTellingTheModelToAskAndStop() async throws {
         // A caller with nobody to answer (no engine around the tool): the old behavior.
         let text = try await BrowseShowTool().run(.object([:]), context: setup.context())

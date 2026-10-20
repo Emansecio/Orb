@@ -1010,8 +1010,12 @@ actor AgentEngine {
             let target = Self.writeTarget(tool.spec.name, arguments, request.context)
             var context = request.context
             context.judgedDanger = permission.danger != nil
-            context.handoff = { [self] page in
-                await handoff(page: page, resuming: summary.title, request: request, out: out)
+            // A routine's run has nobody to click Pronto: a card would hold the Orb (and the routines after it) for good.
+            context.unattended = request.unattended
+            if !request.unattended {
+                context.handoff = { [self] page in
+                    await handoff(page: page, resuming: summary.title, request: request, out: out)
+                }
             }
             context.askUser = { [self] question in
                 await ask(question, resuming: summary.title, request: request, out: out)

@@ -626,6 +626,8 @@ struct ToolContext: Sendable {
     /// Waits for the person to finish what only they can do in the browser window `browse_show` opened. The engine sets it for the
     /// tool call (it opens the card and waits); nil where nobody can answer, and `browse_show` then tells the model to ask and stop.
     var handoff: HandoffHandler?
+    /// Nobody reads the turn while it runs (a routine's run): what only the person can do is not waited for, it is reported.
+    var unattended = false
     /// Asks the person a question (`ask_user`) and waits for the answer, nil when they skipped it. The engine sets it for the tool
     /// call; the tool is only offered where the person is (`MultiOrbOffering.askUser`).
     var askUser: QuestionHandler?

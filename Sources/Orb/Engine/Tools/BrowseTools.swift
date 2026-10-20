@@ -668,6 +668,8 @@ struct BrowseShowTool: BrowseTool {
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
         let session = try await BrowseSupport.session(context)
         let hide = arguments.flag("hide")
+        // In a routine's run nobody is at the window: it is not opened, and the run ends saying what the person has to do.
+        if !hide, context.unattended { return Self.unattended }
         // An Orb set to "Visível" has its window open for good: there is nothing to open (or to hide), and the page stays as it is.
         let keepsWindow = session.mode == .visible
         let page: BrowserPage
@@ -735,6 +737,11 @@ struct BrowseShowTool: BrowseTool {
     static let finished = "The user says they are done in the browser window (it is still open, on whatever page they left). "
         + "Take a fresh browse_snapshot to see where the page is now: refs from before are stale. "
         + "browse_show with hide: true sends the browser back to the background."
+    /// What a routine's run is told instead of opening the window: nobody would do the step, so the run reports it.
+    static let unattended = "This is an automatic run and nobody is at the screen: the window was not opened. Do not try this step "
+        + "yourself. End the run now, saying in your reply what the person has to do on this page (log in, enter the code, solve "
+        + "the check) so they see it in the report and can do it before the next run."
+
     static let declined = "The user cancelled: they will not do this in the browser. The window was closed. Do not retry or look for a way around "
         + "it; continue without that step, or ask what they want instead."
 }
