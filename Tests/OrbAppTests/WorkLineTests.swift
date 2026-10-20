@@ -26,6 +26,19 @@ struct WorkPhraseTests {
         #expect(background.verb == "Rodando em segundo plano" && background.target == "npm run dev")
     }
 
+    @Test func theHeadlineSaysACommandWithoutWritingItOut() {
+        #expect(line("Rodando no Terminal", "docker exec app python -c \"x\"").headline == "Rodando um comando")
+        #expect(line("Rodando em segundo plano", "npm run dev").headline == "Rodando um comando em segundo plano")
+        #expect(line("Lendo arquivo", "/Users/x/README.md", kind: .file).headline == "Lendo README.md")
+        #expect(WorkLine(verb: "Pensando").headline == "Pensando…")
+        var routine = line("Rodando no Terminal", "swift build")
+        routine.routine = "Rodada WhatsApp"
+        #expect(routine.headline == "Rotina “Rodada WhatsApp” · Rodando um comando")
+        #expect(routine.text == "Rotina “Rodada WhatsApp”: Rodando swift build", "the working line still writes it out")
+        let request = WorkLine(verb: "Lendo", target: "README.md", style: .code, prefix: "Pedido de Atlas")
+        #expect(request.headline == "Pedido de Atlas · Lendo README.md")
+    }
+
     @Test func onlyTheFirstLineOfTheDetailCountsAndItsWhiteSpaceIsCollapsed() {
         #expect(line("Rodando no Terminal", "git log   --oneline\n  | head -5\nmais").target == "git log --oneline")
         #expect(line("Rodando no Terminal", "\n\n   make\ttest  \n").target == "make test")

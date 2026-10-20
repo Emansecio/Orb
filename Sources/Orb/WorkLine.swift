@@ -76,6 +76,20 @@ struct WorkLine: Equatable, Sendable {
         return phrase
     }
 
+    /// `text` for the window's title and the sidebar's row, which have one short line: a command is said, not written out
+    /// ("Rodando um comando"; the working line in the chat shows it), and the routine or the request goes in front after
+    /// a "·" ("Rotina “Resumo” · Rodando um comando").
+    var headline: String {
+        let said = switch (verb, style) {
+        case ("Rodando", .code): "Rodando um comando"
+        case ("Rodando em segundo plano", .code): "Rodando um comando em segundo plano"
+        default: phrase
+        }
+        if let routine { return "Rotina “\(routine)” · \(said)" }
+        if let prefix { return "\(prefix) · \(said)" }
+        return said
+    }
+
     /// What identifies the phrase on screen: it changes when the words or the mood change, not when the count of
     /// actions, the routine or the countdown do. A new key swaps the phrase in the working line.
     var phraseKey: String {

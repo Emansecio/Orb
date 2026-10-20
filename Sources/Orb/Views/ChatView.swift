@@ -67,8 +67,8 @@ struct ChatView: View {
         .background(Palette.canvas)
         .navigationTitle(look.name)
         // Under the name, what the Orb is doing while it works (with the sidebar hidden, the only place that says so
-        // above the fold), and its model when it is free.
-        .navigationSubtitle(live.needsYou ? "Precisa de você" : live.shownWork?.text ?? model.modelName(forModel: live.modelID))
+        // above the fold), in its short form (a command is not written out), and its model when it is free.
+        .navigationSubtitle(live.needsYou ? "Precisa de você" : live.shownWork?.headline ?? model.modelName(forModel: live.modelID))
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button("Buscar na conversa", systemImage: "magnifyingglass") { find.open() }

@@ -314,7 +314,7 @@ struct SidebarBotRow: View {
         SidebarRow(isSelected: isSelected, selectionSpace: selectionSpace, dragPayload: SidebarOrder.dragPayload(botID)) {
             model.selection = .bot(botID)
         } content: { isHovering in
-            BotRowContent(row: BotRow(look: live.look, workText: live.shownWork?.text, shimmers: live.shownWork?.shimmers ?? false, activity: live.activity, isSelected: isSelected,
+            BotRowContent(row: BotRow(look: live.look, workText: live.shownWork?.headline, shimmers: live.shownWork?.shimmers ?? false, activity: live.activity, isSelected: isSelected,
                                       celebration: live.celebration, ack: live.poke, cue: live.cue, glance: live.glance, needsYou: live.needsYou, unread: live.unread,
                                       // MARK: MultiOrb (WP2): the ring of the Orb it is exchanging messages with
                                       partner: live.partner,
