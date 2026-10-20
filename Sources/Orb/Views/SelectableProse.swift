@@ -520,3 +520,44 @@ enum ProseWidth {
         mutating func reset() { run = 0; changedAt = 0 }
     }
 }
+
+/// How the width a prose text is laid out at follows the width it is given.
+enum ProseWidth {
+    /// Width steps while the width moves, in points.
+    static let step: CGFloat = 16
+    /// How long the width must stay still before the text is laid out at the exact width.
+    static let settle: TimeInterval = 0.12
+    /// Widths whose size is kept.
+    static let cacheLimit = 16
+
+    /// The width to lay out at: the exact one at rest, a step below it (never above) while it moves.
+    static func layoutWidth(_ width: CGFloat, moving: Bool) -> CGFloat {
+        guard moving, width > step else { return width }
+        return (width / step).rounded(.down) * step
+    }
+
+    /// Notes the widths asked for. The width is moving after `frames` changes in a row, each less than `settle` after the
+    /// one before and a frame apart (one layout pass asking several widths is not movement), until it stays the same
+    /// for `settle`.
+    struct Motion {
+        static let frames = 3
+        private var last: CGFloat?
+        private var changedAt: TimeInterval = 0
+        private var run = 0
+
+        var isMoving: Bool { run >= Self.frames }
+
+        /// True while the width is moving, `width` asked for at `now`.
+        mutating func note(_ width: CGFloat, at now: TimeInterval) -> Bool {
+            defer { last = width }
+            guard let last else { return false }
+            if width != last {
+                if now - changedAt > settle { run = 0 }
+                if now - changedAt > 0.004 { run += 1; changedAt = now }
+            }
+            return isMoving && now - changedAt < settle
+        }
+
+        mutating func reset() { run = 0; changedAt = 0 }
+    }
+}
