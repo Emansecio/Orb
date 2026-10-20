@@ -15,14 +15,6 @@ enum PermissionChipText {
         return "\(permission.mode.label) · \(count)"
     }
 
-    /// The words beside the chip's icon in the bar: none in the usual mode ("Perguntar antes", which every Orb starts
-    /// in), only its count of standing grants when it has some; the whole label in any other mode, which should be seen.
-    static func barLabel(_ permission: PermissionState) -> String? {
-        guard permission.mode == .ask else { return permission.mode.label }
-        let count = permission.rules.count
-        return count > 0 ? "\(count)" : nil
-    }
-
     /// The same for a screen reader and the tooltip: "Perguntar antes, 4 liberações".
     static func spoken(_ permission: PermissionState) -> String {
         let count = permission.rules.count

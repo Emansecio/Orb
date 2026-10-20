@@ -211,6 +211,9 @@ extension AppModel {
         return session.turnTask != nil && session.routineID != nil && (session.sideKind == nil || session.sideKind == .routine)
     }
 
+    /// Whether a routine's run holds this Orb (its name may be unknown if the routine was deleted meanwhile).
+    func holdsRoutine(_ botID: UUID) -> Bool { sessions[botID]?.routineID != nil }
+
     /// The name of the routine whose run holds this Orb, if one does.
     func runningRoutineName(_ botID: UUID) -> String? {
         sessions[botID]?.routineID.flatMap { id in routines.first { $0.id == id }?.name }

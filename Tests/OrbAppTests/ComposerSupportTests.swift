@@ -101,8 +101,13 @@ struct ComposerSupportTests {
     }
 
     @Test func theComposerNamesTheRoutineThatHoldsTheOrb() {
-        #expect(ComposerAction.routinePlaceholder(routineName: "Resumo diário") == "A rotina “Resumo diário” está rodando. O que você escrever vai depois dela.")
-        #expect(ComposerAction.routinePlaceholder(routineName: nil) == "Uma rotina está rodando. O que você escrever vai depois dela.")
+        #expect(ComposerAction.routineStrip(routineName: "Resumo diário") == "Rotina “Resumo diário” rodando · o que você escrever vai depois")
+        #expect(ComposerAction.routineStrip(routineName: nil) == "Uma rotina está rodando · o que você escrever vai depois")
+        #expect(ComposerAction.routineStrip(routineName: "  ") == "Uma rotina está rodando · o que você escrever vai depois")
+        let cut = ComposerAction.routineStrip(routineName: String(repeating: "a", count: 80))
+        #expect(cut == "Rotina “\(String(repeating: "a", count: ComposerAction.maxRoutineNameLength - 1))…” rodando · o que você escrever vai depois")
+        #expect(ComposerAction.placeholder(orbName: "Luna") == "Mensagem para Luna")
+        #expect(ComposerAction.placeholder(orbName: " ") == "Mensagem")
         #expect(ComposerAction.stop.title(isRoutine: false) == "Parar" && ComposerAction.stop.title(isRoutine: true) == "Parar a rotina")
         #expect(ComposerAction.stop.help(isRoutine: true) == "Parar a rotina (\(AppShortcut.stop.label))")
         #expect(ComposerAction.stop.help(isRoutine: false) == "\(CommandName.stop) (\(AppShortcut.stop.label))")
@@ -173,16 +178,6 @@ struct ComposerSupportTests {
         #expect(PermissionChipText.grantsTitle(PermissionState(mode: .readOnly, rules: rules)) == "Liberações permanentes: 2")
         #expect(PermissionChipText.grantsTitle(PermissionState(mode: .ask, rules: [rules[0]])) == "Liberações permanentes: 1")
         #expect(PermissionChipText.grantsTitle(PermissionState(mode: .ask, rules: [])) == nil)
-    }
-
-    /// The bar says nothing beside the icon in the mode every Orb starts in, only its grants' count; any other mode in words.
-    @Test func theBarNamesOnlyAModeThatIsNotTheUsualOne() {
-        let rules = [PermissionRule.shell("git"), .shell("brew")]
-        #expect(PermissionChipText.barLabel(PermissionState(mode: .ask, rules: [])) == nil)
-        #expect(PermissionChipText.barLabel(PermissionState(mode: .ask, rules: rules)) == "2")
-        #expect(PermissionChipText.barLabel(PermissionState(mode: .auto, rules: rules)) == "Automático")
-        #expect(PermissionChipText.barLabel(PermissionState(mode: .readOnly, rules: [])) == "Só leitura")
-        #expect(PermissionChipText.barLabel(PermissionState(mode: .bypass, rules: [])) == "Sem pedir permissão")
     }
 
     /// One order everywhere (the Orb's panel, the new-Orb sheet and the composer all list `allCases`) and one wording:

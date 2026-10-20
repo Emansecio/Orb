@@ -1,7 +1,7 @@
 import SwiftUI
 
 // The small controls under the message field: the "+" (attach, skills), what the Orb may do (permissions) and the
-// model. The permission chip says its mode in words only when it is not the usual one (and there is room).
+// model. The permission chip is its mode's icon alone, the name in its tooltip.
 
 /// A pill-shaped button for the composer's bar: icon and text, a soft fill on hover, a filled one when `filled`.
 struct ComposerChipStyle: ButtonStyle {
@@ -22,12 +22,11 @@ struct ComposerChipStyle: ButtonStyle {
 
 // MARK: Permissions
 
-/// The Orb's permission mode as a chip ("Perguntar antes · 4") that opens a short list of the four modes, each with
+/// The Orb's permission mode as an icon chip (its name and the grants' count in the tooltip) that opens a short list of the four modes, each with
 /// what it means. The standing grants are counted on the chip and managed in the Orb's panel.
 struct PermissionChip: View {
     @Environment(AppModel.self) private var model
     let botID: UUID
-    let compact: Bool
     /// The list closed (a mode chosen, "Gerenciar", or a click away): the composer takes the focus back.
     var onClose: () -> Void = {}
     @State private var isOpen = false
@@ -36,13 +35,11 @@ struct PermissionChip: View {
     var body: some View {
         let permission = model.live(botID).permission
         Button { isOpen.toggle() } label: {
-            HStack(spacing: 5) {
-                Image(systemName: permission.mode.symbol)
-                if !compact, let text = PermissionChipText.barLabel(permission) { Text(text).lineLimit(1).fixedSize() }
-            }
-            .foregroundStyle(Self.tint(permission.mode))
+            Image(systemName: permission.mode.symbol)
+                .foregroundStyle(Self.tint(permission.mode))
         }
         .buttonStyle(ComposerChipStyle())
+        // Icon only: the mode's name lives in the tooltip and for VoiceOver (the icon's colour already tells the unusual ones).
         .help("Permissões: \(PermissionChipText.spoken(permission)) · \(Tip.withoutFullStop(permission.mode.shortSummary))" + grantsHelp(permission))
         .accessibilityLabel("Permissões")
         .accessibilityValue(PermissionChipText.spoken(permission))
@@ -331,6 +328,36 @@ struct ModelChip: View {
         .accessibilityLabel("Modelo")
         .accessibilityValue(name.isEmpty ? "Nenhum" : name)
         .popover(isPresented: $isOpen, arrowEdge: .bottom) { ModelPopover(botID: botID) { isOpen = false } }
+    }
+}
+
+// MARK: Routine
+
+/// The line above the field while one of the Orb's routines runs: what holds the Orb, what a message does now, and the
+/// button that stops the run (the same as the bar's Stop). Said like `JobsStrip` is.
+struct RoutineStrip: View {
+    @Environment(AppModel.self) private var model
+    let botID: UUID
+    let routineName: String?
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "clock.arrow.circlepath")
+                .foregroundStyle(Palette.faint)
+                .accessibilityHidden(true)
+            Text(ComposerAction.routineStrip(routineName: routineName))
+                .foregroundStyle(Palette.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 4)
+            Button("Parar", systemImage: "stop.fill") { model.stopTurn(botID) }
+                .labelStyle(.iconOnly)
+                .buttonStyle(ComposerChipStyle())
+                .help(ComposerAction.stop.help(isRoutine: true))
+        }
+        .font(.system(size: 11))
+        .padding(.horizontal, 4)
+        .accessibilityElement(children: .contain) // the stop button stays reachable
     }
 }
 

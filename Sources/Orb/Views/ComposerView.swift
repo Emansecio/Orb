@@ -128,6 +128,10 @@ struct ComposerView: View {
         let matches = slashMatches
         let jobs = model.live(botID).jobs
         return VStack(alignment: .leading, spacing: 10) {
+            if model.holdsRoutine(botID) {
+                RoutineStrip(botID: botID, routineName: model.runningRoutineName(botID))
+                    .transition(.adapted(.unfold, reduceMotion: reduceMotion))
+            }
             if !jobs.isEmpty {
                 JobsStrip(botID: botID, jobs: jobs).transition(.adapted(.unfold, reduceMotion: reduceMotion))
             }
@@ -183,7 +187,8 @@ struct ComposerView: View {
         // count or by a key): one discrete value, so the field's own height keeps following the typing (§2.5).
         .animation(reduceMotion ? Motion.fade : Motion.content,
                    value: CardParts(suggestions: !matches.isEmpty, strip: lane.hasAttachments || lane.pendingPictures > 0,
-                                    error: lane.error != nil, banner: lane.editing != nil, jobs: jobs.count))
+                                    error: lane.error != nil, banner: lane.editing != nil, jobs: jobs.count,
+                                    routine: model.holdsRoutine(botID)))
         // The shadow belongs to the background alone: on the whole card every key in the field re-rendered the text,
         // chips and buttons into an offscreen pass to cast it.
         // Reads the dictation's phase, never its level: the card does not re-render with the voice.
@@ -217,8 +222,8 @@ struct ComposerView: View {
 
     private var placeholder: LocalizedStringKey {
         if isQueueing { return "Escreva para orientar o Orb enquanto ele trabalha" }
-        if isWorking { return LocalizedStringKey(ComposerAction.routinePlaceholder(routineName: model.runningRoutineName(botID))) }
-        return "Pergunte qualquer coisa ou solte um arquivo"
+        // Free or running a routine (the strip above the field says so): the same short line, naming the Orb.
+        return LocalizedStringKey(ComposerAction.placeholder(orbName: model.live(botID).look.name))
     }
 
     /// The line under the card: how the keys work, shown only when it helps and nothing else is being said.
@@ -281,7 +286,7 @@ struct ComposerView: View {
         let action = ComposerAction.current(isWorking: isWorking, canSend: canSend, waitsOnChain: model.live(botID).chainWork != nil)
         return HStack(spacing: 2) {
             ComposerPlusMenu(botID: botID, attach: { isImporting = true }) { insert("/\($0) ") }
-            PermissionChip(botID: botID, compact: isCompact) { isFocused = true }
+            PermissionChip(botID: botID) { isFocused = true }
             Spacer(minLength: 8)
             ContextMeterChip(botID: botID, gauge: gauge, compact: isCompact)
             ModelChip(botID: botID, isOpen: $isModelOpen)
@@ -532,6 +537,8 @@ private struct CardParts: Equatable {
     var banner: Bool
     /// Lines of running processes: each one that comes or goes changes the card's height once (they are rare).
     var jobs: Int
+    /// A routine holds the Orb: its strip comes and goes once.
+    var routine: Bool
 }
 
 /// A picture waiting to be sent: its thumbnail with a remove button.
@@ -696,10 +703,23 @@ enum ComposerAction: Equatable {
         return isPlain && isQueueing && canSend ? .queueAfterTask : .ignore
     }
 
-    /// The field's placeholder while a routine runs (which a message cannot join: it waits for the run's end).
-    static func routinePlaceholder(routineName: String?) -> String {
-        routineName.map { "A rotina “\($0)” está rodando. O que você escrever vai depois dela." }
-            ?? "Uma rotina está rodando. O que você escrever vai depois dela."
+    /// The sentence of the strip above the field while a routine runs (a message cannot join the run: it waits for its end).
+    static func routineStrip(routineName: String?) -> String {
+        let tail = "o que você escrever vai depois"
+        guard let name = routineName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else {
+            return "Uma rotina está rodando · \(tail)"
+        }
+        let shown = name.count > maxRoutineNameLength ? name.prefix(maxRoutineNameLength - 1) + "…" : name
+        return "Rotina “\(shown)” rodando · \(tail)"
+    }
+
+    /// Longer routine names are cut with an ellipsis, so the sentence after them is never pushed out of the strip.
+    static let maxRoutineNameLength = 36
+
+    /// The field's placeholder when the Orb is free (or runs a routine): short, with the Orb's name.
+    static func placeholder(orbName: String) -> String {
+        let name = orbName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? "Mensagem" : "Mensagem para \(name)"
     }
 
     /// `waitsOnChain` (MultiOrb, WP2): the Orb is idle but waits on other Orbs' answers; with nothing typed the button stops that chain.
