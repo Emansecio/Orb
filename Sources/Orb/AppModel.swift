@@ -418,6 +418,7 @@ final class AppModel {
         for (id, preview) in state.replies {
             if let id = UUID(uuidString: id), botIDs.contains(id) { live(id).setLastReply(preview) }
         }
+        if runsBackgroundWork && !devRun { fillMissingReplies() }
         if !devRun { // a developer run starts no server, and its screens set the statuses themselves
             let manager = mcp
             Task { [weak self] in await manager.observe { statuses in Task { @MainActor in self?.connectorStatus = statuses } } }
@@ -744,6 +745,22 @@ final class AppModel {
         guard live.unread != count else { return }
         live.setUnread(count)
         scheduleStateSave()
+    }
+
+    /// Orbs whose row has no reply to show (saved before the previews existed): the last reply of each one's saved
+    /// conversation, read one at a time off the main thread. Once per Orb, as the preview found is saved with the state.
+    func fillMissingReplies() {
+        let missing = botIDs.filter { live($0).lastReply == nil }
+        guard !missing.isEmpty else { return }
+        let store = self.store
+        Task(priority: .utility) { [weak self] in
+            for id in missing {
+                let read = await store.readConversationAsync(id)
+                guard let self, let items = read.value?.items, let preview = ReplyPreview.last(in: items),
+                      botIDs.contains(id), live(id).lastReply == nil else { continue }
+                setLastReply(preview, for: id)
+            }
+        }
     }
 
     /// The Orb's latest reply for its sidebar row, saved with the app's state like the unread count. A turn that ended

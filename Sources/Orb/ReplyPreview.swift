@@ -12,6 +12,15 @@ struct ReplyPreview: Codable, Equatable, Sendable {
         let text = RoutineRun.preview(of: reply, limit: 140)
         return text.isEmpty ? nil : ReplyPreview(text: text, date: date)
     }
+
+    /// The preview of the newest finished reply of a saved conversation that has one with readable words (an Orb whose
+    /// row was never given a preview: saved before they existed). Its time is when that reply came.
+    static func last(in items: [TranscriptItem]) -> ReplyPreview? {
+        for item in items.reversed() {
+            if case .bot(let text, false) = item.kind, let preview = make(from: text, at: item.date) { return preview }
+        }
+        return nil
+    }
 }
 
 /// The time at the right of an Orb's name in the sidebar: the hour today, "Ontem", the weekday within the last week,

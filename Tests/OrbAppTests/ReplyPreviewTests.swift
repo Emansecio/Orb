@@ -16,6 +16,22 @@ import Testing
         calendar.date(from: DateComponents(year: 2026, month: month, day: day, hour: hour, minute: minute))!
     }
 
+    // MARK: A conversation saved before the previews
+
+    @Test func theLastFinishedReplyOfASavedConversationIsTheOne() {
+        var older = TranscriptItem(.bot(text: "**Feito.** Duas vendas hoje.", isStreaming: false))
+        older.date = date(19, 9, 0)
+        var newer = TranscriptItem(.bot(text: "Tudo certo por aqui.", isStreaming: false))
+        newer.date = date(20, 16, 23)
+        let items = [TranscriptItem(.user(text: "oi", attachments: [])), older,
+                     TranscriptItem(.user(text: "e agora?", attachments: [])), newer,
+                     TranscriptItem(.notice("Compactei a conversa")),
+                     TranscriptItem(.bot(text: "pela met", isStreaming: true)),
+                     TranscriptItem(.bot(text: "```\n```", isStreaming: false))]
+        #expect(ReplyPreview.last(in: items) == ReplyPreview(text: "Tudo certo por aqui.", date: date(20, 16, 23)))
+        #expect(ReplyPreview.last(in: [TranscriptItem(.user(text: "oi", attachments: []))]) == nil)
+    }
+
     // MARK: The time
 
     @Test func todayShowsTheHour() {
