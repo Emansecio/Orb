@@ -15,6 +15,9 @@ struct TranscriptRow: View, Equatable {
     /// This is the Orb's reply at the very end of the chat: its avatar is alive (the one Orb in view), and the
     /// working line below it hides its own. Part of the row's identity, so only the two rows that change re-render.
     var isLastReply = false
+    /// The reply wears its Orb's avatar: false for one that a later reply of the same run (no message of yours between
+    /// them) gives it up to. Part of the row's identity, like `isLastReply`.
+    var showsAvatar = true
     /// This is the reply "Refazer" belongs to (the last one of an idle chat).
     var offersRedo = false
     /// The row is about to leave (an edit or "Refazer" cuts the chat before it): it fades out first.
@@ -27,6 +30,7 @@ struct TranscriptRow: View, Equatable {
 
     nonisolated static func == (lhs: TranscriptRow, rhs: TranscriptRow) -> Bool {
         lhs.item == rhs.item && lhs.botID == rhs.botID && lhs.orb == rhs.orb && lhs.isLastReply == rhs.isLastReply
+            && lhs.showsAvatar == rhs.showsAvatar
             && lhs.offersRedo == rhs.offersRedo && lhs.isDropping == rhs.isDropping && lhs.find == rhs.find
             && lhs.editable == rhs.editable
     }
@@ -45,7 +49,7 @@ struct TranscriptRow: View, Equatable {
                        editable: editable, highlight: find?.query)
         case .bot(let text, let isStreaming):
             BotMessage(orb: orb, botID: botID, text: text, live: isStreaming ? model.liveText(for: item.id, of: botID) : nil,
-                       isLastReply: isLastReply, offersRedo: offersRedo, highlight: find?.query)
+                       isLastReply: isLastReply, showsAvatar: showsAvatar, offersRedo: offersRedo, highlight: find?.query)
         case .tool(let call):
             ToolCallLine(call: call)
         case .approval(let request):
@@ -59,7 +63,7 @@ struct TranscriptRow: View, Equatable {
         case .notice(let text):
             NoticeLine(id: item.id, text: text, botID: botID)
         case .greeting(let text):
-            GreetingMessage(orb: orb, botID: botID, text: text, isLast: isLastReply, highlight: find?.query)
+            GreetingMessage(orb: orb, botID: botID, text: text, isLast: isLastReply, showsAvatar: showsAvatar, highlight: find?.query)
         // MARK: MultiOrb (WP0)
         case .event(let event):
             EventLineView(event: event).alignedWithReplyText()
@@ -334,6 +338,8 @@ private struct BotMessage: View {
     let text: String
     let live: LiveText?
     let isLastReply: Bool
+    /// False when a later reply of the same run wears the avatar: the margin stays, empty.
+    var showsAvatar = true
     /// The last reply of an idle chat: "Refazer" is beside its copy buttons.
     var offersRedo = false
     var highlight: String?
@@ -348,6 +354,9 @@ private struct BotMessage: View {
         let name = model.live(botID).look.name
         return name.isEmpty ? "Orb" : name
     }
+
+    /// Which avatar the margin holds (none, the still one, the living one); the fade is tied to this.
+    private var avatarPhase: Int { showsAvatar ? (isLastReply ? 2 : 1) : 0 }
 
     // The bubble is padded and given the row's width instead of sharing an HStack with the avatar and a Spacer:
     // the text then gets one definite width to wrap to (an HStack asks for several sizes, and each one lays the
@@ -388,15 +397,18 @@ private struct BotMessage: View {
                 // line or a new message came in) the live one may be mid-expression: the two cross-fade (0.15 s) instead
                 // of the expression jumping. The animation is tied to this flag, which changes rarely, not to the list.
                 Group {
-                    if isLastReply {
-                        LiveBotAvatar(botID: botID, orb: orb, size: 30, restsWhenIdle: true)
-                            .transition(.opacity)
-                    } else {
-                        BotAvatar(orb: orb, size: 30, animated: false)
-                            .transition(.opacity)
+                    if showsAvatar {
+                        if isLastReply {
+                            LiveBotAvatar(botID: botID, orb: orb, size: 30, restsWhenIdle: true)
+                                .transition(.opacity)
+                        } else {
+                            BotAvatar(orb: orb, size: 30, animated: false)
+                                .transition(.opacity)
+                        }
                     }
                 }
-                .animation(Motion.fade, value: isLastReply)
+                // A reply that a newer one of the run takes the avatar from fades it out the same way, the margin kept.
+                .animation(Motion.fade, value: avatarPhase)
                 .offset(y: ReplyBubble.avatarDrop)
                 .accessibilityHidden(true)
             }
@@ -433,12 +445,13 @@ private struct GreetingMessage: View {
     let botID: UUID
     let text: String
     let isLast: Bool
+    var showsAvatar = true
     var highlight: String?
 
     var body: some View {
         let enters = isLast && EmptyChatEntrance.plays(for: botID, in: presented)
         VStack(alignment: .leading, spacing: 10) {
-            BotMessage(orb: orb, botID: botID, text: text, live: nil, isLastReply: isLast, highlight: highlight)
+            BotMessage(orb: orb, botID: botID, text: text, live: nil, isLastReply: isLast, showsAvatar: showsAvatar, highlight: highlight)
                 .entrance(.rise, enters: enters)
             if isLast {
                 GreetingReplies(botID: botID)
@@ -1000,7 +1013,7 @@ struct WorkGroupRow<Content: View>: View, Equatable {
     /// the row is open, so a closed one is not drawn again for what only its hidden content would show.
     struct ContentInputs: Equatable {
         var openRuns: Set<UUID>
-        var lastReplyID: UUID?
+        var avatars: ReplyAvatars
         var redoID: UUID?
         var dropping: Set<UUID>
         var find: FindFocus?
