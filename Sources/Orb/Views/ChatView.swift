@@ -230,8 +230,9 @@ private struct TranscriptList: View {
         // Looked at before the rows are made, as many times as this is evaluated: the same items say the same thing.
         let generation = entrances.observe(items, isLoading: isLoading, swaps: transcript.swaps)
         // The Orb's reply at the end of the chat carries its living avatar; the working line below gives up its own
-        // then, so there is one Orb in view at a time. Only the two rows whose answer changed are drawn again.
-        let lastReplyID: UUID? = if let last = items.last, last.kind.isReply { last.id } else { nil }
+        // then, so there is one Orb in view at a time. In a run of replies with no message of yours between them only the
+        // last keeps an avatar. Only the rows whose answer changed are drawn again (a new reply changes the one before it).
+        let avatars = ReplyAvatars(items)
         // "Refazer" belongs to the last finished reply of an idle chat; rows an edit or a redo is about to cut fade out.
         let redoID = RewindRows.redoTarget(in: items, isWorking: isWorking)
         let dropping = live.dropping
@@ -241,7 +242,7 @@ private struct TranscriptList: View {
         // a new one then, as it was when the whole chat was rebuilt.
         ZStack {
             conversation(items: items, isWorking: isWorking, isLoading: isLoading, live: live, transcript: transcript,
-                         lastReplyID: lastReplyID, redoID: redoID, dropping: dropping, found: found)
+                         avatars: avatars, redoID: redoID, dropping: dropping, found: found)
                 .id(generation)
                 .transition(.opacity)
         }
@@ -250,7 +251,7 @@ private struct TranscriptList: View {
     }
 
     private func conversation(items: [TranscriptItem], isWorking: Bool, isLoading: Bool, live: BotLive,
-                              transcript: OrbTranscript, lastReplyID: UUID?, redoID: UUID?, dropping: Set<UUID>,
+                              transcript: OrbTranscript, avatars: ReplyAvatars, redoID: UUID?, dropping: Set<UUID>,
                               found: FindFocus?) -> some View {
         // A result on show holds the chat where it is: a reply that grows meanwhile does not take the view to the end.
         let follows = followsBottom && !find.pausesFollowing
@@ -272,28 +273,28 @@ private struct TranscriptList: View {
                         if showsFolded {
                             ForEach(rows[..<transcript.foldedRows]) { row in
                                 timed(row.id, breaks) {
-                                    foldedRow(row, lastReplyID: lastReplyID, redoID: redoID, dropping: dropping, found: found)
+                                    foldedRow(row, avatars: avatars, redoID: redoID, dropping: dropping, found: found)
                                 }
                             }
                         }
                         if fold.count > 0 { foldLine(fold, proxy) }
                         ForEach(rows[transcript.foldedRows...]) { row in
                             timed(row.id, breaks) {
-                                foldedRow(row, lastReplyID: lastReplyID, redoID: redoID, dropping: dropping, found: found)
+                                foldedRow(row, avatars: avatars, redoID: redoID, dropping: dropping, found: found)
                             }
                         }
                     } else {
                         if showsFolded {
                             ForEach(items[..<fold.count]) { item in
                                 timed(item.id, breaks) {
-                                    itemRow(item, lastReplyID: lastReplyID, redoID: redoID, dropping: dropping, found: found)
+                                    itemRow(item, avatars: avatars, redoID: redoID, dropping: dropping, found: found)
                                 }
                             }
                         }
                         if fold.count > 0 { foldLine(fold, proxy) }
                         ForEach(items[fold.count...]) { item in
                             timed(item.id, breaks) {
-                                itemRow(item, lastReplyID: lastReplyID, redoID: redoID, dropping: dropping, found: found)
+                                itemRow(item, avatars: avatars, redoID: redoID, dropping: dropping, found: found)
                             }
                         }
                     }
@@ -302,7 +303,7 @@ private struct TranscriptList: View {
                     QueuedMessages(botID: look.id)
                     // A chain of requests the Orb waits on (`chainWork`) keeps its line too, with the button that stops it.
                     if isWorking || live.chainWork != nil {
-                        WorkingLine(look: look, avatarHidden: lastReplyID != nil)
+                        WorkingLine(look: look, avatarHidden: avatars.lastID != nil)
                             .transition(.adapted(.arrive, reduceMotion: reduceMotion))
                     }
                     Color.clear.frame(height: 1).id(BottomAnchor.id)
@@ -409,10 +410,10 @@ private struct TranscriptList: View {
 
     /// One item of the chat as a row, entering by itself when it is new.
     @ViewBuilder
-    private func itemRow(_ item: TranscriptItem, lastReplyID: UUID?, redoID: UUID?, dropping: Set<UUID>, found: FindFocus?) -> some View {
+    private func itemRow(_ item: TranscriptItem, avatars: ReplyAvatars, redoID: UUID?, dropping: Set<UUID>, found: FindFocus?) -> some View {
         let isNew = entrances.isNew(item.id)
         TranscriptRow(item: item, botID: look.id, orb: look.orb, entering: isNew,
-                      isLastReply: item.id == lastReplyID, offersRedo: item.id == redoID,
+                      isLastReply: item.id == avatars.lastID, showsAvatar: !avatars.quiet.contains(item.id), offersRedo: item.id == redoID,
                       isDropping: dropping.contains(item.id), find: item.id == found?.itemID ? found : nil, editable: true)
             .equatable()
             // The row comes in by itself, not through an animation of the list (which would lay every row out again); the
@@ -424,11 +425,11 @@ private struct TranscriptList: View {
     /// A folded row (MultiOrb, WP2): one item as it is, or a run of events or of messages between Orbs that folds into one
     /// line and unfolds into its items. Those items are drawn as rows of their own, without an entrance (the fold has one).
     @ViewBuilder
-    private func foldedRow(_ row: TranscriptRowModel, lastReplyID: UUID?, redoID: UUID?, dropping: Set<UUID>,
+    private func foldedRow(_ row: TranscriptRowModel, avatars: ReplyAvatars, redoID: UUID?, dropping: Set<UUID>,
                            found: FindFocus?) -> some View {
         switch row {
         case .single(let item):
-            itemRow(item, lastReplyID: lastReplyID, redoID: redoID, dropping: dropping, found: found)
+            itemRow(item, avatars: avatars, redoID: redoID, dropping: dropping, found: found)
         case .events(let kind, let items):
             FoldedThread(items: items, summary: { EventsSummary(kind: kind, items: items, unfolded: $0).alignedWithReplyText() },
                          child: { plainRow($0) })
@@ -450,13 +451,13 @@ private struct TranscriptList: View {
         case .work(let items, let seconds):
             let isOpen = openRuns.contains(row.id) || ToolGroupRow.opensInSnapshots
             WorkGroupRow(items: items, seconds: seconds, isOpen: isOpen,
-                         inputs: isOpen ? .init(openRuns: openRuns, lastReplyID: lastReplyID, redoID: redoID, dropping: dropping,
+                         inputs: isOpen ? .init(openRuns: openRuns, avatars: avatars, redoID: redoID, dropping: dropping,
                                                 find: found, orb: look.orb) : nil) {
                 if openRuns.remove(row.id) == nil { openRuns.insert(row.id) }
             } content: {
                 // Opened: the request's work as it was while it ran (its runs of actions folded as usual).
                 ForEach(TranscriptFolding.rows(for: items)) { inner in
-                    AnyView(foldedRow(inner, lastReplyID: lastReplyID, redoID: redoID, dropping: dropping, found: found))
+                    AnyView(foldedRow(inner, avatars: avatars, redoID: redoID, dropping: dropping, found: found))
                 }
             }
             .equatable()

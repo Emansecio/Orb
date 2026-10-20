@@ -363,3 +363,38 @@ struct ApprovalPulseBorder: View {
             .accessibilityHidden(true)
     }
 }
+
+/// Which replies of a chat wear their Orb's avatar. In a run of replies with nothing of the person's (or of another
+/// Orb's) between them, only the last one does: repeating the same face on every bubble of a long answer (text, tool
+/// lines, more text) weighs the screen down. Tool lines, cards, notices and events do not cut a run; the margin of a
+/// reply without an avatar stays empty, so the lines and cards below it keep their alignment.
+struct ReplyAvatars: Equatable {
+    /// The reply at the very end of the chat, if the chat ends in one: it carries the living avatar.
+    let lastID: UUID?
+    /// The replies that give their avatar up to a later one of the same run.
+    let quiet: Set<UUID>
+
+    init(_ items: [TranscriptItem]) {
+        lastID = if let last = items.last, last.kind.isReply { last.id } else { nil }
+        quiet = Self.quietReplies(in: items)
+    }
+
+    /// One pass from the end, so a long chat costs one walk and a set of ids; rows compare only their own bit, which
+    /// means a new reply redraws the one it silences and not the list.
+    static func quietReplies(in items: [TranscriptItem]) -> Set<UUID> {
+        var quiet = Set<UUID>()
+        var laterReplyInRun = false
+        for item in items.reversed() {
+            switch item.kind {
+            case .user, .orbMessage:
+                laterReplyInRun = false
+            case .bot, .greeting:
+                if laterReplyInRun { quiet.insert(item.id) }
+                laterReplyInRun = true
+            default:
+                continue
+            }
+        }
+        return quiet
+    }
+}
