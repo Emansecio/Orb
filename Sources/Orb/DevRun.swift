@@ -1,11 +1,11 @@
 import Foundation
 
 /// The developer modes of the executable that draw something and exit (`--snapshot`, `--render-orbs`,
-/// `--render-icon`). They fill the model with made-up data (the `conversations` snapshot even writes sample
+/// `--render-icon`, `--bench-panels`). They fill the model with made-up data (the `conversations` snapshot even writes sample
 /// conversations), so they must never see the user's real Orbs, conversations or secrets.
 enum DevRun {
     /// The arguments that start one of these modes.
-    static let flags = ["--snapshot", "--render-orbs", "--render-icon"]
+    static let flags = ["--snapshot", "--render-orbs", "--render-icon", "--bench-panels"]
 
     /// Whether this process is one of the developer modes (decided once, from the real command line).
     static let isActive = isActive(arguments: CommandLine.arguments)

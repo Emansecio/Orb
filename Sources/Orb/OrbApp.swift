@@ -18,6 +18,10 @@ enum Launcher {
             exit(64)
         }
         #endif
+        #if DEBUG || ORB_DEV_TOOLS
+        // The panels bench never takes the focus: accessory before the app finishes launching, not after.
+        if CommandLine.arguments.contains("--bench-panels") { NSApplication.shared.setActivationPolicy(.accessory) }
+        #endif
         OrbApp.main()
     }
 }
@@ -40,6 +44,7 @@ struct OrbApp: App {
                 }
                 #if DEBUG || ORB_DEV_TOOLS
                 .task { await SwitchBench.runIfAsked(model) }
+                .task { await PanelsBench.runIfAsked(model) }
                 #endif
                 .task {
                     // Snapshots send their own launch prompt; the regular window must not send it again.
@@ -79,8 +84,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         // Snapshots and sheets render in the background: no Dock icon, never takes focus.
-        let renders = ["--snapshot", "--render-orbs", "--render-icon"]
+        let renders = ["--snapshot", "--render-orbs", "--render-icon", "--bench-panels"]
         if CommandLine.arguments.contains(where: renders.contains) { NSApp.setActivationPolicy(.accessory) }
+        #if DEBUG || ORB_DEV_TOOLS
+        // The panels bench runs like a snapshot: an accessory app with its window off screen, so it never takes the focus.
+        if PanelsBench.isAsked {
+            NSApp.setActivationPolicy(.accessory)
+            Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { _ in MainActor.assumeIsolated { PanelsBench.hideWindows() } }
+        }
+        #endif
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {

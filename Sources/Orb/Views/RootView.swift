@@ -118,6 +118,7 @@ private struct DetailView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.canvas)
+        .background(ColumnSizing(panelIsOpen: model.showInspector))
         .motion(Motion.crossFade, value: page)
         // The Orb's panel belongs to the Orb's page: it is here, not in the chat, so it closes with the page rather than
         // staying a fade-length behind it and vanishing. The user's choice (`showInspector`) is left as it was.

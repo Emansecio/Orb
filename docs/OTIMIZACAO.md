@@ -225,3 +225,15 @@ Cada item fica marcado aqui quando entra na `main`.
 - Recursos (`Resources/Orbs`): nenhum PNG sem uso (os nomes são montados dinamicamente).
 - `saveAndWait`, `evictForTesting`, `existingSession`, `queuedWrites`, `beginConnectionCheck`: ganchos de teste
   intencionais, não código morto.
+
+---
+
+## Abas laterais pesadas (20/10/2026)
+
+Medido com `PanelsBench` (`ORB_DATA_DIR=<cópia> ORB_BENCH_PANELS=<rodadas> .build/release/Orb --bench-panels`, build com
+`-Xswiftc -DORB_DEV_TOOLS`; `ORB_NO_SIZING_TRIM=1` liga o "antes"), conversa de 2.173 itens, tela de 120 Hz, primeiros 0,4 s da
+animação. A causa não era a conversa (com 89 itens deu igual) nem a sidebar: cada coluna do split view é um `NSHostingView` que
+refaz a medida de tamanho mínimo, ideal e máximo (`sizingOptions`) a cada layout, e mais da metade do layout de cada quadro ia
+nisso. `ColumnSizing` zera o `sizingOptions` das colunas (a janela fica como estava). Antes/depois: painel direito 55-58 -> 114-118
+fps (quadros acima de 25 ms: 24% -> 0%, pior quadro 49 -> 22 ms); sidebar 56-63 -> 96-100 fps (15%/7% -> 0%, pior 53 -> 25 ms).
+Testadas sem efeito: trocar os `ZStack` das páginas por um `Layout` próprio e fixar o mínimo da janela num `Layout` que não mede os filhos.
