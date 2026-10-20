@@ -34,12 +34,12 @@ struct PermissionChip: View {
 
     var body: some View {
         let permission = model.live(botID).permission
+        // Icon only: the mode's name lives in the tooltip and for VoiceOver (the icon's colour already tells the unusual ones).
         Button { isOpen.toggle() } label: {
             Image(systemName: permission.mode.symbol)
                 .foregroundStyle(Self.tint(permission.mode))
         }
         .buttonStyle(ComposerChipStyle())
-        // Icon only: the mode's name lives in the tooltip and for VoiceOver (the icon's colour already tells the unusual ones).
         .help("Permissões: \(PermissionChipText.spoken(permission)) · \(Tip.withoutFullStop(permission.mode.shortSummary))" + grantsHelp(permission))
         .accessibilityLabel("Permissões")
         .accessibilityValue(PermissionChipText.spoken(permission))
