@@ -365,6 +365,12 @@ atual:
   Um Orb que ficou pausado enquanto estava fora da vista vai direto ao repouso (sem quadros ele nunca assentaria e o timer
   de 0,5 s ficaria ligado), e ao entrar em repouso o sorriso do clique e a pose segurada da ferramenta, se ainda não
   venceram, são descartados: com os quadros parados nada reavaliaria o prazo e o rosto congelaria.
+- **Orbs de palco descansam.** O Orb grande do chat vazio (`LiveBotAvatar(settles:)`), os da boas-vindas e os do grupo
+  (`SettlingOrb`) animam na entrada, com o ponteiro em cima e enquanto há trabalho; seis segundos depois da última dessas
+  coisas assentam na pose de repouso e param (mesma ideia do `selectionSettled` da barra lateral). Os Orbs de 18 pt do
+  QuickAsk descansam ociosos. Os que esperam voltar à vista compartilham **um** timer de 0,5 s (`OrbReturnWatch`, ligado só
+  enquanto algum espera). O brilho/pulso das linhas "trabalhando" (`ShimmerBandView`) e o ponto do grupo (`BreathingDotView`,
+  animação de opacidade em CALayer) também param com o app inativo ou fora da área visível da rolagem.
 - **Imagens decodificadas fora da thread principal.** `OrbImages.cached` nunca decodifica; `OrbImages.load` decodifica em
   segundo plano (`.needed`, em paralelo; `.prewarm`, um por vez em prioridade baixa) e avisa na thread principal
   entregando os próprios bitmaps: quem montar as camadas usa esses, e o cache despejar um no meio não vira decodificação

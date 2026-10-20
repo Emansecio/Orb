@@ -154,3 +154,45 @@ final class OrbDriver: NSObject {
         CATransaction.commit()
     }
 }
+
+// MARK: - Waiting to come back into view
+
+/// One timer for every orb that would run if it were in view: scroll and layout notifications cover most
+/// moves into view, not all, so these orbs look again twice a second. The timer exists only while one waits.
+@MainActor
+final class OrbReturnWatch {
+    static let shared = OrbReturnWatch()
+    private let orbs = NSHashTable<OrbAnimationView>.weakObjects()
+    private var timer: Timer?
+
+    var count: Int { orbs.allObjects.count }
+    var isTimerOn: Bool { timer != nil }
+    func contains(_ orb: OrbAnimationView) -> Bool { orbs.contains(orb) }
+
+    func add(_ orb: OrbAnimationView) {
+        orbs.add(orb)
+        guard timer == nil else { return }
+        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.fire() }
+        }
+        timer.tolerance = 0.25
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+
+    func remove(_ orb: OrbAnimationView) {
+        orbs.remove(orb)
+        if orbs.allObjects.isEmpty { stopTimer() }
+    }
+
+    private func fire() {
+        // Looking again may add or remove orbs: iterate a copy.
+        for orb in orbs.allObjects { orb.lookAgain() }
+        if orbs.allObjects.isEmpty { stopTimer() }
+    }
+
+    private func stopTimer() {
+        timer?.invalidate()
+        timer = nil
+    }
+}

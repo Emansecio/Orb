@@ -141,9 +141,8 @@ final class OrbAnimationView: NSView {
     /// Frames that moved the layers (the others were skipped as too small to see), read by the bench.
     private(set) var draws = 0
     private weak var clipView: NSClipView?
-    private var outOfViewTimer: Timer?
     /// For tests: the timer that waits for the orb to come back into view, and the layers on screen.
-    var isWatchingForReturn: Bool { outOfViewTimer != nil }
+    var isWatchingForReturn: Bool { OrbReturnWatch.shared.contains(self) }
     var placedLayerCount: Int { placed.count }
     /// For tests: the status bubble is on screen.
     var isBubbleShown: Bool { !bubble.isHidden }
@@ -630,20 +629,13 @@ final class OrbAnimationView: NSView {
     }
 
     /// Scrolling and most layout changes notify, but not all of them: an orb that is out of sight looks again
-    /// twice a second (a timer that costs nothing while orbs are in view).
+    /// twice a second (one timer shared by all of them, on only while some orb waits).
     private func watchForReturn(_ away: Bool) {
-        if !away {
-            outOfViewTimer?.invalidate()
-            outOfViewTimer = nil
-        } else if outOfViewTimer == nil {
-            let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated { self?.updateRunning() }
-            }
-            timer.tolerance = 0.25
-            RunLoop.main.add(timer, forMode: .common)
-            outOfViewTimer = timer
-        }
+        if away { OrbReturnWatch.shared.add(self) } else { OrbReturnWatch.shared.remove(self) }
     }
+
+    /// Called by `OrbReturnWatch`'s shared timer.
+    func lookAgain() { updateRunning() }
 
     /// Not hidden, and in a window someone can see (or one that animates regardless, for measuring).
     private var isVisibleOnScreen: Bool {

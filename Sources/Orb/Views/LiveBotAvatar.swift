@@ -18,6 +18,8 @@ struct LiveBotAvatar: View {
     var restsWhenIdle = false
     /// Off for the Orb on a stage with room around it (the empty chat): a big hair or hat keeps its full size there.
     var fits = true
+    /// Lives for a few seconds (its entrance, the pointer on it, work), then settles and rests (`SettlingOrb`).
+    var settles = false
     /// An interactive Orb that rests when idle wakes while the pointer is on it, so its gaze and click still work.
     @State private var hovering = false
 
@@ -26,9 +28,11 @@ struct LiveBotAvatar: View {
         // While you dictate to it, an Orb with nothing else to do listens.
         let hearing = model.dictation.botID == botID && model.dictation.phase == .listening
         let activity = hearing && [.idle, .attentive].contains(live.activity) ? OrbActivity.listening : live.activity
-        BotAvatar(orb: orb, size: size, activity: activity, celebration: live.celebration,
-                  paused: paused || (restsWhenIdle && activity == .idle && !hovering), ack: live.poke, landing: landing,
-                  cue: live.cue, interactive: interactive, fits: fits)
-            .onHover { if interactive && restsWhenIdle { hovering = $0 } }
+        SettlingOrb(idle: settles && activity == .idle, wake: live.poke &+ landing) { settled in
+            BotAvatar(orb: orb, size: size, activity: activity, celebration: live.celebration,
+                      paused: paused || settled || (restsWhenIdle && activity == .idle && !hovering), ack: live.poke, landing: landing,
+                      cue: live.cue, interactive: interactive, fits: fits)
+        }
+        .onHover { if interactive && restsWhenIdle { hovering = $0 } }
     }
 }

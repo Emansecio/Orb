@@ -231,6 +231,7 @@ final class ShimmerBandView: NSView {
         }
     }
     private let fillsBackground: Bool
+    private weak var clipView: NSClipView?
 
     init(fillsBackground: Bool, pulses: Bool = false) {
         self.pulses = pulses
@@ -269,16 +270,49 @@ final class ShimmerBandView: NSView {
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         super.viewWillMove(toWindow: newWindow)
-        NotificationCenter.default.removeObserver(self, name: NSWindow.didChangeOcclusionStateNotification, object: nil)
+        let center = NotificationCenter.default
+        center.removeObserver(self, name: NSWindow.didChangeOcclusionStateNotification, object: nil)
+        center.removeObserver(self, name: NSApplication.didBecomeActiveNotification, object: nil)
+        center.removeObserver(self, name: NSApplication.didResignActiveNotification, object: nil)
         if let newWindow {
-            NotificationCenter.default.addObserver(self, selector: #selector(updateSweep),
-                                                   name: NSWindow.didChangeOcclusionStateNotification, object: newWindow)
+            center.addObserver(self, selector: #selector(updateSweep),
+                               name: NSWindow.didChangeOcclusionStateNotification, object: newWindow)
+            // An inactive app shows nothing moving (as the Orbs do): the band and the breath stop and come back with it.
+            center.addObserver(self, selector: #selector(updateSweep), name: NSApplication.didBecomeActiveNotification, object: nil)
+            center.addObserver(self, selector: #selector(updateSweep), name: NSApplication.didResignActiveNotification, object: nil)
         }
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        observeScrolling()
         updateSweep()
+    }
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        observeScrolling()
+    }
+
+    /// The scroll view this band lives in (the transcript): a band scrolled out of sight stops, and comes back as it
+    /// scrolls into view again.
+    private func observeScrolling() {
+        let clip = window == nil ? nil : enclosingScrollView?.contentView
+        guard clip !== clipView else { return }
+        let center = NotificationCenter.default
+        if let clipView {
+            center.removeObserver(self, name: NSView.boundsDidChangeNotification, object: clipView)
+        }
+        clipView = clip
+        guard let clip else { return }
+        clip.postsBoundsChangedNotifications = true
+        center.addObserver(self, selector: #selector(updateSweep), name: NSView.boundsDidChangeNotification, object: clip)
+    }
+
+    /// Inside the visible part of its scroll view (a margin of one screen-line keeps it running just past the edge).
+    private var isInView: Bool {
+        guard let clipView else { return true }
+        return OrbVisibility.isVisible(orb: convert(bounds, to: clipView), in: clipView.bounds, margin: 20)
     }
 
     override func viewDidHide() {
@@ -293,7 +327,7 @@ final class ShimmerBandView: NSView {
 
     @objc private func updateSweep() {
         let visible = window.map { !isHiddenOrHasHiddenAncestor && (OrbView.animateInactive || $0.occlusionState.contains(.visible)) } ?? false
-        guard visible, bounds.width > 0 else {
+        guard visible, NSApp.isActive || OrbView.animateInactive, isInView, bounds.width > 0 else {
             band.removeAnimation(forKey: Self.animationKey)
             layer?.removeAnimation(forKey: Self.pulseKey)
             return

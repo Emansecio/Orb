@@ -434,6 +434,43 @@ struct OrbDriverTests {
 
     // MARK: Shimmer
 
+    @Test func theShimmerStopsScrolledOutOfSightAndResumes() throws {
+        try #require(hasScreen)
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 120, height: 100))
+        final class FlippedDoc: NSView { override var isFlipped: Bool { true } }
+        let document = FlippedDoc(frame: NSRect(x: 0, y: 0, width: 120, height: 2000))
+        scroll.documentView = document
+        let band = ShimmerBandView(fillsBackground: true)
+        band.frame = NSRect(x: 10, y: 1500, width: 100, height: 20)
+        document.addSubview(band)
+        let win = window(scroll, size: 200)
+        defer { close(win) }
+        band.needsLayout = true
+        band.layoutSubtreeIfNeeded()
+        #expect(!band.isSweeping)
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: 1450))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        #expect(band.isSweeping)
+        scroll.contentView.scroll(to: .zero)
+        scroll.reflectScrolledClipView(scroll.contentView)
+        #expect(!band.isSweeping)
+    }
+
+    @Test func outOfViewOrbsShareOneTimer() throws {
+        try #require(hasScreen)
+        let (scrollA, a) = scrollView(orbAt: 1500, live: true)
+        let (scrollB, b) = scrollView(orbAt: 1600, live: true)
+        let winA = window(scrollA, size: 200)
+        let winB = window(scrollB, size: 200)
+        defer { close(winA); close(winB) }
+        #expect(a.isWatchingForReturn && b.isWatchingForReturn)
+        #expect(OrbReturnWatch.shared.isTimerOn)
+        scrollA.contentView.scroll(to: NSPoint(x: 0, y: 1450))
+        scrollA.reflectScrolledClipView(scrollA.contentView)
+        #expect(!a.isWatchingForReturn && b.isWatchingForReturn)
+        #expect(OrbReturnWatch.shared.isTimerOn)
+    }
+
     @Test func theShimmerStopsWhenHiddenAndResumes() throws {
         try #require(hasScreen)
         let band = ShimmerBandView(fillsBackground: true)

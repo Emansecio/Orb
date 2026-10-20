@@ -131,20 +131,117 @@ struct SidebarGroupRow: View {
     }
 }
 
-/// A small dot that breathes while the group works (a repeating opacity change; still under Reduce Motion).
+/// A small dot that breathes while the group works (a repeating opacity change; still under Reduce Motion). The breath
+/// is a Core Animation opacity animation (no SwiftUI re-evaluation per frame) that stops when the window is covered, the
+/// app is inactive or the dot is scrolled out of view, like the shimmer and the Orbs.
 private struct WorkingRing: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var lit = false
 
     var body: some View {
-        Circle()
-            .fill(Palette.accentText)
+        BreathingDot(color: Palette.accentText, breathes: !reduceMotion)
             .frame(width: 7, height: 7)
-            .opacity(lit || reduceMotion ? 1 : 0.35)
-            .onAppear {
-                guard !reduceMotion else { return }
-                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { lit = true }
-            }
             .accessibilityHidden(true)
+    }
+}
+
+private struct BreathingDot: NSViewRepresentable {
+    let color: Color
+    let breathes: Bool
+
+    func makeNSView(context: Context) -> BreathingDotView { BreathingDotView() }
+
+    func updateNSView(_ view: BreathingDotView, context: Context) {
+        view.color = NSColor(color)
+        view.breathes = breathes
+    }
+}
+
+final class BreathingDotView: NSView {
+    private static let key = "breath"
+    private weak var clipView: NSClipView?
+    var color = NSColor.systemBlue { didSet { layer?.backgroundColor = color.cgColor } }
+    var breathes = true { didSet { if breathes != oldValue { update() } } }
+    /// For tests: whether the dot is breathing.
+    var isBreathing: Bool { layer?.animation(forKey: Self.key) != nil }
+
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func layout() {
+        super.layout()
+        layer?.cornerRadius = min(bounds.width, bounds.height) / 2
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        let center = NotificationCenter.default
+        center.removeObserver(self, name: NSWindow.didChangeOcclusionStateNotification, object: nil)
+        center.removeObserver(self, name: NSApplication.didBecomeActiveNotification, object: nil)
+        center.removeObserver(self, name: NSApplication.didResignActiveNotification, object: nil)
+        if let newWindow {
+            center.addObserver(self, selector: #selector(update), name: NSWindow.didChangeOcclusionStateNotification, object: newWindow)
+            center.addObserver(self, selector: #selector(update), name: NSApplication.didBecomeActiveNotification, object: nil)
+            center.addObserver(self, selector: #selector(update), name: NSApplication.didResignActiveNotification, object: nil)
+        }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        observeScrolling()
+        update()
+    }
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        observeScrolling()
+    }
+
+    override func viewDidHide() {
+        super.viewDidHide()
+        update()
+    }
+
+    override func viewDidUnhide() {
+        super.viewDidUnhide()
+        update()
+    }
+
+    private func observeScrolling() {
+        let clip = window == nil ? nil : enclosingScrollView?.contentView
+        guard clip !== clipView else { return }
+        let center = NotificationCenter.default
+        if let clipView { center.removeObserver(self, name: NSView.boundsDidChangeNotification, object: clipView) }
+        clipView = clip
+        guard let clip else { return }
+        clip.postsBoundsChangedNotifications = true
+        center.addObserver(self, selector: #selector(update), name: NSView.boundsDidChangeNotification, object: clip)
+    }
+
+    @objc private func update() {
+        layer?.backgroundColor = color.cgColor
+        let visible = window.map { !isHiddenOrHasHiddenAncestor && (OrbView.animateInactive || $0.occlusionState.contains(.visible)) } ?? false
+        let inView = clipView.map { OrbVisibility.isVisible(orb: convert(bounds, to: $0), in: $0.bounds, margin: 20) } ?? true
+        guard breathes, visible, NSApp.isActive || OrbView.animateInactive, inView else {
+            layer?.removeAnimation(forKey: Self.key)
+            // Held still, the dot shows its lit state (as under Reduce Motion).
+            layer?.opacity = 1
+            return
+        }
+        guard let layer, layer.animation(forKey: Self.key) == nil else { return }
+        let breath = CABasicAnimation(keyPath: "opacity")
+        breath.fromValue = 0.35
+        breath.toValue = 1
+        breath.duration = 0.9
+        breath.autoreverses = true
+        breath.repeatCount = .infinity
+        breath.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        breath.preferredFrameRateRange = CAFrameRateRange(minimum: 20, maximum: 30, preferred: 24)
+        layer.add(breath, forKey: Self.key)
     }
 }

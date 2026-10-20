@@ -340,7 +340,9 @@ struct WelcomeView: View {
 
     private func heroOrb(_ config: OrbConfig, size: CGFloat, landing: Int, style: EntranceStyle,
                          activity: OrbActivity = .idle, landed: @escaping @MainActor () -> Void) -> some View {
-        OrbView(config: config, activity: activity, size: size, animated: true, landing: landing, interactive: true)
+        SettlingOrb(idle: activity == .idle, wake: landing) { settled in
+            OrbView(config: config, activity: activity, size: size, animated: true, paused: settled, landing: landing, interactive: true)
+        }
             .entrance(style, enters: entering) {
                 // Touches the floor: it lands. Still under Reduce Motion.
                 if !reduceMotion { landed() }

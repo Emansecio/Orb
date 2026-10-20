@@ -354,7 +354,7 @@ private struct QuickAskWorkingRow: View {
     var body: some View {
         let live = model.live(botID)
         HStack(spacing: 8) {
-            BotAvatar(live: live, size: 18)
+            BotAvatar(live: live, size: 18, paused: live.activity == .idle)
             let work = live.shownWork
             Text("\(live.look.name): \(work?.text ?? "")")
                 .font(.caption)
@@ -491,7 +491,7 @@ struct QuickAskApprovalCard: View {
         let preview = ApprovalPreview.of(request)
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                BotAvatar(live: model.live(entry.bot.id), size: 18)
+                BotAvatar(live: model.live(entry.bot.id), size: 18, paused: model.live(entry.bot.id).activity == .idle)
                 Text(entry.bot.name)
                     .font(.system(size: 12, weight: .semibold))
                 Text("precisa de você")

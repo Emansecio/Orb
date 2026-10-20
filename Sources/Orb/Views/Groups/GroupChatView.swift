@@ -124,6 +124,7 @@ private struct GroupThreadView: View {
     var body: some View {
         let items = transcript.items
         let lastSpeaker = items.last { Self.answerer($0) != nil }?.id
+        let continuing = Self.continuingAnswers(items)
         let lastSentID = items.last { if case .user = $0.kind { true } else { false } }?.id
         ScrollViewReader { proxy in
             ScrollView {
@@ -132,10 +133,11 @@ private struct GroupThreadView: View {
                         GroupEmptyState(group: group)
                             .transition(.opacity)
                     }
-                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                        let previous = index > 0 ? items[index - 1] : nil
-                        row(item, isLastSpeaker: item.id == lastSpeaker, continuesPrevious: Self.answerer(item) != nil
-                            && Self.answerer(item) == previous.flatMap(Self.answerer))
+                    ForEach(items) { item in
+                        GroupRow(item: item, orchestratorID: group.orchestratorID, isLastSpeaker: item.id == lastSpeaker,
+                                 continuesPrevious: continuing.contains(item.id), look: look(of: item),
+                                 toLook: toLook(of: item))
+                            .equatable()
                     }
                     Color.clear.frame(height: 1).id(bottomID)
                 }
@@ -166,20 +168,59 @@ private struct GroupThreadView: View {
         return nil
     }
 
-    @ViewBuilder private func row(_ item: TranscriptItem, isLastSpeaker: Bool, continuesPrevious: Bool) -> some View {
+    /// The ids of the answers that continue the previous item's Orb (one pass, no copy of the items).
+    private static func continuingAnswers(_ items: [TranscriptItem]) -> Set<UUID> {
+        var result = Set<UUID>()
+        var previous: UUID?
+        for item in items {
+            let speaker = answerer(item)
+            if speaker != nil, speaker == previous { result.insert(item.id) }
+            previous = speaker
+        }
+        return result
+    }
+
+    /// The look of the Orb an Orb message comes from, as it is now (read here so a row is a plain value).
+    private func look(of item: TranscriptItem) -> BotLook? {
+        guard case .orbMessage(let message) = item.kind else { return nil }
+        return model.liveBot(message.from.id)?.look
+    }
+
+    private func toLook(of item: TranscriptItem) -> BotLook? {
+        guard case .orbMessage(let message) = item.kind, Self.answerer(item) == nil else { return nil }
+        return message.to.flatMap { model.liveBot($0.id)?.look }
+    }
+}
+
+/// One row of the group's thread, a plain value: a new item or a change of look redraws only the rows it touches.
+private struct GroupRow: View, Equatable {
+    let item: TranscriptItem
+    let orchestratorID: UUID?
+    let isLastSpeaker: Bool
+    let continuesPrevious: Bool
+    /// The look of the Orb that spoke (or assigned); nil for other rows and for a deleted Orb.
+    let look: BotLook?
+    /// The look of the Orb an assignment goes to.
+    let toLook: BotLook?
+
+    nonisolated static func == (a: GroupRow, b: GroupRow) -> Bool {
+        a.item == b.item && a.orchestratorID == b.orchestratorID && a.isLastSpeaker == b.isLastSpeaker
+            && a.continuesPrevious == b.continuesPrevious && a.look == b.look && a.toLook == b.toLook
+    }
+
+    var body: some View {
         switch item.kind {
         case .user(let text, let attachments):
             GroupUserBubble(text: text, attachmentCount: attachments.count)
         case .orbMessage(let message):
-            if Self.answerer(item) != nil {
-                GroupMessageBubble(message: message, look: model.liveBot(message.from.id)?.look,
-                                   isOrchestrator: message.from.id == group.orchestratorID, isLastSpeaker: isLastSpeaker,
+            if GroupRow.isAnswer(message) {
+                GroupMessageBubble(message: message, look: look,
+                                   isOrchestrator: message.from.id == orchestratorID, isLastSpeaker: isLastSpeaker,
                                    showsHeader: !continuesPrevious)
                 // Words of the same Orb that follow each other sit under the first, 6 pt apart (the list gives 14).
                 .padding(.top, continuesPrevious ? -8 : 0)
             } else {
-                GroupAssignmentLine(message: message, from: model.liveBot(message.from.id)?.look,
-                                    to: message.to.flatMap { model.liveBot($0.id)?.look })
+                GroupAssignmentLine(message: message, from: look, to: toLook)
             }
         case .event(let event):
             EventLineView(event: event, centered: true)
@@ -196,6 +237,8 @@ private struct GroupThreadView: View {
             EmptyView()
         }
     }
+
+    private static func isAnswer(_ message: OrbMessageItem) -> Bool { message.direction == .post && message.kind == .reply }
 }
 
 /// The first view of a group: its Orbs standing together on one stage like the welcome screen's. The orchestrator stands
@@ -260,7 +303,9 @@ struct GroupEmptyState: View {
     }
 
     private func standing(_ look: BotLook, size: CGFloat) -> some View {
-        BotAvatar(orb: look.orb, size: size, animated: !reduceMotion, interactive: !reduceMotion)
+        SettlingOrb(idle: true) { settled in
+            BotAvatar(orb: look.orb, size: size, animated: !reduceMotion, paused: settled, interactive: !reduceMotion)
+        }
             .frame(width: size, height: size)
             .accessibilityLabel(look.name)
     }
