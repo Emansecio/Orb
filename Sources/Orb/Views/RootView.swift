@@ -32,6 +32,7 @@ struct RootView: View {
         .onChange(of: model.selection) { fixSelection() }
         // The window's own width: the split view's swells for a moment while the panel slides in (see `WindowWidthReader`).
         .background(WindowWidthReader { width in
+            guard autoClose.crosses(width: width) else { return } // no write to @State while the width only slides
             guard let open = autoClose.windowResized(to: width, isOpen: model.showInspector) else { return }
             autoChange = open
             model.setInspector(open)

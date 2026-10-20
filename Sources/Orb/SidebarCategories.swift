@@ -203,6 +203,12 @@ struct SidebarDropFrames: PreferenceKey {
     }
 }
 
+/// The rows' frames as the drop delegate reads them, in a reference the views do not observe: writing it does not
+/// re-evaluate the sidebar, so a slide or a resize costs nothing here.
+final class SidebarDropFrameBox {
+    var frames: [SidebarDropKey: CGRect] = [:]
+}
+
 /// What the sidebar's name field is open for.
 enum CategoryNaming: Equatable {
     /// A new category; `moving` is the Orb that goes into it once it has a name ("Mover para → Nova categoria…").

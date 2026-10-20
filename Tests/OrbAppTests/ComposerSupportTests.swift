@@ -367,6 +367,17 @@ struct ComposerSupportTests {
         #expect(close.windowResized(to: 1500, isOpen: true) == nil)
     }
 
+    @Test func resizingWithoutCrossingTheLimitChangesNothing() {
+        var close = InspectorAutoClose()
+        _ = close.windowResized(to: 1400, isOpen: true)
+        let before = close
+        #expect(!close.crosses(width: 1300))
+        #expect(close.windowResized(to: 1300, isOpen: true) == nil)
+        #expect(close == before)
+        #expect(close.crosses(width: 1100)) // the limit crossed is seen without writing
+        #expect(close == before)
+    }
+
     @Test func aPanelYouClosedYourselfStaysClosed() {
         var close = InspectorAutoClose()
         #expect(close.windowResized(to: 1100, isOpen: true) == false)

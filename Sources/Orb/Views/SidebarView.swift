@@ -24,7 +24,8 @@ struct SidebarView: View {
 
     /// The Orb being dragged over the list and the gap the rows open for it, and the rows' frames it is worked out from.
     @State private var drag: SidebarDragPreview?
-    @State private var dropFrames: [SidebarDropKey: CGRect] = [:]
+    /// Held in a box nobody observes: the frames change at every frame of a slide or a resize, and only a drop reads them.
+    @State private var dropFrames = SidebarDropFrameBox()
 
     var body: some View {
         let order = model.sidebarBotIDs
@@ -63,7 +64,7 @@ struct SidebarView: View {
                 }
                 .coordinateSpace(.named(SidebarDrop.space))
                 .onPreferenceChange(SidebarDropFrames.self) { frames in
-                    dropFrames = frames
+                    dropFrames.frames = frames
                     if let previewDropY, let held = model.draggedBotID {
                         drag = SidebarDrop.preview(dragging: held, at: previewDropY, in: SidebarDrop.sections(loose: model.looseBotIDs, categories: model.categories,
                                                                                                              botIDs: model.botIDs), frames: frames)

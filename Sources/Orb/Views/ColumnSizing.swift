@@ -17,11 +17,19 @@ struct ColumnSizing: NSViewRepresentable {
 
     func makeNSView(context: Context) -> TrimView { TrimView() }
 
-    func updateNSView(_ view: TrimView, context: Context) { view.trimSoon() }
+    func updateNSView(_ view: TrimView, context: Context) {
+        // Only the panel opening can bring a column that was not there; the rest of the updates find nothing new.
+        guard view.lastPanelIsOpen != panelIsOpen else { return }
+        view.lastPanelIsOpen = panelIsOpen
+        view.trimSoon()
+    }
 
     final class TrimView: NSView {
         /// The hosting views already trimmed (a view that goes away leaves the table by itself).
         private let trimmed = NSHashTable<NSView>.weakObjects()
+
+        /// The `panelIsOpen` of the last update (nil before the first), to look again only when it changes.
+        var lastPanelIsOpen: Bool?
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
@@ -42,11 +50,10 @@ struct ColumnSizing: NSViewRepresentable {
             #endif
             guard let root = window?.contentView else { return }
             func visit(_ view: NSView) {
-                // `NSHostingView<Content>` is generic over private types, so it is told apart by name and reached through a
-                // protocol (the cast finds the conformance of its real `Content`); the window's own `AppKitWindowHostingView`
-                // is another class.
-                if String(describing: type(of: view)).hasPrefix("NSHostingView<"), !trimmed.contains(view),
-                   let column = view as? SizingTrimmable {
+                // `NSHostingView<Content>` is generic over private types, so it is reached through a protocol (the cast
+                // finds the conformance of its real `Content`). The window's own hosting view (`AppKitWindowHostingView`,
+                // the root) is left alone. Columns are entered too: the panel's column may sit inside the chat's.
+                if view !== root, !trimmed.contains(view), let column = view as? SizingTrimmable {
                     trimmed.add(view)
                     column.trimSizing()
                 }

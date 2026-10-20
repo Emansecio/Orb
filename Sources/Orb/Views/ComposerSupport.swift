@@ -216,12 +216,18 @@ struct InspectorAutoClose: Equatable {
     private(set) var closedByWidth = false
     private var isNarrow: Bool?
 
+    /// Whether `width` is on the other side of the limit from the last one told. Read-only, so a caller holding this in
+    /// `@State` can ask on every resize without writing the state.
+    func crosses(width: CGFloat) -> Bool { narrows(at: width) != isNarrow }
+
+    private func narrows(at width: CGFloat) -> Bool { (isNarrow ?? false) ? width < Self.wideFrom : width < Self.narrowBelow }
+
     /// The window is now `width` wide and the panel is (`isOpen`) or is not open. Returns what to do to the panel:
     /// true opens it, false closes it, nil leaves it as it is.
     mutating func windowResized(to width: CGFloat, isOpen: Bool) -> Bool? {
-        let narrow = (isNarrow ?? false) ? width < Self.wideFrom : width < Self.narrowBelow
-        defer { isNarrow = narrow }
+        let narrow = narrows(at: width)
         guard narrow != isNarrow else { return nil }
+        isNarrow = narrow
         if narrow, isOpen {
             closedByWidth = true
             return false

@@ -77,7 +77,7 @@ extension View {
 struct SidebarDropDelegate: DropDelegate {
     let model: AppModel
     let sections: [SidebarDrop.Section]
-    let frames: [SidebarDropKey: CGRect]
+    let frames: SidebarDropFrameBox
     @Binding var drag: SidebarDragPreview?
     let reduceMotion: Bool
 
@@ -116,7 +116,7 @@ struct SidebarDropDelegate: DropDelegate {
     }
 
     private func aim(_ info: DropInfo) {
-        show(model.draggedBotID.flatMap { SidebarDrop.preview(dragging: $0, at: info.location.y, in: sections, frames: frames) })
+        show(model.draggedBotID.flatMap { SidebarDrop.preview(dragging: $0, at: info.location.y, in: sections, frames: frames.frames) })
     }
 
     /// The rows slide into their new places in the content curve; under Reduce Motion they jump.
