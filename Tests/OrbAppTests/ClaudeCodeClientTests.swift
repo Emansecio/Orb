@@ -183,7 +183,7 @@ while True:
     message = read_message()
     if message is None:
         sys.exit(0)
-    if message.get("type") == "user" and not served:
+    if message.get("type") == "user" and (os.environ.get("FAKE_MULTI") == "1" or not served):
         served = True
         turn()
 """#
@@ -216,6 +216,18 @@ private struct Rig {
         return ClaudeCodeClient(launch: { launch }, orbBinary: URL(fileURLWithPath: "/fake/Orb"), folders: folders,
                                 initializeTimeout: initializeTimeout, parkTimeout: parkTimeout, effort: effort)
     }
+
+    /// A client per turn, as the app makes them, sharing `pool` (the process a turn leaves idle) for the conversation.
+    func turnClient(pool: ClaudePipeIdlePool, conversation: String = "conv", idleTimeout: Duration = .seconds(60),
+                    effort: String? = nil) -> ClaudeCodeClient {
+        var environment = environment
+        environment["FAKE_MULTI"] = "1"
+        let launch = ClaudePipeLaunch(executable: script, environment: environment)
+        return ClaudeCodeClient(launch: { launch }, orbBinary: URL(fileURLWithPath: "/fake/Orb"), folders: folders, effort: effort,
+                                conversationID: conversation, idlePool: pool, idleTimeout: idleTimeout)
+    }
+
+    var metricsText: String { (try? String(contentsOf: root.appending(path: "cache-metrics.jsonl"), encoding: .utf8)) ?? "" }
 
     func cleanUp() { try? FileManager.default.removeItem(at: root) }
 
@@ -463,6 +475,132 @@ struct ClaudeCodeClientTests {
         // The abandoned process was told to stop (its stdin closed) and the new one got the results as text.
         #expect(await waitUntil { rig.stdinLogs.filter { $0.contains("eof") }.count == 1 })
         #expect(rig.stdinLogs.contains { $0.contains("conteúdo") && $0.contains("Leia b.txt") })
+    }
+
+    // MARK: Idle process between turns
+
+    private let answered: [ChatMessage] = [.system("s"), .user("Oi"), ChatMessage(role: .assistant, content: "Olá, mundo")]
+
+    @Test func theNextTurnReusesTheIdleProcessAndSendsOnlyTheNewMessage() async throws {
+        let rig = try Rig(scenario: "text")
+        defer { rig.cleanUp() }
+        let pool = ClaudePipeIdlePool()
+        let first = try await collect(rig.turnClient(pool: pool).stream(model: "m", messages: Array(answered.prefix(2)), tools: [readFile], toolChoice: .auto))
+        #expect(texts(first) == "Olá, mundo")
+        #expect(pool.count == 1)
+        #expect(rig.stdinLogs.first?.contains("eof") != true)
+
+        // A new client, as the app makes one per turn; the history comes back as the Orb stores it (no itemID needed, reasoning dropped).
+        var stored = answered
+        stored[1].itemID = UUID()
+        stored[2].reasoning = nil
+        let second = try await collect(rig.turnClient(pool: pool).stream(model: "m", messages: stored + [.user("E agora?")], tools: [readFile], toolChoice: .auto))
+        #expect(texts(second) == "Olá, mundo")
+        #expect(rig.launches.count == 1)
+        let stdin = try #require(rig.stdinLogs.first).split(separator: "\n").map(String.init)
+        #expect(stdin.filter { $0.contains("\"type\":\"user\"") || $0.contains("\"type\": \"user\"") }.count == 2)
+        #expect(stdin.last { $0.contains("E agora?") } != nil)
+        #expect(!stdin.contains { $0.contains("E agora?") && $0.contains("Oi") })
+        #expect(await waitUntil { rig.metricsText.contains(#""plan":"idle""#) })
+        #expect(pool.count == 1)
+    }
+
+    @Test func anEditedHistoryEndsTheIdleProcessAndStartsANewOne() async throws {
+        let rig = try Rig(scenario: "text")
+        defer { rig.cleanUp() }
+        let pool = ClaudePipeIdlePool()
+        _ = try await collect(rig.turnClient(pool: pool).stream(model: "m", messages: Array(answered.prefix(2)), tools: [readFile], toolChoice: .auto))
+        var edited = answered
+        edited[1] = .user("Oi, editado")
+        _ = try await collect(rig.turnClient(pool: pool).stream(model: "m", messages: edited + [.user("E agora?")], tools: [readFile], toolChoice: .auto))
+        #expect(rig.launches.count == 2)
+        #expect(await waitUntil { rig.stdinLogs.filter { $0.contains("eof") }.count == 1 })
+    }
+
+    @Test func anAnswerTheOrbStoredDifferentlyIsNotAContinuation() async throws {
+        let rig = try Rig(scenario: "text")
+        defer { rig.cleanUp() }
+        let pool = ClaudePipeIdlePool()
+        _ = try await collect(rig.turnClient(pool: pool).stream(model: "m", messages: Array(answered.prefix(2)), tools: [readFile], toolChoice: .auto))
+        var other = answered
+        other[2].content = "Outra resposta"
+        _ = try await collect(rig.turnClient(pool: pool).stream(model: "m", messages: other + [.user("E agora?")], tools: [readFile], toolChoice: .auto))
+        #expect(rig.launches.count == 2)
+    }
+
+    @Test func aChangeOfModelOrEffortStartsANewProcess() async throws {
+        let rig = try Rig(scenario: "text")
+        defer { rig.cleanUp() }
+        let pool = ClaudePipeIdlePool()
+        _ = try await collect(rig.turnClient(pool: pool).stream(model: "m", messages: Array(answered.prefix(2)), tools: [readFile], toolChoice: .auto))
+        _ = try await collect(rig.turnClient(pool: pool).stream(model: "outro", messages: answered + [.user("E agora?")], tools: [readFile], toolChoice: .auto))
+        #expect(rig.launches.count == 2)
+        // The second process is idle now; the same model with another effort is not it either.
+        let third: [ChatMessage] = answered + [.user("E agora?"), ChatMessage(role: .assistant, content: "Olá, mundo"), .user("Mais uma")]
+        _ = try await collect(rig.turnClient(pool: pool, effort: "high").stream(model: "outro", messages: third, tools: [readFile], toolChoice: .auto))
+        #expect(rig.launches.count == 3)
+    }
+
+    @Test func anIdleProcessNobodyComesBackForIsEnded() async throws {
+        let rig = try Rig(scenario: "text")
+        defer { rig.cleanUp() }
+        let pool = ClaudePipeIdlePool()
+        _ = try await collect(rig.turnClient(pool: pool, idleTimeout: .milliseconds(300)).stream(model: "m", messages: Array(answered.prefix(2)), tools: [readFile], toolChoice: .auto))
+        #expect(await waitUntil { rig.stdinLogs.first?.contains("eof") == true })
+        #expect(pool.count == 0)
+        #expect(await waitUntil { rig.scratchEntries.isEmpty })
+    }
+
+    @Test func aStoppedTurnLeavesNothingIdle() async throws {
+        let rig = try Rig(scenario: "hang")
+        defer { rig.cleanUp() }
+        let pool = ClaudePipeIdlePool()
+        let task = Task { try await collect(rig.turnClient(pool: pool).stream(model: "m", messages: Array(answered.prefix(2)), tools: [readFile], toolChoice: .auto)) }
+        #expect(await waitUntil { !rig.launches.isEmpty })
+        try await Task.sleep(for: .milliseconds(300))
+        task.cancel()
+        _ = try? await task.value
+        #expect(pool.count == 0)
+    }
+
+    @Test func theLeastRecentlyUsedIdleProcessIsClosedPastTheLimit() async throws {
+        let rig = try Rig(scenario: "text")
+        defer { rig.cleanUp() }
+        let pool = ClaudePipeIdlePool(limit: 1)
+        _ = try await collect(rig.turnClient(pool: pool, conversation: "a").stream(model: "m", messages: Array(answered.prefix(2)), tools: [readFile], toolChoice: .auto))
+        _ = try await collect(rig.turnClient(pool: pool, conversation: "b").stream(model: "m", messages: Array(answered.prefix(2)), tools: [readFile], toolChoice: .auto))
+        #expect(pool.count == 1)
+        #expect(await waitUntil { rig.stdinLogs.filter { $0.contains("eof") }.count == 1 })
+        pool.stop("b")
+        #expect(pool.count == 0)
+        #expect(await waitUntil { rig.stdinLogs.filter { $0.contains("eof") }.count == 2 })
+    }
+
+    @Test func anIdleProcessThatDiedFallsBackToANewOneWithoutAnError() async throws {
+        let rig = try Rig(scenario: "text")
+        defer { rig.cleanUp() }
+        let pool = ClaudePipeIdlePool()
+        _ = try await collect(rig.turnClient(pool: pool).stream(model: "m", messages: Array(answered.prefix(2)), tools: [readFile], toolChoice: .auto))
+        let entry = try #require(pool.take("conv"))
+        kill(entry.run.process.pid, SIGKILL)
+        #expect(await waitUntil { entry.run.process.hasExited })
+        pool.put("conv", run: entry.run, seen: entry.seen, setup: entry.setup, timeout: .seconds(60))
+        let events = try await collect(rig.turnClient(pool: pool).stream(model: "m", messages: answered + [.user("E agora?")], tools: [readFile], toolChoice: .auto))
+        #expect(texts(events) == "Olá, mundo")
+        #expect(rig.launches.count == 2)
+    }
+
+    @Test func idleContinuationAcceptsOnlyNewUserMessagesAfterTheAnswer() {
+        let seen = answered
+        #expect(ClaudeCodeClient.idleContinuation(of: seen + [.user("x")], after: seen) == [.user("x")])
+        #expect(ClaudeCodeClient.idleContinuation(of: seen + [.user("x"), .user("y")], after: seen)?.count == 2)
+        #expect(ClaudeCodeClient.idleContinuation(of: seen, after: seen) == nil)
+        #expect(ClaudeCodeClient.idleContinuation(of: seen + [ChatMessage(role: .assistant, content: "z")], after: seen) == nil)
+        #expect(ClaudeCodeClient.idleContinuation(of: Array(seen.dropFirst()) + [.user("x")], after: seen) == nil)
+        // The answer is compared by text, trimmed: the Orb keeps the model's text as it came.
+        var padded = seen
+        padded[2].content = "Olá, mundo\n"
+        #expect(ClaudeCodeClient.idleContinuation(of: padded + [.user("x")], after: seen) != nil)
     }
 
     @Test func noToolsAtTheLastStepStartsAFreshProcessWithoutMCP() async throws {

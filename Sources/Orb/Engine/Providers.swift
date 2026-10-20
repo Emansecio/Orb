@@ -468,10 +468,14 @@ extension ProviderAccount {
     /// `replyTokens`: the room the history left for the reply (`ContextBudget.replyTokens`), the cap the Messages format
     /// sends, so a full history and the longest reply still fit the window together.
     func client(for model: ProviderModel?, credentials: @escaping CredentialsProvider, conversationID: String,
-                effort: String? = nil, replyTokens: Int? = nil, cacheTTL: String? = nil) -> (any LLMClient)? {
+                effort: String? = nil, replyTokens: Int? = nil, cacheTTL: String? = nil,
+                keepsIdleProcess: Bool = false) -> (any LLMClient)? {
         // Claude Code has no address and no key: the installed CLI is only the transport to the model, through the user's login
         // (so `credentials` goes unused). Everything else about the turn (prompt, tools, memory) is the Orb's own.
-        if kind == .claudeCode { return ClaudeCodeClient(effort: effort, cacheTTL: cacheTTL, conversationID: conversationID) }
+        // `keepsIdleProcess`: the chat's own turns leave the CLI process open for the next message (`ClaudePipeIdlePool`); side calls do not.
+        if kind == .claudeCode {
+            return ClaudeCodeClient(effort: effort, cacheTTL: cacheTTL, conversationID: conversationID, keepsIdleProcess: keepsIdleProcess)
+        }
         guard let base = URL(string: baseURL), base.host != nil else { return nil }
         var headers = kind == .custom ? self.headers : [:]
         if kind == .opencodeZen || kind == .opencodeGo { headers["x-opencode-session"] = conversationID }
@@ -493,7 +497,7 @@ extension ProviderAccount {
             client.reasoningEffort = effort
             return client
         case .claudeCode:
-            return ClaudeCodeClient(effort: effort, cacheTTL: cacheTTL, conversationID: conversationID)
+            return ClaudeCodeClient(effort: effort, cacheTTL: cacheTTL, conversationID: conversationID, keepsIdleProcess: keepsIdleProcess)
         }
     }
 }

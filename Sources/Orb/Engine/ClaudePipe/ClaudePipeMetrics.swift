@@ -4,7 +4,7 @@ import Foundation
 /// Numbers and enums only: nothing of the conversation is written.
 struct ClaudePipeMetric: Sendable, Equatable {
     /// Why a step started a new process (nil for a step that continued a parked one).
-    enum FreshReason: String, Sendable { case noParked, notContinuation, toolChoice }
+    enum FreshReason: String, Sendable { case noParked, notContinuation, toolChoice, idleLost }
 
     var timestamp: Date
     /// A short, stable tag of the conversation (see `tag(of:)`), when the client knows one.
@@ -14,6 +14,8 @@ struct ClaudePipeMetric: Sendable, Equatable {
     var messageCount: Int
     var characterCount: Int
     var usage: TokenUsage?
+    /// The step went to the process a finished turn left idle (a new message of the same conversation), not to a parked one.
+    var idle = false
 
     /// The 8 hex digits of an FNV-1a hash: groups the steps of a conversation without exposing its id.
     static func tag(of id: String) -> String {
@@ -25,7 +27,7 @@ struct ClaudePipeMetric: Sendable, Equatable {
     /// The JSON line (sorted keys, no newline).
     var line: String {
         var object: [String: Any] = [
-            "ts": ISO8601DateFormatter().string(from: timestamp), "model": model, "plan": fresh == nil ? "resume" : "fresh",
+            "ts": ISO8601DateFormatter().string(from: timestamp), "model": model, "plan": fresh != nil ? "fresh" : idle ? "idle" : "resume",
             "messages": messageCount, "chars": characterCount,
         ]
         if let conversation { object["conv"] = conversation }

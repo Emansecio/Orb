@@ -285,8 +285,15 @@ ambiente dele). O que muda é como o histórico chega a ele (`ClaudePipeSession.
   que sobra no fim do histórico entra em texto antes ou depois da mensagem (`[Histórico anterior, em texto]`,
   `[Continuação deste pedido, em texto]`), então nada se perde;
 - um processo atende todos os passos de um turno: ele para nas chamadas de ferramenta do modelo (parked), o motor as executa e o
-  resultado volta ao mesmo processo. Qualquer outra chamada (um turno novo, uma nova tentativa, um corte do histórico) começa um
-  processo novo com a conversa reconstruída, e o cache do prompt é o do provedor (`arrangesPromptCache`).
+  resultado volta ao mesmo processo. Ao fim do turno (resposta sem chamadas) o processo fica **ocioso** em `ClaudePipeIdlePool`,
+  por conversa do chat (rotinas, pedidos de outros Orbs e grupos não guardam): se a próxima chamada é essa conversa mais mensagens
+  novas do usuário (`ClaudeCodeClient.idleContinuation`) e modelo, esforço, TTL, ferramentas e `toolChoice` são os mesmos, só as
+  mensagens novas vão pelo stdin, e o prefixo segue idêntico ao que o provedor guardou (o CLI acrescenta ao fim de cada requisição
+  blocos que um processo novo não reproduz; sem isso cada mensagem regravava 40–100k de cache). Fica ocioso até 20 min, no máximo
+  4 processos (o menos recente fecha primeiro); apagar o Orb, sair do app, parar o turno ou qualquer divergência (edição, refazer,
+  condensação) encerra o processo. Um ocioso que morreu cai em processo novo sem erro. Nas métricas (`cache-metrics.jsonl`) o passo
+  aparece com `plan: "idle"`. Qualquer outra chamada (um turno novo que não continua, uma nova tentativa, um corte do histórico)
+  começa um processo novo com a conversa reconstruída, e o cache do prompt é o do provedor (`arrangesPromptCache`).
 
 ## Economia de tokens
 

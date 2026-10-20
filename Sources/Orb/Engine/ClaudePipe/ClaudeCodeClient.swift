@@ -5,7 +5,9 @@ import os
 // only the transport to the model, through their Claude subscription. One live CLI process serves the steps of an Orb turn: it stops
 // at the model's tool calls (parked), the engine runs the tools, and the next `stream` call hands the results back to the SAME process
 // through the mailbox (the CLI's MCP server for "orb" returns them to the model). Anything that does not continue a parked step starts
-// a fresh process, with the conversation replayed from a session file (see `ClaudePipeSession`).
+// a fresh process, with the conversation replayed from a session file (see `ClaudePipeSession`). A turn that ends with an answer
+// leaves its process idle in `ClaudePipeIdlePool`, and the conversation's next message goes to it as one more stdin line: the
+// process still has the prompt as the provider cached it, which a replayed session cannot reproduce.
 
 /// How to start the CLI: its executable and the environment it runs in.
 struct ClaudePipeLaunch: Sendable {
@@ -59,6 +61,10 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
     private let cacheTTL: String?
     /// A short tag of the conversation for the cache metrics, when the caller has an id (see `ClaudePipeMetric.tag`).
     private let conversationTag: String?
+    /// The conversation's id: the key of the process its finished turn leaves idle (nil: no process is kept between turns).
+    private let conversationID: String?
+    private let idlePool: ClaudePipeIdlePool
+    private let idleTimeout: Duration
     private let metrics: ClaudePipeMetricsLog
 
     /// What a step left behind: the live process waiting at the model's tool calls, and the messages of the call that got there.
@@ -81,7 +87,12 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
 
     init(launch: @escaping LaunchProvider = ClaudeCodeClient.installedLaunch, orbBinary: URL = ClaudeCodeClient.currentBinary,
          folders: ClaudePipeFolders = .standard, initializeTimeout: Duration = .seconds(60), parkTimeout: Duration = .seconds(30 * 60),
-         effort: String? = nil, cacheTTL: String? = nil, conversationID: String? = nil) {
+         effort: String? = nil, cacheTTL: String? = nil, conversationID: String? = nil,
+         idlePool: ClaudePipeIdlePool = .shared, idleTimeout: Duration = ClaudePipeIdlePool.defaultTimeout,
+         keepsIdleProcess: Bool = true) {
+        self.conversationID = keepsIdleProcess ? conversationID : nil
+        self.idlePool = idlePool
+        self.idleTimeout = idleTimeout
         self.launch = launch
         self.effort = effort
         self.cacheTTL = cacheTTL
@@ -111,15 +122,18 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
 
     private enum Plan {
         case resume(ClaudePipeRun, results: [(id: String, result: ClaudePipeToolResult)], extras: [ChatMessage])
+        /// The process a finished turn of this conversation left idle, and the user messages that came after its answer.
+        case idle(ClaudePipeRun, extras: [ChatMessage])
         case fresh(ClaudePipeMetric.FreshReason)
     }
 
     func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
-        let (plan, generation) = decide(messages: messages, toolChoice: toolChoice)
+        let setup = ClaudePipeSetup(model: model, effort: effort, cacheTTL: cacheTTL, tools: tools, toolChoice: toolChoice)
+        let (plan, generation) = decide(messages: messages, setup: setup)
         return AsyncThrowingStream { continuation in
             let task = Task {
                 await self.produce(plan, generation: generation, model: model, messages: messages, tools: tools, toolChoice: toolChoice,
-                                   into: continuation)
+                                   setup: setup, into: continuation)
             }
             continuation.onTermination = { reason in
                 if case .cancelled = reason { task.cancel() }
@@ -127,21 +141,53 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
         }
     }
 
-    /// Takes what is parked and says whether this call continues it. Whatever else was running gives way: one stream at a time.
-    private func decide(messages: [ChatMessage], toolChoice: ToolChoice) -> (Plan, Int) {
+    /// Takes what is parked (or idle) and says whether this call continues it. Whatever else was running gives way: one stream at a time.
+    private func decide(messages: [ChatMessage], setup: ClaudePipeSetup) -> (Plan, Int) {
+        let toolChoice = setup.toolChoice
         let (parked, superseded, generation) = state.withLock { state -> (Parked?, ClaudePipeRun?, Int) in
             state.generation += 1
             defer { state.parked = nil; state.active = nil }
             return (state.parked, state.active, state.generation)
         }
         superseded?.stop(interrupt: true)
-        guard let parked else { return (.fresh(.noParked), generation) }
+        let idle = conversationID.flatMap { idlePool.take($0) }
+        guard let parked else {
+            guard let idle else { return (.fresh(.noParked), generation) }
+            if idle.setup == setup, !idle.run.process.hasExited, let extras = Self.idleContinuation(of: messages, after: idle.seen) {
+                return (.idle(idle.run, extras: extras), generation)
+            }
+            idle.run.stop(interrupt: false)
+            return (.fresh(toolChoice == .auto ? .notContinuation : .toolChoice), generation)
+        }
+        idle?.run.stop(interrupt: false)
         parked.expiry.cancel()
         if toolChoice == .auto, let found = Self.continuation(of: messages, after: parked.previous, toolIDs: parked.toolIDs) {
             return (.resume(parked.run, results: found.results, extras: found.extras), generation)
         }
         parked.run.stop(interrupt: false)
         return (.fresh(toolChoice == .auto ? .notContinuation : .toolChoice), generation)
+    }
+
+    /// Whether `messages` is a new message of the conversation after the answer that ended the last turn: what the process saw
+    /// (`seen`: the messages of its last call, then the assistant's answer) and then only user messages. The comparison is on what
+    /// the model reads (role, text, calls, pictures), not on the Orb's bookkeeping (bubble ids, the reasoning the CLI never sees);
+    /// the answer is compared by its text alone, trimmed. Returns the new messages.
+    static func idleContinuation(of messages: [ChatMessage], after seen: [ChatMessage]) -> [ChatMessage]? {
+        guard let answer = seen.last, answer.role == .assistant, messages.count > seen.count else { return nil }
+        let before = seen.dropLast()
+        guard zip(messages, before).allSatisfy({ readsAlike($0, $1) }) else { return nil }
+        let reply = messages[before.count]
+        guard reply.role == .assistant, reply.toolCalls.isEmpty,
+              reply.content.trimmingCharacters(in: .whitespacesAndNewlines) == answer.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        else { return nil }
+        let extras = Array(messages[seen.count...])
+        guard extras.allSatisfy({ $0.role == .user && !($0.content.isEmpty && $0.images.isEmpty) }) else { return nil }
+        return extras
+    }
+
+    private static func readsAlike(_ a: ChatMessage, _ b: ChatMessage) -> Bool {
+        a.role == b.role && a.content == b.content && a.toolCalls == b.toolCalls && a.toolCallID == b.toolCallID
+            && a.isError == b.isError && a.images == b.images
     }
 
     /// Whether `messages` is exactly what the engine sends after running the parked tool calls: the previous call's messages, the
@@ -164,29 +210,61 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
     }
 
     private func produce(_ plan: Plan, generation: Int, model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice,
-                         into continuation: AsyncThrowingStream<LLMEvent, Error>.Continuation) async {
+                         setup: ClaudePipeSetup, into continuation: AsyncThrowingStream<LLMEvent, Error>.Continuation) async {
         var started: ClaudePipeRun?
         var freshReason: ClaudePipeMetric.FreshReason?
+        var reusedIdle = false
+        // What the caller was shown: the answer for the idle record, and whether anything was shown at all (a process that died
+        // idle can be replaced only before that).
+        let shown = OSAllocatedUnfairLock(initialState: (text: "", any: false))
+        let emit: @Sendable (LLMEvent) -> Void = { event in
+            shown.withLock { shown in
+                shown.any = true
+                if case .text(let delta) = event { shown.text += delta }
+            }
+            continuation.yield(event)
+        }
         do {
-            let run: ClaudePipeRun
+            var run: ClaudePipeRun
+            var step: ClaudePipeStep
+            /// A new process for this call (the history replayed from a session file).
+            func startFresh(_ reason: ClaudePipeMetric.FreshReason) async throws -> (ClaudePipeRun, ClaudePipeStep) {
+                freshReason = reason
+                reusedIdle = false
+                let run = try await begin(model: model, messages: messages, tools: tools, toolChoice: toolChoice)
+                started = run
+                guard register(run, generation: generation) else { throw CancellationError() }
+                await run.sendFirstMessage()
+                return (run, try await run.readStep(emit: emit))
+            }
             switch plan {
             case .resume(let parked, let results, let extras):
                 run = parked
                 started = parked
                 guard register(parked, generation: generation) else { throw CancellationError() }
                 try await parked.resume(results: results, extras: extras)
+                step = try await run.readStep(emit: emit)
+            case .idle(let idle, let extras):
+                run = idle
+                started = idle
+                reusedIdle = true
+                guard register(idle, generation: generation) else { throw CancellationError() }
+                do {
+                    try await idle.sendUser(extras)
+                    step = try await idle.readStep(emit: emit)
+                } catch where !(error is CancellationError) && idle.process.hasExited && !shown.withLock({ $0.any }) {
+                    // The idle process died on its own: the user hears nothing of it, a new one answers.
+                    release(idle, generation: generation)
+                    idle.stop(interrupt: false)
+                    (run, step) = try await startFresh(.idleLost)
+                }
             case .fresh(let reason):
-                freshReason = reason
-                run = try await begin(model: model, messages: messages, tools: tools, toolChoice: toolChoice)
-                started = run
-                guard register(run, generation: generation) else { throw CancellationError() }
-                await run.sendFirstMessage()
+                (run, step) = try await startFresh(reason)
             }
-            let step = try await run.readStep { continuation.yield($0) }
             try Task.checkCancellation()
             metrics.record(ClaudePipeMetric(timestamp: Date(), conversation: conversationTag, model: model, fresh: freshReason,
                                             messageCount: messages.count, characterCount: messages.reduce(0) { $0 + $1.content.count },
-                                            usage: step.usage))
+                                            usage: step.usage, idle: reusedIdle))
             if step.stop == .toolUse, !step.calls.isEmpty {
                 // Parked before the engine hears of the calls: its next `stream` call may come at once.
                 guard park(run, messages: messages, toolIDs: step.calls.map(\.id), generation: generation) else { throw CancellationError() }
@@ -194,7 +272,13 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
                 continuation.yield(.finished(.toolUse, step.usage))
             } else {
                 release(run, generation: generation)
-                run.stop(interrupt: false)
+                if step.stop == .done, step.calls.isEmpty, let conversationID {
+                    // The turn is over, the process is not: the conversation's next message goes to it (see `ClaudePipeIdlePool`).
+                    let answer = ChatMessage(role: .assistant, content: shown.withLock { $0.text })
+                    idlePool.put(conversationID, run: run, seen: messages + [answer], setup: setup, timeout: idleTimeout)
+                } else {
+                    run.stop(interrupt: false)
+                }
                 if !step.calls.isEmpty { continuation.yield(.toolCalls(step.calls)) }
                 continuation.yield(.finished(step.stop, step.usage))
             }
@@ -412,6 +496,13 @@ actor ClaudePipeRun {
     /// The user message that starts the turn (after `initialize`).
     func sendFirstMessage() {
         process.send(firstLine)
+    }
+
+    /// Sends the messages the user wrote after the answer that ended the last turn (the process was idle).
+    func sendUser(_ messages: [ChatMessage]) throws {
+        for message in messages {
+            process.send(try ClaudePipeSession.userLine(message.content, images: message.images))
+        }
     }
 
     /// Hands the tool results to the MCP server (through the mailbox), lets the CLI run the calls, and sends the messages the

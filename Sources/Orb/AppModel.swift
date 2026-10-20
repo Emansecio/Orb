@@ -473,6 +473,7 @@ final class AppModel {
                 ChildProcessGroups.killAllNow(including: self?.jobs.runningGroups ?? [])
                 self?.jobs.killAllNow()
                 self?.browserHub.terminateAllNow(orbs: Set(self?.bots.map(\.id) ?? [])) // each Orb's browser lives in a background process of its own that would outlive the app
+                ClaudePipeIdlePool.shared.stopAll() // the Claude Code processes left idle between turns
                 StdioServerRegistry.shared.killAllNow() // a connector's server that stays open past EOF would outlive the app
             }
         }
@@ -1186,6 +1187,7 @@ final class AppModel {
         }
         leaveGroups(botID, name: name) // MultiOrb (WP5): before the Orb is gone, so the groups can say who left
         bots.removeAll { $0.id == botID }
+        if let id = session.conversation?.gatewaySessionID { ClaudePipeIdlePool.shared.stop(id) } // its Claude Code process, if one is idle
         session.close()
         sessions[botID] = nil // with its transcript: whatever still holds the session writes to nothing anyone shows
         store.deleteConversation(botID)
@@ -1625,7 +1627,10 @@ final class AppModel {
                                                                       conversationID: sessionID,
                                                                       effort: ReasoningEffort.sent(bot.effort, for: modelInfo),
                                                                       replyTokens: budget.replyTokens,
-                                                                      cacheTTL: routineCacheTTL(of: session)) else { throw LLMError.notConfigured }
+                                                                      cacheTTL: routineCacheTTL(of: session),
+                                                                      // Only the Orb's own chat: a routine's run, a request from another Orb
+                                                                      // or a group starts from nothing next time and would only take a slot.
+                                                                      keepsIdleProcess: session.routineID == nil && session.sideKind == nil) else { throw LLMError.notConfigured }
                 client = made
             } catch {
                 session.failSetup(error, turn: turn)

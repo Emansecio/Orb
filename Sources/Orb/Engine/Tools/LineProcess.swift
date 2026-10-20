@@ -109,6 +109,9 @@ final class LineProcess: Sendable {
         writes.async { try? handle.close() }
     }
 
+    /// The child has ended.
+    var hasExited: Bool { exited.withLock { $0 } }
+
     /// The last few KB the child wrote to stderr.
     var errorOutput: String { errors.withLock { $0.text }.trimmingCharacters(in: .whitespacesAndNewlines) }
 
