@@ -64,7 +64,10 @@ struct UsageRow: Identifiable, Equatable, Sendable {
     var cost = 0.0
     /// Dollars the plan's use would have cost at API prices.
     var equivalent = 0.0
+    /// New tokens: charged in full, written to the cache, and the reply (`UsageTotals.budgetTokens`).
     var tokens = 0
+    /// Tokens reread from the cache, at a tenth of the price: kept apart so they do not pass for new content.
+    var cached = 0
     var requests = 0
     /// Share of the page's total in its measure, 0...1 (nil when there is no total).
     var share: Double?
@@ -95,7 +98,9 @@ struct UsageReport: Equatable, Sendable {
     var totalCost = 0.0
     /// Dollars the plans' use would have cost at API prices.
     var totalEquivalent = 0.0
+    /// New tokens (see `UsageRow.tokens`) and the ones read back from the cache.
     var totalTokens = 0
+    var totalCached = 0
     var totalRequests = 0
     /// Some of the use has a model nobody could price.
     var hasUnpriced = false
@@ -109,7 +114,7 @@ struct UsageReport: Equatable, Sendable {
     /// Tokens used in each hour of the day (0...23), summed over the period.
     var hourly = [Int](repeating: 0, count: 24)
 
-    var isEmpty: Bool { totalRequests == 0 && totalTokens == 0 && totalCost == 0 }
+    var isEmpty: Bool { totalRequests == 0 && totalTokens == 0 && totalCached == 0 && totalCost == 0 }
 
     /// Series kept apart in the chart; the rest are "Outros".
     static let seriesLimit = 5
@@ -122,7 +127,7 @@ struct UsageReport: Equatable, Sendable {
         var report = UsageReport(period: period, interval: interval)
 
         struct Sum {
-            var cost = 0.0, equivalent = 0.0, tokens = 0, requests = 0
+            var cost = 0.0, equivalent = 0.0, tokens = 0, cached = 0, requests = 0
             var hasUnpriced = false
             var hasPlan = false, hasLocal = false, hasBilled = false
         }
@@ -131,7 +136,7 @@ struct UsageReport: Equatable, Sendable {
 
         for bucket in buckets where bucket.key.hour >= interval.start && bucket.key.hour <= interval.end {
             let key = bucket.key, totals = bucket.totals
-            var piece = Sum(tokens: totals.tokens, requests: totals.requests)
+            var piece = Sum(tokens: totals.budgetTokens, cached: totals.cacheRead, requests: totals.requests)
             switch book.cost(of: totals, model: key.model, at: key.hour) {
             case .paid(let dollars): piece.cost = dollars; piece.hasBilled = true
             case .included(let equivalent): piece.equivalent = equivalent ?? 0; piece.hasPlan = true
@@ -142,6 +147,7 @@ struct UsageReport: Equatable, Sendable {
                 sum.cost += piece.cost
                 sum.equivalent += piece.equivalent
                 sum.tokens += piece.tokens
+                sum.cached += piece.cached
                 sum.requests += piece.requests
                 sum.hasUnpriced = sum.hasUnpriced || piece.hasUnpriced
                 sum.hasPlan = sum.hasPlan || piece.hasPlan
@@ -157,6 +163,7 @@ struct UsageReport: Equatable, Sendable {
             report.totalCost += piece.cost
             report.totalEquivalent += piece.equivalent
             report.totalTokens += piece.tokens
+            report.totalCached += piece.cached
             report.totalRequests += piece.requests
             report.hasUnpriced = report.hasUnpriced || piece.hasUnpriced
         }
@@ -176,12 +183,12 @@ struct UsageReport: Equatable, Sendable {
 
         report.orbRows = byOrb.map { id, sum in
             UsageRow(id: id.uuidString, name: orbNames[id] ?? rememberedNames[id] ?? "Orb apagado", state: state(sum), cost: sum.cost,
-                     equivalent: sum.equivalent, tokens: sum.tokens, requests: sum.requests,
+                     equivalent: sum.equivalent, tokens: sum.tokens, cached: sum.cached, requests: sum.requests,
                      share: total > 0 ? value(sum) / total : nil, hasUnpriced: sum.hasUnpriced)
         }.sorted(by: order)
         report.modelRows = byModel.map { model, sum in
             UsageRow(id: model, name: book.displayName(for: model), detail: book.providerName(for: model), state: state(sum), cost: sum.cost,
-                     equivalent: sum.equivalent, tokens: sum.tokens, requests: sum.requests,
+                     equivalent: sum.equivalent, tokens: sum.tokens, cached: sum.cached, requests: sum.requests,
                      share: total > 0 ? value(sum) / total : nil, hasUnpriced: sum.hasUnpriced,
                      isCorrected: book.corrections[model] != nil)
         }.sorted(by: order)

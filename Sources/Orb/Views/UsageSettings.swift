@@ -21,6 +21,17 @@ enum UsageFormat {
         return said + (said.hasSuffix("lhão") || said.hasSuffix("lhões") ? " de tokens" : " tokens")
     }
 
+    /// "48 mil novos · 520 mil do cache": the new content apart from what the cache gave back; the cache part is left out when zero.
+    static func tokens(new: Int, cached: Int) -> String {
+        func said(_ count: Int) -> String {
+            let words = ContextWords.approx(count)
+            return words.hasSuffix("lhão") || words.hasSuffix("lhões") ? words + " de" : words
+        }
+        let fresh = said(new) + (new == 1 ? " novo" : " novos")
+        guard cached > 0 else { return fresh }
+        return fresh + " · " + ContextWords.approx(cached) + " do cache"
+    }
+
     static func requests(_ count: Int) -> String { count == 1 ? "1 pedido" : "\(count.formatted(.number.locale(locale))) pedidos" }
 
     /// "42%"; below one percent "< 1%".
@@ -141,7 +152,7 @@ struct UsageSettings: View {
                     .font(.system(size: 34, weight: .semibold, design: .rounded))
                     .foregroundStyle(Palette.ink)
                     .contentTransition(.numericText())
-                Text("estimado · \(UsageFormat.tokens(report.totalTokens)) · \(UsageFormat.requests(report.totalRequests))")
+                Text("estimado · \(UsageFormat.tokens(new: report.totalTokens, cached: report.totalCached)) · \(UsageFormat.requests(report.totalRequests))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .contentTransition(.numericText())
@@ -232,7 +243,7 @@ struct UsageSettings: View {
     }
 
     private func chartSummary(_ report: UsageReport) -> String {
-        "Total de \(UsageFormat.dollars(report.totalCost)) e \(UsageFormat.tokens(report.totalTokens))"
+        "Total de \(UsageFormat.dollars(report.totalCost)) e \(UsageFormat.tokens(new: report.totalTokens, cached: report.totalCached))"
     }
 
     /// An Orb's chart color is its own; models take a fixed sequence, and "Outros" the quiet gray.
@@ -373,7 +384,7 @@ private struct UsageRowView: View {
     }
 
     private var detail: String {
-        var parts = [UsageFormat.tokens(row.tokens), UsageFormat.requests(row.requests)]
+        var parts = [UsageFormat.tokens(new: row.tokens, cached: row.cached), UsageFormat.requests(row.requests)]
         if let provider = row.detail { parts.append(provider) }
         return parts.joined(separator: " · ")
     }

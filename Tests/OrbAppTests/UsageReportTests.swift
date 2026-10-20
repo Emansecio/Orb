@@ -61,7 +61,8 @@ struct UsageReportTests {
                     bucket(utcDate(2026, 10, 9, 11), orb: luna, model: gpt, UsageTotals(requests: 4, input: 2_000_000))]                      // 5
         let report = report(rows, .today)
         #expect(abs(report.totalCost - 9) < 1e-9 && report.totalRequests == 7 && report.measure == .cost)
-        #expect(report.totalTokens == 1_000_000 + 100_000 + 10_000_000 + 2_000_000)
+        #expect(report.totalTokens == 1_000_000 + 100_000 + 2_000_000 && report.totalCached == 10_000_000)
+        #expect(report.orbRows.first { $0.name == "Luna" }?.cached == 10_000_000)
         #expect(report.orbRows.map(\.name) == ["Luna", "Atlas"])
         #expect(abs(report.orbRows[0].cost - 6) < 1e-9 && abs(report.orbRows[1].cost - 3) < 1e-9)
         #expect(report.modelRows.map(\.id) == [gpt, sonnet])
@@ -173,6 +174,8 @@ struct UsageReportTests {
         #expect(UsageFormat.requests(1) == "1 pedido" && UsageFormat.requests(48) == "48 pedidos")
         #expect(UsageFormat.tokens(3_540) == "3,5 mil tokens" && UsageFormat.tokens(1_800_000) == "1,8 milhão de tokens")
         #expect(UsageFormat.tokens(2_000_000) == "2 milhões de tokens" && UsageFormat.tokens(400) == "400 tokens")
+        #expect(UsageFormat.tokens(new: 48_000, cached: 520_000) == "48 mil novos · 520 mil do cache")
+        #expect(UsageFormat.tokens(new: 1_800_000, cached: 0) == "1,8 milhão de novos" && UsageFormat.tokens(new: 400, cached: 0) == "400 novos")
         #expect(UsageFormat.parsePrice("2,5") == 2.5 && UsageFormat.parsePrice(" 2.5 ") == 2.5)
         #expect(UsageFormat.parsePrice("") == nil && UsageFormat.parsePrice("abc") == nil && UsageFormat.parsePrice("-1") == nil)
         #expect(UsageFormat.parsePrice("999999") == nil)

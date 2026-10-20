@@ -172,7 +172,10 @@ enum PromptParts {
         uses.append("open to open files and links for the user" + (bot.capabilities.contains(.browser) ? ", not to read a page" : ""))
         let background = hasFiles ? " Long commands can run in the background (job_output)." : ""
         let control = bot.capabilities.contains(.computerUse) ? " " + appControl : ""
-        return uses.joined(separator: "; ") + "." + background + control + " " + showPicture
+        let together = hasFiles
+            ? " Join simple sequential shell commands into one run_command (a && b, or a script) when you do not need to see what comes between them."
+            : ""
+        return uses.joined(separator: "; ") + "." + background + together + control + " " + showPicture
     }
 
     /// Recipes for the Mac tasks people ask most, and the mistakes models make in them, only for an Orb that may control apps.
