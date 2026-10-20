@@ -206,6 +206,11 @@ enum ProseText {
 /// The text view of a run of prose: read-only, selectable, transparent, laid out at the width SwiftUI gives it.
 final class ProseTextView: NSTextView, @preconcurrency NSLayoutManagerDelegate {
     private var sizes: [CGFloat: CGSize] = [:]
+    /// Widths in `sizes`, least recently used first.
+    private var sizeOrder: [CGFloat] = []
+    /// Tells whether the width is changing fast (an animation, a drag): then the text is laid out in steps (`ProseWidth`).
+    private var widthMotion = ProseWidth.Motion()
+    private var settleWork: DispatchWorkItem?
     /// The text has a quote to draw a bar beside (`drawBackground`).
     private var hasQuote = false
     /// The text shown, without the cursor: what a flush that only adds to it continues.
@@ -228,7 +233,8 @@ final class ProseTextView: NSTextView, @preconcurrency NSLayoutManagerDelegate {
         isHorizontallyResizable = false
         textContainerInset = .zero
         textContainer?.lineFragmentPadding = 0
-        textContainer?.widthTracksTextView = true
+        // The container is sized by `size(forWidth:)` (stepped while the width moves), not by the frame.
+        textContainer?.widthTracksTextView = false
         textContainer?.heightTracksTextView = false
         focusRingType = .none
         linkTextAttributes = [.foregroundColor: NSColor(Palette.accentText), .underlineStyle: NSUnderlineStyle.single.rawValue,
@@ -250,15 +256,28 @@ final class ProseTextView: NSTextView, @preconcurrency NSLayoutManagerDelegate {
             if value != nil { hasQuote = true; stop.pointee = true }
         }
         sizes = [:]
+        sizeOrder = []
         invalidateIntrinsicContentSize()
     }
 
     /// The text laid out `width` wide: its height, and the width of its longest line (never more than `width`). Laid out
-    /// again at that narrower width the lines break in the same places, since each of them fits.
-    func size(forWidth width: CGFloat) -> CGSize {
-        if let known = sizes[width] { return known }
+    /// again at that narrower width the lines break in the same places, since each of them fits. While the width is
+    /// changing fast the text is laid out at a step below it (never wider, so nothing sticks out; the height is that of
+    /// the text drawn, so nothing is cut), and at the exact width once it has been still for `ProseWidth.settle`.
+    func size(forWidth width: CGFloat, steps: Bool = false) -> CGSize {
+        let now = ProcessInfo.processInfo.systemUptime
+        // Text that hugs its lines (a bubble) is asked several widths at once: it is always laid out at the exact one.
+        let moving = widthMotion.note(width, at: now) && steps
+        let layoutWidth = ProseWidth.layoutWidth(width, moving: moving)
+        if moving { scheduleSettle() }
         guard let container = textContainer, let layout = layoutManager else { return .zero }
-        container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
+        if container.containerSize.width != layoutWidth {
+            container.containerSize = NSSize(width: layoutWidth, height: .greatestFiniteMagnitude)
+        }
+        if let known = sizes[layoutWidth] {
+            if let i = sizeOrder.firstIndex(of: layoutWidth) { sizeOrder.remove(at: i); sizeOrder.append(layoutWidth) }
+            return known
+        }
         layout.ensureLayout(for: container)
         let used = layout.usedRect(for: container)
         // The container's used rect can span its whole width; each line's own used rect is as wide as its words.
@@ -266,11 +285,34 @@ final class ProseTextView: NSTextView, @preconcurrency NSLayoutManagerDelegate {
         layout.enumerateLineFragments(forGlyphRange: layout.glyphRange(for: container)) { _, line, _, _, _ in
             longest = max(longest, line.maxX)
         }
-        let size = CGSize(width: min(ceil(longest), width), height: ceil(used.height))
-        // A few widths at most: a window being resized goes through many.
-        if sizes.count >= 4 { sizes = [:] }
-        sizes[width] = size
+        let size = CGSize(width: min(ceil(longest), layoutWidth), height: ceil(used.height))
+        if sizeOrder.count >= ProseWidth.cacheLimit, let oldest = sizeOrder.first {
+            sizeOrder.removeFirst()
+            sizes[oldest] = nil
+        }
+        sizes[layoutWidth] = size
+        sizeOrder.append(layoutWidth)
         return size
+    }
+
+    /// The width stopped moving: ask SwiftUI for the size again, now at the exact width.
+    private func scheduleSettle() {
+        settleWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.widthMotion.reset()
+            self.invalidateIntrinsicContentSize()
+        }
+        settleWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + ProseWidth.settle, execute: work)
+    }
+
+    override func viewDidEndLiveResize() {
+        super.viewDidEndLiveResize()
+        guard widthMotion.isMoving else { return }
+        settleWork?.cancel()
+        widthMotion.reset()
+        invalidateIntrinsicContentSize()
     }
 
     /// `Palette.conversationLineSpacing` between the lines of a paragraph (breaks inside it included), none after its last.
@@ -393,7 +435,7 @@ struct SelectableProse: NSViewRepresentable {
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: ProseTextView, context: Context) -> CGSize? {
         let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? 10_000
-        let size = nsView.size(forWidth: width)
+        let size = nsView.size(forWidth: width, steps: !context.environment.proseHugsText)
         return CGSize(width: context.environment.proseHugsText ? size.width : width, height: size.height)
     }
 }
@@ -412,4 +454,45 @@ extension EnvironmentValues {
     @Entry var proseSelection: ProseSelectionAction?
     /// The text takes the width of its longest line instead of all it is given (inside a bubble, `replyBubble()`).
     @Entry var proseHugsText = false
+}
+
+/// How the width a prose text is laid out at follows the width it is given.
+enum ProseWidth {
+    /// Width steps while the width moves, in points.
+    static let step: CGFloat = 16
+    /// How long the width must stay still before the text is laid out at the exact width.
+    static let settle: TimeInterval = 0.12
+    /// Widths whose size is kept.
+    static let cacheLimit = 16
+
+    /// The width to lay out at: the exact one at rest, a step below it (never above) while it moves.
+    static func layoutWidth(_ width: CGFloat, moving: Bool) -> CGFloat {
+        guard moving, width > step else { return width }
+        return (width / step).rounded(.down) * step
+    }
+
+    /// Notes the widths asked for. The width is moving after `frames` changes in a row, each less than `settle` after the
+    /// one before and a frame apart (one layout pass asking several widths is not movement), until it stays the same
+    /// for `settle`.
+    struct Motion {
+        static let frames = 3
+        private var last: CGFloat?
+        private var changedAt: TimeInterval = 0
+        private var run = 0
+
+        var isMoving: Bool { run >= Self.frames }
+
+        /// True while the width is moving, `width` asked for at `now`.
+        mutating func note(_ width: CGFloat, at now: TimeInterval) -> Bool {
+            defer { last = width }
+            guard let last else { return false }
+            if width != last {
+                if now - changedAt > settle { run = 0 }
+                if now - changedAt > 0.004 { run += 1; changedAt = now }
+            }
+            return isMoving && now - changedAt < settle
+        }
+
+        mutating func reset() { run = 0; changedAt = 0 }
+    }
 }

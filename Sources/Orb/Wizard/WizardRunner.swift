@@ -122,7 +122,7 @@ final class WizardRunner {
         guard isThinking else { return }
         turn?.cancel()
         turn = nil
-        liveText = ""
+        dropLiveText()
         isThinking = false
         failure = Self.interrupted
         if history.count > historyMark { history.removeSubrange(historyMark...) }
@@ -209,7 +209,7 @@ final class WizardRunner {
         }
         failure = nil
         isThinking = true
-        liveText = ""
+        dropLiveText()
         historyMark = history.count
         messagesMark = messages.count
         let usedModel = ref.text
@@ -245,7 +245,8 @@ final class WizardRunner {
             guard !Task.isCancelled, !isFinished else { return }
             switch event {
             case .text(let delta):
-                liveText += delta
+                pendingText += delta
+                scheduleLiveFlush()
             case .toolStarted:
                 flushLiveText()
             case .message(let message):
@@ -269,7 +270,7 @@ final class WizardRunner {
         if failed {
             // The turn's own messages leave the history and the chat, and what had streamed is dropped: "Tentar de novo"
             // sends the same message to the same state (the answer starts over, it does not follow a cut sentence).
-            liveText = ""
+            dropLiveText()
             if history.count > historyMark { history.removeSubrange(historyMark...) }
             dropTurnMessages()
             return
@@ -289,10 +290,42 @@ final class WizardRunner {
         if messages.count > messagesMark { messages.removeSubrange(messagesMark...) }
     }
 
+    /// Words that streamed and are not in `liveText` yet: it takes them every ~33 ms, not a token at a time (each change
+    /// parses the text again), like the main chat.
+    private var pendingText = ""
+    private var liveFlush: Task<Void, Never>?
+
+    private func scheduleLiveFlush() {
+        guard liveFlush == nil else { return }
+        liveFlush = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(33))
+            guard !Task.isCancelled else { return }
+            self?.commitPendingText()
+        }
+    }
+
+    /// The pending words join `liveText` (always before it is read as the answer).
+    private func commitPendingText() {
+        liveFlush?.cancel()
+        liveFlush = nil
+        guard !pendingText.isEmpty else { return }
+        liveText += pendingText
+        pendingText = ""
+    }
+
+    /// The streamed words go, those not shown yet too.
+    private func dropLiveText() {
+        liveFlush?.cancel()
+        liveFlush = nil
+        pendingText = ""
+        liveText = ""
+    }
+
     /// The answer's streamed words become a message of the chat.
     private func flushLiveText() {
+        commitPendingText()
         let text = liveText.trimmingCharacters(in: .whitespacesAndNewlines)
-        liveText = ""
+        dropLiveText()
         guard !text.isEmpty else { return }
         messages.append(TranscriptItem(.bot(text: text, isStreaming: false)))
     }

@@ -237,3 +237,6 @@ refaz a medida de tamanho mínimo, ideal e máximo (`sizingOptions`) a cada layo
 nisso. `ColumnSizing` zera o `sizingOptions` das colunas (a janela fica como estava). Antes/depois: painel direito 55-58 -> 114-118
 fps (quadros acima de 25 ms: 24% -> 0%, pior quadro 49 -> 22 ms); sidebar 56-63 -> 96-100 fps (15%/7% -> 0%, pior 53 -> 25 ms).
 Testadas sem efeito: trocar os `ZStack` das páginas por um `Layout` próprio e fixar o mínimo da janela num `Layout` que não mede os filhos.
+
+## Texto do chat em largura que muda, wizard (20/10/2026)
+`ProseTextView.size(forWidth:)` refazia o layout a cada largura nova (animação de lateral, divisor, redimensionar). Agora, depois de 3 mudanças seguidas de largura (quadros distintos), o texto é medido e desenhado num degrau de 16 pt abaixo da largura (`ProseWidth`, nunca acima: nada sobra nem é cortado, a altura é a do texto desenhado); 120 ms sem mudar (ou `viewDidEndLiveResize`) volta à largura exata. O contêiner deixou de seguir o frame (`widthTracksTextView = false`) e é ajustado em `size(forWidth:)`. Bolhas (`proseHugsText`) não usam degrau. Cache de larguras: 16, LRU. No wizard, `liveText` agora recebe os tokens a cada ~33 ms (`pendingText`, sempre descarregado antes de virar mensagem) e `WizardTypingDotsView` usa 24-30 fps e sai da animação fora da janela/oculta/coberta.

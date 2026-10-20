@@ -362,20 +362,47 @@ final class WizardTypingDotsView: NSView {
         }
     }
 
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        NotificationCenter.default.removeObserver(self, name: NSWindow.didChangeOcclusionStateNotification, object: nil)
+        if let newWindow {
+            NotificationCenter.default.addObserver(self, selector: #selector(occlusionChanged),
+                                                   name: NSWindow.didChangeOcclusionStateNotification, object: newWindow)
+        }
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         updateAnimation()
     }
 
+    override func viewDidHide() {
+        super.viewDidHide()
+        updateAnimation()
+    }
+
+    override func viewDidUnhide() {
+        super.viewDidUnhide()
+        updateAnimation()
+    }
+
+    @objc private func occlusionChanged() { updateAnimation() }
+
+    /// The dots run only while the view is on screen: out of a window, hidden or covered, the animation is taken off.
     private func updateAnimation() {
+        let visible = window.map { !isHiddenOrHasHiddenAncestor && (OrbView.animateInactive || $0.occlusionState.contains(.visible)) } ?? false
         for (index, dot) in dots.enumerated() {
+            guard !visible || !animated || dot.animation(forKey: Self.key) == nil else { continue }
             dot.removeAnimation(forKey: Self.key)
             guard animated else { dot.opacity = 0.7; continue }
+            guard visible else { dot.opacity = 0.7; continue }
             let fade = CAKeyframeAnimation(keyPath: "opacity")
             fade.values = [0.3, 1, 0.3]
             fade.keyTimes = [0, 0.4, 1]
             fade.duration = 1.1
             fade.repeatCount = .infinity
+            // Three soft dots need no more than 30 frames a second.
+            fade.preferredFrameRateRange = CAFrameRateRange(minimum: 24, maximum: 30, preferred: 30)
             fade.beginTime = CACurrentMediaTime() + Double(index) * 0.16
             fade.fillMode = .backwards
             dot.add(fade, forKey: Self.key)
