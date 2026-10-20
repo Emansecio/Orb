@@ -1,8 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-// The sidebar's categories (see `SidebarCategory`): a heading that folds its Orbs, the field that names one, and
-// "Nova categoria" at the end of the Orbs. Only how the list is laid out: nothing here deletes an Orb.
+// The sidebar's categories (see `SidebarCategory`): a heading that folds its Orbs and the field that names one (opened
+// from the "+" of "Orbs"). Only how the list is laid out: nothing here deletes an Orb.
 
 /// A category in the sidebar: its heading and, unfolded, its Orbs indented under it. Where a dragged Orb lands is the
 /// sidebar's (`SidebarDropDelegate`): this reports its rows' frames, moves them out of the gap's way and lights its
@@ -225,8 +225,8 @@ private struct SidebarCategoryHeader: View {
     }
 }
 
-/// "Nova categoria" at the end of the Orbs, which turns into the name field; the same field opens here from an Orb's
-/// "Mover para → Nova categoria…" and from the palette.
+/// The name field of a category being made, after the categories: it opens from the "+" of "Orbs", an Orb's
+/// "Mover para → Nova categoria…" and the palette, and shows nothing otherwise.
 struct NewCategoryRow: View {
     @Environment(AppModel.self) private var model
     let selectionSpace: Namespace.ID
@@ -236,13 +236,6 @@ struct NewCategoryRow: View {
             CategoryNameField(initial: "", symbol: "plus") { name in
                 model.createCategory(named: name, moving: moving)
             }
-        } else {
-            SidebarRow(isSelected: false, selectionSpace: selectionSpace, help: "Organiza Orbs numa seção da lista que você recolhe") {
-                model.categoryNaming = .new(moving: nil)
-            } content: { _ in
-                NavLabel(title: "Nova categoria", isSelected: false, symbol: "plus")
-            }
-            .accessibilityIdentifier("sidebar-new-category")
         }
     }
 }

@@ -18,7 +18,7 @@ enum GroupRowText {
     }
 }
 
-/// The groups of the sidebar, between the Orbs and the workspace (the sidebar puts "Novo grupo" under them). A group is also
+/// The groups of the sidebar, below the Orbs (the "+" of its title makes a new one). A group is also
 /// made from the palette, ⌥⌘G, the Orbs menu or an Orb's "Criar grupo com…".
 struct SidebarGroupsSection: View {
     @Environment(AppModel.self) private var model
@@ -26,12 +26,13 @@ struct SidebarGroupsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
-            Text("Grupos")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Palette.faint)
-                .padding(.horizontal, 10)
-                .padding(.bottom, 4)
-                .accessibilityAddTraits(.isHeader)
+            SectionTitle("Grupos") {
+                Button { model.showNewGroup = true } label: { SectionPlus() }
+                    .buttonStyle(.plain)
+                    .help(Tip.newGroup())
+                    .accessibilityLabel("Novo grupo")
+                    .accessibilityIdentifier("sidebar-new-group")
+            }
             ForEach(model.groups) { group in
                 SidebarGroupRow(group: group, selectionSpace: selectionSpace)
             }

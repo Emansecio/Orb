@@ -13,6 +13,9 @@ struct AppState: Codable, Sendable {
     /// Messages each Orb has not seen yet (by Orb id; Orbs with none are left out). Older files kept the count
     /// inside each Orb, and still load (see `init(from:)`).
     var unread: [String: Int] = [:]
+    /// The latest reply of each Orb, shortened to a line, for the second line of its sidebar row (by Orb id; Orbs with
+    /// none are left out). Older files have none.
+    var replies: [String: ReplyPreview] = [:]
     /// How much conversation the Orbs remember word for word before folding the start into a summary.
     var contextMemory = ContextMemoryLevel.balanced
     /// Context windows models turned out to have (a request was refused for its size), by "provider/model".
@@ -956,6 +959,8 @@ extension AppState {
         for orb in counted where orb.unread > 0 && unread[orb.id.uuidString] == nil {
             unread[orb.id.uuidString] = orb.unread
         }
+        // A preview is only a convenience: one that can't be read is dropped, never the file.
+        replies = ((try? c.decodeIfPresent([String: ReplyPreview].self, forKey: .replies)) ?? nil) ?? [:]
         contextMemory = try c.value(.contextMemory, default: .balanced)
         learnedContexts = (try? c.decodeIfPresent([String: LearnedContext].self, forKey: .learnedContexts)) ?? [:]
         do { profile = try c.value(.profile, default: UserProfile()) } catch { DecodeLoss.record() }

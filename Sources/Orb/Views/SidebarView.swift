@@ -22,8 +22,6 @@ struct SidebarView: View {
     /// it would land.
     var previewDropY: CGFloat?
 
-    /// With no Orbs the dashed invitation at the top is the way to make one: no second button for the same thing.
-    private var showsNewOrb: Bool { SidebarFooter.showsNewOrb(botCount: model.botIDs.count) }
     /// The Orb being dragged over the list and the gap the rows open for it, and the rows' frames it is worked out from.
     @State private var drag: SidebarDragPreview?
     @State private var dropFrames: [SidebarDropKey: CGRect] = [:]
@@ -35,7 +33,7 @@ struct SidebarView: View {
             VStack(alignment: .leading, spacing: 1) {
                 // The Orbs, loose and in categories, as one place to drop on: the gap opens anywhere among them.
                 VStack(alignment: .leading, spacing: 1) {
-                    SectionTitle("Orbs")
+                    SectionTitle("Orbs") { NewOrbMenu() }
                         .sidebarDropFrame(.looseTitle)
                     if model.botIDs.isEmpty {
                         // No Orbs: an invitation in the list's own place. It shows the welcome screen (what you get with
@@ -76,46 +74,20 @@ struct SidebarView: View {
                     frames: dropFrames, drag: $drag, reduceMotion: reduceMotion))
                 .background(alignment: .topLeading) { SidebarDropGap(gap: drag?.gap) }
 
-                // "Nova categoria" under the categories.
-                if SidebarOrder.showsNewCategory(botCount: model.botIDs.count, categoryCount: model.categories.count) || isNamingNewCategory {
+                // The name field of a category being made (the "+" of the Orbs, an Orb's "Mover para", the palette).
+                if isNamingNewCategory {
                     NewCategoryRow(selectionSpace: selectionSpace)
                         .transition(.adapted(.arrive, reduceMotion: reduceMotion))
                 }
 
-                // MARK: MultiOrb (WP6): the groups, between the Orbs and the workspace, with "Novo grupo" under them; the section
-                // shows once there are two Orbs to put together (or a group already).
+                // MARK: MultiOrb (WP6): the groups, below the Orbs; the section shows once there are two Orbs to put together
+                // (or a group already), and its "+" makes a new one.
                 if !model.groups.isEmpty || model.botIDs.count >= 2 {
-                    VStack(alignment: .leading, spacing: 1) {
-                        SidebarGroupsSection(selectionSpace: selectionSpace)
-                        SidebarRow(isSelected: false, selectionSpace: selectionSpace, help: "Junta Orbs para trabalharem juntos num pedido") {
-                            model.showNewGroup = true
-                        } content: { hovering in
-                            NavLabel(title: "Novo grupo", isSelected: false, symbol: "plus", hint: hovering ? AppShortcut.newGroup.label : nil)
-                        }
-                        .accessibilityIdentifier("sidebar-new-group")
-                    }
-                    .padding(.top, 16)
-                    .transition(.adapted(.arrive, reduceMotion: reduceMotion))
+                    SidebarGroupsSection(selectionSpace: selectionSpace)
+                        .padding(.top, 16)
+                        .transition(.adapted(.arrive, reduceMotion: reduceMotion))
                 }
                 // MARK: end MultiOrb (WP6)
-
-                SectionTitle("Espaço de trabalho")
-                    .padding(.top, 16)
-                SidebarRow(isSelected: model.selection == .routines, selectionSpace: selectionSpace, help: Tip.allRoutines) {
-                    model.selection = .routines
-                } content: { hovering in
-                    NavLabel(title: "Rotinas", isSelected: model.selection == .routines, symbol: "clock.arrow.circlepath", hint: hovering ? AppShortcut.routines.label : nil)
-                }
-                SidebarRow(isSelected: model.selection == .connectors, selectionSpace: selectionSpace, help: Tip.manageConnectors) {
-                    model.selection = .connectors
-                } content: { hovering in
-                    NavLabel(title: "Conectores", isSelected: model.selection == .connectors, symbol: "point.3.filled.connected.trianglepath.dotted", hint: hovering ? AppShortcut.connectors.label : nil)
-                }
-                SidebarRow(isSelected: model.selection == .skills, selectionSpace: selectionSpace, help: Tip.skillsPage) {
-                    model.selection = .skills
-                } content: { hovering in
-                    NavLabel(title: "Skills", isSelected: model.selection == .skills, symbol: "wand.and.stars", hint: hovering ? AppShortcut.skills.label : nil)
-                }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
@@ -145,34 +117,19 @@ struct SidebarView: View {
                 KeptMemoryBanner()
                 HStack(spacing: 6) {
                     ProfileAvatarButton()
-                    if showsNewOrb {
-                        Button { model.showNewBot = true } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: "plus")
-                                    .font(.system(size: 12, weight: .semibold))
-                                Text("Novo Orb")
-                                Spacer(minLength: 4)
-                                Text(AppShortcut.newBot.label)
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(Palette.muted)
-                            }
-                            .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(SecondaryPillStyle())
-                        .help(Tip.newBot())
-                        .transition(.adapted(.rise, reduceMotion: reduceMotion))
-                    } else {
-                        // Ajustes stays at the right edge while the button is away.
-                        Spacer(minLength: 0)
-                    }
+                    Spacer(minLength: 0)
+                    FooterPageButton(item: .routines, name: "Rotinas", symbol: "clock.arrow.circlepath",
+                                     tip: Tip.allRoutines, shortcut: AppShortcut.routines.label)
+                    FooterPageButton(item: .connectors, name: "Conectores", symbol: "point.3.filled.connected.trianglepath.dotted",
+                                     tip: Tip.manageConnectors, shortcut: AppShortcut.connectors.label)
+                    FooterPageButton(item: .skills, name: "Skills", symbol: "wand.and.stars",
+                                     tip: Tip.skillsPage, shortcut: AppShortcut.skills.label)
                     Button("Ajustes", systemImage: "gearshape") { openSettings() }
                         .labelStyle(.iconOnly)
                         .buttonStyle(CircleGhostStyle(side: 32, fontSize: 14))
                         .foregroundStyle(Palette.muted)
                         .iconTip(Tip.settings(), label: "Ajustes")
                 }
-                // The button comes back when the first Orb is made, and leaves with the last one (§2.13).
-                .motion(Motion.enter, value: showsNewOrb)
                 .padding(.horizontal, 8)
             }
             .padding(.vertical, 8)
@@ -181,17 +138,88 @@ struct SidebarView: View {
     }
 }
 
-private struct SectionTitle: View {
+/// A section's title, with what sits at its right edge (a "+" that makes a new one).
+struct SectionTitle<Trailing: View>: View {
     let title: String
-    init(_ title: String) { self.title = title }
+    let trailing: Trailing
+    init(_ title: String, @ViewBuilder trailing: () -> Trailing) {
+        self.title = title
+        self.trailing = trailing()
+    }
 
     var body: some View {
-        Text(title)
+        HStack(spacing: 4) {
+            Text(title)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Palette.faint)
+                .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 4)
+            trailing
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 2)
+        .padding(.bottom, 4)
+    }
+}
+
+/// The small "+" at the right of a section title: dim at rest, lighter under the pointer, a 20 pt target. The Orbs'
+/// title wraps it in a `Menu`, the groups' in a `Button`.
+struct SectionPlus: View {
+    @State private var isHovering = false
+
+    var body: some View {
+        Image(systemName: "plus")
             .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(Palette.faint)
-            .padding(.horizontal, 10)
-            .padding(.bottom, 4)
-            .accessibilityAddTraits(.isHeader)
+            .foregroundStyle(isHovering ? Palette.secondary : Palette.hint)
+            .frame(width: 20, height: 20)
+            .hoverFill(isHovering, in: .rect(cornerRadius: 6))
+            .contentShape(.rect)
+            .onHover { isHovering = $0 }
+            .animation(Motion.fade, value: isHovering)
+    }
+}
+
+/// The "+" of "Orbs": a new Orb, or a new category when there are Orbs to sort.
+private struct NewOrbMenu: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        Menu {
+            Button("Novo Orb  \(AppShortcut.newBot.label)") { model.showNewBot = true }
+            // Nothing to sort with a single Orb and no category (the same rule the palette follows): the item stays, dimmed.
+            Button("Nova categoria") { model.categoryNaming = .new(moving: nil) }
+                .disabled(!SidebarOrder.showsNewCategory(botCount: model.botIDs.count, categoryCount: model.categories.count))
+        } label: {
+            SectionPlus()
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(Tip.newOrbOrCategory)
+        .accessibilityLabel("Novo Orb ou categoria")
+        .accessibilityIdentifier("sidebar-new-orb")
+    }
+}
+
+/// One of the pages at the foot of the sidebar (Rotinas, Conectores, Skills): a round icon like Ajustes, with the
+/// selected page marked.
+private struct FooterPageButton: View {
+    @Environment(AppModel.self) private var model
+    let item: SidebarItem
+    let name: String
+    let symbol: String
+    let tip: String
+    let shortcut: String
+
+    var body: some View {
+        let isSelected = model.selection == item
+        Button(name, systemImage: symbol) { model.selection = item }
+            .labelStyle(.iconOnly)
+            .buttonStyle(CircleGhostStyle(side: 32, fontSize: 14))
+            .foregroundStyle(isSelected ? Palette.ink : Palette.muted)
+            .background(Circle().fill(isSelected ? Palette.ghostSelected : .clear))
+            .iconTip("\(tip) (\(shortcut))", label: name)
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 
@@ -266,13 +294,6 @@ extension EnvironmentValues {
     @Entry fileprivate var sidebarListChanged = false
 }
 
-/// What the foot of the sidebar shows, as plain values the tests can read.
-enum SidebarFooter {
-    /// "Novo Orb" (⌘N) at the foot is hidden while the list is empty, because the invitation "Criar seu primeiro Orb" is
-    /// there for the same thing. ⌘N itself (the menu) works either way.
-    static func showsNewOrb(botCount: Int) -> Bool { botCount > 0 }
-}
-
 /// What the sidebar's selection is made of, as plain values the tests can read.
 enum SidebarSelection {
     /// The id the selected background carries in the namespace.
@@ -315,7 +336,7 @@ struct SidebarBotRow: View {
             model.selection = .bot(botID)
         } content: { isHovering in
             BotRowContent(row: BotRow(look: live.look, workText: live.shownWork?.headline, shimmers: live.shownWork?.shimmers ?? false, activity: live.activity, isSelected: isSelected,
-                                      celebration: live.celebration, ack: live.poke, cue: live.cue, glance: live.glance, needsYou: live.needsYou, unread: live.unread,
+                                      celebration: live.celebration, ack: live.poke, cue: live.cue, glance: live.glance, needsYou: live.needsYou, unread: live.unread, reply: live.lastReply,
                                       // MARK: MultiOrb (WP2): the ring of the Orb it is exchanging messages with
                                       partner: live.partner,
                                       hint: isHovering && index < 9 ? AppShortcut.bot(at: index).label : nil,
@@ -442,6 +463,8 @@ private struct BotRow: Equatable {
     /// An approval card is open: the Orb is stopped until the user answers.
     let needsYou: Bool
     let unread: Int
+    /// Its latest reply and when it ended: the second line while it rests, and the time beside its name.
+    let reply: ReplyPreview?
     /// The Orb it is exchanging messages with now: its avatar gets a ring in that Orb's color.
     var partner: PartnerTint?
     /// The shortcut shown while the pointer is on the row.
@@ -496,52 +519,65 @@ private struct BotRowContent: View, Equatable {
                     if !Task.isCancelled { selectionSettled = true }
                 }
             VStack(alignment: .leading, spacing: 1) {
-                Text(look.name)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Palette.ink)
-                Group {
-                    if needsYou {
-                        Text("Precisa de você").foregroundStyle(Palette.warn)
-                    } else if let workText {
-                        if row.shimmers {
-                            Text(workText).shimmer()
-                        } else {
-                            Text(workText).foregroundStyle(Palette.faint)
-                        }
-                    } else {
-                        Text(look.role).foregroundStyle(Palette.faint)
+                HStack(spacing: 4) {
+                    Text(look.name)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Palette.ink)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    // The shortcut takes the time's place while the pointer is on the row.
+                    if let hint = row.hint {
+                        Text(hint)
+                            .font(.system(size: 11))
+                            .foregroundStyle(Palette.muted)
+                            .accessibilityHidden(true)
+                    } else if let reply = row.reply {
+                        Text(ReplyTime.label(reply.date))
+                            .font(.system(size: 11).monospacedDigit())
+                            .foregroundStyle(Palette.faint)
                     }
                 }
-                .font(.system(size: 11))
-                .lineLimit(1)
+                HStack(spacing: 4) {
+                    Group {
+                        if needsYou {
+                            Text("Precisa de você").foregroundStyle(Palette.warn)
+                        } else if let workText {
+                            if row.shimmers {
+                                Text(workText).shimmer()
+                            } else {
+                                Text(workText).foregroundStyle(Palette.faint)
+                            }
+                        } else if let reply = row.reply {
+                            Text(reply.text).foregroundStyle(Palette.faint)
+                        } else {
+                            Text(look.role).foregroundStyle(Palette.faint)
+                        }
+                    }
+                    .font(.system(size: 11))
+                    .lineLimit(1)
+                    Spacer(minLength: 4)
+                    ZStack {
+                        if needsYou {
+                            Image(systemName: "exclamationmark.bubble.fill")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Palette.warn)
+                                .transition(.scale.combined(with: .opacity))
+                                .accessibilityLabel("Precisa da sua permissão")
+                        } else if row.unread > 0 {
+                            Circle()
+                                .fill(Palette.accentText)
+                                .frame(width: 7, height: 7)
+                                .transition(.scale.combined(with: .opacity))
+                                .accessibilityLabel(SidebarText.unread(row.unread))
+                        }
+                    }
+                    .animateChanges(of: needsYou || row.unread > 0)
+                }
             }
             // The same height with or without a second line (an Orb with no role), so the rows keep one rhythm.
             .frame(minHeight: 32, alignment: .leading)
             .animateChanges(of: workText)
             .animateChanges(of: needsYou)
-            Spacer(minLength: 4)
-            if let hint = row.hint {
-                Text(hint)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Palette.muted)
-                    .accessibilityHidden(true)
-            }
-            ZStack {
-                if needsYou {
-                    Image(systemName: "exclamationmark.bubble.fill")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Palette.warn)
-                        .transition(.scale.combined(with: .opacity))
-                        .accessibilityLabel("Precisa da sua permissão")
-                } else if row.unread > 0 {
-                    Circle()
-                        .fill(Palette.accentText)
-                        .frame(width: 7, height: 7)
-                        .transition(.scale.combined(with: .opacity))
-                        .accessibilityLabel(SidebarText.unread(row.unread))
-                }
-            }
-            .animateChanges(of: needsYou || row.unread > 0)
         }
         .accessibilityElement(children: .combine)
     }

@@ -484,23 +484,8 @@ extension WelcomeTests {
 // MARK: - The sidebar's foot
 
 extension WelcomeTests {
-    @Test func novoOrbAtTheFootGivesWayToTheInvitationWhileTheListIsEmpty() {
-        #expect(!SidebarFooter.showsNewOrb(botCount: 0))
-        #expect(SidebarFooter.showsNewOrb(botCount: 1))
-        #expect(SidebarFooter.showsNewOrb(botCount: 7))
-    }
-
-    @Test @MainActor func theFootFollowsTheListAsOrbsComeAndGo() throws {
-        let model = try emptyModel()
-        #expect(!SidebarFooter.showsNewOrb(botCount: model.botIDs.count))
-        let bot = model.createBot(name: "Lia", role: "", orb: OrbConfig(), model: "", mode: .ask, folder: .home)
-        #expect(SidebarFooter.showsNewOrb(botCount: model.botIDs.count))
-        _ = model.deleteBot(bot.id)
-        #expect(!SidebarFooter.showsNewOrb(botCount: model.botIDs.count))
-    }
-
     @Test func theShortcutIsTheMenusCommandAndDoesNotNeedTheButton() {
-        // ⌘N is the app menu's command (OrbApp), not the foot's button: its label stays in the catalog and the tips.
+        // ⌘N is the app menu's command (OrbApp), not a button of the list: its label stays in the catalog and the tips.
         #expect(AppShortcut.newBot.label == "⌘N")
         #expect(Tip.newBot().contains("⌘N"))
         #expect(Tip.createOrbSheet().contains("⌘N"))

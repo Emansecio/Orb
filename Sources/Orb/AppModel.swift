@@ -415,6 +415,9 @@ final class AppModel {
         for (id, count) in state.unread {
             if let id = UUID(uuidString: id) { live(id).setUnread(count) }
         }
+        for (id, preview) in state.replies {
+            if let id = UUID(uuidString: id), botIDs.contains(id) { live(id).setLastReply(preview) }
+        }
         if !devRun { // a developer run starts no server, and its screens set the statuses themselves
             let manager = mcp
             Task { [weak self] in await manager.observe { statuses in Task { @MainActor in self?.connectorStatus = statuses } } }
@@ -740,6 +743,15 @@ final class AppModel {
         let live = live(botID)
         guard live.unread != count else { return }
         live.setUnread(count)
+        scheduleStateSave()
+    }
+
+    /// The Orb's latest reply for its sidebar row, saved with the app's state like the unread count. A turn that ended
+    /// without a reply never calls this, so the row keeps the last one it had.
+    func setLastReply(_ preview: ReplyPreview?, for botID: UUID) {
+        let live = live(botID)
+        guard live.lastReply != preview else { return }
+        live.setLastReply(preview)
         scheduleStateSave()
     }
 
@@ -2333,9 +2345,13 @@ final class AppModel {
 
     private var state: AppState {
         var unread: [String: Int] = [:]
-        for (id, live) in lives where live.unread > 0 { unread[id.uuidString] = live.unread }
+        var replies: [String: ReplyPreview] = [:]
+        for (id, live) in lives {
+            if live.unread > 0 { unread[id.uuidString] = live.unread }
+            if let preview = live.lastReply { replies[id.uuidString] = preview }
+        }
         return AppState(bots: bots, routines: routines, skills: skills, connectors: connectorSecrets.redact(connectors),
-                        providers: providers, defaultModel: defaultModel, unread: unread, contextMemory: contextMemory,
+                        providers: providers, defaultModel: defaultModel, unread: unread, replies: replies, contextMemory: contextMemory,
                         learnedContexts: learnedContexts, profile: profile, priceCorrections: priceCorrections, groups: groups,
                         categories: categories)
     }

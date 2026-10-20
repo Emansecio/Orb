@@ -433,6 +433,8 @@ extension BotSession {
                 celebrate(OrbCelebration.level(seconds: turnSeconds, actions: turnActions, ranRoutine: ranRoutine,
                                                selected: model.selection == .bot(id)))
             }
+            // The row's second line, for every turn that ended with an answer (a routine's, an Orb's request too).
+            if let reply, let preview = ReplyPreview.make(from: reply) { model.setLastReply(preview, for: id) }
             if !isOrbRun, !waits, let bot = model.bot(id), let reply { model.notify(bot.name, RoutineRun.preview(of: reply)) }
         } else {
             flash(\.hasFailed, seconds: 2.5)
