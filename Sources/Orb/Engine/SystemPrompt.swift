@@ -307,21 +307,23 @@ enum OrbsPrompt {
 
 enum SystemPrompt {
     /// `memory` is the stable part of the Orb's memory brief (`MemoryBrief.stable`); `folder` the section for the
-    /// folder's instruction file (`FolderInstructions.prompt`).
+    /// folder's instruction file (`FolderInstructions.prompt`). `skillsSection` and `permissionsSection` are those sections as the
+    /// conversation froze them (`FrozenSections`); nil takes them as the bot and the skills are now.
     ///
     /// The same inputs give the same text, and nothing in it changes from one message to the next, or from one day to
     /// the next: the date and the time come with each message.
-    static func make(bot: Bot, skills: [Skill], memory: String = "", environment: MacEnvironment = .current(), folder: String = "") -> String {
+    static func make(bot: Bot, skills: [Skill], memory: String = "", environment: MacEnvironment = .current(), folder: String = "",
+                     skillsSection: String? = nil, permissionsSection: String? = nil) -> String {
         var sections = [
             ([PromptParts.identity(bot), PromptParts.roaming(bot), PromptParts.language]
                 + PromptParts.behaviour).joined(separator: "\n"),
             PromptParts.environment(environment),
-            PromptParts.permissions(bot),
+            permissionsSection ?? PromptParts.permissions(bot),
             PromptParts.untrustedContent,
             PromptParts.workHabits + "\n" + PromptParts.nativeToolHints(bot),
             PromptParts.macApps(bot),
             memory,
-            PromptParts.skills(skills),
+            skillsSection ?? PromptParts.skills(skills),
             folder,
         ]
         sections.removeAll { $0.isEmpty }
