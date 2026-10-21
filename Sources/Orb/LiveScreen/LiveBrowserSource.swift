@@ -1,7 +1,6 @@
 import Foundation
 
-/// The real `LiveBrowserSource`: the app's `BrowserHub`. What the hub needs from the browser side that does not exist without the
-/// WP-A work (`pageLooksSensitive`, `setPointerHandler`) is in LiveBrowserSourceWPA.swift.
+/// The real `LiveBrowserSource`: the app's `BrowserHub`.
 struct BrowserHubLiveSource: LiveBrowserSource {
     let browsers: BrowserHub
 
@@ -12,6 +11,14 @@ struct BrowserHubLiveSource: LiveBrowserSource {
     func streamPort(botID: UUID) async throws -> Int? {
         guard let session = browsers.existingSession(botID: botID) else { return nil }
         return try await session.exclusive { try await session.driver.streamPort() }
+    }
+
+    func pageLooksSensitive(botID: UUID) -> Bool {
+        browsers.pageLooksSensitive(botID: botID)
+    }
+
+    func setPointerHandler(_ handler: (@Sendable (UUID, LivePointer) -> Void)?) {
+        browsers.setPointerHandler(handler)
     }
 }
 
