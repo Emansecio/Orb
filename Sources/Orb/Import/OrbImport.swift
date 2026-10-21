@@ -181,9 +181,7 @@ enum ImportSanitizer {
     /// Instructions of a skill: secrets and control characters out, lines and indentation kept (they run only when the
     /// person types the command).
     static func instructions(_ text: String, limit: Int = ImportLimits.skillInstructions) -> String {
-        let visible = String(String.UnicodeScalarView(withoutTags(MemorySanitizer.scrub(text)).unicodeScalars.filter {
-            !CharacterSet.controlCharacters.contains($0) || $0 == "\n" || $0 == "\t"
-        }))
+        let visible = withoutTags(MemorySanitizer.scrub(text)).withoutControlCharacters
         return String(visible.trimmingCharacters(in: .whitespacesAndNewlines).prefix(limit))
     }
 

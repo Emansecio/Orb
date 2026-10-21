@@ -211,7 +211,7 @@ private struct GroupSettingsTab: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                field("Nome") {
+                TitledSection("Nome") {
                     TextField("Nome do grupo", text: $nameDraft)
                         .textFieldStyle(.plain)
                         .font(.system(size: 13))
@@ -221,7 +221,7 @@ private struct GroupSettingsTab: View {
                         .focused($isNameFocused)
                         .onSubmit { commitName() }
                 }
-                field("Conversa") {
+                TitledSection("Conversa") {
                     Toggle(isOn: Binding(
                         get: { group.policy.membersMayTalk },
                         set: { model.setGroupPolicy(GroupPolicy(membersMayTalk: $0), of: group.id) })) {
@@ -249,16 +249,6 @@ private struct GroupSettingsTab: View {
         .onDisappear { if GroupNameEdit.commit(draft: nameDraft, current: group.name) != nil { commitName() } }
     }
 
-    private func field<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Palette.faint)
-            content()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
     private func commitName() {
         guard let name = GroupNameEdit.commit(draft: nameDraft, current: group.name) else { nameDraft = group.name; return }
         model.renameGroup(group.id, to: name)
@@ -275,5 +265,29 @@ enum GroupNameEdit {
     static func commit(draft: String, current: String) -> String? {
         let name = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         return name.isEmpty || name == current ? nil : name
+    }
+}
+
+/// A small faint title over its content: a field of a group's panel or sheet, or a section of its board.
+struct TitledSection<Content: View>: View {
+    let title: String
+    var isHeader = false
+    @ViewBuilder let content: Content
+
+    init(_ title: String, isHeader: Bool = false, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.isHeader = isHeader
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Palette.faint)
+                .accessibilityAddTraits(isHeader ? .isHeader : [])
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

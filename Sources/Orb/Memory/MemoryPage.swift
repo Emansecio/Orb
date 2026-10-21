@@ -414,6 +414,15 @@ enum MemoryText {
     ]
 }
 
+extension String {
+    /// The text without control characters, newlines and tabs kept.
+    var withoutControlCharacters: String {
+        String(String.UnicodeScalarView(unicodeScalars.filter {
+            !CharacterSet.controlCharacters.contains($0) || $0 == "\n" || $0 == "\t"
+        }))
+    }
+}
+
 /// Removes secrets before anything reaches memory (the transcript can contain commands and outputs with keys). Only
 /// literal ones: a value that is a reference (`$TOKEN`, `$(security find-generic-password …)`) or a placeholder
 /// (`<chave>`) is no secret, and says where the credential is kept.

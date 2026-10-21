@@ -84,9 +84,7 @@ enum GroupThread {
 
     /// An Orb's words as data: angle brackets and control characters cannot close the fence they are in.
     static func fenced(_ text: String) -> String {
-        let plain = String(String.UnicodeScalarView(text.unicodeScalars.filter {
-            !CharacterSet.controlCharacters.contains($0) || $0 == "\n" || $0 == "\t"
-        }))
+        let plain = text.withoutControlCharacters
         return plain.replacingOccurrences(of: "<", with: "‹").replacingOccurrences(of: ">", with: "›")
     }
 

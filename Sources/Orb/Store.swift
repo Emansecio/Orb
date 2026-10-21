@@ -314,10 +314,6 @@ struct Store: Sendable {
         archiveFolder(botID).appendingPathComponent("\(id.uuidString).json")
     }
 
-    private func routineConversationURL(_ botID: UUID, _ routineID: UUID) -> URL {
-        archiveFolder(botID).appendingPathComponent("routine-\(routineID.uuidString).json")
-    }
-
     private func archiveIndexURL(_ botID: UUID) -> URL { archiveFolder(botID).appendingPathComponent("index.json") }
 
     // MARK: Side conversations (requests from other Orbs, turns in groups)
@@ -336,10 +332,11 @@ struct Store: Sendable {
         }
     }
 
-    func readSideConversation(prefix: String, id: UUID, for botID: UUID) -> StoreRead<Conversation> {
+    func readSideConversation(prefix: String, id: UUID, for botID: UUID,
+                              ifUnreadable outcome: String = "a conversa começou vazia") -> StoreRead<Conversation> {
         let url = sideConversationURL(botID, prefix, id)
         return Self.gate.reading(url) {
-            read(Conversation.self, from: url, ifUnreadable: "a conversa começou vazia")
+            read(Conversation.self, from: url, ifUnreadable: outcome)
         }
     }
 
@@ -434,18 +431,12 @@ struct Store: Sendable {
     /// `then` (on the store's queue) says whether the file is as written: false when the write failed or was dropped.
     func saveRoutineConversation(_ conversation: Conversation, routine routineID: UUID, for botID: UUID,
                                  then done: (@Sendable (Bool) -> Void)? = nil) {
-        let url = routineConversationURL(botID, routineID)
-        enqueue(touching: [url], dropped: { done?(false) }) {
-            let result = writeConversation(conversation, to: url, cached: true)
-            done?(result != .failed)
-        }
+        saveSideConversation(conversation, prefix: Self.routinePrefix, id: routineID, for: botID, then: done)
     }
 
     func readRoutineConversation(routine routineID: UUID, for botID: UUID) -> StoreRead<Conversation> {
-        let url = routineConversationURL(botID, routineID)
-        return Self.gate.reading(url) {
-            read(Conversation.self, from: url, ifUnreadable: "o histórico da rotina começou vazio")
-        }
+        readSideConversation(prefix: Self.routinePrefix, id: routineID, for: botID,
+                             ifUnreadable: "o histórico da rotina começou vazio")
     }
 
     func readRoutineConversationAsync(routine routineID: UUID, for botID: UUID) async -> StoreRead<Conversation> {
@@ -494,12 +485,7 @@ struct Store: Sendable {
     }
 
     func deleteRoutineConversation(routine routineID: UUID, for botID: UUID) {
-        let url = routineConversationURL(botID, routineID)
-        enqueue(touching: [url]) {
-            Self.gate.waitForReaders(of: url)
-            try? FileManager.default.removeItem(at: url)
-            encoders.remove(url)
-        }
+        deleteSideConversation(prefix: Self.routinePrefix, id: routineID, for: botID)
     }
 
     /// Waits for pending writes.
@@ -554,9 +540,7 @@ struct Store: Sendable {
     /// later launch because it still couldn't be rewritten).
     private func keepAside(_ url: URL, moving: Bool) -> URL? {
         if !moving, let existing = identicalCopy(of: url) { return existing }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let formatter = DateFormatter.make(locale: "en_US_POSIX", format: "yyyyMMdd-HHmmss")
         let base = "\(url.lastPathComponent).corrupt-\(formatter.string(from: .now))"
         let manager = FileManager.default
         for attempt in 0..<100 {

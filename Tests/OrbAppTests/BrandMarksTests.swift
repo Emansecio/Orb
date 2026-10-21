@@ -125,8 +125,8 @@ struct BrandMarksTests {
         for service in ConnectorGallery.services {
             if branded.contains(service.id) {
                 guard let brand = service.mark.brand else { Issue.record("no brand: \(service.id)"); continue }
-                #expect(BrandMarks.mark(brand) != nil || BrandMarks.withoutLogo.contains(brand), Comment(rawValue: service.id))
-                #expect(service.mark.logo != nil || BrandMarks.withoutLogo.contains(brand), Comment(rawValue: service.id))
+                #expect(BrandMarks.mark(brand) != nil, Comment(rawValue: service.id))
+                #expect(service.mark.logo != nil, Comment(rawValue: service.id))
                 // A card with no logo keeps the symbol or the letter it had.
                 if service.mark.logo == nil { #expect(service.mark.symbol != nil || !service.mark.monogram.isEmpty) }
             } else {
@@ -135,8 +135,6 @@ struct BrandMarksTests {
             }
         }
         #expect(Set(ConnectorGallery.services.filter { $0.mark.brand != nil }.map(\.id)) == Set(branded))
-        #expect(BrandMarks.withoutLogo.isEmpty)
-        #expect(Set(BrandMarks.all.keys).isDisjoint(with: BrandMarks.withoutLogo))
     }
 
     @Test func noMarkIsUnused() {

@@ -71,7 +71,6 @@ struct GroupMessageBubble: View {
     var showsHeader = true
 
     @State private var hovering = false
-    @State private var flash = CopiedFlash()
 
     private var name: String { look?.name ?? message.from.name }
 
@@ -82,7 +81,9 @@ struct GroupMessageBubble: View {
                 .replyBubble()
                 .overlay(alignment: .bottomTrailing) {
                     // Beside the bubble, in the space the right padding leaves (as a reply's buttons in the single chat).
-                    copyButton
+                    CopyButton(symbol: "doc.on.doc", help: "Copiar", copiedHelp: "Copiado") {
+                        Clipboard.copy(MarkdownBlocks.plainText(of: message.text))
+                    }
                         .fixedSize()
                         .alignmentGuide(.trailing) { $0[.leading] - 6 }
                         .opacity(hovering ? 1 : 0)
@@ -148,24 +149,6 @@ struct GroupMessageBubble: View {
         } else {
             Circle().fill(Palette.raised)
         }
-    }
-
-    private var copyButton: some View {
-        Button {
-            Clipboard.copy(MarkdownBlocks.plainText(of: message.text))
-            flash.trigger()
-        } label: {
-            Image(systemName: flash.isOn ? "checkmark" : "doc.on.doc")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(flash.isOn ? Palette.ink : Palette.muted)
-                .frame(width: 26, height: 26)
-                .background(Palette.surface, in: .circle)
-                .overlay(Circle().strokeBorder(Palette.line, lineWidth: 1))
-                .contentShape(.circle)
-        }
-        .buttonStyle(.plain)
-        .help(flash.isOn ? "Copiado" : "Copiar")
-        .accessibilityLabel("Copiar")
     }
 }
 

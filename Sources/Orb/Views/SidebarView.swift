@@ -387,33 +387,6 @@ private struct MoveToCategoryMenu: View {
     }
 }
 
-struct NavLabel: View {
-    let title: String
-    /// The row is the selected one: its title goes from `secondary` to `ink` along with the background.
-    let isSelected: Bool
-    let symbol: String
-    var hint: String?
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: symbol)
-                .font(.system(size: 13))
-                .frame(width: 26)
-                .foregroundStyle(Palette.muted)
-            Text(title)
-                .font(.system(size: 13))
-                .foregroundStyle(isSelected ? Palette.ink : Palette.secondary)
-            Spacer(minLength: 4)
-            if let hint {
-                Text(hint)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Palette.muted)
-                    .accessibilityHidden(true)
-            }
-        }
-    }
-}
-
 /// The row that stands where the Orbs go when there are none: a dashed circle with a plus, what it is for and where
 /// the Orbs will be. Selected while the welcome screen shows.
 private struct FirstOrbInvitation: View {

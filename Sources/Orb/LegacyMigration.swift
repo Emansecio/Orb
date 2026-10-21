@@ -47,9 +47,7 @@ enum LegacyMigration {
                 try files.copyItem(at: item, to: staging.appending(path: item.lastPathComponent))
             }
             if files.fileExists(atPath: directory.path) {
-                let format = DateFormatter()
-                format.locale = Locale(identifier: "en_US_POSIX")
-                format.dateFormat = "yyyy-MM-dd HH.mm"
+                let format = DateFormatter.make(locale: "en_US_POSIX", format: "yyyy-MM-dd HH.mm")
                 let aside = directory.deletingLastPathComponent()
                     .appending(path: "\(directory.lastPathComponent) (antes da migração \(format.string(from: now)))")
                 try files.moveItem(at: directory, to: aside)

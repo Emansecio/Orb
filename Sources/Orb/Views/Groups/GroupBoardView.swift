@@ -34,7 +34,7 @@ struct GroupBoardView: View {
         let groups = MemoryGroups.make(memory.items.filter { $0.kind != .preferencia }, matching: query, cache: folded)
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.xl) {
-                section("Objetivo") {
+                TitledSection("Objetivo", isHeader: true) {
                     TextField("Para que o grupo existe", text: $objective, axis: .vertical)
                         .textFieldStyle(.plain)
                         .font(.system(size: 13))
@@ -44,7 +44,7 @@ struct GroupBoardView: View {
                         .onSubmit { setObjective(objective) }
                         .accessibilityLabel("Objetivo do grupo")
                 }
-                section("Combinados") {
+                TitledSection("Combinados", isHeader: true) {
                     ForEach(agreements) { item in
                         MemoryRow(item: item, lineLimit: 3) { forgetItem(item) }
                     }
@@ -61,7 +61,7 @@ struct GroupBoardView: View {
                             agreement = ""
                         }
                 }
-                section("Lembranças") {
+                TitledSection("Lembranças", isHeader: true) {
                     MemorySearchField(query: $query)
                     if memory.items.isEmpty {
                         Text("Ainda não há nada no quadro. Os membros guardam aqui o que vale para todos: decisões, links e combinados.")
@@ -112,17 +112,6 @@ struct GroupBoardView: View {
     private func forgetItem(_ item: MemorySnapshot.Item) {
         forget(item)
         forgotten = item
-    }
-
-    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Palette.faint)
-                .accessibilityAddTraits(.isHeader)
-            content()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

@@ -191,10 +191,7 @@ enum ConnectorEditing {
     }
 }
 
-/// Shortcuts to the old list of bare configs.
 extension MCPServerConfig {
-    static var templates: [MCPServerConfig] { ConnectorTemplate.all.map(\.config) }
-
     func withNewID() -> MCPServerConfig {
         var copy = self
         copy.id = UUID()

@@ -161,8 +161,6 @@ final class BreathingDotView: NSView {
     private weak var clipView: NSClipView?
     var color = NSColor.systemBlue { didSet { layer?.backgroundColor = color.cgColor } }
     var breathes = true { didSet { if breathes != oldValue { update() } } }
-    /// For tests: whether the dot is breathing.
-    var isBreathing: Bool { layer?.animation(forKey: Self.key) != nil }
 
     init() {
         super.init(frame: .zero)

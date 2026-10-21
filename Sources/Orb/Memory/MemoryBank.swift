@@ -864,9 +864,7 @@ actor MemoryBank {
     static func clean(_ text: String, limit: Int? = maximumLength) -> String {
         // A huge text is cut before it is scrubbed (which reads all of it): only the start is kept anyway.
         let scrubbed = MemorySanitizer.scrub(limit.map { String(text.prefix($0 * 4)) } ?? text)
-        let visible = String(String.UnicodeScalarView(scrubbed.unicodeScalars.filter {
-            !CharacterSet.controlCharacters.contains($0) || $0 == "\n" || $0 == "\t"
-        }))
+        let visible = scrubbed.withoutControlCharacters
         let trimmed = visible.trimmingCharacters(in: .whitespacesAndNewlines)
         return limit.map { String(trimmed.prefix($0)) } ?? trimmed
     }
@@ -1010,12 +1008,7 @@ actor MemoryBank {
         return MemoryText.clip(line, 400)
     }
 
-    static let dayFormat: DateFormatter = {
-        let format = DateFormatter()
-        format.locale = Locale(identifier: "pt_BR")
-        format.dateFormat = "dd/MM/yyyy HH:mm"
-        return format
-    }()
+    static let dayFormat = DateFormatter.make(locale: "pt_BR", format: "dd/MM/yyyy HH:mm")
 }
 
 /// Every Orb's memory bank, one folder per Orb under `memoria/` in the data folder.
