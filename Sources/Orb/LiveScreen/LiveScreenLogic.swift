@@ -211,9 +211,9 @@ enum LiveScreenText {
 
 /// Where the Orb's pointer is on a layer that shows a picture of the page.
 enum LiveCursor {
-    /// The box the driver resolves is taken as page coordinates (CSS pixels from the top of the document), so the scroll of the
-    /// picture is taken off to land on it; the WP-A driver says if its boxes are relative to the viewport instead.
-    static let boxIsPageRelative = true
+    /// The box the driver resolves (`get box`) is already in viewport pixels, scroll taken off, so the picture's scroll is not
+    /// applied; `true` would treat boxes as page coordinates.
+    static let boxIsPageRelative = false
 
     /// The point, from the layer's top left, where the middle of `box` is drawn when the picture (`imageSize` in pixels) fills
     /// a layer of `layerSize` the way `resizeAspectFill` does. nil when the picture has no usable viewport. Clamped to the

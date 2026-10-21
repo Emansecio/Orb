@@ -147,8 +147,8 @@ struct LiveScreenLogicTests {
         #expect(point == CGPoint(x: 25, y: 27.5))
     }
 
-    @Test func theScrollOfThePictureIsTakenOff() {
-        let point = LiveCursor.point(of: CGRect(x: 100, y: 1_000, width: 200, height: 40), viewport: CGSize(width: 1280, height: 800),
+    @Test func aBoxIsInViewportPixelsSoTheScrollIsNotApplied() {
+        let point = LiveCursor.point(of: CGRect(x: 100, y: 200, width: 200, height: 40), viewport: CGSize(width: 1280, height: 800),
                                      scroll: CGPoint(x: 0, y: 800), imageSize: CGSize(width: 640, height: 400),
                                      layerSize: CGSize(width: 160, height: 100))
         #expect(point == CGPoint(x: 25, y: 27.5))
