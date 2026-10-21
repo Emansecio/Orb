@@ -9,7 +9,7 @@ struct ServiceMark: Sendable, Equatable {
     /// The brand's colour, as 0xRRGGBB.
     var color: UInt32
     /// The brand's key in `BrandMarks` (its Simple Icons slug); nil for Apple's apps and the generic tools, which keep
-    /// their symbol. A key `BrandMarks` does not hold (`BrandMarks.withoutLogo`) keeps the symbol or letter as well.
+    /// their symbol.
     var brand: String?
 
     /// The logo to draw, when the brand has one.

@@ -581,7 +581,7 @@ private struct ActionCircleButton: View {
     }
 }
 
-private struct CopyButton: View {
+struct CopyButton: View {
     let symbol: String
     let help: String
     let copiedHelp: String

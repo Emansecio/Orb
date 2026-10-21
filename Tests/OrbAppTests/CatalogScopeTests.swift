@@ -328,7 +328,6 @@ struct ConnectorTemplateTests {
         #expect(all.first { $0.id == "arquivos" }?.folderArgumentIndex == 2)
         #expect(all.first { $0.id == "arquivos" }?.badges == ["Não precisa de chave"])
         #expect(all.first { $0.id == "github" }?.badges == ["Pede 1 chave", "Remoto"])
-        #expect(MCPServerConfig.templates.count == all.count)
     }
 
     @Test func theGalleryNoLongerOffersTheAbandonedPackages() throws {

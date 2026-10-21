@@ -20,10 +20,6 @@ struct BrandMark: Sendable, Equatable {
 enum BrandMarks {
     static let version = "16.34.0"
 
-    /// Brands the gallery names that Simple Icons does not carry: they keep the symbol or the letter on the brand colour.
-    /// None today (Slack, taken down from Simple Icons at the brand's request, comes from its last release that had it).
-    static let withoutLogo: Set<String> = []
-
     static func mark(_ slug: String) -> BrandMark? { all[slug] }
 
     static let all: [String: BrandMark] = [

@@ -217,9 +217,6 @@ enum LocalDates {
     private static let dayFormatter = formatter("yyyy-MM-dd")
 
     private static func formatter(_ format: String) -> DateFormatter {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = format
-        return formatter
+        DateFormatter.make(locale: "en_US_POSIX", format: format)
     }
 }

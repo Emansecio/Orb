@@ -122,10 +122,7 @@ enum SessionSummary {
     }()
 
     private static func ptBRFormatter(_ format: String) -> DateFormatter {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "pt_BR")
-        formatter.dateFormat = format
-        return formatter
+        DateFormatter.make(locale: "pt_BR", format: format)
     }
 
     /// Where a session page starting at `date` is written: `sessoes/<aaaa-mm-dd-hhmm>-<6 hex>.md` (the hex keeps two pages of

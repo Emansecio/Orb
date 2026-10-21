@@ -130,10 +130,7 @@ private enum RoutineFormats {
     static let stamp = make("en_US_POSIX", "yyyy-MM-dd HHmm")
 
     private static func make(_ locale: String, _ format: String) -> DateFormatter {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: locale)
-        formatter.dateFormat = format
-        return formatter
+        DateFormatter.make(locale: locale, format: format)
     }
 }
 

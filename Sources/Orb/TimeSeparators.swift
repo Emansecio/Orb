@@ -59,9 +59,17 @@ enum TimeSeparators {
     private static let formatters: [String: DateFormatter] = Dictionary(uniqueKeysWithValues: [
         "HH:mm", "EEEE", "d 'de' MMMM", "d 'de' MMMM 'de' yyyy",
     ].map { pattern in
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "pt_BR")
-        formatter.dateFormat = pattern
-        return (pattern, formatter)
+        (pattern, DateFormatter.make(locale: "pt_BR", format: pattern))
     })
+}
+
+extension DateFormatter {
+    /// A formatter for `format` in the locale `locale` (an identifier such as "pt_BR" or "en_US_POSIX"); calendar and
+    /// time zone stay the system's.
+    static func make(locale: String, format: String) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: locale)
+        formatter.dateFormat = format
+        return formatter
+    }
 }

@@ -63,7 +63,7 @@ struct NewGroupSheet: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                field("Nome") {
+                TitledSection("Nome") {
                     TextField("Ex.: Lançamento", text: Binding(get: { nameShown }, set: { written = $0; isNameEdited = true }))
                         .textFieldStyle(.plain)
                         .font(.system(size: 14))
@@ -72,7 +72,7 @@ struct NewGroupSheet: View {
                         .background(Palette.surface, in: .rect(cornerRadius: 10))
                         .accessibilityLabel("Nome do grupo")
                 }
-                field("Orbs") {
+                TitledSection("Orbs") {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 128), spacing: 10, alignment: .top)], alignment: .leading, spacing: 10) {
                         ForEach(looks, id: \.id) { look in
                             OrbChoiceCard(look: look, isChosen: chosen.contains(look.id),
@@ -90,7 +90,7 @@ struct NewGroupSheet: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                field("Objetivo (opcional)") {
+                TitledSection("Objetivo (opcional)") {
                     TextField("O que o grupo deve entregar", text: $objective, axis: .vertical)
                         .textFieldStyle(.plain)
                         .font(.system(size: 13))
@@ -123,16 +123,6 @@ struct NewGroupSheet: View {
             .padding(.vertical, 14)
         }
         .onAppear(perform: start)
-    }
-
-    private func field<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Palette.faint)
-            content()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func start() {

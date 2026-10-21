@@ -7,10 +7,6 @@ import SwiftUI
 /// picture. Dev aid; nothing is saved.
 @MainActor
 enum LiveScreenSnapshots {
-    static func isScene(_ screen: String) -> Bool {
-        ["transcript-browser-live", "transcript-browser-need", "transcript-browser-done", "inspector-screen"].contains(screen)
-    }
-
     /// The items of a chat scene, and the store and session state that goes with them.
     static func items(_ screen: String, model: AppModel, bot: Bot) -> [TranscriptItem] {
         LiveScreenLayerView.countsOffscreenWindows = true

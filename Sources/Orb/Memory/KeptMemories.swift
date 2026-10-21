@@ -86,10 +86,7 @@ struct KeptMemory: Identifiable, Equatable, Sendable {
     }
 
     private static func dayFormatter(_ format: String) -> DateFormatter {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "pt_BR")
-        formatter.dateFormat = format
-        return formatter
+        DateFormatter.make(locale: "pt_BR", format: format)
     }
 
     private static let shortDay = dayFormatter("d 'de' MMM")
@@ -107,10 +104,7 @@ enum KeptMemories {
     static func folder(in root: URL) -> URL { root.appending(path: folderName, directoryHint: .isDirectory) }
 
     private static func formatter() -> DateFormatter {
-        let format = DateFormatter()
-        format.locale = Locale(identifier: "en_US_POSIX")
-        format.dateFormat = dateFormat
-        return format
+        DateFormatter.make(locale: "en_US_POSIX", format: dateFormat)
     }
 
     /// The folder name for a memory kept at `now`: "<name> – <aaaa-mm-dd hh.mm>".
