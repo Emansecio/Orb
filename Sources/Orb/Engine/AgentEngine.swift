@@ -963,7 +963,7 @@ actor AgentEngine {
         case .allow:
             break
         case .deny(let message):
-            return Self.block(tool, summary, message, out)
+            return Self.block(tool, summary, arguments, message, out)
         case .ask(let why):
             // A review shows no card (nobody would see it): what it may run asks nothing, and the rest is refused.
             if request.onlyTools != nil { return ToolOutcome("This review only proposes skills: use remember with tipo skill.", isError: true) }
@@ -983,7 +983,7 @@ actor AgentEngine {
             case .deny, .review:
                 // Switching to read-only answers open cards with a denial: say why.
                 if await request.currentPermissions().mode == .readOnly {
-                    return Self.block(tool, summary, PermissionPolicy.readOnlyDenial, out)
+                    return Self.block(tool, summary, arguments, PermissionPolicy.readOnlyDenial, out)
                 }
                 return ToolOutcome(PermissionPolicy.userDenial(note: answer.note), isError: true)
             case .task:
@@ -997,7 +997,7 @@ actor AgentEngine {
             }
         }
 
-        let started = ToolCall(kind: tool.kind, title: summary.title, detail: summary.detail)
+        let started = ToolCall(kind: tool.kind, title: summary.title, detail: summary.detail, intent: tool.intent(arguments))
         out.yield(.toolStarted(started))
         out.yield(.status(summary.title))
         // A connector that has to start first says so: an `npx` server can take many seconds.
@@ -1090,9 +1090,9 @@ actor AgentEngine {
     }
 
     /// A call refused by the mode: the row shows it as started and failed (so the Orb is not left "running" it).
-    private static func block(_ tool: any AgentTool, _ summary: (title: String, detail: String), _ message: String,
+    private static func block(_ tool: any AgentTool, _ summary: (title: String, detail: String), _ arguments: JSONValue, _ message: String,
                               _ out: AsyncStream<TurnEvent>.Continuation) -> ToolOutcome {
-        let blocked = ToolCall(kind: tool.kind, title: summary.title, detail: summary.detail)
+        let blocked = ToolCall(kind: tool.kind, title: summary.title, detail: summary.detail, intent: tool.intent(arguments))
         out.yield(.toolStarted(blocked))
         out.yield(.toolFinished(id: blocked.id, state: .failed, output: "Bloqueado: o Orb está em modo Só leitura."))
         return ToolOutcome(message, isError: true)

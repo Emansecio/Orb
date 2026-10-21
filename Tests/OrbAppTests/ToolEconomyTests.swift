@@ -22,7 +22,9 @@ struct ToolSpecEconomyTests {
     /// Raised to 18,900 for `app_dictionary` (~500, with the line in `applescript`): the AppleScript dictionary of an app, read on demand
     /// so the model stops writing scripts from memory (docs/REVISAO-USO-DO-COMPUTADOR-2026-10-16.md, fase 3). It is the detail that stays out of the prompt.
     /// `apps_list` saying how to control each app (~100; item 2 of the same phase) fits after both descriptions were shortened: 18,861.
-    private static let specCharsCeiling = 18_900
+    /// Raised to 19,200 for the `description` of `run_command` and `applescript` (~315): what the action is for, in words, which the
+    /// working line and the folded lines of the chat say instead of the raw command. Measured at 19,180.
+    private static let specCharsCeiling = 19_200
     /// `ui_read`, `ui_act` and `screenshot` together: waiting, steps, takeover, marks and OCR all have to fit here.
     private static let appControlSpecCharsCeiling = 4_800
     /// The tools of the Orb's own browser are offered only when an engine is installed, so they have a ceiling of their own.

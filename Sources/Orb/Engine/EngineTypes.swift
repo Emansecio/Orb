@@ -681,6 +681,8 @@ protocol AgentTool: Sendable {
     func summary(_ arguments: JSONValue) -> (title: String, detail: String)
     /// Same, for tools whose summary needs the working directory (to resolve a relative path); defaults to `summary(_:)`.
     func summary(_ arguments: JSONValue, context: ToolContext) -> (title: String, detail: String)
+    /// What the model said this call is for (the `description` argument of the tools that take one, see `ToolIntent`), or nil.
+    func intent(_ arguments: JSONValue) -> String?
     /// What the activity line says while the tool starts something slow before it can run ("Conectando a GitHub…"), or nil.
     func connectingNote(_ arguments: JSONValue) async -> String?
     /// Brings up what `connectingNote` announced, so the engine can go back to the tool's own title once it is up.
@@ -705,6 +707,7 @@ extension AgentTool {
     }
 
     func summary(_ arguments: JSONValue, context: ToolContext) -> (title: String, detail: String) { summary(arguments) }
+    func intent(_ arguments: JSONValue) -> String? { nil }
     func danger(_ arguments: JSONValue) -> String? { nil }
     func readsLivePage(_ arguments: JSONValue) -> Bool { false }
     func connectingNote(_ arguments: JSONValue) async -> String? { nil }

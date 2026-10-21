@@ -273,11 +273,14 @@ struct AppleScriptTool: AgentTool {
             "output": .object(["type": .string("string"),
                                "enum": .array(["text", "structured"].map(JSONValue.string))]),
             "timeout_seconds": .property("integer"),
+            "description": .property("string", ToolIntent.shortSchemaText),
         ], required: ["script"]))
 
     var kind: ToolCall.Kind { .computer }
     var capability: Capability? { .computerUse }
     func risk(_ arguments: JSONValue) -> ToolRisk { .sensitive }
+
+    func intent(_ arguments: JSONValue) -> String? { ToolIntent.normalize(arguments["description"]?.string) }
 
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) {
         let title = arguments["language"]?.string == "javascript" ? "Usando o JavaScript para Automação" : "Usando o AppleScript"

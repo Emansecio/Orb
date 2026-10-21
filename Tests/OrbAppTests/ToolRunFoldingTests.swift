@@ -160,8 +160,11 @@ struct ToolRunFoldingTests {
         var second = call("Rodando no Terminal", .shell, .failed)
         second.startedAt = start.addingTimeInterval(0.5)
         second.finishedAt = start.addingTimeInterval(2.5)
-        #expect(ToolTally.failures([first, second]) == "1 falhou")
-        #expect(ToolTally.failures([second, second]) == "2 falharam")
+        // The run ended on an action that worked: the Orb got over it, so the mark is quiet. Ended on a failure: red.
+        #expect(ToolTally.failures([second, first]) == ToolTally.Failures(text: "1 com erro", recovered: true))
+        #expect(ToolTally.failures([first, second]) == ToolTally.Failures(text: "1 com erro", recovered: false))
+        #expect(ToolTally.failures([second, second]) == ToolTally.Failures(text: "2 com erro", recovered: false))
+        #expect(ToolTally.failures([second, call("Rodando no Terminal", .shell, .running)])?.recovered == true)
         #expect(ToolTally.failures([first]) == nil)
         #expect(ToolTally.span([first, second]) == 2.5)
         #expect(ToolTally.span([first, call("Rodando no Terminal", .shell, .running)]) == nil)

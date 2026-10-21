@@ -8,7 +8,7 @@ import Foundation
 
 /// One phrase of the working line.
 struct WorkLine: Equatable, Sendable {
-    /// How the target is written: code (a command, a file, a pattern) in a monospaced face, a plain word (a host),
+    /// What the target is: code (a command, a file, a pattern), a plain word (a host),
     /// or a quoted piece of text (what is searched for, what is delegated).
     enum Style: Equatable, Sendable { case code, plain, quoted }
 
@@ -30,9 +30,14 @@ struct WorkLine: Equatable, Sendable {
     var prefix: String?
     /// How many actions (tool calls) the turn has made so far, this phrase's one included.
     var actions = 0
+    /// The verb is the whole phrase, already a sentence the model described ("Conferindo se a vaga já saiu"): no ellipsis
+    /// after it.
+    var isSentence = false
+    /// The phrase is a command being run, whatever its words (a described command does not start with "Rodando").
+    var isCommand = false
 
     init(verb: String, target: String? = nil, style: Style = .plain, tone: Tone = .working, routine: String? = nil,
-         prefix: String? = nil, actions: Int = 0) {
+         prefix: String? = nil, actions: Int = 0, isSentence: Bool = false, isCommand: Bool = false) {
         self.verb = verb
         self.target = target?.isEmpty == true ? nil : target
         self.style = style
@@ -40,6 +45,8 @@ struct WorkLine: Equatable, Sendable {
         self.routine = routine
         self.prefix = prefix
         self.actions = actions
+        self.isSentence = isSentence
+        self.isCommand = isCommand
     }
 
     /// The longest target shown: past it, the middle is left out ("swift build --jobs … -configuration release"), so
@@ -60,13 +67,13 @@ struct WorkLine: Equatable, Sendable {
     /// Whether the line shimmers: only while the Orb works.
     var shimmers: Bool { tone == .working }
     /// Whether the Orb is running a command (in the Terminal or in the background): the line also breathes.
-    var runsCommand: Bool { tone == .working && verb.hasPrefix("Rodando") }
+    var runsCommand: Bool { tone == .working && (isCommand || verb.hasPrefix("Rodando")) }
 
     /// The phrase as plain text (the sidebar, the menu bar panel and VoiceOver read this): the verb and its target,
     /// or the verb with an ellipsis when it has none ("Pensando…"). A wait is a state, not an action: no ellipsis.
     var phrase: String {
         if let shownTarget { return "\(verb) \(shownTarget)" }
-        return tone == .working ? "\(verb)…" : verb
+        return tone == .working && !isSentence ? "\(verb)…" : verb
     }
 
     /// `phrase`, with the routine's name in front, or the request's ("Pedido de Atlas: Lendo README.md").
@@ -77,12 +84,12 @@ struct WorkLine: Equatable, Sendable {
     }
 
     /// `text` for the window's title and the sidebar's row, which have one short line: a command is said, not written out
-    /// ("Rodando um comando"; the working line in the chat shows it), and the routine or the request goes in front after
-    /// a "·" ("Rotina “Resumo” · Rodando um comando").
+    /// ("Rodando um comando"; the working line in the chat shows it) unless the model described it ("Conferindo se a vaga
+    /// já saiu"), and the routine or the request goes in front after a "·" ("Rotina “Resumo” · Rodando um comando").
     var headline: String {
         let said = switch (verb, style) {
-        case ("Rodando", .code): "Rodando um comando"
-        case ("Rodando em segundo plano", .code): "Rodando um comando em segundo plano"
+        case ("Rodando", .code) where !isSentence: "Rodando um comando"
+        case ("Rodando em segundo plano", .code) where !isSentence: "Rodando um comando em segundo plano"
         default: phrase
         }
         if let routine { return "Rotina “\(routine)” · \(said)" }
@@ -102,7 +109,7 @@ struct WorkLine: Equatable, Sendable {
     }
 
     /// Whether VoiceOver may be told about the phrase: it names something the Orb is doing.
-    var isAnnounceable: Bool { tone == .working && target != nil }
+    var isAnnounceable: Bool { tone == .working && (target != nil || isSentence) }
 }
 
 // MARK: - Where the words come from
@@ -112,14 +119,19 @@ enum WorkPhrase {
     static let targetLimit = 120
 
     /// The phrase for a tool call, from its title and the first line of its detail. A title this does not know says
-    /// itself, without a target ("Usando github", "Clicando em Salvar").
+    /// itself, without a target ("Usando github", "Clicando em Salvar"). An action the model described says that, in the
+    /// gerund ("Conferindo se a vaga do Marcus já saiu"); a command it did not describe says what it does, read off the
+    /// command (`CommandGist`).
     static func line(for call: ToolCall) -> WorkLine {
+        if let intent = call.intent {
+            return WorkLine(verb: ToolIntent.gerund(intent), isSentence: true, isCommand: call.kind == .shell)
+        }
         let first = firstLine(of: call.detail)
         switch call.title {
         case "Rodando no Terminal":
-            return WorkLine(verb: "Rodando", target: first, style: .code)
+            return command(verb: "Rodando", detail: call.detail)
         case "Rodando em segundo plano":
-            return WorkLine(verb: "Rodando em segundo plano", target: first, style: .code)
+            return command(verb: "Rodando em segundo plano", detail: call.detail)
         case "Lendo arquivo", "Lendo caderno":
             return WorkLine(verb: "Lendo", target: fileName(first), style: .code)
         case "Editando arquivo":
@@ -150,6 +162,12 @@ enum WorkPhrase {
             if let name = exchangeTarget(call.title, verb: notifyingVerb) { return WorkLine(verb: notifyingVerb, target: name) }
             return WorkLine(verb: call.title)
         }
+    }
+
+    /// "Rodando" `swift build`, "Rodando" um script Python: the program and its first argument, or the kind of script.
+    private static func command(verb: String, detail: String) -> WorkLine {
+        guard let gist = CommandGist.gist(of: detail) else { return WorkLine(verb: verb, target: firstLine(of: detail), style: .code) }
+        return WorkLine(verb: verb, target: gist.text, style: gist.isScript ? .plain : .code)
     }
 
     /// The verbs of a tool call that talks to another Orb: "Falando com Pesquisador" (`orbs` ask, tell).

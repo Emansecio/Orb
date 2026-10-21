@@ -48,6 +48,17 @@ private struct TouchTool: AgentTool {
     }
 }
 
+/// A tool that takes a `description` of what it does for the person watching, like `run_command`.
+private struct DescribedTool: AgentTool {
+    var spec: ToolSpec { ToolSpec(name: "describe", description: "Described", parameters: .schema(["description": .property("string")])) }
+    var kind: ToolCall.Kind { .shell }
+    var capability: Capability? { nil }
+    func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
+    func intent(_ arguments: JSONValue) -> String? { ToolIntent.normalize(arguments["description"]?.string) }
+    func summary(_ arguments: JSONValue) -> (title: String, detail: String) { ("Rodando no Terminal", "python3 - <<'EOF'") }
+    func run(_ arguments: JSONValue, context: ToolContext) async throws -> String { "ok" }
+}
+
 /// A read-only tool that takes `ms` to run and, with `together`, waits until that many runs are in progress at once
 /// (so overlapping runs are seen however the machine schedules them, not by hoping the sleeps overlap).
 private struct LookTool: AgentTool {
@@ -354,6 +365,16 @@ extension AgentEngineTests {
     private func quickEngine() -> (AgentEngine, Counter) {
         let waits = Counter()
         return (AgentEngine(retrySleep: { _ in await waits.increment() }), waits)
+    }
+
+    @Test func theDescriptionOfACallReachesItsActivityLine() async {
+        let described = LLMEvent.toolCalls([ToolCallRequest(id: "d1", name: "describe",
+                                                            arguments: #"{"description":"  Conferir se a vaga do Marcus já saiu.\n"}"#),
+                                            ToolCallRequest(id: "d2", name: "describe", arguments: "{}")])
+        let script = CallScript([[described], [.text("Pronto.")]], whenExhausted: .fim)
+        let events = await run(AgentEngine(), request(script, mode: .auto, runs: Counter(), tools: [DescribedTool()]))
+        let started = events.compactMap { event -> ToolCall? in if case .toolStarted(let call) = event { call } else { nil } }
+        #expect(started.map(\.intent) == ["Conferir se a vaga do Marcus já saiu", nil])
     }
 
     // MARK: Retries

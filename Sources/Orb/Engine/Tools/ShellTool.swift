@@ -22,6 +22,7 @@ struct RunCommandTool: AgentTool {
             "cwd": .property("string", "Directory to run in (default: the working directory)."),
             "timeout_seconds": .property("integer", "Default 120, max 600; not with background."),
             "background": .property("boolean", "Leave it running and return at once (servers, watchers)."),
+            "description": .property("string", ToolIntent.schemaText),
         ], required: ["command"]))
 
     var kind: ToolCall.Kind { .shell }
@@ -32,6 +33,8 @@ struct RunCommandTool: AgentTool {
         (arguments["background"]?.bool == true ? "Rodando em segundo plano" : "Rodando no Terminal",
          arguments["command"]?.string ?? "")
     }
+
+    func intent(_ arguments: JSONValue) -> String? { ToolIntent.normalize(arguments["description"]?.string) }
 
     /// The approval card also says where the command runs when that is not the Orb's folder: `rm *.log` or `make install`
     /// mean something else in `/` than in the project.

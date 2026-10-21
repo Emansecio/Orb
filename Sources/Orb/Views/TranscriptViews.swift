@@ -793,6 +793,10 @@ struct ToolCallLine: View {
     private struct PermissionKey: Equatable { var state: ToolCall.State; var output: String? }
 
     var body: some View {
+        // What the line says (see `ToolCall.lineWords`): what the action is for, or its title and detail as the tool wrote them.
+        let words = call.lineWords
+        let hidden = call.hiddenDetail
+        let canOpen = call.output != nil || hidden != nil
         VStack(alignment: .leading, spacing: 6) {
             Button {
                 withAnimation(Motion.adapted(Motion.content, reduceMotion: reduceMotion)) { isExpanded.toggle() }
@@ -802,15 +806,15 @@ struct ToolCallLine: View {
                         .font(.system(size: 11))
                         .foregroundStyle(Palette.faint)
                         .frame(width: 14)
-                    (Text(call.title).foregroundColor(call.state == .running ? Palette.faint : Palette.muted)
-                        + Text("  \(call.detail)").foregroundColor(Palette.faint))
+                    (Text(words.main).foregroundColor(call.state == .running ? Palette.faint : Palette.muted)
+                        + Text(words.rest.map { "  \($0)" } ?? "").foregroundColor(Palette.faint))
                         .font(.system(size: 12))
                         .lineLimit(1)
                         // Cut in the middle: the verb stays and so does the end of a command, where what tells two runs
                         // apart usually is ("… --filter Suite26").
                         .truncationMode(.middle)
                     stateMark
-                    if call.output != nil {
+                    if canOpen {
                         Image(systemName: "chevron.right")
                             .font(.system(size: 9, weight: .semibold))
                             .foregroundStyle(Palette.faint)
@@ -823,13 +827,13 @@ struct ToolCallLine: View {
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .disabled(call.output == nil)
-            .help(call.output == nil ? "" : Tip.toggleOutput(isExpanded: isExpanded))
+            .disabled(!canOpen)
+            .help(!canOpen ? "" : hidden == nil ? Tip.toggleOutput(isExpanded: isExpanded) : Tip.toggleCommand(isExpanded: isExpanded))
             // Running -> done or failed: the mark of the state comes in (see `stateMark`).
             .motion(Motion.enter, value: call.state)
-            .accessibilityLabel(TranscriptSpeech.tool(title: call.title, detail: call.detail, state: call.state))
-            .accessibilityValue(call.output == nil ? "" : (isExpanded ? "expandido" : "recolhido"))
-            .accessibilityHint(call.output == nil ? "" : "Mostra a saída")
+            .accessibilityLabel(TranscriptSpeech.tool(title: words.main, detail: words.rest ?? "", state: call.state))
+            .accessibilityValue(!canOpen ? "" : (isExpanded ? "expandido" : "recolhido"))
+            .accessibilityHint(!canOpen ? "" : hidden == nil ? "Mostra a saída" : "Mostra o comando e a saída")
 
             if let problem = permissionProblem {
                 OpenPrivacySettingsButton(problem: problem).padding(.leading, 22)
@@ -839,15 +843,31 @@ struct ToolCallLine: View {
                 ProducedFilesView(files: files, captures: Set(call.capturedPictures.map(\.path))).padding(.leading, 22)
             }
 
-            if isExpanded, let output = call.output {
-                Text(output)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(Palette.secondary)
-                    .textSelection(.enabled)
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .card(radius: 10)
-                    .transition(.adapted(.unfold, reduceMotion: reduceMotion))
+            if isExpanded, hidden != nil || call.output != nil {
+                VStack(alignment: .leading, spacing: 8) {
+                    // The words the line leaves out: what ran, and the command or script itself.
+                    if let hidden {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(hidden.title)
+                                .font(.system(size: 11))
+                                .foregroundStyle(Palette.faint)
+                            Text(hidden.detail)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(Palette.secondary)
+                                .textSelection(.enabled)
+                        }
+                    }
+                    if let output = call.output {
+                        Text(output)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(Palette.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .card(radius: 10)
+                .transition(.adapted(.unfold, reduceMotion: reduceMotion))
             }
         }
         .padding(.leading, gutter)
@@ -915,11 +935,12 @@ struct ToolGroupRow: View, Equatable {
     var body: some View {
         let calls = calls
         let isRunning = calls.contains { $0.state == .running }
-        let summary = ToolTally.line(calls)
+        let variants = ToolTally.lineVariants(calls)
         let failures = ToolTally.failures(calls)
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
-                header(summary: summary, failures: failures, span: ToolTally.span(calls), isRunning: isRunning, symbol: ToolTally.symbol(calls))
+                header(variants: variants, failures: failures, span: ToolTally.span(calls), count: ToolTally.countNote(calls),
+                       isRunning: isRunning, symbol: ToolTally.symbol(calls))
                 if !isOpen { keptInView(calls) }
             }
             .padding(.leading, gutter)
@@ -941,42 +962,48 @@ struct ToolGroupRow: View, Equatable {
         }
     }
 
-    private func header(summary: String, failures: String?, span: TimeInterval?, isRunning: Bool, symbol: String) -> some View {
+    private func header(variants: [String], failures: ToolTally.Failures?, span: TimeInterval?, count: String?, isRunning: Bool,
+                        symbol: String) -> some View {
         Button(action: toggle) {
-            HStack(spacing: 8) {
-                Image(systemName: symbol)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Palette.faint)
-                    .frame(width: 14)
-                Text(summary)
-                    .font(.system(size: 12))
-                    .foregroundStyle(isRunning ? Palette.faint : Palette.muted)
-                    .lineLimit(1)
-                    // A new action changes a count, once per action (never per token): the number rolls.
-                    .contentTransition(reduceMotion ? .opacity : .numericText())
-                    .animation(Motion.content, value: summary)
-                if let failures {
-                    HStack(spacing: 4) {
-                        Image(systemName: "exclamationmark.circle")
-                        Text(failures)
-                    }
-                    .font(.system(size: 11))
-                    .foregroundStyle(Palette.danger)
-                    .transition(.adapted(.mark, reduceMotion: reduceMotion))
-                }
-                if let span {
-                    (Text(span, format: .number.precision(.fractionLength(1))) + Text(" s"))
+            FittingWords(variants: variants) { summary in
+                HStack(spacing: 8) {
+                    Image(systemName: symbol)
                         .font(.system(size: 11))
-                        .monospacedDigit()
                         .foregroundStyle(Palette.faint)
-                        .transition(.adapted(.mark, reduceMotion: reduceMotion))
+                        .frame(width: 14)
+                    Text(summary)
+                        .font(.system(size: 12))
+                        .foregroundStyle(isRunning ? Palette.faint : Palette.muted)
+                        .lineLimit(1)
+                        // The words give way before the marks do, when even the shortest wording is too long.
+                        .layoutPriority(-1)
+                        // A new action changes a count, once per action (never per token): the number rolls.
+                        .contentTransition(reduceMotion ? .opacity : .numericText())
+                        .animation(Motion.content, value: summary)
+                    if let failures {
+                        ErrorMark(failures: failures)
+                            .transition(.adapted(.mark, reduceMotion: reduceMotion))
+                    }
+                    if let span {
+                        (Text(span, format: .number.precision(.fractionLength(1))) + Text(" s"))
+                            .font(.system(size: 11))
+                            .monospacedDigit()
+                            .foregroundStyle(Palette.faint)
+                            .transition(.adapted(.mark, reduceMotion: reduceMotion))
+                    }
+                    if let count {
+                        Text("· \(count)")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Palette.faint)
+                            .lineLimit(1)
+                    }
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Palette.faint)
+                        .rotationEffect(.degrees(isOpen ? 90 : 0))
+                        .animation(reduceMotion ? nil : Motion.content, value: isOpen)
+                    Spacer(minLength: 0)
                 }
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(Palette.faint)
-                    .rotationEffect(.degrees(isOpen ? 90 : 0))
-                    .animation(reduceMotion ? nil : Motion.content, value: isOpen)
-                Spacer(minLength: 0)
             }
             .contentShape(.rect)
         }
@@ -985,7 +1012,7 @@ struct ToolGroupRow: View, Equatable {
         // The last action ending: the marks of the result come in (see `ToolCallLine`).
         .motion(Motion.enter, value: isRunning)
         .motion(Motion.enter, value: failures)
-        .accessibilityLabel(failures.map { "\(summary), \($0)" } ?? summary)
+        .accessibilityLabel([variants[0], failures?.text, count].compactMap { $0 }.joined(separator: ", "))
         .accessibilityValue(isOpen ? "expandido" : "recolhido")
         .accessibilityHint(isOpen ? "Recolhe as ações" : "Mostra cada ação")
     }
@@ -1007,6 +1034,49 @@ struct ToolGroupRow: View, Equatable {
         }
         if !files.isEmpty {
             ProducedFilesView(files: files, captures: Set(calls.flatMap(\.capturedPictures).map(\.path))).padding(.leading, 22)
+        }
+    }
+}
+
+/// The mark of the errors in a folded line: "3 com erro", red with its icon when the run ended on a failure, quiet gray
+/// without icon when the Orb got over it (the last action worked), so a recovered stumble does not read as an alarm.
+private struct ErrorMark: View {
+    let failures: ToolTally.Failures
+
+    var body: some View {
+        if failures.recovered {
+            Text(failures.text)
+                .font(.system(size: 11))
+                .foregroundStyle(Palette.faint)
+                .lineLimit(1)
+        } else {
+            HStack(spacing: 4) {
+                Image(systemName: "exclamationmark.circle")
+                Text(failures.text)
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(Palette.danger)
+            .lineLimit(1)
+        }
+    }
+}
+
+/// The words of a folded line in the fullest wording that fits the width (`variants`, fullest first, at most three): a
+/// line is never cut in the middle of a word unless even the shortest does not fit. Only more than one wording asks the
+/// layout to measure them.
+private struct FittingWords<Row: View>: View {
+    let variants: [String]
+    @ViewBuilder let row: (String) -> Row
+
+    var body: some View {
+        if variants.count < 2 {
+            row(variants[0])
+        } else {
+            ViewThatFits(in: .horizontal) {
+                row(variants[0])
+                row(variants[1])
+                row(variants[min(2, variants.count - 1)])
+            }
         }
     }
 }
@@ -1041,40 +1111,38 @@ struct WorkGroupRow<Content: View>: View, Equatable {
 
     var body: some View {
         let calls = items.compactMap { if case .tool(let call) = $0.kind { call } else { nil } }
-        let line = ToolTally.work(calls, seconds: seconds)
+        let variants = ToolTally.workVariants(calls, seconds: seconds)
         let failures = ToolTally.failures(calls)
         VStack(alignment: .leading, spacing: 12) {
             Button(action: toggle) {
-                HStack(spacing: 8) {
-                    Image(systemName: "checklist")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Palette.faint)
-                        .frame(width: 14)
-                    Text(line)
-                        .font(.system(size: 12))
-                        .foregroundStyle(Palette.muted)
-                        .lineLimit(1)
-                    if let failures {
-                        HStack(spacing: 4) {
-                            Image(systemName: "exclamationmark.circle")
-                            Text(failures)
+                FittingWords(variants: variants) { line in
+                    HStack(spacing: 8) {
+                        Image(systemName: "checklist")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Palette.faint)
+                            .frame(width: 14)
+                        Text(line)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Palette.muted)
+                            .lineLimit(1)
+                            .layoutPriority(-1)
+                        if let failures {
+                            ErrorMark(failures: failures)
                         }
-                        .font(.system(size: 11))
-                        .foregroundStyle(Palette.danger)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(Palette.faint)
+                            .rotationEffect(.degrees(isOpen ? 90 : 0))
+                            .animation(reduceMotion ? nil : Motion.content, value: isOpen)
+                        Spacer(minLength: 0)
                     }
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(Palette.faint)
-                        .rotationEffect(.degrees(isOpen ? 90 : 0))
-                        .animation(reduceMotion ? nil : Motion.content, value: isOpen)
-                    Spacer(minLength: 0)
                 }
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
             .padding(.leading, gutter)
             .help(Tip.toggleWork(isOpen: isOpen))
-            .accessibilityLabel(failures.map { "\(line), \($0)" } ?? line)
+            .accessibilityLabel(failures.map { "\(variants[0]), \($0.text)" } ?? variants[0])
             .accessibilityValue(isOpen ? "expandido" : "recolhido")
             .accessibilityHint(isOpen ? "Recolhe o trabalho" : "Mostra o que o Orb disse e fez")
             if isOpen {

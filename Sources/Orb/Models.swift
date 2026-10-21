@@ -411,6 +411,9 @@ struct ToolCall: Identifiable, Codable, Sendable, Equatable {
     var finishedAt: Date?
     /// Files the tool created or changed, shown under its line (nil: none, which is what older conversations have).
     var files: [ProducedFile]?
+    /// What the model said the action is for, one short line in the infinitive ("Conferir se a vaga já saiu"; see
+    /// `ToolIntent`). nil when it said nothing, which is what older conversations have.
+    var intent: String?
 
     var duration: TimeInterval? { finishedAt.map { $0.timeIntervalSince(startedAt) } }
 }
@@ -428,6 +431,7 @@ extension ToolCall {
         finishedAt = try c.decodeIfPresent(Date.self, forKey: .finishedAt)
         // Only a convenience: whatever cannot be read leaves the line without cards instead of failing the conversation.
         files = (try? c.decodeIfPresent([ProducedFile].self, forKey: .files)) ?? nil
+        intent = ToolIntent.normalize(try? c.decodeIfPresent(String.self, forKey: .intent))
     }
 }
 

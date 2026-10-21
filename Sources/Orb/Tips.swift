@@ -102,6 +102,7 @@ enum Tip {
     static let cancelEdit = "Desiste da edição; o campo volta como estava"
     static func togglePlan(isExpanded: Bool) -> String { isExpanded ? "Oculta as etapas do plano" : "Mostra as etapas do plano" }
     static func toggleOutput(isExpanded: Bool) -> String { isExpanded ? "Oculta o resultado desta ação" : "Mostra o resultado desta ação" }
+    static func toggleCommand(isExpanded: Bool) -> String { isExpanded ? "Oculta o comando e o resultado desta ação" : "Mostra o comando e o resultado desta ação" }
     static func toggleWork(isOpen: Bool) -> String { isOpen ? "Recolhe o trabalho deste pedido numa linha" : "Mostra o que o Orb disse e fez neste pedido" }
     static func toggleActions(isOpen: Bool) -> String { isOpen ? "Recolhe estas ações numa linha" : "Mostra cada uma destas ações" }
     static func toggleRequest(isOpen: Bool) -> String { isOpen ? "Oculta os detalhes deste pedido" : "Mostra os detalhes deste pedido" }
@@ -321,7 +322,7 @@ enum Tip {
          macPermissions, showInstructions, openFolderInFinder("Orb"), openFolderInTerminal("Orb"),
          createFirstOrb, showWelcome, skillsPage, keptMemoryInFinder, dismissNotice, deleteWithMemory,
          deleteKeepingMemory, profile(callName: "Ana"), profile(callName: nil),
-         copyReply, copyMarkdown, redoReply, editMessage, cancelEdit, toggleOutput(isExpanded: true), toggleOutput(isExpanded: false), toggleRequest(isOpen: true), toggleRequest(isOpen: false), toggleActions(isOpen: true), toggleActions(isOpen: false), toggleWork(isOpen: true), toggleWork(isOpen: false),
+         copyReply, copyMarkdown, redoReply, editMessage, cancelEdit, toggleOutput(isExpanded: true), toggleOutput(isExpanded: false), toggleCommand(isExpanded: true), toggleCommand(isExpanded: false), toggleRequest(isOpen: true), toggleRequest(isOpen: false), toggleActions(isOpen: true), toggleActions(isOpen: false), toggleWork(isOpen: true), toggleWork(isOpen: false),
          routineUseAuto, routineUseReadOnly, randomLook, denyWithNote, showAllActions, deny, allowOptions,
          handoffDone, handoffCancel, browserMode, removeBrowserProxy, searchProvider, installBrowser, addSearchKey,
          enlargeScreen, stopBrowsing, hideScreen, revealScreen, lastScreen, backToLiveScreen, showBrowserScreen,

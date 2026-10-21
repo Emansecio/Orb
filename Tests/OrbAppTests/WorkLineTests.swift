@@ -18,10 +18,10 @@ struct WorkPhraseTests {
         WorkPhrase.line(for: ToolCall(kind: kind, title: title, detail: detail))
     }
 
-    @Test func aCommandIsRunWithItsFirstLineAsTheTarget() {
-        let run = line("Rodando no Terminal", "swift build --jobs 6")
-        #expect(run.verb == "Rodando" && run.target == "swift build --jobs 6" && run.style == .code)
-        #expect(run.text == "Rodando swift build --jobs 6")
+    @Test func aCommandIsRunWithWhatItDoesAsTheTarget() {
+        let run = line("Rodando no Terminal", "swift build --jobs 6 | tail -5")
+        #expect(run.verb == "Rodando" && run.target == "swift build" && run.style == .code)
+        #expect(run.text == "Rodando swift build")
         let background = line("Rodando em segundo plano", "npm run dev")
         #expect(background.verb == "Rodando em segundo plano" && background.target == "npm run dev")
     }
@@ -40,20 +40,19 @@ struct WorkPhraseTests {
     }
 
     @Test func onlyTheFirstLineOfTheDetailCountsAndItsWhiteSpaceIsCollapsed() {
-        #expect(line("Rodando no Terminal", "git log   --oneline\n  | head -5\nmais").target == "git log --oneline")
+        #expect(line("Rodando no Terminal", "git log   --oneline\n  | head -5\nmais").target == "git log")
         #expect(line("Rodando no Terminal", "\n\n   make\ttest  \n").target == "make test")
         // The note a command run elsewhere carries is not the target.
-        #expect(line("Rodando no Terminal", "ls -la\n\nem ~/Projetos").target == "ls -la")
+        #expect(line("Rodando no Terminal", "ls -la\n\nem ~/Projetos").target == "ls")
         #expect(WorkPhrase.firstLine(of: "x".padding(toLength: 300, withPad: "x", startingAt: 0))?.count == WorkPhrase.targetLimit + 1)
     }
 
     @Test func aLongTargetLosesItsMiddle() {
-        let command = "swift build --jobs 6 --configuration release --product Orb --scratch-path /tmp/build-dir-with-a-long-name"
-        let long = line("Rodando no Terminal", command)
+        let query = "swift build jobs configuration release product Orb scratch path build directory with a long name"
+        let long = line("Pesquisando na web", query, kind: .search)
         let shown = long.shownTarget ?? ""
-        #expect(shown.count == WorkLine.displayLimit - 1 && shown.contains("…"))
-        #expect(shown.hasPrefix("swift build --jobs 6 --conf") && shown.hasSuffix("dir-with-a-long-name"))
-        #expect(long.target == WorkPhrase.firstLine(of: command), "the value itself is whole")
+        #expect(shown.hasPrefix("“swift build jobs configurat") && shown.hasSuffix("ctory with a long name”") && shown.contains("…"))
+        #expect(long.target == WorkPhrase.firstLine(of: query), "the value itself is whole")
         #expect(line("Rodando no Terminal", "ls").shownTarget == "ls")
     }
 

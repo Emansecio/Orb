@@ -1010,7 +1010,7 @@ private struct WorkingLine: View {
     }
 }
 
-/// The words of a phrase: the verb, then what it works on (code in a monospaced face, cut in the middle when the
+/// The words of a phrase: the verb, then what it works on (cut in the middle when the
 /// line is short of room), after the routine's name when it is a routine's run. The shimmer covers the whole
 /// phrase (one mask), and only while the Orb works.
 struct WorkPhraseView: View {
@@ -1045,10 +1045,9 @@ struct WorkPhraseView: View {
                 .lineLimit(1)
                 .fixedSize(horizontal: work.shownTarget != nil, vertical: false) // the target is what gives way, not its verb
             if let target = work.shownTarget {
+                // The system face like the rest of the Orb: what the target is (a command, a file) is said by its words.
                 Text(target)
-                    // The command or path in a lighter monospace, a touch tighter, so it reads as part of the phrase.
-                    .font(work.style == .code ? .system(size: 12, design: .monospaced) : .system(size: 13))
-                    .tracking(work.style == .code ? -0.2 : 0)
+                    .font(.system(size: 13))
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .layoutPriority(-1)
