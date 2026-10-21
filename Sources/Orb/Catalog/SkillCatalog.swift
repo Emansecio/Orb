@@ -45,6 +45,20 @@ actor SkillCatalog {
     /// The SKILL.md files already read, by "owner/repo/path": a search reads the same ones for several cards.
     private var files: [String: Task<(text: String?, answered: Bool), Never>] = [:]
 
+    /// Ceilings for the three caches above (the actor lives as long as the session): the oldest entry goes first.
+    private static let capacity = (documents: 100, trees: 20, files: 100)
+    private var documentOrder: [String] = []
+    private var treeOrder: [String] = []
+    private var fileOrder: [String] = []
+
+    private static func remember<V>(_ key: String, _ value: V, in cache: inout [String: V], order: inout [String], capacity: Int) {
+        if cache.updateValue(value, forKey: key) == nil {
+            order.removeAll { $0 == key } // a key dropped by hand is not counted twice
+            order.append(key)
+        }
+        while order.count > capacity { cache[order.removeFirst()] = nil }
+    }
+
     init(session: URLSession = .shared) {
         send = { request in
             let (data, response) = try await session.data(for: request)
@@ -81,7 +95,7 @@ actor SkillCatalog {
             instructions: parsed.body,
             folderURL: Self.github.appending(path: "\(skill.repo)/tree/HEAD/\(folder)")
         )
-        documents[skill.id] = document
+        Self.remember(skill.id, document, in: &documents, order: &documentOrder, capacity: Self.capacity.documents)
         return document
     }
 
@@ -133,7 +147,7 @@ actor SkillCatalog {
             (try await fetchJSON(url)["tree"]?.array ?? []).compactMap { $0["path"]?.string }
                 .filter { $0 == "SKILL.md" || $0.hasSuffix("/SKILL.md") }
         }
-        trees[repo] = listing
+        Self.remember(repo, listing, in: &trees, order: &treeOrder, capacity: Self.capacity.trees)
         do {
             return try await listing.value
         } catch {
@@ -157,7 +171,7 @@ actor SkillCatalog {
                 return (nil, false)
             }
         }
-        files[key] = reading
+        Self.remember(key, reading, in: &files, order: &fileOrder, capacity: Self.capacity.files)
         let result = await reading.value
         if !result.answered, files[key] == reading { files[key] = nil }
         return result.text

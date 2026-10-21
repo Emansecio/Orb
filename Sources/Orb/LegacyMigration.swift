@@ -39,6 +39,7 @@ enum LegacyMigration {
         }
         let staging = directory.deletingLastPathComponent().appending(path: directory.lastPathComponent + ".migrando")
         try? files.removeItem(at: staging)
+        var movedAside: URL?
         do {
             // Item by item, without the large tool outputs (`saidas/`): they are cleaned by age anyway and can be the
             // bulk of the folder. The original stays where it was.
@@ -51,10 +52,15 @@ enum LegacyMigration {
                 let aside = directory.deletingLastPathComponent()
                     .appending(path: "\(directory.lastPathComponent) (antes da migração \(format.string(from: now)))")
                 try files.moveItem(at: directory, to: aside)
+                movedAside = aside
             }
             try files.moveItem(at: staging, to: directory)
         } catch {
             try? files.removeItem(at: staging)
+            // The current data went aside and the copy did not take its place: put it back, or the app opens empty.
+            if let aside = movedAside, !files.fileExists(atPath: directory.path) {
+                try? files.moveItem(at: aside, to: directory)
+            }
             NSLog("Orb: não foi possível copiar os dados do OpenBot: \(error)")
             return false
         }
