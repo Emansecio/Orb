@@ -118,8 +118,9 @@ struct BrowseFindTool: BrowseTool {
         }
         if arguments.flag("exact") { options.append("--exact") }
         let words = built + options
-        // The same find, only to focus the field first: it is judged by its real type, as browse_fill and browse_press do.
-        let focusWords = ["find", by, value, "focus"] + options
+        // The same find, clicking the field first (agent-browser's find has no focus action) so it is judged by its real type,
+        // as browse_fill and browse_press do.
+        let focusWords = ["find", by, value, "click"] + options
         let session = try await BrowseSupport.session(context)
         let (data, dialog) = try await BrowseSupport.acting {
             try await session.exclusive {
