@@ -42,9 +42,12 @@ struct AppControlInfo: Sendable, Equatable {
         return nil
     }
 
-    /// ` · AppleScript · AX bom`, ` · sem AppleScript · AX fraco (Electron)`.
+    /// What a line of `apps_list` assumes when it says nothing: the header spells it out.
+    static let usual = "AppleScript · AX bom"
+
+    /// Only what departs from `usual`: ` · sem AppleScript`, ` · AX fraco (Electron)`, or both; empty for the usual.
     var summary: String {
-        " · " + (scriptable ? "AppleScript" : "sem AppleScript") + " · " + (weakAccessibility.map { "AX fraco (\($0))" } ?? "AX bom")
+        (scriptable ? "" : " · sem AppleScript") + (weakAccessibility.map { " · AX fraco (\($0))" } ?? "")
     }
 }
 

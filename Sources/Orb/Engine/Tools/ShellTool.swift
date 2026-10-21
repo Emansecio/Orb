@@ -199,6 +199,9 @@ private extension ToolContext {
 }
 
 struct JobOutputTool: AgentTool {
+    /// Finished jobs listed when `job_output` has no id.
+    static let finishedShown = 5
+
     let spec = ToolSpec(
         name: "job_output",
         description: "Latest output of a background process (run_command with background: true) and whether it still runs; "
@@ -223,7 +226,13 @@ struct JobOutputTool: AgentTool {
         guard (try? arguments.jobID()) != nil else {
             let all = await jobs.list(botID: botID)
             guard !all.isEmpty else { return "Nenhum processo em segundo plano." }
-            return all.map { "\($0.id)  \($0.statusText)  \($0.command)  (em \($0.directory))" }.joined(separator: "\n")
+            // Running ones all show; of the finished ones only the latest few (the list is by id, oldest first).
+            let finished = all.filter { !$0.isRunning }
+            let hidden = Set(finished.dropLast(Self.finishedShown).map(\.id))
+            var text = all.filter { !hidden.contains($0.id) }
+                .map { "\($0.id)  \($0.statusText)  \($0.command)  (em \($0.directory))" }.joined(separator: "\n")
+            if !hidden.isEmpty { text += "\n(+\(hidden.count) encerrados)" }
+            return text
         }
         let lines = arguments.integer("lines", default: 50, in: 1...500)
         let result = try await jobs.output(botID: botID, id: try arguments.jobID(), lines: lines)

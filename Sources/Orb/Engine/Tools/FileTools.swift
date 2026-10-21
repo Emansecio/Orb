@@ -77,17 +77,20 @@ struct ReadFileTool: AgentTool {
         guard size <= maxTextFileBytes else {
             throw ToolError("\(url.path) é grande demais (\(size) bytes); use grep ou run_command com head, tail ou sed.")
         }
-        let data = try FileAccess.translating(url, writing: false) { try Data(contentsOf: url, options: .mappedIfSafe) }
-        guard let file = TextFile.decode(data) else {
-            let bytes = AttachmentKind.fileSize(Int64(size))
-            throw ToolError("\(url.path) é um arquivo binário (\(bytes)); não dá para ler como texto. "
-                + (Self.binaryAdvice(for: url) ?? "Use run_command (file, strings, xxd) se precisar inspecioná-lo."))
+        // Reading and decoding up to 20 MB would hold a cooperative thread, so it runs off the pool.
+        return try await runDetached {
+            let data = try FileAccess.translating(url, writing: false) { try Data(contentsOf: url, options: .mappedIfSafe) }
+            guard let file = TextFile.decode(data) else {
+                let bytes = AttachmentKind.fileSize(Int64(size))
+                throw ToolError("\(url.path) é um arquivo binário (\(bytes)); não dá para ler como texto. "
+                    + (Self.binaryAdvice(for: url) ?? "Use run_command (file, strings, xxd) se precisar inspecioná-lo."))
+            }
+            var notes: [String] = []
+            if file.encoding != .utf8 || file.hasBOM { notes.append("codificação \(file.encodingName)") }
+            if file.invalidUTF8Bytes > 0 { notes.append("UTF-8 com \(file.invalidUTF8Bytes) bytes inválidos (mostrados como \u{FFFD})") }
+            if file.lineEnding == .crlf { notes.append("linhas CRLF") }
+            return Self.numbered(TextFile.lines(of: file.text), arguments: arguments, note: notes.isEmpty ? nil : notes.joined(separator: ", "))
         }
-        var notes: [String] = []
-        if file.encoding != .utf8 || file.hasBOM { notes.append("codificação \(file.encodingName)") }
-        if file.invalidUTF8Bytes > 0 { notes.append("UTF-8 com \(file.invalidUTF8Bytes) bytes inválidos (mostrados como \u{FFFD})") }
-        if file.lineEnding == .crlf { notes.append("linhas CRLF") }
-        return Self.numbered(TextFile.lines(of: file.text), arguments: arguments, note: notes.isEmpty ? nil : notes.joined(separator: ", "))
     }
 
     /// The bytes of the files inside a package folder (an .rtfd).
@@ -204,22 +207,28 @@ struct WriteFileTool: AgentTool {
         let url = context.url(for: try arguments.requiredString("path"))
         if url.isInLinkLoop { throw ToolError("Link simbólico em loop (aponta de volta para si mesmo): \(url.path)") }
         let target = url.resolvingLinkChain
-        var content = try arguments.requiredString("content", allowEmpty: true)
+        let content = try arguments.requiredString("content", allowEmpty: true)
         let append = arguments.flag("append")
         guard !target.isExistingDirectory else { throw ToolError("\(url.path) é uma pasta.") }
 
         let written = Data(content.utf8)
         if append, FileManager.default.fileExists(atPath: target.path) {
             // Appending UTF-8 bytes to a UTF-16 or Windows-1252 file would corrupt it, so match the file.
-            let existing = try FileAccess.translating(target, writing: true) { try Data(contentsOf: target, options: .mappedIfSafe) }
-            if existing.count <= maxTextFileBytes, let file = TextFile.decode(existing), file.invalidUTF8Bytes == 0,
-               file.encoding != .utf8 || file.lineEnding == .crlf {
+            let addition = content
+            let appended: (data: Data, bytes: Int)? = try await runDetached {
+                let existing = try FileAccess.translating(target, writing: true) { try Data(contentsOf: target, options: .mappedIfSafe) }
+                guard existing.count <= maxTextFileBytes, let file = TextFile.decode(existing), file.invalidUTF8Bytes == 0,
+                      file.encoding != .utf8 || file.lineEnding == .crlf else { return nil }
+                var text = addition
                 if file.lineEnding == .crlf {
-                    content = content.replacingOccurrences(of: "\r\n", with: "\n", options: .literal)
+                    text = text.replacingOccurrences(of: "\r\n", with: "\n", options: .literal)
                         .replacingOccurrences(of: "\n", with: "\r\n", options: .literal)
                 }
-                try FileWriter.write(try file.encoded(file.text + content), to: url)
-                return "\(content.utf8.count) bytes acrescentados a \(Self.location(url, target))"
+                return (try file.encoded(file.text + text), text.utf8.count)
+            }
+            if let appended {
+                try FileWriter.write(appended.data, to: url)
+                return "\(appended.bytes) bytes acrescentados a \(Self.location(url, target))"
             }
             try FileAccess.translating(target, writing: true) {
                 let handle = try FileHandle(forWritingTo: target)
@@ -292,45 +301,48 @@ struct EditFileTool: AgentTool {
         guard old != new else { throw ToolError("old_text e new_text são idênticos; não há nada para alterar.") }
         let size = try target.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
         guard size <= maxTextFileBytes else { throw ToolError("\(url.path) é grande demais para editar (\(size) bytes).") }
-        let data = try FileAccess.translating(target, writing: false) { try Data(contentsOf: target) }
-        guard var file = TextFile.decode(data) else {
-            throw ToolError("\(url.path) é um arquivo binário; edit_file só edita texto.")
-        }
-        if file.invalidUTF8Bytes > 0 {
-            // The stray bytes stay as stand-ins and go back as they were; only a stretch that includes one cannot be edited.
-            guard !old.contains("\u{FFFD}"), !TextFile.containsEscapes(old), !TextFile.containsEscapes(new),
-                  let escaped = TextFile.decodeEscapingInvalidUTF8(data) else {
-                throw ToolError("\(url.path) é UTF-8 com \(file.invalidUTF8Bytes) bytes inválidos (o read_file os mostra como \u{FFFD}); "
-                    + "edite um trecho que não os inclua, ou use run_command (sed, python) para mudar esse trecho.")
+        // Decoding and searching up to 20 MB would hold a cooperative thread, so it runs off the pool.
+        return try await runDetached {
+            let data = try FileAccess.translating(target, writing: false) { try Data(contentsOf: target) }
+            guard var file = TextFile.decode(data) else {
+                throw ToolError("\(url.path) é um arquivo binário; edit_file só edita texto.")
             }
-            file.text = escaped
-            file.escapesInvalidBytes = true
-        }
-
-        let text = file.text as NSString
-        var found: (ranges: [NSRange], replacement: String)?
-        for (candidateOld, candidateNew) in Self.candidates(old: old, new: new, lineEnding: file.lineEnding) {
-            // Exact UTF-16 match first; then canonical equivalence (é as one character or as e + accent).
-            for options in [NSString.CompareOptions.literal, []] {
-                let ranges = Self.ranges(of: candidateOld, in: text, options: options)
-                if !ranges.isEmpty { found = (ranges, candidateNew); break }
+            if file.invalidUTF8Bytes > 0 {
+                // The stray bytes stay as stand-ins and go back as they were; only a stretch that includes one cannot be edited.
+                guard !old.contains("\u{FFFD}"), !TextFile.containsEscapes(old), !TextFile.containsEscapes(new),
+                      let escaped = TextFile.decodeEscapingInvalidUTF8(data) else {
+                    throw ToolError("\(url.path) é UTF-8 com \(file.invalidUTF8Bytes) bytes inválidos (o read_file os mostra como \u{FFFD}); "
+                        + "edite um trecho que não os inclua, ou use run_command (sed, python) para mudar esse trecho.")
+                }
+                file.text = escaped
+                file.escapesInvalidBytes = true
             }
-            if found != nil { break }
-        }
-        guard let (ranges, replacement) = found else { throw ToolError(Self.notFoundMessage(path: url.path, old: old)) }
-        if ranges.count > 1, !replaceAll {
-            let lines = ranges.prefix(5).map { String(Self.lineNumber(of: $0, in: text)) }.joined(separator: ", ")
-            throw ToolError("old_text aparece \(ranges.count) vezes (linhas \(lines)\(ranges.count > 5 ? ", …" : "")). Inclua mais linhas ao redor para torná-lo único, ou passe replace_all=true para trocar todas.")
-        }
 
-        let chosen = replaceAll ? ranges : [ranges[0]]
-        let result = NSMutableString(string: file.text)
-        for range in chosen.reversed() { result.replaceCharacters(in: range, with: replacement) }
-        try FileWriter.write(try file.encoded(result as String), to: url)
+            let text = file.text as NSString
+            var found: (ranges: [NSRange], replacement: String)?
+            for (candidateOld, candidateNew) in Self.candidates(old: old, new: new, lineEnding: file.lineEnding) {
+                // Exact UTF-16 match first; then canonical equivalence (é as one character or as e + accent).
+                for options in [NSString.CompareOptions.literal, []] {
+                    let ranges = Self.ranges(of: candidateOld, in: text, options: options)
+                    if !ranges.isEmpty { found = (ranges, candidateNew); break }
+                }
+                if found != nil { break }
+            }
+            guard let (ranges, replacement) = found else { throw ToolError(Self.notFoundMessage(path: url.path, old: old)) }
+            if ranges.count > 1, !replaceAll {
+                let lines = ranges.prefix(5).map { String(Self.lineNumber(of: $0, in: text)) }.joined(separator: ", ")
+                throw ToolError("old_text aparece \(ranges.count) vezes (linhas \(lines)\(ranges.count > 5 ? ", …" : "")). Inclua mais linhas ao redor para torná-lo único, ou passe replace_all=true para trocar todas.")
+            }
 
-        let first = Self.lineNumber(of: chosen[0], in: text)
-        let count = chosen.count == 1 ? "1 trecho substituído (linha \(first))" : "\(chosen.count) trechos substituídos (a partir da linha \(first))"
-        return "\(count) em \(WriteFileTool.location(url, target))"
+            let chosen = replaceAll ? ranges : [ranges[0]]
+            let result = NSMutableString(string: file.text)
+            for range in chosen.reversed() { result.replaceCharacters(in: range, with: replacement) }
+            try FileWriter.write(try file.encoded(result as String), to: url)
+
+            let first = Self.lineNumber(of: chosen[0], in: text)
+            let count = chosen.count == 1 ? "1 trecho substituído (linha \(first))" : "\(chosen.count) trechos substituídos (a partir da linha \(first))"
+            return "\(count) em \(WriteFileTool.location(url, target))"
+        }
     }
 
     /// `old`/`new` as the file would spell them: a CRLF file matches multi-line text given with plain newlines
@@ -371,6 +383,9 @@ struct ListDirectoryTool: AgentTool {
     static let maxEntries = 500
     static let defaultEntries = 200
     static let maxDepth = 3
+    /// Entries counted (for "mais N itens") before the walk stops, and the time it may take.
+    static let countCap = 5_000
+    static let countTimeBudget = Duration.seconds(5)
 
     let spec = ToolSpec(
         name: "list_directory",
@@ -406,6 +421,9 @@ struct ListDirectoryTool: AgentTool {
         var lines: [String] = []
         var total = 0
         var unreadable = 0
+        // A deep walk only needs to know there is more: it stops counting at the cap or when the time is up.
+        let deadline = ContinuousClock.now + Self.countTimeBudget
+        var countStopped = false
 
         func list(_ directory: URL, prefix: String, level: Int) throws {
             let keys: [URLResourceKey] = [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey, .contentModificationDateKey]
@@ -424,6 +442,10 @@ struct ListDirectoryTool: AgentTool {
             }
             for entry in entries.sorted(by: { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }) {
                 try Task.checkCancellation() // a wide tree is still being counted when the user stops
+                if total >= Self.countCap || ContinuousClock.now > deadline {
+                    countStopped = true
+                    return
+                }
                 let values = try? entry.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey, .contentModificationDateKey])
                 // A link to a folder reports isDirectory false; follow it to see what it points at.
                 let isFolder = values?.isDirectory == true || (values?.isSymbolicLink == true && entry.isExistingDirectory)
@@ -457,7 +479,10 @@ struct ListDirectoryTool: AgentTool {
         let fitted = ToolOutputBudget.fit(lines)
         lines = fitted.kept
         let more = total - lines.count
-        if more > 0 {
+        if more > 0, countStopped {
+            let count = total >= Self.countCap ? "5.000" : String(total)
+            lines.append("[... mais de \(count) itens; use pattern ou um subcaminho ...]")
+        } else if more > 0 {
             // `limit` only helps when it was the limit that cut the list; a list cut by the character budget has no use for it.
             let how = fitted.omitted > 0 ? "use pattern ou um subcaminho" : "use pattern, um subcaminho ou limit (máx. \(Self.maxEntries))"
             lines.append("[... mais \(more) itens; \(how) ...]")

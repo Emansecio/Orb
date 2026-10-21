@@ -571,6 +571,25 @@ final class BackgroundJobsTests {
         try await jobs.start(botID: bot ?? self.bot, command: command, directory: directory, shell: "/bin/zsh", environment: basicEnvironment)
     }
 
+    @Test func aBackgroundCommandThatWentQuietReturnsBeforeTheWindowEnds() async throws {
+        let clock = ContinuousClock()
+        var started: (job: BackgroundJobs.Snapshot, firstOutput: String)?
+        let elapsed = try await clock.measure { started = try await start("echo ready; sleep 30") }
+        #expect(started?.firstOutput.contains("ready") == true)
+        #expect(elapsed < .milliseconds(950), Comment(rawValue: "\(elapsed)"))
+    }
+
+    @Test func jobOutputListsEveryRunningJobAndOnlyTheLatestFinishedOnes() async throws {
+        for number in 1...7 { _ = try await start("echo feito\(number)") }
+        _ = try await start("sleep 60")
+        await waitForJob("7", "finished") { !$0.isRunning }
+        let context = ToolContext(workingDirectory: directory, botID: bot, jobs: jobs)
+        let listing = try await JobOutputTool().run(.object([:]), context: context)
+        #expect(listing.contains("8  rodando") && listing.contains("echo feito7") && listing.contains("echo feito3"))
+        #expect(!listing.contains("echo feito2") && !listing.contains("echo feito1"))
+        #expect(listing.hasSuffix("(+2 encerrados)"))
+    }
+
     private func numbers(in output: String) -> [pid_t] {
         output.split(separator: "\n").compactMap { pid_t($0.split(separator: "=").last ?? "") }
     }

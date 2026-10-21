@@ -37,6 +37,15 @@ final class SearchToolTests {
         #expect(try await run(GrepTool(), ["pattern": .string("marks")]).contains("a.txt:1"))
     }
 
+    @Test func grepAndGlobStayOutOfPackages() async throws {
+        try workspace.write("Foo.app/Contents/Info.txt", "needle\n")
+        try workspace.write("plain/a.txt", "needle\n")
+        let grep = try await run(GrepTool(), ["pattern": .string("needle")])
+        #expect(grep.contains("plain/a.txt") && !grep.contains("Foo.app"))
+        let glob = try await run(GlobTool(), ["pattern": .string("**/*.txt")])
+        #expect(glob.contains("plain/a.txt") && !glob.contains("Foo.app"))
+    }
+
     @Test func grepAndGlobSeeSymlinkedFiles() async throws {
         try workspace.write("real/zshrc.txt", "export NEEDLE=1\n")
         try workspace.write("dots/.keep", "")
