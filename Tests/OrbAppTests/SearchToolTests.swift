@@ -21,6 +21,44 @@ final class SearchToolTests {
         #expect(lines(output) == ["a.swift:2: let needle = 1", "sub/b.swift:1: // needle again"])
     }
 
+    @Test func grepSkipsFilesWithoutAMatchAndKeepsTheResultOfTheOthers() async throws {
+        try workspace.write("none.txt", "nothing here\nat all\n")
+        try workspace.write("hit.txt", "first\nneedle two\n")
+        let output = try await run(GrepTool(), ["pattern": .string("needle\\d?\\s")])
+        #expect(lines(output) == ["hit.txt:2: needle two"])
+        #expect(try await run(GrepTool(), ["pattern": .string("needle"), "mode": .string("count")]) .contains("hit.txt: 1"))
+    }
+
+    @Test func grepAnchorsMatchAtLineEdgesAcrossTheWholeFile() async throws {
+        try workspace.write("a.txt", "xx\nstart here\nmore end\nlast")
+        #expect(lines(try await run(GrepTool(), ["pattern": .string("^start")])) == ["a.txt:2: start here"])
+        #expect(lines(try await run(GrepTool(), ["pattern": .string("end$")])) == ["a.txt:3: more end"])
+        #expect(lines(try await run(GrepTool(), ["pattern": .string("^last$")])) == ["a.txt:4: last"])
+    }
+
+    @Test func grepIgnoresCaseWhenAsked() async throws {
+        try workspace.write("a.txt", "x\nNeedle\n")
+        #expect(lines(try await run(GrepTool(), ["pattern": .string("^needle"), "case_insensitive": .bool(true)])) == ["a.txt:2: Needle"])
+        #expect(try await run(GrepTool(), ["pattern": .string("^needle")]).contains("a.txt:2:") == false)
+    }
+
+    @Test func grepPrefilterIsOnlyUsedForPatternsThatReadTheSameOnTheWholeText() throws {
+        func regex(_ pattern: String) throws -> NSRegularExpression { try NSRegularExpression(pattern: pattern) }
+        #expect(GrepTool.wholeTextRegex(for: try regex("^foo\\d+\\.bar$")) != nil)
+        #expect(GrepTool.wholeTextRegex(for: try regex("\\Afoo")) == nil)
+        #expect(GrepTool.wholeTextRegex(for: try regex("foo\\z")) == nil)
+        #expect(GrepTool.wholeTextRegex(for: try regex("a(?!\\s)")) == nil)
+        #expect(GrepTool.wholeTextRegex(for: try regex("(?<=a)b")) == nil)
+        #expect(GrepTool.wholeTextRegex(for: try regex("^$")) == nil)
+        #expect(GrepTool.wholeTextRegex(for: try regex("x[^a]*+$")) == nil)
+        #expect(GrepTool.wholeTextRegex(for: try regex("(a)\\1")) == nil)
+    }
+
+    @Test func grepWithAnchorAtTheStartOfTheTextMatchesEveryLineLikeBefore() async throws {
+        try workspace.write("a.txt", "foo\nfoo\n")
+        #expect(lines(try await run(GrepTool(), ["pattern": .string("\\Afoo")])) == ["a.txt:1: foo", "a.txt:2: foo"])
+    }
+
     @Test func grepFindsAccentsInAUTF8FileWithAStrayByte() async throws {
         try workspace.write("cortado.log", Data("um coração\notra Ásia\n".utf8) + Data([0xC3]))
         let output = try await run(GrepTool(), ["pattern": .string("coração")])

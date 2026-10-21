@@ -257,6 +257,7 @@ struct GrepTool: AgentTool {
         }
         candidates.sort { $0.relativePath < $1.relativePath }
 
+        let wholeText = wholeTextRegex(for: regex)
         var output: [String] = []
         var results = 0
         var totalLines = 0
@@ -274,6 +275,11 @@ struct GrepTool: AgentTool {
             if candidate.size <= maxFileBytes {
                 guard let data = try? Data(contentsOf: candidate.url, options: .mappedIfSafe),
                       let file = TextFile.decode(data) else { continue }
+                // Most files have no match at all: one pass over the whole text says so before a String is made per line.
+                if let wholeText, hasNoMatch(wholeText, in: file.text, deadline: deadline) {
+                    searched += 1
+                    continue
+                }
                 let lines = TextFile.lines(of: file.text)
                 scanned = scan(lines: lines, regex: regex, mode: mode, deadline: deadline)
             } else if singleFile, candidate.size <= maxStreamedBytes {
@@ -365,6 +371,35 @@ struct GrepTool: AgentTool {
         let shown = names.prefix(3).joined(separator: ", ") + (names.count > 3 ? " e mais \(names.count - 3)" : "")
         return "[\(names.count) \(names.count == 1 ? "arquivo acima de 5 MB não foi pesquisado" : "arquivos acima de 5 MB não foram pesquisados"): \(shown); "
             + "para buscar neles passe o arquivo como path]"
+    }
+
+    /// The pattern as run once over a whole file, or nil when that could miss a line the per-line pass would find.
+    /// `.anchorsMatchLines` keeps ^ and $ at line edges. Only constructs whose match inside a line is also a match in the
+    /// text around it are accepted: no lookaround or inline flags `(?`, no backreferences, `\A \z \Z \G \n \r` and the
+    /// like (only punctuation escapes and \d \w \s \b \t with their negations), no possessive quantifiers (they stop
+    /// at a different place once a newline is in reach), and nothing that matches an empty line.
+    static func wholeTextRegex(for regex: NSRegularExpression) -> NSRegularExpression? {
+        let pattern = regex.pattern
+        if pattern.contains("(?") || ["*+", "++", "?+", "}+"].contains(where: pattern.contains) { return nil }
+        var escaped = false
+        for character in pattern {
+            if escaped {
+                escaped = false
+                guard character.isASCII, character.isPunctuation || character.isSymbol || "dwsDWSbt".contains(character) else { return nil }
+            } else if character == "\\" {
+                escaped = true
+            }
+        }
+        if escaped { return nil }
+        if regex.firstMatch(in: "", range: NSRange(location: 0, length: 0)) != nil { return nil }
+        return try? NSRegularExpression(pattern: pattern, options: regex.options.union(.anchorsMatchLines))
+    }
+
+    /// True when `whole` certainly finds nothing in `text`. A pattern that runs out of time here is left to the per-line pass.
+    private static func hasNoMatch(_ whole: NSRegularExpression, in text: String, deadline: ContinuousClock.Instant) -> Bool {
+        var timedOut = false
+        let found = firstMatch(of: whole, in: text, deadline: deadline, timedOut: &timedOut)
+        return found == nil && !timedOut
     }
 
     /// The matching lines of a file already split into lines.

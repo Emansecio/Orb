@@ -334,11 +334,21 @@ actor HTTPTransport: MCPTransport {
                 return !answered
             }
         } else {
+            // A declared length over the ceiling is refused before reading; otherwise the bytes pile up in one buffer and the
+            // ceiling is checked every 64 KB (so the body may overshoot it by less than that before the error).
+            if response.expectedContentLength > Int64(maxMessageBytes) { throw tooLarge }
             var data = Data()
+            if response.expectedContentLength > 0 { data.reserveCapacity(Int(response.expectedContentLength)) }
+            var sinceCheck = 0
             for try await byte in bytes {
                 data.append(byte)
-                if data.count > maxMessageBytes { throw tooLarge }
+                sinceCheck += 1
+                if sinceCheck == 65_536 {
+                    sinceCheck = 0
+                    if data.count > maxMessageBytes { throw tooLarge }
+                }
             }
+            if data.count > maxMessageBytes { throw tooLarge }
             answered = await deliver(String(decoding: data, as: UTF8.self), replyTo: message)
         }
         guard answered else { throw ToolError("O conector \(name) encerrou a resposta sem resultado.") }
