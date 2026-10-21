@@ -118,7 +118,14 @@ final class LiveText {
 @MainActor @Observable
 final class OrbTranscript {
     /// The user's chat. The reply still being streamed is in it as it was when it began; its text is a `LiveText`.
-    private(set) var items: [TranscriptItem]
+    /// Its readers are told of every new array, without comparing it with the last one element by element (as a stored
+    /// property of an observable class would, at the length of the chat for each action of the Orb): `show` only takes
+    /// an array that is not the one shown, so it all but always differs.
+    var items: [TranscriptItem] {
+        access(keyPath: \.items)
+        return storedItems
+    }
+    @ObservationIgnored private var storedItems: [TranscriptItem]
     /// Counts the changes of `items`, for a list that has to follow them.
     private(set) var revision = 0
     /// Counts the times the whole chat was replaced by another conversation (a new one, one reopened): the chat cross-fades
@@ -126,14 +133,23 @@ final class OrbTranscript {
     private(set) var swaps = 0
     // MARK: MultiOrb (WP2)
     /// The chat folded into rows (exchanges between Orbs, repeated events, `TranscriptFolding`); nil when it holds neither, and
-    /// then its rows are its items. Made once per change of `items`, not per view pass.
-    private(set) var rows: [TranscriptRowModel]?
+    /// then its rows are its items. Made once per change of `items`, not per view pass; told without comparing, like `items`.
+    var rows: [TranscriptRowModel]? {
+        access(keyPath: \.rows)
+        return storedRows
+    }
+    @ObservationIgnored private var storedRows: [TranscriptRowModel]?
     // MARK: end MultiOrb (WP2)
     /// What a compaction folded at the top of the chat (`CompactedFold`), and how many of `rows` hold only those items.
     private(set) var fold = CompactedFold.none
     private(set) var foldedRows = 0
     /// The rows a time separator goes above (`TimeSeparators`), by row id, with the time each shows.
     private(set) var timeBreaks: [UUID: Date] = [:]
+    /// The replies that carry an avatar (`ReplyAvatars`) and the reply "Refazer" belongs to while the Orb is idle
+    /// (`RewindRows.redoTarget`): one walk of the chat per change of its items, not one per pass of the list's body (which also
+    /// runs when a scroll begins or ends, a search moves, a run of actions opens).
+    private(set) var avatars = ReplyAvatars([])
+    private(set) var redoCandidate: UUID?
     /// The task plan while some step of it is open (`Conversation.activePlan`), for the line at the end of the chat.
     private(set) var plan: TaskPlan?
 
@@ -156,14 +172,14 @@ final class OrbTranscript {
     }
 
     init(items: [TranscriptItem] = []) {
-        self.items = items
+        storedItems = items
         refold()
     }
 
     /// Shows `items`. The same array again (one conversation mutation that left the items alone) changes nothing.
     func show(_ items: [TranscriptItem]) {
-        guard !self.items.isSameStorage(as: items) else { return }
-        self.items = items
+        guard !storedItems.isSameStorage(as: items) else { return }
+        withMutation(keyPath: \.items) { storedItems = items }
         refold()
         revision &+= 1
     }
@@ -175,11 +191,18 @@ final class OrbTranscript {
 
     /// The rows and what a compaction folded, from the items: the rows end where the fold does, so none is half in it.
     private func refold() {
+        let items = storedItems
         let fold = CompactedFold.of(items)
-        rows = TranscriptFolding.foldedRows(items, boundary: fold.count, liveTail: isLive)
+        let rows = TranscriptFolding.foldedRows(items, boundary: fold.count, liveTail: isLive)
+        withMutation(keyPath: \.rows) { storedRows = rows }
         if fold != self.fold { self.fold = fold }
-        let breaks = TimeSeparators.breaks(rows.map { $0.map { ($0.id, $0.items.map(\.date)) } } ?? items.map { ($0.id, [$0.date]) })
+        let breaks = TimeSeparators.breaks(spans: rows.map { $0.map { ($0.id, $0.span.start, $0.span.end) } }
+                                           ?? items.map { ($0.id, $0.date, $0.date) })
         if breaks != timeBreaks { timeBreaks = breaks }
+        let avatars = ReplyAvatars(items)
+        if avatars != self.avatars { self.avatars = avatars }
+        let redo = RewindRows.redoTarget(in: items, isWorking: false)
+        if redo != redoCandidate { redoCandidate = redo }
         guard let rows, fold.count > 0 else {
             if foldedRows != 0 { foldedRows = 0 }
             return

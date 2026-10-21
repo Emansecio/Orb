@@ -125,6 +125,9 @@ final class TextFade: NSObject {
     func run() {
         guard link == nil, !words.isEmpty, let view, view.window != nil else { return }
         let link = view.displayLink(target: self, selector: #selector(step(_:)))
+        // A colour easing in over 0.4 s reads the same at 60 Hz: on a 120 Hz screen the link does half the work, which the
+        // chat's scroll gets back while a reply streams.
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
         link.add(to: .main, forMode: .common)
         self.link = link
     }

@@ -10,16 +10,20 @@ enum TimeSeparators {
     /// The rows a separator goes above, by the id of each, with the time it shows (when its row began). `rows`: each
     /// row's id and its items' dates, in order.
     static func breaks(_ rows: [(id: UUID, dates: [Date])], calendar: Calendar = .current) -> [UUID: Date] {
+        breaks(spans: rows.compactMap { row in row.dates.first.map { (row.id, $0, row.dates.max() ?? $0) } }, calendar: calendar)
+    }
+
+    /// The same from each row's id, its first item's date and its latest one (what the chat has at hand for every row).
+    static func breaks(spans: [(id: UUID, start: Date, end: Date)], calendar: Calendar = .current) -> [UUID: Date] {
         var breaks: [UUID: Date] = [:]
         var last: Date?
-        for row in rows {
-            guard let start = row.dates.first else { continue }
-            if let last, start.timeIntervalSince(last) < pause, calendar.isDate(start, inSameDayAs: last) {
+        for row in spans {
+            if let last, row.start.timeIntervalSince(last) < pause, calendar.isDate(row.start, inSameDayAs: last) {
                 // Same moment: nothing between them.
             } else {
-                breaks[row.id] = start
+                breaks[row.id] = row.start
             }
-            last = row.dates.max().map { max($0, last ?? $0) } ?? last
+            last = max(row.end, last ?? row.end)
         }
         return breaks
     }

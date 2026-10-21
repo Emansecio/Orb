@@ -102,6 +102,9 @@ extension ChatView {
 /// The line that stands for the messages a compaction folded: how many, and the button that shows them again (or hides
 /// them once more). The messages open above it, so the line and what follows it stay where they were.
 struct CompactedFoldLine: View {
+    /// `ScrollBench` with `ORB_BENCH_SCROLL_UNFOLD=1`: every chat starts with what a compaction folded on show.
+    static var opensInBench = false
+
     let fold: CompactedFold
     let isOpen: Bool
     let toggle: () -> Void
@@ -215,8 +218,10 @@ private struct TranscriptList: View {
     @State private var follower = BottomFollower()
     /// Which rows just arrived (they come in; the rest are simply there), and when the conversation itself was replaced.
     @State private var entrances = TranscriptEntrances()
+    /// The second scroll to the end a new row asks for, 150 ms later: one at a time (`followResumedTurn`).
+    @State private var settle = PendingScroll()
     /// The messages a compaction folded are on show (`CompactedFold`): until the Orb is left or compacted again.
-    @State private var showsFolded = false
+    @State private var showsFolded = CompactedFoldLine.opensInBench
     /// The runs of actions and the work of requests opened into their lines, by the id of their row (its first item's,
     /// which holds while the run grows).
     @State private var openRuns: Set<UUID> = []
@@ -232,9 +237,9 @@ private struct TranscriptList: View {
         // The Orb's reply at the end of the chat carries its living avatar; the working line below gives up its own
         // then, so there is one Orb in view at a time. In a run of replies with no message of yours between them only the
         // last keeps an avatar. Only the rows whose answer changed are drawn again (a new reply changes the one before it).
-        let avatars = ReplyAvatars(items)
+        let avatars = transcript.avatars
         // "Refazer" belongs to the last finished reply of an idle chat; rows an edit or a redo is about to cut fade out.
-        let redoID = RewindRows.redoTarget(in: items, isWorking: isWorking)
+        let redoID = isWorking ? nil : transcript.redoCandidate
         let dropping = live.dropping
         let found = find.focus
 
@@ -362,7 +367,7 @@ private struct TranscriptList: View {
                     scrollToFound(jump, proxy)
                 }
             }
-            .onChange(of: transcript.fold.count) { showsFolded = false }
+            .onChange(of: transcript.fold.count) { showsFolded = CompactedFoldLine.opensInBench }
             .onChange(of: transcript.revision) {
                 find.itemsChanged()
                 if BottomFollower.anchorsItself {
@@ -539,8 +544,12 @@ private struct TranscriptList: View {
         guard followsBottom, !find.pausesFollowing else { return }
         withAnimation(ScrollMotion.animation(reduceMotion: reduceMotion)) { scrollToBottom(proxy) }
         // Again once the rows of the event and the working line have been laid out: the first scroll goes by estimates.
-        Task {
+        // A burst of changes (the Orb's actions starting and ending) makes one such scroll, after the last of them: each
+        // scroll to an id costs as much as the conversation is long.
+        settle.task?.cancel()
+        settle.task = Task {
             try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
             if followsBottom, !find.pausesFollowing { scrollToBottom(proxy) }
         }
     }
@@ -678,6 +687,12 @@ enum FollowRule {
     static func glides(distance: CGFloat, minY: CGFloat, wasAtBottom: Bool, startMinY: CGFloat) -> Bool {
         distance > 1 && touchLeftListInPlace(minY: minY, wasAtBottom: wasAtBottom, startMinY: startMinY)
     }
+}
+
+/// A scroll waiting to run. A reference, so replacing it never redraws the list.
+@MainActor
+private final class PendingScroll {
+    var task: Task<Void, Never>?
 }
 
 /// Where the list was when the user's scroll began. A reference, so noting it never redraws the list.

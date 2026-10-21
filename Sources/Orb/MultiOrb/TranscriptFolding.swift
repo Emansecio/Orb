@@ -15,8 +15,23 @@ enum TranscriptRowModel: Identifiable, Equatable {
     /// ("Trabalhou por 1 min 05 s · rodou 11 comandos e leu 1 arquivo"), with how long the request took (whole seconds).
     case work([TranscriptItem], seconds: Int?)
 
-    /// The id of the first item: it stays the same while the row grows, so its expanded state survives.
-    var id: UUID { items[0].id }
+    /// The id of the first item: it stays the same while the row grows, so its expanded state survives. Read for every row
+    /// each time the list compares its rows, so a lone item is not put in an array for it.
+    var id: UUID {
+        switch self {
+        case .single(let item): item.id
+        case .events(_, let items), .exchange(let items), .tools(let items), .work(let items, _): items[0].id
+        }
+    }
+
+    /// When the row began and when its last item came, without an array for a lone item.
+    var span: (start: Date, end: Date) {
+        switch self {
+        case .single(let item): (item.date, item.date)
+        case .events(_, let items), .exchange(let items), .tools(let items), .work(let items, _):
+            (items[0].date, items.lazy.map(\.date).max() ?? items[0].date)
+        }
+    }
 
     /// The items the row holds, in order.
     var items: [TranscriptItem] {
