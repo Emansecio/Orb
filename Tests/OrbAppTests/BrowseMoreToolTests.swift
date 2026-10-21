@@ -124,6 +124,16 @@ struct BrowseMoreToolTests {
         #expect(!setup.driver.calls.contains { $0.hasPrefix("command find") })
     }
 
+    @Test func findRefusesAFieldThatIsAPasswordByItsTypeEvenWhenTheLocatorSaysNothing() async {
+        setup.driver.state.withLock { $0.evaluation = #"{"type":"password","autocomplete":"","label":"x"}"# }
+        let text = await message(BrowseFindTool(), ["by": .string("placeholder"), "value": .string("Digite aqui"), "do": .string("fill"), "text": .string("segredo")])
+        #expect(text.contains("Refused") && text.contains("browse_show"), "\(text)")
+        #expect(!setup.driver.calls.contains("command find placeholder Digite aqui fill segredo"))
+        setup.driver.state.withLock { $0.evaluation = #"{"type":"text","autocomplete":"","label":"Nome"}"# }
+        _ = try? await run(BrowseFindTool(), ["by": .string("placeholder"), "value": .string("Digite aqui"), "do": .string("fill"), "text": .string("Ana")])
+        #expect(setup.driver.calls.contains("command find placeholder Digite aqui fill Ana"))
+    }
+
     // MARK: Dialog
 
     @Test func dialogSaysWhatIsOpenAndAnswersIt() async throws {
@@ -175,8 +185,19 @@ struct BrowseMoreToolTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let context = setup.context(directory: directory)
         let text = await message(BrowseFilesTool(), ["action": .string("download"), "ref": .string("e1"), "path": .string("out/oi.txt")], context: context)
-        #expect(text.contains("did not hand over a file"))
+        #expect(text.contains("did not hand over a new file"))
         #expect(FileManager.default.fileExists(atPath: directory.appending(path: "out").path))
+    }
+
+    @Test func anOldFileIsNotADownloadNorAPDF() async throws {
+        let directory = try folder()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let context = setup.context(directory: directory)
+        try Data("velho".utf8).write(to: directory.appending(path: "old.bin"))
+        let download = await message(BrowseFilesTool(), ["action": .string("download"), "ref": .string("e1"), "path": .string("old.bin")], context: context)
+        #expect(download.contains("did not hand over a new file"))
+        let pdf = await message(BrowsePageTool(), ["action": .string("pdf"), "path": .string("old.bin")], context: context)
+        #expect(pdf.contains("no new file was written"))
     }
 
     // MARK: Page
@@ -217,7 +238,7 @@ struct BrowseMoreToolTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let context = setup.context(directory: directory)
         let text = await message(BrowsePageTool(), ["action": .string("pdf"), "path": .string("p.pdf")], context: context)
-        #expect(text.contains("no file was written"))
+        #expect(text.contains("no new file was written"))
         let bad: JSONValue = .object(["action": .string("pdf"), "path": .string("~/.zshrc")])
         #expect(BrowsePageTool().danger(bad, context: context) != nil)
     }
