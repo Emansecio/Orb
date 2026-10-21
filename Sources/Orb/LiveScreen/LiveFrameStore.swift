@@ -11,7 +11,9 @@ import Observation
 /// One picture of the page, decoded off the main thread.
 struct LiveFrame: @unchecked Sendable {
     let image: CGImage
-    /// The page's viewport in CSS pixels, and how far it is scrolled: what turns a box on the page into a point on the image.
+    /// The page's viewport in CSS pixels (the stream's `status`, not the frame metadata, whose height does not match the image) and how
+    /// far it is scrolled. A box from `get box` is already in viewport pixels, scroll taken off: the point on the image is
+    /// `box × image size / viewport`, without adding `scroll`.
     let viewport: CGSize
     let scroll: CGPoint
     /// When the browser painted it.
