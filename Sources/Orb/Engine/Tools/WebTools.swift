@@ -390,7 +390,6 @@ struct WebFetchTool: AgentTool {
     /// download never leaves a half-written file behind. Returns the size in bytes.
     /// Given up after `deadline`, with nothing left behind.
     static func download(_ bytes: URLSession.AsyncBytes, to target: URL, deadline: Duration = downloadDeadline) async throws -> Int {
-        let ends = ContinuousClock.now + deadline
         let destination = target.resolvingLinkChain
         guard !destination.isExistingDirectory else { throw ToolError("\(destination.path) é uma pasta; informe o nome do arquivo em save_to.") }
         let manager = FileManager.default
@@ -401,38 +400,48 @@ struct WebFetchTool: AgentTool {
         defer { if !completed { try? manager.removeItem(at: temporary) } }
 
         let handle = try FileHandle(forWritingTo: temporary)
-        var buffer = Data()
-        var total = 0
-        do {
-            for try await byte in bytes {
-                buffer.append(byte)
-                if buffer.count >= 65_536 {
-                    total += buffer.count
-                    try handle.write(contentsOf: buffer)
-                    buffer.removeAll(keepingCapacity: true)
+        // The deadline is a sibling task that cancels the read, as in `read()`: a stream that sends one byte now and then
+        // is cut on time without looking at the clock for every byte. `written` is what reached the file, for the message.
+        let written = OSAllocatedUnfairLock(initialState: 0)
+        let size: Int? = try await withThrowingTaskGroup(of: Int?.self) { group in
+            group.addTask {
+                defer { try? handle.close() }
+                var buffer = Data()
+                var total = 0
+                for try await byte in bytes {
+                    buffer.append(byte)
+                    if buffer.count >= 65_536 {
+                        total += buffer.count
+                        try handle.write(contentsOf: buffer)
+                        buffer.removeAll(keepingCapacity: true)
+                        let flushed = total
+                        written.withLock { $0 = flushed }
+                    }
+                    if total + buffer.count > maxDownloadBytes {
+                        throw ToolError(tooLargeMessage)
+                    }
                 }
-                // Every byte: a stream that sends one now and then would never reach a multiple of 1,024 before the deadline.
-                if ContinuousClock.now > ends {
-                    throw ToolError(Self.downloadTooSlow(deadline, bytes: total + buffer.count))
-                }
-                if total + buffer.count > maxDownloadBytes {
-                    throw ToolError(tooLargeMessage)
-                }
+                total += buffer.count
+                try handle.write(contentsOf: buffer)
+                return total
             }
-            total += buffer.count
-            try handle.write(contentsOf: buffer)
-            try handle.close()
-        } catch {
-            try? handle.close()
-            throw error
+            group.addTask {
+                try await Task.sleep(for: deadline)
+                return nil
+            }
+            let first = try await group.next() ?? nil
+            group.cancelAll()
+            return first
         }
+        try Task.checkCancellation()
+        guard let size else { throw ToolError(Self.downloadTooSlow(deadline, bytes: written.withLock { $0 })) }
         if manager.fileExists(atPath: destination.path) {
             _ = try manager.replaceItemAt(destination, withItemAt: temporary)
         } else {
             try manager.moveItem(at: temporary, to: destination)
         }
         completed = true
-        return total
+        return size
     }
 }
 

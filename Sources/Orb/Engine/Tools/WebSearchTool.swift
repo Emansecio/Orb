@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// One result of a web search.
 struct SearchHit: Sendable, Equatable {
@@ -89,8 +90,20 @@ enum SearchResultsParser {
         options: [.dotMatchesLineSeparators, .caseInsensitive])
     private static let tagRegex = try! NSRegularExpression(pattern: #"<[^>]*>"#)
 
+    /// One expression per attribute name, built once: the parser asks for the same few names for every result.
+    private static let attributeRegexes = OSAllocatedUnfairLock(initialState: [String: NSRegularExpression]())
+
+    private static func attributeRegex(_ name: String) -> NSRegularExpression? {
+        attributeRegexes.withLock { cache in
+            if let known = cache[name] { return known }
+            guard let made = try? NSRegularExpression(pattern: name + #"\s*=\s*(?:"([^"]*)"|'([^']*)')"#, options: .caseInsensitive) else { return nil }
+            cache[name] = made
+            return made
+        }
+    }
+
     private static func attribute(_ name: String, in attributes: String) -> String? {
-        guard let regex = try? NSRegularExpression(pattern: name + #"\s*=\s*(?:"([^"]*)"|'([^']*)')"#, options: .caseInsensitive),
+        guard let regex = attributeRegex(name),
               let match = regex.firstMatch(in: attributes, range: NSRange(attributes.startIndex..., in: attributes)) else { return nil }
         let source = attributes as NSString
         for group in 1...2 where match.range(at: group).location != NSNotFound { return HTMLText.decodeEntities(source.substring(with: match.range(at: group))) }

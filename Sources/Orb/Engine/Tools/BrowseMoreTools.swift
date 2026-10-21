@@ -111,15 +111,24 @@ struct BrowseFindTool: BrowseTool {
             if let reason = SecretField.reason(role: by == "role" ? value : "", name: name) { throw ToolError(SecretField.refusal(reason)) }
             built.append(text)
         }
+        var options: [String] = []
         if let name = arguments.nonEmptyString("name"), by == "role" {
             guard !name.hasPrefix("-") else { throw ToolError("`name` cannot start with “-”.") }
-            built += ["--name", name]
+            options += ["--name", name]
         }
-        if arguments.flag("exact") { built.append("--exact") }
-        let words = built
+        if arguments.flag("exact") { options.append("--exact") }
+        let words = built + options
+        // The same find, clicking the field first (agent-browser's find has no focus action) so it is judged by its real type,
+        // as browse_fill and browse_press do.
+        let focusWords = ["find", by, value, "click"] + options
         let session = try await BrowseSupport.session(context)
         let (data, dialog) = try await BrowseSupport.acting {
             try await session.exclusive {
+                if action == "fill" {
+                    _ = try await session.driver.command(focusWords)
+                    let focus = try await session.driver.evaluate(BrowsePressTool.focusScript)
+                    if let reason = BrowsePressTool.secretReason(focus: focus) { throw ToolError(SecretField.refusal(reason)) }
+                }
                 let data = try await session.driver.command(words)
                 let after = action == "text" ? (url: nil as String?, dialog: nil as String?) : await BrowseSupport.addressOrDialog(session)
                 return (data, after.dialog)
@@ -206,9 +215,7 @@ struct BrowseFilesTool: BrowseTool {
     }
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
-        guard context.canSaveFiles else {
-            throw ToolError("Files in the browser need “\(Capability.terminal.label)”, which is off for this Orb. Ask the user to turn it on in the Orb's panel.")
-        }
+        guard context.canSaveFiles else { throw BrowseSupport.needsFiles("Files in the browser") }
         let action = try arguments.requiredString("action").lowercased()
         let ref = try BrowseSupport.ref(arguments)
         let url = context.url(for: try arguments.requiredString("path")).resolvingLinkChain
@@ -223,12 +230,14 @@ struct BrowseFilesTool: BrowseTool {
             return "Uploaded \(url.lastPathComponent) to \(ref)."
         case "download":
             guard !url.isExistingDirectory else { throw ToolError("\(url.path) is a folder; give the file's name in `path`.") }
-            if let reason = DangerousCommand.reason(forWritingTo: url) { throw ToolError("Refused: writing there \(reason).") }
-            try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try BrowseSupport.prepareToWrite(url)
+            let before = BrowseSupport.stamp(of: url)
             _ = try await BrowseSupport.acting { try await session.exclusive { try await session.driver.command(["download", "@" + ref, url.path]) } }
             session.pageChanged()
-            let size = (try? fileManager.attributesOfItem(atPath: url.path)[.size] as? Int) ?? nil
-            guard let size else { throw ToolError("The page did not hand over a file by clicking \(ref).") }
+            guard let after = BrowseSupport.stamp(of: url), after != before else {
+                throw ToolError("The page did not hand over a new file by clicking \(ref).")
+            }
+            let size = after.size
             return "Downloaded to \(url.path) (\(size) bytes)."
         default:
             throw ToolError("`action` is upload or download.")
@@ -301,16 +310,16 @@ struct BrowsePageTool: BrowseTool {
             session.forgetPage()
             return target == "main" ? "Back to the main page. Take a new browse_snapshot." : "Working inside the frame \(target.dropFirst()). Take a new browse_snapshot: its refs are the frame's."
         case "pdf":
-            guard context.canSaveFiles else {
-                throw ToolError("Saving a PDF needs “\(Capability.terminal.label)”, which is off for this Orb. Ask the user to turn it on in the Orb's panel.")
-            }
+            guard context.canSaveFiles else { throw BrowseSupport.needsFiles("Saving a PDF") }
             let url = context.url(for: try arguments.requiredString("path")).resolvingLinkChain
             guard !url.isExistingDirectory else { throw ToolError("\(url.path) is a folder; give the file's name in `path`.") }
-            if let reason = DangerousCommand.reason(forWritingTo: url) { throw ToolError("Refused: writing there \(reason).") }
-            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try BrowseSupport.prepareToWrite(url)
+            let before = BrowseSupport.stamp(of: url)
             _ = try await BrowseSupport.acting { try await session.exclusive { try await session.driver.command(["pdf", url.path]) } }
-            let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? nil
-            guard let size else { throw ToolError("The browser reported a PDF but no file was written.") }
+            guard let after = BrowseSupport.stamp(of: url), after != before else {
+                throw ToolError("The browser reported a PDF but no new file was written.")
+            }
+            let size = after.size
             return "Saved the page as PDF at \(url.path) (\(size) bytes)."
         case "state_save", "state_load":
             let name = try Self.stateName(arguments)
@@ -546,15 +555,12 @@ struct BrowseRunTool: BrowseTool {
         }
         if let refusal = BrowseRunRules.refusal(words) { throw ToolError(refusal) }
         let files = BrowseRunRules.files(words)
-        if !files.isEmpty, !context.canSaveFiles {
-            throw ToolError("This command reads or writes a file, and “\(Capability.terminal.label)” is off for this Orb. Ask the user to turn it on in the Orb's panel.")
-        }
+        if !files.isEmpty, !context.canSaveFiles { throw BrowseSupport.needsFiles("A command that reads or writes a file") }
         let resolved = BrowseRunRules.resolved(words, context: context)
         for (index, access) in files {
             let url = URL(fileURLWithPath: resolved[index])
             if access == .write {
-                if let reason = DangerousCommand.reason(forWritingTo: url) { throw ToolError("Refused: writing there \(reason).") }
-                try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try BrowseSupport.prepareToWrite(url)
             } else if let reason = DangerousCommand.SensitiveFiles().reason(for: url.path) {
                 throw ToolError("Refused: this \(reason).")
             }
