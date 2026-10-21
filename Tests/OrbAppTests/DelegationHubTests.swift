@@ -1249,6 +1249,70 @@ private final class Hooks: GroupTurnHooks {
         #expect(team.botTexts(team.pesquisador).isEmpty) // its chat is untouched
         #expect(team.model.delegation.inbox.isEmpty) // the person asked: nobody to answer
     }
+
+    // MARK: A reply or a cancel for an Orb whose conversation was let go of
+
+    /// Atlas with a request sent (open) and a note (tell) it was not handed yet, written to disk, then let go of.
+    private func unloadedAtlas(_ team: Team, request: UUID, chain: UUID) async -> AppModel {
+        let model = team.model
+        let atlas = OrbRef(team.atlas), pesquisador = OrbRef(team.pesquisador)
+        let sent = OrbMessageItem(direction: .sent, kind: .ask, state: .open, from: atlas, to: pesquisador, text: "Pesquise.", requestID: request, chainID: chain)
+        let note = OrbMessageItem(direction: .received, kind: .tell, state: .open, from: pesquisador, to: atlas, text: "Aviso.", requestID: UUID(), chainID: chain)
+        model.editConversation(team.atlas.id) { $0.items += [TranscriptItem(.orbMessage(sent)), TranscriptItem(.orbMessage(note))] }
+        model.selection = .bot(team.pesquisador.id)
+        model.saveNow()
+        model.store.flush()
+        model.conversationKeepAlive = .zero
+        await model.unloadIdleConversations(only: team.atlas.id)
+        return model
+    }
+
+    private func savedMessages(_ model: AppModel, _ bot: Bot) async -> [OrbMessageItem] {
+        await model.loadedConversation(bot.id)
+        return model.transcript(bot.id).compactMap { if case .orbMessage(let m) = $0.kind { m } else { nil } }
+    }
+
+    @Test func aReplyForAnUnloadedAskerIsNotReadOnTheMainThread() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let request = UUID()
+        let model = await unloadedAtlas(team, request: request, chain: UUID())
+        let session = model.session(team.atlas.id)
+        try #require(session.isUnloaded)
+
+        model.delegation.markSent(request, asker: team.atlas.id, as: .replied)
+        #expect(session.isUnloaded && session.conversation == nil, "no read on the main thread for one line")
+
+        // The file closes a request that was open (nobody works on it after a reload), so the reply finds it lost, as when the chat was read first.
+        #expect(await savedMessages(model, team.atlas).map(\.state) == [.lost, .open])
+    }
+
+    @Test func aCancelForAnUnloadedOrbDropsItsUnreadNoticesOnceItIsLoaded() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let chain = UUID()
+        let model = await unloadedAtlas(team, request: UUID(), chain: chain)
+        let session = model.session(team.atlas.id)
+        try #require(session.isUnloaded)
+
+        model.delegation.dropUnreadNotices(of: chain, for: team.atlas.id)
+        #expect(session.isUnloaded && session.conversation == nil)
+
+        #expect(await savedMessages(model, team.atlas).map(\.state) == [.lost, .cancelled])
+        #expect(session.pendingChanges.isEmpty)
+    }
+
+    @Test func quittingBeforeAnUnloadedOrbIsReadStillWritesWhatTheHubChanged() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let chain = UUID()
+        let model = await unloadedAtlas(team, request: UUID(), chain: chain)
+        model.delegation.dropUnreadNotices(of: chain, for: team.atlas.id)
+        model.saveNow()
+        model.store.flush()
+        let again = team.reopened { _ in say("?") }
+        #expect(await savedMessages(again, team.atlas).map(\.state) == [.lost, .cancelled])
+    }
 }
 
 // MARK: Groups over the real delegation hub (WP1 + WP5)

@@ -1062,14 +1062,16 @@ final class DelegationHub: DelegationService {
     }
 
     /// The asker's lines about `requestID` now read `state`, in the chat or in the chat a side run parked.
-    private func markSent(_ requestID: UUID, asker: UUID, as state: OrbMessageItem.State) {
+    func markSent(_ requestID: UUID, asker: UUID, as state: OrbMessageItem.State) {
         guard let model, model.bot(asker) != nil else { return }
         let session = model.session(asker)
         func has(_ items: [TranscriptItem]) -> Bool {
             items.contains { if case .orbMessage(let m) = $0.kind { m.direction == .sent && m.requestID == requestID && m.state == .open } else { false } }
         }
-        if session.isUnloaded { session.ensureLoaded() }
-        if let conversation = session.conversation, has(conversation.items) {
+        // An unloaded chat is not read here (on the main thread) for one line: the change waits for the read.
+        if session.isUnloaded {
+            session.changeOnceLoaded { if has($0.items) { $0.items.settingSent(requestID, to: state) } }
+        } else if let conversation = session.conversation, has(conversation.items) {
             session.mutateItems { $0.settingSent(requestID, to: state) }
         }
         if let parked = session.parkedChat, has(parked.items) {
@@ -1080,10 +1082,9 @@ final class DelegationHub: DelegationService {
 
     /// The notices of the chain that the chat of `botID` was not handed yet now read cancelled: its next turn does not get them
     /// (the line stays, as a stopped request's does).
-    private func dropUnreadNotices(of chainID: UUID, for botID: UUID) {
+    func dropUnreadNotices(of chainID: UUID, for botID: UUID) {
         guard let model, model.bot(botID) != nil else { return }
         let session = model.session(botID)
-        if session.isUnloaded { session.ensureLoaded() }
         func unread(_ chat: Conversation) -> [Int] {
             SinceLastTurn.pendingIndices(in: chat.items, since: chat.contextHandedAt).filter { index in
                 if case .orbMessage(let m) = chat.items[index].kind { m.kind == .tell && m.chainID == chainID } else { false }
@@ -1096,7 +1097,9 @@ final class DelegationHub: DelegationService {
                 items[index].kind = .orbMessage(message)
             }
         }
-        if var parked = session.parkedChat {
+        if session.isUnloaded, session.parkedChat == nil { // not read here: the change waits for the read
+            session.changeOnceLoaded { chat in cancel(&chat.items, at: unread(chat)) }
+        } else if var parked = session.parkedChat {
             let indices = unread(parked)
             guard !indices.isEmpty else { return }
             cancel(&parked.items, at: indices)
