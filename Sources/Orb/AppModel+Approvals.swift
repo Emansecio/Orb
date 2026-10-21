@@ -114,21 +114,32 @@ extension AppModel {
     /// Both steps are counted from when the card opened, on a clock that runs while the Mac sleeps: a reminder that comes
     /// late (the Mac woke) says how long it really waited.
     private func watchUnanswered(_ request: ApprovalRequest, of botID: UUID) {
-        let opened = ContinuousClock.now
-        Task { [weak self] in
+        let opened = ContinuousClock.now, approvalID = request.id
+        // The handles stay in `unansweredWatchers` so an answer (or the end of the turn) cancels the sleeping tasks
+        // instead of leaving them for an hour or a day; they hold only the ids and look the card up when they wake.
+        let reminder = Task { [weak self] in
             try? await Task.sleep(until: opened + ApprovalWait.remindAfter, clock: .continuous)
-            guard let self, isPending(request.id, of: botID) else { return }
-            postBanner(for: request, of: botID, waited: opened.duration(to: .now))
+            guard !Task.isCancelled, let self,
+                  let open = pendingApprovals(of: botID).first(where: { $0.id == approvalID }) else { return }
+            postBanner(for: open, of: botID, waited: opened.duration(to: .now))
         }
-        Task { [weak self] in
+        let giveUp = Task { [weak self] in
             try? await Task.sleep(until: opened + ApprovalWait.giveUpAfter, clock: .continuous)
-            self?.giveUpWaiting(on: request.id, of: botID)
+            guard !Task.isCancelled else { return }
+            self?.giveUpWaiting(on: approvalID, of: botID)
         }
+        unansweredWatchers[approvalID] = [reminder, giveUp]
+    }
+
+    /// The cards stop being watched: they were answered or the turn that asked them ended.
+    func stopWatching(_ approvalIDs: [UUID]) {
+        for id in approvalIDs { unansweredWatchers.removeValue(forKey: id)?.forEach { $0.cancel() } }
     }
 
     /// The card is still open after a day: the Orb stops the task, as Parar would, so a forgotten question no longer
     /// holds its chat or the routines queued behind it, and the chat says why.
     func giveUpWaiting(on approvalID: UUID, of botID: UUID) {
+        stopWatching([approvalID])
         guard isPending(approvalID, of: botID) else { return }
         stop(botID, notice: ApprovalWait.gaveUpNotice, reason: .gaveUp)
     }
@@ -194,6 +205,7 @@ extension AppModel {
         }
         session.updateAwaitingApproval()
         ApprovalNotifications.clear([approvalID])
+        stopWatching([approvalID])
         // Saved before the engine is answered, so its next tool call already sees the rule.
         if decision == .always, let chosen, chosen.isValid {
             update(botID) { if !$0.permissionRules.contains(chosen) { $0.permissionRules.append(chosen) } }

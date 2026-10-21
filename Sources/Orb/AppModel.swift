@@ -47,6 +47,8 @@ final class AppModel {
     @ObservationIgnored lazy var groupHub: GroupHub = makeGroupHub()
     /// Each group's board as the panel shows it (`refreshGroupBoard`), and the notes forgotten from it that can still come back.
     var groupBoards: [UUID: MemorySnapshot] = [:]
+    /// The sleeping tasks of each open approval card that nobody answered yet (`watchUnanswered`).
+    @ObservationIgnored var unansweredWatchers: [UUID: [Task<Void, Never>]] = [:]
     @ObservationIgnored var forgottenGroupNotes: [UUID: [String: ForgottenMemory]] = [:]
     // MARK: end MultiOrb (WP5)
     /// Each Orb's running machinery (see `BotSession`): its conversation in memory, its turn, its streamed reply.
@@ -71,7 +73,10 @@ final class AppModel {
     // MARK: UI state
 
     var drafts: [UUID: String] = [:] {
-        didSet { syncDraftBoxes() }
+        didSet {
+            syncDraftBoxes()
+            scheduleDraftsSave()
+        }
     }
     /// One observable text per Orb, mirroring `drafts`: the composer reads its own, so typing in one Orb does not
     /// redraw the composer of any other (the dictionary is a single observation for all of them).
@@ -255,6 +260,7 @@ final class AppModel {
     /// Whether macOS trusts the app for Accessibility, read when a turn starts (tests replace it).
     @ObservationIgnored var accessibilityProbe: @Sendable () -> Bool = { LiveMacPermissionSystem().isAccessibilityTrusted() }
     @ObservationIgnored private var stateSave: Task<Void, Never>?
+    @ObservationIgnored private var draftsSave: Task<Void, Never>?
     /// How long a conversation nobody is looking at stays in memory (tests shorten it).
     @ObservationIgnored var conversationKeepAlive = Duration.seconds(300)
     @ObservationIgnored private(set) var didReportSaveFailure = false
@@ -459,6 +465,7 @@ final class AppModel {
                     await self?.unloadIdleConversations()
                     self?.unloadIdleGroupSessions()
                     try? await Task.sleep(for: .seconds(30))
+                    if self == nil { break }
                 }
             }
             // The settings offer "Entrar" again. Only the app's own login counts (never a copy made by a test), and a
@@ -1217,7 +1224,10 @@ final class AppModel {
                 self?.keptMemoriesVersion += 1
             }
         } else {
-            library.delete(botID)
+            // The bank closes now (a late task writes nothing); the folder, with all its pages, goes off the main thread.
+            library.closeBank(botID)
+            let folder = library.directory(for: botID)
+            Task.detached(priority: .utility) { try? FileManager.default.removeItem(at: folder) }
         }
         leaveGroups(botID, name: name) // MultiOrb (WP5): before the Orb is gone, so the groups can say who left
         bots.removeAll { $0.id == botID }
@@ -2376,6 +2386,18 @@ final class AppModel {
                         providers: providers, defaultModel: defaultModel, unread: unread, replies: replies, contextMemory: contextMemory,
                         learnedContexts: learnedContexts, profile: profile, priceCorrections: priceCorrections, groups: groups,
                         categories: categories)
+    }
+
+    /// Writes the drafts about 2 s after the last change in them (not on every key); the scheduler's round stays as the
+    /// safety net and quitting writes them anyway.
+    private func scheduleDraftsSave() {
+        guard !isDevRun, !isResetting else { return } // as the scheduler: a developer run's copy of the data stays as it is
+        draftsSave?.cancel()
+        draftsSave = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            self?.saveDraftsIfChanged()
+        }
     }
 
     private func scheduleStateSave() {

@@ -134,7 +134,9 @@ extension BotSession {
         resumableSince = nil // a process left running after a stop does not bring the Orb back by itself
         guard let task = turnTask, let turn = turnID, let model else { return }
         task.cancel()
-        ApprovalNotifications.clear(model.pendingApprovals(of: id).map(\.id))
+        let open = model.pendingApprovals(of: id).map(\.id)
+        ApprovalNotifications.clear(open)
+        model.stopWatching(open)
         let gate = model.gate, botID = id
         Task { await gate.cancelApprovals(for: botID) }
         flushText()
@@ -657,6 +659,7 @@ extension BotSession {
             }
         }
         ApprovalNotifications.clear(answered.map(\.approvalID))
+        model?.stopWatching(answered.map(\.approvalID))
         updateAwaitingApproval()
     }
 

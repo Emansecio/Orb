@@ -54,6 +54,10 @@ extension AppModel {
                 return
             }
             forgottenGroupNotes[id, default: [:]][path] = forgotten
+            // Few are kept: a board forgotten from all day does not hold every old page in memory (no date to tell the oldest).
+            while let extra = forgottenGroupNotes[id]?.keys.first(where: { $0 != path }), (forgottenGroupNotes[id]?.count ?? 0) > 20 {
+                forgottenGroupNotes[id]?[extra] = nil
+            }
             await refreshGroupBoard(id)
         }
     }
@@ -62,10 +66,8 @@ extension AppModel {
         guard group(id) != nil, let forgotten = forgottenGroupNotes[id]?[item.path] else { return }
         forgottenGroupNotes[id]?[item.path] = nil
         let bank = memory.groupBank(for: id)
-        let directory = bank.directory
         Task {
-            _ = await Task.detached(operation: { forgotten.restore(in: directory) }).value
-            await bank.reconcile()
+            await restoreForgotten(forgotten, in: bank)
             await refreshGroupBoard(id)
         }
     }
