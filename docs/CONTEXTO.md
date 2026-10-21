@@ -81,6 +81,10 @@ Antes de esquecer, o app *encolhe a cópia enviada* do trecho velho. As mensagen
 
 - o prefácio `<orb_context>` das mensagens antigas é cortado até a linha `Now:`, menos o do snapshot mais novo e as
   mudanças da pasta enviadas depois dele (sem elas o modelo perderia o estado da pasta);
+- cada `<attached_file path="...">` de mensagem antiga fica com os **800 primeiros caracteres** mais o marcador
+  "N characters omitted; the file is at <path>, read it again with read_file" (o caminho continua com o modelo); os blocos
+  `<orb_since_last_turn>` e `<orb_your_context>` viram uma linha, mantendo as tags (o `stripped` continua funcionando);
+  vale também para a mensagem do snapshot, só o prefácio dela é poupado; idempotente;
 - saídas antigas de ferramentas ficam com **800 caracteres** (erros, 1 200; a nota "full output saved at …" sempre inteira);
 - o raciocínio criptografado e as assinaturas de "thinking" deixam de ser reenviados;
 - os dois últimos turnos nunca são condensados (`frontier`).
