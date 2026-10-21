@@ -46,7 +46,22 @@ enum SettingsRouter {
 
     @MainActor static func open(_ tab: SettingsTab, using openSettings: OpenSettingsAction) {
         request(tab)
+        show(using: openSettings)
+    }
+
+    /// The window SwiftUI gives the `Settings` scene.
+    static let windowIdentifier = "com_apple_SwiftUI_Settings_window"
+
+    /// Opens Ajustes in front of the main window: `openSettings()` alone could leave it behind the Orb (the window
+    /// is made a moment later and the main one kept the front). Tried again a little later in case it is not there yet.
+    @MainActor static func show(using openSettings: OpenSettingsAction) {
+        NSApp.activate()
         openSettings()
+        for delay in [0.0, 0.15] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                NSApp.windows.first { $0.identifier?.rawValue == windowIdentifier && $0.isVisible }?.makeKeyAndOrderFront(nil)
+            }
+        }
     }
 
     /// The tab Ajustes opens on: the one asked for; else Modelos while no model is connected (it is what the user

@@ -98,7 +98,7 @@ extension SettingsRouter {
 
     @MainActor static func openBrowser(using openSettings: OpenSettingsAction) {
         requestBrowser()
-        openSettings()
+        show(using: openSettings)
     }
 }
 

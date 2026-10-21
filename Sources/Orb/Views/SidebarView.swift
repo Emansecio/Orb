@@ -125,7 +125,7 @@ struct SidebarView: View {
                                      tip: Tip.manageConnectors, shortcut: AppShortcut.connectors.label)
                     FooterPageButton(item: .skills, name: "Skills", symbol: "wand.and.stars",
                                      tip: Tip.skillsPage, shortcut: AppShortcut.skills.label)
-                    Button("Ajustes", systemImage: "gearshape") { openSettings() }
+                    Button("Ajustes", systemImage: "gearshape") { SettingsRouter.show(using: openSettings) }
                         .labelStyle(.iconOnly)
                         .buttonStyle(CircleGhostStyle(side: 32, fontSize: 14))
                         .foregroundStyle(Palette.muted)

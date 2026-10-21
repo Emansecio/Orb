@@ -211,10 +211,7 @@ struct QuickAskView: View {
                         .font(.system(size: 12))
                         .foregroundStyle(Palette.secondary)
                     Spacer(minLength: 4)
-                    Button("Abrir Ajustes") {
-                        NSApp.activate()
-                        openSettings()
-                    }
+                    Button("Abrir Ajustes") { SettingsRouter.show(using: openSettings) }
                     .buttonStyle(.link)
                     .font(.system(size: 12))
                     .help(Tip.connectModel)
