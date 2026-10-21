@@ -33,6 +33,9 @@ final class BotSession {
     var parkedChat: Conversation? { didSet { showTranscript() } }
     /// The conversation isn't in memory (never in `conversation`): not read yet, or let go of again.
     @ObservationIgnored var isUnloaded = false
+    /// Changes the delegation hub made while the conversation was unloaded (a request answered, notices cancelled),
+    /// applied in order when it is installed: the hub must not read the whole file on the main thread for them.
+    @ObservationIgnored var pendingChanges: [(inout Conversation) -> Void] = []
     /// The conversation is being read off the main thread right now: the chat shows a placeholder.
     var isLoading = false
     @ObservationIgnored var loadTask: Task<Void, Never>?

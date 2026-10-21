@@ -50,6 +50,7 @@ extension BotSession {
         }
         guard let model, let owner = model.bot(id) else { // deleted meanwhile
             isUnloaded = false
+            pendingChanges = []
             return
         }
         // Loaded on demand (`ensureLoaded`) while this was reading: that result wins. Its notice still stands when the
@@ -66,7 +67,17 @@ extension BotSession {
     private func install(_ read: StoreRead<Conversation>) {
         conversation = read.value?.closingInterruptedTurn(notice: BotSession.quitNotice) ?? Conversation()
         lastUsed = .now
-        rewriteIfItLostItems(read)
+        guard !pendingChanges.isEmpty else { return rewriteIfItLostItems(read) }
+        let pending = pendingChanges
+        pendingChanges = []
+        changeConversation { chat in for change in pending { change(&chat) } }
+        scheduleSave(delay: 0) // what the hub changed while it was unloaded is not on disk yet
+    }
+
+    /// Holds a change to the conversation until it is installed, instead of reading it on the main thread for one
+    /// line. The conversation ends up the same as if it had been read first. Only for an unloaded session.
+    func changeOnceLoaded(_ change: @escaping (inout Conversation) -> Void) {
+        pendingChanges.append(change)
     }
 
     /// A file that lost items while decoding is rewritten once (its original is kept aside), so the loss is
@@ -103,6 +114,7 @@ extension BotSession {
         conversation = nil
         parkedChat = nil
         isUnloaded = false
+        pendingChanges = []
         isLoading = false
         loadTask?.cancel()
         loadTask = nil
@@ -155,6 +167,7 @@ extension BotSession {
     /// Writes what changed now, on quit: the conversation if it is waiting to be saved, and the chat a running
     /// routine parked (it is not `conversation`, so nothing else writes it).
     func saveNow() {
+        if !pendingChanges.isEmpty { ensureLoaded() } // quitting: the changes waiting for the read are written too
         if isDirty {
             saveTask?.cancel() // written now: its timer has nothing left to do
             saveTask = nil
