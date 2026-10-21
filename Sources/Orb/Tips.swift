@@ -128,6 +128,15 @@ enum Tip {
     static let installBrowser = "Abre os Ajustes do navegador, onde está o comando de instalação"
     static let addSearchKey = "Abre os Ajustes do navegador, onde a chave do TinyFish é guardada"
 
+    // MARK: Live screen of the Orb's browser
+    static let enlargeScreen = "Mostra a tela do navegador do Orb maior, no painel"
+    static let stopBrowsing = "Para o Orb: interrompe o que ele está fazendo"
+    static let hideScreen = "Borra a tela do navegador até você mostrar de novo"
+    static let revealScreen = "Mostra de novo a tela do navegador do Orb"
+    static let lastScreen = "Mostra a última tela deste uso do navegador, enquanto o app estiver aberto"
+    static let backToLiveScreen = "Volta para a tela ao vivo do navegador do Orb"
+    static let showBrowserScreen = "Mostra no chat a página que o Orb abre no navegador, ao vivo; nada é gravado"
+
     // MARK: Menu bar panel
 
     static let menuBarItem = "Abre o painel rápido do Orb, sem abrir o app"
@@ -315,6 +324,7 @@ enum Tip {
          copyReply, copyMarkdown, redoReply, editMessage, cancelEdit, toggleOutput(isExpanded: true), toggleOutput(isExpanded: false), toggleRequest(isOpen: true), toggleRequest(isOpen: false), toggleActions(isOpen: true), toggleActions(isOpen: false), toggleWork(isOpen: true), toggleWork(isOpen: false),
          routineUseAuto, routineUseReadOnly, randomLook, denyWithNote, showAllActions, deny, allowOptions,
          handoffDone, handoffCancel, browserMode, removeBrowserProxy, searchProvider, installBrowser, addSearchKey,
+         enlargeScreen, stopBrowsing, hideScreen, revealScreen, lastScreen, backToLiveScreen, showBrowserScreen,
          menuBarItem, connectModel, openMainWindow, closeReply, openChatInApp, reviewRiskyInApp, allowOnce, allowBatchOnce,
          routineRequest, chooseOrb(named: "Orb"),
          importFromAssistant, importPickBot, importMarketplaceCategory, startFromKeptMemory, importBack, importCopyPrompt, importChooseFile, importReadLocal, importKind, importItem, importReview, importRemove,

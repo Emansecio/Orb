@@ -131,6 +131,7 @@ enum TranscriptFolding {
         switch item.kind {
         case .notice: true
         case .event(let event): event.kind == .routineRun // a routine's line, like a notice
+        case .browserView: true // the Orb's browser (card or closing line) stays in view, after the work's line
         default: false
         }
     }
@@ -172,7 +173,7 @@ enum TranscriptFolding {
 
     private static func foldsIntoWork(_ item: TranscriptItem) -> Bool {
         switch item.kind {
-        case .bot, .tool, .notice: true
+        case .bot, .tool, .notice, .browserView: true
         case .event: isNotice(item)
         case .approval: joinsToolRun(item)
         default: false

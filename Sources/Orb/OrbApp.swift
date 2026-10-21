@@ -319,10 +319,11 @@ enum Snapshot {
         case "routines": AnyView(RoutinesView())
         case "models": AnyView(ProviderSettings())
         case "browser-settings": AnyView(BrowserSettings().frame(width: 640, height: 720))
-        case "inspector", "inspector-memory", "inspector-folder", "inspector-routines":
-            // The tab after the dash: memory, folder or routines.
+        case "inspector", "inspector-memory", "inspector-folder", "inspector-routines", "inspector-screen":
+            // The tab after the dash: memory, folder, routines or screen (the Orb's page, seeded with a drawn one).
             AnyView(model.bots.first.map { bot in
-                BotInspector(botID: bot.id, tab: InspectorTab.allCases.first { screen == "inspector-" + $0.rawValue } ?? .general)
+                if screen == "inspector-screen" { LiveScreenSnapshots.tab(model: model, botID: bot.id) }
+                return BotInspector(botID: bot.id, tab: InspectorTab.allCases.first { screen == "inspector-" + $0.rawValue } ?? .general)
                     .frame(width: 360)
             })
         case "memory-sheet": AnyView(model.bots.first.map { MemorySheet(botID: $0.id, name: $0.name) })

@@ -302,6 +302,11 @@ struct Conversation: Codable, Sendable {
             case .groupPause(var pause) where pause.state == .open:
                 pause.state = .ended
                 copy.items[index].kind = .groupPause(pause)
+            case .browserView(var view) where view.outcome == .running:
+                // The page is gone with the app: the use ends as stopped, at the last time the chat shows.
+                view.outcome = .stopped
+                view.endedAt = max(items.last?.date ?? view.startedAt, view.startedAt)
+                copy.items[index].kind = .browserView(view)
             default:
                 break
             }

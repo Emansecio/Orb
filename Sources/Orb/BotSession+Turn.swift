@@ -35,6 +35,7 @@ extension BotSession {
         let turn = UUID()
         turnID = turn
         reviewBase = nil
+        browserViewID = nil
         clearBeats()
         resetWork()
         model?.workAnnouncer.reset()
@@ -139,6 +140,7 @@ extension BotSession {
         flushText()
         keepCutReply(liveText?.text)
         closeStreaming()
+        closeBrowserView(.stopped)
         model.setAwaitingApproval(false, of: id)
         mutateItems { items in
             for index in items.indices {
@@ -230,6 +232,8 @@ extension BotSession {
         case .toolStarted(let call):
             stopSpeaking()
             closeStreaming()
+            // The Orb's browser: the page shows live in an item of its own, above the line of the tool.
+            noteBrowserTool(call)
             append(.tool(call))
             model.live(id).runningTool = call.kind
             runningCalls[call.id] = call
@@ -259,6 +263,7 @@ extension BotSession {
             stopSpeaking()
             closeStreaming()
             append(.approval(request))
+            if request.isHandoff { syncHandoffPending() }
             model.setAwaitingApproval(true, of: id)
             model.announceApproval(request, of: id)
         case .message(let message):
@@ -383,6 +388,7 @@ extension BotSession {
         foldedNotes = []
         stopSpeaking()
         closeStreaming()
+        closeBrowserView(succeeded ? .done : .failed)
         model.setStatus(nil, of: id)
         resetWork()
         if routineID != nil {
@@ -652,6 +658,7 @@ extension BotSession {
             if case .approval(let request) = $0.kind { request.decision == nil } else { false }
         }
         if !stillOpen { model?.setAwaitingApproval(false, of: id) }
+        syncHandoffPending()
     }
 }
 

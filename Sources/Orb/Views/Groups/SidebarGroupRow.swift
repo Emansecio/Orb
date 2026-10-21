@@ -144,7 +144,7 @@ private struct WorkingRing: View {
     }
 }
 
-private struct BreathingDot: NSViewRepresentable {
+struct BreathingDot: NSViewRepresentable {
     let color: Color
     let breathes: Bool
 

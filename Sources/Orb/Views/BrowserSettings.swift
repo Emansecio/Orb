@@ -5,6 +5,7 @@ import AppKit
 /// Everything is installed inside the app's data folder (nothing from Homebrew or Node, nothing with administrator rights).
 struct BrowserSettings: View {
     @Environment(AppModel.self) private var model
+    @AppStorage(LiveScreenSetting.key) private var showsScreen = true
 
     var body: some View {
         let setup = model.browserSetup
@@ -15,6 +16,12 @@ struct BrowserSettings: View {
                 Text("Navegador dos Orbs")
             } footer: { FormFootnote {
                 Text("Cada Orb escolhe no painel dele se o navegador fica em segundo plano ou visível. O que você instala aqui não precisa de Homebrew, Node nem senha.")
+            } }
+            Section {
+                Toggle("Mostrar a tela do navegador no chat", isOn: $showsScreen)
+                    .help(Tip.showBrowserScreen)
+            } footer: { FormFootnote {
+                Text("Enquanto o Orb usa o navegador, o chat mostra a página ao vivo. Só você vê: nada é gravado nem vai para o modelo. Desligado, o chat fica como antes.")
             } }
             SearchKeySection()
             Section("Privacidade") {

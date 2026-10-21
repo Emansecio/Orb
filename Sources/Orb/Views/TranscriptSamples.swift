@@ -1,7 +1,7 @@
 #if DEBUG || ORB_DEV_TOOLS
 import SwiftUI
 
-/// `Orb --snapshot transcript[-approvals|-long-command|-question|-quote|-notices|-compacted|-failed|-attachments|-outputs|-screen-steps] out.png`:
+/// `Orb --snapshot transcript[-approvals|-long-command|-question|-quote|-notices|-compacted|-failed|-attachments|-outputs|-screen-steps|-browser-live|-browser-need|-browser-done] out.png`:
 /// a seeded conversation of the first Orb for visual review of the replies' Markdown, the approval cards and the notices
 /// with an action. Dev aid; nothing is saved.
 @MainActor
@@ -147,6 +147,8 @@ enum TranscriptSample {
                 items[0].date = .now.addingTimeInterval(-65)
                 items.append(TranscriptItem(.bot(text: "Pronto: dos 61 contatos, 12 eram leads sem resposta. Respondi os 12 conforme o Brain e deixei o relatório em /tmp/af_report.txt.", isStreaming: false)))
             }
+        case "transcript-browser-live", "transcript-browser-need", "transcript-browser-done":
+            items = LiveScreenSnapshots.items(screen, model: model, bot: bot)
         case "transcript-retry":
             items = [user, TranscriptItem(.notice("Não deu certo: Sem conexão com o provedor: A conexão com a Internet parece estar desligada."))]
         default:
@@ -158,6 +160,7 @@ enum TranscriptSample {
             if screen == "transcript-skill-proposal" { _ = await model.memory.bank(for: bot.id).proposeSkill(SkillSnapshots.proposal) }
             try? await Task.sleep(for: .seconds(1))
             model.seedConversation(Conversation(items: items), for: bot.id)
+            if screen == "transcript-browser-live" { await LiveScreenSnapshots.point(model: model, botID: bot.id) }
             // The bar over the top of the conversation (⌘F), and the first message taken back into the field (Editar).
             if screen == "transcript-find" { try? await Task.sleep(for: .seconds(1)); model.request(.findInConversation, of: bot.id) }
             if screen == "transcript-edit" {
