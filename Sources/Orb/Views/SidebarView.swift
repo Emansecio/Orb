@@ -333,7 +333,8 @@ struct SidebarBotRow: View {
     var body: some View {
         let live = model.live(botID)
         let isSelected = model.selection == .bot(botID)
-        SidebarRow(isSelected: isSelected, selectionSpace: selectionSpace, dragPayload: SidebarOrder.dragPayload(botID)) {
+        // The name and the reply under it are cut to one line each: the hover text has the name whole.
+        SidebarRow(isSelected: isSelected, selectionSpace: selectionSpace, help: live.look.name, dragPayload: SidebarOrder.dragPayload(botID)) {
             model.selection = .bot(botID)
         } content: { isHovering in
             BotRowContent(row: BotRow(look: live.look, workText: live.shownWork?.headline, shimmers: live.shownWork?.shimmers ?? false, activity: live.activity, isSelected: isSelected,

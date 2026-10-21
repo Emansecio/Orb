@@ -108,7 +108,6 @@ extension SettingsRouter {
 struct BrowserPickerRows: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openSettings) private var openSettings
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(InspectorFold.browserKey) private var storedOpen = false
     let botID: UUID
     /// The switch of the capability itself: the pickers show while it is on.
@@ -225,7 +224,7 @@ struct BrowserPickerRows: View {
 
     private func toggleFold(isOpen: Bool, hasProblem: Bool) {
         let next = InspectorFold.stored(afterClickWhen: isOpen, stored: storedOpen, hasProblem: hasProblem)
-        withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) { storedOpen = next }
+        storedOpen = next // the height changes at once; what comes fades in (`foldContent`)
     }
 
     // MARK: Rows

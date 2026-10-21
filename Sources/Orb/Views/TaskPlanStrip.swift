@@ -13,7 +13,7 @@ struct TaskPlanStrip: View {
         if let plan = transcript.plan {
             VStack(alignment: .leading, spacing: 6) {
                 Button {
-                    withAnimation(Motion.adapted(Motion.content, reduceMotion: reduceMotion)) { isExpanded.toggle() }
+                    withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) { isExpanded.toggle() }
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: ToolCall.Kind.plan.symbol)

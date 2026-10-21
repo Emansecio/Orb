@@ -4,8 +4,9 @@ import SwiftUI
 // chevron, and the motion of what comes and goes. Which parts are open lives in `InspectorFold` (InspectorSupport.swift).
 
 enum FoldMotion {
-    /// The curve of a part opening or closing: the app's content curve; none under Reduce Motion (what comes then fades in
-    /// by its own transition, see `foldContent`, and the height changes at once).
+    /// The curve of a part of the chat opening or closing (a run of actions, a request's work, an action's output): the app's
+    /// content curve; none under Reduce Motion (what comes then fades in by its own transition and the height changes at
+    /// once). The General tab's parts never animate their height (`foldContent`).
     static func animation(reduceMotion: Bool) -> Animation? {
         reduceMotion ? nil : Motion.content
     }
@@ -21,6 +22,8 @@ struct FoldChevron: View {
             .font(.system(size: 10, weight: .semibold))
             .foregroundStyle(Palette.faint)
             .rotationEffect(.degrees(!reduceMotion && isOpen ? 90 : 0))
+            // It turns by itself: the row's part opens without an animation (`foldContent`).
+            .animation(reduceMotion ? nil : Motion.content, value: isOpen)
             .frame(width: 12)
             .accessibilityHidden(true)
     }
@@ -66,13 +69,11 @@ struct FoldHeader<ClosedSummary: View>: View {
     }
 }
 
-/// What a folding part shows when it opens: it comes down from the row above and fades in (only the fade under Reduce
-/// Motion), and leaves by fading.
+/// What a folding part shows when it opens: rows of a `Form`, so it only fades in and out, and the table takes its new
+/// height at once (MOVIMENTO.md, pattern H): animating it would animate every row of the table.
 private struct FoldContent: ViewModifier {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
     func body(content: Content) -> some View {
-        content.transition(.adapted(.unfold, reduceMotion: reduceMotion))
+        content.transition(.quiet)
     }
 }
 

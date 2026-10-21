@@ -305,7 +305,7 @@ struct BotInspector: View {
     /// A folding row's click: the part stores the other state (a part held open by a problem keeps what it had).
     private func toggleFold(_ stored: Binding<Bool>, isOpen: Bool, hasProblem: Bool) {
         let next = InspectorFold.stored(afterClickWhen: isOpen, stored: stored.wrappedValue, hasProblem: hasProblem)
-        withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) { stored.wrappedValue = next }
+        stored.wrappedValue = next // the height changes at once; what comes fades in (`foldContent`)
     }
 
     // MARK: Modelo e modo
@@ -326,6 +326,7 @@ struct BotInspector: View {
                         .foregroundStyle(Palette.faint)
                         .lineLimit(1)
                         .truncationMode(.tail)
+                        .help(modelName) // cut in a narrow panel: the hover text has it whole
                     if let warning {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .font(.system(size: 11))
@@ -899,7 +900,7 @@ private struct InspectorHeader: View {
             } else {
                 Text(role.isEmpty ? "Papel" : role)
                     .font(.callout)
-                    .foregroundStyle(role.isEmpty ? Palette.hint : Palette.secondary)
+                    .foregroundStyle(role.isEmpty ? Palette.faint : Palette.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -963,7 +964,7 @@ private struct WorkspaceFileRow: View {
             if let modified = file.modified {
                 Text(RelativeTime.text(modified))
                     .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Palette.faint)
                     .lineLimit(1)
             }
         }

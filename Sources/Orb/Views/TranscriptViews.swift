@@ -799,7 +799,7 @@ struct ToolCallLine: View {
         let canOpen = call.output != nil || hidden != nil
         VStack(alignment: .leading, spacing: 6) {
             Button {
-                withAnimation(Motion.adapted(Motion.content, reduceMotion: reduceMotion)) { isExpanded.toggle() }
+                withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) { isExpanded.toggle() }
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: call.kind.symbol)
@@ -956,7 +956,7 @@ struct ToolGroupRow: View, Equatable {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: isOpen)
+        .animation(FoldMotion.animation(reduceMotion: reduceMotion), value: isOpen)
         .task(id: calls.map(\.state)) {
             permissionProblem = isRunning ? nil : calls.lazy.compactMap(\.permissionProblemToShow).first
         }
@@ -1151,7 +1151,7 @@ struct WorkGroupRow<Content: View>: View, Equatable {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: isOpen)
+        .animation(FoldMotion.animation(reduceMotion: reduceMotion), value: isOpen)
     }
 }
 
@@ -1605,7 +1605,7 @@ struct ApprovalCard: View {
             }
             if !showsAllItems, request.items.count > Self.visibleItems {
                 Button {
-                    withAnimation(Motion.adapted(Motion.content, reduceMotion: reduceMotion)) { showsAllItems = true }
+                    withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) { showsAllItems = true }
                 } label: {
                     Text("e mais \(request.items.count - Self.visibleItems)")
                         .font(.system(size: 12))
@@ -1721,7 +1721,7 @@ struct ApprovalCard: View {
     private var answeredCard: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button {
-                withAnimation(Motion.adapted(Motion.content, reduceMotion: reduceMotion)) { isOpen.toggle() }
+                withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) { isOpen.toggle() }
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: request.decision == .deny ? "xmark.circle" : "checkmark.circle")
@@ -1734,6 +1734,7 @@ struct ApprovalCard: View {
                         + Text("  \(ApprovalSummary.detail(request))").foregroundColor(Palette.faint))
                         .font(.system(size: 12))
                         .lineLimit(1)
+                        .truncationMode(.middle) // a long command keeps its start and its end
                         .contentTransition(.opacity)
                     Image(systemName: "chevron.right")
                         .font(.system(size: 9, weight: .semibold))
