@@ -266,13 +266,7 @@ struct UIReadTool: AgentTool {
             try await sessions.run(app, within: deadline) {
                 let root = system.root(of: app)
                 // Electron and Chromium build their tree on demand: asked once per app, retried once if it came back bare.
-                var enabled = false
-                if session.state.withLock({ $0.manualAccessibility == nil }) {
-                    system.prepare(root)
-                    let accepted = root.attribute("AXManualAccessibility")?.bool == true
-                    session.state.withLock { $0.manualAccessibility = accepted }
-                    enabled = accepted
-                }
+                let enabled = session.enableManualAccessibilityOnce(root: root, system: system) ?? false
                 return (try Self.reading(root: root, app: app, window: window, query: query, includeMenus: menus, limits: readLimits), enabled)
             }
         }

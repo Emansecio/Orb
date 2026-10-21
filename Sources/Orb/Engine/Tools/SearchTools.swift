@@ -102,15 +102,19 @@ enum FileWalker {
         // files that bury the real sources. Asking for the folder itself as `path` still searches it.
         "build", "dist", "out", "target", ".gradle", ".next", ".nuxt", "coverage", "venv", ".tox", ".mypy_cache", ".cache",
     ]
+    /// Skipped only directly below the user's home folder.
+    static let homeSkippedDirectories: Set<String> = ["Library", ".Trash"]
     static let maxFiles = 200_000
 
     /// `truncated` is set when the walk stopped early (too many files or out of time).
     static func files(under root: URL, deadline: ContinuousClock.Instant) throws -> (files: [WalkedFile], truncated: Bool) {
         let base = root.resolvingLinkChain
         let keys: [URLResourceKey] = [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey, .contentModificationDateKey]
-        guard let enumerator = FileManager.default.enumerator(at: base, includingPropertiesForKeys: keys, options: [], errorHandler: { _, _ in true }) else {
+        guard let enumerator = FileManager.default.enumerator(at: base, includingPropertiesForKeys: keys, options: [.skipsPackageDescendants], errorHandler: { _, _ in true }) else {
             return ([], false)
         }
+        // Walking the home folder itself: ~/Library (caches, containers) and the Trash only bury the real files.
+        let isHome = base.path == FileManager.default.homeDirectoryForCurrentUser.resolvingLinkChain.path
         var files: [WalkedFile] = []
         var visited = 0
         while let item = enumerator.nextObject() as? URL {
@@ -126,7 +130,10 @@ enum FileWalker {
                 guard let target = try? item.resolvingLinkChain.resourceValues(forKeys: Set(keys)) else { continue }
                 values = target
             } else if values.isDirectory == true {
-                if skippedDirectories.contains(item.lastPathComponent) { enumerator.skipDescendants() }
+                if skippedDirectories.contains(item.lastPathComponent)
+                    || (isHome && enumerator.level == 1 && homeSkippedDirectories.contains(item.lastPathComponent)) {
+                    enumerator.skipDescendants()
+                }
                 continue
             }
             guard values.isRegularFile == true, item.lastPathComponent != ".DS_Store" else { continue }

@@ -87,13 +87,18 @@ struct ShortcutsRunTool: AgentTool {
             throw ToolError("O atalho \"\(name)\" falhou" + (detail.isEmpty ? "." : ": \(detail)")
                             + "\nConfira o nome exato com shortcuts_list.")
         }
-        return ShortcutsFormatter.result(name: name, output: try? Data(contentsOf: outputFile),
-                                         console: result.output)
+        // Only the start is read: the answer is cut at 20,000 characters anyway.
+        let handle = try? FileHandle(forReadingFrom: outputFile)
+        defer { try? handle?.close() }
+        let head = try? handle?.read(upToCount: ShortcutsFormatter.maxReadBytes)
+        let total = (try? outputFile.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? head?.count
+        return ShortcutsFormatter.result(name: name, output: head, console: result.output, totalBytes: total)
     }
 }
 
 enum ShortcutsFormatter {
     static let maxListed = 300
+    static let maxReadBytes = 100_000
 
     /// Shortcut names from `shortcuts list`, one per line, filtered and capped.
     static func listing(_ output: String, filter: String?) -> String {
@@ -111,13 +116,20 @@ enum ShortcutsFormatter {
     }
 
     /// What the Shortcut produced: text, or a note when the output is a file or empty.
-    static func result(name: String, output: Data?, console: String) -> String {
+    /// `totalBytes` is the size of the whole output when `output` is only its start.
+    static func result(name: String, output: Data?, console: String, totalBytes: Int? = nil) -> String {
         let log = console.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let output, !output.isEmpty else {
             return "O atalho \"\(name)\" rodou e não devolveu resultado." + (log.isEmpty ? "" : "\n\(log)")
         }
-        guard let text = String(data: output, encoding: .utf8) else {
-            return "O atalho \"\(name)\" rodou e devolveu um arquivo que não é texto (\(output.count) bytes)."
+        // A start cut inside a multi-byte character is still text: drop the broken tail.
+        let cut = totalBytes.map { $0 > output.count } ?? false
+        var text = String(data: output, encoding: .utf8)
+        if text == nil, cut {
+            for dropped in 1...3 where text == nil { text = String(data: output.dropLast(dropped), encoding: .utf8) }
+        }
+        guard let text else {
+            return "O atalho \"\(name)\" rodou e devolveu um arquivo que não é texto (\(totalBytes ?? output.count) bytes)."
         }
         return text.trimmingCharacters(in: .whitespacesAndNewlines).truncated(to: 20_000)
     }
@@ -320,7 +332,9 @@ enum AppListFormatter {
             if let found = shortcuts[app.name], !found.isEmpty { line += " · Atalhos: " + found.joined(separator: ", ") }
             return line
         }
-        return "\(apps.count) app\(apps.count == 1 ? "" : "s") aberto\(apps.count == 1 ? "" : "s"):\n" + lines.joined(separator: "\n")
+        // The usual way to control an app is said once; a line only mentions where its app differs.
+        let usual = control.isEmpty ? "" : " (sem aviso na linha: \(AppControlInfo.usual))"
+        return "\(apps.count) app\(apps.count == 1 ? "" : "s") aberto\(apps.count == 1 ? "" : "s")\(usual):\n" + lines.joined(separator: "\n")
     }
 }
 

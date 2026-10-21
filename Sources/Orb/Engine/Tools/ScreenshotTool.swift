@@ -287,11 +287,7 @@ struct ScreenshotTool: AgentTool {
                     try await appSessions.run(app, within: appSessions.deadlines.action) { () -> Result<AXWindowList?, ToolError> in
                         let root = system.root(of: app)
                         // Asked once per app, as ui_read does (Electron and Chromium build their tree on demand).
-                        if session.state.withLock({ $0.manualAccessibility == nil }) {
-                            system.prepare(root)
-                            let accepted = root.attribute("AXManualAccessibility")?.bool == true
-                            session.state.withLock { $0.manualAccessibility = accepted }
-                        }
+                        _ = session.enableManualAccessibilityOnce(root: root, system: system)
                         do { return .success(try Self.axWindows(root: root, selector: selector)) } catch let error as ToolError {
                             return .failure(error)
                         } catch {
@@ -576,8 +572,10 @@ enum ScreenshotImage {
     }
 
     static func isBlank(at url: URL) -> Bool {
+        // Only a 24 px thumbnail is needed, so the PNG is not decoded at full resolution.
+        let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 24]
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return true }
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return true }
         return isBlank(image)
     }
 

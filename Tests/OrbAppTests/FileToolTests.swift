@@ -494,6 +494,16 @@ final class FileToolTests {
         #expect(try await run(ListDirectoryTool(), ["path": .string("alias")]).contains("inner.txt"))
     }
 
+    @Test func aDeepListStopsCountingAtTheCap() async throws {
+        let folder = workspace.url("many")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        for number in 0..<(ListDirectoryTool.countCap + 100) {
+            FileManager.default.createFile(atPath: folder.appending(path: "f\(number).txt").path, contents: nil)
+        }
+        let listing = try await run(ListDirectoryTool(), ["depth": .number(2)])
+        #expect(listing.contains("mais de 5.000 itens"), Comment(rawValue: String(listing.suffix(200))))
+    }
+
     @Test func listReportsAnUnreadableFolderInsteadOfCallingItEmpty() async throws {
         let locked = workspace.url("locked")
         try FileManager.default.createDirectory(at: locked, withIntermediateDirectories: true)

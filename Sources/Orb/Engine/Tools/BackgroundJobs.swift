@@ -145,9 +145,20 @@ actor BackgroundJobs {
         changed.yield(botID)
 
         let deadline = ContinuousClock.now + firstOutputWindow
+        // With output in the log, the wait ends once the log stops growing for a moment (a quiet command does not
+        // hold the result for the whole window); a command that keeps writing is cut at the deadline.
+        var lastSize = 0
+        var lastGrowth = ContinuousClock.now
         while jobs[botID]?[id]?.snapshot.isRunning == true, !Task.isCancelled, ContinuousClock.now < deadline,
               !(endsAtFirstOutput && Self.hasOutput(log)) {
             try? await Task.sleep(for: .milliseconds(50))
+            let size = Self.logSize(log)
+            if size != lastSize {
+                lastSize = size
+                lastGrowth = .now
+            } else if size > 0, ContinuousClock.now - lastGrowth >= Self.quietPeriod {
+                break
+            }
         }
         return (jobs[botID]?[id]?.snapshot ?? snapshot, Self.tail(of: log, lines: 40))
     }
@@ -307,9 +318,14 @@ actor BackgroundJobs {
 
     // MARK: Reading logs
 
-    private static func hasOutput(_ log: URL) -> Bool {
-        ((try? FileManager.default.attributesOfItem(atPath: log.path)[.size] as? Int) ?? 0) > 0
+    private static func hasOutput(_ log: URL) -> Bool { logSize(log) > 0 }
+
+    private static func logSize(_ log: URL) -> Int {
+        (try? FileManager.default.attributesOfItem(atPath: log.path)[.size] as? Int) ?? 0
     }
+
+    /// How long a log with output may stay the same size before `start` stops waiting for more.
+    private static let quietPeriod = Duration.milliseconds(250)
 
     /// The last `lines` lines of a log (at most the last 64 KB read, 20 000 characters shown), cut on
     /// character boundaries.

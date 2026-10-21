@@ -51,8 +51,9 @@ struct AppControlInfoTests {
     }
 
     @Test func theSummaryIsOneShortPhrase() {
-        #expect(AppControlInfo(scriptable: true, weakAccessibility: nil).summary == " · AppleScript · AX bom")
+        #expect(AppControlInfo(scriptable: true, weakAccessibility: nil).summary == "")
         #expect(AppControlInfo(scriptable: false, weakAccessibility: "Electron").summary == " · sem AppleScript · AX fraco (Electron)")
+        #expect(AppControlInfo(scriptable: true, weakAccessibility: "Electron").summary == " · AX fraco (Electron)")
     }
 
     @Test func theListGainsTheWayToControlEachApp() {
@@ -61,8 +62,9 @@ struct AppControlInfoTests {
         let text = AppListFormatter.format([spotify, plain],
                                            control: [7: .init(scriptable: true, weakAccessibility: "Electron"), 8: .init(scriptable: false, weakAccessibility: nil)],
                                            shortcuts: ["Spotify": ["Spotify: pausar"]])
-        #expect(text.contains("- Spotify (com.spotify.client) · pid 7 · AppleScript · AX fraco (Electron) · Atalhos: Spotify: pausar"))
-        #expect(text.contains("- Calculadora (com.apple.calculator) · pid 8 · em primeiro plano · sem AppleScript · AX bom"))
+        #expect(text.contains("- Spotify (com.spotify.client) · pid 7 · AX fraco (Electron) · Atalhos: Spotify: pausar"))
+        #expect(text.contains("- Calculadora (com.apple.calculator) · pid 8 · em primeiro plano · sem AppleScript"))
+        #expect(text.hasPrefix("2 apps abertos (sem aviso na linha: AppleScript · AX bom):"))
         // Without the extras the line is what it always was.
         #expect(AppListFormatter.format([plain]).contains("pid 8 · em primeiro plano") && !AppListFormatter.format([plain]).contains("AX"))
     }

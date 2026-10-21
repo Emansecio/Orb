@@ -72,6 +72,16 @@ actor AXAppSession {
         queue = DispatchSerialQueue(label: "Orb.AX.\(pid)", qos: .userInitiated)
     }
 
+    /// Electron and Chromium build their tree on demand: asks for `AXManualAccessibility` the first time only. Returns
+    /// whether the app accepted when it was asked just now, and nil when it had been asked before.
+    nonisolated func enableManualAccessibilityOnce(root: any AccessibilityElement, system: any AccessibilitySystem) -> Bool? {
+        guard state.withLock({ $0.manualAccessibility == nil }) else { return nil }
+        system.prepare(root)
+        let accepted = root.attribute("AXManualAccessibility")?.bool == true
+        state.withLock { $0.manualAccessibility = accepted }
+        return accepted
+    }
+
     nonisolated var isStuck: Bool { state.withLock { $0.overdue > 0 } }
 
     /// Puts `work` straight on the session's queue (the actor's own executor, so it is still one call at a time): starting
