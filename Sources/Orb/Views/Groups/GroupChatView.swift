@@ -232,7 +232,7 @@ private struct GroupRow: View, Equatable {
                 .foregroundStyle(Palette.muted)
                 .frame(maxWidth: .infinity)
                 .multilineTextAlignment(.center)
-        case .bot, .tool, .approval, .greeting:
+        case .bot, .tool, .approval, .greeting, .browserView:
             // A group's thread holds none of these: the Orbs' own work stays in their side conversations.
             EmptyView()
         }

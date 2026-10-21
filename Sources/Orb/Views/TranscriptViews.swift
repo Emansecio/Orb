@@ -71,6 +71,8 @@ struct TranscriptRow: View, Equatable {
             OrbMessageRow(message: message, botID: botID).alignedWithReplyText()
         case .groupPause(let pause):
             GroupPauseCard(pause: pause)
+        case .browserView(let view):
+            LiveScreenRow(itemID: item.id, view: view, botID: botID)
         }
     }
 }

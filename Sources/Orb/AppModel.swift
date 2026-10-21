@@ -206,6 +206,8 @@ final class AppModel {
     @ObservationIgnored let outputsDirectory: URL
     /// The Orbs' browsers (`navegador/<id>/` in the data folder holds what each keeps, logins included).
     @ObservationIgnored var browserHub: BrowserHub
+    /// The live screens of the Orbs' browsers (docs/TELA-AO-VIVO.md).
+    @ObservationIgnored lazy var liveScreens = LiveFeedHub(browsers: browserHub)
     /// Ajustes → Navegador: installs, updates and removes what the Orbs' browser needs (`navegador/bin`, `chrome`).
     @ObservationIgnored lazy var browserSetup: BrowserSetup = {
         let root = browserHub.profilesDirectory ?? store.directory.appending(path: "navegador")

@@ -257,6 +257,7 @@ enum ConversationSearch {
             let line = ExchangeWords.line(for: message)
             return (.exchange, message.text.isEmpty ? line : line + ": " + message.text)
         case .groupPause: return nil
+        case .browserView: return nil
         }
     }
 

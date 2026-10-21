@@ -22,12 +22,12 @@ import Testing
 
     // MARK: Tabs
 
-    @Test func tabsAreTheFourSectionsInOrder() {
-        #expect(InspectorTab.allCases.map(\.title) == ["Geral", "Memória", "Pasta e acessos", "Rotinas"])
+    @Test func tabsAreTheSectionsInOrder() {
+        #expect(InspectorTab.allCases.map(\.title) == ["Geral", "Memória", "Pasta e acessos", "Rotinas", "Tela"])
     }
 
     @Test func theBarShowsEachTabOnOneShortLine() {
-        #expect(InspectorTab.allCases.map(\.shortTitle) == ["Geral", "Memória", "Pasta", "Rotinas"])
+        #expect(InspectorTab.allCases.map(\.shortTitle) == ["Geral", "Memória", "Pasta", "Rotinas", "Tela"])
     }
 
     @Test func aRowLeavesOutTheListMarkTheTextWasWrittenWith() {

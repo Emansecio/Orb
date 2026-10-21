@@ -53,6 +53,7 @@ struct BotInspector: View {
                         case .memory: memoryTab(bot)
                         case .folder: folderTab(bot)
                         case .routines: routinesTab(bot)
+                        case .screen: LiveScreenTab(botID: bot.id)
                         }
                     }
                     .formStyle(.grouped)

@@ -161,6 +161,33 @@ struct MemoryFact: Identifiable, Hashable, Codable, Sendable {
     var text: String
 }
 
+/// One use of the Orb's browser in a turn, as the chat keeps it (see `docs/TELA-AO-VIVO.md`): where it went, how long, how
+/// many actions, and how it ended. Changes once per browser action at most, never per frame: the frames live apart, in
+/// memory only (`LiveFrameStore`).
+struct BrowserViewItem: Codable, Sendable, Equatable {
+    enum Outcome: String, Codable, Sendable {
+        /// The turn is still using the browser: the card shows the page live.
+        case running
+        case done
+        /// The turn failed or the browser went away.
+        case failed
+        /// Parar, or the app quit in the middle.
+        case stopped
+
+        init(from decoder: Decoder) throws { self = try decoder.rawValue(Self.self, fallback: .stopped) }
+    }
+
+    /// The page's host when the use began or was last seen ("checkout.acessosfit.com.br"); empty until known.
+    var host = ""
+    /// The path the browser was on when the use ended ("/pagamentos"), for the closing line.
+    var lastPath: String?
+    var startedAt = Date.now
+    var endedAt: Date?
+    /// Browser tool calls in this use.
+    var actions = 0
+    var outcome = Outcome.running
+}
+
 struct TranscriptItem: Identifiable, Codable, Sendable, Equatable {
     enum Kind: Codable, Sendable, Equatable {
         case user(text: String, attachments: [String])
@@ -177,6 +204,9 @@ struct TranscriptItem: Identifiable, Codable, Sendable, Equatable {
         case orbMessage(OrbMessageItem)
         /// A group reached its budget and waits for the person to continue or end the request.
         case groupPause(GroupPauseItem)
+        /// The Orb used its own browser in this turn: while the turn runs the chat shows the page live in this item's place
+        /// (`LiveScreenCard`), and after it a line of what was done. Only words are kept here, never a picture.
+        case browserView(BrowserViewItem)
     }
 
     var id = UUID()

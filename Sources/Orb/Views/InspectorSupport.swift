@@ -7,6 +7,8 @@ import Foundation
 /// The panel's tabs.
 enum InspectorTab: String, CaseIterable, Identifiable, Sendable {
     case general, memory, folder, routines
+    /// The Orb's browser, live and larger (`docs/TELA-AO-VIVO.md`).
+    case screen
 
     var id: String { rawValue }
 
@@ -16,6 +18,7 @@ enum InspectorTab: String, CaseIterable, Identifiable, Sendable {
         case .memory: "Memória"
         case .folder: "Pasta e acessos"
         case .routines: "Rotinas"
+        case .screen: "Tela"
         }
     }
 
@@ -31,6 +34,7 @@ enum InspectorTab: String, CaseIterable, Identifiable, Sendable {
         case .memory: "brain"
         case .folder: "folder"
         case .routines: "clock.arrow.circlepath"
+        case .screen: "play.rectangle"
         }
     }
 }

@@ -103,6 +103,9 @@ protocol BrowserDriver: Sendable {
     /// Goes up each time this driver learns that its browser closed or went away, so what was known about its tabs is not
     /// taken for the tabs of the next one (`TabBook`).
     var generation: Int { get }
+    /// The local port of this session's live stream of the page (agent-browser's `stream status`); nil when the browser
+    /// has none or is not running. It changes when the browser is launched again (`generation`).
+    func streamPort() async throws -> Int?
 }
 
 extension BrowserDriver {
@@ -113,4 +116,5 @@ extension BrowserDriver {
     func runningSessions() async -> [String] { [] }
     func runningSessionsSynchronously(timeout: TimeInterval) -> [String] { [] }
     var generation: Int { 0 }
+    func streamPort() async throws -> Int? { nil }
 }

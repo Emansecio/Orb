@@ -28,7 +28,7 @@ enum SessionNote {
                 lines.append("Assistant used " + call.title + detail + (call.state == .failed ? " (failed)" : ""))
             case .approval(let request):
                 if request.decision == .deny { lines.append("User denied: " + request.title) }
-            case .notice, .greeting, .event, .orbMessage, .groupPause:
+            case .notice, .greeting, .event, .orbMessage, .groupPause, .browserView:
                 break
             }
         }
