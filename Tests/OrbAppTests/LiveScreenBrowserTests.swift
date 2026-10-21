@@ -92,6 +92,15 @@ struct LiveScreenPointerTests {
         #expect(!setup.driver.calls.contains("box e1"))
     }
 
+    @Test func aListenerForAnotherOrbCostsThisOneNoBox() async throws {
+        setup.driver.state.withLock { $0.boxes["e1"] = CGRect(x: 1, y: 2, width: 3, height: 4) }
+        let heard = heard
+        setup.hub.setPointerHandler({ _, pointer in heard.withLock { $0.append(pointer) } }, only: UUID())
+        _ = try await run(BrowseClickTool(), ["ref": .string("e1")])
+        #expect(heard.withLock { $0.isEmpty })
+        #expect(setup.driver.calls.contains("click e1") && !setup.driver.calls.contains("box e1"))
+    }
+
     @Test func removingTheListenerBringsBackTheOldBehavior() async throws {
         setup.driver.state.withLock { $0.boxes["e1"] = CGRect(x: 1, y: 2, width: 3, height: 4) }
         listen()

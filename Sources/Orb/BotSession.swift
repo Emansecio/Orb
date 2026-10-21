@@ -110,7 +110,7 @@ final class BotSession {
     @ObservationIgnored var runningCalls: [UUID: ToolCall] = [:]
     /// How many tool calls the running turn has made (the working line's "3 ações").
     @ObservationIgnored var actionsThisTurn = 0
-    /// The turn's open `.browserView` item (nil: the turn has not used its browser, or the item is closed). See `noteBrowserTool`.
+    /// The turn's open `.browserView` item (nil: the turn has not used its browser, or the item is closed). See `browserToolChange`.
     @ObservationIgnored var browserViewID: UUID?
     /// The model's answer to this turn was cut off at its limit (the end of the turn sighs instead of celebrating).
     @ObservationIgnored var turnCutShort = false

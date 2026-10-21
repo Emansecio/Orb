@@ -17,8 +17,8 @@ struct BrowserHubLiveSource: LiveBrowserSource {
         browsers.pageLooksSensitive(botID: botID)
     }
 
-    func setPointerHandler(_ handler: (@Sendable (UUID, LivePointer) -> Void)?) {
-        browsers.setPointerHandler(handler)
+    func setPointerHandler(_ handler: (@Sendable (UUID, LivePointer) -> Void)?, only botID: UUID?) {
+        browsers.setPointerHandler(handler, only: botID)
     }
 }
 

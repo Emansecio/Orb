@@ -273,7 +273,7 @@ private struct LiveScreenClosedLine: View {
             Spacer(minLength: 0)
         }
         .padding(.leading, gutter)
-        .onAppear { hasLastScreen = model.liveScreens.lastScreen(of: itemID) != nil }
+        .onAppear { hasLastScreen = model.liveScreens.hasLastScreen(of: itemID) }
     }
 
     private func showLastScreen() {
@@ -312,13 +312,19 @@ struct LiveScreenTab: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let botID: UUID
+    @AppStorage(LiveScreenSetting.key) private var showsScreen = true
     @State private var lastImage: NSImage?
 
     var body: some View {
         let focus = LiveScreenFocus.shared.shown[botID]
         Section {
             VStack(alignment: .leading, spacing: 10) {
-                if let focus {
+                if !showsScreen {
+                    // Off in Settings: as before the live screen, nothing is opened.
+                    placeholder("A tela do navegador está desligada em Ajustes → Navegador")
+                        .aspectRatio(1.6, contentMode: .fit)
+                        .frame(maxWidth: .infinity)
+                } else if let focus {
                     lastScreen(focus)
                 } else {
                     liveScreen()
@@ -410,7 +416,10 @@ struct LiveScreenTab: View {
             }
             ZStack {
                 Palette.raised
-                if let lastImage {
+                if model.liveScreens.store(botID).isPrivate {
+                    // "Privado" hides every picture of the Orb's page, this one too.
+                    LiveScreenVeil(veil: .blur, text: LiveScreenText.veilText(for: .privateView, handoffPage: nil))
+                } else if let lastImage {
                     Image(nsImage: lastImage).resizable().scaledToFill()
                 } else {
                     placeholder("Esta tela não está mais na memória")

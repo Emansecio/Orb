@@ -5,26 +5,39 @@ import Foundation
 // itself is never written anywhere (`LiveFrameStore`).
 
 extension BotSession {
-    /// Opens this turn's browser item at its first browser tool and counts the action on it. One change of the transcript per
-    /// action, never per frame. With the setting off no item is opened (a use already open goes on counting and closes as usual).
-    func noteBrowserTool(_ call: ToolCall) {
-        guard let model, LiveScreenBrowser.countsAsUse(call) else { return }
-        let store = model.liveScreens.store(id)
+    /// This turn's browser item at a browser tool: opened at the first one, the action counted on it. Given back as a change of
+    /// the transcript, for the tool's own line to go in with it: one change per action, never per frame. With the setting off no
+    /// item is opened (a use already open goes on counting and closes as usual).
+    func browserToolChange(_ call: ToolCall) -> ((inout [TranscriptItem]) -> Void)? {
+        guard let model, LiveScreenBrowser.countsAsUse(call) else { return nil }
+        let hub = model.liveScreens
         let opened = call.title == LiveScreenBrowser.openTitle ? LiveScreenText.host(of: WorkPhrase.firstLine(of: call.detail)) : nil
-        let host = LiveScreenText.host(of: store.url) ?? opened
+        let host = LiveScreenText.host(of: hub.store(id).url) ?? opened
+        hub.browserActed(id)
         if let itemID = browserViewID {
-            mutateItems { items in
+            return { items in
                 guard let index = items.lastIndex(where: { $0.id == itemID }), case .browserView(var view) = items[index].kind else { return }
                 view.actions += 1
                 if let host { view.host = host }
                 items[index].kind = .browserView(view)
             }
-            return
         }
-        guard LiveScreenSetting.isOn(), call.title != LiveScreenBrowser.closeTitle else { return }
+        guard LiveScreenSetting.isOn(), call.title != LiveScreenBrowser.closeTitle else { return nil }
         let item = TranscriptItem(.browserView(BrowserViewItem(host: host ?? "", startedAt: .now, actions: 1)))
         browserViewID = item.id
-        mutateItems { $0.append(item) }
+        hub.beginUse(id)
+        return { $0.append(item) }
+    }
+
+    /// A hand-off card arrived. With this turn's live card standing for it, the card comes down to it, where the person looks
+    /// (its buttons answer it; the permission card then draws nothing): one change for both.
+    func appendHandoff(_ request: ApprovalRequest) {
+        guard let card = browserViewID else { return append(.approval(request)) }
+        let approval = TranscriptItem(.approval(request))
+        mutateItems { items in
+            if let index = items.lastIndex(where: { $0.id == card }) { items.append(items.remove(at: index)) }
+            items.append(approval)
+        }
     }
 
     /// Closes this turn's browser item: the end time, the page it ended on, how it ended. The hub keeps the last picture first,
@@ -32,7 +45,9 @@ extension BotSession {
     func closeBrowserView(_ outcome: BrowserViewItem.Outcome) {
         guard let itemID = browserViewID, let model else { return }
         browserViewID = nil
-        let path = LiveScreenText.path(of: model.liveScreens.store(id).url)
+        // Not the address of a protected page (a reset link, a code in the path): the line is saved with the conversation.
+        let frames = model.liveScreens.store(id)
+        let path = frames.isProtected ? nil : LiveScreenText.path(of: frames.url)
         model.liveScreens.endUse(id, itemID: itemID)
         mutateItems { items in
             guard let index = items.lastIndex(where: { $0.id == itemID }), case .browserView(var view) = items[index].kind else { return }

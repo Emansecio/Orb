@@ -353,6 +353,8 @@ final class LiveScreenLayerView: NSView {
         let reach = isBlurred ? blurRadius * 2 : 0
         pageLayer.frame = bounds.insetBy(dx: -reach, dy: -reach)
         CATransaction.commit()
+        // On entering the window it had no size yet, so it was not "in view": a chat that does not scroll would never feed it.
+        refresh()
     }
 }
 

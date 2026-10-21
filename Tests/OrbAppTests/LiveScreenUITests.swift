@@ -32,7 +32,7 @@ struct LiveScreenLogicTests {
         #expect(state(phase: .failed) == .failed)
         #expect(state(isPrivate: true) == .privateView)
         #expect(state(isProtected: true, isPrivate: true) == .protected, "a protected page is not the person's to show")
-        #expect(state(phase: .failed, isPrivate: true) == .failed)
+        #expect(state(phase: .failed, isPrivate: true) == .privateView, "a broken stream still shows its last frame: hidden too")
         #expect(state(phase: .failed, isProtected: true, handoff: true) == .needsYou, "a hand-off wins over everything")
         #expect(state(phase: .idle, handoff: true) == .needsYou)
     }
@@ -382,6 +382,18 @@ final class LiveScreenItemTests {
         #expect(model.pendingHandoff(of: id)?.id == request.id)
         model.decide(.once, approvalID: request.id, botID: id)
         #expect(model.pendingHandoff(of: id) == nil, "answered: the usual line again")
+    }
+
+    @Test @MainActor func theLiveCardComesDownToTheHandoffItStandsFor() {
+        let model = model()
+        let (id, _, session) = running(model)
+        model.apply(.toolStarted(browse("Abrindo página", "https://a.com")), to: id)
+        model.apply(.toolStarted(browse("Clicando em Entrar")), to: id)
+        model.apply(.toolStarted(browse("Lendo a página")), to: id)
+        model.apply(.approval(ApprovalRequest.handoff(botName: "Atlas", page: "https://a.com/login — “Entrar”")), to: id)
+        #expect(order(session) == ["Abrindo página", "Clicando em Entrar", "Lendo a página", "view", "other"],
+                "where the person looks, just above the hand-off it answers")
+        #expect(views(session).count == 1 && views(session)[0].actions == 3)
     }
 
     @Test @MainActor func anotherKindOfCardIsNotAHandoff() {

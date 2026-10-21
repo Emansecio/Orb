@@ -17,8 +17,8 @@ protocol LiveBrowserSource: Sendable {
     func streamPort(botID: UUID) async throws -> Int?
     /// The page needs the person or shows a secret (a login, a code, a captcha, a password field).
     func pageLooksSensitive(botID: UUID) -> Bool
-    /// Told about every place the Orb is about to act on, from any thread; nil stops the telling (nobody is looking).
-    func setPointerHandler(_ handler: (@Sendable (UUID, LivePointer) -> Void)?)
+    /// Told about every place the Orb `only` is about to act on, from any thread; nil stops the telling (nobody is looking).
+    func setPointerHandler(_ handler: (@Sendable (UUID, LivePointer) -> Void)?, only botID: UUID?)
 }
 
 /// One open connection to a stream.
@@ -254,7 +254,12 @@ struct LiveStreamRunner: Sendable {
         var retries = 0
         var again = false
         while !Task.isCancelled {
-            guard let generation = source.generation(botID: botID) else { return await fail() }
+            guard let generation = source.generation(botID: botID) else {
+                // No browser yet (the card comes at the Orb's first browser tool, which is still opening it): waited for like a
+                // port that is not there; after the pauses, `failed` until the Orb's next action asks again (`browserActed`).
+                guard await pauseBeforeRetry(&retries) else { return }
+                continue
+            }
             if again { await sink.phase(.connecting) }   // the hub said it for the first attempt
             again = true
             await refreshSensitivity()   // before any frame, so the replayed one is judged too

@@ -38,15 +38,15 @@ enum LiveCardState: Equatable, Sendable {
     /// A button of the card's third line.
     enum Button: Equatable, Sendable { case enlarge, stop, hide, reveal, done, cancel }
 
-    /// Most urgent first: the hand-off, then a protected page, a broken stream, the person's own "Privado", and last what
-    /// the stream says.
+    /// Most urgent first: the hand-off, then a protected page, the person's own "Privado" (a broken stream still shows its last
+    /// frame, so it hides that too), a broken stream, and last what the stream says.
     static func of(outcome: BrowserViewItem.Outcome, phase: LiveFrameStore.Phase, isProtected: Bool, isPrivate: Bool,
                    handoff: Bool) -> LiveCardState {
         guard outcome == .running else { return .ended }
         if handoff { return .needsYou }
         if isProtected { return .protected }
-        if phase == .failed { return .failed }
         if isPrivate { return .privateView }
+        if phase == .failed { return .failed }
         switch phase {
         case .live: return .live
         case .paused: return .paused

@@ -232,9 +232,13 @@ extension BotSession {
         case .toolStarted(let call):
             stopSpeaking()
             closeStreaming()
-            // The Orb's browser: the page shows live in an item of its own, above the line of the tool.
-            noteBrowserTool(call)
-            append(.tool(call))
+            // The Orb's browser: the page shows live in an item of its own, above the line of the tool (one change for both).
+            let browser = browserToolChange(call)
+            let tool = TranscriptItem(.tool(call))
+            mutateItems { items in
+                browser?(&items)
+                items.append(tool)
+            }
             model.live(id).runningTool = call.kind
             runningCalls[call.id] = call
             actionsThisTurn += 1
@@ -262,8 +266,12 @@ extension BotSession {
         case .approval(let request):
             stopSpeaking()
             closeStreaming()
-            append(.approval(request))
-            if request.isHandoff { syncHandoffPending() }
+            if request.isHandoff {
+                appendHandoff(request)
+                syncHandoffPending()
+            } else {
+                append(.approval(request))
+            }
             model.setAwaitingApproval(true, of: id)
             model.announceApproval(request, of: id)
         case .message(let message):

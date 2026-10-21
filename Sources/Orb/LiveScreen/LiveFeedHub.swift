@@ -47,8 +47,11 @@ final class LiveFeedHub {
     /// The Orbs whose stream gave up: they are tried again only when a view asks again (`acquire`), never in a loop.
     private var failed: Set<UUID> = []
     private var connection: Connection?
-    private var pointerHandlerInstalled = false
-    /// The newest unprotected frame of each Orb, compressed: what `endUse` keeps.
+    /// The Orb the browser tells its pointer for (the one streaming); nil: it is told nothing and asks for no box.
+    private var pointerTarget: UUID?
+    /// The Orbs with a use of the browser open in their transcript (`beginUse`…`endUse`): only theirs is a last screen.
+    private var usesOpen: Set<UUID> = []
+    /// The newest unprotected frame of each Orb's open use, compressed: what `endUse` keeps.
     private var newestJPEG: [UUID: Data] = [:]
     /// Least recently used first.
     private var lastScreens: [LastScreen] = []
@@ -103,7 +106,9 @@ final class LiveFeedHub {
         if connection?.botID == botID {
             graceTasks[botID]?.cancel()
             graceTasks[botID] = Task { [clock] in
-                do { try await clock.sleep(for: Self.graceAfterRelease) } catch { return }
+                do { try await clock.sleep(for: LiveFeedHub.graceAfterRelease) } catch { return }
+                // Woken just as an `acquire` cancelled it (and maybe a `release` made a new one): that one decides.
+                guard !Task.isCancelled else { return }
                 self.graceEnded(botID)
             }
         } else {
@@ -118,7 +123,8 @@ final class LiveFeedHub {
         guard holds[botID] == nil else { return }
         if connection?.botID == botID {
             stopConnection()
-            stores[botID]?.setPhase(.idle)   // its last frame stays for the card to show dimmed
+            // Its last frame stays for the card of a use still open to show dimmed; with none, nothing shows it any more.
+            if usesOpen.contains(botID) { stores[botID]?.setPhase(.idle) } else { stores[botID]?.clear() }
         }
         updatePointerHandler()
         reconcile()
@@ -136,6 +142,7 @@ final class LiveFeedHub {
         stores[botID] = nil
         protections[botID] = nil
         newestJPEG[botID] = nil
+        usesOpen.remove(botID)
         lastScreens.removeAll { $0.botID == botID }
         updatePointerHandler()
         if wasStreaming { reconcile() }
@@ -143,14 +150,34 @@ final class LiveFeedHub {
 
     // MARK: Last screen
 
+    /// A use of the browser (`BrowserViewItem`) of this Orb opened in its transcript: its frames may become its last screen.
+    func beginUse(_ botID: UUID) {
+        usesOpen.insert(botID)
+        newestJPEG[botID] = nil
+    }
+
+    /// The Orb acted on its browser: a stream that gave up (the browser was not open yet, or was launched again) is tried
+    /// once more if a view still shows it. Never a loop: only an action of the Orb asks again.
+    func browserActed(_ botID: UUID) {
+        guard failed.remove(botID) != nil, (holds[botID]?.total ?? 0) > 0 else { return }
+        reconcile()
+    }
+
     /// The use of the browser (`BrowserViewItem`) of this Orb ended: its last picture is kept, compressed, as that item's.
-    /// Never one of a protected page.
+    /// Never one of a protected page, nor while the person hid the page ("Privado"). Frames that still come in the seconds
+    /// before the stream closes are nobody's.
     func endUse(_ botID: UUID, itemID: UUID) {
+        usesOpen.remove(botID)
         defer { newestJPEG[botID] = nil }
-        guard protections[botID]?.isProtected != true, let jpeg = newestJPEG[botID] else { return }
+        guard protections[botID]?.isProtected != true, stores[botID]?.isPrivate != true, let jpeg = newestJPEG[botID] else { return }
         lastScreens.removeAll { $0.itemID == itemID }
         lastScreens.append(LastScreen(itemID: itemID, botID: botID, jpeg: jpeg))
         if lastScreens.count > Self.lastScreenLimit { lastScreens.removeFirst(lastScreens.count - Self.lastScreenLimit) }
+    }
+
+    /// Whether a finished use still has its last picture; only looks (a line scrolled past does not make it recent).
+    func hasLastScreen(of itemID: UUID) -> Bool {
+        lastScreens.contains { $0.itemID == itemID }
     }
 
     /// The last picture of a finished use of the browser (`BrowserViewItem`), as JPEG, while it is still kept in memory.
@@ -213,11 +240,10 @@ final class LiveFeedHub {
 
     private func startConnection(_ botID: UUID) {
         stopConnection()
-        let store = store(botID)
-        store.setPhase(.connecting)
+        store(botID).setPhase(.connecting)
         let token = UUID()
         let inbox = LiveInbox()
-        let protection = protection(botID)
+        let shield = protection(botID)
         let sink = LiveStreamSink(
             phase: { [weak self] phase in self?.streamPhase(phase, botID: botID, token: token) },
             url: { [weak self] url in
@@ -227,9 +253,10 @@ final class LiveFeedHub {
             frame: { [weak self] decoded in self?.streamFrame(decoded, botID: botID, token: token) },
             protectionChanged: { [weak self] in self?.applyProtection(botID) })
         let runner = LiveStreamRunner(botID: botID, source: source, transport: transport,
-                                      clock: clock, protection: protection, inbox: inbox, decoder: decoder, sink: sink)
+                                      clock: clock, protection: shield, inbox: inbox, decoder: decoder, sink: sink)
         let task = Task.detached(priority: .userInitiated) { await runner.run() }
         connection = Connection(botID: botID, token: token, task: task, inbox: inbox)
+        updatePointerHandler()
         applyProtection(botID)   // an already protected Orb opens with its frame down
     }
 
@@ -239,6 +266,7 @@ final class LiveFeedHub {
         connection.inbox.close()
         connection.task.cancel()
         self.connection = nil
+        updatePointerHandler()
     }
 
     private func streamPhase(_ phase: LiveFrameStore.Phase, botID: UUID, token: UUID) {
@@ -255,22 +283,23 @@ final class LiveFeedHub {
         guard connection?.token == token, protections[botID]?.isProtected != true, let store = stores[botID] else { return }
         framesProcessed += 1
         store.deliver(decoded.frame)
-        newestJPEG[botID] = decoded.jpeg
+        if usesOpen.contains(botID) { newestJPEG[botID] = decoded.jpeg }
     }
 
     // MARK: The Orb's pointer
 
     /// The browser tells where it is about to act only while someone could see it.
+    /// Only for the Orb that streams: the other Orbs' actions cost no `get box`.
     private func updatePointerHandler() {
-        let needed = !holds.isEmpty || connection != nil
-        guard needed != pointerHandlerInstalled else { return }
-        pointerHandlerInstalled = needed
-        if needed {
-            source.setPointerHandler { [weak self] botID, pointer in
+        let target = connection?.botID
+        guard target != pointerTarget else { return }
+        pointerTarget = target
+        if let target {
+            source.setPointerHandler({ [weak self] botID, pointer in
                 Task { @MainActor in self?.pointerArrived(botID, pointer) }
-            }
+            }, only: target)
         } else {
-            source.setPointerHandler(nil)
+            source.setPointerHandler(nil, only: nil)
         }
     }
 

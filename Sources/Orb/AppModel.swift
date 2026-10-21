@@ -1190,6 +1190,9 @@ final class AppModel {
         }
         let browsers = browserHub
         Task { await browsers.deleteData(botID: botID) }
+        // Its live screen: the stream, the last frame and its last screens in memory.
+        liveScreens.forget(botID)
+        LiveScreenFocus.shared.clear(of: botID)
         if BrowserProxy.hasUser(bot(botID)?.browserProxy) { secretVault.remove(BrowserProxy.keychainAccount(botID: botID)) }
         session.memoryIdle?.cancel()
         session.memoryIdle = nil

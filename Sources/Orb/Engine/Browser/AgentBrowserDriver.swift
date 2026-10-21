@@ -221,6 +221,7 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
     /// The longest a page load, or the first launch of the browser, is waited for.
     static let openTimeout = Duration.seconds(75)
     static let commandTimeout = Duration.seconds(45)
+    static let boxTimeout = Duration.seconds(2)
     /// Output above this would be cut in the middle and no longer be JSON (a snapshot of a huge page).
     static let outputLimit = 8_000_000
 
@@ -549,7 +550,8 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
     func box(of ref: String) async throws -> CGRect? {
         // Measured on 0.39: `{"x":599,"y":698.28,"width":82,"height":18}`, the same numbers as `getBoundingClientRect()` (the
         // viewport's CSS pixels, scroll already counted).
-        let data = try await send(["get", "box", "@" + ref])
+        // Short: it is asked before the action, which waits for it (a cursor that comes late is no cursor).
+        let data = try await send(["get", "box", "@" + ref], timeout: Self.boxTimeout)
         guard let x = data["x"]?.number, let y = data["y"]?.number,
               let width = data["width"]?.number, let height = data["height"]?.number,
               width >= 0, height >= 0 else { return nil }

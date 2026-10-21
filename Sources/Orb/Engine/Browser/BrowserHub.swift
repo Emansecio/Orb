@@ -480,9 +480,14 @@ final class BrowserHub: Sendable {
     private let scoped = OSAllocatedUnfairLock<[UUID: [String: BrowserSession]]>(initialState: [:])
     /// The Orbs whose profile caches are being emptied now (`cleanCachesIfDue`): their browser waits.
     private let cleaning = OSAllocatedUnfairLock<Set<UUID>>(initialState: [])
-    /// Where the live screen hears about the Orb's pointer (`setPointerHandler`); nil while no one listens, and then the tools ask
-    /// the browser for nothing extra.
-    private let pointerHandler = OSAllocatedUnfairLock<(@Sendable (UUID, LivePointer) -> Void)?>(initialState: nil)
+    /// Where the live screen hears about the Orb's pointer (`setPointerHandler`), and for which Orb (nil: any); nil while no one
+    /// listens, and then the tools ask the browser for nothing extra.
+    private let pointerHandler = OSAllocatedUnfairLock<PointerListener?>(initialState: nil)
+
+    private struct PointerListener: Sendable {
+        let botID: UUID?
+        let handler: @Sendable (UUID, LivePointer) -> Void
+    }
     /// Whether the page each Orb last looked at (opened, snapshot, read) asked for the person or had a secret field; a flag, never
     /// the page's text.
     private let sensitivePages = OSAllocatedUnfairLock<Set<UUID>>(initialState: [])
@@ -635,15 +640,18 @@ final class BrowserHub: Sendable {
 
     /// Where the app hears that an Orb is about to act on an element (the live screen's cursor): `botID` and where on the page.
     /// Called from inside the Orb's browser lock, on whatever thread the tool runs: the handler only hands the value over.
-    func setPointerHandler(_ handler: (@Sendable (UUID, LivePointer) -> Void)?) { pointerHandler.withLock { $0 = handler } }
+    func setPointerHandler(_ handler: (@Sendable (UUID, LivePointer) -> Void)?, only botID: UUID? = nil) {
+        let listener = handler.map { PointerListener(botID: botID, handler: $0) }
+        pointerHandler.withLock { $0 = listener }
+    }
 
     /// Tells the handler where the element is, asked of the browser (`get box`) just before the action. Inside the `exclusive` of the
     /// action, so it is the same page and no other conversation moves it. Nothing happens, and nothing is asked of the browser,
     /// when no one listens; a box that cannot be had is no cursor, never an error.
     func point(at ref: String, kind: LivePointer.Kind, session: BrowserSession) async {
-        guard let handler = pointerHandler.withLock({ $0 }) else { return }
+        guard let listener = pointerHandler.withLock({ $0 }), listener.botID == nil || listener.botID == session.botID else { return }
         guard let rect = try? await session.driver.box(of: ref) else { return }
-        handler(session.botID, LivePointer(rect: rect, kind: kind))
+        listener.handler(session.botID, LivePointer(rect: rect, kind: kind))
     }
 
     /// The page an Orb just looked at, as far as the live screen goes: a login, a code, a captcha, or a password or card field in
