@@ -21,7 +21,7 @@ enum ProviderGroup: CaseIterable, Identifiable, Sendable {
     var kinds: [ProviderKind] {
         switch self {
         case .subscription: [.claudeCode, .chatgpt]
-        case .apiKey: [.openai, .anthropic, .xai, .openrouter, .opencodeZen, .opencodeGo, .commandCode]
+        case .apiKey: [.openai, .anthropic, .xai, .openrouter, .opencodeZen, .opencodeGo, .commandCode, .openDesign]
         case .local: [.ollama, .lmstudio]
         case .advanced: [.custom]
         }
@@ -43,6 +43,7 @@ extension ProviderKind {
         case .opencodeZen: "OpenCode Zen"
         case .opencodeGo: "OpenCode Go"
         case .commandCode: "Command Code"
+        case .openDesign: "Open Design"
         case .xai: "xAI (Grok)"
         case .openrouter: "OpenRouter"
         case .ollama: "Ollama"
@@ -61,6 +62,7 @@ extension ProviderKind {
         case .opencodeZen: "Vários modelos, pré-pago"
         case .opencodeGo: "Modelos abertos por assinatura"
         case .commandCode: "Vários laboratórios, uma chave"
+        case .openDesign: "Gateway da Open Design Cloud"
         case .xai: "Modelos Grok, cobrados por uso"
         case .openrouter: "Centenas de modelos com uma chave"
         case .ollama: "Roda no seu Mac, sem enviar nada para fora"

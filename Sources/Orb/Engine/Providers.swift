@@ -57,7 +57,7 @@ extension ProviderModel {
 }
 
 enum ProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
-    case chatgpt, claudeCode, openai, anthropic, opencodeZen, opencodeGo, commandCode, xai, openrouter, ollama, lmstudio, custom
+    case chatgpt, claudeCode, openai, anthropic, opencodeZen, opencodeGo, commandCode, openDesign, xai, openrouter, ollama, lmstudio, custom
 
     var id: String { rawValue }
 
@@ -70,6 +70,7 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .opencodeZen: "OpenCode Zen"
         case .opencodeGo: "OpenCode Go"
         case .commandCode: "Command Code"
+        case .openDesign: "Open Design"
         case .xai: "xAI (Grok)"
         case .openrouter: "OpenRouter"
         case .ollama: "Ollama (local)"
@@ -87,6 +88,7 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .opencodeZen: "Gateway da OpenCode com modelos testados em agentes (Claude, GPT, Grok e abertos; os modelos Gemini, que usam outro formato, ainda não aparecem). Pré-pago: cobra do seu saldo pelo uso, sem margem sobre o preço do modelo. Os modelos gratuitos, que podem usar seus dados, ficam fora da lista."
         case .opencodeGo: "Assinatura da OpenCode (Go US$ 10/mês, Go Plus US$ 40/mês) com modelos abertos como GLM, Kimi, DeepSeek e Qwen. O uso tem limite por modelo em janelas de 5 horas, semana e mês; passando do limite, os modelos gratuitos seguem funcionando, e o saldo do Zen cobre se você ativar \"Use balance\" no console."
         case .commandCode: "Modelos de vários laboratórios (Claude, GPT, DeepSeek, Kimi, GLM…) pela API da Command Code. Precisa de um plano com acesso à API: Provider (pago por uso), GOAT, Pro, Max ou Team. O plano Go não inclui a API. Os modelos gratuitos ou promocionais, que podem rodar sob outros termos, ficam fora da lista."
+        case .openDesign: "Gateway da Open Design Cloud com modelos de vários laboratórios por uma chave só, no formato de chat da OpenAI. As chaves são pessoais (não valem para o espaço de trabalho) e se criam em open-design.ai, em API keys."
         case .xai: "Modelos Grok pela API da xAI."
         case .openrouter: "Centenas de modelos com uma chave só."
         case .ollama: "Modelos rodando no seu Mac com o Ollama."
@@ -102,6 +104,7 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .opencodeZen: "https://opencode.ai/zen/v1"
         case .opencodeGo: "https://opencode.ai/zen/go/v1"
         case .commandCode: "https://api.commandcode.ai/provider/v1"
+        case .openDesign: "https://amr-link.open-design.ai/v1"
         case .xai: "https://api.x.ai/v1"
         case .openrouter: "https://openrouter.ai/api/v1"
         case .ollama: "http://localhost:11434/v1"
@@ -117,6 +120,7 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .anthropic: URL(string: "https://console.anthropic.com/settings/keys")
         case .opencodeZen, .opencodeGo: URL(string: "https://opencode.ai/auth")
         case .commandCode: URL(string: "https://commandcode.ai/settings/keys")
+        case .openDesign: URL(string: "https://open-design.ai")
         case .xai: URL(string: "https://console.x.ai")
         case .openrouter: URL(string: "https://openrouter.ai/keys")
         case .chatgpt, .claudeCode, .ollama, .lmstudio, .custom: nil
@@ -274,7 +278,7 @@ enum ModelCatalog {
             return ids.map { ProviderModel(id: $0, name: $0, format: account.format) }
         case .openrouter:
             return openRouterModels(try await OpenAIClient(baseURL: base, apiKey: token, session: session).modelEntries())
-        case .claudeCode, .xai, .ollama, .lmstudio:
+        case .claudeCode, .openDesign, .xai, .ollama, .lmstudio:
             return try await OpenAIClient(baseURL: base, apiKey: token, session: session).models()
                 .map { ProviderModel(id: $0, name: $0, format: .chat) }
         }
