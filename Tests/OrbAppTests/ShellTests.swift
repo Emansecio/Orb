@@ -572,11 +572,17 @@ final class BackgroundJobsTests {
     }
 
     @Test func aBackgroundCommandThatWentQuietReturnsBeforeTheWindowEnds() async throws {
+        // A long window of its own, so a slow machine does not blur "returned when quiet" with "the window ended".
+        let patient = BackgroundJobs(directory: directory.appending(path: "quiet"), firstOutputWindow: .seconds(8))
         let clock = ContinuousClock()
         var started: (job: BackgroundJobs.Snapshot, firstOutput: String)?
-        let elapsed = try await clock.measure { started = try await start("echo ready; sleep 30") }
+        let elapsed = try await clock.measure {
+            started = try await patient.start(botID: bot, command: "echo ready; sleep 30", directory: directory,
+                                              shell: "/bin/zsh", environment: basicEnvironment)
+        }
         #expect(started?.firstOutput.contains("ready") == true)
-        #expect(elapsed < .milliseconds(950), Comment(rawValue: "\(elapsed)"))
+        #expect(elapsed < .seconds(4), Comment(rawValue: "\(elapsed)"))
+        await patient.forget(botID: bot)
     }
 
     @Test func jobOutputListsEveryRunningJobAndOnlyTheLatestFinishedOnes() async throws {
