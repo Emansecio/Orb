@@ -192,7 +192,7 @@ struct SystemPromptTests {
         #expect(limited.contains("\"Terminal e arquivos\"") && limited.contains("\"Controlar apps do Mac\"") && limited.contains("\"Conectores\""))
         #expect(!limited.contains("\"Navegar na web\""))
         #expect(limited.contains("Do not emulate") && limited.contains("osascript") && limited.contains("curl"))
-        #expect(limited.contains("turn on, in the Orb's panel (Geral → \"O que Atlas pode usar\")"))
+        #expect(limited.contains("turn on, in the Orb's panel (Geral → \"Pode usar\")"))
 
         let noBrowser = PromptParts.permissions(bot(capabilities: [.terminal, .computerUse, .connectors]))
         #expect(noBrowser.contains("\"Navegar na web\"") && !noBrowser.contains("\"Terminal e arquivos\""))
@@ -218,7 +218,7 @@ struct SystemPromptTests {
         let readOnly = PromptParts.permissions(bot(mode: .readOnly))
         #expect(readOnly.contains("Geral → Permissões → Modo") && readOnly.contains("permissions button next to the message box"))
         let noMacApps = PromptParts.permissions(bot(capabilities: [.terminal]))
-        #expect(noMacApps.contains("\"Controlar apps do Mac\"") && noMacApps.contains("Geral → \"O que"))
+        #expect(noMacApps.contains("\"Controlar apps do Mac\"") && noMacApps.contains("Geral → \"Pode usar\""))
     }
 
     @Test func theHomeIsTheDefaultFolder() {

@@ -429,7 +429,7 @@ Separadas das anteriores: dizem o que o **macOS** deixa o app fazer. Ficam em Aj
   "Permitir…" (`OpenPrivacySettingsButton`: pede ao macOS onde ele mostra o aviso, senão abre o painel certo); o botão também
   aparece quando uma captura de tela sai só com o papel de parede ou o `browser_tab` traz a recusa dentro do resultado.
   O nome do app recusado é lido também do texto em português do sistema ("eventos Apple para Mail") e, se nada o nomeia e o
-  script fala com um só app, esse é o app. No painel do Orb (Geral → "O que o Orb pode usar"), a chave "Controlar apps do Mac"
+  script fala com um só app, esse é o app. No painel do Orb (Geral → "Pode usar"), a chave "Controlar apps do Mac"
   ligada mostra o atalho **Permissões**.
 - `ui_read` e `ui_act` só são oferecidos ao modelo com a Acessibilidade concedida (o prompt avisa quando ficam de fora).
 - As permissões valem para a identidade de assinatura do app. Com assinatura ad-hoc (o padrão de `scripts/bundle.sh`), cada

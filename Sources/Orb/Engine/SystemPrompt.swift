@@ -51,7 +51,7 @@ enum PromptParts {
 
     /// Where the user turns a capability on, by the names the app really shows (`Capability.label` is the name of each
     /// switch). The section is titled after the Orb.
-    static func whereToTurnOn(_ bot: Bot) -> String { "the Orb's panel (Geral → \"O que \(bot.name) pode usar\")" }
+    static func whereToTurnOn(_ bot: Bot) -> String { "the Orb's panel (Geral → \"Pode usar\")" }
 
     /// What the Orb may do right now, in plain words, and how to work with that.
     static func permissions(_ bot: Bot) -> String {
