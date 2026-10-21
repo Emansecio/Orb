@@ -60,18 +60,64 @@ enum TurnPreface {
             + "in the system prompt:\n" + Fence.neutralize(memory, tags: [memoryTag, name]) + "\n</\(memoryTag)>"
     }
 
-    /// The newest `memoryUpdate` block the model can still read in `history` (condensing drops the older ones' prefaces).
-    static func latestMemoryUpdate(in history: [ChatMessage]) -> String? {
+    /// The newest block with `tag` the model can still read in `history` (condensing drops the older ones' prefaces).
+    static func latestBlock(_ tag: String, in history: [ChatMessage]) -> String? {
         for message in history.reversed() where message.role == .user && message.content.hasPrefix(openTag) {
             // Only the preface: a block pasted in the message itself is not the app's.
             guard let close = message.content.range(of: closeTag) else { continue }
             let preface = message.content[..<close.lowerBound]
-            guard let start = preface.range(of: "<\(memoryTag)>\n"),
-                  let end = preface.range(of: "\n</\(memoryTag)>", range: start.upperBound..<preface.endIndex)
+            guard let start = preface.range(of: "<\(tag)>\n"),
+                  let end = preface.range(of: "\n</\(tag)>", range: start.upperBound..<preface.endIndex)
             else { continue }
             return String(preface[start.lowerBound..<end.upperBound])
         }
         return nil
+    }
+
+    /// The newest `memoryUpdate` block the model can still read in `history`.
+    static func latestMemoryUpdate(in history: [ChatMessage]) -> String? { latestBlock(memoryTag, in: history) }
+
+    static let permissionsTag = "permissions_update"
+    static let folderTag = "folder_instructions_update"
+    static let skillsTag = "skills_update"
+
+    /// The permissions section (`PromptParts.permissions`) as a preface carries it once the mode or the switches changed:
+    /// the system prompt keeps the one the conversation started with. The app enforces the real permissions (the gate),
+    /// whatever this text says; it only tells the model what to expect.
+    static func permissionsUpdate(_ section: String) -> String {
+        "<\(permissionsTag)>\nWhat you may do changed since this conversation began. The section below REPLACES the \"What you may do\" "
+            + "section of the system prompt: follow it, not the older one.\n" + Fence.neutralize(section, tags: [permissionsTag, name])
+            + "\n</\(permissionsTag)>"
+    }
+
+    /// The folder instructions section (`FolderInstructions.prompt`, which already tells trusted instructions from reference
+    /// material) as a preface carries it once the file, or the user's trust in it, changed. Empty: the file is gone.
+    static func folderUpdate(_ section: String) -> String {
+        let body = section.isEmpty
+            ? "The working folder no longer has an instruction file. Ignore the section about the folder's instructions or reference "
+                + "material in the system prompt."
+            : "The working folder's instruction file (or the user's trust in it) changed since this conversation began. The section "
+                + "below REPLACES the one about the folder in the system prompt; it counts as instructions only if it says the user "
+                + "trusts it.\n" + Fence.neutralize(section, tags: [folderTag, name])
+        return "<\(folderTag)>\n" + body + "\n</\(folderTag)>"
+    }
+
+    /// The skills section (`PromptParts.skills`) as a preface carries it once skills were added, removed or changed. Empty: none left.
+    static func skillsUpdate(_ section: String) -> String {
+        let body = section.isEmpty
+            ? "You have no skills now. Ignore the list of skills in the system prompt."
+            : "Your skills changed since this conversation began (added, removed or renamed). The list below REPLACES the one in the "
+                + "system prompt.\n" + Fence.neutralize(section, tags: [skillsTag, name])
+        return "<\(skillsTag)>\n" + body + "\n</\(skillsTag)>"
+    }
+
+    /// The update block for `current` when it is not what the model already holds: the newest block of `tag` in `history`,
+    /// or, with none, the block for the `frozen` section the system prompt carries. Empty when there is nothing to tell.
+    static func pending(tag: String, frozen: String, current: String, history: [ChatMessage],
+                        block: (String) -> String) -> String {
+        let now = block(current)
+        let known = latestBlock(tag, in: history) ?? block(frozen)
+        return known == now ? "" : now
     }
 
     static let name = "orb_context"
@@ -168,6 +214,15 @@ enum TurnPreface {
     }
 }
 
+/// The parts of the system prompt besides the memory that stay as the conversation began with them, so the provider's prompt
+/// cache lasts: a change reaches the model in a message's preface instead (`TurnPreface.permissionsUpdate`, `folderUpdate`,
+/// `skillsUpdate`). An empty text is a section that was not there; nil, one not recorded (conversations from before this).
+struct FrozenSections: Codable, Sendable, Equatable {
+    var permissions: String?
+    var folder: String?
+    var skills: String?
+}
+
 /// What a turn records on its conversation once the model has actually been given the snapshot (see `AppModel`): a turn that
 /// is stopped or fails before that leaves the marks as they were, so the next turn sends again.
 struct DeliveryMarks: Sendable, Equatable {
@@ -176,11 +231,14 @@ struct DeliveryMarks: Sendable, Equatable {
     var workspace: WorkspaceSnapshot?
     /// The memory the system prompt carried (`Conversation.memoryInPrompt`).
     var memory: String?
+    /// The sections the system prompt carried besides the memory (`Conversation.frozenSections`).
+    var sections: FrozenSections?
 
     func record(in conversation: inout Conversation) {
         conversation.workspaceHash = workspaceHash
         conversation.workspaceSeen = workspace
         conversation.memoryInPrompt = memory
+        conversation.frozenSections = sections
     }
 }
 
@@ -204,6 +262,8 @@ struct TurnPromptInputs: Sendable {
     }
 
     fileprivate var folderSection: String { instructions?.prompt(trustedHash: bot.trustedInstructionsHash) ?? "" }
+    fileprivate var skillsSection: String { PromptParts.skills(skills) }
+    fileprivate var permissionsSection: String { PromptParts.permissions(bot) }
 }
 
 /// The system prompt plus the per-message context of a turn.
@@ -218,8 +278,12 @@ enum TurnPrompt {
         var workspace: WorkspaceSnapshot
         /// What `Conversation.memoryInPrompt` becomes.
         var memory: String
+        /// What `Conversation.frozenSections` becomes.
+        var sections: FrozenSections
 
-        var marks: DeliveryMarks { DeliveryMarks(workspaceHash: workspaceHash, workspace: workspace, memory: memory) }
+        var marks: DeliveryMarks {
+            DeliveryMarks(workspaceHash: workspaceHash, workspace: workspace, memory: memory, sections: sections)
+        }
     }
 
     /// `lastWorkspaceHash` and `lastWorkspace`: the snapshot the conversation last sent. The model gets the whole snapshot
@@ -227,10 +291,13 @@ enum TurnPrompt {
     /// recorded of the last one; only what changed when the folder changed; and nothing about the folder otherwise.
     /// `memoryInPrompt`: the memory this conversation's system prompt has carried so far. It stays there unchanged (a new
     /// start, with no history, takes the memory as it is now); a memory that changed goes in the preface instead, once,
-    /// and again only if the model can no longer read it there. `plan`: the conversation's task plan, which goes with every
+    /// and again only if the model can no longer read it there. `frozenSections` does the same for the permissions, the
+    /// folder's instructions and the skills (a field nil, as in a conversation from before it was kept, takes the section as it
+    /// is now). `plan`: the conversation's task plan, which goes with every
     /// message while some step is still open (the preface is written once and stays, so the prompt cache keeps it).
     static func native(_ inputs: TurnPromptInputs, history: [ChatMessage], lastWorkspaceHash: String?,
-                       lastWorkspace: WorkspaceSnapshot? = nil, memoryInPrompt: String? = nil, plan: TaskPlan? = nil) -> Native {
+                       lastWorkspace: WorkspaceSnapshot? = nil, memoryInPrompt: String? = nil,
+                       frozenSections: FrozenSections? = nil, plan: TaskPlan? = nil) -> Native {
         let report = inputs.snapshot.report(lastHash: lastWorkspaceHash, seen: lastWorkspace,
                                             modelHasSnapshot: TurnPreface.hasSnapshot(in: history))
         // The full notes (where you left off, other titles) once, at the start; later only what fits the message.
@@ -239,11 +306,25 @@ enum TurnPrompt {
         let frozen = (history.isEmpty ? nil : memoryInPrompt) ?? inputs.brief.stable
         let current = TurnPreface.memoryUpdate(inputs.brief.stable)
         let known = TurnPreface.latestMemoryUpdate(in: history) ?? TurnPreface.memoryUpdate(frozen)
+        let kept = (history.isEmpty ? nil : frozenSections) ?? FrozenSections()
+        let sections = FrozenSections(permissions: kept.permissions ?? inputs.permissionsSection,
+                                      folder: kept.folder ?? inputs.folderSection, skills: kept.skills ?? inputs.skillsSection)
+        let updates = [
+            known == current ? "" : current,
+            TurnPreface.pending(tag: TurnPreface.permissionsTag, frozen: sections.permissions ?? "", current: inputs.permissionsSection,
+                                history: history, block: TurnPreface.permissionsUpdate),
+            TurnPreface.pending(tag: TurnPreface.folderTag, frozen: sections.folder ?? "", current: inputs.folderSection,
+                                history: history, block: TurnPreface.folderUpdate),
+            TurnPreface.pending(tag: TurnPreface.skillsTag, frozen: sections.skills ?? "", current: inputs.skillsSection,
+                                history: history, block: TurnPreface.skillsUpdate),
+        ].filter { !$0.isEmpty }.joined(separator: "\n\n")
         return Native(system: SystemPrompt.make(bot: inputs.bot, skills: inputs.skills, memory: frozen,
-                                                environment: inputs.environment, folder: inputs.folderSection),
+                                                environment: inputs.environment, folder: sections.folder ?? "",
+                                                skillsSection: sections.skills, permissionsSection: sections.permissions),
                       preface: TurnPreface.make(now: inputs.now, timeZone: inputs.environment.timeZone, report: report,
-                                                snapshot: inputs.snapshot, notes: notes, memory: known == current ? "" : current,
+                                                snapshot: inputs.snapshot, notes: notes, memory: updates,
                                                 plan: plan?.isActive == true ? plan?.compact() ?? "" : ""),
-                      workspaceHash: inputs.snapshot.hash, workspace: inputs.snapshot.forComparison, memory: frozen)
+                      workspaceHash: inputs.snapshot.hash, workspace: inputs.snapshot.forComparison, memory: frozen,
+                      sections: sections)
     }
 }

@@ -1635,6 +1635,7 @@ final class AppModel {
         let sessionID = session.gatewaySessionID()
         let lastWorkspace = session.conversation?.workspaceSeen
         let memoryInPrompt = session.conversation?.memoryInPrompt
+        let frozenSections = session.conversation?.frozenSections
 
         session.turnModel = ref.text
         let turn = session.beginTurn()
@@ -1664,7 +1665,7 @@ final class AppModel {
             if let told = await outsideText(outside, of: botID) { message = told + "\n\n" + message }
             guard session.isCurrent(turn) else { return } // stopped while preparing
             let built = TurnPrompt.native(inputs, history: history, lastWorkspaceHash: lastWorkspaceHash, lastWorkspace: lastWorkspace,
-                                          memoryInPrompt: memoryInPrompt, plan: plan)
+                                          memoryInPrompt: memoryInPrompt, frozenSections: frozenSections, plan: plan)
             let client: any LLMClient
             do {
                 guard let made = clientOverride?() ?? account.client(for: modelInfo, credentials: Self.credentials(for: ref.provider),

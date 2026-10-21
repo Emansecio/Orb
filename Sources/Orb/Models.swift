@@ -267,6 +267,9 @@ struct Conversation: Codable, Sendable {
     /// The memory (`MemoryBrief.stable`) this conversation's system prompt carries: kept as it was so the provider's
     /// prompt cache lasts, while a change reaches the model in a message's preface (`TurnPreface.memoryUpdate`).
     var memoryInPrompt: String?
+    /// The permissions, folder instructions and skills sections this conversation's system prompt carries, kept the same way
+    /// (`TurnPreface.permissionsUpdate`, `folderUpdate`, `skillsUpdate`). Nil in conversations from before they were kept.
+    var frozenSections: FrozenSections?
     /// The plan of the task in progress (`task_plan`), as the calls in `messages` left it: kept beside them so it does not
     /// depend on what the summary says, and worked out from them again when "Refazer" cuts some of them away.
     var taskPlan: TaskPlan?
@@ -356,6 +359,7 @@ extension Conversation {
         // Only helps to save tokens: whatever cannot be read here is sent whole next time instead of failing the conversation.
         workspaceSeen = (try? c.decodeIfPresent(WorkspaceSnapshot.self, forKey: .workspaceSeen)) ?? nil
         memoryInPrompt = (try? c.decodeIfPresent(String.self, forKey: .memoryInPrompt)) ?? nil
+        frozenSections = (try? c.decodeIfPresent(FrozenSections.self, forKey: .frozenSections)) ?? nil
         // A plan this version cannot read is dropped; the calls that made it are still in `messages`.
         taskPlan = (try? c.decodeIfPresent(TaskPlan.self, forKey: .taskPlan)) ?? nil
         turnOpen = (try? c.decodeIfPresent(Bool.self, forKey: .turnOpen)) ?? nil
