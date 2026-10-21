@@ -56,6 +56,8 @@ actor ChatGPTAuth {
     private let tokenURL: URL
     private let session: URLSession
     private var cached: ChatGPTCredential?
+    /// The storage was read once: without a login, `credential` does not go to the Keychain on every call.
+    private var loaded = false
     /// The refresh in progress, shared by every caller that needs one: refresh tokens rotate, so two refreshes with
     /// the same token would make the second fail and sign the user out.
     private var refreshing: Task<ChatGPTCredential, Error>?
@@ -70,8 +72,11 @@ actor ChatGPTAuth {
     }
 
     var credential: ChatGPTCredential? {
-        if cached == nil, let data = storage.load()?.data(using: .utf8) {
-            cached = try? JSONDecoder().decode(ChatGPTCredential.self, from: data)
+        if cached == nil, !loaded {
+            loaded = true
+            if let data = storage.load()?.data(using: .utf8) {
+                cached = try? JSONDecoder().decode(ChatGPTCredential.self, from: data)
+            }
         }
         return cached
     }

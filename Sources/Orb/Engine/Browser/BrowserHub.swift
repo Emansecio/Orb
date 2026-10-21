@@ -193,6 +193,9 @@ final class TabBook: @unchecked Sendable {
             } catch BrowserDriverError.noPage {
                 restartEmpty(for: scope, driver: driver)
                 return
+            } catch is CancellationError {
+                // Stopped by the person (⌘.): the tab is still there, so the mapping stays.
+                return
             } catch {
                 // That tab is gone (closed by the page or by hand): another one below.
                 forget(tab)
@@ -214,6 +217,8 @@ final class TabBook: @unchecked Sendable {
             if closesTabs { await trim(keeping: scope, driver: driver) }
         } catch BrowserDriverError.noPage {
             restartEmpty(for: scope, driver: driver)
+        } catch is CancellationError {
+            // Stopped by the person: nothing to adopt, nothing to forget.
         } catch {
             // The call goes on in the current tab, which is what there was before tabs of their own.
         }
@@ -349,6 +354,10 @@ final class BrowserSession: @unchecked Sendable {
     /// Runs `work` alone on this browser, in this conversation's tab.
     func exclusive<T: Sendable>(_ work: @Sendable () async throws -> T) async throws -> T {
         await mutex.lock()
+        if Task.isCancelled {
+            await mutex.unlock()
+            throw CancellationError()
+        }
         do {
             if let scope { await tabs.activate(scope, driver: driver, closesTabs: closesTabs) }
             let result = try await work()
