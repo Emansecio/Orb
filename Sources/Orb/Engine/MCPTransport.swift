@@ -469,8 +469,9 @@ actor HTTPTransport: MCPTransport {
         for try await byte in bytes {
             defer { previous = byte }
             if byte == 0x0A || byte == 0x0D {
-                if byte == 0x0A, previous == 0x0D { continue }   // the LF of a CRLF: the CR already ended the line
-                if lineBytes == 0 { pending = 0 } else { pending += 1; lineBytes = 0 }   // blank line: event boundary
+                // The LF of a CRLF: the CR already ended the line (the decoder still sees it, to clear its own CR state).
+                if byte == 0x0A, previous == 0x0D {
+                } else if lineBytes == 0 { pending = 0 } else { pending += 1; lineBytes = 0 }   // blank line: event boundary
             } else {
                 lineBytes += 1
                 pending += 1
