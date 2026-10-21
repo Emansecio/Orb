@@ -81,6 +81,18 @@ enum Tip {
     static let showInstructions = "Mostra o arquivo de instruções da pasta no Finder"
     static func openFolderInFinder(_ name: String) -> String { "Abre a pasta de \(name) no Finder" }
     static func openFolderInTerminal(_ name: String) -> String { "Abre o Terminal na pasta de \(name)" }
+    static func toggleModelCard(isOpen: Bool) -> String { isOpen ? "Recolhe o modelo e o modo de permissão numa linha" : "Mostra o modelo e o modo de permissão" }
+    static func toggleCapabilities(isOpen: Bool) -> String { isOpen ? "Recolhe o que o Orb pode usar numa linha" : "Mostra o que o Orb pode usar" }
+    static func toggleBrowserOptions(isOpen: Bool) -> String { isOpen ? "Recolhe o navegador e a pesquisa" : "Mostra o navegador e a pesquisa" }
+    /// What each switch of "Pode usar" does, in the hover text of its row (the panel keeps the rows short).
+    static func capability(_ capability: Capability) -> String {
+        switch capability {
+        case .terminal: "Roda comandos e lê e escreve arquivos"
+        case .browser: "Abre e lê páginas da internet"
+        case .computerUse: "Abre, clica e preenche campos em outros apps"
+        case .connectors: "Usa as ferramentas dos seus conectores"
+        }
+    }
 
     // MARK: Sidebar
 
@@ -125,7 +137,6 @@ enum Tip {
     // MARK: Orb panel: browser
     static let removeBrowserProxy = "Tira o proxy do navegador deste Orb; as próximas páginas abrem direto"
     static let browserMode = "Segundo plano não abre janela nem tira o foco; Visível mostra o navegador do Orb"
-    static let searchProvider = "Onde o Orb pesquisa quando você pede uma busca na web"
     static let installBrowser = "Abre os Ajustes do navegador, onde está o comando de instalação"
     static let addSearchKey = "Abre os Ajustes do navegador, onde a chave do TinyFish é guardada"
 
@@ -320,11 +331,14 @@ enum Tip {
          routineToggle(isOn: true), routineToggle(isOn: false), routineDatePassed,
          customizeOrb, refreshFolder, removeGrant, removeAllGrants, recreateFolder, changeFolder, manageConnectors, cancelLogin,
          macPermissions, showInstructions, openFolderInFinder("Orb"), openFolderInTerminal("Orb"),
+         toggleModelCard(isOpen: true), toggleModelCard(isOpen: false), toggleCapabilities(isOpen: true), toggleCapabilities(isOpen: false),
+         toggleBrowserOptions(isOpen: true), toggleBrowserOptions(isOpen: false),
+         capability(.terminal), capability(.browser), capability(.computerUse), capability(.connectors),
          createFirstOrb, showWelcome, skillsPage, keptMemoryInFinder, dismissNotice, deleteWithMemory,
          deleteKeepingMemory, profile(callName: "Ana"), profile(callName: nil),
          copyReply, copyMarkdown, redoReply, editMessage, cancelEdit, toggleOutput(isExpanded: true), toggleOutput(isExpanded: false), toggleCommand(isExpanded: true), toggleCommand(isExpanded: false), toggleRequest(isOpen: true), toggleRequest(isOpen: false), toggleActions(isOpen: true), toggleActions(isOpen: false), toggleWork(isOpen: true), toggleWork(isOpen: false),
          routineUseAuto, routineUseReadOnly, randomLook, denyWithNote, showAllActions, deny, allowOptions,
-         handoffDone, handoffCancel, browserMode, removeBrowserProxy, searchProvider, installBrowser, addSearchKey,
+         handoffDone, handoffCancel, browserMode, removeBrowserProxy, installBrowser, addSearchKey,
          enlargeScreen, stopBrowsing, hideScreen, revealScreen, lastScreen, backToLiveScreen, showBrowserScreen,
          menuBarItem, connectModel, openMainWindow, closeReply, openChatInApp, reviewRiskyInApp, allowOnce, allowBatchOnce,
          routineRequest, chooseOrb(named: "Orb"),

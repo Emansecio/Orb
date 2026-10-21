@@ -64,7 +64,7 @@ import Testing
     @Test func capabilitiesUseTheSharedVocabulary() {
         #expect(Capability.allCases.map(\.label) ==
                 ["Terminal e arquivos", "Navegar na web", "Controlar apps do Mac", "Conectores"])
-        for capability in Capability.allCases { #expect(!CapabilityCopy.subtitle(capability).isEmpty) }
+        for capability in Capability.allCases { #expect(!Tip.capability(capability).isEmpty) }
     }
 
     @Test func connectorsLineSaysHowManyAreOn() {

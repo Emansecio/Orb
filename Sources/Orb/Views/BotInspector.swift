@@ -10,6 +10,16 @@ struct BotInspector: View {
     @State private var isEditingOrb = false
     @State private var isPickingFolder = false
     @State private var isConfirmingBypass = false
+    @State private var isShowingBypassInfo = false
+    /// Which of the General tab's cards are open, for the whole app (a card with a problem is open whatever this says).
+    @AppStorage(InspectorFold.modelKey) private var modelFoldOpen = false
+    @AppStorage(InspectorFold.capabilitiesKey) private var capabilitiesFoldOpen = false
+    /// What the browser has on this Mac and whether the search key is kept: read here, not by the browser rows, because a
+    /// problem in them opens the "Pode usar" card even when the rows are not drawn.
+    @State private var browserStatus: BrowserStatus?
+    @State private var searchKey: Bool?
+    /// Bumped when the app comes back to the front: the person may have installed the browser meanwhile.
+    @State private var browserRecheck = 0
     @State private var isEditingIdentity = false
     @State private var isShowingMemory = false
     /// The kind the memory sheet opens on (nil: all of it).
@@ -93,8 +103,21 @@ struct BotInspector: View {
             .onChange(of: tab) { _, new in
                 if new == .folder { filesRefresh += 1 }
             }
+            // Only the General tab, and only for an Orb that browses, needs to know what the browser has on this Mac.
+            .task(id: BrowserCheck(provider: bot.searchProvider, comingBack: browserRecheck,
+                                   isShown: tab == .general && bot.capabilities.contains(.browser))) {
+                guard tab == .general, bot.capabilities.contains(.browser) else { return }
+                let provider = bot.searchProvider
+                async let found = model.browserStatus()
+                async let key = model.hasSearchKey(for: provider)
+                let (newStatus, newKey) = await (found, key)
+                guard !Task.isCancelled else { return }
+                browserStatus = newStatus
+                searchKey = provider == .tinyfish ? newKey : nil
+            }
             // The file may have been edited while the panel stayed open: read it again on coming back to the app.
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                browserRecheck += 1
                 Task { instructionFile = await FolderInstructions.loadInBackground(from: bot.workingURL) }
             }
             .fileImporter(isPresented: $isPickingFolder, allowedContentTypes: [.folder]) { result in
@@ -152,6 +175,7 @@ struct BotInspector: View {
         isEditingOrb = false
         isPickingFolder = false
         isConfirmingBypass = false
+        isShowingBypassInfo = false
         isEditingIdentity = false
         isShowingMemory = false
         memorySheetKind = nil
@@ -176,6 +200,12 @@ struct BotInspector: View {
         var isShown: Bool
     }
 
+    private struct BrowserCheck: Hashable {
+        var provider: SearchProvider
+        var comingBack: Int
+        var isShown: Bool
+    }
+
     private struct FilesKey: Hashable {
         var bot: UUID
         var folder: String
@@ -184,38 +214,25 @@ struct BotInspector: View {
 
     // MARK: Top of the panel
 
-    /// Who the Orb is, always visible: avatar, name and role (editable), and one quiet line under them with the way to
-    /// change its look (the look itself is said in the tip) and, for an Orb another made, who made it.
+    /// Who the Orb is, always visible: avatar, name and role (editable, the role in one line), and one quiet line under
+    /// them with the way to change its look (the look itself is said in the tip) and the folder buttons. Who made an Orb
+    /// another made is at the end of the General tab.
     private func header(_ bot: Bot) -> some View {
         let summary = AppearanceSummary.text(for: bot.orb)
-        return HStack(alignment: .center, spacing: 14) {
-            LiveBotAvatar(botID: bot.id, orb: bot.orb, size: 56, interactive: true, restsWhenIdle: true) // the only part that follows the activity
-            VStack(alignment: .leading, spacing: 5) {
+        return HStack(alignment: .center, spacing: 12) {
+            LiveBotAvatar(botID: bot.id, orb: bot.orb, size: 46, interactive: true, restsWhenIdle: true) // the only part that follows the activity
+            VStack(alignment: .leading, spacing: 3) {
                 InspectorHeader(bot: bot)
                     .id(bot.id)
-                let customize = Button("Personalizar…") {
-                    editorHeight = NewBotSheetLayout.height(preferred: 720)
-                    isEditingOrb = true
-                }
-                .buttonStyle(QuietTextStyle())
-                .fixedSize()
-                .help("\(Tip.customizeOrb) (\(summary))")
                 HStack(alignment: .center, spacing: 6) {
-                    // Who made it beside "Personalizar…" when both fit on the line; under it otherwise, never a name broken in two.
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 6) {
-                            customize
-                            if bot.createdByName != nil {
-                                Text("·").foregroundStyle(Palette.hint).accessibilityHidden(true)
-                            }
-                            CreatedByLine(bot: bot).fixedSize() // MultiOrb (WP3)
-                        }
-                        VStack(alignment: .leading, spacing: 3) {
-                            customize
-                            CreatedByLine(bot: bot)
-                        }
+                    Button("Personalizar…") {
+                        editorHeight = NewBotSheetLayout.height(preferred: 720)
+                        isEditingOrb = true
                     }
+                    .buttonStyle(QuietTextStyle())
                     .font(.system(size: 11))
+                    .fixedSize()
+                    .help("\(Tip.customizeOrb) (\(summary))")
                     Spacer(minLength: 4)
                     quickActions(bot)
                 }
@@ -270,111 +287,223 @@ struct BotInspector: View {
 
     // MARK: Geral
 
-    /// The model, what the Orb is allowed to do and what it may use.
+    /// Two cards that each fold to one line ("Modelo e modo", "Pode usar"), then, under them, who made the Orb and the way
+    /// to delete it. A card with a problem (a model that cannot answer, a browser not ready) shows open until it is gone.
     @ViewBuilder
     private func generalTab(_ bot: Bot) -> some View {
         let info = model.modelInfo(forModel: bot.model)
-        Section {
-            ModelPicker(selection: binding(\.model, of: bot))
-            // A row like "Modo": only for a model whose catalog lists thinking levels.
-            if let levels = info?.efforts {
-                Picker("Esforço", selection: binding(\.effort, of: bot)) {
-                    Text(ReasoningEffort.defaultLabel(for: info)).tag("")
-                    if !bot.effort.isEmpty && !levels.contains(bot.effort) {
-                        Text(ReasoningEffort.label(bot.effort)).tag(bot.effort)
+        let unavailable = model.modelUnavailableNote(bot.model)
+        let modelIsOpen = InspectorFold.isOpen(stored: modelFoldOpen,
+                                               hasProblem: ModelCardSummary.hasProblem(unavailableNote: unavailable))
+        let browserHasProblem = BrowserPickerCopy.hasProblem(capabilities: bot.capabilities, status: browserStatus,
+                                                             provider: bot.searchProvider, hasKey: searchKey)
+        let capabilitiesAreOpen = InspectorFold.isOpen(stored: capabilitiesFoldOpen, hasProblem: browserHasProblem)
+        modelCard(bot, info: info, unavailable: unavailable, isOpen: modelIsOpen)
+        capabilitiesCard(bot, isOpen: capabilitiesAreOpen, hasProblem: browserHasProblem)
+    }
+
+    /// A folding row's click: the part stores the other state (a part held open by a problem keeps what it had).
+    private func toggleFold(_ stored: Binding<Bool>, isOpen: Bool, hasProblem: Bool) {
+        let next = InspectorFold.stored(afterClickWhen: isOpen, stored: stored.wrappedValue, hasProblem: hasProblem)
+        withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) { stored.wrappedValue = next }
+    }
+
+    // MARK: Modelo e modo
+
+    /// Folded: one line with the model's name and, when something needs a look, a mark. Open: the model, its effort (when
+    /// the model has levels) and the permission mode. The mode's description is the picker's hover text; only the mode that
+    /// never asks keeps a line, and a model that cannot answer says why.
+    private func modelCard(_ bot: Bot, info: ProviderModel?, unavailable: String?, isOpen: Bool) -> some View {
+        let warning = ModelCardSummary.warning(mode: bot.permissionMode, unavailableNote: unavailable)
+        let modelName = ModelCardSummary.modelText(selection: bot.model, defaultModel: model.defaultModel,
+                                                   name: { model.modelName($0) })
+        return Section {
+            FoldHeader(title: "Modelo e modo", isOpen: isOpen, tip: Tip.toggleModelCard(isOpen: isOpen),
+                       spokenSummary: [modelName, warning].compactMap { $0 }.joined(separator: ", "),
+                       action: { toggleFold($modelFoldOpen, isOpen: isOpen, hasProblem: unavailable != nil) }) {
+                HStack(spacing: 6) {
+                    Text(modelName)
+                        .foregroundStyle(Palette.faint)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    if let warning {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Palette.warn)
+                            .help(warning)
+                            .accessibilityHidden(true)
                     }
-                    ForEach(levels, id: \.self) { Text(ReasoningEffort.label($0)).tag($0) }
                 }
             }
-        } footer: {
-            if let note = model.modelUnavailableNote(bot.model) {
-                FormFootnote {
-                    Text(note)
-                        .foregroundStyle(Palette.warn)
-                        .textSwap(note)
+            if isOpen {
+                ModelPicker(selection: binding(\.model, of: bot))
+                    .foldContent()
+                // A row like "Modo": only for a model whose catalog lists thinking levels.
+                if let levels = info?.efforts {
+                    Picker("Esforço", selection: binding(\.effort, of: bot)) {
+                        Text(ReasoningEffort.defaultLabel(for: info)).tag("")
+                        if !bot.effort.isEmpty && !levels.contains(bot.effort) {
+                            Text(ReasoningEffort.label(bot.effort)).tag(bot.effort)
+                        }
+                        ForEach(levels, id: \.self) { Text(ReasoningEffort.label($0)).tag($0) }
+                    }
+                    .help(ReasoningEffort.note(bot.effort, for: info) ?? "")
+                    .foldContent()
                 }
-            } else if info != nil, let note = ReasoningEffort.note(bot.effort, for: info) {
-                FormFootnote {
-                    Text(note).textSwap(note)
+                if let unavailable {
+                    Text(unavailable)
+                        .capabilityCaption()
+                        .foregroundStyle(Palette.warn)
+                        .textSwap(unavailable)
+                        .foldContent()
+                }
+                Picker("Modo", selection: binding(\.permissionMode, of: bot).confirmingBypass {
+                    isConfirmingBypass = true
+                }) {
+                    ForEach(PermissionMode.allCases) { Text($0.label).tag($0) }
+                }
+                .help(bot.permissionMode.summary)
+                .foldContent()
+                if bot.permissionMode == .bypass {
+                    bypassLine(bot.permissionMode.summary)
+                        .foldContent()
                 }
             }
         }
-
-        Section {
-            Picker("Modo", selection: binding(\.permissionMode, of: bot).confirmingBypass {
-                isConfirmingBypass = true
-            }) {
-                ForEach(PermissionMode.allCases) { Text($0.label).tag($0) }
-            }
-        } header: {
-            Text("Permissões")
-        } footer: { FormFootnote {
-            Text(bot.permissionMode.summary)
-                .foregroundStyle(bot.permissionMode == .bypass ? Palette.warn : .secondary)
-                .textSwap(bot.permissionMode)
-        } }
         .bypassConfirmation(isPresented: $isConfirmingBypass) {
             model.update(bot.id) { $0.permissionMode = .bypass }
         }
+    }
 
-        Section {
-            ForEach(Capability.allCases) { capability in
-                capabilityRow(capability, of: bot)
+    /// "Roda tudo sem perguntar" in the warning color, with a small ⓘ that says it all (hover or click).
+    private func bypassLine(_ summary: String) -> some View {
+        HStack(spacing: 6) {
+            Text(ModelCardSummary.bypassLine)
+                .font(.caption)
+                .foregroundStyle(Palette.warn)
+            Button("Sobre este modo", systemImage: "info.circle") { isShowingBypassInfo.toggle() }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.plain)
+                .font(.caption)
+                .foregroundStyle(Palette.warn)
+                .iconTip(summary, label: "Sobre este modo")
+                .popover(isPresented: $isShowingBypassInfo, arrowEdge: .bottom) {
+                    Text(summary)
+                        .font(.callout)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(12)
+                        .frame(width: 280, alignment: .leading)
+                }
+            Spacer(minLength: 0)
+        }
+    }
+
+    // MARK: Pode usar
+
+    /// Folded: one line with a small icon for each thing the Orb may use, dimmed for what is off. Open: a switch row for
+    /// each (the description is the row's hover text, the links sit after the title). Under the card, who made the Orb and
+    /// "Apagar".
+    private func capabilitiesCard(_ bot: Bot, isOpen: Bool, hasProblem: Bool) -> some View {
+        let enabled = Capability.allCases.filter { bot.capabilities.contains($0) }.count
+        return Section {
+            FoldHeader(title: "Pode usar", isOpen: isOpen, tip: Tip.toggleCapabilities(isOpen: isOpen),
+                       spokenSummary: CapabilityStrip.spokenCount(enabled: enabled, total: Capability.allCases.count),
+                       action: { toggleFold($capabilitiesFoldOpen, isOpen: isOpen, hasProblem: hasProblem) }) {
+                capabilityStrip(bot)
             }
-        } header: {
-            Text("O que \(bot.name) pode usar")
+            if isOpen {
+                ForEach(Capability.allCases) { capability in
+                    capabilityRow(capability, of: bot)
+                }
+            }
+        } footer: {
+            panelFooter(bot)
         }
+    }
 
-        Section {
-            // One sheet for the sidebar and here (DeleteOrbDialog.swift). A red ghost, as the app's other destructive actions: the
-            // form's own button ignores the red and comes out a plain gray one. Its label lines up with the rows above.
-            Button("Apagar \(bot.name)…", role: .destructive) { model.askToDelete(bot.id) }
-                .buttonStyle(GhostStyle(tint: Palette.danger))
-                .hangsOnLeadingEdge()
+    /// The icons of the folded row: VoiceOver gets the count from the row itself.
+    private func capabilityStrip(_ bot: Bot) -> some View {
+        HStack(spacing: 6) {
+            ForEach(Capability.allCases) { capability in
+                Image(systemName: capability.symbol)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.secondary)
+                    .frame(width: 20, height: 20)
+                    .background(Palette.raised, in: .rect(cornerRadius: 6))
+                    .opacity(CapabilityStrip.opacity(isOn: bot.capabilities.contains(capability)))
+            }
         }
+        .accessibilityHidden(true)
     }
 
     @ViewBuilder
     private func capabilityRow(_ capability: Capability, of bot: Bot) -> some View {
         let isOn = bot.capabilities.contains(capability)
-        let counts = model.connectorCounts(for: bot.id)
-        let connectorsLine = capability == .connectors && isOn
-            ? CapabilityCopy.connectorsLine(enabled: counts.enabled, total: counts.total, anyInstalled: !model.connectors.isEmpty)
-            : nil
-        Toggle(isOn: capabilityBinding(capability, of: bot)) {
-            VStack(alignment: .leading, spacing: 1) {
-                // The icons share one width, so the titles start on one x whatever the symbol (terminal, globe, window…).
-                Label {
-                    Text(capability.label)
-                } icon: {
-                    Image(systemName: capability.symbol).frame(width: 20)
+        if capability == .browser {
+            BrowserPickerRows(botID: bot.id, isOn: capabilityBinding(capability, of: bot), status: browserStatus, hasKey: searchKey)
+        } else {
+            Toggle(isOn: capabilityBinding(capability, of: bot)) {
+                HStack(spacing: 4) {
+                    // The icons share one width, so the titles start on one x whatever the symbol (terminal, globe, window…).
+                    Label {
+                        Text(capability.label)
+                    } icon: {
+                        Image(systemName: capability.symbol).frame(width: 20)
+                    }
+                    .layoutPriority(1)
+                    if isOn { inlineLink(capability) }
                 }
-                Text(connectorsLine ?? CapabilityCopy.subtitle(capability))
-                    .capabilityCaption()
-                    .textSwap(connectorsLine)
+                .lineLimit(1)
             }
+            .help(Tip.capability(capability))
+            .foldContent()
         }
-        if capability == .browser && BrowserPickerCopy.showsPickers(bot.capabilities) {
-            BrowserPickerRows(botID: bot.id)
-                .transition(.quiet)
-        }
-        if capability == .connectors && isOn {
-            Button("Gerenciar conectores", systemImage: "arrow.up.right") { model.selection = .connectors }
-                .buttonStyle(.link)
-                .help(Tip.manageConnectors)
-                .font(.caption)
-                .transition(.quiet)
-        }
-        if capability == .computerUse && isOn {
-            // The macOS permissions (Automação, Acessibilidade, Gravação de Tela) this switch relies on live in Ajustes.
-            Button(SettingsTab.permissions.title, systemImage: "arrow.up.right") {
+    }
+
+    /// The way on from a row, in quiet text after its title: the macOS permissions that "Controlar apps do Mac" relies on
+    /// (Automação, Acessibilidade, Gravação de Tela, which live in Ajustes), and the connectors' page with how many are on.
+    @ViewBuilder
+    private func inlineLink(_ capability: Capability) -> some View {
+        switch capability {
+        case .computerUse:
+            inlineLink(SettingsTab.permissions.title, tip: Tip.macPermissions) {
                 SettingsRouter.open(.permissions, using: openSettings)
             }
-            .buttonStyle(.link)
-            .help(Tip.macPermissions)
-            .font(.caption)
-            .transition(.quiet)
+        case .connectors:
+            let counts = model.connectorCounts(for: botID)
+            inlineLink(CapabilityCopy.connectorsLine(enabled: counts.enabled, total: counts.total, anyInstalled: !model.connectors.isEmpty),
+                       tip: Tip.manageConnectors) { model.selection = .connectors }
+        case .terminal, .browser:
+            EmptyView()
         }
+    }
+
+    private func inlineLink(_ title: String, tip: String, action: @escaping () -> Void) -> some View {
+        HStack(spacing: 4) {
+            Text("·").foregroundStyle(Palette.faint).accessibilityHidden(true)
+            Button(title, action: action)
+                .buttonStyle(.link)
+                .help(tip)
+        }
+        .font(.caption)
+        .lineLimit(1)
+        .transition(.quiet)
+    }
+
+    /// Under the cards, quietly: who made an Orb another made, and "Apagar", gray until the pointer is over it. Both sit
+    /// outside the cards, on the same inset as the notes under a section.
+    private func panelFooter(_ bot: Bot) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if bot.createdByName != nil {
+                CreatedByLine(bot: bot) // MultiOrb (WP3)
+            }
+            // One sheet for the sidebar and here (DeleteOrbDialog.swift).
+            Button("Apagar \(bot.name)…", role: .destructive) { model.askToDelete(bot.id) }
+                .buttonStyle(QuietDeleteStyle())
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, FormFootnote<EmptyView>.headingInset)
+        .padding(.top, 8)
     }
 
     // MARK: Pasta e acessos
@@ -752,8 +881,8 @@ private struct InspectorHeader: View {
                     focus = nil
                     return .handled
                 }
-            // At rest the role is text of up to two lines, ending in "…" when it is longer; a click opens the field, which
-            // grows with what is typed. (A two-line field would show its own first line and scroll the rest away.)
+            // At rest the role is one line, ending in "…" when it is longer (all of it in the hover text); a click opens the
+            // field, which grows with what is typed. (A one-line field would show its own first line and scroll the rest away.)
             if isEditingRole {
                 TextField("Papel", text: $role, prompt: Text("Papel"), axis: .vertical)
                     .lineLimit(1...4)
@@ -771,11 +900,13 @@ private struct InspectorHeader: View {
                 Text(role.isEmpty ? "Papel" : role)
                     .font(.callout)
                     .foregroundStyle(role.isEmpty ? Palette.hint : Palette.secondary)
-                    .lineLimit(2)
+                    .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
                     .onTapGesture { isEditingRole = true }
+                    // The whole role is one hover away when the line cuts it.
+                    .help(role.isEmpty ? "Clique para escrever o papel" : role)
                     .accessibilityAddTraits(.isButton)
                     .accessibilityLabel("Papel: \(role)")
                     .accessibilityAction { isEditingRole = true }
@@ -1197,6 +1328,20 @@ private struct QuietTextStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .foregroundStyle(configuration.isPressed ? Palette.secondary : isHovering ? Palette.ink : Palette.muted)
+            .contentShape(Rectangle())
+            .onHover { isHovering = $0 }
+            .animation(Motion.hover(isHovering), value: isHovering)
+    }
+}
+
+/// "Apagar" at the end of the General tab: gray and small, red only with the pointer over it.
+private struct QuietDeleteStyle: ButtonStyle {
+    @State private var isHovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 12))
+            .foregroundStyle(configuration.isPressed || isHovering ? Palette.danger : Palette.faint)
             .contentShape(Rectangle())
             .onHover { isHovering = $0 }
             .animation(Motion.hover(isHovering), value: isHovering)

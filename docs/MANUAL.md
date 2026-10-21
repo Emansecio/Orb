@@ -101,15 +101,15 @@ O **painel do Orb** (⌥⌘B mostra ou esconde) tem quatro abas:
 
 | Aba | O que tem |
 |---|---|
-| Geral | modelo, **Permissões** (modo) e "O que `<Orb>` pode usar" (as chaves: Terminal e arquivos, Navegar na web, Controlar apps do Mac, Conectores), "Apagar…" |
+| Geral | dois cartões que recolhem numa linha: "Modelo e modo" (modelo, esforço e o modo de permissões) e "Pode usar" (as chaves: Terminal e arquivos, Navegar na web com navegador e pesquisa, Controlar apps do Mac, Conectores); no fim, "Criado por" (de um Orb que outro criou) e "Apagar…". Começam fechados, o app lembra como você deixou, e um cartão com problema (modelo indisponível, navegador não pronto) aparece aberto até resolver |
 | Memória | o que o Orb sabe de você (veja [Memória](#memória)) |
 | Pasta e acessos | a pasta (abrir no Finder ou no Terminal, mudar, recriar se sumiu), "Confiar nas instruções desta pasta", as **Liberações** e os arquivos alterados e recentes |
 | Rotinas | as rotinas deste Orb: ativar e pausar, editar, apagar, rodar agora (veja [Rotinas](#rotinas)) |
 
-No alto do painel: nome e papel (clique para editar; mudar o nome não renomeia a pasta), "Personalizar…" (aparência), "Pasta"
+No alto do painel: nome e papel de uma linha (clique para editar; o papel inteiro aparece ao parar o ponteiro; mudar o nome não renomeia a pasta), "Personalizar…" (aparência), "Pasta"
 e "Terminal". O painel se recolhe sozinho em janelas estreitas (menos de 1180 pt) e volta quando há espaço.
 
-As chaves de "O que pode usar" desligam grupos inteiros de ferramentas para aquele Orb: sem **Terminal e arquivos** ele não roda
+As chaves de "Pode usar" desligam grupos inteiros de ferramentas para aquele Orb: sem **Terminal e arquivos** ele não roda
 comandos nem lê, escreve, procura ou apaga arquivos; sem **Navegar na web** não lê nem pesquisa páginas, não usa o navegador do Orb (nem baixa arquivos com `save_to`, que também precisa de **Terminal e arquivos**); sem **Controlar apps do Mac** não usa
 AppleScript, Atalhos, área de transferência, captura de tela nem controla outros apps; sem **Conectores** não usa os conectores.
 

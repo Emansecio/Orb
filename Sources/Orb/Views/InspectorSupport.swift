@@ -55,17 +55,8 @@ enum InspectorTabMemory {
     }
 }
 
-/// How the panel talks about what the Orb may use: a name and one line each.
+/// How the panel talks about what the Orb may use. (What each switch does is its row's hover text: `Tip.capability`.)
 enum CapabilityCopy {
-    static func subtitle(_ capability: Capability) -> String {
-        switch capability {
-        case .terminal: "Rodar comandos e ler e escrever arquivos"
-        case .browser: "Abrir e ler páginas da internet"
-        case .computerUse: "Abrir, clicar e preencher campos em outros apps"
-        case .connectors: "Usar as ferramentas dos seus conectores"
-        }
-    }
-
     /// The connectors row's line: how many are on, since the toggle alone does not say. `anyInstalled` tells "none
     /// installed at all" from "none in this Orb's scope" (every installed connector is kept for other Orbs).
     static func connectorsLine(enabled: Int, total: Int, anyInstalled: Bool) -> String {
@@ -76,6 +67,67 @@ enum CapabilityCopy {
         default: "\(enabled) conectores ativos"
         }
     }
+}
+
+/// The three folding parts of the General tab ("Modelo e modo", "Pode usar", and "Navegar na web" inside it). Each is open or
+/// closed for the whole app (one stored flag each, closed by default), and a part with a problem shows open whatever was
+/// stored, for as long as the problem lasts: the person never has to unfold a card to learn that something is wrong.
+enum InspectorFold {
+    static let modelKey = "inspectorFoldModel"
+    static let capabilitiesKey = "inspectorFoldCapabilities"
+    static let browserKey = "inspectorFoldBrowser"
+
+    static func isOpen(stored: Bool, hasProblem: Bool) -> Bool { stored || hasProblem }
+
+    /// What a click on a folding row stores. A part held open by a problem has nothing to fold: the click keeps what was
+    /// stored (so it does not turn into an open card once the problem is gone).
+    static func stored(afterClickWhen isOpen: Bool, stored: Bool, hasProblem: Bool) -> Bool {
+        hasProblem ? stored : !isOpen
+    }
+
+    /// The row's state as VoiceOver says it, with what the closed row shows (`summary`) after it.
+    static func spokenState(isOpen: Bool, summary: String? = nil) -> String {
+        guard !isOpen else { return "expandido" }
+        return ["recolhido", summary].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
+    }
+}
+
+/// The closed "Modelo e modo" row: the model's name, and a warning mark when the mode or the model needs a look.
+enum ModelCardSummary {
+    /// The mode that never asks, said in one line (the whole warning is `PermissionMode.summary`).
+    static let bypassLine = "Roda tudo sem perguntar"
+
+    /// The model as the closed row names it: the chosen one, else the app's default, else just "Padrão".
+    static func modelText(selection: String, defaultModel: String, name: (String) -> String) -> String {
+        let chosen = selection.isEmpty ? defaultModel : selection
+        return chosen.isEmpty ? "Padrão" : name(chosen)
+    }
+
+    /// What the warning mark says, or nil for no mark: a model that cannot answer (`unavailableNote`) before the mode that
+    /// does not ask.
+    static func warning(mode: PermissionMode, unavailableNote: String?) -> String? {
+        if let unavailableNote { return unavailableNote }
+        return mode == .bypass ? bypassLine : nil
+    }
+
+    /// Only a model that cannot answer is a problem that holds the card open; "Sem pedir permissão" is a choice, so it
+    /// stays a mark on the closed row.
+    static func hasProblem(unavailableNote: String?) -> Bool { unavailableNote != nil }
+}
+
+/// The closed "Pode usar" row: one small icon for each thing the Orb may use, dimmed for what is off.
+enum CapabilityStrip {
+    static let dimmedOpacity = 0.3
+
+    static func opacity(isOn: Bool) -> Double { isOn ? 1 : dimmedOpacity }
+
+    /// The icons are hidden from VoiceOver, so the row says how many are on: "3 de 4 ligadas".
+    static func spokenCount(enabled: Int, total: Int) -> String { "\(enabled) de \(total) ligadas" }
+}
+
+/// What "Navegar na web" shows after its title while its pickers are folded: "Segundo plano, DuckDuckGo".
+enum BrowserFoldSummary {
+    static func text(mode: BrowserMode, provider: SearchProvider) -> String { "\(mode.label), \(provider.label)" }
 }
 
 /// The look of an Orb in one line ("Índigo · Pílulas · Equilibrado"), so the panel does not list every option.
