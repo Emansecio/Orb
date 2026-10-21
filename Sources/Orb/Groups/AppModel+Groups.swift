@@ -231,6 +231,7 @@ extension AppModel {
         groupSessions[group.id]?.discard()
         groupSessions[group.id] = nil
         groupLives[group.id] = nil
+        forgottenGroupNotes[group.id] = nil
         store.deleteGroupConversation(group: group.id)
         memory.deleteGroup(group.id)
         for member in group.memberIDs { store.deleteGroupSideConversation(group: group.id, for: member) }

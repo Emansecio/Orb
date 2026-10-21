@@ -78,11 +78,21 @@ extension AppModel {
     /// Puts a forgotten page back (the index picks the file up again) and refreshes the panel.
     func restoreMemory(_ forgotten: ForgottenMemory, of botID: UUID) async {
         guard bot(botID) != nil else { return } // the Orb was deleted meanwhile: its memory folder may be gone
-        let bank = memory.bank(for: botID)
-        let directory = bank.directory
-        _ = await Task.detached { forgotten.restore(in: directory) }.value
-        await bank.reconcile()
+        await restoreForgotten(forgotten, in: memory.bank(for: botID))
         await refreshMemory(botID)
+    }
+
+    /// The write-back of a forgotten page, off the main thread, and the index picking it up. When the page cannot go back
+    /// (something sits at its path, or the folder does not take it), the chat of notices says so instead of the undo doing nothing.
+    func restoreForgotten(_ forgotten: ForgottenMemory, in bank: MemoryBank) async {
+        let directory = bank.directory
+        let restored = await Task.detached { forgotten.restore(in: directory) }.value
+        await bank.reconcile()
+        if !restored { addNotice(StoreNotice(message: Self.couldNotRestore(forgotten.title))) }
+    }
+
+    static func couldNotRestore(_ title: String) -> String {
+        "Não consegui desfazer: “\(MemoryText.clip(title, 60))” não voltou para a memória (já existe uma página nesse lugar ou a pasta não aceitou)."
     }
 }
 

@@ -446,7 +446,9 @@ private struct WritingModel: LLMClient {
         model.showApprovalOwner(a)
         #expect(model.selection == .routines && model.routineToShow == routineID)
 
+        #expect(model.unansweredWatchers[card.id]?.count == 2) // the reminder and the giving up wait for the answer
         model.decide(.once, approvalID: card.id, botID: a)
+        #expect(model.unansweredWatchers[card.id] == nil) // answered: nothing sleeps for an hour or a day any more
         await waitUntil("the routine to finish") { !model.isRoutineRunning(routineID) && model.routines.first { $0.id == routineID }?.runs.count == 1 }
         #expect(model.routines.first { $0.id == routineID }?.runs.first?.succeeded == true)
         #expect(!model.live(a).needsYou && model.pendingApprovals.isEmpty && model.routineWaitingForYou(a) == nil)
