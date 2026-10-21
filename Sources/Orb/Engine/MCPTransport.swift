@@ -462,34 +462,27 @@ actor HTTPTransport: MCPTransport {
     /// Server-Sent Events: calls `handle(event, data)` per event (multi-line data joined by "\n") until it returns false.
     private func readEvents(_ bytes: URLSession.AsyncBytes,
                             _ handle: (String, String) async throws -> Bool) async throws {
-        var line = Data(), event = "", data: [String] = []
-        var pending = 0   // bytes of the event being read: its data lines so far and the line in progress
+        var decoder = SSEDecoder()
+        var pending = 0      // bytes read since the last blank line (the event being read, comments included)
+        var lineBytes = 0    // bytes of the line in progress
+        var previous: UInt8 = 0
         for try await byte in bytes {
-            guard byte == 0x0A else {
-                line.append(byte)
-                if pending + line.count > maxMessageBytes { throw tooLarge }
-                continue
+            defer { previous = byte }
+            if byte == 0x0A || byte == 0x0D {
+                if byte == 0x0A, previous == 0x0D { continue }   // the LF of a CRLF: the CR already ended the line
+                if lineBytes == 0 { pending = 0 } else { pending += 1; lineBytes = 0 }   // blank line: event boundary
+            } else {
+                lineBytes += 1
+                pending += 1
             }
-            if line.last == 0x0D { line.removeLast() }
-            let text = String(decoding: line, as: UTF8.self)
-            line.removeAll(keepingCapacity: true)
-            if text.isEmpty {
-                if !data.isEmpty, try await !handle(event.isEmpty ? "message" : event, data.joined(separator: "\n")) { return }
-                event = ""
-                data = []
+            if pending > maxMessageBytes { throw tooLarge }
+            if let sse = decoder.feed(byte) {
                 pending = 0
-                continue
-            }
-            let field = text.prefix { $0 != ":" }
-            var value = text.dropFirst(field.count + 1)
-            if value.hasPrefix(" ") { value = value.dropFirst() }
-            if field == "data" {
-                data.append(String(value))
-                pending += value.utf8.count + 1   // the joining newline counts too, so empty data lines are not free
-            } else if field == "event" {
-                event = String(value)
+                if try await !handle(sse.name ?? "message", sse.data) { return }
             }
         }
+        // The server closed without the final blank line: the last event still counts.
+        if let sse = decoder.finish() { _ = try await handle(sse.name ?? "message", sse.data) }
     }
 }
 

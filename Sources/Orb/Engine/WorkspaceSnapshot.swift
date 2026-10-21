@@ -348,6 +348,7 @@ actor WorkspaceSnapshots {
 
     func snapshot(for botID: UUID, folder: URL, now: Date = .now) async -> WorkspaceSnapshot {
         let path = folder.standardizedFileURL.path
+        let started = Date.now
         if let entry = entries[botID], entry.folder == path, now.timeIntervalSince(entry.takenAt) < lifetime {
             return entry.snapshot
         }
@@ -361,7 +362,7 @@ actor WorkspaceSnapshots {
         // `invalidate` ran while it read (it may have read the folder before the change that asked for the rescan).
         if running[botID]?.token == token {
             running[botID] = nil
-            entries[botID] = Entry(folder: path, takenAt: now, snapshot: snapshot)
+            entries[botID] = Entry(folder: path, takenAt: now.addingTimeInterval(Date.now.timeIntervalSince(started)), snapshot: snapshot)
         }
         return snapshot
     }

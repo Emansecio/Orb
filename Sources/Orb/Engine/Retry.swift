@@ -80,7 +80,8 @@ enum Retry {
     /// `rateLimited`: the failure was a usage limit (`isRateLimit`), whose waits are `rateLimitBackoff`.
     static func delay(afterAttempt attempt: Int, retryAfter: TimeInterval?, jitter: Double, rateLimited: Bool = false) -> TimeInterval? {
         if let retryAfter {
-            return retryAfter > maxServerDelay ? nil : max(0, retryAfter)
+            // Floor at `baseDelay`: a `Retry-After: 0` (or a date already past) must not retry at once.
+            return retryAfter > maxServerDelay ? nil : max(baseDelay, retryAfter)
         }
         let backoff = rateLimited
             ? rateLimitBackoff[min(max(attempt, 1), rateLimitBackoff.count) - 1]

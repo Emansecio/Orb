@@ -218,18 +218,21 @@ struct ChatStreamMapper: SSEMapper {
 /// Assembles streamed `delta.tool_calls` fragments: id/name come first, `arguments` arrive in pieces.
 struct ToolCallAccumulator {
     private var calls: [Int: ToolCallRequest] = [:]
+    private static let empty = ToolCallRequest(id: "", name: "", arguments: "")
 
     mutating func ingest(_ fragments: [JSONValue]) {
         for fragment in fragments {
             let index = slot(for: fragment)
-            var call = calls[index] ?? ToolCallRequest(id: "", name: "", arguments: "")
-            if let id = fragment["id"]?.string, !id.isEmpty { call.id = id }
-            if let name = fragment["function"]?["name"]?.string, !name.isEmpty { call.name = name }
+            // Mutated in place through the dictionary: a local copy would share the buffer and recopy the whole
+            // `arguments` string on every piece (quadratic on large arguments).
+            if let id = fragment["id"]?.string, !id.isEmpty { calls[index, default: Self.empty].id = id }
+            if let name = fragment["function"]?["name"]?.string, !name.isEmpty { calls[index, default: Self.empty].name = name }
             if let arguments = fragment["function"]?["arguments"] {
-                if let piece = arguments.string { call.arguments += piece }
-                else if arguments != .null { call.arguments = arguments.jsonString } // some local servers send an object
+                if let piece = arguments.string { calls[index, default: Self.empty].arguments += piece }
+                else if arguments != .null { calls[index, default: Self.empty].arguments = arguments.jsonString } // some local servers send an object
+            } else if calls[index] == nil {
+                calls[index] = Self.empty
             }
-            calls[index] = call
         }
     }
 
