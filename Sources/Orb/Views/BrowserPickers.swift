@@ -44,6 +44,15 @@ enum BrowserPickerCopy {
     /// The pickers show while the Orb has "Navegar na web".
     static func showsPickers(_ capabilities: Set<Capability>) -> Bool { capabilities.contains(.browser) }
 
+    /// The pickers have something to tell the person (a browser not ready, a search that falls back): they show open then,
+    /// whatever was folded. Still looking (`status` nil) is not a problem yet.
+    static func hasProblem(capabilities: Set<Capability>, status: BrowserStatus?, provider: SearchProvider, hasKey: Bool?) -> Bool {
+        guard showsPickers(capabilities) else { return false }
+        let browserFailed = status.map { browserLine(status: $0).tone == .warning } ?? false
+        let searchFailed = searchLine(provider, browserIsReady: status?.isReady, hasKey: hasKey)?.tone == .warning
+        return browserFailed || searchFailed
+    }
+
     /// What the Orb's browser has on this Mac. `status` is nil while it is being looked for.
     static func browserLine(status: BrowserStatus?) -> Line {
         guard let status else { return Line(text: "Conferindo o que está instalado…", tone: .neutral) }
@@ -93,76 +102,150 @@ extension SettingsRouter {
     }
 }
 
-/// The two pickers and their status lines, rows of the Orb's "O que pode usar" section.
+/// "Navegar na web" in the Orb's "Pode usar" card: its switch row, which folds the two pickers (how the browser runs, where it
+/// searches), and the proxy row when the Orb chose one. What the pickers say (a browser not installed, no search key) shows
+/// only as a problem, and then they are open whatever was folded; the descriptions are the pickers' hover texts.
 struct BrowserPickerRows: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage(InspectorFold.browserKey) private var storedOpen = false
     let botID: UUID
-    /// What the browser has on this Mac, read in the background; read again when the app comes back to the front (the person
-    /// may have installed it in the Terminal meanwhile).
-    @State private var status: BrowserStatus?
-    @State private var hasKey: Bool?
-    @State private var comingBack = 0
+    /// The switch of the capability itself: the pickers show while it is on.
+    @Binding var isOn: Bool
+    /// What the browser has on this Mac and whether the search key is kept. The panel reads them (it opens the whole card
+    /// on a problem even while this part is folded away) and the app coming back to the front reads them again.
+    let status: BrowserStatus?
+    let hasKey: Bool?
 
-    private struct Check: Hashable {
-        var provider: SearchProvider
-        var comingBack: Int
-    }
+    /// The pickers start under the title, past the icon column.
+    private static let indent: CGFloat = 28
 
     var body: some View {
         if let live = model.liveBot(botID) {
             let bot = live.bot
-            // Each picker is one row of the form with its description and status under it: not a row (and a hairline) for
-            // every line, which made the card twice as long as the switches around it.
-            Group {
-                VStack(alignment: .leading, spacing: 4) {
-                    Picker("Navegador", selection: modeBinding) {
-                        ForEach(BrowserMode.allCases) { Text($0.label).tag($0) }
-                    }
-                    .help(Tip.browserMode)
-                    caption(bot.browserMode.summary)
-                    statusLine(BrowserPickerCopy.browserLine(status: status))
-                        .padding(.top, 2)
+            let hasProblem = BrowserPickerCopy.hasProblem(capabilities: bot.capabilities, status: status,
+                                                          provider: bot.searchProvider, hasKey: hasKey)
+            let isOpen = isOn && InspectorFold.isOpen(stored: storedOpen, hasProblem: hasProblem)
+            titleRow(bot, isOpen: isOpen, hasProblem: hasProblem)
+                .foldContent()
+            if isOn, let proxy = bot.browserProxy {
+                proxyRow(proxy)
+                    .transition(.quiet)
+            }
+            if isOpen {
+                Picker("Navegador", selection: modeBinding) {
+                    ForEach(BrowserMode.allCases) { Text($0.label).tag($0) }
                 }
-                if let proxy = bot.browserProxy {
-                    // The same shape as the status line above it: a caption with its icon, and the action under it as a link.
-                    VStack(alignment: .leading, spacing: 3) {
-                        Label("Proxy: \(BrowserProxy.display(proxy))", systemImage: "network")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
-                        Button("Remover") { model.removeBrowserProxy(for: botID) }
-                            .buttonStyle(.link)
-                            .font(.caption)
-                            .help(Tip.removeBrowserProxy)
-                    }
-                    .accessibilityElement(children: .contain)
-                    caption("Escolhido pelo Orb. O navegador dele passa por esse proxy; remover o deixa direto.")
+                .help(Tip.browserMode)
+                .padding(.leading, Self.indent)
+                .foldContent()
+                if let line = problemLine(BrowserPickerCopy.browserLine(status: status)) {
+                    statusLine(line)
+                        .padding(.leading, Self.indent)
+                        .foldContent()
                 }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Picker("Pesquisa", selection: providerBinding) {
-                        ForEach(SearchProvider.allCases) { Text($0.label).tag($0) }
-                    }
-                    .help(Tip.searchProvider)
-                    caption(BrowserPickerCopy.searchSummary(bot.searchProvider))
-                    if let line = BrowserPickerCopy.searchLine(bot.searchProvider, browserIsReady: status?.isReady, hasKey: hasKey) {
-                        statusLine(line)
-                            .padding(.top, 2)
-                    }
+                Picker("Pesquisa", selection: providerBinding) {
+                    ForEach(SearchProvider.allCases) { Text($0.label).tag($0) }
+                }
+                .help(BrowserPickerCopy.searchSummary(bot.searchProvider))
+                .padding(.leading, Self.indent)
+                .foldContent()
+                if let line = BrowserPickerCopy.searchLine(bot.searchProvider, browserIsReady: status?.isReady, hasKey: hasKey)
+                    .flatMap(problemLine) {
+                    statusLine(line)
+                        .padding(.leading, Self.indent)
+                        .foldContent()
                 }
             }
-            .task(id: Check(provider: bot.searchProvider, comingBack: comingBack)) {
-                let provider = bot.searchProvider
-                async let found = model.browserStatus()
-                async let key = model.hasSearchKey(for: provider)
-                let (newStatus, newKey) = await (found, key)
-                guard !Task.isCancelled else { return }
-                status = newStatus
-                hasKey = provider == .tinyfish ? newKey : nil
-            }
-            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in comingBack += 1 }
         }
+    }
+
+    /// The status lines that are good news ("Pronto · usa o Google Chrome", "Chave guardada") or still looking are left out:
+    /// the pickers speak up only when something is wrong.
+    private func problemLine(_ line: BrowserPickerCopy.Line) -> BrowserPickerCopy.Line? {
+        line.tone == .warning ? line : nil
+    }
+
+    // MARK: Title row
+
+    /// The switch row: icon, title (and, folded, what the pickers are set to) with the chevron, and the switch. Clicking the
+    /// text or the chevron folds; the switch is only the switch. Without the capability there is nothing to fold.
+    private func titleRow(_ bot: Bot, isOpen: Bool, hasProblem: Bool) -> some View {
+        HStack(spacing: 8) {
+            if isOn {
+                Button {
+                    toggleFold(isOpen: isOpen, hasProblem: hasProblem)
+                } label: {
+                    HStack(spacing: 6) {
+                        title(bot, showsSummary: !isOpen)
+                        Spacer(minLength: 4)
+                        FoldChevron(isOpen: isOpen)
+                    }
+                    .contentShape(.rect)
+                }
+                .buttonStyle(FoldRowStyle())
+                .help(Tip.toggleBrowserOptions(isOpen: isOpen))
+                .accessibilityLabel(Capability.browser.label)
+                .accessibilityValue(InspectorFold.spokenState(isOpen: isOpen, summary: summaryText(bot)))
+            } else {
+                title(bot, showsSummary: false)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            Toggle(Capability.browser.label, isOn: $isOn)
+                .labelsHidden()
+        }
+        .help(Tip.capability(.browser))
+    }
+
+    private func title(_ bot: Bot, showsSummary: Bool) -> some View {
+        HStack(spacing: 4) {
+            // The icons share one width, so the titles start on one x whatever the symbol (terminal, globe, window…).
+            Label {
+                Text(Capability.browser.label)
+            } icon: {
+                Image(systemName: Capability.browser.symbol).frame(width: 20)
+            }
+            .lineLimit(1)
+            .layoutPriority(1)
+            if showsSummary {
+                Text("· \(summaryText(bot))")
+                    .font(.caption)
+                    .foregroundStyle(Palette.faint)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .transition(.opacity)
+            }
+        }
+    }
+
+    private func summaryText(_ bot: Bot) -> String {
+        BrowserFoldSummary.text(mode: bot.browserMode, provider: bot.searchProvider)
+    }
+
+    private func toggleFold(isOpen: Bool, hasProblem: Bool) {
+        let next = InspectorFold.stored(afterClickWhen: isOpen, stored: storedOpen, hasProblem: hasProblem)
+        withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) { storedOpen = next }
+    }
+
+    // MARK: Rows
+
+    /// The same shape as a status line: a caption with its icon, and the action under it as a link. What the proxy means
+    /// is its hover text.
+    private func proxyRow(_ proxy: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Label("Proxy: \(BrowserProxy.display(proxy))", systemImage: "network")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+            Button("Remover") { model.removeBrowserProxy(for: botID) }
+                .buttonStyle(.link)
+                .font(.caption)
+                .help(Tip.removeBrowserProxy)
+        }
+        .padding(.leading, Self.indent)
+        .help("Escolhido pelo Orb. O navegador dele passa por esse proxy; remover o deixa direto")
+        .accessibilityElement(children: .contain)
     }
 
     private var modeBinding: Binding<BrowserMode> {
@@ -173,13 +256,6 @@ struct BrowserPickerRows: View {
     private var providerBinding: Binding<SearchProvider> {
         Binding(get: { model.liveBot(botID)?.bot.searchProvider ?? .duckduckgo },
                 set: { model.setSearchProvider($0, for: botID) })
-    }
-
-    /// The mode's and the provider's descriptions: the same line as under "Terminal e arquivos" and its siblings.
-    private func caption(_ text: String) -> some View {
-        Text(text)
-            .capabilityCaption()
-            .textSwap(text)
     }
 
     private func statusLine(_ line: BrowserPickerCopy.Line) -> some View {
