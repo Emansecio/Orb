@@ -24,6 +24,10 @@ final class FakeBrowserDriver: BrowserDriver, @unchecked Sendable {
         var generation = 0
         /// Commands that fail (by their words, "tab close c1"), the others answering as usual.
         var failingCommands: [String: BrowserDriverError] = [:]
+        /// What `streamPort` answers (nil: the browser has no stream).
+        var streamPort: Int?
+        /// What `box` answers, by ref; a ref without one has no box.
+        var boxes: [String: CGRect] = [:]
     }
 
     var generation: Int { state.withLock { $0.generation } }
@@ -85,6 +89,10 @@ final class FakeBrowserDriver: BrowserDriver, @unchecked Sendable {
     func evaluate(_ script: String) async throws -> String {
         try note("evaluate").evaluation
     }
+
+    func streamPort() async throws -> Int? { try note("streamPort").streamPort }
+
+    func box(of ref: String) async throws -> CGRect? { try note("box \(ref)").boxes[ref] }
 
     func currentURL() async throws -> String? {
         let state = try note("currentURL")

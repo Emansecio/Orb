@@ -223,6 +223,46 @@ struct AgentBrowserDriverTests {
         await #expect(throws: BrowserDriverError.self) { try await broken.click("e1") }
     }
 
+    // MARK: The live screen
+
+    @Test func theStreamPortIsReadFromStreamStatus() async throws {
+        // As measured on agent-browser 0.39.
+        let (driver, calls) = make { _ in abOK(#"{"connected":true,"enabled":true,"port":51955,"screencasting":false,"lifecycle":{"launched":false}}"#) }
+        #expect(try await driver.streamPort() == 51955)
+        #expect(calls.withLock { $0.last?.dropFirst(3).map { $0 } } == ["stream", "status"])
+
+        let (without, _) = make { _ in abOK(#"{"connected":false,"enabled":false,"lifecycle":{"launched":false}}"#) }
+        #expect(try await without.streamPort() == nil)
+        let (zero, _) = make { _ in abOK(#"{"enabled":true,"port":0}"#) }
+        #expect(try await zero.streamPort() == nil)
+    }
+
+    @Test func noBrowserIsNoStreamPortAndAnyOtherErrorStaysAnError() async throws {
+        let (gone, _) = make { _ in #"{"success":false,"data":null,"error":"Browser not launched"}"# }
+        #expect(try await gone.streamPort() == nil)
+        let (failing, _) = make { _ in #"{"success":false,"data":null,"error":"Stream is broken"}"# }
+        await #expect(throws: BrowserDriverError.failed("Stream is broken")) { _ = try await failing.streamPort() }
+        // Without a background process the command is not even sent (it would start a browser of its own).
+        let (absent, calls) = make(listsSession: false) { _ in abOK(#"{"sessions":[]}"#) }
+        #expect(try await absent.streamPort() == nil)
+        #expect(!calls.withLock { $0.contains { $0.contains("stream") } })
+    }
+
+    @Test func theBoxOfAnElementIsInTheViewportsPixels() async throws {
+        let (driver, calls) = make { _ in abOK(#"{"height":18,"width":82,"x":599,"y":698.28125,"lifecycle":{"launched":false}}"#) }
+        #expect(try await driver.box(of: "e1") == CGRect(x: 599, y: 698.28125, width: 82, height: 18))
+        #expect(calls.withLock { $0.last?.dropFirst(3).map { $0 } } == ["get", "box", "@e1"])
+
+        let (empty, _) = make { _ in abOK(#"{"lifecycle":{"launched":false}}"#) }
+        #expect(try await empty.box(of: "e1") == nil)
+    }
+
+    @Test func theStreamIsAskedForSmallFramesWhenTheDaemonStarts() {
+        let environment = AgentBrowserConfig(executable: "/x", session: "orb-a").extraEnvironment
+        #expect(environment["AGENT_BROWSER_STREAM_MAX_WIDTH"] == "480")
+        #expect(environment["AGENT_BROWSER_STREAM_QUALITY"] == "60")
+    }
+
     // MARK: The real process
 
     @Test(.enabled(if: hasPython)) func theCommandLineIsRunForRealAndItsNoiseIgnored() async throws {

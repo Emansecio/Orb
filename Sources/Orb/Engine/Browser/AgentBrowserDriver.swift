@@ -144,6 +144,11 @@ struct AgentBrowserConfig: Sendable, Equatable {
         var environment = ["AGENT_BROWSER_IDLE_TIMEOUT_MS": "1800000"]
         if let socketDirectory { environment["AGENT_BROWSER_SOCKET_DIR"] = socketDirectory.path }
         if let proxy { environment[Self.proxyVariable] = proxy }
+        // The live screen's frames (docs/TELA-AO-VIVO.md): the daemon reads these when it starts, and the stream takes no width or
+        // quality from a client (measured on 0.39: `?maxWidth=`, `?width=` and `?quality=` change nothing), so they are set here
+        // for every client. At 480 px a frame is 6-36 KB instead of 50 KB and Chrome spends about a quarter of the CPU.
+        environment["AGENT_BROWSER_STREAM_MAX_WIDTH"] = "480"
+        environment["AGENT_BROWSER_STREAM_QUALITY"] = "60"
         return environment
     }
 
@@ -528,6 +533,27 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
         } catch BrowserDriverError.noPage {
             return nil
         }
+    }
+
+    func streamPort() async throws -> Int? {
+        // Same as `currentURL`: `stream status` on a session nobody opened would start a browser of its own choosing.
+        // Measured on 0.39: `{"connected":true,"enabled":true,"port":51955,"screencasting":false,…}`, local and ephemeral.
+        do {
+            let port = try await send(["stream", "status"])["port"]?.int
+            return port.flatMap { $0 > 0 ? $0 : nil }
+        } catch BrowserDriverError.noPage {
+            return nil
+        }
+    }
+
+    func box(of ref: String) async throws -> CGRect? {
+        // Measured on 0.39: `{"x":599,"y":698.28,"width":82,"height":18}`, the same numbers as `getBoundingClientRect()` (the
+        // viewport's CSS pixels, scroll already counted).
+        let data = try await send(["get", "box", "@" + ref])
+        guard let x = data["x"]?.number, let y = data["y"]?.number,
+              let width = data["width"]?.number, let height = data["height"]?.number,
+              width >= 0, height >= 0 else { return nil }
+        return CGRect(x: x, y: y, width: width, height: height)
     }
 
     func setHeaded(_ headed: Bool) async throws -> BrowserPage {
