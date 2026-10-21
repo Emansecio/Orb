@@ -177,6 +177,7 @@ struct BrowseOpenTool: BrowseTool {
             return try await session.driver.open(address)
         }
         BrowseSupport.forgetLabels(context)
+        if let botID = context.botID { context.browser.hub?.notePage(botID: botID, url: page.url, title: page.title) }
         var text = "Opened \(page.url)" + (page.title.isEmpty ? "" : " — “\(page.title)”")
         text += BrowseSupport.handoffNote(url: page.url, title: page.title)
         return text + "\nNext: browse_snapshot (what to click or fill) or browse_read (the text)."
@@ -213,7 +214,10 @@ struct BrowseSnapshotTool: BrowseTool {
             tree = snapshot.tree
             url = snapshot.url
             session.remember(snapshot, text: tree)
-            if let botID = context.botID { context.browser.hub?.setLabels(snapshot.refs, botID: botID, scope: context.browser.scope) }
+            if let botID = context.botID {
+                context.browser.hub?.setLabels(snapshot.refs, botID: botID, scope: context.browser.scope)
+                context.browser.hub?.notePage(botID: botID, url: url, title: "", text: tree, refs: snapshot.refs)
+            }
         }
         let note = BrowseSupport.handoffNote(url: url, title: "", text: tree)
         guard !tree.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -250,6 +254,7 @@ struct BrowseReadTool: BrowseTool {
             text = readout.content
             url = readout.url
             session.rememberRead(text: text, url: url)
+            if let botID = context.botID { context.browser.hub?.notePage(botID: botID, url: url, title: "", text: String(text.prefix(4_000))) }
         }
         let note = BrowseSupport.handoffNote(url: url, title: "", text: String(text.prefix(4_000)))
         let body = WebFetchTool.page(of: text, arguments: arguments, truncatedDownload: nil)
@@ -310,6 +315,16 @@ struct BrowseClickTool: BrowseTool {
     /// The ones that only look or move the pointer: they change nothing on the page by themselves.
     private static let gentle: Set<String> = ["hover", "focus", "scrollintoview"]
 
+    /// What the live screen's cursor does for an action on an element: presses (click, double click, check, uncheck) or rests
+    /// there (hover, focus). Scrolling and dragging have no single point to show.
+    private static func pointerKind(_ action: String) -> LivePointer.Kind? {
+        switch action {
+        case "click", "dblclick", "check", "uncheck": .click
+        case "hover", "focus": .hover
+        default: nil
+        }
+    }
+
     let spec = ToolSpec(
         name: "browse_click",
         description: """
@@ -350,6 +365,7 @@ struct BrowseClickTool: BrowseTool {
         let session = try await BrowseSupport.session(context)
         let (url, dialog) = try await BrowseSupport.acting {
             try await session.exclusive {
+                if let kind = Self.pointerKind(action) { await context.browser.hub?.point(at: ref, kind: kind, session: session) }
                 if action == "click" {
                     try await session.driver.click(ref)
                 } else {
@@ -395,6 +411,7 @@ struct BrowseFillTool: BrowseTool {
         let outcome: String = try await BrowseSupport.acting {
             try await session.exclusive {
                 if let reason = await BrowseSupport.secretReason(ref: ref, session: session) { return SecretField.refusal(reason) }
+                await context.browser.hub?.point(at: ref, kind: .type, session: session)
                 try await session.driver.fill(ref, text: text)
                 guard submit else { return "" }
                 try await session.driver.press("Enter")
@@ -425,7 +442,12 @@ struct BrowseSelectTool: BrowseTool {
         let ref = try BrowseSupport.ref(arguments)
         let value = try arguments.requiredString("value")
         let session = try await BrowseSupport.session(context)
-        try await BrowseSupport.acting { try await session.exclusive { try await session.driver.select(ref, value: value) } }
+        try await BrowseSupport.acting {
+            try await session.exclusive {
+                await context.browser.hub?.point(at: ref, kind: .click, session: session)
+                try await session.driver.select(ref, value: value)
+            }
+        }
         session.pageChanged()
         return "Selected “\(value)” in \(ref)."
     }

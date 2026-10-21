@@ -106,6 +106,9 @@ protocol BrowserDriver: Sendable {
     /// The local port of this session's live stream of the page (agent-browser's `stream status`); nil when the browser
     /// has none or is not running. It changes when the browser is launched again (`generation`).
     func streamPort() async throws -> Int?
+    /// Where an element of the last snapshot is on the page now (`get box`), in the viewport's CSS pixels (what scrolling has
+    /// moved is already in it); nil when the browser cannot say. Only the live screen asks (the pointer of the Orb).
+    func box(of ref: String) async throws -> CGRect?
 }
 
 extension BrowserDriver {
@@ -117,4 +120,5 @@ extension BrowserDriver {
     func runningSessionsSynchronously(timeout: TimeInterval) -> [String] { [] }
     var generation: Int { 0 }
     func streamPort() async throws -> Int? { nil }
+    func box(of ref: String) async throws -> CGRect? { nil }
 }

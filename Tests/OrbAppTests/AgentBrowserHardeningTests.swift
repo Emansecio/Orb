@@ -198,13 +198,15 @@ struct AgentBrowserSessionGuardTests {
 
     @Test func theLoginShellsAgentBrowserSettingsAreStrippedAndProxiesKept() {
         let shell = ["PATH": "/usr/bin", "AGENT_BROWSER_PROFILE": "/Users/me/Chrome", "AGENT_BROWSER_EXECUTABLE_PATH": "/Applications/Brave",
-                     "agent_browser_args": "--no-sandbox", "AGENT_BROWSER_CONFIG": "/Users/me/ab.json",
+                     "agent_browser_args": "--no-sandbox", "AGENT_BROWSER_CONFIG": "/Users/me/ab.json", "AGENT_BROWSER_STREAM_MAX_WIDTH": "1920",
                      "HTTPS_PROXY": "http://proxy:3128", "NO_PROXY": "localhost", "HOME": "/Users/me"]
         let cleaned = AgentBrowserConfig.sanitized(shell)
         #expect(Set(cleaned.keys) == ["PATH", "HTTPS_PROXY", "NO_PROXY", "HOME"])
         let environment = config().environment(base: shell)
         #expect(environment["AGENT_BROWSER_PROFILE"] == nil && environment["AGENT_BROWSER_CONFIG"] == nil)
         #expect(environment["AGENT_BROWSER_IDLE_TIMEOUT_MS"] == "1800000", "what the app sets stays")
+        #expect(environment["AGENT_BROWSER_STREAM_MAX_WIDTH"] == "480" && environment["AGENT_BROWSER_STREAM_QUALITY"] == "60",
+                "the live screen's frame size is the app's, not the shell's")
         #expect(environment["HTTPS_PROXY"] == "http://proxy:3128")
     }
 
