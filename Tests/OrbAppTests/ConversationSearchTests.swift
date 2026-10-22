@@ -32,6 +32,15 @@ import Testing
         #expect(try hits("coração", in: [bot("o coracao bate")]).count == 1)
     }
 
+    @Test func theActionThatSentAMessageBetweenOrbsIsNotAHit() throws {
+        let atlas = OrbRef(id: UUID(), name: "Atlas"), lia = OrbRef(id: UUID(), name: "Lia")
+        let ask = TranscriptItem(.orbMessage(OrbMessageItem(direction: .sent, kind: .ask, state: .open, from: atlas, to: lia,
+                                                            text: "Escreve o resumo.", requestID: UUID(), chainID: UUID())))
+        let send = TranscriptItem(.tool(ToolCall(kind: .orbs, title: "Falando com Lia", detail: "Escreve o resumo.", state: .done)))
+        // The message's card is the one hit: the action beside it has no row to scroll to.
+        #expect(try hits("resumo", in: [ask, send]).map(\.itemIndex) == [0])
+    }
+
     @Test func aLetterWrittenAsBaseAndCombiningMarkIsTheSameLetter() throws {
         let decomposed = "a\u{0327}\u{0303}" // a + cedilla + tilde, nothing a user types, but pasted text has it
         let items = [bot("Uma ac\u{0327}a\u{0303}o decomposta"), bot("Outra ação composta")]

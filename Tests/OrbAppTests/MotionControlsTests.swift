@@ -126,9 +126,11 @@ struct MotionControlsTests {
     }
 
     @Test func stopKeepsItsOwnButtonOnlyWhileAMessageIsQueued() {
-        #expect(ComposerAction.queue.showsSecondaryStop)
-        #expect(!ComposerAction.send.showsSecondaryStop)
-        #expect(!ComposerAction.stop.showsSecondaryStop)
+        #expect(ComposerAction.queue.showsSecondaryStop())
+        #expect(!ComposerAction.send.showsSecondaryStop())
+        #expect(!ComposerAction.stop.showsSecondaryStop())
+        #expect(ComposerAction.send.showsSecondaryStop(waitsOnChain: true))
+        #expect(!ComposerAction.stop.showsSecondaryStop(waitsOnChain: true))
     }
 
     @Test func aPressShrinksTheButtonToNinetyTwoPercent() {

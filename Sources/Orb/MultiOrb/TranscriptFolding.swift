@@ -212,9 +212,11 @@ enum TranscriptFolding {
     }
 
     /// The action that sent a message between Orbs ("Falando com Revisor"), next to the message's own line: it has no row,
-    /// the message says the same. One that failed has no message, and stays.
+    /// the message says the same. One that failed has no message, and stays; so do the other `orbs` actions (listing the team,
+    /// a question to you, a group or an Orb proposed), which send none.
     static func sendsMessage(_ items: [TranscriptItem], at index: Int) -> Bool {
-        guard case .tool(let call) = items[index].kind, call.kind == .orbs, call.state != .failed else { return false }
+        guard case .tool(let call) = items[index].kind, call.kind == .orbs, call.state != .failed,
+              call.title.hasPrefix(WorkPhrase.talkingVerb) || call.title.hasPrefix(WorkPhrase.notifyingVerb) else { return false }
         return (index > 0 && isExchangeLine(items[index - 1])) || (index + 1 < items.count && isExchangeLine(items[index + 1]))
     }
 

@@ -286,7 +286,9 @@ enum ConversationSearch {
         var truncated = false
         for (index, item) in items.enumerated() {
             try checkpoint()
-            guard let (source, text) = searchable(item), text.utf8.count >= pattern.units.count else { continue }
+            // The action that sent a message between Orbs has no row (the message's card says it): no hit to scroll to.
+            guard let (source, text) = searchable(item), text.utf8.count >= pattern.units.count,
+                  !TranscriptFolding.sendsMessage(items, at: index) else { continue }
             scanned += 1
             let room = maxHits - hits.count
             let ranges = searcher.matches(in: text.unicodeScalars, limit: room + 1)

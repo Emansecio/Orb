@@ -12,6 +12,10 @@ struct OrbMessageRow: View {
     let botID: UUID
     @State private var unfolded: Bool
     @State private var showsExchange = false
+    /// The card is narrower than `narrowBelow`: the state goes without its word (the icon, the colour and the dot say it), so
+    /// the sentence keeps the room. Changes only when the width crosses it, not at every step of a resize.
+    @State private var isNarrow = false
+    static let narrowBelow: CGFloat = 340
 
     /// `startsUnfolded` is for the review snapshots, which cannot press the line.
     init(message: OrbMessageItem, botID: UUID, startsUnfolded: Bool = false) {
@@ -24,6 +28,7 @@ struct OrbMessageRow: View {
         let to = message.to ?? message.from
         let awaits = message.state == .open
         let line = ExchangeWords.line(for: message, in: botID)
+        let preview = Self.preview(message.text)
         VStack(alignment: .leading, spacing: 0) {
             Button {
                 unfolded.toggle()
@@ -34,16 +39,16 @@ struct OrbMessageRow: View {
                         Text(line)
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(Palette.secondary)
-                        if !unfolded, !message.text.isEmpty {
-                            Text(message.text)
+                        if !unfolded, !preview.isEmpty {
+                            Text(preview)
                                 .font(.system(size: 12))
                                 .foregroundStyle(Palette.faint)
                         }
                     }
                     .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .layoutPriority(-1)
-                    Spacer(minLength: 0)
-                    ExchangeStateMark(state: message.state)
+                    ExchangeStateMark(state: message.state, showsWord: !isNarrow)
                     Image(systemName: "chevron.right")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(Palette.faint)
@@ -79,9 +84,10 @@ struct OrbMessageRow: View {
         }
         .card(radius: 12, stroke: awaits ? Palette.accentText.opacity(0.3) : Palette.line)
         .frame(maxWidth: 560, alignment: .leading)
+        .onGeometryChange(for: Bool.self) { $0.size.width < Self.narrowBelow } action: { isNarrow = $0 }
         .frame(maxWidth: .infinity, alignment: .leading)
         .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: unfolded)
-        .motion(Motion.content, value: awaits)
+        .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: awaits)
         .sheet(isPresented: $showsExchange) {
             // The chat's own copy of the exchange; this line alone when the Orb that holds the rest is gone.
             let found = ExchangeSource.messages(chain: message.chainID, of: botID, in: model)
@@ -89,20 +95,28 @@ struct OrbMessageRow: View {
             ExchangeSheet(messages: messages, parties: ExchangeSource.parties(of: messages))
         }
     }
+
+    /// The start of the message under the sentence: its first line, at most 200 characters. A reply can be 6,000 long, and
+    /// the line is laid out again at every width while the window is resized.
+    static func preview(_ text: String) -> String {
+        String(text.drop { $0.isWhitespace }.prefix(200).prefix { !$0.isNewline })
+    }
 }
 
-/// The state of an exchange message as a small mark after its line: waiting (three dots that pulse, still under Reduce Motion),
+/// The state of an exchange message as a small mark after its line: waiting (the word alone: the card's dot already breathes),
 /// answered (a check), failed or refused (a warning), cancelled, or lost when the app closed before the answer came.
 struct ExchangeStateMark: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let state: OrbMessageItem.State
+    /// Off in a narrow card (`OrbMessageRow.narrowBelow`).
+    var showsWord = true
 
     var body: some View {
         // The symbol alone is small and says nothing to someone who has not met it: every state but the answered one also
         // has its word beside it, in the symbol's colour (the answered one is the quiet, expected case).
         HStack(spacing: 4) {
             symbol
-            if state != .replied {
+            if state != .replied, showsWord {
                 Text(Self.tooltip(state))
                     .font(.system(size: 11))
                     .foregroundStyle(tint)
@@ -126,10 +140,7 @@ struct ExchangeStateMark: View {
     @ViewBuilder private var symbol: some View {
         switch state {
         case .open:
-            Image(systemName: "ellipsis")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(tint)
-                .symbolEffect(.pulse, isActive: !reduceMotion)
+            EmptyView()
         case .replied:
             Image(systemName: "checkmark")
                 .font(.system(size: 10, weight: .semibold))

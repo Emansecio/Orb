@@ -969,8 +969,6 @@ private struct WorkingLine: View {
                             .help(Tip.sendToBackground)
                             .transition(.adapted(.swap, reduceMotion: reduceMotion))
                     }
-                    // MARK: MultiOrb (WP2): no Stop of its own while the Orb waits for other Orbs: the composer's (and ⌘.)
-                    // ends the conversation too (`ComposerAction.current`, `stopTurn`).
                 }
                 // The meter slides along with the width of the phrase.
                 .animation(reduceMotion ? nil : Motion.content, value: work.phraseKey)

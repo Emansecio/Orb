@@ -147,8 +147,15 @@ struct TranscriptFoldingTests {
         #expect(TranscriptFolding.rows(for: [read, other, send, ask]) == [.tools([read, other]), .single(ask)])
         let failed = tool(.orbs, .failed)
         #expect(TranscriptFolding.rows(for: [ask, failed]) == [.single(ask), .single(failed)])
-        // Away from any message it is an action like the others.
+        // Away from any message it is an action like the others; an `orbs` action that sends nothing, next to a message, too.
         #expect(TranscriptFolding.rows(for: [read, send]) == [.tools([read, send])])
+        let list = TranscriptItem(.tool(ToolCall(kind: .orbs, title: "Vendo o time", detail: "", state: .done)))
+        #expect(TranscriptFolding.rows(for: [list, ask, send]) == [.single(list), .single(ask)])
+        // Between two messages, and next to the event of a request received.
+        let reply = message(.reply, .reply, from: researcher, to: atlas, chain: chain)
+        #expect(TranscriptFolding.rows(for: [ask, send, reply]) == [.exchange([ask, reply])])
+        let asked = event(.delegationReceived, actor: researcher, subject: atlas, chain: chain)
+        #expect(TranscriptFolding.rows(for: [asked, send, words]) == [.single(asked), .single(words)])
     }
 
     @Test("No chat de um dos dois, a frase não repete o nome dele")

@@ -283,7 +283,9 @@ struct ComposerView: View {
     // MARK: Bar
 
     private var bar: some View {
-        let action = ComposerAction.current(isWorking: isWorking, canSend: canSend, waitsOnChain: model.live(botID).chainWork != nil)
+        let waitsOnChain = model.live(botID).chainWork != nil
+        let action = ComposerAction.current(isWorking: isWorking, canSend: canSend, waitsOnChain: waitsOnChain)
+        let secondaryStop = action.showsSecondaryStop(waitsOnChain: waitsOnChain)
         return HStack(spacing: 2) {
             ComposerPlusMenu(botID: botID, attach: { isImporting = true }) { insert("/\($0) ") }
             PermissionChip(botID: botID) { isFocused = true }
@@ -291,21 +293,21 @@ struct ComposerView: View {
             ContextMeterChip(botID: botID, gauge: gauge, compact: isCompact)
             ModelChip(botID: botID, isOpen: $isModelOpen)
             if Dictation.isSupported { DictationButton(botID: botID) }
-            actionButtons(action)
+            actionButtons(action, secondaryStop: secondaryStop)
         }
         .foregroundStyle(Palette.muted)
         // Stop stepping in or out moves the whole row: the model and meter chips slide with it (34-38 pt, 0.25 s)
         // instead of jumping. Tied to this one value, so neither the chips' texts nor `isCompact` animate with it.
-        .animation(reduceMotion ? nil : Motion.content, value: action.showsSecondaryStop)
+        .animation(reduceMotion ? nil : Motion.content, value: secondaryStop)
     }
 
     /// One round button that is Send or Stop: its symbol is swapped (not the button), so the change reads as the same
     /// control changing meaning. While the Orb works and a message is typed, Stop steps back beside it as a plain round
     /// icon (like "+" and the microphone), so the white button is the one thing the eye finds, and it queues the message.
-    @ViewBuilder private func actionButtons(_ action: ComposerAction) -> some View {
+    @ViewBuilder private func actionButtons(_ action: ComposerAction, secondaryStop: Bool) -> some View {
         let routine = model.runningRoutineName(botID)
         HStack(spacing: 6) {
-            if action.showsSecondaryStop {
+            if secondaryStop {
                 Button("Parar", systemImage: "stop.fill") { model.stopTurn(botID) }
                     .labelStyle(.iconOnly)
                     .buttonStyle(CircleGhostStyle(side: 28, fontSize: 11))
@@ -316,7 +318,7 @@ struct ComposerView: View {
             mainButton(action, routine: routine)
         }
         // Under Reduce Motion the row above does not animate: Stop alone fades in or out (opacity is not movement).
-        .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: action.showsSecondaryStop)
+        .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: secondaryStop)
     }
 
     private func mainButton(_ action: ComposerAction, routine: String?) -> some View {
@@ -768,8 +770,9 @@ enum ComposerAction: Equatable {
         }
     }
 
-    /// Stop keeps its own (dark) button next to the queueing one, so a turn can still be ended with a message typed.
-    var showsSecondaryStop: Bool { self == .queue }
+    /// Stop keeps its own (dark) button next to the queueing one, so a turn can still be ended with a message typed; and next
+    /// to Send while the Orb only waits on other Orbs (`waitsOnChain`), so the wait can too.
+    func showsSecondaryStop(waitsOnChain: Bool = false) -> Bool { self == .queue || (self == .send && waitsOnChain) }
 }
 
 /// The line under the composer while a message can be sent to a working Orb. Pure, so the tests can read it.
