@@ -459,7 +459,12 @@ extension BotSession {
         if !isOrbRun, !waits, model.selection != .bot(id) || !(NSApp?.isActive ?? false) {
             model.setUnread(model.live(id).unread + 1, for: id)
         }
-        if routineID == nil { scheduleSave(delay: 0) } // a routine's was written by `finishRoutineRun`
+        if let working = workingChatID {
+            model.markUnread(working, of: id) // it ended where you were not looking
+            endWorkElsewhere() // the one on show takes the turn machinery back
+        } else if routineID == nil {
+            scheduleSave(delay: 0) // a routine's was written by `finishRoutineRun`
+        }
         if routineID == nil {
             model.settleSteering(id, succeeded: succeeded) // what you said during the turn, if anything
         } else if !isOrbRun {

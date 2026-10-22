@@ -270,21 +270,6 @@ extension AppModel {
 
     func orbRef(_ botID: UUID) -> OrbRef { OrbRef(id: botID, name: bot(botID)?.name ?? "Orb") }
 
-    /// An event line in the Orb's own chat (in the chat itself, also while a side run has it parked).
-    func appendToChat(_ kind: TranscriptItem.Kind, of botID: UUID) {
-        guard bot(botID) != nil else { return }
-        ensureLoaded(botID)
-        let session = session(botID)
-        if var parked = session.parkedChat {
-            parked.items.append(TranscriptItem(kind))
-            session.parkedChat = parked
-            session.isDirty = true
-            session.scheduleSave(delay: BotSession.streamingSaveInterval)
-        } else {
-            append(kind, to: botID)
-        }
-    }
-
     /// What a group's turn adds to the turn of an Orb (nil when the Orb is not in a turn of a group).
     func groupTurnExtras(for botID: UUID) -> GroupTurnExtras? {
         guard let turn = groupHub.turn(of: botID), let group = group(turn.groupID), let run = groupHub.run(turn.groupID) else { return nil }

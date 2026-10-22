@@ -1928,3 +1928,116 @@ private actor Names {
         #expect(team.model.groupSession(group.id)?.items.contains { if case .event(let event) = $0.kind { event.kind == .groupStopped } else { false } } == true)
     }
 }
+
+// MARK: An Orb with more than one conversation (OrbChats)
+
+@Suite @MainActor struct DelegationAcrossConversationsTests {
+    /// Atlas asks the Pesquisador from its first conversation and gets an answer once `gate` opens.
+    private func team(_ gate: TestGate) -> Team {
+        Team { seen in
+            switch seen.who {
+            case "Atlas":
+                if seen.user.contains("<orb_reply") { return say("O Pesquisador achou 42.") }
+                if seen.toolResult != nil { return say("Pedi ao Pesquisador.") }
+                if seen.user.contains("peça ao Pesquisador") { return orbsCall("ask", to: "Pesquisador", "Pesquise o número.") }
+                return say("Certo, outro assunto.")
+            case "Pesquisador":
+                await gate.wait()
+                return say("Achei 42.")
+            default: return say("?")
+            }
+        }
+    }
+
+    private func askThenOpenANewConversation(_ team: Team) async throws -> UUID {
+        let model = team.model, atlas = team.atlas.id
+        model.send("peça ao Pesquisador", to: atlas, fromUser: true)
+        await waitUntil("the request to reach the Pesquisador") { await team.log.count(by: "Pesquisador") >= 1 }
+        await waitUntil("the asker's turn to end") { model.sessions[atlas]?.turnTask == nil }
+        model.newChat(for: atlas)
+        return try #require(model.live(atlas).chats?.active)
+    }
+
+    @Test func anAnswerWakesTheConversationThatAskedBehindTheOneOnShow() async throws {
+        let gate = TestGate()
+        let team = team(gate)
+        defer { team.cleanUp() }
+        let model = team.model, atlas = team.atlas.id
+        let new = try await askThenOpenANewConversation(team)
+        model.send("outro assunto", to: atlas, fromUser: true)
+        await waitUntil("the new conversation's turn") { team.botTexts(team.atlas) == ["Certo, outro assunto."] }
+        await waitUntil("its end") { model.sessions[atlas]?.turnTask == nil }
+
+        await gate.open()
+        await team.settle()
+        let session = model.session(atlas)
+        #expect(session.chatID == new && session.workingChatID == nil, "the one on show stayed in front")
+        #expect(team.botTexts(team.atlas) == ["Certo, outro assunto."])
+        #expect(team.orbMessages(team.atlas).isEmpty)
+        model.store.flush()
+        let first = model.store.readConversation(atlas).value?.items ?? []
+        #expect(first.compactMap { if case .bot(let text, _) = $0.kind { text } else { nil } } == ["Pedi ao Pesquisador.", "O Pesquisador achou 42."])
+        let lines = first.compactMap { if case .orbMessage(let m) = $0.kind { m } else { nil } }
+        #expect(lines.map(\.direction) == [.sent, .reply] && lines.first?.state == .replied)
+        #expect(model.live(atlas).chats?.list.first { $0.id == atlas }?.unread == true)
+
+        model.openChat(atlas, of: atlas)
+        await model.loadedConversation(atlas)
+        #expect(team.botTexts(team.atlas) == ["Pedi ao Pesquisador.", "O Pesquisador achou 42."])
+        #expect(model.live(atlas).chats?.list.first { $0.id == atlas }?.unread == nil, "opening it reads it")
+    }
+
+    @Test func theAnswerOfAConversationDeletedMeanwhileGoesToTheLatest() async throws {
+        let gate = TestGate()
+        let team = team(gate)
+        defer { team.cleanUp() }
+        let model = team.model, atlas = team.atlas.id
+        let new = try await askThenOpenANewConversation(team)
+        #expect(model.canDeleteChat(atlas, of: atlas))
+        model.deleteChat(atlas, of: atlas)
+        #expect(model.live(atlas).chats?.list.map(\.id) == [new])
+
+        await gate.open()
+        await team.settle()
+        #expect(model.session(atlas).chatID == new)
+        #expect(team.botTexts(team.atlas) == ["O Pesquisador achou 42."])
+        #expect(team.orbMessages(team.atlas).map(\.direction) == [.reply])
+        model.store.flush()
+        #expect(model.store.readConversation(atlas).value == nil, "nothing writes the deleted one back")
+    }
+
+    @Test func aNoticeGoesToTheConversationYouWroteInLastEvenWithAnotherOnShow() async throws {
+        let team = Team { seen in
+            switch seen.who {
+            case "Pesquisador":
+                if seen.toolResult != nil { return say("Avisei.") }
+                return orbsCall("tell", to: "Atlas", "O relatório saiu.")
+            default: return say("Ok.")
+            }
+        }
+        defer { team.cleanUp() }
+        let model = team.model, atlas = team.atlas.id
+        model.send("oi", to: atlas, fromUser: true)
+        await team.settle()
+        model.newChat(for: atlas)
+        let new = try #require(model.live(atlas).chats?.active)
+        model.send("na nova", to: atlas, fromUser: true)
+        await team.settle()
+        model.openChat(atlas, of: atlas) // back to the first one, to read it: the new one is still the latest
+        await model.loadedConversation(atlas)
+        #expect(model.latestChat(of: atlas) == new)
+
+        model.send("avise o Atlas", to: team.pesquisador.id, fromUser: true)
+        await team.settle()
+        #expect(team.orbMessages(team.atlas).isEmpty, "not in the one on show")
+        model.store.flush()
+        let lines = (model.store.readConversation(atlas, chat: new).value?.items ?? [])
+            .compactMap { if case .orbMessage(let m) = $0.kind { m } else { nil } }
+        #expect(lines.map(\.kind) == [.tell] && lines.first?.direction == .received && lines.first?.text == "O relatório saiu.")
+        #expect(model.live(atlas).chats?.list.first?.unread == true)
+
+        model.openChat(new, of: atlas)
+        await model.loadedConversation(atlas)
+        #expect(team.orbMessages(team.atlas).map(\.text) == ["O relatório saiu."])
+    }
+}

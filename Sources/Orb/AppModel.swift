@@ -379,12 +379,16 @@ final class AppModel {
         browserHub = BrowserHub.live(dataFolder: store.directory)
         // Only the Orb shown first is read at launch, and the window does not wait for it (`beginLoading` below).
         let readsFirstLater = asyncLoading ?? runsBackgroundWork
-        for bot in state.bots { session(bot.id).isUnloaded = true }
+        for bot in state.bots {
+            let session = session(bot.id)
+            session.isUnloaded = true
+            session.chatID = state.chats[bot.id.uuidString]?.active ?? bot.id // the conversation it was showing
+        }
         restoreDrafts()
         if !readsFirstLater, let first = firstShown {
-            let read = store.readConversation(first.id)
-            notices += Self.labeled(read.notice, for: first).map { [$0] } ?? []
             let shown = session(first.id)
+            let read = store.readConversation(first.id, chat: shown.chatID)
+            notices += Self.labeled(read.notice, for: first).map { [$0] } ?? []
             shown.conversation = read.value?.closingInterruptedTurn(notice: BotSession.quitNotice) ?? Conversation()
             shown.isUnloaded = false
             shown.lastUsed = .now
@@ -425,6 +429,9 @@ final class AppModel {
         }
         for (id, preview) in state.replies {
             if let id = UUID(uuidString: id), botIDs.contains(id) { live(id).setLastReply(preview) }
+        }
+        for (id, chats) in state.chats {
+            if let id = UUID(uuidString: id), botIDs.contains(id) { live(id).setChats(chats) }
         }
         if runsBackgroundWork && !devRun { fillMissingReplies() }
         if !devRun { // a developer run starts no server, and its screens set the statuses themselves
@@ -590,12 +597,13 @@ final class AppModel {
         var unloadedAny = false
         for session in candidates {
             let botID = session.id
-            guard let meta = await store.readMetaAsync(botID) else { continue }
-            // Looked at again after waiting: it may have been used, changed or started a turn meanwhile.
-            guard sessions[botID] === session, session.isIdle(now: now, keepAlive: keepAlive),
+            let chat = session.chatID
+            guard let meta = await store.readMetaAsync(botID, chat: chat) else { continue }
+            // Looked at again after waiting: it may have been used, changed, started a turn or shown another conversation meanwhile.
+            guard sessions[botID] === session, session.chatID == chat, session.isIdle(now: now, keepAlive: keepAlive),
                   let conversation = session.conversation, meta.matches(conversation) else { continue }
             session.unload()
-            store.releaseCache(for: botID)
+            store.releaseCache(for: botID, chat: chat)
             unloadedAny = true
         }
         if unloadedAny { MemoryRelief.soon() }
@@ -778,6 +786,16 @@ final class AppModel {
         let live = live(botID)
         guard live.lastReply != preview else { return }
         live.setLastReply(preview)
+        scheduleStateSave()
+    }
+
+    /// The Orb's list of conversations (see `AppModel+Chats`), saved with the app's state like the reply. None is kept
+    /// once only its first conversation is left.
+    func setChats(_ chats: OrbChats?, for botID: UUID) {
+        let kept = chats?.isOnlyFirst(of: botID) == true ? nil : chats
+        let live = live(botID)
+        guard live.chats != kept else { return }
+        live.setChats(kept)
         scheduleStateSave()
     }
 
@@ -1387,7 +1405,7 @@ final class AppModel {
     /// Whether the Orb's conversation may have a stretch not yet saved to memory, without reading the conversation
     /// when the note beside it can tell (a conversation with no valid note is read, off the main thread).
     private func mayHaveUnsavedStretch(_ botID: UUID) async -> Bool {
-        if sessions[botID]?.isUnloaded == true, let meta = await store.readMetaAsync(botID) {
+        if let session = sessions[botID], session.isUnloaded, let meta = await store.readMetaAsync(botID, chat: session.chatID) {
             return meta.hasUnsavedStretch || sessions[botID]?.isUnloaded != true
         }
         return true
@@ -1549,6 +1567,7 @@ final class AppModel {
         let itemsBeforeMessage = session.conversation?.items.count ?? 0
         if origin.isUser {
             append(.user(text: typed, attachments: attachments.map(\.path) + pictures.map(\.path)), to: botID, id: bubble)
+            chatGotMessage(typed, of: botID)
         } else {
             // Another Orb's words are never your bubble: lines of their own (the first takes the id the model's message points to).
             for (index, item) in origin.items.enumerated() {
@@ -1636,6 +1655,9 @@ final class AppModel {
         let lastWorkspace = session.conversation?.workspaceSeen
         let memoryInPrompt = session.conversation?.memoryInPrompt
         let frozenSections = session.conversation?.frozenSections
+        // "Where you left off" is for the Orb's first conversation and its routines: one opened with "Nova conversa" starts
+        // clean, with only the memory. Taken now: you may open another conversation while the turn is prepared.
+        let tellsWhereLeftOff = (session.conversationChat ?? botID) == botID
 
         session.turnModel = ref.text
         let turn = session.beginTurn()
@@ -1657,7 +1679,7 @@ final class AppModel {
             // The attachments are read while the memory is gathered (the prompt's inputs need the brief, the files nothing).
             async let files = attachmentTexts.texts(attachments)
             let brief = await bank.brief(for: typed, context: TurnPreface.taskContext(history: history, goal: ledger?.goal),
-                                         conversationIsNew: history.isEmpty, userTurns: userTurns,
+                                         conversationIsNew: history.isEmpty && tellsWhereLeftOff, userTurns: userTurns,
                                          canSave: bot.permissionMode != .readOnly, alreadySent: sentMemories,
                                          profile: profile.promptSection)
             let inputs = await TurnPromptInputs.gather(bot: bot, skills: skills, brief: brief)
@@ -1873,14 +1895,18 @@ final class AppModel {
             for shown in live.jobs {
                 guard let job = all.first(where: { $0.id == shown.id }), !job.isActive, job.state != .stopped else { continue }
                 let notice = NoticeAction.jobEnded(job)
-                append(.notice(notice), to: botID)
+                appendToChat(.notice(notice), of: botID) // the latest conversation, where the task you last asked for is
                 if resumesByItself(after: job, of: botID) { resumeAfter = notice }
             }
         }
         live.setJobs(all.filter(\.isActive))
-        // As "Continuar" sends it, but without bringing the chat to its end: you may be reading further up.
-        if let notice = resumeAfter, send(NoticeAction.continueMessage(after: notice), to: botID) {
+        // As "Continuar" sends it, but without bringing the chat to its end: you may be reading further up. In the
+        // conversation of the notice, behind the one on show when that is another.
+        guard let notice = resumeAfter, await prepareTurn(in: latestChat(of: botID), of: botID) else { return }
+        if send(NoticeAction.continueMessage(after: notice), to: botID) {
             session(botID).resumedAfterJobs += 1
+        } else {
+            session(botID).endWorkElsewhere() // nothing began: the one on show takes the turn machinery back
         }
     }
 
@@ -2379,14 +2405,16 @@ final class AppModel {
     private var state: AppState {
         var unread: [String: Int] = [:]
         var replies: [String: ReplyPreview] = [:]
+        var chats: [String: OrbChats] = [:]
         for (id, live) in lives {
             if live.unread > 0 { unread[id.uuidString] = live.unread }
             if let preview = live.lastReply { replies[id.uuidString] = preview }
+            if let list = live.chats { chats[id.uuidString] = list }
         }
         return AppState(bots: bots, routines: routines, skills: skills, connectors: connectorSecrets.redact(connectors),
                         providers: providers, defaultModel: defaultModel, unread: unread, replies: replies, contextMemory: contextMemory,
                         learnedContexts: learnedContexts, profile: profile, priceCorrections: priceCorrections, groups: groups,
-                        categories: categories)
+                        categories: categories, chats: chats)
     }
 
     /// Writes the drafts about 2 s after the last change in them (not on every key); the scheduler's round stays as the

@@ -28,6 +28,8 @@ struct AppState: Codable, Sendable {
     var groups: [OrbGroup] = []
     /// The sidebar's categories of Orbs (see `SidebarCategory`); older files have none.
     var categories: [SidebarCategory] = []
+    /// The conversations of each Orb that has more than one (by Orb id; see `OrbChats`). Older files have none.
+    var chats: [String: OrbChats] = [:]
 
     /// What the app starts with when there is no data yet (a new install, after "Redefinir o Orb"): no Orb, so the
     /// window opens on the welcome, where Atlas is one click away.
@@ -103,30 +105,34 @@ struct Store: Sendable {
 
     private var stateURL: URL { directory.appendingPathComponent("state.json") }
 
-    private func conversationURL(_ botID: UUID) -> URL {
-        directory.appendingPathComponent("conversations/\(botID.uuidString).json")
+    /// The Orb's first conversation (`chat` nil or the Orb's own id) is `conversations/<botID>.json`; the others it opened
+    /// later (`OrbChats`) are in its archive folder, `conversa-<id>.json`.
+    private func conversationURL(_ botID: UUID, _ chat: UUID? = nil) -> URL {
+        guard let chat, chat != botID else { return directory.appendingPathComponent("conversations/\(botID.uuidString).json") }
+        return archiveFolder(botID).appendingPathComponent("\(Self.conversaPrefix)-\(chat.uuidString).json")
     }
 
     /// The prefixes of the conversations an Orb keeps in its archive folder besides the earlier chats (a routine's run, a
-    /// request from another Orb, a turn in a group): not earlier conversations of the Orb, so no index lists them.
-    static var sideConversationPrefixes: [String] { [routinePrefix, pedidoPrefix, grupoPrefix].map { $0 + "-" } }
+    /// request from another Orb, a turn in a group, a conversation of its own made with "Nova conversa"): not the earlier
+    /// chats `mergeArchive` folds back, so no index of the archive lists them.
+    static var sideConversationPrefixes: [String] { [routinePrefix, pedidoPrefix, grupoPrefix, conversaPrefix].map { $0 + "-" } }
 
-    /// Whether `file` is where the chat of this Orb is saved, or the conversation of one of its side runs (a routine's, a
-    /// request's, a group's).
+    /// Whether `file` is where a chat of this Orb is saved (its first one, or one made later), or the conversation of one
+    /// of its side runs (a routine's, a request's, a group's).
     func isConversationFile(_ file: URL, of botID: UUID) -> Bool {
         file == conversationURL(botID)
             || (file.deletingLastPathComponent() == archiveFolder(botID) && Self.isSideConversationName(file.lastPathComponent))
     }
 
-    static let routinePrefix = "routine", pedidoPrefix = "pedido", grupoPrefix = "grupo"
+    static let routinePrefix = "routine", pedidoPrefix = "pedido", grupoPrefix = "grupo", conversaPrefix = "conversa"
 
-    /// `routine-…`, `pedido-…` and `grupo-…`: the conversations that are not "earlier conversations" of the Orb.
+    /// `routine-…`, `pedido-…`, `grupo-…` and `conversa-…`: the conversations that are not "earlier conversations" of the Orb.
     static func isSideConversationName(_ name: String) -> Bool {
         sideConversationPrefixes.contains { name.hasPrefix($0) }
     }
 
-    private func metaURL(_ botID: UUID) -> URL {
-        directory.appendingPathComponent("conversations/\(botID.uuidString).meta.json")
+    private func metaURL(_ botID: UUID, _ chat: UUID? = nil) -> URL {
+        conversationURL(botID, chat).deletingPathExtension().appendingPathExtension("meta.json")
     }
 
     // MARK: Reading
@@ -137,20 +143,20 @@ struct Store: Sendable {
 
     /// Reads (and decodes) on the calling thread. The main thread uses this only when it cannot wait for
     /// `readConversationAsync`.
-    func readConversation(_ botID: UUID) -> StoreRead<Conversation> {
-        loadConversation(botID)
+    func readConversation(_ botID: UUID, chat: UUID? = nil) -> StoreRead<Conversation> {
+        loadConversation(botID, chat)
     }
 
     /// Like `readConversation`, on a thread of the store's own: the caller is not blocked, and nothing is waited for
     /// but the writes still queued for this very file.
-    func readConversationAsync(_ botID: UUID) async -> StoreRead<Conversation> {
+    func readConversationAsync(_ botID: UUID, chat: UUID? = nil) async -> StoreRead<Conversation> {
         await withCheckedContinuation { continuation in
-            Self.readQueue.async { continuation.resume(returning: loadConversation(botID)) }
+            Self.readQueue.async { continuation.resume(returning: loadConversation(botID, chat)) }
         }
     }
 
-    private func loadConversation(_ botID: UUID) -> StoreRead<Conversation> {
-        let url = conversationURL(botID)
+    private func loadConversation(_ botID: UUID, _ chat: UUID?) -> StoreRead<Conversation> {
+        let url = conversationURL(botID, chat)
         let result = Self.gate.reading(url) {
             read(Conversation.self, from: url, ifUnreadable: "a conversa começou vazia")
         }
@@ -159,34 +165,34 @@ struct Store: Sendable {
         // A conversation read without a valid note about it gets one, so the next launch can tell what is unsaved
         // in it without reading it again.
         if let conversation = result.value, let fingerprint = result.fingerprint, result.notice == nil,
-           readMeta(botID)?.file != fingerprint {
-            recordMeta(ConversationMeta(of: conversation, file: fingerprint), for: botID, ifFileStill: fingerprint)
+           readMeta(botID, chat: chat)?.file != fingerprint {
+            recordMeta(ConversationMeta(of: conversation, file: fingerprint), for: botID, chat, ifFileStill: fingerprint)
         }
         return result
     }
 
     /// What is known about the conversation without reading it: nil when no valid note exists, `.empty` when there is
     /// no conversation file.
-    func readMeta(_ botID: UUID) -> ConversationMeta? {
-        let url = conversationURL(botID)
-        return Self.gate.reading([url, metaURL(botID)]) {
+    func readMeta(_ botID: UUID, chat: UUID? = nil) -> ConversationMeta? {
+        let url = conversationURL(botID, chat), note = metaURL(botID, chat)
+        return Self.gate.reading([url, note]) {
             guard let current = FileFingerprint(of: url) else { return ConversationMeta.empty }
-            guard let data = try? Data(contentsOf: metaURL(botID)),
+            guard let data = try? Data(contentsOf: note),
                   let meta = try? JSONDecoder().decode(ConversationMeta.self, from: data), meta.file == current else { return nil }
             return meta
         }
     }
 
-    func readMetaAsync(_ botID: UUID) async -> ConversationMeta? {
+    func readMetaAsync(_ botID: UUID, chat: UUID? = nil) async -> ConversationMeta? {
         await withCheckedContinuation { continuation in
-            Self.readQueue.async { continuation.resume(returning: readMeta(botID)) }
+            Self.readQueue.async { continuation.resume(returning: readMeta(botID, chat: chat)) }
         }
     }
 
     /// Writes a note about a conversation just read, unless the file changed since (a save in between wrote a
     /// better note).
-    private func recordMeta(_ meta: ConversationMeta, for botID: UUID, ifFileStill fingerprint: FileFingerprint) {
-        let conversation = conversationURL(botID), note = metaURL(botID)
+    private func recordMeta(_ meta: ConversationMeta, for botID: UUID, _ chat: UUID?, ifFileStill fingerprint: FileFingerprint) {
+        let conversation = conversationURL(botID, chat), note = metaURL(botID, chat)
         enqueue(touching: [note]) {
             guard FileFingerprint(of: conversation) == fingerprint else { return }
             write(meta, to: note)
@@ -270,8 +276,8 @@ struct Store: Sendable {
     /// The file is the same document either way; what is cheaper is that only items that changed since the last
     /// save of this file are encoded again, and a save that changes nothing writes nothing.
     /// `then` (on the store's queue) says whether the file is as written: false when the write failed.
-    func save(_ conversation: Conversation, for botID: UUID, then done: (@Sendable (Bool) -> Void)? = nil) {
-        let url = conversationURL(botID), note = metaURL(botID)
+    func save(_ conversation: Conversation, for botID: UUID, chat: UUID? = nil, then done: (@Sendable (Bool) -> Void)? = nil) {
+        let url = conversationURL(botID, chat), note = metaURL(botID, chat)
         enqueue(touching: [url, note], dropped: { done?(false) }) {
             let result = writeConversation(conversation, to: url, cached: true)
             // A save that wrote nothing (nothing changed) leaves the note as it is.
@@ -288,14 +294,34 @@ struct Store: Sendable {
         }
     }
 
+    /// Changes a conversation that is not in memory, in its file: read after the writes queued for it, changed and
+    /// written back, with its note (what lands in one of an Orb's conversations that is not on show,
+    /// `BotSession.changeChat`). A file that can't be read is set aside as a read does, and told (`onNotice`); the change
+    /// then starts an empty one.
+    func amend(_ botID: UUID, chat: UUID, _ change: @escaping @Sendable (inout Conversation) -> Void) {
+        let url = conversationURL(botID, chat), note = metaURL(botID, chat)
+        enqueue(touching: [url, note]) {
+            // This write is queued, so no read of the file starts; one already under way ends first.
+            Self.gate.waitForReaders(of: url)
+            let found = read(Conversation.self, from: url, ifUnreadable: "a conversa recomeçou com o que chegou nela")
+            if let notice = found.notice { onNotice?(notice) }
+            if let size = found.fingerprint?.size, size > 1 << 20 { MemoryRelief.now() }
+            var conversation = found.value ?? Conversation()
+            change(&conversation)
+            if writeConversation(conversation, to: url, cached: true) == .wrote {
+                write(ConversationMeta(of: conversation, file: FileFingerprint(of: url)), to: note)
+            }
+        }
+    }
+
     /// Lets go of what is kept for saving this Orb's conversation faster (it was unloaded).
-    func releaseCache(for botID: UUID) {
-        let url = conversationURL(botID)
+    func releaseCache(for botID: UUID, chat: UUID? = nil) {
+        let url = conversationURL(botID, chat)
         queue.async { encoders.remove(url) }
     }
 
-    func deleteConversation(_ botID: UUID) {
-        let url = conversationURL(botID), note = metaURL(botID)
+    func deleteConversation(_ botID: UUID, chat: UUID? = nil) {
+        let url = conversationURL(botID, chat), note = metaURL(botID, chat)
         enqueue(touching: [url, note]) {
             Self.gate.waitForReaders(of: url)
             try? FileManager.default.removeItem(at: url)
@@ -956,6 +982,12 @@ extension AppState {
         priceCorrections = ((try? c.decodeIfPresent([String: Price].self, forKey: .priceCorrections)) ?? nil)?.compactMapValues(\.value) ?? [:]
         groups = try c.lossyArray(.groups)
         categories = try c.lossyArray(.categories)
+        // An Orb's list that can't be read is dropped alone (its conversations' files stay); the others stay.
+        struct Chats: Decodable {
+            var value: OrbChats?
+            init(from decoder: Decoder) throws { value = try? decoder.singleValueContainer().decode(OrbChats.self) }
+        }
+        chats = ((try? c.decodeIfPresent([String: Chats].self, forKey: .chats)) ?? nil)?.compactMapValues(\.value) ?? [:]
         try migrateSingleProvider(from: decoder)
     }
 

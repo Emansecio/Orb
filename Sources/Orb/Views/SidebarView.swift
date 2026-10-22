@@ -323,6 +323,7 @@ private struct ProfileAvatarButton: View {
 /// re-renders that Orb's row and nothing here.
 struct SidebarBotRow: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let botID: UUID
     /// Position in the list: the first nine answer ⌘1…⌘9.
     let index: Int
@@ -334,34 +335,42 @@ struct SidebarBotRow: View {
         let live = model.live(botID)
         let isSelected = model.selection == .bot(botID)
         // The name and the reply under it are cut to one line each: the hover text has the name whole.
-        SidebarRow(isSelected: isSelected, selectionSpace: selectionSpace, help: live.look.name, dragPayload: SidebarOrder.dragPayload(botID)) {
-            model.selection = .bot(botID)
-        } content: { isHovering in
-            BotRowContent(row: BotRow(look: live.look, workText: live.shownWork?.headline, shimmers: live.shownWork?.shimmers ?? false, activity: live.activity, isSelected: isSelected,
-                                      celebration: live.celebration, ack: live.poke, cue: live.cue, glance: live.glance, needsYou: live.needsYou, unread: live.unread, reply: live.lastReply,
-                                      // MARK: MultiOrb (WP2): the ring of the Orb it is exchanging messages with
-                                      partner: live.partner,
-                                      hint: isHovering && index < 9 ? AppShortcut.bot(at: index).label : nil,
-                                      landing: live.landing))
-                .equatable()
-        } dragBegan: {
-            model.draggedBotID = botID
+        VStack(alignment: .leading, spacing: 0) {
+            SidebarRow(isSelected: isSelected, selectionSpace: selectionSpace, help: live.look.name, dragPayload: SidebarOrder.dragPayload(botID)) {
+                model.selection = .bot(botID)
+            } content: { isHovering in
+                BotRowContent(row: BotRow(look: live.look, workText: live.shownWork?.headline, shimmers: live.shownWork?.shimmers ?? false, activity: live.activity, isSelected: isSelected,
+                                          celebration: live.celebration, ack: live.poke, cue: live.cue, glance: live.glance, needsYou: live.needsYou, unread: live.unread, reply: live.lastReply,
+                                          // MARK: MultiOrb (WP2): the ring of the Orb it is exchanging messages with
+                                          partner: live.partner,
+                                          hint: isHovering && index < 9 ? AppShortcut.bot(at: index).label : nil,
+                                          landing: live.landing))
+                    .equatable()
+            } dragBegan: {
+                model.draggedBotID = botID
+            }
+            .contextMenu {
+                Button(CommandName.newChat, systemImage: "square.and.pencil") { model.newChat(for: botID) }
+                Button(CommandName.openFolder, systemImage: "folder") { model.openFolder(of: botID) }
+                Button("Personalizar…", systemImage: "paintpalette") { model.showLookEditor(of: botID) }
+                MoveToCategoryMenu(botID: botID)
+                // MARK: MultiOrb (WP6)
+                Button("Criar grupo com…", systemImage: "person.3") {
+                    model.newGroupStart = botID
+                    model.showNewGroup = true
+                }
+                .disabled(model.botIDs.count < 2)
+                Button("Ver todas as rotinas", systemImage: "clock") { model.selection = .routines }
+                Divider()
+                Button("Apagar \(live.look.name)…", systemImage: "trash", role: .destructive) { model.askToDelete(botID) }
+            }
+            // The open Orb's conversations, once it has more than one.
+            if isSelected, let chats = live.chats {
+                SidebarChatList(botID: botID, chats: chats)
+                    .transition(.adapted(.unfold, reduceMotion: reduceMotion))
+            }
         }
         .matchedGeometryEffect(id: botID, in: rowSpace)
-        .contextMenu {
-            Button(CommandName.openFolder, systemImage: "folder") { model.openFolder(of: botID) }
-            Button("Personalizar…", systemImage: "paintpalette") { model.showLookEditor(of: botID) }
-            MoveToCategoryMenu(botID: botID)
-            // MARK: MultiOrb (WP6)
-            Button("Criar grupo com…", systemImage: "person.3") {
-                model.newGroupStart = botID
-                model.showNewGroup = true
-            }
-            .disabled(model.botIDs.count < 2)
-            Button("Ver todas as rotinas", systemImage: "clock") { model.selection = .routines }
-            Divider()
-            Button("Apagar \(live.look.name)…", systemImage: "trash", role: .destructive) { model.askToDelete(botID) }
-        }
     }
 }
 

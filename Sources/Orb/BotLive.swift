@@ -96,6 +96,8 @@ final class BotLive {
     /// The Orb's latest reply as one short line and when it ended, for the second line of its sidebar row. Saved with
     /// the app's state; nil until a turn ends with a reply.
     private(set) var lastReply: ReplyPreview?
+    /// The Orb's conversations when it has more than one (the sidebar lists them under its row). Saved with the app's state.
+    private(set) var chats: OrbChats?
     /// What the inspector's memory section shows, refreshed after changes.
     private(set) var memory = MemorySnapshot()
     /// The Orb's latest model call (what the context meter's cache hit reads) and what its latest compaction left
@@ -225,6 +227,8 @@ final class BotLive {
     func setUnread(_ count: Int) { assign(\.unread, to: count) }
 
     func setLastReply(_ preview: ReplyPreview?) { assign(\.lastReply, to: preview) }
+
+    func setChats(_ chats: OrbChats?) { assign(\.chats, to: chats) }
 
     func setMemory(_ snapshot: MemorySnapshot) { assign(\.memory, to: snapshot) }
 

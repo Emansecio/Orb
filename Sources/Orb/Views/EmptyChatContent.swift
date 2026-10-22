@@ -34,6 +34,9 @@ enum EmptyChatContent {
     /// The most prompts shown (the interview offer and the routine ideas count).
     static let limit = 4
 
+    /// Under the name in an empty conversation of an Orb that has several.
+    static let newChatNote = "Começa do zero: não vê as outras conversas, mas lembra o que está na memória e usa a mesma pasta e ferramentas."
+
     /// What "Me conheça" and the greeting's "Me entreviste" send: the Orb's first conversation is its interview.
     static let interviewRequest = "Oi! Antes de começarmos, me faça algumas perguntas para entender como você pode me ajudar."
 

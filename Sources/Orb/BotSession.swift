@@ -21,6 +21,7 @@ final class BotSession {
     init(id: UUID, model: AppModel?) {
         self.id = id
         self.model = model
+        chatID = id
     }
 
     // MARK: Conversation
@@ -28,9 +29,28 @@ final class BotSession {
     /// The conversation in memory (nil while it is on disk only). While a routine runs, the routine's own
     /// conversation: the turn machinery works on this one, and the user's chat waits in `parkedChat`.
     var conversation: Conversation? { didSet { showTranscript() } }
-    /// The user's chat while a routine of this Orb runs, untouched. Every turn of an Orb works on one conversation at
-    /// a time, so a routine and a chat turn of the same Orb cannot run together yet (the routine waits in the queue).
+    /// The user's chat while a routine of this Orb runs, untouched (or the one on show while a turn works on another,
+    /// `workingChatID`). Every turn of an Orb works on one conversation at a time, so a routine and a chat turn of the
+    /// same Orb cannot run together yet (the routine waits in the queue).
     var parkedChat: Conversation? { didSet { showTranscript() } }
+    /// Which of the Orb's conversations the chat shows (`OrbChats`): the Orb's own id for its first one.
+    var chatID: UUID
+    /// The conversation a turn still works on after you opened another one (`openChat`): `conversation` is that one,
+    /// and the one you opened waits in `parkedChat` until the turn ends (`endWorkElsewhere`). nil the rest of the time.
+    var workingChatID: UUID?
+    /// The conversation `AppModel.openChat` is reading off the main thread before it shows it; opening another one meanwhile
+    /// drops it.
+    @ObservationIgnored var opening: UUID?
+    /// Bumped each time one of the Orb's conversations changes in its file (`changeChat`): a read of one that was under way
+    /// may be older, and is done again (`AppModel.readChat`).
+    @ObservationIgnored var amends = 0
+
+    /// Which of the Orb's conversations `conversation` is: the one a turn works on behind the one on show, or the one on
+    /// show. nil while a side run (a routine's, a request's, a group's) has it, its end included: the chat stays parked
+    /// a moment after `routineID` is cleared.
+    var conversationChat: UUID? {
+        routineID == nil && (parkedChat == nil || workingChatID != nil) ? workingChatID ?? chatID : nil
+    }
     /// The conversation isn't in memory (never in `conversation`): not read yet, or let go of again.
     @ObservationIgnored var isUnloaded = false
     /// Changes the delegation hub made while the conversation was unloaded (a request answered, notices cancelled),

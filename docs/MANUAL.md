@@ -410,7 +410,8 @@ Cada Orb tem a **sua** memória, que nasce com ele e cresce a cada conversa: nad
   **Esquecer** apaga uma página; um aviso "`<Orb>` esqueceu isso" com **Desfazer** (ou **⌘Z**) fica por cerca de 10 segundos.
   **Abrir pasta da memória** mostra os arquivos.
 - **O que ele usa.** Identidade e preferências vão em toda conversa. O resto ele busca quando precisa (ferramenta `recall`) e
-  lembranças ligadas à sua mensagem chegam sozinhas. Ao começar uma conversa nova, ele sabe "onde vocês pararam".
+  lembranças ligadas à sua mensagem chegam sozinhas. Na primeira conversa e nas rotinas, ele sabe "onde vocês pararam"; uma
+  conversa aberta com **Nova conversa** começa limpa, só com a memória.
 - **Segredos não entram.** Chaves de API, tokens, senhas em URLs e variáveis do tipo `SENHA=…` são removidos antes de qualquer
   coisa ser gravada.
 - **O tempo.** Conversas antigas (mais de 30 dias e pouco usadas) são compactadas, nunca apagadas sozinhas. Só você apaga.
@@ -469,10 +470,27 @@ Detalhes: [docs/MEMORIA.md](MEMORIA.md).
 
 ### Conversas
 
-Cada Orb tem **uma conversa só**, que nunca some: tudo o que vocês disseram, as anotações e os avisos ficam nela, em ordem.
+Cada Orb começa com uma conversa, que nunca some: tudo o que vocês disseram, as anotações e os avisos ficam nela, em ordem.
 Quando ela cresce, o começo vira um resumo para o modelo (veja [Contexto da conversa](#contexto-da-conversa)), mas as mensagens continuam
-no chat para você ler e buscar (⌘F). Conversas guardadas por versões antigas do Orb (o antigo "Nova conversa") voltam para
-dentro dela na primeira abertura, na ordem em que aconteceram.
+no chat para você ler e buscar (⌘F).
+
+**Nova conversa** (⇧⌘N, o botão de lápis na barra do chat, o menu do Orb na lateral ou ⌘K) abre outra, vazia. Cada conversa
+tem o próprio histórico, e o modelo não vê o das outras; a memória, a pasta e as ferramentas são do Orb e valem para todas. O
+que uma conversa disse vai para a memória quando você sai dela, e aí as outras encontram. Com mais de uma, a lateral lista as
+conversas do Orb aberto embaixo dele: as três mais recentes, a que está na tela e as que têm algo não lido ("mais…" mostra o
+resto), com o título tirado da primeira mensagem. O menu de cada uma renomeia ou apaga; o que ela guardou na memória fica.
+
+Trocar de conversa com o Orb trabalhando não interrompe nada: a tarefa termina na conversa em que começou (um ponto pulsa ao
+lado dela na lateral), a faixa acima da caixa de mensagem diz qual é, com **Ver** para voltar, e o que você escrever na outra
+espera ela acabar.
+
+A resposta de um pedido a outro Orb volta para a conversa que pediu, mesmo com outra na tela: o Orb continua nela por trás, do
+mesmo jeito. Os avisos de outros Orbs, o fim de uma rotina, um processo em segundo plano que terminou e as novidades dos grupos
+vão para a conversa em que você escreveu por último. O que chega numa conversa que não está na tela deixa um ponto ao lado
+dela na lateral, até você abri-la; se a conversa que pediu foi apagada, a resposta vai para a mais recente.
+
+Conversas guardadas por versões antigas do Orb (o antigo "Nova conversa", de antes de 11/10) voltam para dentro da primeira
+na primeira abertura, na ordem em que aconteceram.
 
 ### Rotinas
 

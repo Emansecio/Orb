@@ -384,10 +384,14 @@ Pasta de dados: `~/Library/Application Support/Orb/` (a variável `ORB_DATA_DIR`
 
 ```
 state.json                       AppState: Orbs, rotinas, skills, conectores (segredos viram "@keychain"), provedores,
-                                 modelo padrão, não lidas, nível de contexto das conversas, janelas aprendidas, correções de preço
-conversations/<Orb>.json         a conversa do Orb (uma só, nunca some): itens da tela + mensagens do modelo + resumo/ledger + marcas
+                                 modelo padrão, não lidas, nível de contexto das conversas, janelas aprendidas, correções de preço,
+                                 as conversas de cada Orb que tem mais de uma (`OrbChats`: a que está na tela, títulos, datas, não lidas)
+conversations/<Orb>.json         a primeira conversa do Orb (nunca some): itens da tela + mensagens do modelo + resumo/ledger + marcas
 conversations/<Orb>.meta.json    nota ao lado: quantos itens, quantos já foram para a memória, impressão digital do arquivo
 conversations/<Orb>/<id>.json    só de versões antigas ("Nova conversa"): `Store.mergeArchive` as junta à conversa na abertura, em ordem, e apaga
+conversations/<Orb>/conversa-<id>.json      cada conversa aberta com "Nova conversa" (e a nota `.meta.json` ao lado); trocar
+                                 de conversa grava a que sai e lê a outra (`BotSession.openChat`); o que chega numa que não está
+                                 na memória é gravado direto nela (`Store.amend`)
 conversations/<Orb>/routine-<rotina>.json   a conversa de cada rotina
 rascunhos.json                   o que cada compositor guarda sem enviar (`ComposerDraft`: texto e caminhos de arquivos e imagens); gravado ao sair, depois que o turno interrompido devolveu a fila, e a cada rodada do agendador; lido na abertura
 conectores/<id>.json             catálogo do conector (`ConnectorCatalog`): o que o servidor ofereceu da última vez, sem segredos
@@ -557,6 +561,13 @@ modelo de provedor com formato desconhecido sai da lista. A gravação increment
   `interrupt`, fecha a entrada e é terminado se não sair).
 - Em rotina, a conversa da rotina assume o lugar da conversa do chat (que fica "estacionada" em `parkedChat`) enquanto ela
   roda: um Orb faz uma coisa por vez, e a rotina espera (fila de uma por rotina) se o Orb está ocupado.
+- Um turno de outra conversa do mesmo Orb (a que você deixou com ele trabalhando, ou a que pediu algo a outro Orb e recebeu a
+  resposta) usa o mesmo estacionamento: `workingChatID` é a conversa do turno, em `conversation`, e a que está na tela fica em
+  `parkedChat` até o turno acabar (`BotSession.workElsewhere` / `endWorkElsewhere`). `conversationChat` diz qual conversa está em
+  `conversation` (nil durante rotina, pedido ou grupo). O envelope de um pedido guarda a conversa que pediu (`OrbEnvelope.chat`) e
+  a resposta volta para ela; avisos, rotinas, processos e grupos vão para a mais recente (`AppModel.latestChat`). O que muda numa
+  conversa fora da memória vai direto ao arquivo, na fila de gravação (`BotSession.changeChat` → `Store.amend`); uma leitura que
+  estava a caminho é refeita (`AppModel.readChat`, contador `amends`), para nunca instalar uma cópia mais velha.
 - As poucas exceções à isolação (`nonisolated(unsafe)` em caches `NSCache` e tabelas de filas) estão marcadas e guardadas por
   lock ou por serem seguras por construção.
 

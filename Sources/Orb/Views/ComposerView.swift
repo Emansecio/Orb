@@ -131,6 +131,9 @@ struct ComposerView: View {
             if model.holdsRoutine(botID) {
                 RoutineStrip(botID: botID, routineName: model.runningRoutineName(botID))
                     .transition(.adapted(.unfold, reduceMotion: reduceMotion))
+            } else if let working = model.workingChatTitle(botID) {
+                ElsewhereStrip(botID: botID, chatTitle: working)
+                    .transition(.adapted(.unfold, reduceMotion: reduceMotion))
             }
             if !jobs.isEmpty {
                 JobsStrip(botID: botID, jobs: jobs).transition(.adapted(.unfold, reduceMotion: reduceMotion))
@@ -188,7 +191,7 @@ struct ComposerView: View {
         .animation(reduceMotion ? Motion.fade : Motion.content,
                    value: CardParts(suggestions: !matches.isEmpty, strip: lane.hasAttachments || lane.pendingPictures > 0,
                                     error: lane.error != nil, banner: lane.editing != nil, jobs: jobs.count,
-                                    routine: model.holdsRoutine(botID)))
+                                    routine: model.holdsRoutine(botID) || model.workingChatTitle(botID) != nil))
         // The shadow belongs to the background alone: on the whole card every key in the field re-rendered the text,
         // chips and buttons into an offscreen pass to cast it.
         // Reads the dictation's phase, never its level: the card does not re-render with the voice.
@@ -233,7 +236,10 @@ struct ComposerView: View {
             return ComposerHint.queueing(needsYou: model.live(botID).needsYou,
                                          typesInComposer: isFocused && hasText, compact: isCompact)
         }
-        if isWorking { return hasContent && model.canQueue(botID) ? "↩ envia quando a rotina terminar" : "" }
+        if isWorking {
+            guard hasContent, model.canQueue(botID) else { return "" }
+            return model.workingChatTitle(botID) == nil ? "↩ envia quando a rotina terminar" : "↩ envia quando a outra conversa terminar"
+        }
         // "Esc cancela" is said once, in the banner above the field, with its button.
         if isEditing { return "↩ envia a edição" }
         if isFocused, !hasContent, !lane.hasAttachments { return "↩ envia · \(CommandName.newLineKeys) nova linha" }
@@ -306,22 +312,23 @@ struct ComposerView: View {
     /// icon (like "+" and the microphone), so the white button is the one thing the eye finds, and it queues the message.
     @ViewBuilder private func actionButtons(_ action: ComposerAction, secondaryStop: Bool) -> some View {
         let routine = model.runningRoutineName(botID)
+        let elsewhere = model.workingChatTitle(botID) != nil
         HStack(spacing: 6) {
             if secondaryStop {
                 Button("Parar", systemImage: "stop.fill") { model.stopTurn(botID) }
                     .labelStyle(.iconOnly)
                     .buttonStyle(CircleGhostStyle(side: 28, fontSize: 11))
                     .foregroundStyle(Palette.secondary)
-                    .help(ComposerAction.stop.help(isRoutine: routine != nil))
+                    .help(ComposerAction.stop.help(isRoutine: routine != nil, elsewhere: elsewhere))
                     .transition(.opacity)
             }
-            mainButton(action, routine: routine)
+            mainButton(action, routine: routine, elsewhere: elsewhere)
         }
         // Under Reduce Motion the row above does not animate: Stop alone fades in or out (opacity is not movement).
         .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: secondaryStop)
     }
 
-    private func mainButton(_ action: ComposerAction, routine: String?) -> some View {
+    private func mainButton(_ action: ComposerAction, routine: String?, elsewhere: Bool) -> some View {
         Button {
             if action == .stop { model.stopTurn(botID) } else { send() }
         } label: {
@@ -331,8 +338,8 @@ struct ComposerView: View {
         }
         .buttonStyle(RoundActionStyle(isEnabled: action == .stop || canSend))
         .disabled(action != .stop && !canSend)
-        .accessibilityLabel(action.title(isRoutine: routine != nil))
-        .help(action.help(isRoutine: routine != nil))
+        .accessibilityLabel(action.title(isRoutine: routine != nil, elsewhere: elsewhere))
+        .help(action.help(isRoutine: routine != nil, elsewhere: elsewhere))
         // ⌘↩ sends when the Orb is free; while it works ⌘↩ means "stop and send" (see `shortcuts`).
         .keyboardShortcut(action == .send ? AppShortcut.commandReturn : nil)
     }
@@ -718,6 +725,13 @@ enum ComposerAction: Equatable {
     /// Longer routine names are cut with an ellipsis, so the sentence after them is never pushed out of the strip.
     static let maxRoutineNameLength = 36
 
+    /// The sentence of the strip above the field while the Orb ends a turn in a conversation you left: what you write in
+    /// this one waits for it, and a permission it asks for is answered there.
+    static func elsewhereStrip(chatTitle: String, needsYou: Bool) -> String {
+        let shown = chatTitle.count > maxRoutineNameLength ? chatTitle.prefix(maxRoutineNameLength - 1) + "…" : Substring(chatTitle)
+        return needsYou ? "“\(shown)” precisa de você" : "Trabalhando em “\(shown)” · o que você escrever vai depois"
+    }
+
     /// The field's placeholder when the Orb is free (or runs a routine): short, with the Orb's name.
     static func placeholder(orbName: String) -> String {
         let name = orbName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -752,7 +766,8 @@ enum ComposerAction: Equatable {
     /// Stopping during a routine says so: it ends the routine's run. Queueing says "Direcionar": the Orb takes the
     /// message in the middle of the task, which is what ↩ does there; ⇥ is the queue.
     /// During a routine queueing does not steer: the message waits for the run's end.
-    func title(isRoutine: Bool) -> String {
+    func title(isRoutine: Bool, elsewhere: Bool = false) -> String {
+        if elsewhere, self != .send { return self == .queue ? "Enviar depois da outra conversa" : "Parar a outra conversa" }
         guard isRoutine else { return title }
         switch self {
         case .send: return title
@@ -761,7 +776,11 @@ enum ComposerAction: Equatable {
         }
     }
 
-    func help(isRoutine: Bool) -> String {
+    /// `elsewhere`: the turn is a conversation's you left (`BotSession.workingChatID`); a message waits for it, as for a routine.
+    func help(isRoutine: Bool, elsewhere: Bool = false) -> String {
+        if elsewhere, self != .send {
+            return self == .queue ? "Enviar quando a outra conversa terminar (↩)" : "Parar a outra conversa (\(AppShortcut.stop.label))"
+        }
         guard isRoutine else { return help }
         switch self {
         case .send: return help

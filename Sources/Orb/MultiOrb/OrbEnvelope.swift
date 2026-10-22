@@ -40,6 +40,9 @@ struct OrbEnvelope: Codable, Equatable, Sendable {
     var fromChat = false
     /// The routine whose run asked (nil outside a routine): its answer resumes that run, not the chat.
     var servingRoutine: UUID?
+    /// The asker's conversation the request was sent from (`BotSession.conversationChat`): its answer goes back there.
+    /// nil when a routine's run, a request or a group's turn asked.
+    var chat: UUID?
 }
 
 extension OrbEnvelope {
@@ -61,5 +64,6 @@ extension OrbEnvelope {
         sentAt = try c.value(.sentAt, default: Date.now)
         fromChat = try c.value(.fromChat, default: false)
         servingRoutine = (try? c.decodeIfPresent(UUID.self, forKey: .servingRoutine)) ?? nil
+        chat = (try? c.decodeIfPresent(UUID.self, forKey: .chat)) ?? nil
     }
 }

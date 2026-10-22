@@ -20,7 +20,7 @@ extension BotSession {
         loadTask?.cancel() // superseded: it must not be handed out again if this one is let go
         loadTask = nil
         loadEpoch += 1 // a read under way is older than this one
-        let read = model.store.readConversation(id)
+        let read = model.store.readConversation(id, chat: chatID)
         model.addNotice(AppModel.labeled(read.notice, for: model.bot(id)))
         install(read)
     }
@@ -33,9 +33,9 @@ extension BotSession {
         guard isUnloaded, let store = model?.store else { return nil }
         if let running = loadTask { return running }
         isLoading = true
-        let epoch = loadEpoch, botID = id
+        let epoch = loadEpoch, botID = id, chat = chatID
         let task = Task { [weak self] in
-            let read = await store.readConversationAsync(botID)
+            let read = await store.readConversationAsync(botID, chat: chat)
             self?.finishLoading(epoch: epoch, read)
         }
         loadTask = task
@@ -113,6 +113,7 @@ extension BotSession {
         liveText = nil
         conversation = nil
         parkedChat = nil
+        workingChatID = nil
         isUnloaded = false
         pendingChanges = []
         isLoading = false
@@ -150,7 +151,7 @@ extension BotSession {
         guard let current = conversation, let model else { return }
         let conversation = withLiveText(current)
         isDirty = false
-        guard let routineID else { return model.store.save(conversation, for: id) }
+        guard let routineID else { return model.store.save(conversation, for: id, chat: workingChatID ?? chatID) }
         // A running side run's conversation goes to its own file, never over the chat's.
         switch sideKind ?? .routine {
         case .routine:
@@ -173,7 +174,7 @@ extension BotSession {
             saveTask = nil
             write()
         }
-        if let chat = parkedChat, !chat.items.isEmpty { model?.store.save(chat, for: id) }
+        if let chat = parkedChat, !chat.items.isEmpty { model?.store.save(chat, for: id, chat: chatID) }
     }
 
     // MARK: A routine's run
@@ -190,7 +191,7 @@ extension BotSession {
         saveTask?.cancel()
         saveTask = nil
         isDirty = false
-        if !chat.items.isEmpty { model?.store.save(chat, for: id) }
+        if !chat.items.isEmpty { model?.store.save(chat, for: id, chat: chatID) }
         parkedChat = chat
         conversation = own
         sideKind = kind
@@ -215,6 +216,130 @@ extension BotSession {
         guard let chat = parkedChat else { return }
         parkedChat = nil
         conversation = chat
+    }
+
+    // MARK: Another conversation
+
+    /// Shows the Orb's conversation `target` in the chat (`fresh`: a new one, with no file yet). The one in front is
+    /// written as it leaves, after giving the memory what it said since its last stretch: the conversations share the
+    /// memory, not their history. Free, the Orb lets go of it and reads the other off the main thread. A turn of the one
+    /// in front goes on in it (`workingChatID`) while the other waits in front of it, as a routine parks the chat: what
+    /// you write there waits for the turn's end. While a side run or such a turn holds the Orb, only the parked chat changes.
+    /// `read`: the other one, read already (off the main thread, see `AppModel.openChat`); otherwise it is read here when the
+    /// chat cannot wait for it.
+    func openChat(_ target: UUID, fresh: Bool = false, read: StoreRead<Conversation>? = nil) {
+        guard target != chatID else { return }
+        if !pendingChanges.isEmpty { ensureLoaded() } // what the hub changed belongs to the conversation being left
+        transcript?.swapped() // the chat cross-fades to the other one
+        func other() -> Conversation { fresh ? Conversation() : chat(from: read ?? model?.store.readConversation(id, chat: target)) }
+        if var shown = parkedChat {
+            leave(&shown, as: chatID)
+            if target == workingChatID { // back to the one the turn works on, which is `conversation`
+                workingChatID = nil
+                parkedChat = nil
+            } else {
+                parkedChat = other()
+            }
+        } else if turnTask != nil {
+            workingChatID = chatID
+            parkedChat = other()
+        } else {
+            memoryIdle?.cancel() // the stretch it waits for is saved now
+            memoryIdle = nil
+            saveTask?.cancel()
+            saveTask = nil
+            isDirty = false
+            if var left = conversation { leave(&left, as: chatID) }
+            loadTask?.cancel()
+            loadTask = nil
+            isLoading = false
+            unload()
+            if fresh || read != nil {
+                isUnloaded = false
+                conversation = other()
+                lastUsed = .now
+            }
+        }
+        chatID = target
+        forgetLastCall()
+        if isUnloaded { beginLoading() }
+    }
+
+    /// A turn of another of the Orb's conversations (the answer to what it asked there, a process it waited for) works on
+    /// it while the one on show stays in front, as after you open one during a turn: the one on show is written and waits
+    /// in `parkedChat` until the turn ends (`endWorkElsewhere`). Only for a free Orb whose conversation is in memory.
+    func workElsewhere(_ chat: UUID, read: StoreRead<Conversation>) {
+        guard chat != chatID, turnTask == nil, routineID == nil, parkedChat == nil, !isUnloaded, let shown = conversation else { return }
+        cancelChunkNote() // the note being written is about the one on show
+        memoryIdle?.cancel() // its stretch waits for the next idle moment after the turn
+        memoryIdle = nil
+        saveTask?.cancel()
+        saveTask = nil
+        isDirty = false
+        model?.store.save(shown, for: id, chat: chatID)
+        parkedChat = shown
+        conversation = self.chat(from: read)
+        workingChatID = chat
+        lastUsed = .now
+        forgetLastCall()
+    }
+
+    /// The turn of the conversation you left ended: it is written, and the one you opened takes its place (it was on show
+    /// all along: nothing moves on screen).
+    func endWorkElsewhere() {
+        guard let working = workingChatID, var left = conversation else { return }
+        saveTask?.cancel()
+        saveTask = nil
+        isDirty = false
+        cancelChunkNote()
+        leave(&left, as: working)
+        workingChatID = nil
+        conversation = parkedChat ?? Conversation()
+        parkedChat = nil
+        lastUsed = .now
+        forgetLastCall()
+    }
+
+    /// Changes the Orb's conversation `chat` where it is: the one the turn machinery has (`conversationChat`; one still to
+    /// be read takes the change once it is, `changeOnceLoaded`), the one on show parked by a side run or by a turn
+    /// elsewhere, or any other in its file (`Store.amend`). The caller makes sure `chat` is one of the Orb's.
+    func changeChat(_ chat: UUID, _ change: @escaping @Sendable (inout Conversation) -> Void) {
+        if chat == conversationChat {
+            guard !isUnloaded else { return changeOnceLoaded(change) }
+            changeConversation(change)
+            scheduleSave(delay: Self.streamingSaveInterval)
+        } else if chat == chatID, var shown = parkedChat {
+            change(&shown)
+            parkedChat = shown
+            model?.store.save(shown, for: id, chat: chatID)
+        } else {
+            model?.store.amend(id, chat: chat, change)
+            amends += 1
+        }
+    }
+
+    /// The context meter's cache hit and last compaction were the other conversation's.
+    private func forgetLastCall() {
+        lastCompaction = nil
+        model?.live(id).setLastUsage(nil)
+        model?.live(id).setCompactedTo(nil)
+    }
+
+    /// Writes a conversation the chat leaves, after giving the memory its stretch since the last one.
+    private func leave(_ chat: inout Conversation, as chatID: UUID) {
+        let saved = min(chat.memorySavedCount ?? 0, chat.items.count)
+        if saved < chat.items.count {
+            persistStretch(Array(chat.items[saved...]), summarize: true)
+            chat.memorySavedCount = chat.items.count
+        }
+        model?.store.save(chat, for: id, chat: chatID)
+    }
+
+    /// One of the Orb's conversations as it was read, its notice told.
+    private func chat(from read: StoreRead<Conversation>?) -> Conversation {
+        guard let model, let read else { return Conversation() }
+        model.addNotice(AppModel.labeled(read.notice, for: model.bot(id)))
+        return read.value?.closingInterruptedTurn(notice: BotSession.quitNotice) ?? Conversation()
     }
 
     // MARK: Memory

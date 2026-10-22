@@ -11,6 +11,7 @@ import SwiftUI
 /// What each command is called wherever it appears.
 enum CommandName {
     static let newBot = "Novo Orb…"
+    static let newChat = "Nova conversa"
     static let quit = "Encerrar Orb"
     static let newGroup = "Novo grupo…"
     static let newCategory = "Nova categoria…"
@@ -37,6 +38,8 @@ enum CommandName {
 /// The keys the menus declare.
 enum AppShortcut {
     static let newBot = KeyboardShortcut("n")
+    /// ⇧⌘N: a new conversation of the Orb on show (`AppModel.newChat`).
+    static let newChat = KeyboardShortcut("n", modifiers: [.command, .shift])
     /// ⌥⌘G: a new group of Orbs (sheet "Novo grupo").
     static let newGroup = KeyboardShortcut("g", modifiers: [.command, .option])
     static let toggleInspector = KeyboardShortcut("b", modifiers: [.command, .option])
@@ -78,7 +81,7 @@ enum AppShortcut {
     static let contextual: [KeyboardShortcut] = [commandReturn, chooseModel, undoForget, find, findNext, findPrevious, settings]
 
     /// Every key above, for the tests that check that none is used twice.
-    static let all: [KeyboardShortcut] = [newBot, newGroup, toggleInspector, goTo, writeMessage, stop, sendToBackground,
+    static let all: [KeyboardShortcut] = [newBot, newChat, newGroup, toggleInspector, goTo, writeMessage, stop, sendToBackground,
                                           openFolder, previousBot, nextBot, routines, connectors, skills]
         + (0..<9).map(bot(at:))
 }
@@ -110,7 +113,7 @@ extension KeyboardShortcut {
 /// A command a key answers to, so the places that show a key (the palette) ask the catalog for it by command.
 enum ShortcutCommand: String, CaseIterable, Sendable {
     case newBot, newGroup, goTo, toggleInspector, settings
-    case writeMessage, stop, sendToBackground, openFolder, send, newLine, queueAfterTask, stopAndSend, chooseModel, cancelEdit
+    case newChat, writeMessage, stop, sendToBackground, openFolder, send, newLine, queueAfterTask, stopAndSend, chooseModel, cancelEdit
     case goToBot, previousBot, nextBot, routines, connectors, skills
     case allowApproval, denyApproval
     case compactOrSave, undoForget, find, findNext, findPrevious
@@ -160,6 +163,7 @@ enum ShortcutCatalog {
             ShortcutItem(.settings, AppShortcut.settings, "Ajustes"),
         ]),
         ShortcutGroup(title: "Conversa", items: [
+            ShortcutItem(.newChat, AppShortcut.newChat, CommandName.newChat + " com o Orb aberto"),
             ShortcutItem(.writeMessage, AppShortcut.writeMessage, CommandName.writeMessage),
             ShortcutItem(.stop, AppShortcut.stop, CommandName.stop),
             ShortcutItem(.sendToBackground, AppShortcut.sendToBackground, CommandName.sendToBackground + " (enquanto o Orb espera um comando do Terminal)"),

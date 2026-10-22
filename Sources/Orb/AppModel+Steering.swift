@@ -197,18 +197,20 @@ extension AppModel {
     func composerLane(_ botID: UUID) -> ComposerLane { session(botID).composerLane() }
 
     /// Whether a message sent now is queued behind the running turn instead of starting one: the Orb is working on
-    /// your chat (a routine's run has a conversation of its own, which a message cannot join).
+    /// your chat (a routine's run has a conversation of its own, which a message cannot join, and so has a turn of another
+    /// conversation you left, `BotSession.workingChatID`).
     func canSteer(_ botID: UUID) -> Bool {
         guard let session = sessions[botID] else { return false }
-        return session.turnTask != nil && session.routineID == nil
+        return session.turnTask != nil && session.routineID == nil && session.workingChatID == nil
     }
 
     /// Whether a message written now can wait in the queue: while the Orb works on your chat (`canSteer`), and while it runs
-    /// one of your routines, after which it goes as the next request (the run's own conversation cannot take it).
+    /// one of your routines or a turn of another of its conversations, after which it goes as the next request (the run's
+    /// own conversation cannot take it).
     func canQueue(_ botID: UUID) -> Bool {
         if canSteer(botID) { return true }
-        guard let session = sessions[botID] else { return false }
-        return session.turnTask != nil && session.routineID != nil && (session.sideKind == nil || session.sideKind == .routine)
+        guard let session = sessions[botID], session.turnTask != nil else { return false }
+        return session.workingChatID != nil || (session.routineID != nil && (session.sideKind == nil || session.sideKind == .routine))
     }
 
     /// Whether a routine's run holds this Orb (its name may be unknown if the routine was deleted meanwhile).
@@ -401,6 +403,12 @@ extension AppModel {
             giveBack(waiting, to: botID)
             return
         }
+    }
+
+    /// What waits in the queue was written for the conversation on show: when another one comes, it goes back to the composer.
+    func giveBackQueued(_ botID: UUID) {
+        guard let lane = sessions[botID]?.lane, !lane.queued.isEmpty else { return }
+        giveBack(lane.takeAll(), to: botID)
     }
 
     /// Puts messages back in the composer: their texts first, then what is already typed. While a message is being edited

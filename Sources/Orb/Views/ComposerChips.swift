@@ -361,6 +361,36 @@ struct RoutineStrip: View {
     }
 }
 
+/// The strip above the field while the Orb ends a turn in a conversation you left (`BotSession.workingChatID`): which one,
+/// that what you write here waits for it (or that it waits for you), and the button back to it.
+struct ElsewhereStrip: View {
+    @Environment(AppModel.self) private var model
+    let botID: UUID
+    let chatTitle: String
+
+    var body: some View {
+        let needsYou = model.live(botID).needsYou
+        HStack(spacing: 6) {
+            Image(systemName: needsYou ? "exclamationmark.bubble.fill" : "bubble.left.and.bubble.right")
+                .foregroundStyle(needsYou ? Palette.warn : Palette.faint)
+                .accessibilityHidden(true)
+            Text(ComposerAction.elsewhereStrip(chatTitle: chatTitle, needsYou: needsYou))
+                .foregroundStyle(needsYou ? Palette.warn : Palette.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 4)
+            Button("Ver") {
+                if let working = model.sessions[botID]?.workingChatID { model.openChat(working, of: botID) }
+            }
+            .buttonStyle(ComposerChipStyle())
+            .help("Voltar para “\(chatTitle)”")
+        }
+        .font(.system(size: 11))
+        .padding(.horizontal, 4)
+        .accessibilityElement(children: .contain)
+    }
+}
+
 // MARK: Background processes
 
 /// The processes the Orb left running (`run_command` with background), one line each: what runs, for how long, and a

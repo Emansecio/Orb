@@ -176,6 +176,12 @@ struct AppCommands: Commands {
             Button(CommandName.newBot) { showMain(); model.showNewBot = true }
                 .keyboardShortcut(AppShortcut.newBot)
                 .disabled(sheetOpen)
+            Button(CommandName.newChat) {
+                showMain()
+                if let id = model.selectedBotID { model.newChat(for: id) }
+            }
+            .keyboardShortcut(AppShortcut.newChat)
+            .disabled(model.selectedBotID == nil || sheetOpen)
         }
         CommandGroup(after: .sidebar) {
             Button(CommandName.toggleInspector) { model.toggleInspector() }
@@ -361,6 +367,7 @@ enum Snapshot {
                 ?? SettingsSnapshots.view(screen, firstBotID: model.bots.first?.id)
                 ?? CatalogSnapshots.view(screen, model: model)
                 ?? MultiOrbSnapshots.view(screen, model: model)
+                ?? ChatsSnapshots.view(screen, model: model)
                 ?? AnyView(model.bots.first.map { ChatView(botID: $0.id) })
         }
         let size = NSSize(width: ProcessInfo.processInfo.environment["ORB_SNAPSHOT_WIDTH"].flatMap(Double.init) ?? 1100, height: height ?? 760)

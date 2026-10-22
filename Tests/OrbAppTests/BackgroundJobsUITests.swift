@@ -51,6 +51,26 @@ import Testing
         #expect(afterQuit.hasPrefix(NoticeAction.continueMessage + ".") && afterQuit.contains("Confira antes de repetir"))
     }
 
+    @Test @MainActor func theEndOfAJobIsToldInTheConversationYouWroteInLast() async throws {
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let (model, botID) = makeModel()
+        let latest = UUID()
+        var chats = OrbChats(first: botID, updated: .now)
+        chats.add(latest, at: .now)
+        chats.active = botID // you went back to read the first one
+        model.setChats(chats, for: botID)
+        try await start("until [ -e go ]; do sleep 0.1; done", in: model, for: botID)
+        await wait { model.live(botID).jobs.count == 1 }
+        FileManager.default.createFile(atPath: root.appending(path: "go").path, contents: nil)
+
+        await wait { model.live(botID).chats?.list.first?.unread == true }
+        #expect(notices(model, botID).isEmpty, "not in the one on show")
+        model.store.flush()
+        let told = (model.store.readConversation(botID, chat: latest).value?.items ?? [])
+            .compactMap { if case .notice(let text) = $0.kind { text } else { nil } }
+        #expect(told.count == 1 && told.first?.hasPrefix(NoticeAction.jobEndedPrefix) == true)
+    }
+
     @Test @MainActor func aProcessOfTheTaskYouAskedForLetsTheOrbGoOnByItself() {
         let (model, botID) = makeModel()
         let session = model.session(botID)

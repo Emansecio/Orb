@@ -7,7 +7,7 @@ struct PaletteEntry: Identifiable, Equatable {
     enum Action: Equatable {
         case bot(UUID)
         case page(SidebarItem)
-        case newBot, importOrb, focusComposer, findInConversation, openFolder, toggleInspector, shortcuts
+        case newBot, importOrb, newChat, focusComposer, findInConversation, openFolder, toggleInspector, shortcuts
         /// A group's chat (its id), and "Novo grupo…".
         case group(UUID), newGroup
         /// Names a new category of the sidebar.
@@ -104,6 +104,9 @@ enum PaletteBuilder {
         let name = orbs.first { $0.id == current }?.name
         if current != nil {
             let suffix = name.map { " de \($0)" } ?? ""
+            list.append(PaletteEntry(id: "new-chat", title: CommandName.newChat, subtitle: name.map { "Com \($0), do zero" }, symbol: "square.and.pencil",
+                                     section: .actions, shortcut: ShortcutCatalog.keys(for: .newChat), action: .newChat,
+                                     keywords: "nova conversa limpar zero contexto chat"))
             list.append(PaletteEntry(id: "focus", title: CommandName.writeMessage, subtitle: name, symbol: "text.cursor",
                                      section: .actions, shortcut: ShortcutCatalog.keys(for: .writeMessage), action: .focusComposer, keywords: "compositor campo focar digitar"))
             list.append(PaletteEntry(id: "find", title: CommandName.findInConversation, subtitle: name, symbol: "magnifyingglass",
@@ -281,6 +284,7 @@ struct CommandPalette: View {
         case .newGroup: model.showNewGroup = true
         case .newCategory: model.categoryNaming = .new(moving: nil)
         case .importOrb: model.startNewOrbImporting()
+        case .newChat: if let id = model.commandBotID { model.newChat(for: id) }
         case .focusComposer: model.focusComposer()
         case .findInConversation: model.findInConversation()
         case .openFolder: if let id = model.commandBotID { model.openFolder(of: id) }

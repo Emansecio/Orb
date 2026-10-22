@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Orb · Várias conversas dentro de um Orb (mock)</title>
+<style>
+  :root{
+    --chrome:#111; --canvas:#070707; --surface:#181818; --raised:#222; --agent:#141414; --user:#323232;
+    --ink:#FCFCFC; --secondary:rgba(252,252,252,.74); --muted:rgba(252,252,252,.6); --faint:rgba(252,252,252,.48);
+    --hint:rgba(252,252,252,.32); --line:rgba(252,252,252,.08); --accent:#4C8DFF; --accentText:#7FB0FF; --ok:#3DD68C;
+    --gestor:radial-gradient(circle at 35% 30%,#a77bff,#5b2bc4); --atend:radial-gradient(circle at 35% 30%,#8cc4ff,#3f7fe0);
+    --lp:radial-gradient(circle at 35% 30%,#ff8fc0,#c4307a); --egg:radial-gradient(circle at 35% 30%,#ff8a8a,#b52a3a);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#000;color:var(--ink);font:13px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;
+       display:flex;flex-direction:column;align-items:center;gap:14px;padding:18px}
+  h1{font-size:15px;margin:0;font-weight:600}
+  .note{color:var(--muted);font-size:12px;max-width:1180px;text-align:center}
+  .demo{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;align-items:center}
+  .demo span{color:var(--faint);font-size:11px;margin:0 4px 0 10px}
+  .demo button{background:#1b1b1b;color:var(--secondary);border:1px solid var(--line);border-radius:999px;padding:6px 12px;font:inherit;cursor:pointer}
+  .demo button.on{background:var(--ink);color:#141414}
+  .window{width:100%;max-width:1180px;height:700px;background:var(--canvas);border-radius:14px;overflow:hidden;display:flex;border:1px solid #222;position:relative}
+  /* sidebar */
+  .side{width:250px;flex:none;background:var(--chrome);padding:12px 8px;display:flex;flex-direction:column;gap:1px}
+  .lights{display:flex;gap:8px;padding:4px 10px 16px}.lights i{width:12px;height:12px;border-radius:50%}
+  .sec{display:flex;justify-content:space-between;color:var(--faint);font-size:11px;font-weight:500;padding:6px 10px 4px}
+  .row{display:flex;gap:9px;align-items:center;padding:6px 8px;border-radius:10px;position:relative}
+  .row.sel{background:rgba(252,252,252,.07)}
+  .row .plus{position:absolute;right:8px;top:9px;width:20px;height:20px;border-radius:6px;display:none;place-items:center;color:var(--muted);background:var(--raised);font-size:13px}
+  .opt-side .row.sel:hover .plus{display:grid}
+  .av{width:30px;height:30px;border-radius:50%;flex:none;box-shadow:inset 0 -4px 8px rgba(0,0,0,.35)}
+  .av.sm{width:16px;height:16px}
+  .g{background:var(--gestor)}.a{background:var(--atend)}.l{background:var(--lp)}.e{background:var(--egg)}
+  .rt{flex:1;min-width:0}.rt .n{display:flex;justify-content:space-between;font-weight:500}
+  .rt .n span{font-weight:400;font-size:11px;color:var(--faint)}
+  .rt .s{font-size:11px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .cat{display:flex;gap:8px;align-items:center;padding:6px 10px;color:var(--secondary);font-weight:500}
+  .cat span{margin-left:auto;color:var(--faint);font-size:11px}
+  .indent{padding-left:14px}
+  /* conversations nested under the selected Orb */
+  .convs{display:none;flex-direction:column;margin:2px 0 6px 46px;border-left:1px solid var(--line);padding-left:6px}
+  .opt-side .convs{display:flex}
+  .conv{display:flex;align-items:center;gap:7px;padding:4px 8px;border-radius:7px;font-size:12px;color:var(--muted);cursor:pointer}
+  .conv:hover{background:rgba(252,252,252,.04)}
+  .conv.on{background:rgba(252,252,252,.07);color:var(--ink)}
+  .conv .t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .conv .when{font-size:10.5px;color:var(--hint)}
+  .conv .spin{width:8px;height:8px;border-radius:50%;border:1.5px solid var(--accentText);border-right-color:transparent;animation:spin .9s linear infinite}
+  .conv .dot{width:6px;height:6px;border-radius:50%;background:var(--accent)}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .conv.more{color:var(--faint);font-size:11.5px}
+  .conv.new{color:var(--accentText)}
+  /* main */
+  .main{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
+  .top{height:56px;display:flex;align-items:center;gap:10px;padding:0 20px;border-bottom:1px solid var(--line)}
+  .ttl{display:flex;flex-direction:column;line-height:1.25}
+  .ttl b{font-weight:600}
+  .ttl .sub{font-size:11.5px;color:var(--faint);display:flex;align-items:center;gap:4px}
+  .ttlbtn{border-radius:8px;padding:4px 8px;margin-left:-8px;cursor:default}
+  .opt-title .ttlbtn{cursor:pointer}
+  .opt-title .ttlbtn:hover{background:rgba(252,252,252,.06)}
+  .chev{display:none;color:var(--faint);font-size:10px}
+  .opt-title .chev{display:inline}
+  .tools{margin-left:auto;display:flex;gap:4px}
+  .ib{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;color:var(--muted)}
+  .ib:hover{background:var(--raised)}
+  .newbtn{display:none}
+  .opt-title .newbtn{display:grid}
+  /* popover */
+  .pop{position:absolute;top:50px;left:12px;width:340px;background:#1c1c1c;border:1px solid rgba(252,252,252,.12);border-radius:12px;
+       box-shadow:0 18px 50px rgba(0,0,0,.6);padding:6px;display:none;z-index:5}
+  .pop.open{display:block;animation:pop .18s cubic-bezier(.2,.9,.3,1.2)}
+  @keyframes pop{from{opacity:0;transform:translateY(-4px) scale(.98)}}
+  .pop input{width:100%;background:var(--raised);border:0;border-radius:8px;padding:7px 10px;color:var(--ink);font:inherit;margin-bottom:4px;outline:none}
+  .pop .conv{padding:7px 10px}
+  .pop .k{margin-left:auto;font-size:11px;color:var(--hint)}
+  .pop hr{border:0;border-top:1px solid var(--line);margin:4px 0}
+  /* chat */
+  .chat{flex:1;overflow:auto;display:flex;justify-content:center;padding:20px 0}
+  .col{width:min(640px,100% - 40px);display:flex;flex-direction:column;gap:10px}
+  .center{align-self:center;font-size:11px;color:var(--faint)}
+  .ub{align-self:flex-end;background:var(--user);padding:8px 14px;border-radius:16px;max-width:80%}
+  .arow{display:flex;gap:10px}.ab{background:var(--agent);padding:9px 14px;border-radius:16px;max-width:88%}
+  .fresh{align-self:center;display:flex;flex-direction:column;align-items:center;gap:6px;margin-top:80px;color:var(--muted);text-align:center}
+  .fresh .big{width:56px;height:56px}
+  .fresh small{color:var(--faint);max-width:360px}
+  .chips{display:flex;gap:6px;margin-top:6px}
+  .chips span{border:1px solid var(--line);border-radius:999px;padding:4px 10px;font-size:12px;color:var(--secondary)}
+  .composer{margin:0 20px 14px;border:1px solid var(--line);border-radius:16px;padding:11px 14px;color:var(--hint);display:flex;flex-direction:column;gap:8px}
+  .busy{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--secondary)}
+  .busy a{color:var(--accentText);cursor:pointer}
+  .hidden{display:none!important}
+  .legend{max-width:1180px;display:grid;grid-template-columns:repeat(3,1fr);gap:12px;font-size:12px;color:var(--muted)}
+  .legend div{background:#0e0e0e;border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+  .legend b{color:var(--ink);display:block;margin-bottom:3px}
+</style>
+</head>
+<body>
+<h1>Várias conversas dentro de um Orb</h1>
+<div class="note">Mesma tela da sua captura. Troque a opção de onde as conversas moram e o estado. Memória, pasta e ferramentas são do Orb; o contexto é de cada conversa.</div>
+<div class="demo">
+  <span>Onde moram:</span>
+  <button data-opt="side" class="on">A · Na lateral, sob o Orb aberto</button>
+  <button data-opt="title">B · No título do chat</button>
+  <span>Estado:</span>
+  <button data-st="chat" class="on">Conversa com histórico</button>
+  <button data-st="new">Conversa nova</button>
+  <button data-st="busy">Orb ocupado em outra</button>
+</div>
+
+<div class="window opt-side" id="win">
+  <div class="side">
+    <div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div>
+    <div class="sec">Orbs <span>＋</span></div>
+    <div class="row"><div class="av e"></div><div class="rt"><div class="n">Dr eggbot <span>15/10</span></div><div class="s">Não, ele não tem uma skill do Ego L…</div></div></div>
+    <div class="cat">⌄ AcessosFit <span>3</span></div>
+    <div class="indent">
+      <div class="row"><div class="av a"></div><div class="rt"><div class="n">Atendente AcessosFit <span>Ontem</span></div><div class="s">Pedido de Gestor de Campanha…</div></div></div>
+      <div class="row sel"><div class="av g"></div><div class="rt"><div class="n">Gestor de Campanha… <span>00:27</span></div><div class="s" id="sideSub">Rodando no navegador…</div></div><span class="plus" title="Nova conversa (⇧⌘N)">＋</span></div>
+      <div class="convs" id="convs">
+        <div class="conv on" data-c="a"><span class="t">Análise da campanha 21/10</span><span class="spin" id="spinA"></span></div>
+        <div class="conv" data-c="b"><span class="t">Ajustar texto do anúncio Wellhub</span><span class="dot"></span></div>
+        <div class="conv" data-c="c"><span class="t">Orçamento de novembro</span><span class="when">seg</span></div>
+        <div class="conv more">3 mais…</div>
+        <div class="conv new">＋ Nova conversa</div>
+      </div>
+      <div class="row"><div class="av l"></div><div class="rt"><div class="n">Gestor LP AcessosFit <span>00:24</span></div><div class="s">O site estava fora do ar (erro 53…</div></div></div>
+    </div>
+    <div class="sec" style="margin-top:8px">Grupos <span>＋</span></div>
+  </div>
+
+  <div class="main">
+    <div class="top">
+      <div class="ttlbtn" id="ttl"><div class="ttl"><b>Gestor de Campanha AcessosFit</b>
+        <span class="sub"><span id="convName">Análise da campanha 21/10</span><span class="chev">⌄</span></span></div></div>
+      <div class="tools"><span class="ib newbtn" title="Nova conversa (⇧⌘N)">✎</span><span class="ib">⌕</span><span class="ib">◫</span></div>
+    </div>
+    <div class="pop" id="pop">
+      <input placeholder="Buscar conversas">
+      <div class="conv on"><span class="t">Análise da campanha 21/10</span><span class="spin"></span></div>
+      <div class="conv"><span class="t">Ajustar texto do anúncio Wellhub</span><span class="dot"></span></div>
+      <div class="conv"><span class="t">Orçamento de novembro</span><span class="when">seg</span></div>
+      <div class="conv"><span class="t">Configurar conversões do WhatsApp</span><span class="when">12/10</span></div>
+      <hr><div class="conv new">＋ Nova conversa<span class="k">⇧⌘N</span></div>
+    </div>
+
+    <div class="chat"><div class="col" id="col">
+      <div class="center">Hoje, 02:15</div>
+      <div class="ub">Analise mais detalhada da campanha de ontem 21</div>
+      <div class="arow"><div class="av g"></div><div class="ab">Leio primeiro o relatório da rotina e o registro de ontem. Depois aprofundo no Google Ads e na LP.</div></div>
+      <div class="arow"><div class="av g"></div><div class="ab">Gympass gerou 34 dos 54 cliques. Agora os anúncios do mesmo dia.</div></div>
+    </div>
+    <div class="col hidden" id="fresh"><div class="fresh"><div class="av g big"></div><b>Conversa nova com o Gestor de Campanha</b>
+      <small>Começa do zero: ele não vê as outras conversas, mas lembra o que guardou na memória e usa a mesma pasta e ferramentas.</small>
+      <div class="chips"><span>Resumo da semana</span><span>Revisar palavras-chave</span></div></div></div>
+    </div>
+    <div class="composer"><div class="busy hidden" id="busy"><span class="spin" style="width:9px;height:9px;border-radius:50%;border:1.5px solid var(--accentText);border-right-color:transparent;animation:spin .9s linear infinite"></span>
+      O Gestor está trabalhando em “Análise da campanha 21/10”. Sua mensagem espera ele terminar. <a>Ver</a></div>
+      <span>Escreva para o Gestor…</span></div>
+  </div>
+</div>
+
+<div class="legend">
+  <div><b>A · Na lateral (recomendo)</b>O Orb aberto mostra suas conversas logo abaixo dele, 3 recentes e “mais…”. Os outros Orbs ficam fechados, então a lateral não cresce. Cada conversa tem seu estado: girando enquanto o Orb trabalha nela, ponto azul quando há resposta não lida. O ＋ aparece ao passar o mouse no Orb.</div>
+  <div><b>B · No título do chat</b>A lateral não muda. O nome da conversa fica sob o nome do Orb e abre uma lista com busca. É mais discreto, mas esconde onde o Orb está trabalhando e quantas conversas há.</div>
+  <div><b>Conversa nova e Orb ocupado</b>A conversa nova começa sem contexto e com a memória do Orb. Na primeira etapa o Orb trabalha numa conversa por vez, como hoje com rotinas: escrever em outra coloca a mensagem na fila, com aviso e link para a conversa em andamento.</div>
+</div>
+
+<script>
+  const win=document.getElementById('win'),pop=document.getElementById('pop');
+  document.querySelectorAll('[data-opt]').forEach(b=>b.onclick=()=>{
+    document.querySelectorAll('[data-opt]').forEach(x=>x.classList.toggle('on',x===b));
+    win.className='window opt-'+b.dataset.opt; pop.classList.remove('open');
+  });
+  document.getElementById('ttl').onclick=()=>{ if(win.classList.contains('opt-title')) pop.classList.toggle('open') };
+  const col=document.getElementById('col'),fresh=document.getElementById('fresh'),busy=document.getElementById('busy'),name=document.getElementById('convName');
+  function state(s){
+    document.querySelectorAll('[data-st]').forEach(x=>x.classList.toggle('on',x.dataset.st===s));
+    col.classList.toggle('hidden',s!=='chat'); fresh.classList.toggle('hidden',s==='chat'); busy.classList.toggle('hidden',s!=='busy');
+    name.textContent=s==='chat'?'Análise da campanha 21/10':'Nova conversa';
+    document.querySelectorAll('#convs .conv[data-c]').forEach(c=>c.classList.toggle('on',(s==='chat')===(c.dataset.c==='a')&&s==='chat'));
+  }
+  document.querySelectorAll('[data-st]').forEach(b=>b.onclick=()=>state(b.dataset.st));
+</script>
+</body>
+</html>

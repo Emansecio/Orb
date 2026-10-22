@@ -7,7 +7,8 @@ extension AppModel {
     /// What `ContextReading.make` needs for the Orb's conversation, taken on the main thread (the copy of the conversation
     /// is cheap) so the measuring can run elsewhere. nil while the Orb or its conversation is not in memory yet.
     /// A running routine's own conversation is not the chat: the chat waits parked, and is what the meter measures
-    /// (so the routine's model calls are not read as the chat's cache hit).
+    /// (so the routine's model calls are not read as the chat's cache hit). So does the conversation you opened while a turn
+    /// of another one goes on (`BotSession.workingChatID`).
     func contextInput(for botID: UUID) -> ContextInput? {
         guard let bot = bot(botID), let session = sessions[botID], let conversation = session.parkedChat ?? session.conversation else { return nil }
         let ref = modelRef(for: bot)
@@ -17,7 +18,7 @@ extension AppModel {
             stated = catalog > 0 || (learnedContexts[ref.text]?.isFresh() ?? false)
         }
         return ContextInput(botID: botID, conversation: conversation, budget: contextBudget(for: bot),
-                            windowIsStated: stated, usage: session.routineID == nil ? live(botID).lastUsage : nil, memory: contextMemory)
+                            windowIsStated: stated, usage: session.routineID == nil && session.workingChatID == nil ? live(botID).lastUsage : nil, memory: contextMemory)
     }
 
     /// "Compactar agora" from the meter or the card: compacts and says what happened to VoiceOver.

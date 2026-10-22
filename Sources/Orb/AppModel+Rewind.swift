@@ -21,7 +21,7 @@ extension AppModel {
     /// loads, or a routine holds it.
     func rewindRefusal(_ botID: UUID, ignoringFade: Bool = false) -> RewindRefusal? {
         guard let session = sessions[botID], bot(botID) != nil else { return .missing }
-        if session.routineID != nil || session.parkedChat != nil { return .routine }
+        if session.routineID != nil || (session.parkedChat != nil && session.workingChatID == nil) { return .routine }
         if session.turnTask != nil || live(botID).isWorking || session.isLoading || session.isUnloaded
             || isResetting || (!ignoringFade && !live(botID).dropping.isEmpty) { return .busy }
         if !pendingApprovals(of: botID).isEmpty { return .approvalPending }

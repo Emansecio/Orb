@@ -49,6 +49,7 @@ struct ChatView: View {
             find.close()
             bindFind()
         }
+        .onChange(of: model.sessions[botID]?.chatID) { find.close() } // another of the Orb's conversations
         .onChange(of: model.pendingChatRequest) { takeFindRequest() }
         // MARK: MultiOrb (WP2): a banner for an approval raised while the Orb works on another Orb's request opens that work.
         .sheet(item: Bindable(model).sideWorkToShow) { target in
@@ -66,11 +67,11 @@ struct ChatView: View {
         .onDrop(of: AppModel.droppableTypes, isTargeted: $isDropTargeted) { model.attachDropped($0, to: botID) }
         .background(Palette.canvas)
         .navigationTitle(look.name)
-        // Under the name, what the Orb is doing while it works (with the sidebar hidden, the only place that says so
-        // above the fold), in its short form (a command is not written out), and its model when it is free.
-        .navigationSubtitle(live.needsYou ? "Precisa de você" : live.shownWork?.headline ?? model.modelName(forModel: live.modelID))
+        .navigationSubtitle(subtitle(live))
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
+                Button(CommandName.newChat, systemImage: "square.and.pencil") { model.newChat(for: botID) }
+                    .help("\(CommandName.newChat): \(look.name) começa do zero, com a mesma memória (\(AppShortcut.newChat.label))")
                 Button("Buscar na conversa", systemImage: "magnifyingglass") { find.open() }
                     .keyboardShortcut(AppShortcut.find)
                     .help(Tip.findInConversation())
@@ -84,6 +85,17 @@ struct ChatView: View {
 }
 
 extension ChatView {
+    /// Under the name, what the Orb is doing while it works (with the sidebar hidden, the only place that says so above the
+    /// fold), in its short form (a command is not written out), and its model when it is free, after the conversation on
+    /// show when it has more than one.
+    private func subtitle(_ live: BotLive) -> String {
+        if live.needsYou { return "Precisa de você" }
+        if let work = live.shownWork?.headline { return work }
+        let name = model.modelName(forModel: live.modelID)
+        guard let chats = live.chats, let title = chats.title(of: chats.active) else { return name }
+        return name.isEmpty ? title : "\(title) · \(name)"
+    }
+
     /// What the find bar searches (the stored items of this Orb's chat, never its rows) and how it speaks to VoiceOver.
     private func bindFind() {
         let model = model, botID = botID
@@ -230,7 +242,8 @@ private struct TranscriptList: View {
         let transcript = model.orbTranscript(look.id)
         let items = transcript.items
         let live = model.live(look.id)
-        let isWorking = live.isWorking
+        // A turn of a conversation you left goes on behind this one: this one is not being worked on (the composer says so).
+        let isWorking = live.isWorking && model.sessions[look.id]?.workingChatID == nil
         let isLoading = model.isLoadingConversation(look.id)
         // Looked at before the rows are made, as many times as this is evaluated: the same items say the same thing.
         let generation = entrances.observe(items, isLoading: isLoading, swaps: transcript.swaps)
@@ -808,6 +821,15 @@ private struct EmptyChatView: View {
                     Text(look.role.isEmpty ? "Seu assistente" : look.role)
                         .font(.system(size: 13))
                         .foregroundStyle(Palette.muted)
+                    // One of several conversations (`OrbChats`): what it starts from.
+                    if live.chats != nil {
+                        Text(EmptyChatContent.newChatNote)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Palette.faint)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: 360)
+                            .padding(.top, 6)
+                    }
                 }
                 .entrance(.rise.delayed(EmptyChatEntrance.nameDelay), enters: enters)
                 if showsFirstRun {
