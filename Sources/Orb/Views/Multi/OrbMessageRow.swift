@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// A message between Orbs in a chat, as one line on the text's left edge: the two mini avatars and an arrow, the sentence ("Atlas pediu
-/// ajuda ao Revisor"), the state of the message and a chevron that unfolds its text (`Motion.panel`). "Ver troca" opens the
-/// exchange read-only (`ExchangeSheet`).
+/// A message between Orbs in a chat, as a small card on the text's left edge: the two mini avatars (a dot breathes between them
+/// while the answer is awaited), the sentence as this chat's Orb reads it ("Pediu ajuda ao Revisor") over the start of the
+/// message, the state and a chevron that unfolds the whole text (`Motion.panel`). "Ver troca" opens the exchange read-only
+/// (`ExchangeSheet`). The card is as wide as the chat lets it, up to 560 pt: the words give way, never the marks.
 struct OrbMessageRow: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -21,17 +22,27 @@ struct OrbMessageRow: View {
 
     var body: some View {
         let to = message.to ?? message.from
-        VStack(alignment: .leading, spacing: 6) {
+        let awaits = message.state == .open
+        let line = ExchangeWords.line(for: message, in: botID)
+        VStack(alignment: .leading, spacing: 0) {
             Button {
                 unfolded.toggle()
             } label: {
-                HStack(spacing: 8) {
-                    ExchangeGlyph(from: message.from.id, to: to.id)
-                    Text(ExchangeWords.line(for: message))
-                        .font(.system(size: 12))
-                        .foregroundStyle(Palette.muted)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                HStack(spacing: 10) {
+                    ExchangeGlyph(from: message.from.id, to: to.id, awaits: awaits)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(line)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Palette.secondary)
+                        if !unfolded, !message.text.isEmpty {
+                            Text(message.text)
+                                .font(.system(size: 12))
+                                .foregroundStyle(Palette.faint)
+                        }
+                    }
+                    .lineLimit(1)
+                    .layoutPriority(-1)
+                    Spacer(minLength: 0)
                     ExchangeStateMark(state: message.state)
                     Image(systemName: "chevron.right")
                         .font(.system(size: 10, weight: .semibold))
@@ -39,12 +50,13 @@ struct OrbMessageRow: View {
                         .rotationEffect(.degrees(unfolded ? 90 : 0))
                         .animation(Motion.panel(reduceMotion: reduceMotion), value: unfolded)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
             .help(unfolded ? "Recolher a mensagem" : "Ver a mensagem")
-            .accessibilityLabel(ExchangeWords.line(for: message))
+            .accessibilityLabel(line)
             .accessibilityValue(ExchangeStateMark.spoken(message.state))
             .accessibilityHint(unfolded ? "Recolhe a mensagem" : "Desdobra a mensagem")
 
@@ -55,25 +67,21 @@ struct OrbMessageRow: View {
                         .foregroundStyle(Palette.ink)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    HStack(spacing: 8) {
-                        if message.state == .open {
-                            Text("Esperando a resposta")
-                                .font(.system(size: 11))
-                                .foregroundStyle(Palette.faint)
-                        }
+                    HStack {
                         Spacer(minLength: 0)
                         Button("Ver troca") { showsExchange = true }
                             .buttonStyle(GhostStyle(tint: nil))
                     }
                 }
-                .padding(12)
-                .frame(maxWidth: 520, alignment: .leading)
-                .card(radius: 10)
+                .padding([.horizontal, .bottom], 12)
                 .transition(AnyTransition.adapted(.unfold, reduceMotion: reduceMotion))
             }
         }
+        .card(radius: 12, stroke: awaits ? Palette.accentText.opacity(0.3) : Palette.line)
+        .frame(maxWidth: 560, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: .leading)
         .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: unfolded)
+        .motion(Motion.content, value: awaits)
         .sheet(isPresented: $showsExchange) {
             // The chat's own copy of the exchange; this line alone when the Orb that holds the rest is gone.
             let found = ExchangeSource.messages(chain: message.chainID, of: botID, in: model)

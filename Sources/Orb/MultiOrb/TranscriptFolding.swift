@@ -63,6 +63,7 @@ enum TranscriptFolding {
     ///   (the end of what a compaction folded: a row is all folded or not);
     /// - a finished request's work before its answer becomes one row (`workStretches`); the notices in it come right after
     ///   that row, so none is hidden. `liveTail`: the last request is still running, and stays as it is;
+    /// - the action that sent a message between Orbs, next to it, has no row (`sendsMessage`);
     /// - a lone item stays as it is.
     static func rows(for items: [TranscriptItem], boundary: Int = 0, liveTail: Bool = false) -> [TranscriptRowModel] {
         var rows: [TranscriptRowModel] = []
@@ -75,6 +76,10 @@ enum TranscriptFolding {
                 rows.append(.work(inside.filter { !isNotice($0) }, seconds: stretch.seconds))
                 rows += inside.filter(isNotice).map { TranscriptRowModel.single($0) }
                 index = stretch.range.upperBound
+                continue
+            }
+            if sendsMessage(items, at: index) {
+                index += 1
                 continue
             }
             let item = items[index]
@@ -92,7 +97,7 @@ enum TranscriptFolding {
                         pendingTools = []
                         last = next
                     } else if case .tool = candidate.kind {
-                        pendingTools.append(candidate)
+                        if !sendsMessage(items, at: next) { pendingTools.append(candidate) }
                     } else {
                         break scan
                     }
@@ -117,7 +122,9 @@ enum TranscriptFolding {
             }
             if isToolLine(item) {
                 var next = index + 1
-                while next < items.count, next != boundary, stretches[next] == nil, joinsToolRun(items[next]) { next += 1 }
+                while next < items.count, next != boundary, stretches[next] == nil, joinsToolRun(items[next]), !sendsMessage(items, at: next) {
+                    next += 1
+                }
                 rows.append(next - index > 1 ? .tools(Array(items[index..<next])) : .single(item))
                 index = next
                 continue
@@ -202,6 +209,13 @@ enum TranscriptFolding {
         case .event(let event): event.kind == .delegationReceived
         default: false
         }
+    }
+
+    /// The action that sent a message between Orbs ("Falando com Revisor"), next to the message's own line: it has no row,
+    /// the message says the same. One that failed has no message, and stays.
+    static func sendsMessage(_ items: [TranscriptItem], at index: Int) -> Bool {
+        guard case .tool(let call) = items[index].kind, call.kind == .orbs, call.state != .failed else { return false }
+        return (index > 0 && isExchangeLine(items[index - 1])) || (index + 1 < items.count && isExchangeLine(items[index + 1]))
     }
 
     /// The kind of an event that folds with its neighbours, nil for one that stands alone.
@@ -305,6 +319,26 @@ enum ExchangeWords {
         case .tell: return "\(from) avisou \(PortugueseArticle.article(for: to)) \(to)"
         case .reply where toGroup: return "O grupo \(from) respondeu \(preposition(for: to)) \(to)"
         case .reply: return "\(from) respondeu \(preposition(for: to)) \(to)"
+        }
+    }
+
+    /// The line as the chat of `botID` reads it: that Orb is not named ("Pediu ajuda ao Revisor", "Revisor respondeu"). A
+    /// message of a group, or between two other Orbs, reads as `line(for:)`.
+    static func line(for message: OrbMessageItem, in botID: UUID) -> String {
+        guard message.fromChat != true else { return line(for: message) }
+        let to = message.to?.name ?? "outro Orb"
+        if message.from.id == botID {
+            switch message.kind {
+            case .ask: return "Pediu ajuda \(PortugueseArticle.contraction(for: to)) \(to)"
+            case .tell: return "Avisou \(PortugueseArticle.article(for: to)) \(to)"
+            case .reply: return "Respondeu \(preposition(for: to)) \(to)"
+            }
+        }
+        guard message.to?.id == botID else { return line(for: message) }
+        switch message.kind {
+        case .ask: return "\(message.from.name) pediu ajuda"
+        case .tell: return "\(message.from.name) avisou"
+        case .reply: return "\(message.from.name) respondeu"
         }
     }
 

@@ -15,17 +15,28 @@ struct MiniOrb: View {
     }
 }
 
-/// Who talks to whom: two mini avatars with an arrow between them ("Atlas → Revisor").
+/// Who talks to whom: two mini avatars with an arrow between them ("Atlas → Revisor"). `awaits`: the answer has not come, and a
+/// dot breathes in the arrow's place (Core Animation, paused out of view; still under Reduce Motion).
 struct ExchangeGlyph: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let from: UUID
     let to: UUID
+    var awaits = false
 
     var body: some View {
         HStack(spacing: 4) {
             MiniOrb(botID: from)
-            Image(systemName: "arrow.right")
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(Palette.hint)
+            Group {
+                if awaits {
+                    BreathingDot(color: Palette.accentText, breathes: !reduceMotion)
+                        .frame(width: 5, height: 5)
+                } else {
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(Palette.hint)
+                }
+            }
+            .frame(width: 10) // the dot and the arrow take the same room: the line does not move when the answer comes
             MiniOrb(botID: to)
         }
         .accessibilityHidden(true)

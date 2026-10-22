@@ -29,8 +29,9 @@ struct TranscriptFoldingTests {
         TranscriptItem(.orbMessage(msg(kind, direction, state, from: from, to: to, chain: chain)))
     }
 
-    private func tool() -> TranscriptItem {
-        TranscriptItem(.tool(ToolCall(kind: .orbs, title: "Falando com Pesquisador", detail: "", state: .done)))
+    private func tool(_ kind: ToolCall.Kind = .shell, _ state: ToolCall.State = .done) -> TranscriptItem {
+        TranscriptItem(.tool(ToolCall(kind: kind, title: kind == .orbs ? "Falando com Pesquisador" : "Rodando no Terminal", detail: "",
+                                      state: state)))
     }
 
     private func say(_ text: String) -> TranscriptItem { TranscriptItem(.bot(text: text, isStreaming: false)) }
@@ -133,6 +134,32 @@ struct TranscriptFoldingTests {
         let call = tool()
         let rows = TranscriptFolding.rows(for: [first, call, second])
         #expect(rows == [.exchange([first, second]), .single(call)])
+    }
+
+    @Test("A ação que enviou a mensagem não tem linha; a que falhou fica")
+    func sendingActionHasNoRow() {
+        let chain = UUID()
+        let ask = message(.ask, .sent, .open, from: atlas, to: researcher, chain: chain)
+        let send = tool(.orbs)
+        let read = tool(), other = tool(), words = say("Sigo.")
+        // After the message (as the asker's chat has it), and before it, at the end of a run of actions.
+        #expect(TranscriptFolding.rows(for: [ask, send, words]) == [.single(ask), .single(words)])
+        #expect(TranscriptFolding.rows(for: [read, other, send, ask]) == [.tools([read, other]), .single(ask)])
+        let failed = tool(.orbs, .failed)
+        #expect(TranscriptFolding.rows(for: [ask, failed]) == [.single(ask), .single(failed)])
+        // Away from any message it is an action like the others.
+        #expect(TranscriptFolding.rows(for: [read, send]) == [.tools([read, send])])
+    }
+
+    @Test("No chat de um dos dois, a frase não repete o nome dele")
+    func lineLeavesThisChatsOrbOut() {
+        let chain = UUID()
+        let ask = msg(.ask, from: atlas, to: researcher, chain: chain)
+        let reply = msg(.reply, .reply, from: researcher, to: atlas, chain: chain)
+        #expect(ExchangeWords.line(for: ask, in: atlas.id) == "Pediu ajuda ao Pesquisador")
+        #expect(ExchangeWords.line(for: reply, in: atlas.id) == "Pesquisador respondeu")
+        #expect(ExchangeWords.line(for: ask, in: researcher.id) == "Atlas pediu ajuda")
+        #expect(ExchangeWords.line(for: ask, in: reviewer.id) == ExchangeWords.line(for: ask))
     }
 
     @Test("Uma fala do Orb quebra a troca")

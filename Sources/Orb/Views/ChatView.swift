@@ -306,7 +306,7 @@ private struct TranscriptList: View {
                     // end MultiOrb (WP2)
                     TaskPlanStrip(transcript: transcript)
                     QueuedMessages(botID: look.id)
-                    // A chain of requests the Orb waits on (`chainWork`) keeps its line too, with the button that stops it.
+                    // A chain of requests the Orb waits on (`chainWork`) keeps its line too.
                     if isWorking || live.chainWork != nil {
                         WorkingLine(look: look, avatarHidden: avatars.lastID != nil)
                             .transition(.adapted(.arrive, reduceMotion: reduceMotion))
@@ -943,11 +943,6 @@ private struct WorkingLine: View {
                     .opacity(avatarHidden ? 0 : 1)
                     .animation(Motion.fade, value: avatarHidden)
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    // MARK: MultiOrb (WP2): the two Orbs of an exchange, joined by an arrow, before the phrase.
-                    if let partner = live.partner {
-                        ExchangeGlyph(from: look.id, to: partner.botID)
-                            .transition(.quiet)
-                    }
                     ZStack(alignment: .leading) {
                         WorkPhraseView(work: work)
                             .id(work.phraseKey)
@@ -974,16 +969,8 @@ private struct WorkingLine: View {
                             .help(Tip.sendToBackground)
                             .transition(.adapted(.swap, reduceMotion: reduceMotion))
                     }
-                    // MARK: MultiOrb (WP2): the Orb waits for other Orbs' answers: the line stops the conversation.
-                    if live.chainWork != nil {
-                        Button("Parar", systemImage: "stop.fill") { model.stop(look.id) }
-                            .buttonStyle(GhostStyle(tint: nil))
-                            .lineLimit(1)
-                            .fixedSize()
-                            .layoutPriority(1)
-                            .help("Parar a conversa entre Orbs (\(AppShortcut.stop.label))")
-                            .transition(.adapted(.swap, reduceMotion: reduceMotion))
-                    }
+                    // MARK: MultiOrb (WP2): no Stop of its own while the Orb waits for other Orbs: the composer's (and ⌘.)
+                    // ends the conversation too (`ComposerAction.current`, `stopTurn`).
                 }
                 // The meter slides along with the width of the phrase.
                 .animation(reduceMotion ? nil : Motion.content, value: work.phraseKey)

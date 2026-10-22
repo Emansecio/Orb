@@ -9,7 +9,7 @@ import SwiftUI
 /// - `delegation-thread`: a finished exchange folded, then an open, a failed and a lost message in their own lines.
 /// - `delegation-folded`: an exchange of three messages with two Orbs, folded (closed) and unfolded.
 /// - `delegation-exchange`: the read-only exchange view.
-/// - `delegation-waiting`: the work line of an Orb that waits for two answers, with the partner's glyph and the Parar button.
+/// - `delegation-waiting`: the work line of an Orb that waits for two answers (the composer's Stop ends it).
 /// - `sidebar-talking`: the sidebar while Atlas talks with Pesquisador: the rings and the phrases of both sides.
 /// - `delegation-group`: Atlas creates the group Lançamento, asks it from its chat and gets the group's answer, and a notice
 ///   from the Revisor arrives.
