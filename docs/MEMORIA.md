@@ -138,7 +138,7 @@ qualquer que seja o tamanho da memória. Ele se divide em duas partes, por causa
 |---|---|---|
 | `stable` | prompt do sistema (igual de uma mensagem para outra) | o perfil da usuária (veja abaixo; nada quando vazio), identidade (até 1 500 caracteres: saem primeiro as notas mais antigas, com a marca "(+N older notes left out of this prompt)"; só o seu texto, quando não cabe sozinho, vira começo e fim), preferências (até 1 500, entre as 200 mais novas: cada uma cortada em `max(240, 1 500 ÷ N)`, e as que não cabem viram a linha "(+N older preferences not shown here; recall finds them)"; o painel avisa quantas não cabem inteiras e se a consolidação vai juntá-las, que agora roda também quando elas não cabem, mirando 1 200 caracteres) e a linha de como usar `remember`/`recall` |
 | `interview` | prefácio da mensagem, fora de `<memory_notes>` | a entrevista enquanto pendente (até a 4ª mensagem sua). Fica fora do prompt do sistema: o fim dela mudaria a memória congelada ali e mandaria toda a memória de novo (`memory_update`) |
-| `notes` | prefácio da mensagem (`<orb_context>`), dentro de `<memory_notes>` | até **3 lembranças ligadas à mensagem** (220 caracteres cada, 900 no total); "onde paramos" (até 900, **só ao começar uma conversa nova**: Resumo, Pedidos sem repetir o que virou decisão, Decisões, Pendências, o que foi feito (só quando não há Resumo, que já diz isso em menos palavras) e a última resposta em 200 caracteres); títulos de outros fatos (12) e procedimentos (8), em que uma série de títulos que só mudam nos números ("Diário 15/10 rodada 23:21", "… 22:21") ocupa uma linha só, a mais nova com "(+N like it)" (`MemoryBank.titleLines`) |
+| `notes` | prefácio da mensagem (`<orb_context>`), dentro de `<memory_notes>` | até **3 lembranças ligadas à mensagem** (220 caracteres cada, 900 no total); "onde paramos" (até 900, **só ao começar uma conversa nova**: Resumo, Pedidos sem repetir o que virou decisão, Decisões, Pendências, o que foi feito (só quando não há Resumo, que já diz isso em menos palavras) e a última resposta em 200 caracteres); títulos de outros fatos (12) e procedimentos (8), em que uma série de títulos que só mudam nos números ("Diário 15/10 rodada 23:21", "… 22:21") ocupa uma linha só, a mais nova com "(+N like it)" (`MemoryBank.titleLines`). Os títulos saem de todas as páginas do tipo (até 2 000, só título, `titleItems`), não das mais novas, e as linhas vão pela retenção (usos e recência; a série vale pela sua melhor página), para que um diário de hora em hora não tire da lista os fatos mais usados |
 
 Detalhes que importam:
 
@@ -158,6 +158,9 @@ Detalhes que importam:
   precisa ter pelo menos 2", e com 2 ou mais deles a página precisa casar pelo menos um (um verbo em comum não basta).
   Prefixo na busca só a partir de 4 letras ou com número ("10" acha "10h"); uma palavra de 3 letras acha também o plural
   ("voo" acha "voos"), e "sp" não acha "sprint".
+- **Uma vaga por série**: fatos e procedimentos com data ou hora no título que só mudam nos números ("Diário 15/10 rodada
+  14:21", "… 15:21") ocupam uma vaga só, no lugar do que melhor casou, com a página mais nova da série que casa com a
+  mensagem; as outras ficam para o `recall`. Títulos sem data ("Fato 1 …", "Fato 2 …") e sessões não são série.
 - **Pela tarefa em andamento**: uma mensagem que só aponta para trás ("faz igual ao anterior", "continua", "de novo") e
   tem menos de 2 palavras de assunto próprias pega emprestados até 6 termos da tarefa (`MemoryText.lookupTerms`):
   `TurnPreface.taskContext` junta os 2 últimos pedidos da conversa (o mais novo primeiro) e a meta do resumo. Uma mensagem

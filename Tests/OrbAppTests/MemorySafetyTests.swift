@@ -221,6 +221,41 @@ import Testing
         #expect(notes.components(separatedBy: "Diário").count == 2)
     }
 
+    @Test func aLongLogDoesNotPushTheFactsUsedMostOffTheTitles() async {
+        let bank = bank()
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        await bank.remember("Desconto de 10% para famílias com 3 pessoas ou mais", title: "Condições comerciais", now: start - 10 * day)
+        await bank.remember("A tabela de preços da academia mudou em outubro", title: "Tabela de preços", now: start - 9 * day)
+        for minute in 0..<20 { _ = await bank.recall("condições comerciais", now: start - 8 * day + Double(minute) * 120) }
+        for hour in 0..<70 {
+            let chats = (0..<3).map { _ in UUID().uuidString.prefix(8).lowercased() }.joined(separator: " ")
+            await bank.remember("Rodada do atendimento: respondi \(chats)", kind: .fato,
+                                title: "Diário rodada \(hour)", now: start + Double(hour) * 3600)
+        }
+        let notes = await bank.brief(for: "oi", conversationIsNew: false, now: start + 3 * day).notes
+        let titles = notes.components(separatedBy: "### Other things you know").last ?? ""
+        #expect(titles.contains("Condições comerciais") && titles.contains("Tabela de preços"))
+        #expect(titles.contains("Diário rodada 69 (+69 like it)"))
+        #expect((titles.range(of: "Condições comerciais")?.lowerBound)! < (titles.range(of: "Diário")?.lowerBound)!)
+    }
+
+    @Test func aLogTakesOneRelatedPlaceWithItsNewestMatch() async {
+        let bank = bank()
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        await bank.remember("O link do checkout especial é https://loja.example/checkout-especial", title: "URL do checkout especial",
+                            now: start - day)
+        await bank.remember("Desconto no checkout para famílias com 3 pessoas ou mais", title: "Condições comerciais", now: start - day)
+        let names = ["Ana", "Bruno", "Carla", "Davi", "Elisa"]
+        for (hour, name) in names.enumerated() {
+            await bank.remember("Rodada: mandei o link do checkout para \(name) e esperei o pagamento", kind: .fato,
+                                title: "Diário 15/10 rodada \(hour + 10):21", now: start + Double(hour) * 3600)
+        }
+        let hits = await bank.related(to: "manda o link do checkout", now: start + day)
+        #expect(hits.count == 3)
+        #expect(hits.filter { $0.title.hasPrefix("Diário") }.map(\.title) == ["Diário 15/10 rodada 14:21"])
+        #expect(hits.contains { $0.title == "URL do checkout especial" })
+    }
+
     @Test func whereYouLeftOffSkipsTheCommandsWhenTheModelSummarized() {
         let summarized = SessionSummary.resumoHeading + "- Revisamos o site e subimos a versão nova.\n\n## O que foi feito\n- Rodando no Terminal: cd /x && make"
         #expect(!MemoryBank.leftOff(summarized).contains("make"))

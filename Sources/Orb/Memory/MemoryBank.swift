@@ -352,12 +352,29 @@ actor MemoryBank {
         let required = subject.count >= 3 ? 2 : 1
         // A message naming two subjects or more: a page must have one of them, not just a verb or an adverb it shares.
         let needsSubject = subject.count >= 2 && subject.count < terms.count
-        // Wider than `limit`: what the filters drop must not leave the message with fewer memories than it deserves.
-        let candidates = search(match: match, words: Set(terms.map(MemoryText.stem)), rows: 4 * limit + excluding.count, excluding: excluding)
-        let hits = candidates.filter {
-            MemoryText.matchCount(of: terms, in: $0.text) >= required && !isSent($0.hit)
+        // Wider than `limit`: what the filters and the series drop must not leave the message with fewer memories than it deserves.
+        let candidates = search(match: match, words: Set(terms.map(MemoryText.stem)), rows: 8 * limit + excluding.count, excluding: excluding)
+        let matching = candidates.filter {
+            MemoryText.matchCount(of: terms, in: $0.text) >= required
                 && (!needsSubject || MemoryText.matchCount(of: subject, in: $0.text) >= 1)
-        }.prefix(limit).map(\.hit)
+        }.map(\.hit)
+        // A series (an hourly log) takes one place, where its best match ranks, with its newest page that matches: the older
+        // ones stay a recall away instead of taking every place. Before `isSent`, so an older page doesn't stand in for the
+        // newest one the conversation already carries.
+        var places: [String] = [], newest: [String: MemoryHit] = [:]
+        // Only dated facts and procedures ("Diário 15/10 rodada 14:21"): "Fato 1 …" and "Fato 2 …" are two facts, and two
+        // conversations that opened with the same request are not a log.
+        for hit in matching {
+            let series = (hit.kind == .fato || hit.kind == .procedimento) && Self.isDated(hit.title)
+                ? hit.kind.rawValue + ":" + Self.series(title: hit.title, path: hit.path) : hit.path
+            if let kept = newest[series] {
+                if hit.date > kept.date { newest[series] = hit }
+            } else {
+                places.append(series)
+                newest[series] = hit
+            }
+        }
+        let hits = places.compactMap { newest[$0] }.filter { !isSent($0) }.prefix(limit)
         bump(hits.map(\.path), now: now)
         return Array(hits)
     }
@@ -447,9 +464,14 @@ actor MemoryBank {
             shown.insert(last.path)
             take("### Where you left off (\(Self.dayFormat.string(from: last.date)))\n" + Self.leftOff(last.body), into: &notes)
         }
-        // Read wider than shown: a series (an hourly log) takes one line, so the other titles still get theirs.
-        let others = Self.titleLines(items(.fato, limit: 60).filter { !shown.contains($0.path) }, limit: 12)
-            + Self.titleLines(items(.procedimento, limit: 40).filter { !shown.contains($0.path) }, limit: 8)
+        // Every title, not the newest few: an hourly log would push the facts used most off the list. A series takes one
+        // line, and the lines go by retention (uses and how recent).
+        func titles(_ kind: MemoryKind, limit: Int) -> [String] {
+            let ranked = titleItems(kind, now: now).filter { !shown.contains($0.item.path) }
+            return Self.titleLines(ranked.map(\.item), limit: limit,
+                                   scores: Dictionary(ranked.map { ($0.item.path, $0.score) }, uniquingKeysWith: max))
+        }
+        let others = titles(.fato, limit: 12) + titles(.procedimento, limit: 8)
         if !others.isEmpty {
             var lines: [String] = []
             for line in others {
@@ -740,6 +762,27 @@ actor MemoryBank {
         return known
     }
 
+    /// Pages of `kind` the brief's title list reads at most: the newest and the most used (titles only, so cheap).
+    static let titleReadLimit = 2_000, titleReadUsed = 200
+
+    /// The pages of `kind` for the title list, newest first, without their bodies, each with its retention at `now`: the
+    /// `titleReadLimit` newest and the `titleReadUsed` most used, so a log that outgrows the first never hides the second.
+    func titleItems(_ kind: MemoryKind, now: Date) -> [(item: MemorySnapshot.Item, score: Double)] {
+        index?.rows("""
+            SELECT path, title, updated, compacted, access_count, last_access, salience FROM pages WHERE kind = ?1
+              AND (id IN (SELECT id FROM pages WHERE kind = ?1 ORDER BY updated DESC, path LIMIT ?2)
+                OR id IN (SELECT id FROM pages WHERE kind = ?1 ORDER BY access_count DESC, path LIMIT ?3))
+            ORDER BY updated DESC, path
+            """, [.text(kind.rawValue), .int(Self.titleReadLimit), .int(Self.titleReadUsed)]).map { row in
+            let updated = row.double(2) ?? 0
+            let age = max(0, now.timeIntervalSince1970 - updated) / 86_400
+            let sinceAccess = max(0, now.timeIntervalSince1970 - (row.double(5) ?? updated)) / 86_400
+            return (MemorySnapshot.Item(path: row.text(0), kind: kind, title: row.text(1), body: "",
+                                        date: Date(timeIntervalSince1970: updated), compacted: row.int(3) == 1),
+                    Self.retention(ageDays: age, daysSinceAccess: sinceAccess, accessCount: row.int(4), salience: row.double(6) ?? 1))
+        } ?? []
+    }
+
     /// Newest first; pages saved in the same instant keep one order (by path), because the pinned memory is part of the
     /// system prompt and its order must not change between two messages.
     func items(_ kind: MemoryKind, limit: Int) -> [MemorySnapshot.Item] {
@@ -929,16 +972,33 @@ actor MemoryBank {
         return headAndTail(body, limit)
     }
 
-    /// Up to `limit` title lines, newest first. Titles that differ only in their numbers ("Diário 15/10 rodada 23:21",
-    /// "Diário 15/10 rodada 22:21") are one series: its newest page, with how many more there are.
-    static func titleLines(_ items: [MemorySnapshot.Item], limit: Int) -> [String] {
-        var keys: [String] = [], newest: [String: MemorySnapshot.Item] = [:], counts: [String: Int] = [:]
+    /// The series a page belongs to: its title without the numbers ("Diário 15/10 rodada 23:21" and "Diário 15/10 rodada
+    /// 22:21" are one), or the page alone when nothing is left.
+    static func series(title: String, path: String) -> String {
+        let words = MemoryText.fold(title).filter { !$0.isNumber }.components(separatedBy: CharacterSet.alphanumerics.inverted)
+        let key = words.filter { !$0.isEmpty }.joined(separator: " ")
+        return key.isEmpty ? path : key
+    }
+
+    /// Whether `title` carries a date or a time ("15/10", "14:21", "2026-10-15"), as the pages of a log do.
+    static func isDated(_ title: String) -> Bool {
+        title.range(of: #"\d{1,4}[/:\-]\d{1,2}"#, options: .regularExpression) != nil
+    }
+
+    /// Up to `limit` title lines from `items` (newest first). A series (see `series(title:path:)`) takes one line: its
+    /// newest page, with how many more there are. With `scores` (by path), the series with the best-scored page come
+    /// first, newest first on a tie; without, newest first.
+    static func titleLines(_ items: [MemorySnapshot.Item], limit: Int, scores: [String: Double] = [:]) -> [String] {
+        var keys: [String] = [], newest: [String: MemorySnapshot.Item] = [:], counts: [String: Int] = [:], best: [String: Double] = [:]
         for item in items {
-            let words = MemoryText.fold(item.title).filter { !$0.isNumber }.components(separatedBy: CharacterSet.alphanumerics.inverted)
-            let key = words.filter { !$0.isEmpty }.joined(separator: " ")
-            let series = key.isEmpty ? item.path : key
+            let series = series(title: item.title, path: item.path)
             if newest[series] == nil { keys.append(series); newest[series] = item }
             counts[series, default: 0] += 1
+            best[series] = max(best[series] ?? -.infinity, scores[item.path] ?? 0)
+        }
+        if !scores.isEmpty {
+            let position = Dictionary(uniqueKeysWithValues: keys.enumerated().map { ($1, $0) })
+            keys.sort { (best[$0] ?? 0, -(position[$0] ?? 0)) > (best[$1] ?? 0, -(position[$1] ?? 0)) }
         }
         return keys.prefix(limit).compactMap { series in
             guard let item = newest[series] else { return nil }
