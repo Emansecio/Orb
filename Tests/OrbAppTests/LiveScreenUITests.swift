@@ -446,7 +446,7 @@ struct LiveScreenFoldingTests {
 
     @Test func theItemIsNotAMessageForTheModelsContext() {
         // It carries no text anyone could search or remember (see `ConversationSearch`).
-        #expect(ReplyAvatars.quietReplies(in: [say("a"), card, say("b")]).count == 1, "it does not cut a run of replies")
+        #expect(ReplyAvatars([say("a"), card, say("b")]).quiet.count == 1, "it does not cut a run of replies")
     }
 }
 

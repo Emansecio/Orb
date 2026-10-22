@@ -266,5 +266,15 @@ final class AttachmentPresentationTests {
         return files
     }
 
+    @Test func producedFilesAreCountedInOneHeading() {
+        let new = ProducedFile(path: "/tmp/a.txt", created: true), changed = ProducedFile(path: "/tmp/b.txt", created: false)
+        #expect(ProducedFilesView.heading([new]) == "1 arquivo novo")
+        #expect(ProducedFilesView.heading([new, new, new]) == "3 arquivos novos")
+        #expect(ProducedFilesView.heading([changed]) == "1 arquivo alterado")
+        #expect(ProducedFilesView.heading([changed, changed]) == "2 arquivos alterados")
+        #expect(ProducedFilesView.heading([new, new, changed]) == "3 arquivos (2 novos, 1 alterado)")
+        #expect(ProducedFilesView.heading([new, changed, changed]) == "3 arquivos (1 novo, 2 alterados)")
+    }
+
 }
 

@@ -85,12 +85,9 @@ struct ChatView: View {
 }
 
 extension ChatView {
-    /// Under the name, what the Orb is doing while it works (with the sidebar hidden, the only place that says so above the
-    /// fold), in its short form (a command is not written out), and its model when it is free, after the conversation on
-    /// show when it has more than one.
+    /// Under the name, the conversation on show (when the Orb has more than one) and the model. What the Orb is doing is
+    /// said in one place, the working line at the end of the chat, not here too.
     private func subtitle(_ live: BotLive) -> String {
-        if live.needsYou { return "Precisa de você" }
-        if let work = live.shownWork?.headline { return work }
         let name = model.modelName(forModel: live.modelID)
         guard let chats = live.chats, let title = chats.title(of: chats.active) else { return name }
         return name.isEmpty ? title : "\(title) · \(name)"
@@ -317,12 +314,14 @@ private struct TranscriptList: View {
                         }
                     }
                     // end MultiOrb (WP2)
-                    TaskPlanStrip(transcript: transcript)
                     QueuedMessages(botID: look.id)
                     // A chain of requests the Orb waits on (`chainWork`) keeps its line too.
                     if isWorking || live.chainWork != nil {
-                        WorkingLine(look: look, avatarHidden: avatars.lastID != nil)
+                        WorkingLine(look: look, avatarHidden: avatars.lastID != nil, transcript: transcript)
                             .transition(.adapted(.arrive, reduceMotion: reduceMotion))
+                    } else if transcript.plan != nil {
+                        // A plan left open when the turn ended: its ring alone, where the working line was.
+                        IdlePlanRing(transcript: transcript)
                     }
                     Color.clear.frame(height: 1).id(BottomAnchor.id)
                 }
@@ -431,7 +430,8 @@ private struct TranscriptList: View {
     private func itemRow(_ item: TranscriptItem, avatars: ReplyAvatars, redoID: UUID?, dropping: Set<UUID>, found: FindFocus?) -> some View {
         let isNew = entrances.isNew(item.id)
         TranscriptRow(item: item, botID: look.id, orb: look.orb, entering: isNew,
-                      isLastReply: item.id == avatars.lastID, showsAvatar: !avatars.quiet.contains(item.id), offersRedo: item.id == redoID,
+                      isLastReply: item.id == avatars.lastID, showsAvatar: !avatars.quiet.contains(item.id),
+                      isNarration: avatars.narration.contains(item.id), offersRedo: item.id == redoID,
                       isDropping: dropping.contains(item.id), find: item.id == found?.itemID ? found : nil, editable: true)
             .equatable()
             // The row comes in by itself, not through an animation of the list (which would lay every row out again); the
@@ -942,6 +942,8 @@ private struct WorkingLine: View {
     /// The reply just above is the last item of the chat and carries the living Orb: this one stays out of sight (its
     /// place stays, so the phrase does not move) and rests.
     let avatarHidden: Bool
+    /// For the plan's ring (`TaskPlanRing`), which reads the plan from it.
+    let transcript: OrbTranscript
     /// The last phrase there was: when the turn ends the line is still fading out for a moment, and must say the
     /// same words until it is gone instead of falling back to "Pensando".
     @State private var lastWork = WorkPhrase.line(status: "Pensando")
@@ -949,6 +951,9 @@ private struct WorkingLine: View {
     @State private var showsRelease = false
     /// The button was pressed: the command goes to the background at its next check.
     @State private var releasing = false
+    /// The pointer is on the line: the meter says the count of actions and what the turn used, not only the time.
+    @State private var isHovering = false
+    @State private var showsPlan = false
 
     private func sendToBackground() {
         releasing = true
@@ -976,7 +981,8 @@ private struct WorkingLine: View {
                     // The phrase leaving follows its parent when the line is pushed down by a row coming in above it,
                     // instead of staying drawn where the line used to be.
                     .geometryGroup()
-                    WorkMeterView(work: work, since: live.workingSince, spend: live.turnSpend)
+                    TaskPlanRing(transcript: transcript, showsSteps: $showsPlan)
+                    WorkMeterView(work: work, since: live.workingSince, spend: live.turnSpend, expanded: isHovering)
                     // A command holds the turn: it can go on by itself while you talk to the Orb. The button waits a
                     // moment (`CommandRelease.buttonDelay`), so a quick command ends before it ever shows, and once
                     // pressed it stands dimmed until the command is let go (a quarter of a second at most).
@@ -995,6 +1001,7 @@ private struct WorkingLine: View {
                 // The meter slides along with the width of the phrase.
                 .animation(reduceMotion ? nil : Motion.content, value: work.phraseKey)
             }
+            .onHover { isHovering = $0 }
             .onChange(of: live.shownWork, initial: true) { _, new in if let new { lastWork = new } }
             .task(id: live.commandWaited) {
                 releasing = false
@@ -1016,6 +1023,9 @@ private struct WorkingLine: View {
                 }
                 if live.chainWork != nil {
                     Button("Parar a conversa entre Orbs") { model.stop(look.id) }
+                }
+                if transcript.plan != nil {
+                    Button("Mostrar o plano") { showsPlan = true }
                 }
             }
             if model.routineWaitingForYou(look.id) != nil {
@@ -1089,14 +1099,17 @@ struct WorkPhraseView: View {
     }
 }
 
-/// "16 s · 3 ações" next to the phrase (or "em 8 s" counting down to a new try), redrawn once a second. Hidden from
-/// VoiceOver, which would otherwise read every tick. The count rolls when it changes, which is once per tool.
+/// "16 s" next to the phrase, "16 s · 3 ações · 180 mil tokens" while the pointer is on the line (or "em 8 s" counting
+/// down to a new try), redrawn once a second. Hidden from VoiceOver, which would otherwise read every tick. The count
+/// rolls when it changes, which is once per tool.
 private struct WorkMeterView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let work: WorkLine
     let since: Date?
-    /// What the turn used so far (`TurnSpend`): said from `TurnSpend.shownFrom` on.
+    /// What the turn used so far (`TurnSpend`): said from `TurnSpend.shownFrom` on, on hover.
     var spend: TurnSpend?
+    /// The pointer is on the line: the count and what the turn used come after the time.
+    var expanded = false
     /// Where the ticks start when there is no start time (the wait to try again): fixed when the meter appears, so a
     /// redraw of the line does not move the second marks (`.now` in the body would restart the clock at every one).
     @State private var anchor = Date()
@@ -1121,6 +1134,6 @@ private struct WorkMeterView: View {
     private func text(at now: Date) -> String {
         if case .retrying(let until) = work.tone { return WorkMeter.countdown(until: until, now: now) }
         let elapsed = since.map { ElapsedFormat.working(since: $0, now: now) } ?? ""
-        return WorkMeter.text(elapsed: elapsed, actions: work.actions, spend: spend)
+        return expanded ? WorkMeter.text(elapsed: elapsed, actions: work.actions, spend: spend) : elapsed
     }
 }

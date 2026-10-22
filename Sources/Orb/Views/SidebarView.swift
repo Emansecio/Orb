@@ -233,6 +233,8 @@ struct SidebarRow<Content: View>: View {
     let selectionSpace: Namespace.ID
     /// A dashed outline: the row that invites you to make the first Orb.
     var isDashed = false
+    /// False when something around the row paints the selection instead (the open Orb's card with its conversations).
+    var paintsSelection = true
     var help = ""
     /// What the row carries when it is dragged (an Orb's row, onto a category); nil for a row that is not dragged.
     var dragPayload: String?
@@ -256,14 +258,7 @@ struct SidebarRow<Content: View>: View {
                     }
                 }
                 .background {
-                    if isSelected {
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(Palette.ghostSelected)
-                            .matchedGeometryEffect(id: SidebarSelection.id, in: selectionSpace)
-                            // The list changed in this update (a new Orb that is chosen, a deleted one): the rows come and
-                            // go, and the highlight does not slide to a row that is still arriving.
-                            .transaction { if listChanged { $0.animation = nil } }
-                    }
+                    if isSelected, paintsSelection { SidebarSelectionFill(selectionSpace: selectionSpace) }
                 }
                 .contentShape(.rect)
         Group {
@@ -287,6 +282,21 @@ struct SidebarRow<Content: View>: View {
         .help(help)
         .onHover { isHovering = $0 }
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+/// The selection's background, one view for every row (`matchedGeometryEffect`), so it slides from one to the other.
+private struct SidebarSelectionFill: View {
+    let selectionSpace: Namespace.ID
+    @Environment(\.sidebarListChanged) private var listChanged
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 10)
+            .fill(Palette.ghostSelected)
+            .matchedGeometryEffect(id: SidebarSelection.id, in: selectionSpace)
+            // The list changed in this update (a new Orb that is chosen, a deleted one): the rows come and go, and the
+            // highlight does not slide to a row that is still arriving.
+            .transaction { if listChanged { $0.animation = nil } }
     }
 }
 
@@ -334,9 +344,12 @@ struct SidebarBotRow: View {
     var body: some View {
         let live = model.live(botID)
         let isSelected = model.selection == .bot(botID)
+        // The open Orb with more than one conversation is one card: the selection wraps its row and its conversations.
+        let chats = isSelected ? live.chats : nil
         // The name and the reply under it are cut to one line each: the hover text has the name whole.
         VStack(alignment: .leading, spacing: 0) {
-            SidebarRow(isSelected: isSelected, selectionSpace: selectionSpace, help: live.look.name, dragPayload: SidebarOrder.dragPayload(botID)) {
+            SidebarRow(isSelected: isSelected, selectionSpace: selectionSpace, paintsSelection: chats == nil, help: live.look.name,
+                       dragPayload: SidebarOrder.dragPayload(botID)) {
                 model.selection = .bot(botID)
             } content: { isHovering in
                 BotRowContent(row: BotRow(look: live.look, workText: live.shownWork?.headline, shimmers: live.shownWork?.shimmers ?? false, activity: live.activity, isSelected: isSelected,
@@ -365,11 +378,12 @@ struct SidebarBotRow: View {
                 Button("Apagar \(live.look.name)…", systemImage: "trash", role: .destructive) { model.askToDelete(botID) }
             }
             // The open Orb's conversations, once it has more than one.
-            if isSelected, let chats = live.chats {
+            if let chats {
                 SidebarChatList(botID: botID, chats: chats)
                     .transition(.adapted(.unfold, reduceMotion: reduceMotion))
             }
         }
+        .background { if chats != nil { SidebarSelectionFill(selectionSpace: selectionSpace) } }
         .matchedGeometryEffect(id: botID, in: rowSpace)
     }
 }

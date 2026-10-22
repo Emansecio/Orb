@@ -102,6 +102,25 @@ enum ProseText {
         return text
     }
 
+    /// Words said along the work: a point smaller and as dim as `Palette.secondary` (the marks and links with them), since
+    /// the text is AppKit's and does not take SwiftUI's font or color.
+    static func quieter(_ text: NSAttributedString) -> NSAttributedString {
+        let quiet = NSMutableAttributedString(attributedString: text)
+        let all = NSRange(location: 0, length: quiet.length)
+        quiet.enumerateAttribute(.font, in: all, options: .longestEffectiveRangeNotRequired) { value, range, _ in
+            guard let font = value as? NSFont else { return }
+            quiet.addAttribute(.font, value: NSFontManager.shared.convert(font, toSize: font.pointSize - 1), range: range)
+        }
+        quiet.enumerateAttribute(.foregroundColor, in: all, options: .longestEffectiveRangeNotRequired) { value, range, _ in
+            guard let color = value as? NSColor else { return }
+            quiet.addAttribute(.foregroundColor, value: color.withAlphaComponent(color.alphaComponent * quietAlpha), range: range)
+        }
+        return quiet
+    }
+
+    /// `Palette.secondary` over `Palette.ink`.
+    static let quietAlpha: CGFloat = 0.74
+
     /// The space between the lines of a paragraph is the layout manager's (`ProseTextView`): a paragraph style's would also
     /// come after its last line, which SwiftUI's `lineSpacing` does not.
     private static func paragraphStyle() -> NSMutableParagraphStyle {
@@ -403,6 +422,7 @@ struct SelectableProse: NSViewRepresentable {
         let blocks: [MarkdownBlock]
         let cursor: Bool
         let highlight: String?
+        let isQuiet: Bool
     }
 
     final class Coordinator {
@@ -426,10 +446,12 @@ struct SelectableProse: NSViewRepresentable {
     /// The text is set again only when it changed: setting it would also drop a selection being made.
     private func update(_ view: ProseTextView, context: Context) {
         view.selection = context.environment.proseSelection
-        let shown = Shown(blocks: blocks, cursor: cursor, highlight: highlight)
+        let isQuiet = context.environment.proseIsQuiet
+        let shown = Shown(blocks: blocks, cursor: cursor, highlight: highlight, isQuiet: isQuiet)
         guard context.coordinator.shown != shown else { return }
         context.coordinator.shown = shown
-        view.show(ProseText.make(blocks, cursor: cursor, cached: cached, highlight: highlight), cursor: cursor,
+        let text = ProseText.make(blocks, cursor: cursor, cached: cached, highlight: highlight)
+        view.show(isQuiet ? ProseText.quieter(text) : text, cursor: cursor,
                   fades: cursor && !context.environment.accessibilityReduceMotion)
     }
 
@@ -454,6 +476,8 @@ extension EnvironmentValues {
     @Entry var proseSelection: ProseSelectionAction?
     /// The text takes the width of its longest line instead of all it is given (inside a bubble, `replyBubble()`).
     @Entry var proseHugsText = false
+    /// Words the Orb said along its work, not an answer (`BotMessage.isNarration`): `ProseText.quieter`.
+    @Entry var proseIsQuiet = false
 }
 
 /// How the width a prose text is laid out at follows the width it is given.

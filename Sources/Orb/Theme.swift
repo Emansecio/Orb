@@ -73,6 +73,9 @@ enum Palette {
     static let conversationFont = Font.system(size: 14)
     /// 22 pt line height at 14 pt.
     static let conversationLineSpacing: CGFloat = 5
+    /// What the Orb says along its work, between the action lines: a step below an answer.
+    static let narrationFont = Font.system(size: 13)
+    static let narrationLineSpacing: CGFloat = 4
 }
 
 

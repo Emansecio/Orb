@@ -18,6 +18,8 @@ extension Snapshot {
             model.setDraft("e confere também a pasta de downloads", for: bot.id)
             model.dictation.pose(.listening, level: 0.4, for: bot.id)
             return view
+        case "chat-working-long":
+            return longTask(model: model, bot: bot)
         case "chat-working", "chat-working-wait", "chat-working-retry", "chat-attachments-queued", "chat-working-steered",
              "chat-working-streaming":
             return workingTurn(screen, model: model, bot: bot)
@@ -189,6 +191,66 @@ extension Snapshot {
             if screen == "chat-working-streaming" {
                 model.apply(.text("Compilei e encontrei **2 erros**, os dois no módulo Engine:\n\n- `Turn.swift:42`: um tipo que não"), to: id)
             }
+        })
+    }
+
+    /// `chat-working-long`: almost three minutes into a long task, as an Orb that answers customers leaves it. Words of the
+    /// Orb between runs of actions (each run named by what its actions were for, one of them with two verbs, some with
+    /// errors), the working files it wrote along the way, a plan the model never ticked, and the working line with its
+    /// spend.
+    @MainActor
+    private static func longTask(model: AppModel, bot: Bot) -> AnyView {
+        let id = bot.id
+        let live = model.live(id)
+        live.setWorkDwell(.zero)
+        let folder = model.store.directory.appending(path: "atendimento")
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        func file(_ name: String, _ size: Int) -> ProducedFile {
+            let url = folder.appending(path: name)
+            try? Data(String(repeating: "Olá! ", count: size / 5).utf8).write(to: url)
+            return ProducedFile(path: url.path, created: true)
+        }
+        var clock = Date.now - 180
+        func run(_ intent: String?, _ detail: String, _ state: ToolCall.State = .done, files: [ProducedFile]? = nil) -> TranscriptItem {
+            clock += 3
+            return TranscriptItem(.tool(ToolCall(kind: .shell, title: "Rodando no Terminal", detail: detail, state: state, output: "ok",
+                                                 startedAt: clock, finishedAt: clock + 2, files: files, intent: intent)))
+        }
+        func said(_ text: String) -> TranscriptItem { TranscriptItem(.bot(text: text, isStreaming: false)) }
+        var items = [TranscriptItem(.user(text: "Responda todos. Os que faltarem entregar a conta, me fale aqui.", attachments: []))]
+        items.append(said("Vou responder todos. Primeiro deixo o plano visível e checo os modelos e o `send.py`."))
+        items += [run("Listar modelos e ver uso do send.py", "ls _msgs"), run(nil, "cat send.py", .failed),
+                  run("Listar modelos e ver uso do send.py", "python3 send.py --help"), run(nil, "ls"), run(nil, "head fila.txt")]
+        items.append(said("Agora vou preparar os textos de resposta. Para o Guilherme (áudio de 16/10 nunca ouvido), vou baixar e transcrever antes."))
+        items += [run("Baixar áudio do Guilherme", "python3 baixar.py guilherme"), run("Ver uso do transcrever.py", "python3 transcrever.py -h", .failed),
+                  run(nil, "python3 transcrever.py audio.ogg"), run(nil, "cat audio.txt"),
+                  run("Escrever resposta da Letícia", "cat > leticia.txt", files: [file("leticia.txt", 639)]),
+                  run(nil, "cat > msg_vazia.txt", files: [file("msg_vazia.txt", 151)]),
+                  run(nil, "cat > alice.txt", files: [file("alice.txt", 382)]), run(nil, "wc -c *.txt", .failed), run(nil, "ls"),
+                  run(nil, "python3 fila.py --pendentes"), run(nil, "python3 fila.py --resumo")]
+        items.append(said("O áudio do Guilherme: ele agradece e pergunta como funciona o pagamento para quem é dependente e até quando vale o plano. Vou ver o que já respondi a ele antes de redigir."))
+        items.append(run("Ver histórico do Guilherme", "python3 historico.py guilherme"))
+        items.append(said("O áudio pede como funciona o pagamento pra dependente e até quando vale o plano. Vou redigir a resposta dele e já mandar tudo, começando por Letícia, Guilherme e as mensagens vazias."))
+        items += [run("Enviar resposta à Letícia (lead novo)", "python3 send.py leticia.txt"),
+                  run(nil, "cat > guilherme.txt", files: [file("guilherme.txt", 610)]), run(nil, "python3 send.py alice.txt")]
+        var conversation = Conversation(items: items)
+        conversation.taskPlan = TaskPlan(goal: "Responder todos os contatos pendentes",
+                                         steps: ["Ler modelos _msgs e uso do send.py", "Transcrever o áudio do Guilherme",
+                                                 "Redigir as respostas", "Enviar as respostas", "Listar quem falta entregar a conta"]
+                                            .map { TaskPlan.Step(text: $0) },
+                                         next: "Ler modelos _msgs e uso do send.py")
+        let sending = ToolCall(kind: .shell, title: "Rodando no Terminal", detail: "python3 send.py --lote guilherme vazias",
+                               startedAt: .now - 4, intent: "Enviar Guilherme e 5 mensagens vazias (reenvio)")
+        model.apply(.status("Pensando"), to: id)
+        model.apply(.toolStarted(sending), to: id)
+        model.session(id).turnTask = Task { try? await Task.sleep(for: .seconds(3600)) }
+        live.backdateWork(to: .now.addingTimeInterval(-174))
+        live.setTurnSpend(TurnSpend(tokens: 53_000, dollars: 0.02))
+        conversation.items.append(TranscriptItem(.tool(sending)))
+        // After the Orb's own conversation has been read from disk, which would replace this one.
+        return AnyView(ChatView(botID: id).task {
+            try? await Task.sleep(for: .seconds(1))
+            model.seedConversation(conversation, for: id)
         })
     }
 

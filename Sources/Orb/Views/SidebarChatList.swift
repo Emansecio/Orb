@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// The conversations of the open Orb, under its row in the sidebar, once it has more than one (`OrbChats`): the newest
-/// three, the one on show and any with something unread, "N mais…" for the rest, and "Nova conversa". The one on show is
-/// lit, the one the Orb works on breathes, one where something landed unseen has a dot. A conversation's menu renames it
-/// (in the row itself, as a category) or deletes it.
+/// The conversations of the open Orb, inside its card in the sidebar (the selection wraps both), once it has more than one
+/// (`OrbChats`): the newest three, the one on show and any with something unread, "N mais…" for the rest, and "Nova
+/// conversa". Their text lines up with the Orb's name. The one on show is lit, the one the Orb works on breathes, one where
+/// something landed unseen has a dot. A conversation's menu renames it (in the row itself, as a category) or deletes it.
 struct SidebarChatList: View {
     @Environment(AppModel.self) private var model
     let botID: UUID
@@ -13,7 +13,10 @@ struct SidebarChatList: View {
     @State private var deleting: OrbChats.Entry?
 
     /// How many of the newest show before "N mais…".
-    static let shownAtRest = 3
+    nonisolated static let shownAtRest = 3
+    /// Where the Orb's name starts in its row, and a conversation's text in its own.
+    static let nameInset: CGFloat = 46
+    static let rowInset: CGFloat = 8
 
     var body: some View {
         let working = workingChat
@@ -36,17 +39,16 @@ struct SidebarChatList: View {
                 }
             }
             if chats.list.count > Self.shownAtRest + 1 {
-                SidebarChatAction(title: showsAll ? "Mostrar menos" : "\(chats.list.count - visible.count) mais…", tint: Palette.faint) {
+                SidebarChatAction(title: showsAll ? "Mostrar menos" : "\(chats.list.count - visible.count) mais…") {
                     showsAll.toggle()
                 }
             }
-            SidebarChatAction(title: OrbChats.newTitle, symbol: "plus", tint: Palette.accentText) { model.newChat(for: botID) }
+            SidebarChatAction(title: OrbChats.newTitle, symbol: "plus") { model.newChat(for: botID) }
                 .help("\(OrbChats.newTitle) (\(AppShortcut.newChat.label))")
         }
-        .padding(.leading, 6)
-        .overlay(alignment: .leading) { Rectangle().fill(Palette.line).frame(width: 1) }
-        .padding(.leading, 46)
-        .padding(.top, 2)
+        // The rows' text starts where the Orb's name does (the row's 8 pt, the 30 pt avatar, 8 pt between them).
+        .padding(.leading, Self.nameInset - Self.rowInset)
+        .padding(.trailing, 6)
         .padding(.bottom, 6)
         .confirmationDialog("Apagar “\(deleting?.title ?? "")”?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
                             presenting: deleting) { entry in
@@ -107,10 +109,11 @@ private struct SidebarChatRow: View {
                         .foregroundStyle(Palette.hint)
                 }
             }
-            .font(.system(size: 12, weight: isUnread ? .semibold : .regular))
+            .font(.system(size: 12, weight: isShown || isUnread ? .medium : .regular))
             .foregroundStyle(isShown || isUnread ? Palette.ink : Palette.muted)
-            .padding(.horizontal, 8)
+            .padding(.horizontal, SidebarChatList.rowInset)
             .padding(.vertical, 4)
+            // On the card's own fill: a second, lighter one marks the conversation on show.
             .background(isShown ? Palette.ghostSelected : .clear, in: .rect(cornerRadius: 7))
             .hoverFill(isHovering && !isShown, in: .rect(cornerRadius: 7))
             .contentShape(.rect)
@@ -124,11 +127,10 @@ private struct SidebarChatRow: View {
     }
 }
 
-/// "N mais…" and "Nova conversa" at the foot of the list.
+/// "N mais…" and "Nova conversa" at the foot of the list, quieter than the conversations.
 private struct SidebarChatAction: View {
     let title: String
     var symbol: String?
-    let tint: Color
     let action: () -> Void
     @State private var isHovering = false
 
@@ -139,8 +141,8 @@ private struct SidebarChatAction: View {
                 Text(title)
             }
             .font(.system(size: 11.5))
-            .foregroundStyle(tint)
-            .padding(.horizontal, 8)
+            .foregroundStyle(isHovering ? Palette.muted : Palette.hint)
+            .padding(.horizontal, SidebarChatList.rowInset)
             .padding(.vertical, 4)
             .frame(maxWidth: .infinity, alignment: .leading)
             .hoverFill(isHovering, in: .rect(cornerRadius: 7))
@@ -177,7 +179,7 @@ private struct ChatTitleField: View {
             .focused($isFocused)
             .onSubmit { finish(keeping: true) }
             .onExitCommand { finish(keeping: false) }
-            .padding(.horizontal, 8)
+            .padding(.horizontal, SidebarChatList.rowInset)
             .padding(.vertical, 4)
             .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: 7))
             .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Palette.lineStrong))

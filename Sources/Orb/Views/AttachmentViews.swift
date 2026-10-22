@@ -167,9 +167,10 @@ struct FileCard: View {
     }
 }
 
-/// The files the Orb made or changed with a tool call, under its line: a card for each ("novo" or "alterado"), a
-/// thumbnail for a picture. At most three. `captures`: the pictures that are what the Orb saw (a capture of the screen
-/// or a page, see `ToolCall.capturedPictures`), named so instead of "Imagem criada".
+/// The files the Orb made or changed with a tool call, under its line. A picture is a thumbnail (at most three); the
+/// other files are one line, "3 arquivos novos: a.txt · b.txt · c.txt", each name opening the file in Quick Look, so a
+/// run that wrote a few working files does not stack a card for each. `captures`: the pictures that are what the Orb
+/// saw (a capture of the screen or a page, see `ToolCall.capturedPictures`), named so instead of "Imagem criada".
 struct ProducedFilesView: View {
     let files: [ProducedFile]
     var captures: Set<String> = []
@@ -177,18 +178,106 @@ struct ProducedFilesView: View {
     static let limit = 3
 
     var body: some View {
-        let shown = Array(files.prefix(Self.limit))
+        let pictures = files.filter(Self.isPicture)
+        let others = files.filter { !Self.isPicture($0) }
+        let shown = Array(pictures.prefix(Self.limit))
         let all = shown.map(\.path)
         VStack(alignment: .leading, spacing: 4) {
-            // By path: when `BotSession.takeOver` takes a file off an earlier call, the card of the file that stays keeps its own.
+            if !others.isEmpty {
+                ProducedFilesLine(files: others)
+            }
+            // By path: when `BotSession.takeOver` takes a file off an earlier call, the tile of the file that stays keeps its own.
             ForEach(shown, id: \.path) { file in
-                if file.path.hasPrefix("/"), ImageProcessing.isImageFile(URL(fileURLWithPath: file.path)) {
-                    ImageTile(path: file.path, size: CGSize(width: 112, height: 72), all: all, label: captures.contains(file.path) ? "Captura" : "Imagem criada")
-                } else {
-                    FileCard(path: file.path, all: all, style: .compact, note: file.created ? "novo" : "alterado")
+                ImageTile(path: file.path, size: CGSize(width: 112, height: 72), all: all, label: captures.contains(file.path) ? "Captura" : "Imagem criada")
+            }
+        }
+    }
+
+    private static func isPicture(_ file: ProducedFile) -> Bool {
+        file.path.hasPrefix("/") && ImageProcessing.isImageFile(URL(fileURLWithPath: file.path))
+    }
+
+    /// "3 arquivos novos", "1 arquivo alterado", "3 arquivos (2 novos, 1 alterado)".
+    nonisolated static func heading(_ files: [ProducedFile]) -> String {
+        let created = files.count(where: \.created), changed = files.count - created
+        func count(_ n: Int, _ one: String, _ many: String) -> String { "\(n) \(n == 1 ? one : many)" }
+        if changed == 0 { return count(created, "arquivo novo", "arquivos novos") }
+        if created == 0 { return count(changed, "arquivo alterado", "arquivos alterados") }
+        return "\(files.count) arquivos (\(count(created, "novo", "novos")), \(count(changed, "alterado", "alterados")))"
+    }
+}
+
+/// The line of the files that are not pictures: as many names as fit, then "e mais 2"; when not even one fits, the
+/// heading alone, which opens the first. Quick Look's arrows go through all of them.
+private struct ProducedFilesLine: View {
+    let files: [ProducedFile]
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "doc.on.doc")
+                .font(.system(size: 10))
+                .foregroundStyle(Palette.faint)
+                .accessibilityHidden(true)
+            ViewThatFits(in: .horizontal) {
+                naming(3)
+                naming(2)
+                naming(1)
+                naming(0)
+            }
+        }
+        .font(.system(size: 12))
+        .accessibilityElement(children: .contain)
+    }
+
+    private func naming(_ wanted: Int) -> some View {
+        let named = min(wanted, files.count), all = files.map(\.path)
+        let heading = ProducedFilesView.heading(files)
+        return HStack(spacing: 4) {
+            if named == 0 {
+                FileNameLink(path: files[0].path, all: all, title: heading)
+            } else {
+                Text(heading + ":").foregroundStyle(Palette.faint)
+                ForEach(Array(files.prefix(named).enumerated()), id: \.element.path) { index, file in
+                    if index > 0 { Text("·").foregroundStyle(Palette.faint).accessibilityHidden(true) }
+                    FileNameLink(path: file.path, all: all)
+                }
+                if files.count > named {
+                    Text("e mais \(files.count - named)").foregroundStyle(Palette.faint)
                 }
             }
         }
+        .lineLimit(1)
+        .fixedSize()
+    }
+}
+
+/// A file's name in `ProducedFilesLine`: a click opens it in Quick Look, the right click has the card's menu, and it
+/// drags out as the file. One that is gone is dimmed and does nothing.
+private struct FileNameLink: View {
+    let path: String
+    let all: [String]
+    /// Said instead of the name (the heading, when no name fits).
+    var title: String?
+    @State private var info: AttachmentInfo
+    @State private var isHovering = false
+
+    init(path: String, all: [String], title: String? = nil) {
+        self.path = path
+        self.all = all
+        self.title = title
+        _info = State(initialValue: AttachmentInfo.cachedOrQuick(path))
+    }
+
+    var body: some View {
+        let isOK = info.state == .ok
+        Text(title ?? info.name)
+            .foregroundStyle(isOK ? (isHovering ? Palette.ink : Palette.secondary) : Palette.hint)
+            .underline(isHovering && isOK, color: Palette.muted)
+            .onHover { isHovering = $0 }
+            .clickablePointer(isOK)
+            .attachmentActions(path: path, all: all, info: info, label: title ?? TranscriptSpeech.attachment(info),
+                               help: isOK ? Tip.previewAttachment : Tip.missingAttachment)
+            .task(id: path) { info = await AttachmentInfo.load(path: path) }
     }
 }
 

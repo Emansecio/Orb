@@ -61,6 +61,23 @@ struct ToolIntentTests {
         #expect(ToolIntent.pastOpening("conferir a vaga") == "Conferiu a vaga")
     }
 
+    @Test func theVerbsJoinedToTheFirstTakeItsFormToo() {
+        #expect(ToolIntent.past("Listar modelos e ver uso do send.py") == "Listou modelos e viu uso do send.py")
+        #expect(ToolIntent.gerund("Listar modelos e ver uso do send.py") == "Listando modelos e vendo uso do send.py")
+        #expect(ToolIntent.past("Baixar áudio, transcrever e responder") == "Baixou áudio, transcreveu e respondeu")
+        #expect(ToolIntent.past("Ler o pedido, conferir, enviar") == "Leu o pedido, conferiu, enviou")
+        #expect(ToolIntent.pastInSentence("Ler A e abrir B") == "leu A e abriu B")
+        // Not a verb after " e ": a number, a name, a noun that ends like one, the preposition "por".
+        #expect(ToolIntent.past("Enviar Guilherme e 5 mensagens vazias (reenvio)") == "Enviou Guilherme e 5 mensagens vazias (reenvio)")
+        #expect(ToolIntent.past("Abrir Finder e Terminal") == "Abriu Finder e Terminal")
+        #expect(ToolIntent.past("Reiniciar o nginx e docker") == "Reiniciou o nginx e docker")
+        #expect(ToolIntent.past("Comparar preço e lugar") == "Comparou preço e lugar")
+        #expect(ToolIntent.past("Conferir pedidos e por fim enviar") == "Conferiu pedidos e por fim enviar")
+        // Only after a first word that was a verb.
+        #expect(ToolIntent.past("Testes de login e rodar build") == "Testes de login e rodar build")
+        #expect(ToolIntent.past("Conferir, depois ler e enviar") == "Conferir, depois ler e enviar")
+    }
+
     @Test func aFirstWordThatIsNotAnInfinitiveIsShownAsItCame() {
         for text in ["Conferindo a vaga do Marcus", "Conferiu a vaga do Marcus", "Check the build", "Clear the cache", "Clear cache",
                      "Filter the results", "A vaga do Marcus saiu", "Mar de dúvidas", "Por que a build falhou", "Por causa do erro",
@@ -197,18 +214,18 @@ struct ToolIntentTests {
         let calls = [described("Ler o histórico dos três chats"), described("Conferir se a vaga do Marcus já saiu"),
                      described(nil), described(nil), described(nil), described(nil)]
         let variants = ToolTally.lineVariants(calls)
-        #expect(variants == ["Leu o histórico dos três chats, conferiu se a vaga do Marcus já saiu e mais 4",
-                             "Leu o histórico dos três chats e mais 5"])
+        // How many there were is on the hover, not in the words: no "e mais 4" beside "6 ações".
+        #expect(variants == ["Leu o histórico dos três chats e conferiu se a vaga do Marcus já saiu",
+                             "Leu o histórico dos três chats"])
         #expect(ToolTally.line(calls) == variants[0])
         #expect(ToolTally.countNote(calls) == "6 ações")
     }
 
-    @Test func aFourthDescriptionAndRepeatsAreFoldedIntoTheCount() {
+    @Test func theFoldedLineNamesAtMostThreeDescriptionsEachOnce() {
         let calls = [described("Ler A"), described("Ler A"), described("Rodar B"), described("Abrir C"), described("Mover D"), described("Ler A")]
-        #expect(ToolTally.lineVariants(calls) == ["Leu A, rodou B, abriu C e mais 1", "Leu A, rodou B e mais 2", "Leu A e mais 3"])
-        // Every action named, once each: no "mais".
+        #expect(ToolTally.lineVariants(calls) == ["Leu A, rodou B e abriu C", "Leu A e rodou B", "Leu A"])
         #expect(ToolTally.lineVariants([described("Ler A"), described("Rodar B"), described("Ler A")])
-                == ["Leu A e rodou B", "Leu A e mais 1"])
+                == ["Leu A e rodou B", "Leu A"])
         #expect(ToolTally.lineVariants([described("Ler A"), described("Ler A")]) == ["Leu A"])
         #expect(ToolTally.countNote([described("Ler A")]) == nil)
     }
@@ -217,8 +234,9 @@ struct ToolIntentTests {
         let calls = Array(repeating: shell("ls"), count: 12)
         #expect(ToolTally.lineVariants(calls) == ["Rodou 12 comandos"])
         #expect(ToolTally.countNote(calls) == nil)
-        // A run where only some were described still counts the rest.
-        #expect(ToolTally.lineVariants([described(nil), described("Ler A")]) == ["Leu A e mais 1"])
+        // A run where only some were described names those; the hover counts them all.
+        #expect(ToolTally.lineVariants([described(nil), described("Ler A")]) == ["Leu A"])
+        #expect(ToolTally.countNote([described(nil), described("Ler A")]) == "2 ações")
     }
 
     @Test func theWorkOfAFinishedRequestIsSaidByTheDescriptionsToo() {

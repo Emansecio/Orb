@@ -373,28 +373,38 @@ struct ReplyAvatars: Equatable {
     let lastID: UUID?
     /// The replies that give their avatar up to a later one of the same run.
     let quiet: Set<UUID>
+    /// The Orb's words in the middle of its work (actions came after them, before your next message): they read as part
+    /// of the work, without bubble or avatar, so only the answer that ends it stands out. They are in `quiet` too.
+    let narration: Set<UUID>
 
     init(_ items: [TranscriptItem]) {
         lastID = if let last = items.last, last.kind.isReply { last.id } else { nil }
-        quiet = Self.quietReplies(in: items)
+        (quiet, narration) = Self.runs(in: items)
     }
 
-    /// One pass from the end, so a long chat costs one walk and a set of ids; rows compare only their own bit, which
-    /// means a new reply redraws the one it silences and not the list.
-    static func quietReplies(in items: [TranscriptItem]) -> Set<UUID> {
-        var quiet = Set<UUID>()
-        var laterReplyInRun = false
+    /// One pass from the end, so a long chat costs one walk and two sets of ids; rows compare only their own bits, which
+    /// means a new reply or action redraws the one it changes and not the list.
+    static func runs(in items: [TranscriptItem]) -> (quiet: Set<UUID>, narration: Set<UUID>) {
+        var quiet = Set<UUID>(), narration = Set<UUID>()
+        var laterReplyInRun = false, workAfter = false
         for item in items.reversed() {
             switch item.kind {
             case .user, .orbMessage:
                 laterReplyInRun = false
-            case .bot, .greeting:
+                workAfter = false
+            case .tool, .approval:
+                workAfter = true
+            case .bot:
+                if workAfter { narration.insert(item.id) }
+                if laterReplyInRun || workAfter { quiet.insert(item.id) }
+                laterReplyInRun = true
+            case .greeting:
                 if laterReplyInRun { quiet.insert(item.id) }
                 laterReplyInRun = true
             default:
                 continue
             }
         }
-        return quiet
+        return (quiet, narration)
     }
 }

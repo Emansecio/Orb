@@ -115,9 +115,10 @@ enum ToolTally {
     }
 
     /// `line`, from the fullest wording to the shortest (one when the actions have no descriptions): the row takes the first
-    /// that fits its width, so a word is never cut in two.
+    /// that fits its width, so a word is never cut in two. It names what the actions were for without "e mais N": how many
+    /// there were is on the row's hover (`countNote`), with the time.
     static func lineVariants(_ calls: [ToolCall]) -> [String] {
-        if let said = intentVariants(calls) { return said }
+        if let said = intentVariants(calls, countsRest: false) { return said }
         let opened = calls.last { $0.kind == .browser && ["Abrindo página", "Abrindo uma aba"].contains($0.title) }
         guard let site = opened.flatMap({ WorkPhrase.host(of: WorkPhrase.firstLine(of: $0.detail)) }) else { return [summary(calls)] }
         return ["\(site) · \(summary(calls))"]
@@ -131,8 +132,8 @@ enum ToolTally {
     /// The run by what its actions were for, from the fullest wording to the shortest, or nil when none has a description:
     /// each distinct description once, in the order it happened, in the preterite ("Leu o histórico dos três chats,
     /// conferiu se a vaga do Marcus já saiu e mais 4"). The actions left out of the names (without a description, or past
-    /// the limit) are the "mais N".
-    static func intentVariants(_ calls: [ToolCall], capitalized: Bool = true) -> [String]? {
+    /// the limit) are the "mais N", unless `countsRest` is false (the line that has the count beside it).
+    static func intentVariants(_ calls: [ToolCall], capitalized: Bool = true, countsRest: Bool = true) -> [String]? {
         var order: [String] = []
         var counts: [String: Int] = [:]
         for call in calls {
@@ -148,15 +149,15 @@ enum ToolTally {
             let rest = calls.count - named.reduce(0) { $0 + counts[$1.lowercased(), default: 0] }
             var parts = named.map(ToolIntent.pastInSentence)
             if capitalized { parts[0] = ToolIntent.pastOpening(named[0]) }
-            if rest > 0 { parts.append("mais \(rest)") }
+            if countsRest, rest > 0 { parts.append("mais \(rest)") }
             let line = PortugueseList.join(parts)
             if variants.last != line { variants.append(line) }
         }
         return variants
     }
 
-    /// "12 ações", set quiet at the end of a line that names what the actions were for; nil for one action or none with a
-    /// description.
+    /// "12 ações", on the hover of a line that names what the actions were for; nil for one action or none with a
+    /// description (the line counts them itself: "Rodou 12 comandos").
     static func countNote(_ calls: [ToolCall]) -> String? {
         guard calls.count >= 2, calls.contains(where: { $0.intent != nil }) else { return nil }
         return "\(calls.count) ações"

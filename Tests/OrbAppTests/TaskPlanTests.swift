@@ -121,13 +121,20 @@ struct TaskPlanToolTests {
                                           home: URL(fileURLWithPath: "/Users/teste")) == .allow)
     }
 
-    @Test func theLineInTheChatCountsTheStepsAndSaysWhatIsNext() throws {
+    @Test func theRingCountsTheStepsAndSaysWhatIsNext() throws {
         var made = try plan()
-        #expect(TaskPlanStrip.summary(made) == "0 de 3 etapas · Próximo: começar pelo build")
+        // Nothing marked yet: no "0 de 3", which would never move if the model does not mark the steps.
+        #expect(!TaskPlanRing.isTended(made))
+        #expect(TaskPlanRing.summary(made) == "3 etapas, nenhuma marcada · Próximo: começar pelo build")
+        made.steps[0].state = .inProgress
+        #expect(TaskPlanRing.isTended(made))
+        #expect(TaskPlanRing.summary(made) == "0 de 3 etapas · Próximo: começar pelo build")
         made.steps[0].state = .done
         made.steps[1].state = .inProgress
         made.next = nil
-        #expect(TaskPlanStrip.summary(made) == "1 de 3 etapas · Próximo: Rodar os testes")
+        #expect(TaskPlanRing.summary(made) == "1 de 3 etapas · Próximo: Rodar os testes")
+        made.steps = [TaskPlan.Step(text: "Publicar")]
+        #expect(TaskPlanRing.summary(made) == "1 etapa, não marcada · Próximo: Publicar")
     }
 }
 

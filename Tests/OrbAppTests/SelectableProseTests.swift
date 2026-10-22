@@ -88,4 +88,20 @@ struct SelectableProseTests {
         #expect(wrapped.width <= 300 && wrapped.width > 250)
         #expect(long.size(forWidth: wrapped.width).height == wrapped.height)
     }
+
+    @Test func narrationIsAPointSmallerAndDimmerWithItsBoldKept() {
+        let text = ProseText.make([.paragraph("Vou **baixar** o áudio.")], cursor: false, cached: false, highlight: nil)
+        let quiet = ProseText.quieter(text)
+        #expect(quiet.string == text.string)
+        let bold = (quiet.string as NSString).range(of: "baixar").location
+        for index in [0, bold] {
+            let font = text.attribute(.font, at: index, effectiveRange: nil) as? NSFont
+            let quietFont = quiet.attribute(.font, at: index, effectiveRange: nil) as? NSFont
+            #expect(quietFont?.pointSize == (font?.pointSize ?? 0) - 1)
+            #expect(quietFont?.fontDescriptor.symbolicTraits.contains(.bold) == font?.fontDescriptor.symbolicTraits.contains(.bold))
+            let color = text.attribute(.foregroundColor, at: index, effectiveRange: nil) as? NSColor
+            let quietColor = quiet.attribute(.foregroundColor, at: index, effectiveRange: nil) as? NSColor
+            #expect(abs((quietColor?.alphaComponent ?? 0) - (color?.alphaComponent ?? 0) * ProseText.quietAlpha) < 0.001)
+        }
+    }
 }

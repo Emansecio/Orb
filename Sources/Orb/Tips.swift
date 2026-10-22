@@ -112,7 +112,6 @@ enum Tip {
     static let redoReply = "Descarta esta resposta e faz o pedido de novo"
     static let editMessage = "Põe esta mensagem no campo para editar; o que veio depois sai da conversa"
     static let cancelEdit = "Desiste da edição; o campo volta como estava"
-    static func togglePlan(isExpanded: Bool) -> String { isExpanded ? "Oculta as etapas do plano" : "Mostra as etapas do plano" }
     static func toggleOutput(isExpanded: Bool) -> String { isExpanded ? "Oculta o resultado desta ação" : "Mostra o resultado desta ação" }
     static func toggleCommand(isExpanded: Bool) -> String { isExpanded ? "Oculta o comando e o resultado desta ação" : "Mostra o comando e o resultado desta ação" }
     static func toggleWork(isOpen: Bool) -> String { isOpen ? "Recolhe o trabalho deste pedido numa linha" : "Mostra o que o Orb disse e fez neste pedido" }
@@ -363,7 +362,7 @@ enum Tip {
          previewActivity("pensando"),
          findResults, findClose, findInConversation(), findNext(), findPrevious(),
          newBot(), newOrbOrCategory, newGroup(), settings(), inspector(isShowing: true), inspector(isShowing: false),
-         togglePlan(isExpanded: true), togglePlan(isExpanded: false), pickAnswer, quoteSelection, goToQuote, answerInApp, skipQuestion,
+         pickAnswer, quoteSelection, goToQuote, answerInApp, skipQuestion,
          importSource, importOpenMarketplace,
          permissionAction(.ask), permissionAction(.openAppAndAsk(appName: "Notas")), permissionAction(.openSystemSettings),
          permissionAction(.test), permissionAction(.relaunch)]

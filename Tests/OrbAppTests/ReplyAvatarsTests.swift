@@ -41,11 +41,33 @@ struct ReplyAvatarsTests {
         #expect(avatars.quiet.isEmpty)
     }
 
-    @Test func aChatEndingInAToolLineHasNoLiveReplyButTheRunStillShowsOneAvatar() {
+    @Test func wordsFollowedByActionsAreNarrationWithoutAvatar() {
         let a = bot("a"), b = bot("b")
         let avatars = ReplyAvatars([user("1"), a, tool(), b, tool()])
-        #expect(avatars.lastID == nil)
-        #expect(avatars.quiet == [a.id]) // b keeps the still avatar
+        #expect(avatars.lastID == nil) // the working line below wears the avatar
+        #expect(avatars.narration == [a.id, b.id])
+        #expect(avatars.quiet == [a.id, b.id])
+    }
+
+    @Test func theAnswerAfterTheWorkIsNotNarration() {
+        let a = bot("a"), b = bot("b"), earlier = bot("antes")
+        let avatars = ReplyAvatars([user("0"), earlier, user("1"), a, tool(), b])
+        #expect(avatars.narration == [a.id])
+        #expect(avatars.quiet == [a.id])
+        #expect(avatars.lastID == b.id)
+    }
+
+    @Test func aPermissionCardMakesTheWordsBeforeItNarration() {
+        let a = bot("Vou apagar a pasta.")
+        let card = TranscriptItem(.approval(ApprovalRequest(toolName: "run_command", title: "Apagar", command: "rm -rf build", reason: "")))
+        #expect(ReplyAvatars([user("1"), a, card]).narration == [a.id])
+    }
+
+    @Test func yourMessageEndsTheWorkThatMadeWordsNarration() {
+        let a = bot("a")
+        // An action of an earlier request does not reach past your message to the answer of the next one.
+        #expect(ReplyAvatars([user("1"), tool(), user("2"), a]).narration.isEmpty)
+        #expect(ReplyAvatars([user("1"), a, user("2"), tool()]).narration.isEmpty)
     }
 
     @Test func aGreetingFollowedByAReplyGivesWayToIt() {

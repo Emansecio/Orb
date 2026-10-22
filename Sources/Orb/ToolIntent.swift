@@ -33,13 +33,15 @@ enum ToolIntent {
         return line.isEmpty ? nil : line
     }
 
-    /// `text` with its first word in the gerund ("Conferir se a vaga" → "Conferindo se a vaga"); as it came when the
-    /// first word is not an infinitive.
+    /// `text` with its first word in the gerund ("Conferir se a vaga" → "Conferindo se a vaga"), and the verbs joined to it
+    /// too ("Listar modelos e ver o uso" → "Listando modelos e vendo o uso"); as it came when the first word is not an
+    /// infinitive.
     static func gerund(_ text: String) -> String {
         conjugate(text) { PortugueseVerb.gerund(of: $0) }
     }
 
-    /// `text` with its first word in the preterite, third person ("Conferir se a vaga" → "Conferiu se a vaga").
+    /// `text` with its first word in the preterite, third person ("Conferir se a vaga" → "Conferiu se a vaga"), and the
+    /// verbs joined to it too.
     static func past(_ text: String) -> String {
         conjugate(text) { PortugueseVerb.past(of: $0) }
     }
@@ -65,7 +67,28 @@ enum ToolIntent {
         guard PortugueseVerb.mayBeInfinitive(word, rest: rest), let conjugated = form(word.lowercased()) else { return text }
         let capital = word.first?.isUppercase == true
         let said = capital ? conjugated.prefix(1).uppercased() + conjugated.dropFirst() : conjugated
-        return said + rest
+        return said + joinedVerbs(rest, form)
+    }
+
+    /// The verbs joined to the first one take its form too: a lowercase word right after " e " or ", " that reads as an
+    /// infinitive ("modelos e ver o uso", "áudio, transcrever e responder"). Only once the first word was a verb, so a
+    /// phrase that does not start with one is left as it came. A capital is a name ("e Terminal"), never a verb.
+    private static func joinedVerbs(_ rest: Substring, _ form: (String) -> String?) -> String {
+        guard rest.contains(" e ") || rest.contains(", ") else { return String(rest) }
+        var words = rest.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
+        for index in words.indices.dropFirst() {
+            let before = words[index - 1]
+            guard before == "e" || (before.count > 1 && before.hasSuffix(",")) else { continue }
+            let word = words[index]
+            let comma = word.hasSuffix(",")
+            let core = comma ? String(word.dropLast()) : word
+            // "e por fim", "e por isso": after " e ", "por" is the preposition; the verb would be written "pôr".
+            guard core.first?.isLowercase == true, core != "por",
+                  PortugueseVerb.mayBeInfinitive(core, rest: Substring(words[(index + 1)...].joined(separator: " "))),
+                  let conjugated = form(core) else { continue }
+            words[index] = conjugated + (comma ? "," : "")
+        }
+        return words.joined(separator: " ")
     }
 }
 
@@ -136,6 +159,14 @@ enum PortugueseVerb {
     /// Nouns and adjectives that end like an infinitive, and English verbs that do (a description in English is left alone).
     private static let notVerbs: Set<String> = [
         "qualquer", "mulher", "colher", "lugar", "talher", "mar", "par", "bar", "lar", "ar", "pior", "melhor",
+        // After " e " a noun is as likely as a verb: the ones that end like an infinitive, Portuguese and the English of code.
+        "prazer", "celular", "popular", "similar", "familiar", "militar", "escolar", "particular", "solar",
+        "nuclear", "linear", "avatar", "radar", "açúcar", "caráter", "líder", "titular", "exemplar", "milhar", "pilar", "dólar",
+        "server", "worker", "docker", "container", "router", "parser", "header", "footer", "folder", "buffer", "timer", "user",
+        "player", "browser", "manager", "cluster", "poster", "banner", "trigger", "logger", "helper", "compiler", "installer",
+        "launcher", "scheduler", "printer", "scanner", "viewer", "adapter", "provider", "loader", "reader", "writer", "builder",
+        "runner", "handler", "listener", "controller", "wrapper", "picker", "tracker", "checker", "linter", "formatter", "finder",
+        "layer", "computer", "number", "member", "master", "paper", "power",
         "clear", "filter", "gather", "render", "enter", "answer", "offer", "order", "transfer", "consider", "deliver", "discover",
         "cover", "remember", "register", "repair", "appear", "alter", "prefer", "refer", "suffer", "wonder", "hover", "differ",
     ]

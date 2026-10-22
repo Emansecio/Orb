@@ -18,6 +18,8 @@ struct TranscriptRow: View, Equatable {
     /// The reply wears its Orb's avatar: false for one that a later reply of the same run (no message of yours between
     /// them) gives it up to. Part of the row's identity, like `isLastReply`.
     var showsAvatar = true
+    /// The Orb's words in the middle of its work (`ReplyAvatars.narration`): no bubble, a step quieter than an answer.
+    var isNarration = false
     /// This is the reply "Refazer" belongs to (the last one of an idle chat).
     var offersRedo = false
     /// The row is about to leave (an edit or "Refazer" cuts the chat before it): it fades out first.
@@ -30,7 +32,7 @@ struct TranscriptRow: View, Equatable {
 
     nonisolated static func == (lhs: TranscriptRow, rhs: TranscriptRow) -> Bool {
         lhs.item == rhs.item && lhs.botID == rhs.botID && lhs.orb == rhs.orb && lhs.isLastReply == rhs.isLastReply
-            && lhs.showsAvatar == rhs.showsAvatar
+            && lhs.showsAvatar == rhs.showsAvatar && lhs.isNarration == rhs.isNarration
             && lhs.offersRedo == rhs.offersRedo && lhs.isDropping == rhs.isDropping && lhs.find == rhs.find
             && lhs.editable == rhs.editable
     }
@@ -49,7 +51,8 @@ struct TranscriptRow: View, Equatable {
                        editable: editable, highlight: find?.query)
         case .bot(let text, let isStreaming):
             BotMessage(orb: orb, botID: botID, text: text, live: isStreaming ? model.liveText(for: item.id, of: botID) : nil,
-                       isLastReply: isLastReply, showsAvatar: showsAvatar, offersRedo: offersRedo, highlight: find?.query)
+                       isLastReply: isLastReply, showsAvatar: showsAvatar, isNarration: isNarration, offersRedo: offersRedo,
+                       highlight: find?.query)
         case .tool(let call):
             ToolCallLine(call: call)
         case .approval(let request):
@@ -111,11 +114,11 @@ extension View {
     /// The bubble of an Orb's words (a reply, a member's words in a group, an exchange, the wizard): `Palette.agentBubble`,
     /// darker than the person's bubble, as wide as its longest line (`proseHugsText`) up to the width it is given. Code,
     /// tables and rules take the whole width, and the bubble with them.
-    func replyBubble() -> some View {
+    func replyBubble(filled: Bool = true) -> some View {
         environment(\.proseHugsText, true)
             .padding(.horizontal, ReplyBubble.horizontalPadding)
-            .padding(.vertical, ReplyBubble.verticalPadding)
-            .background(Palette.agentBubble, in: .rect(cornerRadius: ReplyBubble.radius))
+            .padding(.vertical, filled ? ReplyBubble.verticalPadding : ReplyBubble.narrationPadding)
+            .background(filled ? Palette.agentBubble : .clear, in: .rect(cornerRadius: ReplyBubble.radius))
     }
 }
 
@@ -124,6 +127,8 @@ enum ReplyBubble {
     static let horizontalPadding: CGFloat = 14
     static let verticalPadding: CGFloat = 9
     static let radius: CGFloat = 16
+    /// Above and below words said along the work, without a bubble: close to the action lines around them.
+    static let narrationPadding: CGFloat = 3
     /// How far down a 30 pt avatar goes, from the bubble's top, for its middle to be level with the first line.
     static let avatarDrop: CGFloat = 3
 }
@@ -346,6 +351,9 @@ private struct BotMessage: View {
     let isLastReply: Bool
     /// False when a later reply of the same run wears the avatar: the margin stays, empty.
     var showsAvatar = true
+    /// Words said along the work, before more actions: drawn like the work around them, without the bubble that marks
+    /// an answer.
+    var isNarration = false
     /// The last reply of an idle chat: "Refazer" is beside its copy buttons.
     var offersRedo = false
     var highlight: String?
@@ -373,13 +381,15 @@ private struct BotMessage: View {
             // The reply's text never animates: not as it streams, and not when the last flush swaps the paragraphs for
             // the finished blocks, whatever the list around it is animating (the row's own entrance is outside this).
             .transaction { $0.animation = nil }
-            .font(Palette.conversationFont)
-            .foregroundStyle(Palette.ink)
-            .lineSpacing(Palette.conversationLineSpacing)
+            .environment(\.proseIsQuiet, isNarration)
+            .font(isNarration ? Palette.narrationFont : Palette.conversationFont)
+            .foregroundStyle(isNarration ? Palette.secondary : Palette.ink)
+            .lineSpacing(isNarration ? Palette.narrationLineSpacing : Palette.conversationLineSpacing)
             .textSelection(.enabled)
             // In its bubble, beside its Orb: the bubble's edge is the chat's left edge (the tool lines' text, the cards'
-            // edge), the first line level with the avatar's middle.
-            .replyBubble()
+            // edge), the first line level with the avatar's middle. Narration keeps the bubble's left inset without the
+            // bubble, so its text starts where the answer's does.
+            .replyBubble(filled: !isNarration)
             .overlay(alignment: .bottomTrailing) {
                 // Beside the bubble, in the space the right padding leaves; the row's hover keeps it up while the
                 // pointer travels to it.
@@ -786,6 +796,7 @@ enum MarkdownCache {
 struct ToolCallLine: View {
     let call: ToolCall
     @State private var isExpanded = false
+    @State private var isHovering = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Found once per output, not on every render.
     @State private var permissionProblem: MacPermissionProblem?
@@ -822,11 +833,23 @@ struct ToolCallLine: View {
                             // No turning under Reduce Motion: the arrow points the other way at once.
                             .animation(reduceMotion ? nil : Motion.content, value: isExpanded)
                     }
+                    // How long it took, on hover only (as on a folded line): after the chevron, so nothing before it moves.
+                    if isHovering, call.state == .done, let duration = call.duration {
+                        (Text(duration, format: .number.precision(.fractionLength(1))) + Text(" s"))
+                            .font(.system(size: 11))
+                            .monospacedDigit()
+                            .foregroundStyle(Palette.faint)
+                            .lineLimit(1)
+                            .fixedSize()
+                            .transition(.opacity)
+                    }
                     Spacer(minLength: 0)
                 }
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
+            .onHover { isHovering = $0 }
+            .animation(Motion.hover(isHovering), value: isHovering)
             .disabled(!canOpen)
             .help(!canOpen ? "" : hidden == nil ? Tip.toggleOutput(isExpanded: isExpanded) : Tip.toggleCommand(isExpanded: isExpanded))
             // Running -> done or failed: the mark of the state comes in (see `stateMark`).
@@ -884,17 +907,8 @@ struct ToolCallLine: View {
 
     @ViewBuilder private var stateMark: some View {
         switch call.state {
-        case .running:
+        case .running, .done: // the time of one that worked is on hover
             EmptyView()
-        case .done:
-            if let duration = call.duration {
-                (Text(duration, format: .number.precision(.fractionLength(1))) + Text(" s"))
-                    .font(.system(size: 11))
-                    .monospacedDigit()
-                    .foregroundStyle(Palette.faint)
-                    .contentTransition(.numericText())
-                    .transition(markTransition)
-            }
         case .failed:
             Image(systemName: "exclamationmark.circle")
                 .font(.system(size: 11))
@@ -920,6 +934,7 @@ struct ToolGroupRow: View, Equatable {
     let toggle: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var permissionProblem: MacPermissionProblem?
+    @State private var isHovering = false
 
     /// Review snapshots cannot press the line: they draw every run open.
     static var opensInSnapshots = false
@@ -984,30 +999,34 @@ struct ToolGroupRow: View, Equatable {
                         ErrorMark(failures: failures)
                             .transition(.adapted(.mark, reduceMotion: reduceMotion))
                     }
-                    if let span {
-                        (Text(span, format: .number.precision(.fractionLength(1))) + Text(" s"))
-                            .font(.system(size: 11))
-                            .monospacedDigit()
-                            .foregroundStyle(Palette.faint)
-                            .transition(.adapted(.mark, reduceMotion: reduceMotion))
-                    }
-                    if let count {
-                        Text("· \(count)")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Palette.faint)
-                            .lineLimit(1)
-                    }
                     Image(systemName: "chevron.right")
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(Palette.faint)
                         .rotationEffect(.degrees(isOpen ? 90 : 0))
                         .animation(reduceMotion ? nil : Motion.content, value: isOpen)
+                        // How long it took and how many actions, on hover only: the line keeps to what was done (and
+                        // what failed). Laid over the space after the chevron, so the words never change to fit them.
+                        .overlay(alignment: .trailing) {
+                            if isHovering, let marks = marks(span: span, count: count) {
+                                marks
+                                    .font(.system(size: 11))
+                                    .monospacedDigit()
+                                    .foregroundStyle(Palette.faint)
+                                    .lineLimit(1)
+                                    .fixedSize()
+                                    .alignmentGuide(.trailing) { $0[.leading] - 8 }
+                                    .transition(.opacity)
+                                    .allowsHitTesting(false)
+                            }
+                        }
                     Spacer(minLength: 0)
                 }
             }
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .animation(Motion.hover(isHovering), value: isHovering)
         .help(Tip.toggleActions(isOpen: isOpen))
         // The last action ending: the marks of the result come in (see `ToolCallLine`).
         .motion(Motion.enter, value: isRunning)
@@ -1015,6 +1034,17 @@ struct ToolGroupRow: View, Equatable {
         .accessibilityLabel([variants[0], failures?.text, count].compactMap { $0 }.joined(separator: ", "))
         .accessibilityValue(isOpen ? "expandido" : "recolhido")
         .accessibilityHint(isOpen ? "Recolhe as ações" : "Mostra cada ação")
+    }
+
+    /// "12,3 s · 6 ações": the time once every action ended, and the count when the words do not say it.
+    private func marks(span: TimeInterval?, count: String?) -> Text? {
+        let time = span.map { Text($0, format: .number.precision(.fractionLength(1))) + Text(" s") }
+        switch (time, count) {
+        case let (time?, count?): return time + Text(" · \(count)")
+        case let (time?, nil): return time
+        case let (nil, count?): return Text(count)
+        case (nil, nil): return nil
+        }
     }
 
     /// Under the folded line, what one of its actions would have shown under its own: the files they made, and the way

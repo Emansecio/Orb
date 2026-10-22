@@ -165,8 +165,9 @@ Se o navegador não estiver instalado, o Orb fica só com `web_fetch` e `web_sea
   (a extensão fica à vista) e "PDF · 2,1 MB". Arquivo que sumiu ou anexo antigo, que guardou só o nome, aparecem como tal.
   Clicar abre o Quick Look (← e → passam de um anexo para o outro); o botão direito oferece Abrir, Mostrar no Finder, Copiar e Copiar
   caminho; dá para arrastar o arquivo para fora. O que o Orb cria ou altera com as ferramentas de arquivo (e as capturas de
-  tela dele) aparece sob a linha da ferramenta, como cartão "novo" ou "alterado" ou como miniatura ("Captura", quando é o que
-  ele viu na tela ou na página), uma vez só por turno. As capturas ficam ali, recolhidas com as ações; a que importa para
+  tela dele) aparece sob a linha da ferramenta: imagens como miniatura ("Captura", quando é o que ele viu na tela ou na
+  página) e os outros arquivos numa linha só ("3 arquivos novos: leticia.txt · alice.txt · notas.md", com "e mais 2" quando
+  não cabem), em que cada nome abre o Quick Look, uma vez só por turno. As capturas ficam ali, recolhidas com as ações; a que importa para
   você ele põe na resposta.
   Quando um trecho de ações recolhido tirou duas ou mais capturas (no navegador ou num app do Mac), ele mostra uma tira com
   todas, em ordem, cada uma com o que a antecedeu ("Adicionar ao carrinho"); o clique abre o Quick Look, onde ← e → vão de
@@ -223,13 +224,19 @@ Se o navegador não estiver instalado, o Orb fica só com `web_fetch` e `web_sea
   memória do Orb também continua lá** (a página da conversa, o que ele guardou com "lembre"): o corte não apaga memória, e o aviso de
   confirmação lembra disso quando o trecho que sai já foi guardado.
 - **O que o Orb está fazendo.** Uma linha no fim da conversa, ao lado dele, diz o verbo e o alvo ("Rodando `swift build`",
-  "Lendo README.md", "Procurando “TODO”", "Abrindo github.com") com o tempo do turno e, a partir da segunda ferramenta,
-  quantas ações ele já fez ("16 s · 3 ações"). Entre um passo e outro ela diz "Pensando…". Quando espera por você, ela fica
+  "Lendo README.md", "Procurando “TODO”", "Abrindo github.com") com o tempo do turno; com o mouse sobre ela, vêm também
+  quantas ações ele já fez e o que o turno gastou ("16 s · 3 ações · 180 mil tokens"). Se o Orb montou um plano, um anel
+  pequeno ao lado da frase enche conforme as etapas ficam prontas ("2/5"); um clique mostra as etapas. Enquanto o modelo
+  não marca nenhuma etapa, o anel fica apagado e diz só "Plano", em vez de um "0 de 5" que nunca anda. Entre um passo e
+  outro a linha diz "Pensando…". Quando espera por você, ela fica
   parada em laranja ("Esperando sua resposta"); quando espera para tentar de novo, mostra a contagem ("Conexão caiu ·
-  tentando de novo", "em 8 s"). A barra lateral e o painel da barra de menus dizem a mesma coisa. As linhas de ferramenta
+  tentando de novo", "em 8 s"). A barra lateral e o painel da barra de menus dizem a mesma coisa; o subtítulo da janela fica só com a conversa
+  e o modelo. As linhas de ferramenta
   acima dela são o histórico do turno: ações seguidas, sem nada dito entre elas (e os cartões de permissão já
-  respondidos no meio delas), ficam numa linha só ("Rodou 7 comandos e leu 1 arquivo", com "1 falhou" se algo falhou e o
-  tempo do conjunto) que abre com um clique; os arquivos que elas fizeram continuam à vista. Quando o pedido termina, o
+  respondidos no meio delas), ficam numa linha só ("Rodou 7 comandos e leu 1 arquivo", ou o que elas foram fazer: "Listou
+  modelos e viu o uso do send.py", com "1 com erro" se algo falhou; o tempo e a contagem aparecem com o mouse sobre a linha)
+  que abre com um clique; os arquivos que elas fizeram continuam à vista. O que o Orb diz entre uma ação e outra aparece
+  sem balão, menor e mais claro, junto das linhas de trabalho; só a resposta do fim tem balão. Quando o pedido termina, o
   trabalho até a resposta (o que o Orb foi dizendo e as ações) vira uma linha ("Trabalhou por 1 min 05 s · rodou 11
   comandos e leu 1 arquivo") e a resposta fica à vista logo abaixo; avisos do meio do trabalho também. Enquanto ele
   trabalha, tudo fica aberto. A busca (⌘F) abre essas linhas quando o resultado está dentro. Cada frase fica ao menos 0,7 s na tela, e com o VoiceOver ligado ela é anunciada
