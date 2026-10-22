@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Orb · Painel do Orb menos poluído (mock)</title>
+<style>
+  :root{
+    --chrome:#111111; --surface:#181818; --raised:#222222;
+    --ink:#FCFCFC; --secondary:rgba(252,252,252,.74); --muted:rgba(252,252,252,.6);
+    --faint:rgba(252,252,252,.52); --hint:rgba(252,252,252,.36); --line:rgba(252,252,252,.08);
+    --sel:rgba(252,252,252,.07); --accent:#4C8DFF; --accentText:#6FA3FF; --warn:#F5A524; --ok:#3DD68C; --danger:#FF5A5F;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#000;color:var(--ink);font:13px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;padding:22px}
+  h1{font-size:16px;font-weight:600;margin:0 0 4px}
+  .lead{color:var(--muted);margin:0 0 18px;max-width:900px}
+  .cols{display:flex;gap:26px;flex-wrap:wrap;align-items:flex-start}
+  .col{width:340px}
+  .col h2{font-size:13px;font-weight:600;margin:0 0 10px}
+  .col h2 em{font-style:normal;color:var(--ok);font-size:11px;font-weight:600;margin-left:6px}
+  .panel{background:var(--chrome);border-radius:14px;border:1px solid #222;padding:16px 14px 14px}
+  /* header */
+  .hd{display:flex;gap:12px;align-items:center}
+  .av{border-radius:50%;flex:none;position:relative;background:radial-gradient(circle at 35% 30%,#8cc0ff,#3b7cf0 70%);
+      box-shadow:inset 0 -6px 12px rgba(0,0,0,.35)}
+  .av::after{content:"";position:absolute;left:28%;top:36%;width:44%;height:16%;
+             background:radial-gradient(circle at 20% 50%,#fff 0 22%,transparent 24%),radial-gradient(circle at 80% 50%,#fff 0 22%,transparent 24%)}
+  .hd .t{flex:1;min-width:0}
+  .name{font-size:15px;font-weight:650}
+  .role{font-size:12px;color:var(--secondary)}
+  .role.one{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--faint)}
+  .small{font-size:11px;color:var(--faint)}
+  .small a{color:var(--accentText);text-decoration:none}
+  .icons{display:flex;gap:2px}
+  .ic{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--secondary);font-size:12px}
+  .ic:hover{background:var(--sel)}
+  .more{position:absolute;left:-4px;top:-4px;width:18px;height:18px;border-radius:50%;background:var(--raised);font-size:10px;
+        display:flex;align-items:center;justify-content:center;color:var(--secondary)}
+  /* tabs */
+  .tabs{display:flex;justify-content:space-between;margin:14px 0 12px;border-bottom:1px solid var(--line);padding-bottom:8px}
+  .tab{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:11px;color:var(--faint);padding:4px 7px;border-radius:8px}
+  .tab b{font-size:14px;font-weight:400}
+  .tab.on{background:var(--sel);color:var(--ink);font-weight:600}
+  /* form */
+  .sh{font-size:11.5px;font-weight:600;color:var(--secondary);margin:16px 4px 6px}
+  .card{background:var(--surface);border-radius:10px;border:1px solid var(--line)}
+  .r{display:flex;align-items:center;gap:8px;padding:9px 12px;min-height:38px}
+  .r + .r{border-top:1px solid var(--line)}
+  .r .l{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .r .l small{display:block;font-size:11px;color:var(--faint)}
+  .r.sub{padding-left:40px;min-height:32px;padding-top:6px;padding-bottom:6px}
+  .r.sub + .r.sub{border-top:0}
+  .val{color:var(--secondary);display:flex;align-items:center;gap:4px;white-space:nowrap}
+  .val i{font-style:normal;color:var(--hint);font-size:10px}
+  .sym{width:20px;text-align:center;color:var(--secondary);flex:none}
+  .sw{width:30px;height:18px;border-radius:999px;background:var(--accent);position:relative;flex:none}
+  .sw::after{content:"";position:absolute;right:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fff}
+  .sw.off{background:#3a3a3a}.sw.off::after{right:auto;left:2px}
+  .foot{font-size:11px;color:var(--faint);margin:6px 4px 0;line-height:1.35}
+  .foot.warn{color:var(--warn)}
+  .link{color:var(--accentText);font-size:11.5px}
+  .inline{color:var(--faint);font-weight:400}
+  .inline a{color:var(--accentText);text-decoration:none}
+  .warnline{display:flex;align-items:center;gap:6px;color:var(--warn);font-size:11.5px;padding:0 12px 9px}
+  .info{width:14px;height:14px;border-radius:50%;border:1px solid rgba(245,165,36,.6);font-size:9px;display:inline-flex;align-items:center;justify-content:center}
+  .del{color:var(--danger);padding:10px 12px;font-weight:500}
+  .del.quiet{color:var(--faint);font-weight:400;padding:14px 4px 0;font-size:12px}
+  .del.quiet:hover{color:var(--danger)}
+  .ok{color:var(--ok)}
+  .head{cursor:pointer;user-select:none}
+  .head:hover{background:rgba(252,252,252,.03)}
+  .chev{color:var(--hint);font-size:13px;transition:transform .25s cubic-bezier(.2,.8,.2,1);width:12px;text-align:center}
+  .head.open .chev{transform:rotate(90deg)}
+  .chips{display:flex;gap:6px;color:var(--secondary);font-size:11px;transition:opacity .2s}
+  .chips span{width:20px;height:20px;border-radius:6px;background:var(--raised);display:flex;align-items:center;justify-content:center}
+  .chips span.off{opacity:.3}
+  .head.open .chips{opacity:0}
+  .fold{display:grid;grid-template-rows:0fr;transition:grid-template-rows .28s cubic-bezier(.2,.8,.2,1)}
+  .fold > *{overflow:hidden;min-height:0}
+  .fold.open{grid-template-rows:1fr}
+  .fold{border-top:1px solid transparent}
+  .fold.open{border-top-color:var(--line)}
+  .sum{transition:opacity .2s}
+  .head.open .sum{display:none}
+  .warnchip{color:var(--warn);font-size:12px;transition:opacity .2s}
+  .head.open .sum2{display:none}
+  .i{width:1.15em;height:1.15em;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;display:block}
+  .tab b .i{width:17px;height:17px}
+  .ic .i{width:14px;height:14px}
+  .sym{display:flex;justify-content:center}
+  .sym .i{width:16px;height:16px}
+  .chips span .i{width:13px;height:13px}
+  .notes{margin-top:12px;color:var(--muted);font-size:12px;padding-left:16px}
+  .notes li{margin:3px 0}
+  .tip{position:relative}
+  .tip .bubble{display:none;position:absolute;right:0;top:20px;width:230px;background:#2a2a2a;border:1px solid #3a3a3a;border-radius:8px;
+               padding:8px 10px;font-size:11.5px;color:var(--secondary);z-index:3;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+  .tip:hover .bubble{display:block}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h4M12 17h8"/><circle cx="15" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></symbol>
+    <symbol id="i-brain" viewBox="0 0 24 24"><path d="M11 5.5A2.5 2.5 0 0 0 6.6 4 3 3 0 0 0 4.5 8.6 3.2 3.2 0 0 0 4 13.4a3 3 0 0 0 2.2 4.4A2.8 2.8 0 0 0 11 19V5.5z"/><path d="M13 5.5A2.5 2.5 0 0 1 17.4 4a3 3 0 0 1 2.1 4.6 3.2 3.2 0 0 1 .5 4.8 3 3 0 0 1-2.2 4.4A2.8 2.8 0 0 1 13 19V5.5z"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 7.5A2 2 0 0 1 5.5 5.5h3.6l1.9 2h7.5a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M3.5 10h17"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><path d="M4.2 13.5A8 8 0 1 0 6 6.6"/><path d="M5.5 3.5v3.6h3.6"/><path d="M12 8.2V12l2.6 1.8"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><rect x="3.5" y="5.5" width="17" height="13" rx="2.5"/><path d="M10.2 9.4v5.2l4.4-2.6z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3.5" y="5.5" width="17" height="13" rx="2.5"/><path d="M7.5 10l2.6 2-2.6 2M12.5 14.5h4"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.6 2.8 2.6 14.2 0 17M12 3.5c-2.6 2.8-2.6 14.2 0 17"/></symbol>
+    <symbol id="i-window" viewBox="0 0 24 24"><rect x="3.5" y="5.5" width="17" height="13" rx="2.5"/><path d="M3.5 9.5h17"/><circle cx="6.3" cy="7.5" r=".55" fill="currentColor"/><circle cx="8.3" cy="7.5" r=".55" fill="currentColor"/></symbol>
+    <symbol id="i-connectors" viewBox="0 0 24 24"><circle cx="6" cy="7" r="2"/><circle cx="18" cy="7" r="2"/><circle cx="12" cy="17.5" r="2"/><path d="M8 7h8M7.1 8.8l3.8 6.9M16.9 8.8l-3.8 6.9"/></symbol>
+  </defs>
+</svg>
+<h1>Painel do Orb: aba Geral menos poluída</h1>
+<p class="lead">O mesmo Atendente AcessosFit da sua captura, em “Sem pedir permissão”, com navegador e conectores ligados.
+Passe o ponteiro no ⓘ da proposta para ver o aviso completo.</p>
+
+<div class="cols">
+
+  <!-- HOJE -->
+  <div class="col">
+    <h2>Hoje</h2>
+    <div class="panel">
+      <div class="hd">
+        <div class="av" style="width:56px;height:56px"><span class="more">…</span></div>
+        <div class="t">
+          <div class="name">Atendente AcessosFit</div>
+          <div class="role">Atende clientes da AcessosFit no WhatsApp (conta work) pela ski…</div>
+          <div class="small">Personalizar…</div>
+          <div class="small" style="display:flex;justify-content:space-between">Criado por&nbsp;<a href="#">Dr eggbot</a>
+            <span class="icons" style="margin-left:auto"><span class="ic"><svg class="i"><use href="#i-folder"/></svg></span><span class="ic"><svg class="i"><use href="#i-terminal"/></svg></span></span></div>
+        </div>
+      </div>
+      <div class="tabs"><span class="tab on"><b><svg class="i"><use href="#i-sliders"/></svg></b>Geral</span><span class="tab"><b><svg class="i"><use href="#i-brain"/></svg></b>Memória</span><span class="tab"><b><svg class="i"><use href="#i-folder"/></svg></b>Pasta</span><span class="tab"><b><svg class="i"><use href="#i-clock"/></svg></b>Rotinas</span><span class="tab"><b><svg class="i"><use href="#i-play"/></svg></b>Tela</span></div>
+
+      <div class="card"><div class="r"><span class="l">Modelo</span><span class="val">deepseek-v4.1-flash <i>⌃⌄</i></span></div></div>
+      <div class="foot">Este modelo não tem ajuste de esforço; ele usa o padrão dele.</div>
+
+      <div class="sh">Permissões</div>
+      <div class="card"><div class="r"><span class="l">Modo</span><span class="val">Sem pedir permissão <i>⌃⌄</i></span></div></div>
+      <div class="foot warn">Nunca pergunta, nem em ações destrutivas. Roda qualquer comando e altera qualquer arquivo sem confirmação. Use só com Orbs e pastas em que você confia.</div>
+
+      <div class="sh">O que Atendente AcessosFit pode usar</div>
+      <div class="card">
+        <div class="r"><span class="sym"><svg class="i"><use href="#i-terminal"/></svg></span><span class="l">Terminal e arquivos<small>Rodar comandos e ler e escrever arquivos</small></span><span class="sw"></span></div>
+        <div class="r"><span class="sym"><svg class="i"><use href="#i-globe"/></svg></span><span class="l">Navegar na web<small>Abrir e ler páginas da internet</small></span><span class="sw"></span></div>
+        <div class="r" style="display:block"><div style="display:flex"><span class="l">Navegador</span><span class="val">Segundo plano <i>⌃⌄</i></span></div>
+          <div class="foot" style="margin:4px 0 0">Sem janela e sem tirar o foco do que você está fazendo. Quando algo precisa de você (login, código), o Orb abre a janela.</div>
+          <div class="foot ok" style="margin:6px 0 0">● Pronto · usa o Google Chrome 155</div></div>
+        <div class="r" style="display:block"><div style="display:flex"><span class="l">Pesquisa</span><span class="val">DuckDuckGo <i>⌃⌄</i></span></div>
+          <div class="foot" style="margin:4px 0 0">Sem conta. Pelo navegador do Orb, ou pela página simples do DuckDuckGo.</div></div>
+        <div class="r"><span class="sym"><svg class="i"><use href="#i-window"/></svg></span><span class="l">Controlar apps do Mac<small>Abrir, clicar e preencher campos em outros apps</small></span><span class="sw"></span></div>
+        <div class="r"><span class="link">↗ Permissões</span></div>
+        <div class="r"><span class="sym"><svg class="i"><use href="#i-connectors"/></svg></span><span class="l">Conectores<small>1 conector ativo</small></span><span class="sw"></span></div>
+        <div class="r"><span class="link">↗ Gerenciar conectores</span></div>
+      </div>
+      <div class="card" style="margin-top:14px"><div class="del">Apagar Atendente AcessosFit…</div></div>
+    </div>
+    <ul class="notes">
+      <li>4 linhas de cabeçalho; papel cortado em 2 linhas.</li>
+      <li>Rodapé explicando o modelo mesmo sem problema.</li>
+      <li>Parágrafo âmbar de 4 linhas no modo.</li>
+      <li>Toda opção com subtítulo; Navegador e Pesquisa com parágrafos; 2 links soltos em linhas próprias.</li>
+    </ul>
+  </div>
+
+  <!-- PROPOSTA -->
+  <div class="col">
+    <h2>Proposta<em>recomendada</em></h2>
+    <div class="panel">
+      <div class="hd">
+        <div class="av" style="width:46px;height:46px"><span class="more">…</span></div>
+        <div class="t">
+          <div class="name">Atendente AcessosFit</div>
+          <div class="role one">Atende clientes da AcessosFit no WhatsApp (conta work)</div>
+          <div class="small" style="display:flex;align-items:center;gap:6px;margin-top:3px">Personalizar…
+            <span class="icons" style="margin-left:auto"><span class="ic"><svg class="i"><use href="#i-folder"/></svg></span><span class="ic"><svg class="i"><use href="#i-terminal"/></svg></span></span></div>
+        </div>
+      </div>
+      <div class="tabs"><span class="tab on"><b><svg class="i"><use href="#i-sliders"/></svg></b>Geral</span><span class="tab"><b><svg class="i"><use href="#i-brain"/></svg></b>Memória</span><span class="tab"><b><svg class="i"><use href="#i-folder"/></svg></b>Pasta</span><span class="tab"><b><svg class="i"><use href="#i-clock"/></svg></b>Rotinas</span><span class="tab"><b><svg class="i"><use href="#i-play"/></svg></b>Tela</span></div>
+
+      <div class="card">
+        <div class="r head" onclick="toggle(this)">
+          <span class="l">Modelo e modo</span><span class="val sum" style="color:var(--faint)">deepseek-v4.1-flash</span>
+          <span class="warnchip sum2" title="Roda tudo sem perguntar">⚠</span>
+          <span class="chev">›</span>
+        </div>
+        <div class="fold">
+          <div class="r"><span class="l">Modelo</span><span class="val">deepseek-v4.1-flash <i>⌃⌄</i></span></div>
+          <div class="r" style="flex-wrap:wrap;padding-bottom:0"><span class="l">Permissões</span><span class="val">Sem pedir permissão <i>⌃⌄</i></span>
+            <div class="warnline" style="flex-basis:100%;padding:6px 0 9px">⚠ Roda tudo sem perguntar
+              <span class="tip"><span class="info">i</span><span class="bubble">Nunca pergunta, nem em ações destrutivas. Roda qualquer comando e altera qualquer arquivo sem confirmação. Use só com Orbs e pastas em que você confia.</span></span></div></div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:12px">
+        <div class="r head" onclick="toggle(this)">
+          <span class="l">Pode usar</span>
+          <span class="chips"><span title="Terminal e arquivos"><svg class="i"><use href="#i-terminal"/></svg></span><span title="Navegar na web"><svg class="i"><use href="#i-globe"/></svg></span><span title="Controlar apps do Mac"><svg class="i"><use href="#i-window"/></svg></span><span title="Conectores"><svg class="i"><use href="#i-connectors"/></svg></span></span>
+          <span class="chev">›</span>
+        </div>
+        <div class="fold">
+          <div class="r"><span class="sym"><svg class="i"><use href="#i-terminal"/></svg></span><span class="l">Terminal e arquivos</span><span class="sw" onclick="flip(event,this)"></span></div>
+          <div class="r head" onclick="toggle(this)"><span class="sym"><svg class="i"><use href="#i-globe"/></svg></span><span class="l">Navegar na web <span class="inline sum">· Segundo plano, DuckDuckGo</span></span><span class="chev">›</span><span class="sw" onclick="flip(event,this)"></span></div>
+          <div class="fold">
+            <div class="r sub"><span class="l inline">Navegador</span><span class="val">Segundo plano <i>⌃⌄</i></span></div>
+            <div class="r sub"><span class="l inline">Pesquisa</span><span class="val">DuckDuckGo <i>⌃⌄</i></span></div>
+          </div>
+          <div class="r"><span class="sym"><svg class="i"><use href="#i-window"/></svg></span><span class="l">Controlar apps do Mac <span class="inline">· <a href="#">Permissões</a></span></span><span class="sw" onclick="flip(event,this)"></span></div>
+          <div class="r"><span class="sym"><svg class="i"><use href="#i-connectors"/></svg></span><span class="l">Conectores <span class="inline">· <a href="#">1 ativo</a></span></span><span class="sw" onclick="flip(event,this)"></span></div>
+        </div>
+      </div>
+
+      <div class="small" style="margin:14px 4px 0">Criado por <a href="#">Dr eggbot</a></div>
+      <div class="del quiet">Apagar Atendente AcessosFit…</div>
+    </div>
+    <ul class="notes">
+      <li>Cabeçalho em 3 linhas: papel numa linha (inteiro no ponteiro); “Criado por” vai para o fim da aba.</li>
+      <li><b>“Modelo e modo” também recolhe</b>: fechado, mostra o modelo e um ⚠ âmbar quando o modo é arriscado (“Sem pedir permissão”), para o risco nunca ficar escondido.</li>
+      <li>Aberto: aviso em uma linha, o texto inteiro no ⓘ. Rodapé do modelo só quando há problema (e aí abre sozinho).</li>
+      <li><b>“Pode usar” começa fechado</b>: uma linha com os ícones do que está ligado (apagado = desligado). Clique para abrir; o app lembra aberto/fechado.</li>
+      <li>Dentro, “Navegar na web” também recolhe: fechado mostra só “· Segundo plano, DuckDuckGo”; aberto, os dois seletores.</li>
+      <li>Opções sem subtítulo (vira dica no ponteiro); o “Pronto · Chrome” só aparece se algo falhar — e aí abre sozinho.</li>
+      <li>Links viram texto na própria linha (“· Permissões”, “· 1 ativo”).</li>
+      <li>Apagar continua, discreto: cinza e vermelho só no ponteiro.</li>
+    </ul>
+  </div>
+
+</div>
+<script>
+  // A fold is the element right after its head; its children are wrapped so the grid trick can animate the height.
+  document.querySelectorAll('.fold').forEach(f=>{const w=document.createElement('div');while(f.firstChild)w.appendChild(f.firstChild);f.appendChild(w)});
+  function toggle(head){head.classList.toggle('open');head.nextElementSibling.classList.toggle('open')}
+  function flip(e,sw){e.stopPropagation();sw.classList.toggle('off');syncChips()}
+  function syncChips(){
+    const sws=[...document.querySelectorAll('.col:last-child .fold .sw')];
+    const chips=[...document.querySelectorAll('.col:last-child .chips span')];
+    sws.forEach((sw,i)=>chips[i]&&chips[i].classList.toggle('off',sw.classList.contains('off')));
+  }
+</script>
+</body>
+</html>
