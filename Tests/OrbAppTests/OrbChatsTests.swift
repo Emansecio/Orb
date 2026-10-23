@@ -103,6 +103,21 @@ struct OrbChatsListTests {
         #expect(chats.list[0].unread == nil)
     }
 
+    @Test func theFoldIsSavedOnlyWhileTheListIsFolded() throws {
+        let orb = UUID()
+        var chats = OrbChats(first: orb, updated: .distantPast)
+        chats.add(UUID(), at: .now)
+        let open = try JSONEncoder().encode(chats)
+        #expect(!String(decoding: open, as: UTF8.self).contains("collapsed"), "an open list does not name it")
+        chats.collapsed = true
+        let folded = try JSONDecoder().decode(OrbChats.self, from: JSONEncoder().encode(chats))
+        #expect(folded.collapsed == true)
+        var open2 = chats
+        open2.collapsed = nil
+        #expect(folded != open2, "the fold tells the lists apart, so the change is saved")
+        #expect(try JSONDecoder().decode(OrbChats.self, from: open).collapsed == nil, "a list saved before the fold existed opens")
+    }
+
     @Test func theStripSaysWhichConversationTheOrbWorksOn() {
         #expect(ComposerAction.elsewhereStrip(chatTitle: "Análise", needsYou: false) == "Trabalhando em “Análise” · o que você escrever vai depois")
         #expect(ComposerAction.elsewhereStrip(chatTitle: "Análise", needsYou: true) == "“Análise” precisa de você")
@@ -239,6 +254,20 @@ struct OrbChatsListTests {
         await model.loadedConversation(orb)
         #expect(userTexts(model, orb) == ["primeiro assunto"])
         #expect(model.live(orb).chats?.active == orb)
+    }
+
+    @Test @MainActor func foldingTheConversationsNeedsAListAndIsKeptWithIt() {
+        let (model, orb) = setUp(Model())
+        model.setChatsCollapsed(true, for: orb)
+        #expect(model.live(orb).chats == nil, "an Orb with its first conversation alone has nothing to fold")
+        var chats = OrbChats(first: orb, updated: .now)
+        chats.add(UUID(), at: .now)
+        model.setChats(chats, for: orb)
+        model.setChatsCollapsed(true, for: orb)
+        #expect(model.live(orb).chats?.collapsed == true)
+        #expect(model.live(orb).chats?.list.count == 2, "the list itself is untouched")
+        model.setChatsCollapsed(false, for: orb)
+        #expect(model.live(orb).chats?.collapsed == nil, "open again, the file stops naming it")
     }
 
     @Test @MainActor func openingAnotherConversationDuringATurnLetsItEndInItsOwnAndWhatYouWriteWaits() async throws {

@@ -166,13 +166,15 @@ struct SectionTitle<Trailing: View>: View {
 /// The small "+" at the right of a section title: dim at rest, lighter under the pointer, a 20 pt target. The Orbs'
 /// title wraps it in a `Menu`, the groups' in a `Button`.
 struct SectionPlus: View {
+    /// The target's side: 20 pt beside a title, 16 pt in an Orb's row (its name's line height).
+    var size: CGFloat = 20
     @State private var isHovering = false
 
     var body: some View {
         Image(systemName: "plus")
             .font(.system(size: 11, weight: .medium))
             .foregroundStyle(isHovering ? Palette.secondary : Palette.hint)
-            .frame(width: 20, height: 20)
+            .frame(width: size, height: size)
             .hoverFill(isHovering, in: .rect(cornerRadius: 6))
             .contentShape(.rect)
             .onHover { isHovering = $0 }
@@ -345,10 +347,12 @@ struct SidebarBotRow: View {
         let live = model.live(botID)
         let isSelected = model.selection == .bot(botID)
         // The open Orb with more than one conversation is one card: the selection wraps its row and its conversations.
+        // Folded, the conversations are out of sight and the row alone is the card.
         let chats = isSelected ? live.chats : nil
+        let folded = chats?.collapsed == true
         // The name and the reply under it are cut to one line each: the hover text has the name whole.
         VStack(alignment: .leading, spacing: 0) {
-            SidebarRow(isSelected: isSelected, selectionSpace: selectionSpace, paintsSelection: chats == nil, help: live.look.name,
+            SidebarRow(isSelected: isSelected, selectionSpace: selectionSpace, paintsSelection: chats == nil || folded, help: live.look.name,
                        dragPayload: SidebarOrder.dragPayload(botID)) {
                 model.selection = .bot(botID)
             } content: { isHovering in
@@ -357,13 +361,26 @@ struct SidebarBotRow: View {
                                           // MARK: MultiOrb (WP2): the ring of the Orb it is exchanging messages with
                                           partner: live.partner,
                                           hint: isHovering && index < 9 ? AppShortcut.bot(at: index).label : nil,
-                                          landing: live.landing))
+                                          landing: live.landing, botID: botID, chatsFolded: chats == nil ? nil : folded,
+                                          showsNewChat: isHovering))
                     .equatable()
             } dragBegan: {
                 model.draggedBotID = botID
             }
+            // The row is one element for VoiceOver: what its own buttons do is offered as actions on it.
+            .accessibilityActions {
+                Button(CommandName.newChat) { model.newChat(for: botID) }
+                if chats != nil {
+                    Button(folded ? SidebarText.unfoldChats : SidebarText.foldChats) { model.setChatsCollapsed(!folded, for: botID) }
+                }
+            }
             .contextMenu {
                 Button(CommandName.newChat, systemImage: "square.and.pencil") { model.newChat(for: botID) }
+                if chats != nil {
+                    Button(folded ? SidebarText.unfoldChats : SidebarText.foldChats, systemImage: folded ? "chevron.down" : "chevron.right") {
+                        model.setChatsCollapsed(!folded, for: botID)
+                    }
+                }
                 Button(CommandName.openFolder, systemImage: "folder") { model.openFolder(of: botID) }
                 Button("Personalizar…", systemImage: "paintpalette") { model.showLookEditor(of: botID) }
                 MoveToCategoryMenu(botID: botID)
@@ -377,13 +394,13 @@ struct SidebarBotRow: View {
                 Divider()
                 Button("Apagar \(live.look.name)…", systemImage: "trash", role: .destructive) { model.askToDelete(botID) }
             }
-            // The open Orb's conversations, once it has more than one.
-            if let chats {
+            // The open Orb's conversations, once it has more than one and they are not folded under its row.
+            if let chats, !folded {
                 SidebarChatList(botID: botID, chats: chats)
                     .transition(.adapted(.unfold, reduceMotion: reduceMotion))
             }
         }
-        .background { if chats != nil { SidebarSelectionFill(selectionSpace: selectionSpace) } }
+        .background { if chats != nil, !folded { SidebarSelectionFill(selectionSpace: selectionSpace) } }
         .matchedGeometryEffect(id: botID, in: rowSpace)
     }
 }
@@ -469,6 +486,12 @@ private struct BotRow: Equatable {
     var hint: String?
     /// Changes once when the Orb was just born from another Orb's proposal: its avatar gives the birth hop (MultiOrb, WP3).
     var landing = 0
+    /// Whose row it is: what its "+" and its chevron act on.
+    let botID: UUID
+    /// The open Orb's conversations under the row are folded (true) or listed (false); nil when there are none to list.
+    var chatsFolded: Bool?
+    /// The pointer is on the row: the "+" that opens a new conversation shows beside the shortcut.
+    var showsNewChat = false
 }
 
 private struct SelectionRest: Hashable {
@@ -478,6 +501,8 @@ private struct SelectionRest: Hashable {
 }
 
 private struct BotRowContent: View, Equatable {
+    @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let row: BotRow
     /// The selected row has looked at the chat and nothing has happened since: it rests like the others.
     @State private var selectionSettled = false
@@ -534,6 +559,28 @@ private struct BotRowContent: View, Equatable {
                             .font(.system(size: 11).monospacedDigit())
                             .foregroundStyle(Palette.faint)
                     }
+                    // A new conversation, under the pointer only; the chevron folds the open Orb's list. Both 16 pt high,
+                    // the name's line, so the row keeps its height.
+                    if row.showsNewChat {
+                        Button { model.newChat(for: row.botID) } label: { SectionPlus(size: 16) }
+                            .buttonStyle(.plain)
+                            .help("\(CommandName.newChat) (\(AppShortcut.newChat.label))")
+                            .accessibilityHidden(true)
+                    }
+                    if let folded = row.chatsFolded {
+                        Button { model.setChatsCollapsed(!folded, for: row.botID) } label: {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 10, weight: .semibold))
+                                .rotationEffect(.degrees(folded ? 0 : 90))
+                                .animation(Motion.panel(reduceMotion: reduceMotion), value: folded)
+                                .foregroundStyle(Palette.muted)
+                                .frame(width: 16, height: 16)
+                                .contentShape(.rect)
+                        }
+                        .buttonStyle(.plain)
+                        .help(folded ? "Mostra as conversas deste Orb" : "Recolhe as conversas deste Orb")
+                        .accessibilityHidden(true)
+                    }
                 }
                 HStack(spacing: 4) {
                     Group {
@@ -584,4 +631,6 @@ private struct BotRowContent: View, Equatable {
 /// The sentences the sidebar's rows say aloud.
 enum SidebarText {
     static func unread(_ count: Int) -> String { count == 1 ? "1 não lida" : "\(count) não lidas" }
+    static let foldChats = "Recolher conversas"
+    static let unfoldChats = "Mostrar conversas"
 }

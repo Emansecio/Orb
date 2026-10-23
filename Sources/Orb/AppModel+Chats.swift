@@ -26,6 +26,13 @@ extension AppModel {
         show(chat, of: botID, in: chats, fresh: false)
     }
 
+    /// Folds the Orb's conversations under its row in the sidebar, or unfolds them; kept with the list.
+    func setChatsCollapsed(_ collapsed: Bool, for botID: UUID) {
+        guard var chats = live(botID).chats else { return }
+        chats.collapsed = collapsed ? true : nil
+        setChats(chats, for: botID)
+    }
+
     func renameChat(_ chat: UUID, of botID: UUID, to title: String) {
         guard var chats = live(botID).chats else { return }
         chats.rename(chat, to: title)

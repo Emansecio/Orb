@@ -5,6 +5,7 @@ import SwiftUI
 /// - `chats-sidebar`: the open Orb with five conversations (the newest three, the one on show among them, "2 mais…",
 ///   "Nova conversa"); the Orb ends a turn in "Ajustar texto do anúncio Wellhub", left for "Análise da campanha 21/10",
 ///   and something landed unseen in "Orçamento de novembro".
+/// - `chats-collapsed`: the same sidebar with the conversations folded under the Orb's row (the chevron beside its name).
 /// - `chats-elsewhere`: that conversation's chat: the strip above the field, and a message typed that will wait.
 /// - `chats-new`: a new, empty conversation of an Orb that has others.
 @MainActor
@@ -41,6 +42,7 @@ enum ChatsSnapshots {
             session.turnTask = Task { try? await Task.sleep(for: .seconds(3600)) } // what makes a message wait (`canQueue`)
             model.setStatus("Pensando", of: id)
             chats.markUnread(made[1])
+            if screen == "chats-collapsed" { chats.collapsed = true }
             model.setChats(chats, for: id)
             if screen == "chats-elsewhere" {
                 model.setDraft("E o orçamento de novembro?", for: id)

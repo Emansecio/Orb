@@ -21,6 +21,9 @@ struct OrbChats: Codable, Equatable, Sendable {
     }
     /// Newest first.
     private(set) var list: [Entry]
+    /// The list is folded under the Orb's row in the sidebar (the chevron beside its name, or its menu). nil, not false,
+    /// so the file only says it when it is.
+    var collapsed: Bool?
 
     static let firstTitle = "Primeira conversa"
     static let newTitle = "Nova conversa"
