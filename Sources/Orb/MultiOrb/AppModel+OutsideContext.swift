@@ -1,13 +1,15 @@
 import Foundation
 
 /// What a turn is told of what happened outside its conversation: a turn of the chat, what happened since its last turn
-/// (`SinceLastTurn`); a request from another Orb, where its Orb stands (`RequestBackground`). Worked out when the turn is sent
-/// (from the chat's lines) and read when its message is written (the files of the requests, off the main thread).
+/// (`SinceLastTurn`); a request from another Orb, where its Orb stands (`RequestBackground`); a routine's run, what its chat did
+/// just before (`RoutineBackground`). Worked out when the turn is sent (from the chat's lines) and read when its message is
+/// written (the files of the requests, off the main thread).
 struct OutsideContext: Sendable {
     enum Kind: Sendable {
         case none
         case chat([SinceLastTurn.Source])
         case request(RequestBackground.Plan)
+        case routine([String])
     }
 
     var kind = Kind.none
@@ -25,6 +27,11 @@ extension AppModel {
             let background = RequestBackground.plan(chat: chat, asker: envelope.from, current: envelope.id)
             return background.isEmpty ? OutsideContext() : OutsideContext(kind: .request(background), room: RequestBackground.room)
         }
+        // A routine's run, once at its start (the answers that resume it come as they are).
+        if session.routineID != nil, session.sideKind == nil || session.sideKind == .routine, origin.isUser, let chat = session.parkedChat {
+            let lines = RoutineBackground.lines(chat: chat)
+            return lines.isEmpty ? OutsideContext() : OutsideContext(kind: .routine(lines), room: RoutineBackground.room)
+        }
         return OutsideContext()
     }
 
@@ -38,6 +45,8 @@ extension AppModel {
             var earlier: [SinceLastTurn.Handled] = []
             for id in plan.earlier { if let item = await handledRequest(id, of: botID) { earlier.append(item) } }
             return RequestBackground.text(plan, earlier: earlier, notices: plan.notices.filter { bot($0.from.id) != nil })
+        case .routine(let lines):
+            return RoutineBackground.text(lines)
         }
     }
 

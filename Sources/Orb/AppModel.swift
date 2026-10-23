@@ -1627,7 +1627,7 @@ final class AppModel {
         // The message and what goes before it (workspace snapshot, memory notes) take room too.
         let attachmentRoom = AttachmentText.room(historyCharacters: budget.characters)
         // A turn of the chat learns what happened outside it since its last turn here (requests, routines, groups, notices);
-        // a request's run learns where its Orb stands (`RequestBackground`).
+        // a request's run learns where its Orb stands (`RequestBackground`); a routine's, what its chat just did (`RoutineBackground`).
         let outside = outsideContext(of: session, itemsBefore: itemsBeforeMessage, origin: origin)
         session.pendingContextCursor = session.routineID == nil ? .now : nil
         let reserve = prompt.count + Self.prefaceAllowance + outside.room

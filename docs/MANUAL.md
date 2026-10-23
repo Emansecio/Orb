@@ -528,7 +528,9 @@ aviso dizendo por quê.
   destaque suave; ali cada uma tem o interruptor Ativa/Pausada e o botão de apagar (com confirmação na própria linha).
 - **Conversa própria.** Cada rotina roda numa conversa só dela, nunca no seu chat: o chat ganha só uma linha no fim ("Rotina
   'Resumo da manhã' terminou: …"). Em **Ver conversa** você lê a execução. Fica o histórico das últimas 10 execuções, com
-  relatório, e a próxima execução sabe o que a anterior encontrou.
+  relatório, e a próxima execução sabe o que a anterior encontrou. Ela também sabe o que vocês acabaram de fazer no chat aberto:
+  o trecho que a memória ainda não guardou (seus pedidos, as respostas e as ações do Orb, até ~3.000 caracteres, os mais
+  recentes) vai junto, como contexto, para a rotina não refazer nem desfazer o que acabou de ser feito.
 - **Metas.** No editor, "Acompanhar uma meta" pede "como saber que deu certo". A cada execução o Orb confere onde a meta
   está, dá um pequeno passo só se for seguro e reversível, e termina o relatório com uma linha como
   `Progresso: 35% · em dia · faltam 26 arquivos` ("em dia", "atenção" ou "concluída"). O cartão mostra uma barra fina (azul,

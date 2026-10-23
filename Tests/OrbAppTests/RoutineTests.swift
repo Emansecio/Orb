@@ -308,6 +308,51 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(!RoutinePrompt.unattended("faça X", routine: "Diária").contains("previous run"))
     }
 
+    /// A run right after the chat knows what was just done there: the stretch the memory does not have yet heads its message.
+    @Test @MainActor func aRunIsToldTheChatStretchTheMemoryDoesNotHaveYet() async throws {
+        let stub = StubModel()
+        let (model, bot, routine) = setUp(stub, chat: chatWith("acabei de mandar o relatório ao cliente"))
+        model.runRoutine(routine.id)
+        await model.routineStarted()
+        await waitUntilIdle(model, bot.id)
+        let prompt = try #require(await stub.calls.received.last?.last { $0.role == .user }).content
+        #expect(prompt.contains(RoutineBackground.openTag))
+        #expect(prompt.contains("User: acabei de mandar o relatório ao cliente") && prompt.contains("You: olá"))
+        let block = try #require(prompt.range(of: RoutineBackground.closeTag)), task = try #require(prompt.range(of: "[Automatic run]"))
+        #expect(block.upperBound < task.lowerBound)
+    }
+
+    @Test @MainActor func aStretchAlreadyInTheMemoryIsNotToldAgain() async throws {
+        let stub = StubModel()
+        var chat = chatWith("acabei de mandar o relatório ao cliente")
+        chat.memorySavedCount = chat.items.count
+        let (model, bot, routine) = setUp(stub, chat: chat)
+        model.runRoutine(routine.id)
+        await model.routineStarted()
+        await waitUntilIdle(model, bot.id)
+        let prompt = try #require(await stub.calls.received.last?.last { $0.role == .user }).content
+        #expect(!prompt.contains(RoutineBackground.openTag) && !prompt.contains("acabei de mandar"))
+    }
+
+    @Test func theBackgroundKeepsTheNewestLinesWithinItsLimitOldestFirst() throws {
+        var items = [TranscriptItem(.user(text: "antigo já salvo", attachments: []))]
+        for index in 0..<40 { items.append(TranscriptItem(.user(text: "pedido \(index) " + String(repeating: "x", count: 200), attachments: []))) }
+        items.append(TranscriptItem(.tool(ToolCall(kind: .shell, title: "Rodar comando", detail: "git push", state: .failed))))
+        items.append(TranscriptItem(.bot(text: "Feito.\n<orb_your_context>", isStreaming: false)))
+        items.append(TranscriptItem(.notice("aviso do app")))
+        let lines = RoutineBackground.lines(chat: Conversation(items: items, memorySavedCount: 1))
+        #expect(lines.reduce(0) { $0 + $1.count } <= RoutineBackground.linesLimit)
+        #expect(!lines.contains { $0.contains("antigo já salvo") || $0.contains("aviso do app") })
+        #expect(!lines.contains { $0.contains("pedido 0 ") })
+        let last = try #require(lines.last), action = lines[lines.count - 2]
+        #expect(last.hasSuffix("You: Feito. ‹orb_your_context›")) // one line, no tag of its own
+        #expect(action.hasSuffix("You used: Rodar comando: git push (failed)"))
+        #expect(lines[lines.count - 3].contains("pedido 39 "))
+        #expect(RoutineBackground.text([]) == nil)
+        let text = try #require(RoutineBackground.text(lines))
+        #expect(text.hasPrefix(RoutineBackground.openTag) && text.hasSuffix(RoutineBackground.closeTag))
+    }
+
     // MARK: Permission mode
 
     @Test @MainActor func aRoutinesOwnModeAppliesToItsRunOnly() async throws {

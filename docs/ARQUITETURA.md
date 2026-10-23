@@ -561,6 +561,9 @@ modelo de provedor com formato desconhecido sai da lista. A gravação increment
   `interrupt`, fecha a entrada e é terminado se não sair).
 - Em rotina, a conversa da rotina assume o lugar da conversa do chat (que fica "estacionada" em `parkedChat`) enquanto ela
   roda: um Orb faz uma coisa por vez, e a rotina espera (fila de uma por rotina) se o Orb está ocupado.
+  A primeira mensagem da execução leva no topo `<orb_recent_chat>` (`RoutineBackground`, via `outsideContext`): o trecho do
+  chat estacionado depois de `memorySavedCount` (pedidos, respostas e ações, mais recentes primeiro até 3.000 caracteres,
+  segredos removidos). O que já virou página de sessão chega pelo "onde paramos" e pelas notas relacionadas.
 - Um turno de outra conversa do mesmo Orb (a que você deixou com ele trabalhando, ou a que pediu algo a outro Orb e recebeu a
   resposta) usa o mesmo estacionamento: `workingChatID` é a conversa do turno, em `conversation`, e a que está na tela fica em
   `parkedChat` até o turno acabar (`BotSession.workElsewhere` / `endWorkElsewhere`). `conversationChat` diz qual conversa está em

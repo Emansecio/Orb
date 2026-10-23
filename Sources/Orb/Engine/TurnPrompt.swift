@@ -137,7 +137,8 @@ enum TurnPreface {
         if text.hasPrefix(openTag), let end = text.range(of: closeTag) { text = text[end.upperBound...].drop { $0.isNewline } }
         // What happened outside the chat since its last turn (`SinceLastTurn`, or its first version) is not the user's either.
         for (open, close) in [(SinceLastTurn.openTag, SinceLastTurn.closeTag), SinceLastTurn.legacyTags,
-                              (RequestBackground.openTag, RequestBackground.closeTag)] {
+                              (RequestBackground.openTag, RequestBackground.closeTag),
+                              (RoutineBackground.openTag, RoutineBackground.closeTag)] {
             if text.hasPrefix(open), let end = text.range(of: close) { text = text[end.upperBound...].drop { $0.isNewline } }
         }
         return String(text)

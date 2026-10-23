@@ -27,10 +27,11 @@ private actor Gates {
 
     func openAll(_ keys: [String]) { keys.forEach(open) }
 
-    /// The `PEDIDO-…` token of a request ("" when there is none: such a call is not held).
+    /// The `PEDIDO-…` token of a request ("" when there is none: such a call is not held). The last one: context blocks
+    /// that quote the chat (a routine's `RoutineBackground`) come before the request's own words.
     nonisolated static func key(in text: String) -> String {
-        guard let range = text.range(of: #"PEDIDO-[A-Z0-9]+"#, options: .regularExpression) else { return "" }
-        return String(text[range])
+        guard let match = text.matches(of: /PEDIDO-[A-Z0-9]+/).last else { return "" }
+        return String(match.output)
     }
 }
 

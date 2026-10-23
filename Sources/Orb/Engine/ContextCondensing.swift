@@ -117,7 +117,8 @@ extension TurnPreface {
         // The blocks sit at the start, in this order (see `stripped`).
         var offset = text.startIndex
         for (open, close) in [(SinceLastTurn.openTag, SinceLastTurn.closeTag), SinceLastTurn.legacyTags,
-                              (RequestBackground.openTag, RequestBackground.closeTag)] {
+                              (RequestBackground.openTag, RequestBackground.closeTag),
+                              (RoutineBackground.openTag, RoutineBackground.closeTag)] {
             let after = text[offset...].drop { $0.isNewline }
             guard after.hasPrefix(open), let end = text.range(of: close, range: after.startIndex..<text.endIndex) else { continue }
             let innerStart = text.index(after.startIndex, offsetBy: open.count)
