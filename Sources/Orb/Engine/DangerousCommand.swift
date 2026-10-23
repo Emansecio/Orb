@@ -391,7 +391,8 @@ enum DangerousCommand {
                 rest = rest.dropFirst(word == "function" || !word.hasSuffix("()") ? 2 : 1)
                 continue
             }
-            let name = word.contains("/") ? URL(fileURLWithPath: word).lastPathComponent : word
+            // NSString, not URL: on old-SDK binaries URL(fileURLWithPath:) traps on an unparsable "http:" word.
+            let name = word.contains("/") ? (word as NSString).lastPathComponent : word
             guard wrappers.contains(name) else { return (name, Array(rest.dropFirst())) }
             rest = rest.dropFirst()
             if name == "command", rest.first.map({ $0 == "-v" || $0 == "-V" }) == true { return nil }
@@ -436,7 +437,7 @@ enum DangerousCommand {
     /// expansions (`rm\_-rf\_x`, `${SHELL} -c …`), and a shell named by a variable (`$SHELL -c 'rm -rf x'`) runs a
     /// command line it cannot see.
     private static func unverifiable(_ words: [String], _ commands: [(name: String, arguments: [String])]) -> String? {
-        for (index, word) in words.enumerated() where URL(fileURLWithPath: word).lastPathComponent == "env" {
+        for (index, word) in words.enumerated() where (word as NSString).lastPathComponent == "env" {
             for (offset, option) in words.dropFirst(index + 1).enumerated() {
                 guard option.hasPrefix("-"), option != "-" else { break }
                 let next = words.dropFirst(index + 2 + offset).first

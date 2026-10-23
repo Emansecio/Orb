@@ -530,6 +530,15 @@ struct DangerousCommandTests {
         #expect(plain.danger == nil)
     }
 
+    // On binaries built for an old SDK, URL(fileURLWithPath:) traps on an "http:" word it cannot parse, which closed the app.
+    @Test func unparsableWebAddressesInACommandDoNotCrash() {
+        for command in ["curl http://localhost:$PORT/api", "curl -s \"http://localhost:${PORT}/x\"", "env https://x.com:443abc",
+                        "http://localhost:$PORT/x -v", "open http://a b:80"] {
+            #expect(reason(command) == nil, Comment(rawValue: command))
+        }
+        #expect(reason("curl http://localhost:$PORT/x && rm -rf build") != nil)
+    }
+
     @Test func dangerCardsExplainThemselves() {
         #expect(PermissionVerdict.AskReason.dangerous("x").explanation == "Comando arriscado: x.")
         #expect(PermissionVerdict.AskReason.needsPermission.explanation == nil)

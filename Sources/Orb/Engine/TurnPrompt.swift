@@ -173,7 +173,7 @@ enum TurnPreface {
         var attached: [String] = []
         if let cut = additions.compactMap({ text.range(of: $0) }).min(by: { $0.lowerBound < $1.lowerBound }) {
             attached = text[cut.lowerBound...].split(separator: "\n").filter { $0.hasPrefix("- ") }
-                .map { URL(fileURLWithPath: String($0.dropFirst(2))).lastPathComponent }
+                .map { (String($0.dropFirst(2)) as NSString).lastPathComponent }
             text = String(text[..<cut.lowerBound])
         }
         let skillOpening = "Skill \""

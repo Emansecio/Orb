@@ -100,7 +100,7 @@ struct ProfilePhoto: Sendable {
 
     /// Deletes a photo; a name that is not a plain file name of this folder is ignored.
     func remove(_ fileName: String) {
-        guard !fileName.isEmpty, fileName == URL(fileURLWithPath: fileName).lastPathComponent else { return }
+        guard !fileName.isEmpty, fileName == (fileName as NSString).lastPathComponent else { return }
         try? FileManager.default.removeItem(at: url(for: fileName))
     }
 }

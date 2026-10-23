@@ -262,6 +262,7 @@ struct ProfilePhotoTests {
         let outside = try folder.file("fora.txt", Data("x".utf8))
         photos.remove("../fora.txt")
         photos.remove("")
+        photos.remove("http://localhost:$PORT/x")
         #expect(FileManager.default.fileExists(atPath: outside.path))
         photos.remove(one)
         #expect(folder.contents("perfil") == [two])

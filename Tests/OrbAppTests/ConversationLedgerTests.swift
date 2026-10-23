@@ -126,6 +126,8 @@ struct LedgerUserWordsTests {
         let picture = "o que é isso?\n\nAttached images (resized copies, shown to you with this message):\n- /tmp/foto.jpg"
         #expect(TurnPreface.userWords(picture) == "o que é isso? (anexos: foto.jpg)")
         #expect(TurnPreface.userWords("texto normal") == "texto normal")
+        let address = "veja\n\nAttached files (read them with your tools):\n- http://localhost:$PORT/x"
+        #expect(TurnPreface.userWords(address) == "veja (anexos: x)")
     }
 
     @Test func aSkillWithoutARequestIsJustItsName() throws {
