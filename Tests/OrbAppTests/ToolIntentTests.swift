@@ -239,12 +239,9 @@ struct ToolIntentTests {
         #expect(ToolTally.countNote([described(nil), described("Ler A")]) == "2 ações")
     }
 
-    @Test func theWorkOfAFinishedRequestIsSaidByTheDescriptionsToo() {
+    @Test func theWorkOfARequestCountsItsActionsAndLeavesTheDescriptionsToItsLines() {
         let calls = [described("Ler A"), described("Conferir B"), described(nil)]
-        #expect(ToolTally.workVariants(calls, seconds: 65) == ["Trabalhou por 1 min 05 s · leu A, conferiu B e mais 1",
-                                                              "Trabalhou por 1 min 05 s · leu A e mais 2"])
-        #expect(ToolTally.work(calls, seconds: nil) == "Trabalhou · leu A, conferiu B e mais 1")
-        // As before without descriptions.
+        #expect(ToolTally.work(calls, seconds: 65) == "Trabalhou por 1 min 05 s · rodou 3 comandos")
         #expect(ToolTally.work([shell("ls")], seconds: 5) == "Trabalhou por 5 s · rodou 1 comando")
     }
 

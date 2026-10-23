@@ -701,7 +701,7 @@ actor AgentEngine {
     static let continueHint = " Diga “continua” e eu sigo de onde parei."
 
     static func pausedNotice(after steps: Int) -> String {
-        "Pausei depois de \(steps) passos neste turno." + continueHint
+        "\(NoticeAction.pausePrefix) \(steps) passos neste turno." + continueHint
     }
 
     // MARK: Tool calls

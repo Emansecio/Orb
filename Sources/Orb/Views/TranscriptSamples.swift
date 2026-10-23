@@ -117,9 +117,10 @@ enum TranscriptSample {
             items = [TranscriptItem(.user(text: "Publica o site de novo, agora com a versão 2.4", attachments: [])), tool,
                      TranscriptItem(.bot(text: "Publicado: a versão 2.4 já está no ar e o rodapé confere.", isStreaming: false)),
                      TranscriptItem(.notice("Skill proposta: /publicar-site — Publicar site"))]
-        case "transcript-tools", "transcript-tools-open", "transcript-work", "transcript-work-open":
+        case "transcript-tools", "transcript-tools-open", "transcript-work", "transcript-work-open", "transcript-interrupted":
             // The shape of a long task: words of the Orb between runs of commands, a notice in the middle, one failure.
             // `transcript-work`: the same request finished, with its answer (its work folds into one line).
+            // `transcript-interrupted`: the app closed in the middle of it, and the next request asked about it.
             ToolGroupRow.opensInSnapshots = screen.hasSuffix("-open")
             let folder = "\"/Users/voce/Projetos/AcessosFit-Brain/scripts"
             func run(_ detail: String, _ kind: ToolCall.Kind = .shell, _ title: String = "Rodando no Terminal",
@@ -147,6 +148,19 @@ enum TranscriptSample {
                 items[0].date = .now.addingTimeInterval(-65)
                 items.append(TranscriptItem(.bot(text: "Pronto: dos 61 contatos, 12 eram leads sem resposta. Respondi os 12 conforme o Brain e deixei o relatório em /tmp/af_report.txt.", isStreaming: false)))
             }
+            if screen == "transcript-interrupted" {
+                items[0].date = .now.addingTimeInterval(-65)
+                items += [TranscriptItem(.notice(BotSession.quitNotice)),
+                          TranscriptItem(.user(text: "respondeu todos?", attachments: [])),
+                          run("python3 \(folder)/fila.py\" --pendentes"),
+                          TranscriptItem(.bot(text: "Ainda não: ficaram 4 sem resposta. Vou terminar agora.", isStreaming: false)),
+                          run("python3 \(folder)/responder.py\" --lote 4"),
+                          run("python3 \(folder)/fila.py\" --pendentes"),
+                          TranscriptItem(.bot(text: "Respondidos todos: os 4 que faltavam receberam o link e o passo a passo do Pix.", isStreaming: false)),
+                          TranscriptItem(.notice("Melhoria proposta para /publicar-site")),
+                          TranscriptItem(.user(text: "valeu", attachments: [])),
+                          TranscriptItem(.bot(text: "Por nada!", isStreaming: false))]
+            }
         case "transcript-browser-live", "transcript-browser-need", "transcript-browser-done":
             items = LiveScreenSnapshots.items(screen, model: model, bot: bot)
         case "transcript-retry":
@@ -157,7 +171,7 @@ enum TranscriptSample {
         // After the Orb's own conversation has been read from disk, which would replace this one.
         return AnyView(ChatView(botID: bot.id).task {
             // The notice offers "Revisar" only while the proposal it speaks of waits in the Orb's memory.
-            if screen == "transcript-skill-proposal" { _ = await model.memory.bank(for: bot.id).proposeSkill(SkillSnapshots.proposal) }
+            if screen == "transcript-skill-proposal" || screen == "transcript-interrupted" { _ = await model.memory.bank(for: bot.id).proposeSkill(SkillSnapshots.proposal) }
             try? await Task.sleep(for: .seconds(1))
             model.seedConversation(Conversation(items: items), for: bot.id)
             if screen == "transcript-browser-live" { await LiveScreenSnapshots.point(model: model, botID: bot.id) }

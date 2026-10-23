@@ -319,7 +319,7 @@ skill vai dentro de `remember` e `recall`.
   registros", melhorar antes de criar, incorporar o procedimento da memória sobre o mesmo assunto e responder "Nothing to save."
   quando não há técnica não trivial, correção sua ou skill errada. Em Ajustes → Geral dá para desligar.
 - **Aprovar.** Depois do turno ou da revisão, o chat ganha **um** aviso por proposta nova ("Skill proposta: /x — Nome" ou "Melhoria
-  proposta para /x") com o botão **Revisar**, que abre o editor de skills com o texto inteiro e editável. **Salvar skill** cria a
+  proposta para /x") num cartão com o botão **Revisar**, que fica enquanto a proposta espera (mesmo com a conversa seguindo) e abre o editor de skills com o texto inteiro e editável. **Salvar skill** cria a
   skill (origem `aprendida`, `learnedBy` e escopo só o Orb que propôs; você amplia em "Usar com") ou troca as instruções da que
   existe, mantendo id, usos e escopo. **Descartar** apaga a proposta; fechar o editor a deixa esperando. Quem apaga o procedimento
   que a skill absorveu é você.

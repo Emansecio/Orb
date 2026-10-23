@@ -85,12 +85,11 @@ struct ChatView: View {
 }
 
 extension ChatView {
-    /// Under the name, the conversation on show (when the Orb has more than one) and the model. What the Orb is doing is
-    /// said in one place, the working line at the end of the chat, not here too.
+    /// Under the name, the conversation on show, when the Orb has more than one. The model is the composer's (its picker
+    /// says it), and what the Orb is doing is said in one place, the working line at the end of the chat, not here too.
     private func subtitle(_ live: BotLive) -> String {
-        let name = model.modelName(forModel: live.modelID)
-        guard let chats = live.chats, let title = chats.title(of: chats.active) else { return name }
-        return name.isEmpty ? title : "\(title) · \(name)"
+        guard let chats = live.chats else { return "" }
+        return chats.title(of: chats.active) ?? ""
     }
 
     /// What the find bar searches (the stored items of this Orb's chat, never its rows) and how it speaks to VoiceOver.
@@ -466,15 +465,15 @@ private struct TranscriptList: View {
             .equatable()
             .modifier(RowEntrance(id: row.id, style: items[0].kind.entrance, isNew: entrances.isNew(row.id), entrances: entrances))
             .transition(.identity)
-        case .work(let items, let seconds):
+        case .work(let items, let seconds, let outcome):
             let isOpen = openRuns.contains(row.id) || ToolGroupRow.opensInSnapshots
-            WorkGroupRow(items: items, seconds: seconds, isOpen: isOpen,
+            WorkGroupRow(items: items, seconds: seconds, outcome: outcome, isOpen: isOpen,
                          inputs: isOpen ? .init(openRuns: openRuns, avatars: avatars, redoID: redoID, dropping: dropping,
                                                 find: found, orb: look.orb) : nil) {
                 if openRuns.remove(row.id) == nil { openRuns.insert(row.id) }
             } content: {
                 // Opened: the request's work as it was while it ran (its runs of actions folded as usual).
-                ForEach(TranscriptFolding.rows(for: items)) { inner in
+                ForEach(TranscriptFolding.rows(for: items, foldsWork: false)) { inner in
                     AnyView(foldedRow(inner, avatars: avatars, redoID: redoID, dropping: dropping, found: found))
                 }
             }
@@ -488,13 +487,13 @@ private struct TranscriptList: View {
     private func closedRuns(holding itemID: UUID, in rows: [TranscriptRowModel]?) -> [UUID] {
         guard let row = rows?.first(where: { row in
             switch row {
-            case .tools(let items), .work(let items, _): items.contains { $0.id == itemID }
+            case .tools(let items), .work(let items, _, _): items.contains { $0.id == itemID }
             default: false
             }
         }) else { return [] }
         let here = openRuns.contains(row.id) ? [] : [row.id]
-        guard case .work(let items, _) = row else { return here }
-        return here + closedRuns(holding: itemID, in: TranscriptFolding.rows(for: items))
+        guard case .work(let items, _, _) = row else { return here }
+        return here + closedRuns(holding: itemID, in: TranscriptFolding.rows(for: items, foldsWork: false))
     }
 
     /// The line in place of what a compaction folded; opening it puts the messages back above it.

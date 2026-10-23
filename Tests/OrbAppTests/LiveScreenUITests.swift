@@ -432,16 +432,18 @@ struct LiveScreenFoldingTests {
     @Test func aFinishedRequestFoldsItsWorkAndLeavesTheItemRightAfter() {
         let items = [user, say("vou ver"), tool(), tool(), card, tool(), say("pronto")]
         let rows = TranscriptFolding.rows(for: items)
-        guard case .work(let inside, _) = rows[1] else { Issue.record("o trabalho não dobrou: \(rows)"); return }
+        guard case .work(let inside, _, _) = rows[1] else { Issue.record("o trabalho não dobrou: \(rows)"); return }
         #expect(!inside.contains { if case .browserView = $0.kind { true } else { false } }, "not counted in 'Rodou N comandos'")
         guard case .single(let after) = rows[2], case .browserView = after.kind else { Issue.record("o item não vem logo depois"); return }
         #expect(rows.count == 4)
     }
 
-    @Test func whileTheTurnRunsNothingFolds() {
+    @Test func whileTheTurnRunsItsWorkFoldsAndTheCardStaysInView() {
         let items = [user, say("vou ver"), tool(), tool(), card, tool()]
         let rows = TranscriptFolding.rows(for: items, liveTail: true)
-        #expect(!rows.contains { if case .work = $0 { true } else { false } })
+        #expect(rows.count == 3)
+        guard case .work(_, _, .running) = rows[1] else { Issue.record("o trabalho não dobrou: \(rows)"); return }
+        guard case .single(let after) = rows[2], case .browserView = after.kind else { Issue.record("o cartão sumiu"); return }
     }
 
     @Test func theItemIsNotAMessageForTheModelsContext() {

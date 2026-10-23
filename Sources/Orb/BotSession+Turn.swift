@@ -179,7 +179,7 @@ extension BotSession {
         changeConversation { $0.absorb(ChatMessage(role: .assistant, content: said + AgentEngine.interruptedMarker)) }
     }
 
-    static let stoppedNotice = "Você interrompeu esta resposta"
+    nonisolated static let stoppedNotice = "Você interrompeu esta resposta"
     /// A task of your own chat that the app closed on (a quit, or a crash found at the next launch): "Continuar" picks it up.
     nonisolated static let quitNotice = "O app foi fechado no meio desta tarefa."
     /// The same for a routine's run, another Orb's request or a group's turn: nothing picks those up by itself, and running

@@ -33,8 +33,8 @@ struct ToolRunFoldingTests {
         let runs = [tool(), tool(), tool()]
         let lone = tool()
         let items = [ask, read] + runs + [say("A fila trouxe 61 conversas."), lone]
-        // The request still runs: what it did so far stays in view, its actions one line per run.
-        #expect(TranscriptFolding.rows(for: items, liveTail: true) == [.single(ask), .tools([read] + runs), .single(items[5]), .single(lone)])
+        // A request without an answer, nor a notice of how it ended: its actions one line per run.
+        #expect(TranscriptFolding.rows(for: items) == [.single(ask), .tools([read] + runs), .single(items[5]), .single(lone)])
     }
 
     @Test func aFinishedRequestFoldsItsWorkAndKeepsItsAnswer() {
@@ -43,8 +43,9 @@ struct ToolRunFoldingTests {
         let answer = say("Respondi os 12 leads pendentes.")
         let items = [request] + work + [answer]
         #expect(TranscriptFolding.rows(for: items) == [.single(request), .work(work, seconds: nil), .single(answer)])
-        // While it runs, nothing folds into a work row.
-        #expect(!TranscriptFolding.rows(for: items, liveTail: true).contains { if case .work = $0 { true } else { false } })
+        // While it runs, what it did up to its last action folds; the words after it stay in view.
+        #expect(TranscriptFolding.rows(for: items, liveTail: true)
+                == [.single(request), .work(work, seconds: nil, outcome: .running), .single(answer)])
         // Only the last request is the running one.
         let next = ask("E os de ontem?")
         #expect(TranscriptFolding.rows(for: items + [next, tool()], liveTail: true)[1] == .work(work, seconds: nil))
@@ -85,8 +86,87 @@ struct ToolRunFoldingTests {
         let work = [tool(), say("Lendo."), tool()]
         #expect(TranscriptFolding.rows(for: [request] + work + [answer])[1] == .work(work, seconds: 65))
         let calls = Array(repeating: call("Rodando no Terminal"), count: 11) + [call("Lendo arquivo", .file)]
-        #expect(ToolTally.work(calls, seconds: 65) == "Trabalhou por 1 min 05 s · rodou 11 comandos e leu 1 arquivo")
-        #expect(ToolTally.work(calls, seconds: nil) == "Trabalhou · rodou 11 comandos e leu 1 arquivo")
+        #expect(ToolTally.work(calls, seconds: 65) == "Trabalhou por 1 min 05 s · 12 ações")
+        #expect(ToolTally.work(calls, seconds: nil) == "Trabalhou · 12 ações")
+        // Actions all of one named kind say what they were.
+        #expect(ToolTally.work(Array(calls.prefix(11)), seconds: nil) == "Trabalhou · rodou 11 comandos")
+        #expect(ToolTally.work([call("Usando github", .connector)], seconds: nil) == "Trabalhou · 1 ação")
+    }
+
+    @Test func theWorkSaysHowTheRequestEnded() {
+        let calls = [call("Rodando no Terminal"), call("Lendo arquivo", .file)]
+        #expect(ToolTally.work(calls, seconds: nil, outcome: .running) == "Trabalhando · 2 ações")
+        #expect(ToolTally.work(calls, seconds: 40, outcome: .appClosed) == "Interrompido após 40 s (app fechado) · 2 ações")
+        #expect(ToolTally.work(calls, seconds: nil, outcome: .appClosed) == "Interrompido (app fechado) · 2 ações")
+        #expect(ToolTally.work(calls, seconds: 40, outcome: .stopped) == "Você interrompeu após 40 s · 2 ações")
+        #expect(ToolTally.work(calls, seconds: 40, outcome: .failed) == "Não deu certo após 40 s · 2 ações")
+        #expect(ToolTally.work(calls, seconds: nil, outcome: .paused) == "Pausou · 2 ações")
+        #expect(ToolTally.work([], seconds: 40, outcome: .failed) == "Não deu certo após 40 s")
+    }
+
+    @Test func whileItRunsACardThatWaitsAndWhatFollowsStayInView() {
+        let request = ask()
+        let work = [tool(), say("Preciso de permissão."), tool()]
+        let waiting = card(nil)
+        let rows = TranscriptFolding.rows(for: [request] + work + [waiting, tool()], liveTail: true)
+        #expect(rows.first == .single(request))
+        #expect(rows.dropFirst().first == .work(work, seconds: nil, outcome: .running))
+        #expect(rows.contains(.single(waiting)))
+        // A lone run so far is one line already.
+        let run = [tool(), tool()]
+        #expect(TranscriptFolding.rows(for: [request] + run, liveTail: true) == [.single(request), .tools(run)])
+    }
+
+    @Test func aRequestThatEndedWithoutAnAnswerFoldsAndSaysHowItEnded() {
+        let quit = TranscriptItem(.notice(BotSession.quitNotice))
+        let work = [say("Rodando o sweep."), tool(), say("Lead quente: Glauciane."), tool()]
+        let next = ask("respondeu todos?")
+        // Not the chat's last item: the notice goes inside the work, whose line says it.
+        let rows = TranscriptFolding.rows(for: [ask()] + work + [quit, next])
+        #expect(rows.dropFirst().first == .work(work + [quit], seconds: nil, outcome: .appClosed))
+        #expect(rows.last == .single(next))
+        // The chat's last item: the notice stays in view after the line, with its "Continuar".
+        let last = TranscriptFolding.rows(for: [ask()] + work + [quit])
+        #expect(Array(last.suffix(2)) == [.work(work, seconds: nil, outcome: .appClosed), .single(quit)])
+        // Opened, its items are drawn as they were: they do not fold into the line again.
+        #expect(!TranscriptFolding.rows(for: work + [quit], foldsWork: false).contains { if case .work = $0 { true } else { false } })
+        #expect(TranscriptFolding.rows(for: work + [quit]).contains { if case .work = $0 { true } else { false } },
+                "what the flag guards against")
+        // A notice that does not end a request (a memory kept along the way) keeps the request unfolded.
+        let kept = TranscriptItem(.notice("\(NoticeAction.keptMemoryPrefix) prefere Pix"))
+        #expect(!TranscriptFolding.rows(for: [ask()] + work + [kept]).contains { if case .work = $0 { true } else { false } })
+        // Something done after the notice: not how the request ended.
+        #expect(!TranscriptFolding.rows(for: [ask()] + work + [quit, tool()]).contains { if case .work = $0 { true } else { false } })
+    }
+
+    @Test func eachEndingNoticeSaysItsOutcome() {
+        func outcome(_ text: String) -> WorkOutcome? { WorkOutcome(ending: TranscriptItem(.notice(text))) }
+        #expect(outcome(BotSession.quitNotice) == .appClosed)
+        #expect(outcome(BotSession.quitSideNotice) == .appClosed)
+        #expect(outcome(BotSession.stoppedNotice) == .stopped)
+        #expect(outcome(NoticeAction.failurePrefix + "o provedor caiu.") == .failed)
+        #expect(outcome(AgentEngine.pausedNotice(after: 40)) == .paused)
+        #expect(outcome("Compactei a conversa: os 2 primeiros pedidos viraram um resumo.") == nil)
+        #expect(WorkOutcome(ending: say("Pronto.")) == nil)
+    }
+
+    @Test func anInterruptedRequestTakesTheTimeOfItsLastActionNotOfTheNotice() {
+        let start = Date(timeIntervalSince1970: 1_000)
+        var request = ask()
+        request.date = start
+        var first = tool()
+        first.date = start.addingTimeInterval(5)
+        var lastCall = call("Rodando no Terminal", .shell, .failed)
+        lastCall.startedAt = start.addingTimeInterval(30)
+        lastCall.finishedAt = start.addingTimeInterval(70)
+        var last = TranscriptItem(.tool(lastCall))
+        last.date = start.addingTimeInterval(30)
+        var quit = TranscriptItem(.notice(BotSession.quitNotice))
+        quit.date = start.addingTimeInterval(8 * 3_600) // written at the next launch
+        var said = say("Lendo.")
+        said.date = start.addingTimeInterval(20)
+        let rows = TranscriptFolding.rows(for: [request, first, said, last, quit])
+        #expect(rows[1] == .work([first, said, last], seconds: 70, outcome: .appClosed))
     }
 
     @Test func anAnsweredCardGoesWithTheActionsAndOneThatWaitsEndsThem() {

@@ -87,6 +87,8 @@ enum NoticeAction: Equatable, Sendable {
     }
 
     static let failurePrefix = "Não deu certo: "
+    /// How the notice of a turn the engine paused after its steps starts (`AgentEngine.pausedNotice`).
+    static let pausePrefix = "Pausei depois de"
     /// How the notice for a fact the app kept by itself (not the model) starts.
     static let keptMemoryPrefix = "Guardado na memória:"
     /// How the notice proposing a `MemoryMerge` starts.
@@ -104,16 +106,28 @@ enum NoticeAction: Equatable, Sendable {
         return slug.isEmpty ? nil : String(slug)
     }
 
-    /// Whether a notice shows buttons: it has actions AND it is the chat's last word with nothing running. `offers` is read only
-    /// when there are actions: it reads the chat's items and the Orb's state, and a notice that only informs must not depend on them.
-    static func showsButtons(actions: [NoticeAction], offers: @autoclosure () -> Bool) -> Bool {
-        !actions.isEmpty && offers()
+    /// Whether a notice shows buttons: it has actions AND it is an offer (`isOffer`) or the chat's last word with nothing
+    /// running (`offers`). `offers` is read only when it decides: it reads the chat's items and the Orb's state, and a notice
+    /// that only informs, or an offer, must not depend on them.
+    static func showsButtons(for notice: String, actions: [NoticeAction], offers: @autoclosure () -> Bool) -> Bool {
+        !actions.isEmpty && (isOffer(notice) || offers())
+    }
+
+    /// A notice about something kept or proposed for you (a memory, a skill), not about the turn: its buttons stay while what
+    /// it offers waits, wherever it is in the chat.
+    static func isOffer(_ notice: String) -> Bool {
+        [keptMemoryPrefix, memoryMergePrefix, proposalPrefix, proposalUpdatePrefix].contains { notice.hasPrefix($0) }
+    }
+
+    /// A notice that marks a point of the conversation (a compaction): drawn across the chat, like the time of a moment.
+    static func isMark(_ notice: String) -> Bool {
+        CompactionReport.foldNoticePrefixes.contains { notice.hasPrefix($0) }
     }
 
     /// The actions that fit a notice, most useful first; none for the notices that only inform.
     static func actions(for notice: String) -> [NoticeAction] {
         if notice.hasPrefix("Conecte um modelo") { return [.openSettings] }
-        if notice.hasPrefix("Pausei depois de") || notice.hasPrefix("A resposta passou do limite") || notice.hasPrefix(jobEndedPrefix)
+        if notice.hasPrefix(pausePrefix) || notice.hasPrefix("A resposta passou do limite") || notice.hasPrefix(jobEndedPrefix)
             || notice == BotSession.quitNotice {
             return [.continueTurn]
         }

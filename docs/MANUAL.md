@@ -230,16 +230,20 @@ Se o navegador não estiver instalado, o Orb fica só com `web_fetch` e `web_sea
   não marca nenhuma etapa, o anel fica apagado e diz só "Plano", em vez de um "0 de 5" que nunca anda. Entre um passo e
   outro a linha diz "Pensando…". Quando espera por você, ela fica
   parada em laranja ("Esperando sua resposta"); quando espera para tentar de novo, mostra a contagem ("Conexão caiu ·
-  tentando de novo", "em 8 s"). A barra lateral e o painel da barra de menus dizem a mesma coisa; o subtítulo da janela fica só com a conversa
-  e o modelo. As linhas de ferramenta
+  tentando de novo", "em 8 s"). A barra lateral e o painel da barra de menus dizem a mesma coisa; o subtítulo da janela fica só com o nome da
+  conversa, quando o Orb tem mais de uma (o modelo está no seletor do campo de mensagem). As linhas de ferramenta
   acima dela são o histórico do turno: ações seguidas, sem nada dito entre elas (e os cartões de permissão já
   respondidos no meio delas), ficam numa linha só ("Rodou 7 comandos e leu 1 arquivo", ou o que elas foram fazer: "Listou
   modelos e viu o uso do send.py", com "1 com erro" se algo falhou; o tempo e a contagem aparecem com o mouse sobre a linha)
   que abre com um clique; os arquivos que elas fizeram continuam à vista. O que o Orb diz entre uma ação e outra aparece
   sem balão, menor e mais claro, junto das linhas de trabalho; só a resposta do fim tem balão. Quando o pedido termina, o
-  trabalho até a resposta (o que o Orb foi dizendo e as ações) vira uma linha ("Trabalhou por 1 min 05 s · rodou 11
-  comandos e leu 1 arquivo") e a resposta fica à vista logo abaixo; avisos do meio do trabalho também. Enquanto ele
-  trabalha, tudo fica aberto. A busca (⌘F) abre essas linhas quando o resultado está dentro. Cada frase fica ao menos 0,7 s na tela, e com o VoiceOver ligado ela é anunciada
+  trabalho até a resposta (o que o Orb foi dizendo e as ações) vira uma linha só com o desfecho, o tempo e o volume
+  ("Trabalhou por 1 min 05 s · 12 ações", ou "rodou 11 comandos" quando todas foram do mesmo tipo) e a resposta fica à
+  vista logo abaixo; avisos do meio do trabalho também. Um pedido que acabou sem resposta recolhe do mesmo jeito, e a linha diz
+  como acabou: "Interrompido após 40 s (app fechado)", "Você interrompeu após…", "Não deu certo após…" ou "Pausou após…"; o
+  aviso vai para dentro dela, a não ser que seja a última coisa da conversa, onde ficam os botões ("Continuar", "Tentar de
+  novo"). Enquanto ele trabalha, o que já fez até a última ação recolhe numa linha "Trabalhando · 7 ações"; o que ele diz
+  depois dela e um cartão que espera por você ficam à vista. A busca (⌘F) abre essas linhas quando o resultado está dentro. Cada frase fica ao menos 0,7 s na tela, e com o VoiceOver ligado ela é anunciada
   com educação (no máximo uma vez a cada 8 s). Com "Reduzir movimento" as frases só trocam de opacidade.
 - **Quando algo dá errado**, a mensagem vem com a ação: "Tentar de novo" (reenvia, se nada tinha sido feito; se já tinha
   respondido, pede para continuar), "Continuar", "Abrir Ajustes" (chave inválida, sem modelo) ou, numa conversa grande demais, "Compactar
@@ -586,8 +590,8 @@ janela vai antes para a memória do Orb. As mensagens continuam salvas na conver
   conversa": quanto está em uso, o que é mantido palavra por palavra (contado em pedidos seus), quanto veio do cache do provedor e quanto "Compactar
   agora" liberaria.
 - **Compactar agora** (ou `/compactar` e, se quiser, um foco: `/compactar decisões sobre o banco`) resume já. Não roda com o
-  Orb respondendo. O resultado vira um aviso na conversa: "Compactei a conversa: os 5 primeiros pedidos viraram um resumo (≈ 58
-  mil → 19 mil tokens)."
+  Orb respondendo. O resultado vira uma marca no meio da conversa, entre dois traços: "Compactei a conversa: os 5 primeiros pedidos
+  viraram um resumo (≈ 58 mil → 19 mil tokens)."
 - Depois de compactar (por você ou sozinho), o que virou resumo se recolhe numa faixa no alto da conversa: "47 mensagens
   anteriores foram resumidas · Mostrar". Nada é apagado: "Mostrar" traz as mensagens de volta logo acima da faixa, "Ocultar"
   recolhe de novo, e a busca (⌘F) abre a faixa sozinha quando o resultado está lá dentro. Ao voltar para o Orb ela está
@@ -700,7 +704,8 @@ tem a **Galeria**, os **Instalados** e **Explorar**.
   O Orb também lê sozinho a skill que serve para a tarefa.
 - **Skills aprendidas.** Depois de uma tarefa longa, o Orb revisa o que fez e, se aprendeu algo que vale repetir (uma técnica,
   uma correção sua, uma skill que estava errada), **propõe** uma skill, ou uma melhoria de uma que você já tem. O chat mostra
-  "Skill proposta: /nome" com o botão **Revisar**: abre o texto inteiro, que você edita, e **Salvar skill** ou **Descartar**.
+  "Skill proposta: /nome" num cartão com o botão **Revisar**, que fica ali enquanto a proposta espera, mesmo com a conversa
+  seguindo (o mesmo vale para "Guardado na memória" e a unificação de memória): abre o texto inteiro, que você edita, e **Salvar skill** ou **Descartar**.
   Nada é salvo sem você, e a proposta rasa (genérica, sem passos concretos, armadilhas e como verificar, com data do dia ou segredo) nem chega a você.
   A skill aprendida fica marcada "Aprendida por <Orb>" e vale só para ele até você ampliar em "Usar com". Você também pode
   pedir "transforme isso numa skill". Em Ajustes → Geral dá para desligar ("Propor skills com o que os Orbs aprendem"); a revisão

@@ -94,18 +94,27 @@ enum ToolTally {
         return max(0, end.timeIntervalSince(start))
     }
 
-    /// "Trabalhou por 1 min 05 s · rodou 11 comandos e leu 1 arquivo": the line of a finished request's work (without
-    /// the time when it is not known). Actions with a description of their own are said by it (`intentVariants`).
-    static func work(_ calls: [ToolCall], seconds: Int?) -> String {
-        workVariants(calls, seconds: seconds)[0]
+    /// "Trabalhou por 1 min 05 s · 12 ações": the line of a request's work, only how it ended, how long it took (left out
+    /// when not known) and how much was done. What the actions were for is one click away, in their own lines.
+    static func work(_ calls: [ToolCall], seconds: Int?, outcome: WorkOutcome = .answered) -> String {
+        let time = seconds.map { ElapsedFormat.text(seconds: $0) }
+        let lead = switch outcome {
+        case .answered: time.map { "Trabalhou por \($0)" } ?? "Trabalhou"
+        case .running: "Trabalhando"
+        case .stopped: time.map { "Você interrompeu após \($0)" } ?? "Você interrompeu"
+        case .appClosed: time.map { "Interrompido após \($0) (app fechado)" } ?? "Interrompido (app fechado)"
+        case .failed: time.map { "Não deu certo após \($0)" } ?? "Não deu certo"
+        case .paused: time.map { "Pausou após \($0)" } ?? "Pausou"
+        }
+        guard !calls.isEmpty else { return lead }
+        return "\(lead) · \(volume(calls))"
     }
 
-    /// `work`, from the fullest wording to the shortest, for the row to take the first that fits.
-    static func workVariants(_ calls: [ToolCall], seconds: Int?) -> [String] {
-        let time = seconds.map { "Trabalhou por \(ElapsedFormat.text(seconds: $0))" } ?? "Trabalhou"
-        guard !calls.isEmpty else { return [time] }
-        guard let said = intentVariants(calls, capitalized: false) else { return ["\(time) · \(summary(calls, capitalized: false))"] }
-        return said.map { "\(time) · \($0)" }
+    /// How much was done: "rodou 7 comandos" when every action was of one named kind, "12 ações" otherwise.
+    static func volume(_ calls: [ToolCall]) -> String {
+        let first = calls.first.map(Act.init)
+        if let first, first != .other, calls.dropFirst().allSatisfy({ Act($0) == first }) { return first.phrase(calls.count) }
+        return calls.count == 1 ? "1 ação" : "\(calls.count) ações"
     }
 
     /// The folded line of a run in the Orb's browser leads with the site it is on, the last one it opened ("gympass.com ·
@@ -118,7 +127,7 @@ enum ToolTally {
     /// that fits its width, so a word is never cut in two. It names what the actions were for without "e mais N": how many
     /// there were is on the row's hover (`countNote`), with the time.
     static func lineVariants(_ calls: [ToolCall]) -> [String] {
-        if let said = intentVariants(calls, countsRest: false) { return said }
+        if let said = intentVariants(calls) { return said }
         let opened = calls.last { $0.kind == .browser && ["Abrindo página", "Abrindo uma aba"].contains($0.title) }
         guard let site = opened.flatMap({ WorkPhrase.host(of: WorkPhrase.firstLine(of: $0.detail)) }) else { return [summary(calls)] }
         return ["\(site) · \(summary(calls))"]
@@ -126,30 +135,25 @@ enum ToolTally {
 
     // MARK: What the actions were for
 
-    /// The most descriptions a line names before "e mais N".
+    /// The most descriptions a line names.
     static let intentLimit = 3
 
     /// The run by what its actions were for, from the fullest wording to the shortest, or nil when none has a description:
-    /// each distinct description once, in the order it happened, in the preterite ("Leu o histórico dos três chats,
-    /// conferiu se a vaga do Marcus já saiu e mais 4"). The actions left out of the names (without a description, or past
-    /// the limit) are the "mais N", unless `countsRest` is false (the line that has the count beside it).
-    static func intentVariants(_ calls: [ToolCall], capitalized: Bool = true, countsRest: Bool = true) -> [String]? {
+    /// each distinct description once, in the order it happened, in the preterite ("Leu o histórico dos três chats e
+    /// conferiu se a vaga do Marcus já saiu"). How many actions there were is beside the line, on hover (`countNote`).
+    static func intentVariants(_ calls: [ToolCall]) -> [String]? {
         var order: [String] = []
-        var counts: [String: Int] = [:]
+        var seen: Set<String> = []
         for call in calls {
-            guard let intent = call.intent else { continue }
-            let key = intent.lowercased()
-            if counts[key] == nil { order.append(intent) }
-            counts[key, default: 0] += 1
+            guard let intent = call.intent, seen.insert(intent.lowercased()).inserted else { continue }
+            order.append(intent)
         }
         guard !order.isEmpty else { return nil }
         var variants: [String] = []
         for count in stride(from: min(order.count, intentLimit), through: 1, by: -1) {
             let named = order.prefix(count)
-            let rest = calls.count - named.reduce(0) { $0 + counts[$1.lowercased(), default: 0] }
             var parts = named.map(ToolIntent.pastInSentence)
-            if capitalized { parts[0] = ToolIntent.pastOpening(named[0]) }
-            if countsRest, rest > 0 { parts.append("mais \(rest)") }
+            parts[0] = ToolIntent.pastOpening(named[0])
             let line = PortugueseList.join(parts)
             if variants.last != line { variants.append(line) }
         }

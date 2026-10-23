@@ -26,11 +26,38 @@ import Testing
         func offers() -> Bool { reads += 1; return true }
         let informs = NoticeAction.actions(for: "Você interrompeu esta resposta")
         #expect(informs.isEmpty)
-        let showsWithout = NoticeAction.showsButtons(actions: informs, offers: offers())
+        let showsWithout = NoticeAction.showsButtons(for: "Você interrompeu esta resposta", actions: informs, offers: offers())
         #expect(!showsWithout)
         #expect(reads == 0, "the chat's items and state are not read for a notice without actions")
-        let showsWith = NoticeAction.showsButtons(actions: [.retry], offers: offers())
+        let showsWith = NoticeAction.showsButtons(for: "Não deu certo: O modelo não respondeu.", actions: [.retry], offers: offers())
         #expect(showsWith && reads == 1)
+    }
+
+    @Test func anOfferKeepsItsButtonsWhereverItIsAndAnAboutTheTurnOnlyAtTheEnd() {
+        var reads = 0
+        func notLast() -> Bool { reads += 1; return false }
+        for offer in ["Melhoria proposta para /conta-base", "Skill proposta: /publicar-site — Publicar site",
+                      "Guardado na memória: prefere Pix", "Unificação de memória proposta: 3 páginas"] {
+            #expect(NoticeAction.isOffer(offer))
+            // Out of `#expect`, which would evaluate `notLast()` itself to show it.
+            let shows = NoticeAction.showsButtons(for: offer, actions: NoticeAction.actions(for: offer), offers: notLast())
+            #expect(shows)
+        }
+        #expect(reads == 0, "an offer does not read where it is in the chat")
+        // An offer that was decided has no action left, and no button.
+        #expect(!NoticeAction.showsButtons(for: "Melhoria proposta para /conta-base", actions: [], offers: true))
+        // About the turn: only as the chat's last word.
+        #expect(!NoticeAction.isOffer(BotSession.quitNotice))
+        let showsQuit = NoticeAction.showsButtons(for: BotSession.quitNotice, actions: [.continueTurn], offers: notLast())
+        #expect(!showsQuit)
+        #expect(reads == 1)
+    }
+
+    @Test func aCompactionIsAMarkAcrossTheChat() {
+        #expect(NoticeAction.isMark("Compactei a conversa: os 30 primeiros pedidos viraram um resumo (≈ 58 mil → 35 mil tokens)."))
+        #expect(NoticeAction.isMark("Conversa compactada: 12 mensagens."))
+        #expect(!NoticeAction.isMark("Compactei"))
+        #expect(!NoticeAction.isMark(BotSession.quitNotice))
     }
 
     @Test func aFailureOffersToTryAgain() {

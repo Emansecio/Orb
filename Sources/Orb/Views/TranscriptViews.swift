@@ -1111,9 +1111,9 @@ private struct FittingWords<Row: View>: View {
     }
 }
 
-/// The work of a finished request before its answer, on one line: how long it took and what was done ("Trabalhou por 1
-/// min 05 s · rodou 11 comandos e leu 1 arquivo"), and how many actions failed. A click puts back what the Orb said while it
-/// worked and its actions, as they were (`content`); the answer stays below, always in view.
+/// The work of a request on one line: how it ended, how long it took and how much was done ("Trabalhou por 1 min 05 s · 12
+/// ações", "Interrompido após 40 s (app fechado) · 3 ações"), and how many actions failed. A click puts back what the Orb
+/// said while it worked and its actions, as they were (`content`); the answer stays below, always in view.
 struct WorkGroupRow<Content: View>: View, Equatable {
     /// What `content` draws from outside the row (the open runs inside, the find result, the Orb). Only filled in while
     /// the row is open, so a closed one is not drawn again for what only its hidden content would show.
@@ -1128,6 +1128,7 @@ struct WorkGroupRow<Content: View>: View, Equatable {
 
     let items: [TranscriptItem]
     let seconds: Int?
+    let outcome: WorkOutcome
     let isOpen: Bool
     var inputs: ContentInputs?
     let toggle: () -> Void
@@ -1136,43 +1137,46 @@ struct WorkGroupRow<Content: View>: View, Equatable {
 
     /// The closures (`toggle`, `content`) stay out: they are made again on every pass and say nothing the rest does not.
     nonisolated static func == (lhs: WorkGroupRow, rhs: WorkGroupRow) -> Bool {
-        lhs.items == rhs.items && lhs.seconds == rhs.seconds && lhs.isOpen == rhs.isOpen && lhs.inputs == rhs.inputs
+        lhs.items == rhs.items && lhs.seconds == rhs.seconds && lhs.outcome == rhs.outcome && lhs.isOpen == rhs.isOpen
+            && lhs.inputs == rhs.inputs
     }
 
     var body: some View {
         let calls = items.compactMap { if case .tool(let call) = $0.kind { call } else { nil } }
-        let variants = ToolTally.workVariants(calls, seconds: seconds)
-        let failures = ToolTally.failures(calls)
+        let line = ToolTally.work(calls, seconds: seconds, outcome: outcome)
+        // Stopped or cut by the app closing, the action that ran then counts as failed: the line already says why.
+        let failures = [.stopped, .appClosed].contains(outcome) ? nil : ToolTally.failures(calls)
         VStack(alignment: .leading, spacing: 12) {
             Button(action: toggle) {
-                FittingWords(variants: variants) { line in
-                    HStack(spacing: 8) {
-                        Image(systemName: "checklist")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Palette.faint)
-                            .frame(width: 14)
-                        Text(line)
-                            .font(.system(size: 12))
-                            .foregroundStyle(Palette.muted)
-                            .lineLimit(1)
-                            .layoutPriority(-1)
-                        if let failures {
-                            ErrorMark(failures: failures)
-                        }
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(Palette.faint)
-                            .rotationEffect(.degrees(isOpen ? 90 : 0))
-                            .animation(reduceMotion ? nil : Motion.content, value: isOpen)
-                        Spacer(minLength: 0)
+                HStack(spacing: 8) {
+                    Image(systemName: outcome.symbol)
+                        .font(.system(size: 11))
+                        .foregroundStyle(outcome.tint)
+                        .frame(width: 14)
+                    Text(line)
+                        .font(.system(size: 12))
+                        .foregroundStyle(outcome == .running ? Palette.faint : Palette.muted)
+                        .lineLimit(1)
+                        .layoutPriority(-1)
+                        // A new action changes the count while the request runs, once per action: the number rolls.
+                        .contentTransition(reduceMotion ? .opacity : .numericText())
+                        .animation(Motion.content, value: line)
+                    if let failures {
+                        ErrorMark(failures: failures)
                     }
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Palette.faint)
+                        .rotationEffect(.degrees(isOpen ? 90 : 0))
+                        .animation(reduceMotion ? nil : Motion.content, value: isOpen)
+                    Spacer(minLength: 0)
                 }
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
             .padding(.leading, gutter)
             .help(Tip.toggleWork(isOpen: isOpen))
-            .accessibilityLabel(failures.map { "\(variants[0]), \($0.text)" } ?? variants[0])
+            .accessibilityLabel(failures.map { "\(line), \($0.text)" } ?? line)
             .accessibilityValue(isOpen ? "expandido" : "recolhido")
             .accessibilityHint(isOpen ? "Recolhe o trabalho" : "Mostra o que o Orb disse e fez")
             if isOpen {
@@ -1182,6 +1186,26 @@ struct WorkGroupRow<Content: View>: View, Equatable {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .animation(FoldMotion.animation(reduceMotion: reduceMotion), value: isOpen)
+    }
+}
+
+extension WorkOutcome {
+    /// The symbol before the work's line: a request that did not end in an answer says so before its words are read.
+    var symbol: String {
+        switch self {
+        case .answered, .running: "checklist"
+        case .stopped: "stop.circle"
+        case .appClosed, .paused: "exclamationmark.triangle"
+        case .failed: "exclamationmark.circle"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .answered, .running, .stopped: Palette.faint
+        case .appClosed, .paused: Palette.warn
+        case .failed: Palette.danger
+        }
     }
 }
 
@@ -1204,62 +1228,69 @@ private struct NoticeLine: View {
     @State private var showsProviderDetail = false
 
     var body: some View {
+        if NoticeAction.isMark(text) { mark } else { notice }
+    }
+
+    /// A compaction: a point of the conversation, across it between two hairlines, like the time above a moment.
+    private var mark: some View {
+        HStack(spacing: 10) {
+            Rectangle().fill(Palette.line).frame(height: 1)
+            Text(text)
+                .font(.system(size: 11))
+                .foregroundStyle(Palette.faint)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 480)
+                .layoutPriority(1)
+            Rectangle().fill(Palette.line).frame(height: 1)
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(TranscriptSpeech.notice(text))
+    }
+
+    @ViewBuilder private var notice: some View {
         let failure = NoticeAction.failureDetail(of: text)
+        let isOffer = NoticeAction.isOffer(text)
         // Read only under a failure that is the chat's last word: the menu lists them, the button needs one.
         let otherModels = failure != nil && offersActions ? model.retryModels(for: botID) : []
         let actions = NoticeAction.actions(for: text, canCompact: canCompact, hasProposal: hasProposal,
                                            canSwitchModel: !otherModels.isEmpty)
-        VStack(alignment: .leading, spacing: 8) {
-            if let failure {
-                let parts = NoticeAction.failureParts(of: failure)
-                VStack(alignment: .leading, spacing: 2) {
-                    Label("Não deu certo", systemImage: "exclamationmark.triangle.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Palette.danger)
-                    Text(parts.sentence)
-                        .font(.system(size: 12))
-                        .foregroundStyle(Palette.muted)
-                        .multilineTextAlignment(.leading)
-                        .textSelection(.enabled)
-                    if let provider = parts.provider { providerDetail(provider) }
-                }
+        let showsButtons = NoticeAction.showsButtons(for: text, actions: actions, offers: offersActions)
+        Group {
+            if isOffer {
+                offer(actions: actions, showsButtons: showsButtons)
             } else {
-                Text(text)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Palette.muted)
-                    .multilineTextAlignment(.leading)
-            }
-            if !actions.isEmpty, offersActions {
-                HStack(spacing: 8) {
-                    ForEach(actions, id: \.self) { action in
-                        if action == .otherModel {
-                            Menu {
-                                ForEach(otherModels, id: \.ref) { other in
-                                    Button("\(other.name) · \(other.provider)") { model.retryLastTurn(botID, model: ModelRef(other.ref)) }
-                                }
-                            } label: {
-                                Label(action.title, systemImage: action.symbol)
-                            }
-                            .menuStyle(.button)
-                            .menuIndicator(.hidden)
-                            .buttonStyle(NoticeActionStyle(prominent: false))
-                            .fixedSize()
-                            .help(action.help)
-                        } else {
-                            Button { perform(action) } label: {
-                                Label(action.title, systemImage: action.symbol)
-                            }
-                            .buttonStyle(NoticeActionStyle(prominent: action == actions.first))
-                            .help(action.help)
+                VStack(alignment: .leading, spacing: 8) {
+                    if let failure {
+                        let parts = NoticeAction.failureParts(of: failure)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Label("Não deu certo", systemImage: "exclamationmark.triangle.fill")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(Palette.danger)
+                            Text(parts.sentence)
+                                .font(.system(size: 12))
+                                .foregroundStyle(Palette.muted)
+                                .multilineTextAlignment(.leading)
+                                .textSelection(.enabled)
+                            if let provider = parts.provider { providerDetail(provider) }
                         }
+                    } else {
+                        Text(text)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Palette.muted)
+                            .multilineTextAlignment(.leading)
+                    }
+                    if showsButtons {
+                        buttons(actions, otherModels: otherModels)
+                            .transition(.opacity)
                     }
                 }
-                .transition(.opacity)
             }
         }
         // The buttons come with the notice's turn to be the last thing in the chat (and go when something follows): the
         // transition was there, the trigger was not (§2.13).
-        .motion(Motion.content, value: NoticeAction.showsButtons(actions: actions, offers: offersActions))
+        .motion(Motion.content, value: showsButtons)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 4)
         .alignedWithReplyText()
@@ -1276,6 +1307,63 @@ private struct NoticeLine: View {
             Task { hasProposal = await model.hasSkillProposal(slug, of: botID) }
         }) { draft in
             SkillEditor(skill: draft.skill, proposal: draft)
+        }
+    }
+
+    /// Something kept or proposed for you (a memory, a skill): a card with its symbol and its buttons beside the words, or
+    /// under them when they do not fit. Once decided it has no button left, and its words go quiet.
+    private func offer(actions: [NoticeAction], showsButtons: Bool) -> some View {
+        let symbol = NoticeAction.actions(for: text).first?.symbol ?? "sparkles"
+        let words = HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: symbol)
+                .font(.system(size: 11))
+                .foregroundStyle(showsButtons ? Palette.accentText : Palette.faint)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(.system(size: 12))
+                .foregroundStyle(showsButtons ? Palette.muted : Palette.faint)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                words.fixedSize()
+                if showsButtons { buttons(actions, otherModels: []).transition(.opacity) }
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                words
+                if showsButtons { buttons(actions, otherModels: []).transition(.opacity) }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.primary.opacity(0.05), in: .rect(cornerRadius: 12))
+    }
+
+    private func buttons(_ actions: [NoticeAction], otherModels: [(ref: String, name: String, provider: String)]) -> some View {
+        HStack(spacing: 8) {
+            ForEach(actions, id: \.self) { action in
+                if action == .otherModel {
+                    Menu {
+                        ForEach(otherModels, id: \.ref) { other in
+                            Button("\(other.name) · \(other.provider)") { model.retryLastTurn(botID, model: ModelRef(other.ref)) }
+                        }
+                    } label: {
+                        Label(action.title, systemImage: action.symbol)
+                    }
+                    .menuStyle(.button)
+                    .menuIndicator(.hidden)
+                    .buttonStyle(NoticeActionStyle(prominent: false))
+                    .fixedSize()
+                    .help(action.help)
+                } else {
+                    Button { perform(action) } label: {
+                        Label(action.title, systemImage: action.symbol)
+                    }
+                    .buttonStyle(NoticeActionStyle(prominent: action == actions.first))
+                    .help(action.help)
+                }
+            }
         }
     }
 

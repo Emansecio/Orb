@@ -11,16 +11,16 @@ enum TranscriptRowModel: Identifiable, Equatable {
     /// The Orb's actions one after another, with nothing said between them (two or more): "Rodou 7 comandos e leu 1
     /// arquivo", which opens into their lines. A permission card already answered goes with them.
     case tools([TranscriptItem])
-    /// The work of a finished request before its answer: what the Orb said while it worked and its actions, on one line
-    /// ("Trabalhou por 1 min 05 s · rodou 11 comandos e leu 1 arquivo"), with how long the request took (whole seconds).
-    case work([TranscriptItem], seconds: Int?)
+    /// The work of a request on one line ("Trabalhou por 1 min 05 s · 12 ações"): before its answer, before the notice it
+    /// ended on (stopped, failed, the app closed), or, while it runs, what it did so far. `seconds`: how long it took.
+    case work([TranscriptItem], seconds: Int?, outcome: WorkOutcome = .answered)
 
     /// The id of the first item: it stays the same while the row grows, so its expanded state survives. Read for every row
     /// each time the list compares its rows, so a lone item is not put in an array for it.
     var id: UUID {
         switch self {
         case .single(let item): item.id
-        case .events(_, let items), .exchange(let items), .tools(let items), .work(let items, _): items[0].id
+        case .events(_, let items), .exchange(let items), .tools(let items), .work(let items, _, _): items[0].id
         }
     }
 
@@ -28,7 +28,7 @@ enum TranscriptRowModel: Identifiable, Equatable {
     var span: (start: Date, end: Date) {
         switch self {
         case .single(let item): (item.date, item.date)
-        case .events(_, let items), .exchange(let items), .tools(let items), .work(let items, _):
+        case .events(_, let items), .exchange(let items), .tools(let items), .work(let items, _, _):
             (items[0].date, items.lazy.map(\.date).max() ?? items[0].date)
         }
     }
@@ -37,7 +37,39 @@ enum TranscriptRowModel: Identifiable, Equatable {
     var items: [TranscriptItem] {
         switch self {
         case .single(let item): [item]
-        case .events(_, let items), .exchange(let items), .tools(let items), .work(let items, _): items
+        case .events(_, let items), .exchange(let items), .tools(let items), .work(let items, _, _): items
+        }
+    }
+}
+
+/// How a request's work ended, as its folded line says it ("Trabalhou por…", "Interrompido após…").
+enum WorkOutcome: Equatable, Sendable {
+    /// It ended with the Orb's answer.
+    case answered
+    /// It still runs: the line folds what it did so far.
+    case running
+    /// You stopped it ("Parar").
+    case stopped
+    /// The app closed in the middle of it.
+    case appClosed
+    /// It failed ("Não deu certo: …").
+    case failed
+    /// The engine paused it after its steps ("Pausei depois de…").
+    case paused
+
+    /// The way a request without an answer ended, read from the notice it ended on; nil for any other item.
+    init?(ending item: TranscriptItem) {
+        guard case .notice(let text) = item.kind else { return nil }
+        if text == BotSession.quitNotice || text == BotSession.quitSideNotice {
+            self = .appClosed
+        } else if text == BotSession.stoppedNotice {
+            self = .stopped
+        } else if text.hasPrefix(NoticeAction.failurePrefix) {
+            self = .failed
+        } else if text.hasPrefix(NoticeAction.pausePrefix) {
+            self = .paused
+        } else {
+            return nil
         }
     }
 }
@@ -61,21 +93,28 @@ enum TranscriptFolding {
     /// - adjacent actions (`.tool`, and the permission cards already answered among them) become one row of actions;
     ///   anything else between them (a word of the Orb, a card that needs you, a notice) ends it, and so does `boundary`
     ///   (the end of what a compaction folded: a row is all folded or not);
-    /// - a finished request's work before its answer becomes one row (`workStretches`); the notices in it come right after
-    ///   that row, so none is hidden. `liveTail`: the last request is still running, and stays as it is;
+    /// - a request's work becomes one row (`workStretches`); the notices in it come right after that row, so none is hidden.
+    ///   The notice a request ended on goes inside it (its line says how it ended), unless it is the chat's last item, where
+    ///   its buttons are;
     /// - the action that sent a message between Orbs, next to it, has no row (`sendsMessage`);
     /// - a lone item stays as it is.
-    static func rows(for items: [TranscriptItem], boundary: Int = 0, liveTail: Bool = false) -> [TranscriptRowModel] {
+    /// `foldsWork`: false for the items of a work row, opened (they end on the notice that folded them).
+    static func rows(for items: [TranscriptItem], boundary: Int = 0, liveTail: Bool = false,
+                     foldsWork: Bool = true) -> [TranscriptRowModel] {
         var rows: [TranscriptRowModel] = []
         rows.reserveCapacity(items.count)
-        let stretches = workStretches(items, boundary: boundary, liveTail: liveTail)
+        let stretches = foldsWork ? workStretches(items, boundary: boundary, liveTail: liveTail) : [:]
         var index = 0
         while index < items.count {
             if let stretch = stretches[index] {
                 let inside = items[stretch.range]
-                rows.append(.work(inside.filter { !isNotice($0) }, seconds: stretch.seconds))
+                var work = inside.filter { !isNotice($0) }
+                let ending = stretch.ending.map { items[$0] }
+                if let ending, stretch.ending != items.count - 1 { work.append(ending) }
+                rows.append(.work(work, seconds: stretch.seconds, outcome: stretch.outcome))
                 rows += inside.filter(isNotice).map { TranscriptRowModel.single($0) }
-                index = stretch.range.upperBound
+                if let ending, stretch.ending == items.count - 1 { rows.append(.single(ending)) }
+                index = stretch.ending.map { $0 + 1 } ?? stretch.range.upperBound
                 continue
             }
             if sendsMessage(items, at: index) {
@@ -158,15 +197,21 @@ enum TranscriptFolding {
         }
     }
 
-    /// The work of one finished request, from the item after your message to the one before the Orb's answer.
+    /// The work of one request, from the item after your message to the one before its answer (or before the notice it
+    /// ended on, `ending`; or, while it runs, to its last action).
     struct WorkStretch: Equatable {
         var range: Range<Int>
         var seconds: Int?
+        var outcome: WorkOutcome = .answered
+        /// The index of the notice the request ended on, when it ended without an answer.
+        var ending: Int?
     }
 
     /// The stretches that fold into a work row, by their first index. A request (what follows a message of yours, to
     /// the next one) folds its work when:
-    /// - it ended with the Orb's answer (its last words, with no action after them), and is not `liveTail`'s;
+    /// - it ended with the Orb's answer (its last words, with no action after them); or with no answer, on a notice that
+    ///   says how it ended (`WorkOutcome.init(ending:)`); or it is `liveTail`'s, which folds what it did up to its last
+    ///   action (the words it says after that, and a card that waits, stay in view);
     /// - its work holds only words of the Orb, actions, answered cards and notices (an exchange with other Orbs, a card
     ///   that waits, a message of yours stay in view, and a message you sent during the task splits the request);
     /// - it would otherwise take two rows or more (a single run of actions is one line already);
@@ -177,20 +222,50 @@ enum TranscriptFolding {
         while start < items.count {
             let end = items[start...].firstIndex { if case .user = $0.kind { true } else { false } } ?? items.count
             defer { start = end + 1 }
-            guard !(end == items.count && liveTail),
-                  let answer = items[start..<end].lastIndex(where: { if case .bot = $0.kind { true } else { false } }),
-                  answer > start,
-                  !items[(answer + 1)..<end].contains(where: isToolLine),
-                  !(start < boundary && boundary < answer) else { continue }
-            let work = items[start..<answer]
-            guard work.contains(where: isToolLine), work.allSatisfy(foldsIntoWork) else { continue }
-            let shown = work.filter { !isNotice($0) }
-            guard rows(for: shown).count >= 2 else { continue }
-            let began = start > 0 ? items[start - 1].date : items[start].date
-            let seconds = Int(items[answer].date.timeIntervalSince(began).rounded())
-            stretches[start] = WorkStretch(range: start..<answer, seconds: seconds > 0 ? seconds : nil)
+            guard var stretch = stretch(in: items, start: start, end: end, live: end == items.count && liveTail),
+                  !(start < boundary && boundary < stretch.range.upperBound) else { continue }
+            let work = items[stretch.range]
+            guard work.contains(where: isToolLine), work.allSatisfy(foldsIntoWork),
+                  rows(for: work.filter { !isNotice($0) }, foldsWork: false).count >= 2 else { continue }
+            if stretch.outcome != .running {
+                // Up to the answer; without one, up to the last thing done (a notice that the app closed comes at the next
+                // launch, hours later).
+                let began = start > 0 ? items[start - 1].date : items[start].date
+                let ended = stretch.ending == nil ? items[stretch.range.upperBound].date : lastMoment(of: work)
+                let seconds = Int(ended.timeIntervalSince(began).rounded())
+                stretch.seconds = seconds > 0 ? seconds : nil
+            }
+            stretches[start] = stretch
         }
         return stretches
+    }
+
+    /// Where the work of the request `start..<end` ends and how, before the checks every stretch passes; nil when it does not
+    /// fold.
+    private static func stretch(in items: [TranscriptItem], start: Int, end: Int, live: Bool) -> WorkStretch? {
+        let request = items[start..<end]
+        if live {
+            let foldable = request.firstIndex { !foldsIntoWork($0) } ?? end
+            guard let last = items[start..<foldable].lastIndex(where: isToolLine) else { return nil }
+            return WorkStretch(range: start..<(last + 1), outcome: .running)
+        }
+        if let answer = request.lastIndex(where: { if case .bot = $0.kind { true } else { false } }), answer > start,
+           !items[(answer + 1)..<end].contains(where: isToolLine) {
+            return WorkStretch(range: start..<answer)
+        }
+        // No answer: the request ends on the notice that says why, with nothing done after it.
+        guard let ending = request.lastIndex(where: { WorkOutcome(ending: $0) != nil }), ending > start,
+              !items[(ending + 1)..<end].contains(where: isToolLine),
+              let outcome = WorkOutcome(ending: items[ending]) else { return nil }
+        return WorkStretch(range: start..<ending, outcome: outcome, ending: ending)
+    }
+
+    /// The last time something happened in `work`: an item's date, or an action's end.
+    private static func lastMoment(of work: ArraySlice<TranscriptItem>) -> Date {
+        work.reduce(work[work.startIndex].date) { latest, item in
+            if case .tool(let call) = item.kind, let finished = call.finishedAt { return max(latest, item.date, finished) }
+            return max(latest, item.date)
+        }
     }
 
     private static func foldsIntoWork(_ item: TranscriptItem) -> Bool {
