@@ -1,6 +1,6 @@
 import SwiftUI
 
-// The pieces the General tab folds with ("Modelo e modo", "Pode usar", "Navegar na web"): a row that opens and closes, its
+// The pieces the General tab folds with ("Modelo e permissões", "Pode usar", "Navegar na web"): a row that opens and closes, its
 // chevron, and the motion of what comes and goes. Which parts are open lives in `InspectorFold` (InspectorSupport.swift).
 
 enum FoldMotion {

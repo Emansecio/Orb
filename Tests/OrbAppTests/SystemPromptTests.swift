@@ -216,7 +216,7 @@ struct SystemPromptTests {
             #expect(!text.contains("Ler páginas da web") && !text.contains("Apps do Mac"), "an old name of a switch")
         }
         let readOnly = PromptParts.permissions(bot(mode: .readOnly))
-        #expect(readOnly.contains("Geral → Permissões → Modo") && readOnly.contains("permissions button next to the message box"))
+        #expect(readOnly.contains("Geral → Modelo e permissões → Permissões") && readOnly.contains("permissions button next to the message box"))
         let noMacApps = PromptParts.permissions(bot(capabilities: [.terminal]))
         #expect(noMacApps.contains("\"Controlar apps do Mac\"") && noMacApps.contains("Geral → \"Pode usar\""))
     }

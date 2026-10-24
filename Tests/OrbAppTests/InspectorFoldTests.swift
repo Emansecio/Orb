@@ -35,7 +35,7 @@ struct InspectorFoldTests {
         #expect(InspectorFold.spokenState(isOpen: false, summary: "3 de 4 ligadas") == "recolhido, 3 de 4 ligadas")
     }
 
-    // MARK: Modelo e modo
+    // MARK: Modelo e permissões
 
     @Test func theWarningMarkShowsForTheModeThatNeverAsksAndForAModelThatCannotAnswer() {
         for mode in PermissionMode.allCases where mode != .bypass {

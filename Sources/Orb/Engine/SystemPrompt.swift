@@ -46,8 +46,9 @@ enum PromptParts {
     }
 
     /// Where the user changes the permission mode, by the names the app really shows: the panel's "Geral" tab has a
-    /// "Permissões" section with a "Modo" menu, and the message box has a permissions button with the same four modes.
-    static let whereToChangeMode = "the permissions button next to the message box, or the Orb's panel (Geral → Permissões → Modo)"
+    /// "Modelo e permissões" card with a "Permissões" menu, and the message box has a permissions button with the same
+    /// four modes.
+    static let whereToChangeMode = "the permissions button next to the message box, or the Orb's panel (Geral → Modelo e permissões → Permissões)"
 
     /// Where the user turns a capability on, by the names the app really shows (`Capability.label` is the name of each
     /// switch). The section is titled after the Orb.

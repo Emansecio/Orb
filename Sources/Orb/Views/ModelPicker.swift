@@ -66,7 +66,7 @@ private struct SearchableModelField: View {
     var body: some View {
         LabeledContent(title) {
             Button { isOpen = true } label: {
-                // Looks like the pop-up button of a Picker in a Form (the "Esforço" and "Modo" rows beside it): the value
+                // Looks like the pop-up button of a Picker in a Form (the "Esforço" and "Permissões" rows beside it): the value
                 // in the same weight and color, and the chevron in the same small rounded box.
                 HStack(spacing: 6) {
                     Text(currentLabel).lineLimit(1).truncationMode(.middle)

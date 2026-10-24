@@ -361,7 +361,7 @@ struct OrbProposalCard: View {
                         draft.instructions = String(draft.instructions.prefix(OrbProposeTool.instructionsLimit))
                     }
                 }
-                .accessibilityLabel("Instruções do Orb")
+                .accessibilityLabel("Como funciona")
             Text("\(draft.instructions.count)/\(OrbProposeTool.instructionsLimit)")
                 .font(.system(size: 11))
                 .foregroundStyle(Palette.faint)
@@ -406,11 +406,11 @@ struct OrbProposalCard: View {
                 }
             }
             HStack(spacing: 8) {
-                Text("Modo")
+                Text("Permissões")
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.secondary)
                 if draft.allowedModes.count > 1 {
-                    Picker("Modo", selection: $draft.mode) {
+                    Picker("Permissões", selection: $draft.mode) {
                         ForEach(draft.allowedModes) { Text($0.label).tag($0) }
                     }
                     .pickerStyle(.segmented)
