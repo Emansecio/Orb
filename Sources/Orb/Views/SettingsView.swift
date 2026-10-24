@@ -511,23 +511,44 @@ enum SettingsSnapshots {
 struct LearnMoreNote: View {
     let short: String
     let more: String
+
+    var body: some View {
+        InlineLinkNote(text: short, link: "Saiba mais", hint: "Mostra mais detalhes", edge: .bottom) {
+            Text(more)
+                .font(.system(size: 12))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: 300, alignment: .leading)
+                .padding(12)
+        }
+        .font(.caption)
+    }
+}
+
+/// A sentence that ends in an accent-colored link, opening a popover. The link is a stretch of the same `Text` (so it
+/// wraps with the sentence in a narrow window), which a `Button(.link)` could not be; so the whole note takes the keyboard
+/// focus, and Return or Space open it, as a button would.
+struct InlineLinkNote<Detail: View>: View {
+    let text: String
+    let link: String
+    /// What VoiceOver says after the sentence.
+    let hint: String
+    var tip: String?
+    var edge: Edge = .top
+    @ViewBuilder let detail: () -> Detail
     @State private var isOpen = false
 
     var body: some View {
-        // The sentence and the link read as one run of text, the link wrapping with it when the window is narrow.
-        (Text(short + " ") + Text("Saiba mais").foregroundColor(.accentColor))
-            .font(.caption)
+        (Text(text + " ") + Text(link).foregroundColor(.accentColor))
             .fixedSize(horizontal: false, vertical: true)
             .contentShape(.rect)
             .onTapGesture { isOpen = true }
+            .focusable()
+            .onKeyPress(.return) { isOpen = true; return .handled }
+            .onKeyPress(.space) { isOpen = true; return .handled }
             .accessibilityAddTraits(.isButton)
-            .accessibilityHint("Mostra mais detalhes")
-            .popover(isPresented: $isOpen, arrowEdge: .bottom) {
-                Text(more)
-                    .font(.system(size: 12))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(width: 300, alignment: .leading)
-                    .padding(12)
-            }
+            .accessibilityHint(hint)
+            .accessibilityAction { isOpen = true }
+            .help(tip ?? "")
+            .popover(isPresented: $isOpen, arrowEdge: edge) { detail() }
     }
 }

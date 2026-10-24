@@ -14,7 +14,6 @@ struct MemoryTab: View {
     /// Opens the sheet with everything, on one kind when given.
     let showAll: (MemoryKind?) -> Void
     @State private var query = ""
-    @State private var isShowingHelp = false
     @State private var folded = FoldedTextCache()
 
     /// Rows per group in the panel; the sheet shows the rest.
@@ -83,15 +82,10 @@ struct MemoryTab: View {
                 VStack(alignment: .leading, spacing: 8) { memoryButtons(isEmpty: memory.items.isEmpty) }
             }
         } footer: { FormFootnote {
-            // The sentence and the link read as one run of text, as "Saiba mais" in Ajustes (`LearnMoreNote`).
-            (Text("Só \(name) vê isso. São arquivos .md na sua pasta de dados. ") + Text("Como funciona").foregroundColor(.accentColor))
-                .fixedSize(horizontal: false, vertical: true)
-                .contentShape(.rect)
-                .onTapGesture { isShowingHelp = true }
-                .accessibilityAddTraits(.isButton)
-                .accessibilityHint("Mostra como a memória funciona")
-                .help(Tip.memoryHow)
-                .popover(isPresented: $isShowingHelp, arrowEdge: .top) { MemoryHelp(name: name) }
+            InlineLinkNote(text: "Só \(name) vê isso. São arquivos .md na sua pasta de dados.", link: "Como funciona",
+                           hint: "Mostra como a memória funciona", tip: Tip.memoryHow) {
+                MemoryHelp(name: name)
+            }
         } }
     }
 }
@@ -183,7 +177,7 @@ private struct MemoryGroupHeader: View {
         HStack(spacing: 6) {
             Text(group.title)
             Text("\(group.items.count)")
-                .foregroundStyle(Palette.hint)
+                .foregroundStyle(Palette.faint)
                 .monospacedDigit()
         }
         .accessibilityElement(children: .combine)
