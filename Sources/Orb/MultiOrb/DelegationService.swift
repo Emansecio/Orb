@@ -37,6 +37,8 @@ protocol DelegationService: AnyObject {
 protocol GroupTurnHooks: AnyObject {
     /// The text that opens a member's turn ("pedido de vez": the group, the thread since its last turn, the board).
     func prompt(for request: DelegationRequest, member: UUID) async -> String
+    /// The pictures that go with that text (the person's message had them); asked right after `prompt`. The default has none.
+    func images(for request: DelegationRequest) -> [ImageAttachment]
     func turnStarted(_ request: DelegationRequest)
     func turnFinished(_ request: DelegationRequest, reply: String?, outcome: OrbEnvelope.ReplyStatus)
     // MARK: MultiOrb (WP5)
@@ -54,6 +56,7 @@ protocol GroupTurnHooks: AnyObject {
 // MARK: MultiOrb (WP5)
 // Optional parts of the contract: a class that conforms gets these when it does not write its own.
 extension GroupTurnHooks {
+    func images(for request: DelegationRequest) -> [ImageAttachment] { [] }
     func refusal(forRequestFrom asker: UUID, to member: UUID, chain: UUID) -> DelegationRefusal? { nil }
     func chainStopped(_ chainID: UUID) {}
     func noticePosted(_ envelope: OrbEnvelope) {}

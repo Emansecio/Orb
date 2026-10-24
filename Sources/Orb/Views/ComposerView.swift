@@ -514,17 +514,10 @@ struct ComposerView: View {
 
     /// Whether the clipboard held pictures and they were taken.
     private func pasteImages() -> Bool {
-        let board = NSPasteboard.general
-        let files = (board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
-        if files.contains(where: ImageProcessing.isImageFile) {
-            attach(files)
-            return true
+        AppModel.takePastedPictures(files: attach) { data in
+            model.attachPicture(to: botID) { try await $0.attach(data, name: "imagem colada", botID: $1) }
+            isFocused = true
         }
-        let hasText = board.types?.contains { [.string, .rtf].contains($0) } ?? false
-        guard files.isEmpty, !hasText, let data = board.data(forType: .png) ?? board.data(forType: .tiff) else { return false }
-        model.attachPicture(to: botID) { try await $0.attach(data, name: "imagem colada", botID: $1) }
-        isFocused = true
-        return true
     }
 
     private func send(delivery: SteeringDelivery = .steer) {
@@ -590,7 +583,7 @@ private struct CardParts: Equatable {
 }
 
 /// A picture waiting to be sent: its thumbnail with a remove button.
-private struct PictureChip: View {
+struct PictureChip: View {
     let image: ImageAttachment
     let onRemove: () -> Void
 
@@ -612,7 +605,7 @@ private struct PictureChip: View {
 
 /// The small round button that takes an attachment out. Its target is `size` pt (the symbol itself is smaller) and it
 /// gets the round hover fill the other composer buttons have; VoiceOver hears which attachment it removes.
-private struct RemoveButton: View {
+struct RemoveButton: View {
     let label: String
     let symbol: String
     var size: CGFloat = 24
@@ -650,7 +643,7 @@ private struct AttachmentChip: View {
 
 /// Pictures still being shrunk and saved: a tile the size of a thumbnail in the strip, so the paste or drop is seen to
 /// have worked and the strip does not change height when the picture takes its place.
-private struct PreparingChip: View {
+struct PreparingChip: View {
     let count: Int
 
     var body: some View {

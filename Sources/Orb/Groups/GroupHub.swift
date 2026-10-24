@@ -31,6 +31,8 @@ final class GroupHub: GroupTurnHooks {
     /// The person's messages a turn not yet started answers, by request (more than one when they wrote again before it began:
     /// `enqueue`). Its preface leaves them out of the thread.
     private var personTexts: [UUID: [String]] = [:]
+    /// The pictures that came with those messages, by request (paths only: the bytes are read once, when the member's turn is sent).
+    private var personImages: [UUID: [ImageAttachment]] = [:]
     /// How long after a turn ends the hub waits before deciding the request is over (the delegation hub may still be waking
     /// whoever asked).
     var settle: Duration = .milliseconds(80)
@@ -68,24 +70,27 @@ final class GroupHub: GroupTurnHooks {
     // MARK: The person's messages
 
     /// The person writes to the group. The message goes into the thread and reaches the orchestrator, or the members it
-    /// @mentions. Returns false when nothing was sent (no such group, an empty message, the app is resetting).
+    /// @mentions, with its pictures (the same ones to each, by path). Returns false when nothing was sent (no such group, a
+    /// message with neither text nor picture, more pictures than a message may carry, the app is resetting).
     @discardableResult
-    func postUserMessage(_ raw: String, to groupID: UUID) -> Bool {
-        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let model, !model.isResetting, !text.isEmpty, let group = model.group(groupID),
-              let session = model.groupSession(groupID) else { return false }
+    func postUserMessage(_ raw: String, images: [ImageAttachment] = [], to groupID: UUID) -> Bool {
+        let typed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let model, !model.isResetting, !typed.isEmpty || !images.isEmpty, images.count <= ImageProcessing.maxPerMessage,
+              let group = model.group(groupID), let session = model.groupSession(groupID) else { return false }
+        // What the members are asked when the message is only pictures, as in an Orb's chat.
+        let text = typed.isEmpty ? AppModel.attachmentsOnlyPrompt : typed
         let isNew = activeRun(groupID) == nil
         if isNew { runs[groupID] = .new(group: group, request: text, now: now()) }
-        session.append(.user(text: text, attachments: []))
+        session.append(.user(text: typed, attachments: images.map(\.path)))
         markRead(groupID)
-        var targets = Mentions.parse(text, members: group.memberIDs.map { reference($0) })
+        var targets = Mentions.parse(typed, members: group.memberIDs.map { reference($0) })
         if targets.isEmpty { targets = [group.orchestratorID] }
         let live = model.groupLive(groupID)
         if isNew {
             live.setRunState(.running)
             refreshLive(groupID)
         }
-        for member in targets { enqueue(member, text: text, in: groupID) }
+        for member in targets { enqueue(member, text: text, shown: typed, images: images, in: groupID) }
         return true
     }
 
@@ -121,12 +126,14 @@ final class GroupHub: GroupTurnHooks {
         return request
     }
 
-    /// Asks `member` for a turn on behalf of the person.
-    private func enqueue(_ member: UUID, text: String, in groupID: UUID) {
+    /// Asks `member` for a turn on behalf of the person. `shown` is the message as typed (empty for pictures alone): what the
+    /// thread has of it, so the preface can leave it out.
+    private func enqueue(_ member: UUID, text: String, shown: String, images: [ImageAttachment], in groupID: UUID) {
         guard let model, let run = activeRun(groupID), model.group(groupID)?.memberIDs.contains(member) == true else { return }
         // A message right after another, before the member's turn for it began, goes with it: one turn reads both.
         if let joined = delegation.joinQueuedGroupTurn(member: member, chainID: run.id, text: text) {
-            personTexts[joined.envelope.id, default: []].append(text)
+            personTexts[joined.envelope.id, default: []].append(shown)
+            if !images.isEmpty { personImages[joined.envelope.id, default: []] += images }
             return
         }
         let chain = ChainContext(chainID: run.id, hop: 1, path: [], groupID: groupID, serving: nil)
@@ -138,7 +145,8 @@ final class GroupHub: GroupTurnHooks {
             break
         default:
             runs[groupID]?.asked[request.envelope.id] = member
-            personTexts[request.envelope.id] = [text]
+            personTexts[request.envelope.id] = [shown]
+            if !images.isEmpty { personImages[request.envelope.id] = images }
         }
         scheduleIdleCheck(groupID)
     }
@@ -167,6 +175,12 @@ final class GroupHub: GroupTurnHooks {
                                          thread: thread, board: board))
     }
 
+    /// The pictures of the person's message(s) this turn answers. Not taken out: a turn put back in the queue because the
+    /// Orb was busy asks again, and must not lose them (`turnFinished` lets go).
+    func images(for request: DelegationRequest) -> [ImageAttachment] {
+        personImages[request.envelope.id] ?? []
+    }
+
     func turnStarted(_ request: DelegationRequest) {
         guard let (group, run) = lookup(request) else { return }
         let member = request.envelope.to.id
@@ -186,6 +200,7 @@ final class GroupHub: GroupTurnHooks {
         let member = request.envelope.to.id
         let fromUser = isFromUser(request, in: run)
         let interim = request.state == .awaitingChildren || !request.openChildren.isEmpty
+        personImages[request.envelope.id] = nil // the turn is over (or was cancelled before it began)
         if activeTurns[member]?.requestID == request.envelope.id { activeTurns[member] = nil }
         update(group.id) { run in
             run.running.removeAll { $0.request == request.envelope.id }
@@ -267,7 +282,11 @@ final class GroupHub: GroupTurnHooks {
         guard let model, let run = activeRun(groupID) else { return }
         let members = Set(run.running.map(\.member)).union(activeTurns.filter { $0.value.runID == run.id }.keys)
         runs[groupID]?.phase = .stopped
-        for id in run.asked.keys { personTexts[id] = nil } // the turns that did not begin will not
+        // The turns that did not begin will not.
+        for id in run.asked.keys {
+            personTexts[id] = nil
+            personImages[id] = nil
+        }
         runs[groupID]?.asked = [:]
         delegation.cancelChain(run.id, by: reason)
         for member in members {

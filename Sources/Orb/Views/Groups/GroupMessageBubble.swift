@@ -165,7 +165,8 @@ struct GroupMessageBubble: View {
 /// The person's message in a group's thread: the same bubble as everywhere in the app (the one that belongs to "Você").
 struct GroupUserBubble: View {
     let text: String
-    var attachmentCount = 0
+    /// The paths of the pictures that went with the message (as in an Orb's chat; empty for older threads).
+    var attachments: [String] = []
 
     var body: some View {
         HStack {
@@ -176,16 +177,20 @@ struct GroupUserBubble: View {
                     .foregroundStyle(Palette.muted)
                     .padding(.trailing, 4)
                     .accessibilityHidden(true)
-                Text(text)
-                    .font(Palette.conversationFont)
-                    .foregroundStyle(Palette.ink)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(Palette.userBubble, in: .rect(cornerRadius: 16))
-                    .accessibilityLabel("Você: \(text)")
-                    // Editing does not fit a group, which cannot go back; copying does.
-                    .contextMenu { Button("Copiar") { Clipboard.copy(text) } }
+                if !attachments.isEmpty { AttachmentStack(paths: attachments) }
+                // Pictures alone make a message with no text bubble.
+                if !text.isEmpty {
+                    Text(text)
+                        .font(Palette.conversationFont)
+                        .foregroundStyle(Palette.ink)
+                        .textSelection(.enabled)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(Palette.userBubble, in: .rect(cornerRadius: 16))
+                        .accessibilityLabel(TranscriptSpeech.user(text: text, attachmentCount: attachments.count))
+                        // Editing does not fit a group, which cannot go back; copying does.
+                        .contextMenu { Button("Copiar") { Clipboard.copy(text) } }
+                }
             }
         }
     }

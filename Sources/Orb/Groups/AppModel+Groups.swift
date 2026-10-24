@@ -231,6 +231,9 @@ extension AppModel {
         groupSessions[group.id]?.discard()
         groupSessions[group.id] = nil
         groupLives[group.id] = nil
+        groupLanes[group.id] = nil
+        let pictures = images, groupID = group.id
+        Task.detached(priority: .utility) { pictures.deleteAll(for: groupID) } // the thread's and the draft's pictures go with it
         forgottenGroupNotes[group.id] = nil
         store.deleteGroupConversation(group: group.id)
         memory.deleteGroup(group.id)
@@ -240,9 +243,16 @@ extension AppModel {
 
     // MARK: Talking to a group
 
-    /// The person writes to the group (see `GroupHub.postUserMessage`).
+    /// The person writes to the group (see `GroupHub.postUserMessage`), with the pictures waiting in its composer. They leave
+    /// the composer only once the message is in the thread: when nothing was sent they stay.
     @discardableResult
-    func postUserMessage(_ text: String, to groupID: UUID) -> Bool { groupHub.postUserMessage(text, to: groupID) }
+    func postUserMessage(_ text: String, to groupID: UUID) -> Bool {
+        let lane = groupLanes[groupID]
+        let sending = lane?.pictures ?? []
+        guard groupHub.postUserMessage(text, images: sending, to: groupID) else { return false }
+        lane?.pictures.removeAll { sending.contains($0) }
+        return true
+    }
 
     /// "Parar grupo" and ⌘.: everything the group is doing stops.
     func stopGroup(_ groupID: UUID) { groupHub.stopGroup(groupID) }

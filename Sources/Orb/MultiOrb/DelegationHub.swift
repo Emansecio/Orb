@@ -234,6 +234,7 @@ final class DelegationHub: DelegationService {
             // The group's runtime writes the preface (the group, the thread since this Orb last spoke, the board); the request follows:
             // an assignment from another Orb as a request, the person's own message as it was typed.
             let preface = await self.groupHooks?.prompt(for: request, member: botID) ?? ""
+            let pictures = self.groupHooks?.images(for: request) ?? []
             let envelope = request.envelope
             let body = envelope.from.id == envelope.to.id && !envelope.fromChat ? envelope.text : OrbEnvelopeText.request(envelope)
             let prompt = preface.isEmpty ? body : preface + "\n\n" + body
@@ -252,7 +253,8 @@ final class DelegationHub: DelegationService {
             }
             model.addNotice(AppModel.labeled(read.notice, for: model.bot(botID)))
             let conversation = read.value?.closingInterruptedTurn(notice: BotSession.quitSideNotice) ?? Conversation()
-            if !self.startRun(current, conversation: conversation, text: prompt, origin: .orb(current.envelope), resuming: false) {
+            if !self.startRun(current, conversation: conversation, text: prompt, origin: .orb(current.envelope), resuming: false,
+                              images: pictures) {
                 self.schedulePump(botID)
             }
         }
@@ -262,7 +264,7 @@ final class DelegationHub: DelegationService {
     /// conversation shows it. False when the turn could not begin (the request then failed and its asker was told).
     @discardableResult
     private func startRun(_ request: DelegationRequest, conversation: Conversation, text: String, origin: SendOrigin,
-                          resuming: Bool) -> Bool {
+                          resuming: Bool, images: [ImageAttachment] = []) -> Bool {
         guard let model else { return false }
         let envelope = request.envelope
         let botID = envelope.to.id
@@ -281,7 +283,7 @@ final class DelegationHub: DelegationService {
         waitingSince[envelope.id] = nil
         chainStates[envelope.chainID]?.touched = .now
         if kind == .group { groupHooks?.turnStarted(running) }
-        guard model.send(text, to: botID, origin: origin) else {
+        guard model.send(text, images: images, to: botID, origin: origin) else {
             session.endSideRun()
             session.scheduleSave(delay: 0)
             fail(running, "Não consegui começar: confira o modelo em Ajustes")

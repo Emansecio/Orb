@@ -183,7 +183,8 @@ private struct Midnights: TimelineSchedule {
 }
 
 /// What the chat shows while files are dragged over it: where they go, before they are let go.
-private struct ChatDropOverlay: View {
+struct ChatDropOverlay: View {
+    var detail = "Arquivos e imagens vão com a sua próxima mensagem"
     var body: some View {
         VStack(spacing: 8) {
             Image(systemName: "arrow.down.doc")
@@ -192,7 +193,7 @@ private struct ChatDropOverlay: View {
             Text("Solte para anexar")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(Palette.ink)
-            Text("Arquivos e imagens vão com a sua próxima mensagem")
+            Text(detail)
                 .font(.system(size: 12))
                 .foregroundStyle(Palette.muted)
         }

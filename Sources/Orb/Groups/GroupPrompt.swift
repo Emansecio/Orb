@@ -97,12 +97,14 @@ enum GroupThread {
         var kept: [String] = []
         for item in items.reversed() {
             switch item.kind {
-            case .user(let text, _):
+            case .user(let text, let attachments):
                 if let index = toSkip.firstIndex(of: text.trimmingCharacters(in: .whitespacesAndNewlines)) {
                     toSkip.remove(at: index)
                     continue
                 }
-                kept.append("[Você] " + MemoryText.clip(text, itemLimit))
+                // Only the paths: a member who was not sent the pictures can open one with its tools if the task needs it.
+                let pictures = attachments.map { "\n[imagem anexada: \($0)]" }.joined()
+                kept.append("[Você] " + MemoryText.clip(text, itemLimit) + pictures)
             case .orbMessage(let message) where message.direction == .post:
                 if message.from.id == member { continue }
                 if let request, message.requestID == request, message.kind == .ask { continue }

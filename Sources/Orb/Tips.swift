@@ -11,6 +11,7 @@ enum Tip {
     // MARK: Attachments
 
     static let attach = "Anexa arquivos ou escolhe uma skill; também dá para soltar arquivos ou digitar /"
+    static let attachPictures = "Anexa imagens; também dá para colar ou soltar imagens na conversa"
     static let removeAttachment = "Tira o anexo desta mensagem"
     static let previewAttachment = "Abre a pré-visualização (Quick Look); arraste para levar o arquivo"
     static let previewImage = "Abre a imagem em pré-visualização (Quick Look)"
@@ -323,7 +324,7 @@ enum Tip {
     /// than one sentence or longer than 90 characters: `cronExpression`, `sendToBackground` and `answerQuestion`.
     /// (A test reads this file and fails for any other tip that is not listed.)
     static var all: [String] {
-        [attach, removeAttachment, previewAttachment, previewImage, missingAttachment, moreAttachments,
+        [attach, attachPictures, removeAttachment, previewAttachment, previewImage, missingAttachment, moreAttachments,
          manageGrants, adjustContext, chooseModel, forgetWindow, suggestion, routineIdea, queueAfterTask, steerNow,
          newRoutine, editRoutine, deleteRoutine, runRoutineNow, runRoutineAgain, queuedRoutine, routineConversation,
          copyReport, openReportFile, runOnceNow, routinePermissions, allRoutines,

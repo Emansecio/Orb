@@ -68,6 +68,9 @@ private struct GroupConversation: View {
     let group: OrbGroup
     let session: GroupSession
     let live: GroupLive
+    /// Pictures are being dragged over the chat: anywhere on it, they join the next message.
+    @State private var isDropTargeted = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let looks = model.groupLooks(group)
@@ -76,7 +79,7 @@ private struct GroupConversation: View {
             GroupThreadView(group: group, transcript: session.transcript)
             GroupApprovalBar(live: live)
             GroupPresenceBar(group: group, live: live)
-            GroupComposer(names: looks.map(\.name), looks: looks,
+            GroupComposer(groupID: group.id, lane: model.groupLane(group.id), names: looks.map(\.name), looks: looks,
                           text: Binding(get: { model.draftText(group.id) },
                                         set: { model.setDraft($0, for: group.id) })) { message in
                 model.postUserMessage(message, to: group.id)
@@ -85,6 +88,11 @@ private struct GroupConversation: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.canvas)
+        .overlay {
+            ZStack { if isDropTargeted { ChatDropOverlay(detail: "Imagens vão com a sua próxima mensagem") } }
+                .animation(reduceMotion ? nil : Motion.hover(isDropTargeted), value: isDropTargeted)
+        }
+        .onDrop(of: AppModel.droppableTypes, isTargeted: $isDropTargeted) { model.attachDropped($0, toGroup: group.id) }
     }
 }
 
@@ -295,7 +303,7 @@ private struct GroupRow: View, Equatable {
     var body: some View {
         switch item.kind {
         case .user(let text, let attachments):
-            GroupUserBubble(text: text, attachmentCount: attachments.count)
+            GroupUserBubble(text: text, attachments: attachments)
         case .orbMessage(let message):
             if GroupRow.isAnswer(message) {
                 GroupMessageBubble(message: message, look: look,

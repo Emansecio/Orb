@@ -162,9 +162,9 @@ extension AppModel {
             let draft = ComposerDraft(text: drafts[bot.id] ?? "", files: lane?.files.map(\.url.path) ?? [], pictures: lane?.pictures ?? [])
             if !draft.isEmpty { result[bot.id] = draft }
         }
-        // A group's composer has only text, kept under the group's id.
+        // A group's composer has text and pictures, kept under the group's id.
         for group in groups {
-            let draft = ComposerDraft(text: drafts[group.id] ?? "")
+            let draft = ComposerDraft(text: drafts[group.id] ?? "", pictures: groupLanes[group.id]?.pictures ?? [])
             if !draft.isEmpty { result[group.id] = draft }
         }
         return result
@@ -181,7 +181,9 @@ extension AppModel {
             lane.attachExisting(files: draft.files, pictures: draft.pictures)
         }
         for group in groups {
-            if let text = saved[group.id]?.text, !text.isEmpty { drafts[group.id] = text }
+            guard let draft = saved[group.id] else { continue }
+            if !draft.text.isEmpty { drafts[group.id] = draft.text }
+            if !draft.pictures.isEmpty { groupLane(group.id).attachExisting(files: [], pictures: draft.pictures) }
         }
     }
 

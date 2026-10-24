@@ -30,6 +30,8 @@ final class AppModel {
     /// A group's thread and its live state, made when the group is first opened.
     @ObservationIgnored var groupSessions: [UUID: GroupSession] = [:]
     @ObservationIgnored var groupLives: [UUID: GroupLive] = [:]
+    /// The pictures waiting in each group's composer. Kept here, not in the thread's session, which is let go of when idle.
+    @ObservationIgnored var groupLanes: [UUID: ComposerLane] = [:]
     /// The "Novo grupo" sheet is open, and the Orb it starts with ("Criar grupo com…", the Orb's menu). (WP6)
     var showNewGroup = false
     var newGroupStart: UUID?
