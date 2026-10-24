@@ -234,4 +234,15 @@ import Testing
         #expect(NewBotSheet.finalRole(" \n ") == "Assistente pessoal")
         #expect(NewBotSheet.finalRole(" Cuida da agenda ") == "Cuida da agenda")
     }
+
+    @MainActor @Test func aNameThatWasNotKeptAsTypedSaysWhy() {
+        #expect(NameCheck.problem("Atlas") == nil)
+        #expect(NameCheck.problem("  Atlas  ") == nil)
+        #expect(NameCheck.problem("") == "O nome não pode ficar vazio")
+        #expect(NameCheck.problem(" \n ") == "O nome não pode ficar vazio")
+        #expect(NameCheck.problem(String(repeating: "a", count: AppModel.nameLimit)) == nil)
+        #expect(NameCheck.problem(String(repeating: "a", count: AppModel.nameLimit + 1)) == "Até \(AppModel.nameLimit) caracteres")
+        // Blanks around the name do not count against the limit (`clippedName` trims first).
+        #expect(NameCheck.problem("  " + String(repeating: "a", count: AppModel.nameLimit) + "  ") == nil)
+    }
 }

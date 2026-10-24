@@ -8,6 +8,10 @@ struct BotInspector: View {
     let botID: UUID
     @State private var tab: InspectorTab
     @State private var isEditingOrb = false
+    /// "Renomear…" in the sidebar's menu: the header takes it and puts the cursor in the name.
+    @State private var isFocusingName = false
+    /// The look the appearance sheet opened with, for "Desfazer mudanças" (the editor saves as it goes).
+    @State private var orbAtOpen: OrbConfig?
     @State private var isPickingFolder = false
     @State private var isConfirmingBypass = false
     @State private var isShowingBypassInfo = false
@@ -153,6 +157,15 @@ struct BotInspector: View {
                 VStack(spacing: 0) {
                     OrbEditor(config: binding(\.orb, of: bot), name: bot.name)
                     SheetFooterBar {
+                        let hasChanged = orbAtOpen.map { $0 != bot.orb } ?? false
+                        Button("Desfazer mudanças") {
+                            if let orbAtOpen { model.update(bot.id) { $0.orb = orbAtOpen } }
+                        }
+                        .buttonStyle(GhostStyle())
+                        .hangsOnLeadingEdge()
+                        .disabled(!hasChanged)
+                        .opacity(hasChanged ? 1 : 0.4)
+                        .help("Volta à aparência de quando esta janela abriu")
                         Spacer()
                         Button("Pronto") { isEditingOrb = false }
                             .buttonStyle(PrimaryPillStyle())
@@ -162,6 +175,7 @@ struct BotInspector: View {
                     .sheetSection(2)
                 }
                 .frame(width: 560, height: editorHeight)
+                .onAppear { orbAtOpen = bot.orb }
                 .registersOpenSheet()
             }
             .background(Palette.chrome)
@@ -192,6 +206,10 @@ struct BotInspector: View {
     /// permissions chip opens "Pasta e acessos", where the grants are).
     private func takeRequests() {
         if model.takeChatRequest(.editLook, of: botID) { isEditingOrb = true }
+        if model.takeChatRequest(.renameOrb, of: botID) {
+            tab = .general
+            isFocusingName = true
+        }
         if let requested = model.takeTabRequest(of: botID) { tab = requested }
     }
 
@@ -222,7 +240,7 @@ struct BotInspector: View {
         return HStack(alignment: .center, spacing: 12) {
             LiveBotAvatar(botID: bot.id, orb: bot.orb, size: 46, interactive: true, restsWhenIdle: true) // the only part that follows the activity
             VStack(alignment: .leading, spacing: 3) {
-                InspectorHeader(bot: bot)
+                InspectorHeader(bot: bot, focusName: $isFocusingName)
                     .id(bot.id)
                 HStack(alignment: .center, spacing: 6) {
                     Button("Personalizar…") {
@@ -287,7 +305,7 @@ struct BotInspector: View {
 
     // MARK: Geral
 
-    /// Two cards that each fold to one line ("Modelo e modo", "Pode usar"), then, under them, who made the Orb and the way
+    /// Two cards that each fold to one line ("Modelo e permissões", "Pode usar"), then, under them, who made the Orb and the way
     /// to delete it. A card with a problem (a model that cannot answer, a browser not ready) shows open until it is gone.
     @ViewBuilder
     private func generalTab(_ bot: Bot) -> some View {
@@ -299,7 +317,11 @@ struct BotInspector: View {
                                                              provider: bot.searchProvider, hasKey: searchKey)
         let capabilitiesAreOpen = InspectorFold.isOpen(stored: capabilitiesFoldOpen, hasProblem: browserHasProblem)
         modelCard(bot, info: info, unavailable: unavailable, isOpen: modelIsOpen)
-        capabilitiesCard(bot, isOpen: capabilitiesAreOpen, hasProblem: browserHasProblem)
+        // Read here, once per pass, and only for the open card that shows them.
+        let skillNames = capabilitiesAreOpen ? model.skills(for: bot.id).map(\.name) : []
+        let connectorNames = capabilitiesAreOpen ? model.connectorNames(for: bot.id) : []
+        capabilitiesCard(bot, isOpen: capabilitiesAreOpen, hasProblem: browserHasProblem,
+                         skillNames: skillNames, connectorNames: connectorNames)
     }
 
     /// A folding row's click: the part stores the other state (a part held open by a problem keeps what it had).
@@ -308,7 +330,7 @@ struct BotInspector: View {
         stored.wrappedValue = next // the height changes at once; what comes fades in (`foldContent`)
     }
 
-    // MARK: Modelo e modo
+    // MARK: Modelo e permissões
 
     /// Folded: one line with the model's name and, when something needs a look, a mark. Open: the model, its effort (when
     /// the model has levels) and the permission mode. The mode's description is the picker's hover text; only the mode that
@@ -318,7 +340,7 @@ struct BotInspector: View {
         let modelName = ModelCardSummary.modelText(selection: bot.model, defaultModel: model.defaultModel,
                                                    name: { model.modelName($0) })
         return Section {
-            FoldHeader(title: "Modelo e modo", isOpen: isOpen, tip: Tip.toggleModelCard(isOpen: isOpen),
+            FoldHeader(title: "Modelo e permissões", isOpen: isOpen, tip: Tip.toggleModelCard(isOpen: isOpen),
                        spokenSummary: [modelName, warning].compactMap { $0 }.joined(separator: ", "),
                        action: { toggleFold($modelFoldOpen, isOpen: isOpen, hasProblem: unavailable != nil) }) {
                 HStack(spacing: 6) {
@@ -339,7 +361,7 @@ struct BotInspector: View {
             if isOpen {
                 ModelPicker(selection: binding(\.model, of: bot))
                     .foldContent()
-                // A row like "Modo": only for a model whose catalog lists thinking levels.
+                // A row like "Permissões": only for a model whose catalog lists thinking levels.
                 if let levels = info?.efforts {
                     Picker("Esforço", selection: binding(\.effort, of: bot)) {
                         Text(ReasoningEffort.defaultLabel(for: info)).tag("")
@@ -358,7 +380,7 @@ struct BotInspector: View {
                         .textSwap(unavailable)
                         .foldContent()
                 }
-                Picker("Modo", selection: binding(\.permissionMode, of: bot).confirmingBypass {
+                Picker("Permissões", selection: binding(\.permissionMode, of: bot).confirmingBypass {
                     isConfirmingBypass = true
                 }) {
                     ForEach(PermissionMode.allCases) { Text($0.label).tag($0) }
@@ -404,7 +426,8 @@ struct BotInspector: View {
     /// Folded: one line with a small icon for each thing the Orb may use, dimmed for what is off. Open: a switch row for
     /// each (the description is the row's hover text, the links sit after the title). Under the card, who made the Orb and
     /// "Apagar".
-    private func capabilitiesCard(_ bot: Bot, isOpen: Bool, hasProblem: Bool) -> some View {
+    private func capabilitiesCard(_ bot: Bot, isOpen: Bool, hasProblem: Bool, skillNames: [String],
+                                  connectorNames: [String]) -> some View {
         let enabled = Capability.allCases.filter { bot.capabilities.contains($0) }.count
         return Section {
             FoldHeader(title: "Pode usar", isOpen: isOpen, tip: Tip.toggleCapabilities(isOpen: isOpen),
@@ -415,6 +438,13 @@ struct BotInspector: View {
             if isOpen {
                 ForEach(Capability.allCases) { capability in
                     capabilityRow(capability, of: bot)
+                }
+                // What the Orb gets from the catalog pages, read only: which ones, and the way to change them.
+                if !skillNames.isEmpty {
+                    scopeNote("Skills", names: skillNames, tip: Tip.skillsPage) { model.selection = .skills }
+                }
+                if !connectorNames.isEmpty {
+                    scopeNote("Conectores", names: connectorNames, tip: Tip.manageConnectors) { model.selection = .connectors }
                 }
             }
         } footer: {
@@ -477,6 +507,26 @@ struct BotInspector: View {
         case .terminal, .browser:
             EmptyView()
         }
+    }
+
+    /// "Skills: Resumir e Traduzir" with "Gerenciar" after it, in the quiet text of the links above. Cut in a narrow
+    /// panel, the whole list is the hover text.
+    private func scopeNote(_ title: String, names: [String], tip: String, action: @escaping () -> Void) -> some View {
+        HStack(spacing: 4) {
+            Text("\(title): \(OrbScopeText.list(names, limit: 3))")
+                .foregroundStyle(Palette.muted)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .help(names.joined(separator: ", "))
+            Text("·").foregroundStyle(Palette.faint).accessibilityHidden(true)
+            Button("Gerenciar", action: action)
+                .buttonStyle(.link)
+                .fixedSize()
+                .help(tip)
+                .accessibilityLabel("Gerenciar \(title.lowercased())")
+        }
+        .font(.caption)
+        .foldContent()
     }
 
     private func inlineLink(_ title: String, tip: String, action: @escaping () -> Void) -> some View {
@@ -857,16 +907,21 @@ private struct InspectorTabBar: View {
 private struct InspectorHeader: View {
     @Environment(AppModel.self) private var model
     let bot: Bot
+    /// Set by the panel to ask for the cursor in the name; the header puts it there and clears it.
+    @Binding var focusName: Bool
     @State private var name: String
     @State private var role: String
     @FocusState private var focus: Field?
     /// The role's field is on screen (from the click on the text until the focus leaves it).
     @State private var isEditingRole = false
+    /// Why the name was not kept as typed (blank, or cut at the limit): shown under the field for a few seconds.
+    @State private var nameProblem: String?
 
     private enum Field { case name, role }
 
-    init(bot: Bot) {
+    init(bot: Bot, focusName: Binding<Bool>) {
         self.bot = bot
+        _focusName = focusName
         _name = State(initialValue: bot.name)
         _role = State(initialValue: bot.role)
     }
@@ -882,6 +937,12 @@ private struct InspectorHeader: View {
                     focus = nil
                     return .handled
                 }
+            if let nameProblem {
+                Text(nameProblem)
+                    .font(.caption)
+                    .foregroundStyle(Palette.warn)
+                    .transition(.quiet)
+            }
             // At rest the role is one line, ending in "…" when it is longer (all of it in the hover text); a click opens the
             // field, which grows with what is typed. (A one-line field would show its own first line and scroll the rest away.)
             if isEditingRole {
@@ -922,18 +983,33 @@ private struct InspectorHeader: View {
                 if new != .role { isEditingRole = false }
             }
         }
+        // Typing again (the commit itself rewrites `name` while the field is not focused) takes the note away.
+        .onChange(of: name) { if focus == .name { nameProblem = nil } }
+        .task(id: nameProblem) {
+            guard nameProblem != nil, (try? await Task.sleep(for: .seconds(5))) != nil else { return }
+            nameProblem = nil
+        }
+        .onChange(of: focusName) {
+            guard focusName else { return }
+            focusName = false
+            focus = .name
+        }
         .onChange(of: bot.name) { _, new in if focus != .name { name = new } }
         .onChange(of: bot.role) { _, new in if focus != .role { role = new } }
         // The view can go away with a field still focused (panel closed, another Orb chosen): nothing else saves it then.
         .onDisappear {
-            if name != bot.name { commitName() }
+            if name != bot.name { commitName(reporting: false) }
             if role != bot.role { commitRole() }
         }
     }
 
-    private func commitName() {
+    private func commitName(reporting: Bool = true) {
+        let problem = NameCheck.problem(name)
         if !model.rename(bot.id, to: name) { name = bot.name }
         else if let current = model.bot(bot.id) { name = current.name }
+        guard reporting, let problem else { return }
+        nameProblem = problem
+        AccessibilityNotification.Announcement(problem).post()
     }
 
     private func commitRole() {
@@ -1335,14 +1411,15 @@ private struct QuietTextStyle: ButtonStyle {
     }
 }
 
-/// "Apagar" at the end of the General tab: gray and small, red only with the pointer over it.
+/// "Apagar" at the end of the General tab: small and gray (as readable as the quiet links, it is the only way out), red only
+/// with the pointer over it.
 private struct QuietDeleteStyle: ButtonStyle {
     @State private var isHovering = false
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 12))
-            .foregroundStyle(configuration.isPressed || isHovering ? Palette.danger : Palette.faint)
+            .foregroundStyle(configuration.isPressed || isHovering ? Palette.danger : Palette.muted)
             .contentShape(Rectangle())
             .onHover { isHovering = $0 }
             .animation(Motion.hover(isHovering), value: isHovering)

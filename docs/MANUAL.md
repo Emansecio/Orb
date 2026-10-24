@@ -101,12 +101,12 @@ O **painel do Orb** (⌥⌘B mostra ou esconde) tem quatro abas:
 
 | Aba | O que tem |
 |---|---|
-| Geral | dois cartões que recolhem numa linha: "Modelo e modo" (modelo, esforço e o modo de permissões) e "Pode usar" (as chaves: Terminal e arquivos, Navegar na web com navegador e pesquisa, Controlar apps do Mac, Conectores); no fim, "Criado por" (de um Orb que outro criou) e "Apagar…". Começam fechados, o app lembra como você deixou, e um cartão com problema (modelo indisponível, navegador não pronto) aparece aberto até resolver |
+| Geral | dois cartões que recolhem numa linha: "Modelo e permissões" (modelo, esforço e o modo de permissões) e "Pode usar" (as chaves: Terminal e arquivos, Navegar na web com navegador e pesquisa, Controlar apps do Mac, Conectores), com a lista de skills e conectores do Orb no fim do cartão aberto e o link "Gerenciar" para a página de cada um; no fim, "Criado por" (de um Orb que outro criou) e "Apagar…". Começam fechados, o app lembra como você deixou, e um cartão com problema (modelo indisponível, navegador não pronto) aparece aberto até resolver |
 | Memória | o que o Orb sabe de você (veja [Memória](#memória)) |
 | Pasta e acessos | a pasta (abrir no Finder ou no Terminal, mudar, recriar se sumiu), "Confiar nas instruções desta pasta", as **Liberações** e os arquivos alterados e recentes |
 | Rotinas | as rotinas deste Orb: ativar e pausar, editar, apagar, rodar agora (veja [Rotinas](#rotinas)) |
 
-No alto do painel: nome e papel de uma linha (clique para editar; o papel inteiro aparece ao parar o ponteiro; mudar o nome não renomeia a pasta), "Personalizar…" (aparência), "Pasta"
+No alto do painel: nome e papel de uma linha (clique para editar; o papel inteiro aparece ao parar o ponteiro; mudar o nome não renomeia a pasta; um nome vazio ou acima de 60 caracteres avisa o motivo sob o campo; "Renomear…" no menu do Orb na lateral leva o cursor até ele), "Personalizar…" (aparência; a folha tem "Desfazer mudanças", que volta ao visual de quando ela abriu), "Pasta"
 e "Terminal". O painel se recolhe sozinho em janelas estreitas (menos de 1180 pt) e volta quando há espaço.
 
 As chaves de "Pode usar" desligam grupos inteiros de ferramentas para aquele Orb: sem **Terminal e arquivos** ele não roda
@@ -268,7 +268,7 @@ Se o navegador não estiver instalado, o Orb fica só com `web_fetch` e `web_sea
 
 ## Permissões
 
-Cada Orb tem um **modo** (botão no compositor, aba Geral do painel, ou ao criar). Ler e pesquisar não pergunta, em modo nenhum,
+Cada Orb tem um **modo** (botão no compositor, cartão **Modelo e permissões** na aba Geral do painel, ou ao criar). Ler e pesquisar não pergunta, em modo nenhum,
 com duas exceções: **chaves e senhas** (`~/.ssh`, `~/.aws`, `.env`, `*.pem`…) perguntam até no Automático e são recusadas no Só
 leitura; e comandos que só olham (`ls`, `git status`, `git log`, `cat`…) não pedem cartão no Perguntar antes e rodam no Só leitura.
 

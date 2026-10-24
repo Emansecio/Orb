@@ -449,6 +449,17 @@ import Testing
         #expect(model.takeChatRequest(.editLook, of: model.botIDs[1]))
     }
 
+    @Test @MainActor func nameEditorOpensThePanelOfThatOrb() {
+        let model = model()
+        model.showInspector = false
+        model.showNameEditor(of: model.botIDs[1])
+        #expect(model.showInspector)
+        #expect(model.selection == .bot(model.botIDs[1]))
+        #expect(!model.takeChatRequest(.renameOrb, of: model.botIDs[0]), "another Orb's panel does not take it")
+        #expect(model.takeChatRequest(.renameOrb, of: model.botIDs[1]))
+        #expect(!model.takeChatRequest(.renameOrb, of: model.botIDs[1]), "taken once")
+    }
+
     @Test @MainActor func menuCommandsWaitWhileASheetIsOpen() {
         let model = model()
         #expect(!model.hasOpenSheet)

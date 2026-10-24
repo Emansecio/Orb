@@ -5,13 +5,13 @@ import AppKit
 // Kept apart from AppModel.swift: small helpers that only use what the model already exposes.
 
 /// What a command asks of an Orb's chat: the cursor in the composer (⌘L), the list of earlier conversations (⌘Y,
-/// the sidebar's menu) or the appearance editor (the sidebar's "Personalizar…").
+/// the sidebar's menu), the appearance editor (the sidebar's "Personalizar…") or the name field (its "Renomear…").
 ///
 /// It is a request waiting in the model, not a notification: the chat of an Orb that was not open does not exist yet
 /// when the command runs, so a notification would be sent before anyone listens. The chat takes it in `onAppear` (it
 /// has just been created) and in `onChange` (it was already open).
 struct PendingChatRequest: Equatable {
-    enum Kind: Equatable { case focusComposer, editLook, findInConversation, showTab(InspectorTab) }
+    enum Kind: Equatable { case focusComposer, editLook, renameOrb, findInConversation, showTab(InspectorTab) }
     let kind: Kind
     let botID: UUID
 }
@@ -144,6 +144,12 @@ extension AppModel {
     func showLookEditor(of botID: UUID) {
         setInspector(true)
         request(.editLook, of: botID)
+    }
+
+    /// Opens the Orb with its panel, on the name field.
+    func showNameEditor(of botID: UUID) {
+        setInspector(true)
+        request(.renameOrb, of: botID)
     }
 
     /// Orb number `index` (0-based) in the sidebar's order, as ⌘1…⌘9 pick it.

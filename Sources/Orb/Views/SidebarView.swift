@@ -401,6 +401,7 @@ struct SidebarBotRow: View {
                     }
                 }
                 Button(CommandName.openFolder, systemImage: "folder") { model.openFolder(of: botID) }
+                Button("Renomear…", systemImage: "pencil") { model.showNameEditor(of: botID) }
                 Button("Personalizar…", systemImage: "paintpalette") { model.showLookEditor(of: botID) }
                 MoveToCategoryMenu(botID: botID)
                 // MARK: MultiOrb (WP6)

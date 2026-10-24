@@ -55,6 +55,17 @@ enum InspectorTabMemory {
     }
 }
 
+/// Why the name just typed was not kept as it is: `AppModel.rename` refuses a blank one and clips a long one without a
+/// word, and the header says which happened.
+@MainActor enum NameCheck {
+    static func problem(_ typed: String) -> String? {
+        let length = typed.trimmingCharacters(in: .whitespacesAndNewlines).count
+        if length == 0 { return "O nome não pode ficar vazio" }
+        if length > AppModel.nameLimit { return "Até \(AppModel.nameLimit) caracteres" }
+        return nil
+    }
+}
+
 /// How the panel talks about what the Orb may use. (What each switch does is its row's hover text: `Tip.capability`.)
 enum CapabilityCopy {
     /// The connectors row's line: how many are on, since the toggle alone does not say. `anyInstalled` tells "none
@@ -69,7 +80,7 @@ enum CapabilityCopy {
     }
 }
 
-/// The three folding parts of the General tab ("Modelo e modo", "Pode usar", and "Navegar na web" inside it). Each is open or
+/// The three folding parts of the General tab ("Modelo e permissões", "Pode usar", and "Navegar na web" inside it). Each is open or
 /// closed for the whole app (one stored flag each, closed by default), and a part with a problem shows open whatever was
 /// stored, for as long as the problem lasts: the person never has to unfold a card to learn that something is wrong.
 enum InspectorFold {
@@ -92,7 +103,7 @@ enum InspectorFold {
     }
 }
 
-/// The closed "Modelo e modo" row: the model's name, and a warning mark when the mode or the model needs a look.
+/// The closed "Modelo e permissões" row: the model's name, and a warning mark when the mode or the model needs a look.
 enum ModelCardSummary {
     /// The mode that never asks, said in one line (the whole warning is `PermissionMode.summary`).
     static let bypassLine = "Roda tudo sem perguntar"
