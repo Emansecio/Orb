@@ -211,6 +211,71 @@ import Testing
         #expect(entries.contains { $0.id == "new-bot" })
     }
 
+    /// Atlas has three conversations (the first, one about invoices, an empty new one); Luna has only her first.
+    private func entriesWithChats() -> (entries: [PaletteEntry], atlas: UUID, invoice: UUID) {
+        let atlas = BotLook(Bot(id: UUID(), name: "Atlas", role: "Assistente do seu Mac", orb: OrbConfig()))
+        let luna = BotLook(Bot(id: UUID(), name: "Luna", role: "Agenda", orb: OrbConfig()))
+        var chats = OrbChats(first: atlas.id, updated: .now)
+        let invoice = UUID()
+        chats.add(invoice, at: .now)
+        chats.rename(invoice, to: "Notas fiscais de março")
+        chats.add(UUID(), at: .now) // stays "Nova conversa"
+        let entries = PaletteBuilder.entries(orbs: [atlas, luna], current: atlas.id, routines: [], skills: [], chats: [atlas.id: chats])
+        return (entries, atlas.id, invoice)
+    }
+
+    @Test func conversationsShowOnlyWhenSomethingIsTyped() {
+        let (entries, atlas, invoice) = entriesWithChats()
+        #expect(!PaletteSearch.rank(entries, query: "").contains { $0.id.hasPrefix("chat-") })
+        #expect(!PaletteSearch.rank(entries, query: "   ").contains { $0.id.hasPrefix("chat-") })
+        let found = PaletteSearch.rank(entries, query: "fiscais")
+        #expect(found.map(\.action) == [.chat(invoice, of: atlas)])
+        #expect(found.first?.subtitle == "Atlas") // the Orb's name tells whose it is
+        // The Orb's name finds its conversations, after the Orb itself.
+        let byOrb = PaletteSearch.rank(entries, query: "atlas")
+        #expect(byOrb.first?.action == .bot(atlas))
+        #expect(byOrb.contains { $0.action == .chat(invoice, of: atlas) })
+    }
+
+    @Test func anEmptyNewConversationIsNotListed() {
+        let (entries, _, _) = entriesWithChats()
+        #expect(!entries.contains { $0.title == OrbChats.newTitle && $0.id.hasPrefix("chat-") })
+        #expect(entries.filter { $0.id.hasPrefix("chat-") }.count == 2) // "Primeira conversa" and the invoices one
+    }
+
+    @Test func groupsHaveTheirOwnSectionRightAfterTheOrbs() {
+        let atlas = BotLook(Bot(id: UUID(), name: "Atlas", role: "", orb: OrbConfig()))
+        let luna = BotLook(Bot(id: UUID(), name: "Luna", role: "", orb: OrbConfig()))
+        let group = OrbGroup(name: "Time", memberIDs: [atlas.id, luna.id], orchestratorID: atlas.id)
+        let entries = PaletteBuilder.entries(orbs: [atlas, luna], current: nil, routines: [], skills: [], groups: [group])
+        let groups = PaletteSearch.rank(entries, query: "").filter { $0.section == .groups }
+        #expect(groups.map(\.action) == [.group(group.id)])
+        #expect(PaletteEntry.Section.groups.title == "Grupos")
+        #expect(PaletteEntry.Section.orbs < .groups && PaletteEntry.Section.groups < .actions)
+    }
+
+    @Test func newGroupNeedsTwoOrbsAndSettingsIsListed() {
+        func ids(_ count: Int) -> [String] {
+            let orbs = (0..<count).map { BotLook(Bot(id: UUID(), name: "Orb \($0)", role: "", orb: OrbConfig())) }
+            return PaletteBuilder.entries(orbs: orbs, current: nil, routines: [], skills: []).map(\.id)
+        }
+        #expect(!ids(0).contains("new-group"))
+        #expect(!ids(1).contains("new-group"))
+        #expect(ids(2).contains("new-group"))
+        let settings = sample().first { $0.action == .settings }
+        #expect(settings?.title == "Ajustes")
+        #expect(settings?.shortcut == "⌘,")
+        #expect(PaletteSearch.rank(sample(), query: "preferencias").first?.action == .settings)
+    }
+
+    @Test func theShortcutsEntryAndNewCategoryUseTheirOwnWords() {
+        let entries = sample()
+        #expect(entries.first { $0.action == .shortcuts }?.shortcut == "⌘/")
+        // "pasta" belongs to the working folder only: it no longer finds "Nova categoria…".
+        #expect(!PaletteSearch.rank(entries, query: "pasta").contains { $0.action == .newCategory })
+        #expect(entries.first { $0.id == "folder" }?.subtitle == "Pasta de Atlas")
+    }
+
     // MARK: Menu bar panel
 
     @Test func batchPreviewListsThreeActionsAndCountsTheRest() {

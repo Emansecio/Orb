@@ -12,17 +12,21 @@ struct PaletteEntry: Identifiable, Equatable {
         case group(UUID), newGroup
         /// Names a new category of the sidebar.
         case newCategory
+        /// Ajustes, and one conversation (its id) of an Orb (the second id).
+        case settings
+        case chat(UUID, of: UUID)
     }
 
     /// The order of the groups when nothing was typed.
     enum Section: Int, Comparable {
-        case orbs, actions, workspace
+        case orbs, groups, actions, workspace
 
         static func < (a: Section, b: Section) -> Bool { a.rawValue < b.rawValue }
 
         var title: String {
             switch self {
             case .orbs: "Orbs"
+            case .groups: "Grupos"
             case .actions: "Ações"
             case .workspace: "Espaço de trabalho"
             }
@@ -38,6 +42,8 @@ struct PaletteEntry: Identifiable, Equatable {
     var action: Action
     /// Words that find the entry besides its title ("pasta" finds "Abrir pasta no Finder" and also "Finder").
     var keywords = ""
+    /// Only shows up when something is typed, so the first list does not swell (an Orb's conversations).
+    var searchOnly = false
     /// An Orb's look: its row shows its avatar, as the sidebar does, instead of `symbol`.
     var orb: OrbConfig? = nil
 }
@@ -63,7 +69,7 @@ enum PaletteSearch {
         let words = normalize(query).split(whereSeparator: \.isWhitespace).map(String.init)
         let indexed = entries.enumerated().map { (index: $0.offset, entry: $0.element) }
         guard !words.isEmpty else {
-            return indexed.sorted { ($0.entry.section, $0.index) < ($1.entry.section, $1.index) }.map(\.entry)
+            return indexed.filter { !$0.entry.searchOnly }.sorted { ($0.entry.section, $0.index) < ($1.entry.section, $1.index) }.map(\.entry)
         }
         var scored: [(score: Int, index: Int, entry: PaletteEntry)] = []
         for (index, entry) in indexed {
@@ -93,7 +99,7 @@ enum PaletteSearch {
 enum PaletteBuilder {
     /// Everything the palette can go to. `current` is the open Orb: the actions are its.
     static func entries(orbs: [BotLook], current: UUID?, routines: [Routine], skills: [Skill],
-                        groups: [OrbGroup] = []) -> [PaletteEntry] {
+                        groups: [OrbGroup] = [], chats: [UUID: OrbChats] = [:]) -> [PaletteEntry] {
         var list: [PaletteEntry] = []
         for (index, look) in orbs.enumerated() {
             list.append(PaletteEntry(id: "bot-\(look.id)", title: look.name, subtitle: look.role.isEmpty ? nil : look.role,
@@ -111,7 +117,7 @@ enum PaletteBuilder {
                                      section: .actions, shortcut: ShortcutCatalog.keys(for: .writeMessage), action: .focusComposer, keywords: "compositor campo focar digitar"))
             list.append(PaletteEntry(id: "find", title: CommandName.findInConversation, subtitle: name, symbol: "magnifyingglass",
                                      section: .actions, shortcut: ShortcutCatalog.keys(for: .find), action: .findInConversation, keywords: "procurar pesquisar texto mensagem"))
-            list.append(PaletteEntry(id: "folder", title: CommandName.openFolder, subtitle: "Pasta de trabalho\(suffix)", symbol: "folder",
+            list.append(PaletteEntry(id: "folder", title: CommandName.openFolder, subtitle: "Pasta\(suffix)", symbol: "folder",
                                      section: .actions, shortcut: ShortcutCatalog.keys(for: .openFolder), action: .openFolder, keywords: "finder arquivos"))
             list.append(PaletteEntry(id: "inspector", title: CommandName.toggleInspector, subtitle: nil, symbol: "sidebar.right",
                                      section: .actions, shortcut: ShortcutCatalog.keys(for: .toggleInspector), action: .toggleInspector,
@@ -120,15 +126,20 @@ enum PaletteBuilder {
         list.append(PaletteEntry(id: "new-bot", title: CommandName.newBot, subtitle: nil, symbol: "plus", section: .actions,
                                  shortcut: ShortcutCatalog.keys(for: .newBot), action: .newBot, keywords: "criar adicionar"))
         // MARK: MultiOrb (WP6)
-        list.append(PaletteEntry(id: "new-group", title: CommandName.newGroup, subtitle: "Orbs que trabalham juntos", symbol: "person.2",
-                                 section: .actions, shortcut: ShortcutCatalog.keys(for: .newGroup), action: .newGroup,
-                                 keywords: "grupo equipe orquestrador juntos"))
+        // A group needs two Orbs (the sidebar and the menu hold it back the same way).
+        if orbs.count >= 2 {
+            list.append(PaletteEntry(id: "new-group", title: CommandName.newGroup, subtitle: "Orbs que trabalham juntos", symbol: "person.2",
+                                     section: .actions, shortcut: ShortcutCatalog.keys(for: .newGroup), action: .newGroup,
+                                     keywords: "grupo equipe orquestrador juntos"))
+        }
         list.append(PaletteEntry(id: "new-category", title: CommandName.newCategory, subtitle: "Organizar Orbs na lista", symbol: "rectangle.stack",
-                                 section: .actions, shortcut: nil, action: .newCategory, keywords: "pasta seção organizar lateral projeto"))
+                                 section: .actions, shortcut: nil, action: .newCategory, keywords: "seção organizar lateral projeto"))
         list.append(PaletteEntry(id: "import-orb", title: CommandName.importOrb, subtitle: "Trazer o que outro assistente sabe", symbol: "square.and.arrow.down",
                                  section: .actions, shortcut: nil, action: .importOrb, keywords: "chatgpt gemini hermes openclaw memória migrar"))
         list.append(PaletteEntry(id: "shortcuts", title: CommandName.shortcuts, subtitle: nil, symbol: "keyboard", section: .actions,
-                                 shortcut: nil, action: .shortcuts, keywords: "ajuda teclas"))
+                                 shortcut: ShortcutCatalog.keys(for: .shortcuts), action: .shortcuts, keywords: "ajuda teclas"))
+        list.append(PaletteEntry(id: "settings", title: "Ajustes", subtitle: nil, symbol: "gearshape", section: .actions,
+                                 shortcut: ShortcutCatalog.keys(for: .settings), action: .settings, keywords: "preferências configurações"))
         list.append(PaletteEntry(id: "page-routines", title: CommandName.routines, subtitle: "Tarefas que rodam sozinhas", symbol: "clock.arrow.circlepath",
                                  section: .workspace, shortcut: ShortcutCatalog.keys(for: .routines), action: .page(.routines), keywords: "agendar horário"))
         list.append(PaletteEntry(id: "page-connectors", title: CommandName.connectors, subtitle: "Serviços que os Orbs podem usar", symbol: "point.3.filled.connected.trianglepath.dotted",
@@ -143,12 +154,20 @@ enum PaletteBuilder {
         for group in groups {
             list.append(PaletteEntry(id: "group-\(group.id)", title: "Grupo: \(group.name)",
                                      subtitle: group.memberIDs.count == 1 ? "1 Orb" : "\(group.memberIDs.count) Orbs",
-                                     symbol: "person.2.fill", section: .workspace, action: .group(group.id),
+                                     symbol: "person.2.fill", section: .groups, action: .group(group.id),
                                      keywords: "grupo equipe orquestrador"))
         }
         for skill in skills where skill.isEnabled {
             list.append(PaletteEntry(id: "skill-\(skill.id)", title: "Skill: \(skill.name)", subtitle: skill.summary.isEmpty ? "/\(skill.slug)" : skill.summary,
                                      symbol: "wand.and.stars", section: .workspace, action: .page(.skills), keywords: skill.slug))
+        }
+        // The Orbs' other conversations, found by title and only when something is typed. A "Nova conversa" is still empty
+        // and would only echo the action of that name.
+        for look in orbs {
+            for chat in chats[look.id]?.list ?? [] where chat.title != OrbChats.newTitle {
+                list.append(PaletteEntry(id: "chat-\(chat.id)", title: chat.title, subtitle: look.name, symbol: "bubble.left",
+                                         section: .orbs, action: .chat(chat.id, of: look.id), searchOnly: true))
+            }
         }
         return list
     }
@@ -158,6 +177,7 @@ enum PaletteBuilder {
 
 struct CommandPalette: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.openSettings) private var openSettings
     @State private var query = ""
     @State private var selected = 0
     @State private var entries: [PaletteEntry] = []
@@ -187,11 +207,15 @@ struct CommandPalette: View {
             .padding(.vertical, 14)
             Divider().opacity(0.6)
             if results.isEmpty {
-                Text("Nada encontrado para “\(query)”.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Palette.muted)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .transition(.quiet)
+                VStack(spacing: 12) {
+                    Text("Nada encontrado para “\(query)”.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Palette.muted)
+                    Button("Novo Orb") { go(.newBot) }
+                    .buttonStyle(SecondaryPillStyle())
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .transition(.quiet)
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
@@ -260,13 +284,17 @@ struct CommandPalette: View {
     /// Built once when it opens, not on each keystroke.
     private func build() {
         entries = PaletteBuilder.entries(orbs: model.sidebarBotIDs.map { model.live($0).look }, current: model.commandBotID,
-                                         routines: model.routines, skills: model.skills, groups: model.groups)
+                                         routines: model.routines, skills: model.skills, groups: model.groups,
+                                         chats: model.sidebarBotIDs.reduce(into: [:]) { $0[$1] = model.live($1).chats })
         folded = PaletteSearch.fold(entries)
     }
 
     private func run(_ results: [PaletteEntry]) {
         guard results.indices.contains(selected) else { return }
-        let action = results[selected].action
+        go(results[selected].action)
+    }
+
+    private func go(_ action: PaletteEntry.Action) {
         model.showCommandPalette = false
         // After the sheet is gone, so a command that opens something else (or moves the focus) is not swallowed by it.
         Task {
@@ -290,6 +318,8 @@ struct CommandPalette: View {
         case .openFolder: if let id = model.commandBotID { model.openFolder(of: id) }
         case .toggleInspector: model.toggleInspector()
         case .shortcuts: model.showShortcuts = true
+        case .settings: SettingsRouter.show(using: openSettings)
+        case .chat(let chat, let botID): model.openChat(chat, of: botID)
         }
     }
 }
@@ -297,8 +327,6 @@ struct CommandPalette: View {
 private struct PaletteRow: View {
     let entry: PaletteEntry
     let isSelected: Bool
-    /// The pointer is on the row: it is filled with the shared hover fade. The arrow keys move the selection at once.
-    @State private var isHovering = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -337,9 +365,7 @@ private struct PaletteRow: View {
         .padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background { RoundedRectangle(cornerRadius: 8).fill(Palette.ghostSelected).opacity(isSelected ? 1 : 0) }
-        .hoverFill(isHovering && !isSelected, in: .rect(cornerRadius: 8))
         .contentShape(.rect)
-        .onHover { isHovering = $0 }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
