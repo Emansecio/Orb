@@ -161,7 +161,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct AppCommands: Commands {
     let model: AppModel
     @Environment(\.openWindow) private var openWindow
-    @AppStorage(GlobalHotKey.defaultsKey) private var globalShortcut = false
 
     /// Brings the main window forward (it may be closed or behind Settings) before a command that shows something in it.
     private func showMain() {
@@ -195,6 +194,7 @@ struct AppCommands: Commands {
         }
         CommandGroup(replacing: .help) {
             Button(CommandName.shortcuts) { showMain(); model.showShortcuts = true }
+                .keyboardShortcut(AppShortcut.shortcuts)
                 .disabled(sheetOpen)
         }
         CommandMenu("Orbs") {
@@ -246,8 +246,6 @@ struct AppCommands: Commands {
                     .keyboardShortcut(AppShortcut.bot(at: index))
                     .disabled(sheetOpen)
             }
-            Divider()
-            Toggle(CommandName.globalShortcut, isOn: GlobalHotKey.toggleBinding($globalShortcut))
         }
     }
 }

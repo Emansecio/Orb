@@ -54,6 +54,8 @@ enum AppShortcut {
     static let routines = KeyboardShortcut("r", modifiers: [.command, .option])
     static let connectors = KeyboardShortcut("c", modifiers: [.command, .option])
     static let skills = KeyboardShortcut("k", modifiers: [.command, .option])
+    /// ⌘/: the "Atalhos do teclado" sheet (the Ajuda menu's item).
+    static let shortcuts = KeyboardShortcut("/")
 
     /// ⌘1…⌘9: the Orb at that place in the sidebar.
     static func bot(at index: Int) -> KeyboardShortcut {
@@ -82,7 +84,7 @@ enum AppShortcut {
 
     /// Every key above, for the tests that check that none is used twice.
     static let all: [KeyboardShortcut] = [newBot, newChat, newGroup, toggleInspector, goTo, writeMessage, stop, sendToBackground,
-                                          openFolder, previousBot, nextBot, routines, connectors, skills]
+                                          openFolder, previousBot, nextBot, routines, connectors, skills, shortcuts]
         + (0..<9).map(bot(at:))
 }
 
@@ -112,7 +114,7 @@ extension KeyboardShortcut {
 
 /// A command a key answers to, so the places that show a key (the palette) ask the catalog for it by command.
 enum ShortcutCommand: String, CaseIterable, Sendable {
-    case newBot, newGroup, goTo, toggleInspector, settings
+    case newBot, newGroup, goTo, toggleInspector, settings, shortcuts
     case newChat, writeMessage, stop, sendToBackground, openFolder, send, newLine, queueAfterTask, stopAndSend, chooseModel, cancelEdit
     case goToBot, previousBot, nextBot, routines, connectors, skills
     case allowApproval, denyApproval
@@ -161,6 +163,7 @@ enum ShortcutCatalog {
             ShortcutItem(.goTo, AppShortcut.goTo, "Ir para… (Orbs, páginas e ações)"),
             ShortcutItem(.toggleInspector, AppShortcut.toggleInspector, CommandName.toggleInspector),
             ShortcutItem(.settings, AppShortcut.settings, "Ajustes"),
+            ShortcutItem(.shortcuts, AppShortcut.shortcuts, CommandName.shortcuts),
         ]),
         ShortcutGroup(title: "Conversa", items: [
             ShortcutItem(.newChat, AppShortcut.newChat, CommandName.newChat + " com o Orb aberto"),
@@ -195,7 +198,7 @@ enum ShortcutCatalog {
             ShortcutItem(.undoForget, AppShortcut.undoForget, "Desfazer “Esquecer” da memória (enquanto o aviso está na tela)"),
         ]),
         ShortcutGroup(title: "De qualquer lugar do Mac", items: [
-            ShortcutItem(command: .menuBarPanel, keys: "⌃⌥Espaço", title: "Abrir o painel da barra de menus do Orb (opcional, no menu Orbs ou em Ajustes → Geral)",
+            ShortcutItem(command: .menuBarPanel, keys: "⌃⌥Espaço", title: "Abrir o painel da barra de menus do Orb (opcional, em Ajustes → Geral)",
                          titleInGeneral: "Abrir o painel da barra de menus do Orb (opcional, ligue na seção acima)"),
         ]),
     ]
