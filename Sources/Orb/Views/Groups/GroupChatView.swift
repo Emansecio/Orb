@@ -70,16 +70,18 @@ private struct GroupConversation: View {
     let live: GroupLive
 
     var body: some View {
-        let names = model.groupLooks(group).map(\.name)
+        let looks = model.groupLooks(group)
         VStack(spacing: 0) {
             GroupHeaderBar(group: group, live: live)
             GroupThreadView(group: group, transcript: session.transcript)
             GroupApprovalBar(live: live)
             GroupPresenceBar(group: group, live: live)
-            GroupComposer(names: names, text: Binding(get: { model.draftText(group.id) },
-                                                      set: { model.setDraft($0, for: group.id) })) { message in
+            GroupComposer(names: looks.map(\.name), looks: looks,
+                          text: Binding(get: { model.draftText(group.id) },
+                                        set: { model.setDraft($0, for: group.id) })) { message in
                 model.postUserMessage(message, to: group.id)
             }
+            .id(group.id)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.canvas)

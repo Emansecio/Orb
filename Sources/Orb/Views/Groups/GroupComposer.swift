@@ -1,26 +1,30 @@
 import SwiftUI
 
-/// The field under a group's thread. ↩ sends, ⇧↩ or ⌥↩ breaks the line, "@" opens the members (and "todos") with ↑↓ and ↩. No
-/// attachments in a group (v1).
+/// The field under a group's thread. ↩ sends, ⇧↩ or ⌥↩ breaks the line, "@" opens the members (and "todos") with ↑↓, ↩ or ⇥, and
+/// Esc closes the list. No attachments in a group (v1).
 struct GroupComposer: View {
     /// The names of the members: what a mention can call.
     let names: [String]
+    /// The members as the picker draws them (avatar and role); `names` is what the mention rules work on.
+    let looks: [BotLook]
     /// The draft: kept by the app per group, so it is still there after a visit to another conversation.
     @Binding var text: String
     let onSend: (String) -> Void
     @State private var selected = 0
+    /// Esc closed the list; a change of the text opens it again.
+    @State private var isPickerDismissed = false
     @FocusState private var isFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var query: String? { MentionCandidates.openQuery(in: text) }
     private var options: [String] { query.map { MentionCandidates.options(query: $0, names: names) } ?? [] }
-    private var isPicking: Bool { query != nil && !options.isEmpty }
+    private var isPicking: Bool { !isPickerDismissed && query != nil && !options.isEmpty }
     private var canSend: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if isPicking {
-                MentionPicker(options: options, selected: min(selected, options.count - 1), choose: choose)
+                MentionPicker(options: options, looks: looks, selected: min(selected, options.count - 1), choose: choose)
                     .transition(.adapted(.rise, reduceMotion: reduceMotion))
             }
             HStack(alignment: .bottom, spacing: 8) {
@@ -45,7 +49,20 @@ struct GroupComposer: View {
                     }
                     .onKeyPress(.downArrow) { isPicking ? move(1) : .ignored }
                     .onKeyPress(.upArrow) { isPicking ? move(-1) : .ignored }
-                    .onChange(of: text) { selected = 0 }
+                    .onKeyPress(keys: [.tab]) { _ in
+                        guard isPicking else { return .ignored }
+                        choose(options[min(selected, options.count - 1)])
+                        return .handled
+                    }
+                    .onKeyPress(.escape) {
+                        guard isPicking else { return .ignored }
+                        isPickerDismissed = true
+                        return .handled
+                    }
+                    .onChange(of: text) {
+                        selected = 0
+                        isPickerDismissed = false
+                    }
                     .accessibilityLabel("Mensagem para o grupo")
                 Button(action: send) {
                     Image(systemName: "arrow.up.circle.fill")
@@ -67,6 +84,8 @@ struct GroupComposer: View {
         .frame(maxWidth: 760, alignment: .leading)
         .frame(maxWidth: .infinity)
         .animation(Motion.adapted(Motion.enter, reduceMotion: reduceMotion), value: isPicking)
+        // The caller gives each group its own composer (`.id`), so this runs when the group opens or changes.
+        .onAppear { isFocused = true }
     }
 
     private func send() {

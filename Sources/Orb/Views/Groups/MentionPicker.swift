@@ -32,10 +32,12 @@ enum MentionCandidates {
     }
 }
 
-/// The list of members above the composer while a mention is typed: the names, "Todos os membros" among them when there are
-/// two or more. ↑↓ choose, ↩ takes the highlighted one (the composer handles the keys).
+/// The list of members above the composer while a mention is typed: the names with avatar and role, "Todos os membros" among
+/// them when there are two or more. ↑↓ choose, ↩ or ⇥ takes the highlighted one (the composer handles the keys).
 struct MentionPicker: View {
     let options: [String]
+    /// The members, to find the avatar and role of a name; "todos" has none.
+    let looks: [BotLook]
     let selected: Int
     let choose: (String) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -45,6 +47,9 @@ struct MentionPicker: View {
             ForEach(Array(options.enumerated()), id: \.offset) { index, option in
                 Button { choose(option) } label: {
                     HStack(spacing: 8) {
+                        if let look = look(for: option) {
+                            BotAvatar(orb: look.orb, size: 20, animated: false)
+                        }
                         Text("@\(option)")
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(Palette.ink)
@@ -73,7 +78,11 @@ struct MentionPicker: View {
         .accessibilityLabel("Chamar um Orb")
     }
 
+    private func look(for option: String) -> BotLook? {
+        option == MentionCandidates.everyone ? nil : looks.first { $0.name == option }
+    }
+
     private func detail(for option: String) -> String {
-        option == MentionCandidates.everyone ? "Todos os membros" : ""
+        option == MentionCandidates.everyone ? "Todos os membros" : (look(for: option)?.role ?? "")
     }
 }
