@@ -86,7 +86,11 @@ struct ProviderSettings: View {
                     }
                 }
             }
-            Section { addMenu }
+            Section {
+                addMenu
+            } footer: {
+                FormFootnote { Text("A chave da busca na web fica na aba Navegador.") }
+            }
         }
         .formStyle(.grouped)
         .orbFormBackground()
@@ -295,15 +299,15 @@ private struct ProviderRow: View {
             LabeledContent("Conta") {
                 HStack {
                     Text(email ?? "ChatGPT").foregroundStyle(.secondary)
-                    Button("Sair") { isConfirmingSignOut = true }
+                    Button("Sair da conta") { isConfirmingSignOut = true }
                         .buttonStyle(GhostStyle()) // as "Trocar" and "Remover…" in the other rows
                         .controlSize(.small)
                         .hangsOnTrailingEdge()
                         .help(Tip.signOutChatGPT)
                 }
             }
-            .confirmationDialog("Sair do ChatGPT?", isPresented: $isConfirmingSignOut) {
-                Button("Sair", role: .destructive) { model.signOut(kind) }
+            .confirmationDialog("Sair da conta do ChatGPT?", isPresented: $isConfirmingSignOut) {
+                Button("Sair da conta", role: .destructive) { model.signOut(kind) }
             } message: {
                 Text("Os Orbs que usam estes modelos não respondem até você entrar de novo ou escolher outro modelo.")
             }

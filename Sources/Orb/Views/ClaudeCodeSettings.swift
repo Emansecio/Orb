@@ -23,7 +23,7 @@ struct ClaudeCodeAccountRow: View {
                 }
             } else if model.claudeCode.isLoggedIn {
                 line("checkmark.circle.fill", Palette.ok, "Conectado como \(model.claudeCode.accountLabel)\(modelCount)") {
-                    Button("Sair") { isConfirmingSignOut = true }.disabled(isWorking)
+                    Button("Sair da conta") { isConfirmingSignOut = true }.disabled(isWorking)
                         .help(Tip.signOutClaudeCode)
                         .buttonStyle(GhostStyle())
                         .controlSize(.small)
@@ -48,8 +48,8 @@ struct ClaudeCodeAccountRow: View {
                     .foregroundStyle(Palette.danger)
             }
         }
-        .confirmationDialog("Sair do Claude Code?", isPresented: $isConfirmingSignOut) {
-            Button("Sair", role: .destructive) { run { await model.signOutOfClaudeCode() } }
+        .confirmationDialog("Sair da conta do Claude Code?", isPresented: $isConfirmingSignOut) {
+            Button("Sair da conta", role: .destructive) { run { await model.signOutOfClaudeCode() } }
         } message: {
             Text("Isso desconecta o Claude Code neste Mac, inclusive no Terminal.")
         }
