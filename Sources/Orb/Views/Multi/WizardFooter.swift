@@ -6,17 +6,29 @@ struct WizardFooter: View {
     let canCreate: Bool
     /// The assistant said the draft is complete: "Criar Orb" is the next step and shows it (a halo, and ⌘↩ as well as ↩).
     var isReady = false
+    /// The assistant stopped at its limit without a name: the way out is the form, so the foot offers it.
+    var hitLimit = false
+    /// "Ir para o Formulário": the same step as the mode picker (the draft fills the form).
+    var toForm: () -> Void = {}
     let cancel: () -> Void
     let create: () -> Void
 
     var body: some View {
         SheetFooterBar {
             if !canCreate {
-                Text("O assistente ainda não escolheu um nome.")
+                Text(hitLimit ? "A conversa chegou ao limite sem um nome." : "O assistente ainda não escolheu um nome.")
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.muted)
                     .lineLimit(1)
                     .transition(.opacity)
+                if hitLimit {
+                    Button("Ir para o Formulário", action: toForm)
+                        .buttonStyle(.plain)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Palette.accentText)
+                        .help("Leva o que o assistente já entendeu para o formulário, onde você dá o nome")
+                        .accessibilityIdentifier("wizard-to-form")
+                }
             }
             Spacer(minLength: Spacing.m)
             Button("Cancelar", action: cancel)

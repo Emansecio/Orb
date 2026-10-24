@@ -15,6 +15,7 @@ struct NewBotSheet: View {
     @State private var interview = true
     @State private var mode: PermissionMode = .ask
     @State private var isConfirmingBypass = false
+    @State private var isConfirmingDiscard = false
     @State private var isShowingAdvanced = false
     @State private var folder = OrbFolderChoice.own
     /// The memories kept from Orbs that were deleted or reset (read off the main thread when the sheet opens) and the
@@ -134,7 +135,7 @@ struct NewBotSheet: View {
         dismiss()
     }
 
-    /// "Aleatório": another look, in place (the temperament stays, as in the editor's own dice).
+    /// "Sortear": another look, in place (the temperament stays, as in the editor's own dice).
     private func randomLook() {
         var next = OrbConfig.random()
         next.temperament = orb.temperament
@@ -187,6 +188,26 @@ struct NewBotSheet: View {
         }
     }
 
+    /// What closing the sheet now would lose, or nil when there is nothing to lose (then Cancelar/Esc closes at once).
+    static func discardMessage(isAssistant: Bool, userMessages: Int, isFinished: Bool,
+                               name: String, role: String, identity: String) -> String? {
+        if isAssistant {
+            return userMessages >= 1 && !isFinished ? "A conversa com o assistente se perde." : nil
+        }
+        let typed = [name, role, identity].contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        return typed ? "O que você preencheu se perde." : nil
+    }
+
+    private var pendingLoss: String? {
+        Self.discardMessage(isAssistant: isAssistant, userMessages: wizard.userMessageCount, isFinished: wizard.isFinished,
+                            name: name, role: role, identity: identity)
+    }
+
+    /// Cancelar and Esc: ask first when there is something typed or a conversation to lose.
+    private func requestClose() {
+        if pendingLoss == nil { dismiss() } else { isConfirmingDiscard = true }
+    }
+
     /// "Formulário" in the mode picker (and the final card's "Ajustar"): the draft fills the form's fields and the form is shown.
     private func passDraftToForm() {
         let draft = wizard.draft
@@ -207,7 +228,7 @@ struct NewBotSheet: View {
             // "Quem ele é" (the assistant or the form, and the preview) or "Aparência" (the editor, the sheet's whole width).
             ZStack {
                 if tab == .look && !isImporting {
-                    OrbEditor(config: $orb, name: creation == .assistant ? wizard.draft.name : name, randomTitle: "Aleatório")
+                    OrbEditor(config: $orb, name: creation == .assistant ? wizard.draft.name : name)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .transition(.opacity)
                 } else {
@@ -217,9 +238,10 @@ struct NewBotSheet: View {
             .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: tab)
             Group {
                 if isAssistant {
-                    WizardFooter(canCreate: wizard.draft.canCreate, isReady: wizard.draft.ready, cancel: { dismiss() }, create: createFromAssistant)
+                    WizardFooter(canCreate: wizard.draft.canCreate, isReady: wizard.draft.ready, hitLimit: wizard.hitLimit, toForm: passDraftToForm,
+                                 cancel: requestClose, create: createFromAssistant)
                 } else {
-                    SheetFooter(message: isImporting ? ImportText.notCreatedYet : hint, cancel: { dismiss() },
+                    SheetFooter(message: isImporting ? ImportText.notCreatedYet : hint, cancel: requestClose,
                                 primaryTitle: isImporting ? ImportText.confirm : "Criar Orb",
                                 isPrimaryDisabled: isImporting ? draft?.plan().isEmpty ?? true : trimmedName.isEmpty,
                                 primary: isImporting ? useImport : create)
@@ -232,6 +254,11 @@ struct NewBotSheet: View {
         .background(Palette.chrome) // one ground under both tabs: the hairline between the columns sits on it, not on the window
         .task { wizard.attach(model) } // MultiOrb (WP4)
         .onDisappear { wizard.cancel() } // MultiOrb (WP4): the sheet closed: the assistant's turn stops, nothing is kept
+        .confirmationDialog("Descartar o Orb que você está criando?", isPresented: $isConfirmingDiscard, titleVisibility: .visible) {
+            Button("Descartar", role: .destructive) { dismiss() }
+        } message: {
+            Text(pendingLoss ?? "")
+        }
         .task { isNameFocused = creation == .form }
         .task {
             let memories = model.memory.root

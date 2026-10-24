@@ -116,9 +116,12 @@ struct WizardChatView: View {
 
     private var canSendNow: Bool { runner.canSend && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
-    private var placeholder: String {
-        if runner.hitLimit { return "Vamos fechar: toque em Criar Orb" }
-        if runner.failure != nil { return "Toque em Tentar de novo" }
+    private var placeholder: String { Self.placeholder(hitLimit: runner.hitLimit, canCreate: runner.draft.canCreate, failed: runner.failure != nil) }
+
+    /// At the limit the field is off: it says the way out, which depends on whether the draft already has a name.
+    static func placeholder(hitLimit: Bool, canCreate: Bool, failed: Bool) -> String {
+        if hitLimit { return canCreate ? "Vamos fechar: clique em Criar Orb" : "A conversa chegou ao limite. Passe para o Formulário para dar um nome." }
+        if failed { return "Clique em Tentar de novo" }
         return "Responda aqui…"
     }
 
