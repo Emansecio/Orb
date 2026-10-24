@@ -138,6 +138,8 @@ struct SheetFooter: View {
     var message: String?
     var destructiveTitle: String?
     var destructive: (() -> Void)?
+    /// False for a leading action that destroys nothing (going on despite a warning): it is drawn plain, not red.
+    var leadingIsDestructive = true
     var cancelTitle = "Cancelar"
     let cancel: () -> Void
     let primaryTitle: String
@@ -159,8 +161,8 @@ struct SheetFooter: View {
     var body: some View {
         SheetFooterBar {
             if let destructiveTitle, let destructive {
-                Button(destructiveTitle, role: .destructive, action: destructive)
-                    .buttonStyle(GhostStyle(tint: Palette.danger))
+                Button(destructiveTitle, role: leadingIsDestructive ? .destructive : nil, action: destructive)
+                    .buttonStyle(GhostStyle(tint: leadingIsDestructive ? Palette.danger : nil))
                     .help(destructiveHelp)
                     .hangsOnLeadingEdge()
             }

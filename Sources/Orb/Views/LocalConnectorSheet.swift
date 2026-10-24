@@ -187,7 +187,8 @@ struct LocalConnectorSheet: View {
         case .attention(let state):
             SheetFooter(message: state == .noAccount && kind == .agenda ? "Sua conta tem outro nome? Dá para conectar assim mesmo." : nil,
                         destructiveTitle: state == .noAccount && kind == .agenda ? "Conectar assim mesmo" : nil,
-                        destructive: { Task { @MainActor in await install(anyAccount: true) } }, cancel: { dismiss() },
+                        destructive: { Task { @MainActor in await install(anyAccount: true) } },
+                        leadingIsDestructive: false, cancel: { dismiss() },
                         primaryTitle: "Verificar de novo", destructiveHelp: "Conecta usando qualquer agenda do Mac, mesmo sem achar a sua conta Google",
                         primaryHelp: "Confere de novo a permissão e a conta", primary: connect)
         case .done:

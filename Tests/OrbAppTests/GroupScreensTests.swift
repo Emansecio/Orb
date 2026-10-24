@@ -182,5 +182,34 @@ struct GroupTextsTests {
         #expect(summary.goes.contains("a participação em 2 grupos"))
         let none = DeleteOrbSummary(name: "Lia", routineCount: 0, folder: nil)
         #expect(!none.goes.contains("grupo"))
+        #expect(none.undone == nil && summary.undone == nil)
+    }
+
+    @Test func deletingAnOrbNamesTheGroupsItUndoes() {
+        // In two groups, one of them only with it and another Orb: that one is undone, the other goes on without it.
+        let one = DeleteOrbSummary(name: "Lia", routineCount: 0, folder: nil, groupCount: 2, undoneGroups: ["Lançamento"])
+        #expect(one.goes == "A conversa e a participação em 1 grupo vão embora.")
+        #expect(one.undone == "O grupo Lançamento fica com 1 Orb e é desfeito, com a conversa e o quadro.")
+        let both = DeleteOrbSummary(name: "Lia", routineCount: 0, folder: nil, groupCount: 2, undoneGroups: ["A", "B"])
+        #expect(both.goes == "A conversa vai embora.")
+        #expect(both.undone == "Os grupos A e B ficam com 1 Orb e são desfeitos, com a conversa e o quadro de cada um.")
+    }
+
+    @MainActor @Test func theSummaryUndoesOnlyTheGroupsAtTheSmallestSize() {
+        let lia = Bot(name: "Lia", role: "", orb: OrbConfig())
+        let other = Bot(name: "Rui", role: "", orb: OrbConfig()), third = Bot(name: "Ana", role: "", orb: OrbConfig())
+        let pair = OrbGroup(name: "Dupla", memberIDs: [lia.id, other.id], orchestratorID: lia.id)
+        let trio = OrbGroup(name: "Trio", memberIDs: [lia.id, other.id, third.id], orchestratorID: lia.id)
+        let apart = OrbGroup(name: "Fora", memberIDs: [other.id, third.id], orchestratorID: other.id)
+        let summary = DeleteOrbSummary(bot: lia, routineCount: 0, groups: [pair, trio, apart])
+        #expect(summary.groupCount == 2 && summary.undoneGroups == ["Dupla"])
+    }
+
+    @Test func leavingTheObjectiveSavesOnlyAChange() {
+        #expect(GroupObjectiveEdit.commit(draft: "Lançar o site", current: "Lançar o site") == nil)
+        #expect(GroupObjectiveEdit.commit(draft: "  Lançar o site \n", current: "Lançar o site") == nil)
+        #expect(GroupObjectiveEdit.commit(draft: "Lançar o app ", current: "Lançar o site") == "Lançar o app")
+        #expect(GroupObjectiveEdit.commit(draft: "  ", current: "Lançar o site") == "") // cleared: the objective goes
+        #expect(GroupObjectiveEdit.commit(draft: "", current: "") == nil)
     }
 }

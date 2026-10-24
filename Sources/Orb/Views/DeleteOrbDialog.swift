@@ -8,15 +8,26 @@ struct DeleteOrbSummary: Equatable {
     var folder: String?
     /// The groups it belongs to: it leaves them (MultiOrb).
     var groupCount: Int = 0
+    /// The names of the groups it is one of the two Orbs of: those are undone, with their conversation and board.
+    var undoneGroups: [String] = []
 
     /// "A conversa, 2 rotinas e a participação em 2 grupos vão embora."
     var goes: String {
         var parts = ["a conversa"]
         if routineCount == 1 { parts.append("1 rotina") } else if routineCount > 1 { parts.append("\(routineCount) rotinas") }
         // MARK: MultiOrb (WP6): it also leaves the groups it is in ("também sai de N grupos").
-        if groupCount == 1 { parts.append("a participação em 1 grupo") } else if groupCount > 1 { parts.append("a participação em \(groupCount) grupos") }
+        // The groups it undoes get their own line (`undone`); here only the ones that go on without it.
+        let left = groupCount - undoneGroups.count
+        if left == 1 { parts.append("a participação em 1 grupo") } else if left > 1 { parts.append("a participação em \(left) grupos") }
         let subject = Self.list(parts)
         return subject.prefix(1).uppercased() + subject.dropFirst() + (parts.count == 1 ? " vai embora." : " vão embora.")
+    }
+
+    /// "O grupo Lançamento fica com 1 Orb e é desfeito, com a conversa e o quadro."; nil when no group is undone.
+    var undone: String? {
+        guard !undoneGroups.isEmpty else { return nil }
+        if undoneGroups.count == 1 { return "O grupo \(undoneGroups[0]) fica com 1 Orb e é desfeito, com a conversa e o quadro." }
+        return "Os grupos \(Self.list(undoneGroups)) ficam com 1 Orb e são desfeitos, com a conversa e o quadro de cada um."
     }
 
     /// "A pasta ~/Orbs/Atlas continua no seu Mac e, se você quiser, a memória também."
@@ -49,10 +60,13 @@ struct DeleteOrbSummary: Equatable {
 
 extension DeleteOrbSummary {
     @MainActor
-    init(bot: Bot, routineCount: Int, groupCount: Int = 0, home: String = NSHomeDirectory()) {
+    init(bot: Bot, routineCount: Int, groups: [OrbGroup] = [], home: String = NSHomeDirectory()) {
         let shown = bot.workingDirectory.isEmpty ? nil : OrbFolder.display(bot.workingURL, home: home)
+        let joined = groups.filter { $0.memberIDs.contains(bot.id) }
+        // The same rule as leaving a group (`AppModel.leave`): at the smallest size the group is undone.
+        let undone = joined.filter { $0.memberIDs.count <= OrbGroup.memberLimits.lowerBound }.map(\.name)
         self.init(name: bot.name, routineCount: routineCount, folder: shown == "~" ? nil : shown,
-                  groupCount: groupCount)
+                  groupCount: joined.count, undoneGroups: undone)
     }
 }
 
@@ -99,11 +113,11 @@ struct DeleteOrbSheet: View {
 
     var body: some View {
         if let bot = model.bot(botID) {
-            let summary = DeleteOrbSummary(bot: bot, routineCount: model.routines(for: botID).count,
-                                           groupCount: model.groups.filter { $0.memberIDs.contains(botID) }.count)
+            let summary = DeleteOrbSummary(bot: bot, routineCount: model.routines(for: botID).count, groups: model.groups)
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 12) {
                     SummaryLine(.goes, summary.goes)
+                    if let undone = summary.undone { SummaryLine(.goes, undone) }
                     SummaryLine(.stays, summary.stays)
                     Text(DeleteOrbSummary.memoryNote)
                         .font(.system(size: 12))
@@ -114,10 +128,10 @@ struct DeleteOrbSheet: View {
                 .padding(.bottom, 16)
             }
             .orbSheet("Apagar \(bot.name)?", size: .medium) {
-                SheetFooter(destructiveTitle: "Apagar com a memória",
+                SheetFooter(destructiveTitle: "Apagar tudo, inclusive a memória",
                             destructive: { model.confirmDelete(botID, keepMemory: false) },
                             cancel: { model.deletingBotID = nil },
-                            primaryTitle: "Apagar e guardar a memória",
+                            primaryTitle: "Apagar, guardando a memória",
                             primaryIsDefault: false, // deleting is never what a reflex Return does; Esc still cancels
                             primaryIsDestructive: true, // the Orb goes either way: red, not the white of "do this"
                             destructiveHelp: Tip.deleteWithMemory, primaryHelp: Tip.deleteKeepingMemory,

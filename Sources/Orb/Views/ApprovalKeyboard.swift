@@ -2,7 +2,8 @@ import SwiftUI
 import AppKit
 
 /// Keyboard answers for the newest open approval card: ⌘↩ allows, Esc denies. ⌘↩ typed in the main composer is not
-/// ours: there it stops the turn (which denies the card) and sends what was written (see `ComposerView`).
+/// ours: it would mean "stop and send" there, which the composer turns off while a card is open, so a reflex ⌘↩ never
+/// refuses a request (see `ComposerAction.stopAndSendEnabled`).
 enum ApprovalShortcut: Equatable {
     case allow, deny
 

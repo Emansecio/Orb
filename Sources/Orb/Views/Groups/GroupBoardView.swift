@@ -14,6 +14,10 @@ struct GroupBoardView: View {
     @State private var query = ""
     @State private var forgotten: MemorySnapshot.Item?
     @State private var folded = FoldedTextCache()
+    @FocusState private var isObjectiveFocused: Bool
+    /// What this field last saved: the save re-reads the board, which rebuilds the view (`.id`), and leaving then must
+    /// not write the same text again against the board it was drawn from.
+    @State private var savedObjective: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(memory: MemorySnapshot, setObjective: @escaping (String) -> Void, remember: @escaping (String) -> Void,
@@ -41,7 +45,8 @@ struct GroupBoardView: View {
                         .lineLimit(2...5)
                         .padding(10)
                         .background(Palette.surface, in: .rect(cornerRadius: 10))
-                        .onSubmit { setObjective(objective) }
+                        .focused($isObjectiveFocused)
+                        .onSubmit { commitObjective() }
                         .accessibilityLabel("Objetivo do grupo")
                 }
                 TitledSection("Combinados", isHeader: true) {
@@ -107,6 +112,15 @@ struct GroupBoardView: View {
         }
         .animation(Motion.content, value: forgotten?.id)
         .onChange(of: memory.identity) { objective = memory.identity }
+        // Leaving the field (another tab, the panel closed, another group) keeps what was typed, as the group's name does.
+        .onChange(of: isObjectiveFocused) { old, new in if old && !new { commitObjective() } }
+        .onDisappear { commitObjective() }
+    }
+
+    private func commitObjective() {
+        guard let text = GroupObjectiveEdit.commit(draft: objective, current: savedObjective ?? memory.identity) else { return }
+        savedObjective = text
+        setObjective(text)
     }
 
     private func forgetItem(_ item: MemorySnapshot.Item) {
@@ -133,5 +147,14 @@ private struct UndoForgetToast: View {
         .padding(.vertical, 8)
         .card(radius: 12, fill: Palette.surface)
         .shadow(color: .black.opacity(0.3), radius: 10, y: 3)
+    }
+}
+
+/// What leaving the objective's field saves: the text without its outer blanks, or nil when it did not change. An empty
+/// objective is saved too: clearing the field is how it is removed.
+enum GroupObjectiveEdit {
+    static func commit(draft: String, current: String) -> String? {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text == current.trimmingCharacters(in: .whitespacesAndNewlines) ? nil : text
     }
 }

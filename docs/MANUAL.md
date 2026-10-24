@@ -427,8 +427,8 @@ Cada Orb tem a **sua** memória, que nasce com ele e cresce a cada conversa: nad
   coisa ser gravada.
 - **O tempo.** Conversas antigas (mais de 30 dias e pouco usadas) são compactadas, nunca apagadas sozinhas. Só você apaga.
 - **Ao apagar um Orb**, o diálogo mostra o que some (a conversa, as rotinas) e o que fica (a pasta), e
-  oferece **Apagar e guardar a memória** (o botão principal: a memória vai para `memoria/_guardadas/<nome> – <data>`, com
-  "Mostrar no Finder") ou **Apagar com a memória**. Ajustes → Geral → "Memórias guardadas" diz quantas há e abre essa pasta.
+  oferece **Apagar, guardando a memória** (o botão principal: a memória vai para `memoria/_guardadas/<nome> – <data>`, com
+  "Mostrar no Finder") ou **Apagar tudo, inclusive a memória**. Ajustes → Geral → "Memórias guardadas" diz quantas há e abre essa pasta.
   Junto da memória fica um pequeno `perfil.json` com o nome, o papel e a aparência do Orb (nunca permissões, modo ou segredos).
 - **Começar de uma memória guardada.** Em **Novo Orb**, quando há memórias guardadas, o primeiro cartão ("Começar de") tem um
   menu **Memória**: "Nenhuma (Orb novo)" ou uma por memória ("Atlas · 08/10/2026 · 12 lembranças"). Escolher uma preenche o

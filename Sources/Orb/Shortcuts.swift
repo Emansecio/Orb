@@ -171,7 +171,7 @@ enum ShortcutCatalog {
             ShortcutItem(command: .send, keys: "↩", title: "Enviar a mensagem (com o Orb trabalhando, direciona a tarefa)"),
             ShortcutItem(command: .queueAfterTask, keys: "⇥", title: "Pôr na fila para depois da tarefa (Orb trabalhando e algo escrito)"),
             ShortcutItem(command: .newLine, keys: CommandName.newLineKeys, title: "Nova linha na mensagem"),
-            ShortcutItem(.stopAndSend, AppShortcut.commandReturn, "Parar e enviar agora (Orb trabalhando e algo escrito, fora da edição de uma mensagem; recusa o pedido aberto)"),
+            ShortcutItem(.stopAndSend, AppShortcut.commandReturn, "Parar e enviar agora (Orb trabalhando e algo escrito, fora da edição de uma mensagem e sem pedido aberto)"),
             ShortcutItem(.chooseModel, AppShortcut.chooseModel, "Escolher o modelo do Orb"),
             ShortcutItem(command: .cancelEdit, keys: "esc", title: "Cancelar a edição de uma mensagem (com o cursor no campo; a lista de skills aberta fecha primeiro; o campo volta como estava)"),
             ShortcutItem(.find, AppShortcut.find, CommandName.findInConversation + " (em Skills e Conectores, busca no catálogo)"),

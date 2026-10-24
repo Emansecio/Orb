@@ -358,7 +358,8 @@ struct ComposerView: View {
                 // What waits counts the messages that reached the task unanswered too: their bubble left the queue already.
                 .disabled(!ComposerAction.stopAndSendEnabled(isQueueing: isQueueing, canSend: canSend,
                                                              queuedCount: lane.queued.count + model.unansweredSteered(of: botID).count,
-                                                             pendingPictures: lane.pendingPictures, isEditing: isEditing))
+                                                             pendingPictures: lane.pendingPictures, isEditing: isEditing,
+                                                             needsYou: model.live(botID).needsYou))
             Button("Escolher modelo") { isModelOpen.toggle() }
                 .keyboardShortcut(AppShortcut.chooseModel)
             // No button takes Esc for the edit (as `.cancelAction`): a key equivalent runs before the field that has the
@@ -672,10 +673,12 @@ enum ComposerAction: Equatable {
 
     /// ⌘↩ "stop and send" works with something to send: what is typed, or what already waits in the queue (the
     /// queue bubble's own "Parar e enviar" offers that key with an empty field). Not while a message is being edited:
-    /// the field then holds the edit, which is no message to queue (the edit ends when a turn starts anyway).
+    /// the field then holds the edit, which is no message to queue (the edit ends when a turn starts anyway). Not while an
+    /// approval card is open either: stopping refuses it, and the card itself shows ⌘↩ as "Permitir", so the key would
+    /// refuse a request the person meant to allow. The card is answered first; the stop button still does it on purpose.
     static func stopAndSendEnabled(isQueueing: Bool, canSend: Bool, queuedCount: Int, pendingPictures: Int = 0,
-                                   isEditing: Bool = false) -> Bool {
-        isQueueing && pendingPictures == 0 && !isEditing && (canSend || queuedCount > 0)
+                                   isEditing: Bool = false, needsYou: Bool = false) -> Bool {
+        isQueueing && pendingPictures == 0 && !isEditing && !needsYou && (canSend || queuedCount > 0)
     }
 
     /// What Esc does in the message field.
@@ -796,16 +799,16 @@ enum ComposerAction: Equatable {
 
 /// The line under the composer while a message can be sent to a working Orb. Pure, so the tests can read it.
 enum ComposerHint {
-    /// ↩ steers the task, ⇥ waits for its end, ⌘↩ stops and sends. With a permission request open, ⌘↩ typed
-    /// in the composer stops the turn (which refuses the request) and sends; from anywhere else it still allows the
-    /// request (see `ApprovalShortcut`), and the line says so.
+    /// ↩ steers the task, ⇥ waits for its end, ⌘↩ stops and sends. With a permission request open, ⌘↩ typed in the
+    /// composer does nothing (`ComposerAction.stopAndSendEnabled`): the line asks for the request first. From anywhere
+    /// else ⌘↩ allows the request (see `ApprovalShortcut`), and the line says so.
     static func queueing(needsYou: Bool, typesInComposer: Bool, compact: Bool = false) -> String {
         let command = AppShortcut.commandReturn.label
         let keys = "↩ envia agora · ⇥ depois da tarefa"
         if needsYou {
             if !typesInComposer { return compact ? "\(command) permite o pedido" : "\(keys) · \(command) permite o pedido" }
             // A narrow composer gets the same promises in fewer words, so the line is whole rather than cut with "…".
-            return compact ? "\(keys) · \(command) recusa e envia" : "\(keys) · \(command) recusa o pedido e envia agora"
+            return compact ? keys : "\(keys) · responda ao pedido acima"
         }
         return compact ? keys : "\(keys) · \(command) para a tarefa e envia"
     }
