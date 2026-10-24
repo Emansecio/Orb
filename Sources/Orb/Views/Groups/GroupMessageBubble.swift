@@ -105,8 +105,18 @@ struct GroupMessageBubble: View {
             Button("Copiar como Markdown") { Clipboard.copy(message.text) }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Resposta de \(name)\(isOrchestrator ? ", orquestrador" : "")")
+        .accessibilityLabel("\(Self.spokenKind(message.kind)) de \(name)\(isOrchestrator ? ", orquestrador" : "")")
         .accessibilityAction(named: "Copiar resposta") { Clipboard.copy(MarkdownBlocks.plainText(of: message.text)) }
+    }
+
+    /// What VoiceOver calls the message: the group's thread and the exchange sheet show requests and notices here too, not
+    /// only answers.
+    static func spokenKind(_ kind: OrbMessageItem.Kind) -> String {
+        switch kind {
+        case .reply: "Resposta"
+        case .ask: "Pedido"
+        case .tell: "Mensagem"
+        }
     }
 
     /// The name in the Orb's readable tint, its role in faint, and "orquestrador" as a quiet inline detail (no pill).
@@ -174,6 +184,8 @@ struct GroupUserBubble: View {
                     .padding(.vertical, 7)
                     .background(Palette.userBubble, in: .rect(cornerRadius: 16))
                     .accessibilityLabel("Você: \(text)")
+                    // Editing does not fit a group, which cannot go back; copying does.
+                    .contextMenu { Button("Copiar") { Clipboard.copy(text) } }
             }
         }
     }
@@ -206,6 +218,7 @@ struct GroupAssignmentLine: View {
                         .foregroundStyle(Palette.muted)
                         .lineLimit(1)
                     Spacer(minLength: 4)
+                    ExchangeStateMark(state: message.state, showsWord: false)
                     Image(systemName: "chevron.right")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(Palette.faint)
@@ -231,6 +244,7 @@ struct GroupAssignmentLine: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Pedido de \(from?.name ?? message.from.name) a \(toName)\(message.fromChat == true ? ", a seu pedido" : "")")
+        .accessibilityValue(ExchangeStateMark.spoken(message.state))
     }
 
     private func miniAvatar(_ look: BotLook?) -> some View {

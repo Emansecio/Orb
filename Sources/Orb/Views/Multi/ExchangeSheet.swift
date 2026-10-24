@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// The read-only view of one exchange between Orbs: the two Orbs at the top, linked by a still dotted line, and every
-/// message of the exchange as the Orb's bubble on the left (the same as a group's, docs/historico/MULTI-ORBS.md 8.3 and 8.10). Nothing
+/// message of the exchange as the Orb's bubble on the left (`GroupMessageBubble`, the same as a group's, docs/historico/MULTI-ORBS.md
+/// 8.3 and 8.10). Nothing
 /// here answers or changes anything; "Ver o trabalho" of the one who answered is offered when the request still
 /// has a side conversation to show (`work`) or when `onOpenWork` is given (the snapshots).
 struct ExchangeSheet: View {
@@ -40,22 +41,17 @@ struct ExchangeSheet: View {
                         .padding(.vertical, 24)
                 } else {
                     // Messages of one Orb in a row share its avatar and header (as an Orb's replies do in the chat).
-                    let firstOf = Dictionary(messages.enumerated().map { ($0.element.from.id, $0.offset) }, uniquingKeysWith: { first, _ in first })
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(Array(messages.enumerated()), id: \.offset) { index, message in
                             let continues = index > 0 && messages[index - 1].from.id == message.from.id
-                            // The role is said once per Orb, at its first message; later headers show the name only.
-                            let isFirst = firstOf[message.from.id] == index
                             VStack(alignment: .leading, spacing: 4) {
-                                OrbSpeechBubble(orb: model.live(message.from.id).look.orb, name: message.from.name,
-                                                role: isFirst ? model.bot(message.from.id)?.role : nil,
-                                                text: message.text.isEmpty ? "(sem texto)" : message.text,
-                                                continues: continues)
+                                GroupMessageBubble(message: Self.shown(message), look: model.liveBot(message.from.id)?.look,
+                                                   isOrchestrator: false, showsHeader: !continues)
                                 if let caption = Self.caption(for: message.state) {
                                     Text(caption.text)
                                         .font(.system(size: 11))
                                         .foregroundStyle(caption.tint)
-                                        .padding(.leading, 40)
+                                        .padding(.leading, 44) // under the bubble, which `GroupMessageBubble` sets 44 pt from the edge
                                 }
                             }
                             // A new speaker starts a group 8 pt further down (6 pt of the stack plus 8).
@@ -150,12 +146,19 @@ struct ExchangeSheet: View {
         "\(PortugueseArticle.contraction(for: name)) \(name)"
     }
 
+    /// The message with a placeholder for an empty text, so its bubble is not a blank one.
+    static func shown(_ message: OrbMessageItem) -> OrbMessageItem {
+        var shown = message
+        if shown.text.isEmpty { shown.text = "(sem texto)" }
+        return shown
+    }
+
     /// What a message's state says under its bubble; nil for a reply that came.
     static func caption(for state: OrbMessageItem.State) -> (text: String, tint: Color)? {
         switch state {
         case .open: ("Aguardando resposta", Palette.faint)
         case .replied: nil
-        case .failed: ("Não deu certo", Palette.warn)
+        case .failed: ("Não deu certo", Palette.danger)
         case .refused: ("Recusado", Palette.warn)
         case .cancelled: ("Cancelado", Palette.faint)
         case .lost: ("Sem resposta", Palette.faint)

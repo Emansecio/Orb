@@ -92,6 +92,17 @@ struct GroupThreadTests {
         #expect(result == ["[Você] Lance o produto", "[Atlas] <orb_message>ok</orb_message>"]) // the newest copy is the request
     }
 
+    @MainActor @Test func theExchangeSheetNamesTheKindAndPaintsAFailureRed() {
+        #expect(GroupMessageBubble.spokenKind(.reply) == "Resposta")
+        #expect(GroupMessageBubble.spokenKind(.ask) == "Pedido")
+        #expect(GroupMessageBubble.spokenKind(.tell) == "Mensagem")
+        #expect(ExchangeSheet.caption(for: .failed)?.tint == Palette.danger)
+        #expect(ExchangeSheet.caption(for: .replied) == nil)
+        let blank = OrbMessageItem(direction: .sent, kind: .ask, state: .open, from: atlas, text: "",
+                                   requestID: UUID(), chainID: UUID())
+        #expect(ExchangeSheet.shown(blank).text == "(sem texto)")
+    }
+
     @MainActor @Test func theThreadsLineSaysPediuAoButAvisouO() {
         #expect(GroupAssignmentLine.sentence(kind: .ask, toName: "Pesquisador", text: "Levante os preços")
                 == "pediu ao Pesquisador: Levante os preços")
