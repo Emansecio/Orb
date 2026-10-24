@@ -179,22 +179,34 @@ struct QuickAskView: View {
                     chosenLabel(selected)
                 }
             }
-            TextField("Mensagem para \(selected?.name ?? "um Orb")", text: $text, axis: .vertical)
-                .textFieldStyle(.plain)
-                .lineLimit(1...4)
-                .focused($isFocused)
-                .onSubmit(send)
-                // ⇧↩ breaks the line, as in the chat's field.
-                .background {
-                    ApprovalKeyMonitor { event, window in
-                        isFocused && window.attachedSheet == nil && NewLineKey.isShiftReturn(event) && NewLineKey.insert(in: window)
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField("Mensagem para \(selected?.name ?? "um Orb")", text: $text, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1...4)
+                    .focused($isFocused)
+                    .onSubmit(send)
+                    // ⇧↩ breaks the line, as in the chat's field.
+                    .background {
+                        ApprovalKeyMonitor { event, window in
+                            isFocused && window.attachedSheet == nil && NewLineKey.isShiftReturn(event) && NewLineKey.insert(in: window)
+                        }
                     }
+                    .accessibilityLabel("Mensagem para \(selected?.name ?? "um Orb")")
+                    .onChange(of: text) { note = nil }
+                    .onChange(of: selectedID) { note = nil }
+                // The same button as the creation chat's: ↩ alone is no target for the pointer or for VoiceOver.
+                let canSend = selectedID != nil && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                Button(action: send) {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 22))
+                        .foregroundStyle(canSend ? Palette.ink : Palette.hint)
                 }
-                .padding(10)
-                .card(radius: 10)
-                .accessibilityLabel("Mensagem para \(selected?.name ?? "um Orb")")
-                .onChange(of: text) { note = nil }
-                .onChange(of: selectedID) { note = nil }
+                .buttonStyle(.plain)
+                .disabled(!canSend)
+                .iconTip("Enviar (↩)", label: "Enviar")
+            }
+            .padding(10)
+            .card(radius: 10)
             // What appears here fades in by itself (`.quiet`, 0.15 s) and the panel, a window that fits its content, takes its
             // new height at once: animating the height would resize the window on every frame (§2.13).
             if let note {
@@ -211,7 +223,7 @@ struct QuickAskView: View {
                         .font(.system(size: 12))
                         .foregroundStyle(Palette.secondary)
                     Spacer(minLength: 4)
-                    Button("Abrir Ajustes") { SettingsRouter.show(using: openSettings) }
+                    Button("Abrir Ajustes") { SettingsRouter.open(.models, using: openSettings) }
                     .buttonStyle(.link)
                     .font(.system(size: 12))
                     .help(Tip.connectModel)
