@@ -145,32 +145,38 @@ private struct LiveScreenCard: View {
     private func buttons(_ state: LiveCardState, handoff: ApprovalRequest?, store: LiveFrameStore) -> some View {
         let kinds = state.buttons
         let showsKeys = handoff.map { model.showsApprovalKeys($0.id, of: botID) } ?? false
-        // A narrow column drops the last buttons rather than wrapping: the card keeps its height.
-        func row(_ count: Int) -> some View {
+        // A narrow column first shortens the words ("Parar Orb" to "Parar"), and only then drops the last buttons rather
+        // than wrapping: the card keeps its height.
+        func row(_ count: Int, short: Bool = false) -> some View {
             HStack(spacing: Spacing.xs) {
-                ForEach(Array(kinds.prefix(count)), id: \.self) { button($0, handoff: handoff, store: store, showsKeys: showsKeys) }
+                ForEach(Array(kinds.prefix(count)), id: \.self) { button($0, handoff: handoff, store: store, showsKeys: showsKeys, short: short) }
             }
         }
         return ViewThatFits(in: .horizontal) {
             row(kinds.count)
-            row(max(kinds.count - 1, 1))
-            row(1)
+            row(kinds.count, short: true)
+            row(max(kinds.count - 1, 1), short: true)
+            row(1, short: true)
         }
         .controlSize(.small)
         .frame(height: ControlHeight.compact, alignment: .leading)
     }
 
     @ViewBuilder private func button(_ kind: LiveCardState.Button, handoff: ApprovalRequest?, store: LiveFrameStore,
-                                     showsKeys: Bool) -> some View {
+                                     showsKeys: Bool, short: Bool) -> some View {
         switch kind {
         case .enlarge:
             Button("Ampliar") { enlarge() }.buttonStyle(SecondaryPillStyle()).help(Tip.enlargeScreen)
         case .stop:
-            Button("Parar") { model.stop(botID) }.buttonStyle(GhostStyle()).help(Tip.stopBrowsing)
+            // Stops the whole Orb (its chains with other Orbs too), not just the turn as the composer's Stop does.
+            Button(short ? "Parar" : "Parar Orb") { model.stop(botID) }.buttonStyle(GhostStyle()).help(Tip.stopBrowsing)
+                .accessibilityLabel("Parar Orb")
         case .hide:
-            Button("Privado") { store.isPrivate = true }.buttonStyle(GhostStyle()).help(Tip.hideScreen)
+            Button(short ? "Ocultar" : "Ocultar tela") { store.isPrivate = true }.buttonStyle(GhostStyle()).help(Tip.hideScreen)
+                .accessibilityLabel("Ocultar tela")
         case .reveal:
-            Button("Mostrar") { store.isPrivate = false }.buttonStyle(PrimaryPillStyle()).help(Tip.revealScreen)
+            Button(short ? "Mostrar" : "Mostrar tela") { store.isPrivate = false }.buttonStyle(PrimaryPillStyle()).help(Tip.revealScreen)
+                .accessibilityLabel("Mostrar tela")
         case .done:
             Button { if let handoff { model.decide(.once, approvalID: handoff.id, botID: botID) } } label: {
                 HStack(spacing: 7) {
@@ -363,10 +369,10 @@ struct LiveScreenTab: View {
                 if let host { Text(host).font(.system(size: 11)).foregroundStyle(Palette.faint).lineLimit(1).truncationMode(.middle) }
                 Spacer(minLength: 0)
                 if state == .live || state == .connecting {
-                    Button("Privado") { store.isPrivate = true }
+                    Button("Ocultar tela") { store.isPrivate = true }
                         .buttonStyle(GhostStyle()).controlSize(.small).hangsOnTrailingEdge().help(Tip.hideScreen)
                 } else if state == .privateView {
-                    Button("Mostrar") { store.isPrivate = false }
+                    Button("Mostrar tela") { store.isPrivate = false }
                         .buttonStyle(SecondaryPillStyle()).controlSize(.small).help(Tip.revealScreen)
                 }
             }
