@@ -445,9 +445,13 @@ actor MCPAuth {
         guard generation[id, default: 0] == started else { throw ToolError("Login cancelado.") }
     }
 
+    /// What the "needs a registered app" error says after the service's name. The connector sheet looks for it in the
+    /// error text to open the fields for the app, so both read it from here.
+    static let needsAppPhrase = "pede um app registrado"
+
     private static func needsApp(_ name: String, secret: Bool) -> ToolError {
-        ToolError(secret ? "O \(name) pede um app registrado: cole o Client ID e o Client Secret."
-                         : "O \(name) pede um app registrado: cole o Client ID (e o Client Secret, se o app tiver um).")
+        ToolError(secret ? "O \(name) \(needsAppPhrase): cole o Client ID e o Client Secret."
+                         : "O \(name) \(needsAppPhrase): cole o Client ID (e o Client Secret, se o app tiver um).")
     }
 
     /// The scopes of the request: what the server's challenge says, else what the connector's model or the person chose, else everything

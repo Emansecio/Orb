@@ -660,9 +660,9 @@ tem a **Galeria**, os **Instalados** e **Explorar**.
 
 - **Conectores** dão ferramentas novas aos Orbs (ler o Gmail, a Agenda, o Slack, o GitHub, uma pasta…). A **Galeria** é uma grade
   de serviços: cada cartão diz o que o serviço faz e como conecta, e o botão diz onde ele está (**Conectar**, **Conectado**,
-  **Resolver** quando falta algo, **Desligado**, **Em breve**). O ícone é o logotipo da marca (Gmail, Google Agenda, Slack, Notion, GitHub, Supabase, Linear, Atlassian e Sentry; vêm embutidos no app, nada é baixado) ou, nos conectores genéricos e da Apple, um símbolo na cor da marca. Os instalados e as folhas de conexão usam o mesmo ícone.
+  **Resolver** quando falta algo, **Desativado**, **Em breve**). Clicar num conector já instalado leva à aba *Instalados*, com o cartão dele em destaque. O ícone é o logotipo da marca (Gmail, Google Agenda, Slack, Notion, GitHub, Supabase, Linear, Atlassian e Sentry; vêm embutidos no app, nada é baixado) ou, nos conectores genéricos e da Apple, um símbolo na cor da marca. Os instalados e as folhas de conexão usam o mesmo ícone.
   *Explorar* busca no [registro oficial do MCP](https://registry.modelcontextprotocol.io) os demais servidores, com aviso de que os
-  não marcados "Oficial" são código de terceiros. Em "Adicionar manualmente" dá para informar o comando ou a URL.
+  não marcados "Oficial" são código de terceiros. O "+" da barra abre a galeria e, no menu dele, o registro ou "Manualmente", onde dá para informar o comando ou a URL.
   - **Google pelo Mac** (Gmail, Google Agenda, Lembretes): conectores **locais**, sem servidor e sem projeto no Google. A conta
     Google entra em *Ajustes do Sistema → Contas de Internet* (o login é da Apple, o Orb nunca vê a senha). **Conectar** pede a
     permissão do macOS (Calendários, Lembretes ou Automação do Mail) e, se não achar a conta Google no Mac, mostra um guia com
@@ -689,8 +689,8 @@ tem a **Galeria**, os **Instalados** e **Explorar**.
 - **Carregam sob demanda.** Um conector não liga com o app nem manda as suas ferramentas a cada mensagem: o Orb recebe só duas
   ferramentas fixas, uma para ver o que cada conector oferece e outra para usá-lo. O servidor sobe na primeira vez que um Orb
   precisa dele (a conversa mostra "Conectando a GitHub…") e desliga sozinho depois de 10 minutos sem uso (um servidor local que fica sem responder, duas chamadas seguidas, é desligado e sobe de novo na próxima; ao fechar o app, os servidores locais são encerrados). O cartão em
-  *Instalados* mostra **Pronto** (desligado, liga quando precisar), **Em uso**, **Conectando…**, **Erro** ou **Desligado**, e o
-  menu tem **Testar conexão** ("Conectou: 12 ferramentas em 0,8 s"; se falhar, o motivo aparece no cartão), **Ver ferramentas…** (com "Só leitura" e "Destrutiva"),
+  *Instalados* mostra **Pronto** (desligado, liga quando precisar), **Em uso**, **Conectando…**, **Não conectou** ou **Desativado**. O botão **Testar** do cartão ("Conectou: 12 ferramentas em 0,8 s"; se falhar, o motivo fica no cartão até a próxima ação) fica ao lado do
+  menu, que tem **Ver ferramentas…** (com "Só leitura" e "Destrutiva"),
   **Editar…** e **Apagar…**. Uma falha traz "Tentar de novo".
 - **Quem usa.** Cada conector e cada skill tem **"Usar com"**: todos os Orbs (padrão) ou só os que você marcar. O Orb também
   precisa estar com a chave **Conectores** ligada (marcar o Orb em "Usar com" liga sozinho). Uma ferramenta de conector pede

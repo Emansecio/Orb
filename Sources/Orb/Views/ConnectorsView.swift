@@ -8,6 +8,8 @@ struct ConnectorsView: View {
     @State private var editing: ConnectorDraft?
     /// The connector of this Mac whose "Conectar" sheet is open.
     @State private var settingUp: LocalConnectorKind?
+    /// The connector the gallery sent to the Instalados tab: scrolled to and outlined for a moment.
+    @State private var highlighted: UUID?
 
     init(tab: CatalogTab = .gallery) {
         _tab = State(initialValue: tab)
@@ -24,8 +26,11 @@ struct ConnectorsView: View {
                 .padding(.bottom, 4)
             CatalogTabContent(tab: tab) {
                 switch tab {
-                case .gallery: ConnectorGalleryView(editing: $editing, settingUp: $settingUp, explore: { tab = .explore })
-                case .installed: InstalledConnectors(editing: $editing, settingUp: $settingUp, explore: { tab = .gallery })
+                case .gallery:
+                    ConnectorGalleryView(editing: $editing, settingUp: $settingUp, explore: { tab = .explore },
+                                         showInstalled: { highlighted = $0; tab = .installed })
+                case .installed:
+                    InstalledConnectors(editing: $editing, settingUp: $settingUp, highlighted: $highlighted, explore: { tab = .gallery })
                 case .explore: ExploreConnectors(editing: $editing)
                 }
             }
@@ -37,10 +42,18 @@ struct ConnectorsView: View {
             Button("Reconectar", systemImage: "arrow.clockwise") { model.retryFailedConnectors() }
                 .help(hasProblem ? "Tenta conectar de novo os conectores com erro" : "Nenhum conector está com erro")
                 .disabled(!hasProblem)
-            Button("Adicionar manualmente", systemImage: "plus") {
-                editing = ConnectorDraft(config: MCPServerConfig(name: ""))
+            Menu {
+                Button("Da galeria", systemImage: "square.grid.2x2") { tab = .gallery }
+                Button("Do registro", systemImage: "magnifyingglass") { tab = .explore }
+                Button("Manualmente", systemImage: "terminal") {
+                    editing = ConnectorDraft(config: MCPServerConfig(name: ""))
+                }
+            } label: {
+                Label("Adicionar conector", systemImage: "plus")
+            } primaryAction: {
+                tab = .gallery
             }
-            .help("Abre o editor para adicionar um servidor pelo comando ou pela URL")
+            .help("Abre a galeria; o menu também leva ao registro ou ao formulário manual")
         }
         .sheet(item: $editing) { draft in
             ConnectorEditor(draft: draft)
@@ -99,6 +112,7 @@ private struct InstalledConnectors: View {
     @Environment(AppModel.self) private var model
     @Binding var editing: ConnectorDraft?
     @Binding var settingUp: LocalConnectorKind?
+    @Binding var highlighted: UUID?
     /// Back to the gallery, where a connector is picked.
     let explore: () -> Void
     @State private var deleting: MCPServerConfig?
@@ -106,34 +120,44 @@ private struct InstalledConnectors: View {
 
     var body: some View {
         @Bindable var model = model
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 12, alignment: .top)], alignment: .leading, spacing: 12) {
-                    ForEach($model.connectors) { $connector in
-                        ConnectorCard(connector: $connector, status: model.connectorStatus[connector.id],
-                                      usedBy: usedBy(connector), attention: attention(connector), onEdit: {
-                            if let kind = connector.local.flatMap(LocalConnectorKind.init(rawValue:)) {
-                                settingUp = kind
-                            } else {
-                                editing = ConnectorDraft(editing: connector)
-                            }
-                        }, onTest: {
-                            await model.testConnector(connector.id)
-                        }, onSignIn: { moreScope in
-                            await model.signIn(connector: connector.id, moreScope: moreScope)
-                        }, isSigningIn: model.signingIn.contains(connector.id), onCancelSignIn: {
-                            model.cancelSignIn(connector: connector.id)
-                        }, onSignOut: {
-                            await model.signOut(connector: connector.id)
-                        }, onViewTools: {
-                            viewingTools = connector
-                        }, onDelete: {
-                            deleting = connector
-                        })
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 12, alignment: .top)], alignment: .leading, spacing: 12) {
+                        ForEach($model.connectors) { $connector in
+                            ConnectorCard(connector: $connector, status: model.connectorStatus[connector.id],
+                                          usedBy: usedBy(connector), attention: attention(connector),
+                                          isHighlighted: highlighted == connector.id, onEdit: {
+                                if let kind = connector.local.flatMap(LocalConnectorKind.init(rawValue:)) {
+                                    settingUp = kind
+                                } else {
+                                    editing = ConnectorDraft(editing: connector)
+                                }
+                            }, onTest: {
+                                await model.testConnector(connector.id)
+                            }, onSignIn: { moreScope in
+                                await model.signIn(connector: connector.id, moreScope: moreScope)
+                            }, isSigningIn: model.signingIn.contains(connector.id), onCancelSignIn: {
+                                model.cancelSignIn(connector: connector.id)
+                            }, onSignOut: {
+                                await model.signOut(connector: connector.id)
+                            }, onViewTools: {
+                                viewingTools = connector
+                            }, onDelete: {
+                                deleting = connector
+                            })
+                            .id(connector.id)
+                        }
                     }
                 }
+                .pageColumn()
             }
-            .pageColumn()
+            .task(id: highlighted) {
+                guard let id = highlighted else { return }
+                withAnimation(Motion.content) { proxy.scrollTo(id, anchor: .center) }
+                try? await Task.sleep(for: .seconds(1.8))
+                if !Task.isCancelled, highlighted == id { highlighted = nil }
+            }
         }
         .overlay {
             if model.connectors.isEmpty {
@@ -183,6 +207,8 @@ private struct ConnectorCard: View {
     let usedBy: String?
     /// What a connector of this Mac lacks, in a line (a permission, the Google account); nil when nothing does.
     var attention: String?
+    /// The gallery sent the person here for this connector: a brief outline.
+    var isHighlighted = false
     let onEdit: () -> Void
     /// Starts the server (if it is off), lists its tools and says how it went.
     let onTest: () async -> ConnectorTestOutcome
@@ -199,6 +225,8 @@ private struct ConnectorCard: View {
     /// The login under way (the browser is open) or the last one that failed.
     @State private var login = LoginState.none
     @State private var loginTask: Task<Void, Never>?
+    /// The test under way, or the wait that clears its success; a card that goes away does not leave it running.
+    @State private var testTask: Task<Void, Never>?
 
     private enum TestState: Equatable { case none, running, done(String), failed(String) }
     private enum LoginState: Equatable { case none, waiting, failed(String) }
@@ -247,9 +275,12 @@ private struct ConnectorCard: View {
                 statusBadge
                     .animateChanges(of: StatusBadgeKey(isEnabled: connector.isEnabled, status: status))
                 Spacer(minLength: 0)
+                Button("Testar", action: runTest)
+                    .buttonStyle(GhostStyle())
+                    .controlSize(.small)
+                    .disabled(!connector.isEnabled || test == .running)
+                    .help(connector.isEnabled ? "Liga o servidor e lista as ferramentas, para ver se funciona" : "Só dá para testar com o conector ativado")
                 Menu {
-                    Button("Testar conexão", action: runTest).disabled(!connector.isEnabled || test == .running)
-                        .help(connector.isEnabled ? "Liga o servidor e lista as ferramentas, para ver se funciona" : "Só dá para testar com o conector ativado")
                     Button("Ver ferramentas…", action: onViewTools)
                         .help("Mostra o que este conector oferece aos Orbs")
                     Divider()
@@ -270,15 +301,20 @@ private struct ConnectorCard: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
-                .iconTip("Testa, mostra as ferramentas, edita ou apaga \(connector.name)", label: Tip.moreOptions(of: connector.name))
+                .iconTip("Mostra as ferramentas, edita ou apaga \(connector.name)", label: Tip.moreOptions(of: connector.name))
             }
         }
-        .padding(14)
+        .padding(Spacing.cardPadding)
         .card(radius: 14)
+        .overlay {
+            if isHighlighted { RoundedRectangle(cornerRadius: 14).strokeBorder(Palette.accent, lineWidth: 2).transition(.opacity) }
+        }
         .opacity(connector.isEnabled ? 1 : 0.55)
         .animateChanges(of: connector.isEnabled)
         .animateChanges(of: status)
         .animateChanges(of: test)
+        .animateChanges(of: isHighlighted)
+        .onDisappear { testTask?.cancel() }
     }
 
     /// A connector that signs in with the person's account (a login, not a key).
@@ -371,17 +407,17 @@ private struct ConnectorCard: View {
 
     private func runTest() {
         guard test != .running else { return }
-        Task { @MainActor in
+        testTask?.cancel() // the wait of an earlier success must not clear this test's result
+        testTask = Task { @MainActor in
             test = .running
             switch await onTest() {
             case .connected(let tools, let seconds):
                 test = .done(ConnectorStatusText.tested(tools: tools, seconds: seconds))
                 try? await Task.sleep(for: .seconds(6))
-                if case .done = test { test = .none }
+                if !Task.isCancelled, case .done = test { test = .none }
             case .failed(let message):
+                // A failure stays until the next action: it is what the person has to fix.
                 test = .failed(message)
-                try? await Task.sleep(for: .seconds(6))
-                if case .failed = test { test = .none }
             }
         }
     }
@@ -466,10 +502,10 @@ private struct ConnectorCard: View {
         }
     }
 
-    /// Pronto (off, starts by itself when an Orb needs it) · Em uso (connected now) · Conectando… · Erro · Desligado.
+    /// Pronto (off, starts by itself when an Orb needs it) · Em uso (connected now) · Conectando… · Não conectou · Desativado.
     @ViewBuilder private var statusBadge: some View {
         if !connector.isEnabled {
-            CatalogBadge(text: "Desligado", symbol: "pause.circle")
+            CatalogBadge(text: "Desativado", symbol: "pause.circle")
         } else {
             switch status {
             case .ready:
@@ -478,7 +514,7 @@ private struct ConnectorCard: View {
                 CatalogBadge(text: count.map { "Pronto · \(ConnectorStatusText.toolCount($0))" } ?? "Pronto", symbol: "checkmark.circle")
                     .help("Liga sozinho quando um Orb precisar")
             case .failed:
-                CatalogBadge(text: "Erro", symbol: "exclamationmark.triangle.fill", tint: Palette.danger)
+                CatalogBadge(text: "Não conectou", symbol: "exclamationmark.triangle.fill", tint: Palette.danger)
             case .starting:
                 CatalogBadge(text: "Conectando…", symbol: "hourglass")
             case .needsSignIn(let expired):
@@ -486,7 +522,7 @@ private struct ConnectorCard: View {
             case .needsMorePermission:
                 CatalogBadge(text: "Precisa de mais permissão", symbol: "lock.trianglebadge.exclamationmark", tint: Palette.warn)
             case .stopped:
-                CatalogBadge(text: "Desligado", symbol: "pause.circle")
+                CatalogBadge(text: "Desativado", symbol: "pause.circle")
             case nil:
                 CatalogBadge(text: "Pronto", symbol: "checkmark.circle")
                     .help("Liga sozinho quando um Orb precisar")
@@ -581,7 +617,7 @@ struct ConnectorToolsSheet: View {
                 .padding(.horizontal, 20)
             }
         } else {
-            Text(catalog == nil ? "O Orb ainda não conhece as ferramentas deste conector. Use “Testar conexão” no menu do cartão."
+            Text(catalog == nil ? "O Orb ainda não conhece as ferramentas deste conector. Use “Testar” no cartão."
                                 : "Este conector não oferece ferramentas.")
                 .font(.system(size: 12))
                 .foregroundStyle(Palette.muted)
@@ -932,7 +968,7 @@ struct ConnectorEditor: View {
             SheetFooter(message: "O conector foi salvo. Corrija e tente de novo.", cancelTitle: "Fechar", cancel: { dismiss() },
                         primaryTitle: "Editar", primaryHelp: "Volta ao formulário para corrigir o conector", primary: {
                 // A service that wants an app registered by the person: the fields for it are the next thing to see.
-                if case .failed(let message) = phase, message.contains("app registrado") { showsAdvanced = true }
+                if case .failed(let message) = phase, message.contains(MCPAuth.needsAppPhrase) { showsAdvanced = true }
                 phase = .form
             })
         }

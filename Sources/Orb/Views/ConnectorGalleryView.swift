@@ -1,12 +1,14 @@
 import SwiftUI
 
 /// The gallery of the Conectores page: one card per service, one click to connect. A card says what the service does and how it
-/// connects, and its button says where it stands: Conectar, Conectado, Desligado, Resolver (something needs the person) or Em breve.
+/// connects, and its button says where it stands: Conectar, Conectado, Desativado, Resolver (something needs the person) or Em breve.
 struct ConnectorGalleryView: View {
     @Environment(AppModel.self) private var model
     @Binding var editing: ConnectorDraft?
     @Binding var settingUp: LocalConnectorKind?
     let explore: () -> Void
+    /// Shows an installed connector in the Instalados tab.
+    let showInstalled: (UUID) -> Void
 
     var body: some View {
         ScrollView {
@@ -38,11 +40,14 @@ struct ConnectorGalleryView: View {
         ConnectorGallery.status(of: service, connectors: model.connectors, statuses: model.connectorStatus, local: model.localStates)
     }
 
-    /// A new service opens its setup; one that is installed opens it to edit (and, if it needs attention, to fix).
+    /// A new service opens its setup; one that is installed goes to the Instalados tab, where it is managed, unless it
+    /// needs attention: that opens it to fix, as the card says.
     private func open(_ service: ConnectorService, status: ServiceStatus) {
         if status == .soon { return }
         let installed = ConnectorGallery.installed(service, in: model.connectors)
-        if let kind = service.localKind {
+        if let installed, status == .connected || status == .off {
+            showInstalled(installed.id)
+        } else if let kind = service.localKind {
             settingUp = kind
         } else if let installed {
             editing = ConnectorDraft(editing: installed)
@@ -176,7 +181,7 @@ private struct ServiceCard: View {
         .animation(reduceMotion ? nil : Motion.hover(isHovering), value: isHovering)
         .animateChanges(of: status)
         .accessibilityLabel("\(service.name). \(service.summary) \(spoken)")
-        .accessibilityHint(status == .soon ? "" : status == .available ? "Abre a conexão" : "Abre os ajustes")
+        .accessibilityHint(hint)
     }
 
     private func note(_ message: String) -> some View {
@@ -202,7 +207,7 @@ private struct ServiceCard: View {
         case .connected:
             CatalogBadge(text: "Conectado", symbol: "checkmark.circle.fill", tint: Palette.ok)
         case .off:
-            CatalogBadge(text: "Desligado", symbol: "pause.circle")
+            CatalogBadge(text: "Desativado", symbol: "pause.circle")
         case .needsAttention:
             Text("Resolver")
                 .font(.system(size: 12, weight: .medium))
@@ -219,9 +224,18 @@ private struct ServiceCard: View {
     private var help: String {
         switch status {
         case .available: "Abre a conexão com \(service.name)"
-        case .connected, .off: "Abre \(service.name) para editar ou mudar os Orbs que o usam"
+        case .connected, .off: "Mostra \(service.name) entre os instalados, para editar ou mudar os Orbs que o usam"
         case .needsAttention: "Abre \(service.name) para resolver o que falta"
         case .soon: "\(service.name) ainda não está disponível"
+        }
+    }
+
+    private var hint: String {
+        switch status {
+        case .available: "Abre a conexão"
+        case .connected, .off: "Mostra entre os instalados"
+        case .needsAttention: "Abre os ajustes"
+        case .soon: ""
         }
     }
 
@@ -229,7 +243,7 @@ private struct ServiceCard: View {
         switch status {
         case .available: "Não conectado."
         case .connected: "Conectado."
-        case .off: "Desligado."
+        case .off: "Desativado."
         case .needsAttention(let message): "Precisa de atenção: \(message)"
         case .soon: "Em breve."
         }

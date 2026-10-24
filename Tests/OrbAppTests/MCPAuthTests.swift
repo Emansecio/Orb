@@ -276,6 +276,7 @@ struct MCPSignInTests {
             _ = try await auth.signIn(config, open: FakeOAuthService.Browser().open)
         })
         #expect(error.message == "O Notion pede um app registrado: cole o Client ID e o Client Secret.")
+        #expect(error.message.contains(MCPAuth.needsAppPhrase)) // what the connector sheet looks for
         await auth.setClientSecret("s3cret", for: config.id)
 
         let browser = FakeOAuthService.Browser()
