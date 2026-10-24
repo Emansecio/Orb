@@ -1012,11 +1012,22 @@ private struct WorkingLine: View {
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(work.tone == .waiting ? "\(look.name) precisa de você" : "\(look.name) está trabalhando")
-            .accessibilityValue(work.text)
+            .accessibilityValue(WorkMeter.spokenValue(phrase: work.text, actions: work.actions, spend: live.turnSpend))
             .accessibilityAddTraits(.updatesFrequently)
             // The line is one element for VoiceOver: its buttons are its actions. The command one is there at once,
             // without the delay the eye needs.
             .accessibilityActions {
+                Button("Dizer o tempo e o gasto") {
+                    // Read when asked: the clock is not part of the value, which would be read again every second.
+                    let said: String
+                    if case .retrying(let until) = work.tone {
+                        said = WorkMeter.countdown(until: until, now: .now)
+                    } else {
+                        let elapsed = live.workingSince.map { ElapsedFormat.working(since: $0, now: .now) } ?? ""
+                        said = WorkMeter.text(elapsed: elapsed, actions: work.actions, spend: live.turnSpend)
+                    }
+                    model.announceForAccessibility(WorkMeter.spoken(said.isEmpty ? "Ainda sem tempo medido" : said))
+                }
                 if live.commandWaited && !releasing {
                     Button(CommandName.sendToBackground) { sendToBackground() }
                 }

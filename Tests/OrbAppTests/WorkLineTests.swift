@@ -154,6 +154,14 @@ struct WorkPhraseTests {
                 == WorkLine(verb: "Sem rede", tone: .retrying(until: later.addingTimeInterval(8))).phraseKey)
     }
 
+    @Test func theLineReadByVoiceOverCarriesTheCountAndTheSpendButNeverTheClock() {
+        #expect(WorkMeter.spokenValue(phrase: "Lendo a.swift", actions: 0, spend: nil) == "Lendo a.swift")
+        #expect(WorkMeter.spokenValue(phrase: "Lendo a.swift", actions: 1, spend: TurnSpend(tokens: 900)) == "Lendo a.swift")
+        #expect(WorkMeter.spokenValue(phrase: "Lendo a.swift", actions: 3, spend: nil) == "Lendo a.swift, 3 ações")
+        #expect(WorkMeter.spokenValue(phrase: "Lendo", actions: 3, spend: TurnSpend(tokens: 75_000)) == "Lendo, 3 ações, 75 mil tokens")
+        #expect(WorkMeter.spoken("4 min · 30 ações") == "4 min, 30 ações")
+    }
+
     @Test func theMeterShowsTheClockAndFromTheSecondActionTheCount() {
         #expect(WorkMeter.text(elapsed: "", actions: 0) == "")
         #expect(WorkMeter.text(elapsed: "16 s", actions: 0) == "16 s")

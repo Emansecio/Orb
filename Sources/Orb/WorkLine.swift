@@ -297,6 +297,17 @@ enum WorkMeter {
         return parts.joined(separator: " · ")
     }
 
+    /// The meter's text for a screen reader: the dots between the parts become pauses.
+    static func spoken(_ text: String) -> String { text.replacingOccurrences(of: " · ", with: ", ") }
+
+    /// The line's value for VoiceOver: the phrase and the parts of the meter that change rarely (the actions, once per
+    /// tool, and the spend). The clock is left out, or the line would be read again every second; the line's
+    /// "Dizer o tempo e o gasto" action says it all on request.
+    static func spokenValue(phrase: String, actions: Int, spend: TurnSpend?) -> String {
+        let rest = spoken(text(elapsed: "", actions: actions, spend: spend))
+        return rest.isEmpty ? phrase : "\(phrase), \(rest)"
+    }
+
     /// "em 8 s": the wait before the new try, counting down; empty once it is over.
     static func countdown(until date: Date, now: Date) -> String {
         let seconds = Int(date.timeIntervalSince(now).rounded(.up))
