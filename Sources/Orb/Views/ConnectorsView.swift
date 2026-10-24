@@ -305,9 +305,9 @@ private struct ConnectorCard: View {
             }
         }
         .padding(Spacing.cardPadding)
-        .card(radius: 14)
+        .card(radius: Radius.large)
         .overlay {
-            if isHighlighted { RoundedRectangle(cornerRadius: 14).strokeBorder(Palette.accent, lineWidth: 2).transition(.opacity) }
+            if isHighlighted { RoundedRectangle(cornerRadius: Radius.large).strokeBorder(Palette.accent, lineWidth: 2).transition(.opacity) }
         }
         .opacity(connector.isEnabled ? 1 : 0.55)
         .animateChanges(of: connector.isEnabled)
@@ -777,7 +777,7 @@ private struct RegistryServerCard: View {
                 }
             }
             .padding(14)
-            .hoverCard(isHovering, radius: 14, strongOutline: true)
+            .hoverCard(isHovering, radius: Radius.large, strongOutline: true)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -1255,7 +1255,7 @@ struct ConnectorEditor: View {
                     .lineLimit(8)
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Palette.raised, in: .rect(cornerRadius: 8))
+                    .background(Palette.raised, in: .rect(cornerRadius: Radius.small))
                     .padding(.horizontal, 20)
             }
         }

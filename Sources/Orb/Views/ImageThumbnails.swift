@@ -39,8 +39,8 @@ struct ImageThumbnail: View {
         }
         .animation(Motion.fade, value: image != nil)
         .frame(width: size.width, height: size.height)
-        .clipShape(.rect(cornerRadius: 10))
-        .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Palette.line) }
+        .clipShape(.rect(cornerRadius: Radius.medium))
+        .overlay { RoundedRectangle(cornerRadius: Radius.medium).strokeBorder(Palette.line) }
         .task(id: path) {
             // Born from the cache with this very picture: nothing to decode, and no second pass over the body.
             // (Compared with the cached copy of `path`, so a view reused for another path still loads it.)

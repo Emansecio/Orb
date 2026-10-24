@@ -425,7 +425,7 @@ struct ComposerView: View {
                 }
             }
             .padding(.vertical, 4)
-            .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: 12))
+            .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: Radius.card))
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Skills sugeridas")
             .transition(.adapted(.asymmetric(insertion: .opacity.combined(with: .offset(y: 4)), removal: .opacity),
@@ -650,7 +650,7 @@ struct PreparingChip: View {
         ProgressView()
             .controlSize(.small)
             .frame(width: 56, height: 56)
-            .background(Palette.raised, in: .rect(cornerRadius: 10))
+            .background(Palette.raised, in: .rect(cornerRadius: Radius.medium))
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(ComposerLane.preparingText(count))
     }

@@ -175,7 +175,7 @@ struct KeptMemoryBanner: View {
                         .foregroundStyle(Palette.muted)
                 }
                 .padding(10)
-                .card(radius: 10, stroke: Palette.lineStrong)
+                .card(radius: Radius.medium, stroke: Palette.lineStrong)
                 .padding(.horizontal, 8)
                 .padding(.bottom, 4)
                 .transition(.adapted(.arrive, reduceMotion: reduceMotion))

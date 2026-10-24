@@ -34,7 +34,7 @@ struct MarketplaceGallery: View {
                     Text("Lendo o marketplace…").font(.system(size: 12)).foregroundStyle(Palette.muted)
                 }
                 .frame(maxWidth: .infinity, minHeight: 120)
-                .card(radius: 12)
+                .card(radius: Radius.card)
             case .failed(let message):
                 VStack(alignment: .leading, spacing: 8) {
                     Text(message)
@@ -46,7 +46,7 @@ struct MarketplaceGallery: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(14)
-                .card(radius: 12)
+                .card(radius: Radius.card)
             case .loaded(let bots):
                 gallery(bots)
             }
@@ -75,7 +75,7 @@ struct MarketplaceGallery: View {
                 }
             }
             .frame(height: 300)
-            .card(radius: 12)
+            .card(radius: Radius.card)
             HStack {
                 Text(shown.count == bots.count ? "\(bots.count) bots" : "\(shown.count) de \(bots.count) bots")
                     .font(.system(size: 11))
@@ -107,7 +107,7 @@ struct MarketplaceGallery: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .card(radius: 10, stroke: isSearching ? Palette.lineStrong : Palette.line)
+        .card(radius: Radius.medium, stroke: isSearching ? Palette.lineStrong : Palette.line)
     }
 
     private func categoryChips(_ categories: [String]) -> some View {
@@ -174,7 +174,7 @@ private struct MarketplaceRow: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: 26, height: 26)
-                    .background(MarketplaceGallery.color(bot.color), in: .rect(cornerRadius: 8))
+                    .background(MarketplaceGallery.color(bot.color), in: .rect(cornerRadius: Radius.small))
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -205,7 +205,7 @@ private struct MarketplaceRow: View {
             }
             .padding(8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isChosen ? Palette.ghostSelected : isHovering ? Palette.ghostHover : .clear, in: .rect(cornerRadius: 8))
+            .background(isChosen ? Palette.ghostSelected : isHovering ? Palette.ghostHover : .clear, in: .rect(cornerRadius: Radius.small))
             .contentShape(.rect)
         }
         .buttonStyle(.plain)

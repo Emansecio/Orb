@@ -51,8 +51,8 @@ struct FindBar: View {
         .padding(.trailing, 6)
         .padding(.vertical, 5)
         .frame(maxWidth: 480)
-        .background(Palette.surface, in: .rect(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Palette.lineStrong))
+        .background(Palette.surface, in: .rect(cornerRadius: Radius.card))
+        .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Palette.lineStrong))
         .shadow(color: .black.opacity(0.35), radius: 10, y: 3)
         .background {
             // ⌘G and ⇧⌘G, while the bar is open (the app has no Edit menu to carry them).
@@ -176,8 +176,8 @@ private struct FindResultRow: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background { RoundedRectangle(cornerRadius: 8).fill(Palette.ghostSelected).opacity(isCurrent ? 1 : 0) }
-            .hoverFill(isHovering && !isCurrent, in: .rect(cornerRadius: 8))
+            .background { RoundedRectangle(cornerRadius: Radius.small).fill(Palette.ghostSelected).opacity(isCurrent ? 1 : 0) }
+            .hoverFill(isHovering && !isCurrent, in: .rect(cornerRadius: Radius.small))
             .contentShape(.rect)
         }
         .buttonStyle(.plain)

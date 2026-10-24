@@ -207,8 +207,8 @@ struct CodeBlockView: View, Equatable {
                 .padding(.bottom, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(Palette.raised, in: .rect(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Palette.line, lineWidth: 1))
+        .background(Palette.raised, in: .rect(cornerRadius: Radius.small))
+        .overlay(RoundedRectangle(cornerRadius: Radius.small).strokeBorder(Palette.line, lineWidth: 1))
         .accessibilityElement(children: .contain)
         .accessibilityLabel(language.map { "Código em \($0)" } ?? "Código")
     }
@@ -309,8 +309,8 @@ struct TableBlockView: View, Equatable {
         }
         .font(.system(size: 13))
         .padding(Self.inset)
-        .background(Palette.raised.opacity(0.7), in: .rect(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Palette.line, lineWidth: 1))
+        .background(Palette.raised.opacity(0.7), in: .rect(cornerRadius: Radius.small))
+        .overlay(RoundedRectangle(cornerRadius: Radius.small).strokeBorder(Palette.line, lineWidth: 1))
     }
 
     /// The narrowest each column may get: its longest word (header in semibold), up to `maxFloor` so a long link or

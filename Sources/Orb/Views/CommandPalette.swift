@@ -364,7 +364,7 @@ private struct PaletteRow: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background { RoundedRectangle(cornerRadius: 8).fill(Palette.ghostSelected).opacity(isSelected ? 1 : 0) }
+        .background { RoundedRectangle(cornerRadius: Radius.small).fill(Palette.ghostSelected).opacity(isSelected ? 1 : 0) }
         .contentShape(.rect)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? .isSelected : [])

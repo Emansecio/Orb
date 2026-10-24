@@ -179,9 +179,9 @@ struct ImportPanel: View {
         }
         .overlay {
             if isTargeted {
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: Radius.card)
                     .strokeBorder(Palette.accent, style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
-                    .background(Palette.chrome.opacity(0.85), in: .rect(cornerRadius: 12))
+                    .background(Palette.chrome.opacity(0.85), in: .rect(cornerRadius: Radius.card))
                     .overlay { Text("Solte para importar").font(.system(size: 14, weight: .medium)).foregroundStyle(Palette.ink) }
                     .padding(8)
                     .transition(.opacity)
@@ -278,7 +278,7 @@ struct ImportPanel: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .card(radius: 10)
+            .card(radius: Radius.medium)
             if let error {
                 Text(error)
                     .font(.system(size: 12))
@@ -316,7 +316,7 @@ struct ImportPanel: View {
                         .padding(8)
                 }
                 .frame(height: 150)
-                .background(Palette.raised, in: .rect(cornerRadius: 8))
+                .background(Palette.raised, in: .rect(cornerRadius: Radius.small))
             }
             .font(.system(size: 12))
             Text("Num GPT, Gem ou Projeto, cole o prompt dentro dele. Se ele não mostrar as instruções, copie o texto da tela de configuração e cole abaixo.")
@@ -661,7 +661,7 @@ private struct ImportSkillRow: View {
                     .textSelection(.enabled)
                     .padding(8)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Palette.raised, in: .rect(cornerRadius: 8))
+                    .background(Palette.raised, in: .rect(cornerRadius: Radius.small))
                     .transition(.opacity)
             }
         }

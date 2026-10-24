@@ -44,7 +44,7 @@ struct GroupBoardView: View {
                         .font(.system(size: 13))
                         .lineLimit(2...5)
                         .padding(10)
-                        .background(Palette.surface, in: .rect(cornerRadius: 10))
+                        .background(Palette.surface, in: .rect(cornerRadius: Radius.medium))
                         .focused($isObjectiveFocused)
                         .onSubmit { commitObjective() }
                         .accessibilityLabel("Objetivo do grupo")
@@ -58,7 +58,7 @@ struct GroupBoardView: View {
                         .font(.system(size: 13))
                         .padding(.horizontal, 10)
                         .padding(.vertical, 7)
-                        .background(Palette.surface, in: .rect(cornerRadius: 8))
+                        .background(Palette.surface, in: .rect(cornerRadius: Radius.small))
                         .onSubmit {
                             let text = agreement.trimmingCharacters(in: .whitespacesAndNewlines)
                             guard !text.isEmpty else { return }
@@ -145,7 +145,7 @@ private struct UndoForgetToast: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .card(radius: 12, fill: Palette.surface)
+        .card(radius: Radius.card, fill: Palette.surface)
         .shadow(color: .black.opacity(0.3), radius: 10, y: 3)
     }
 }

@@ -169,7 +169,7 @@ private struct ServiceCard: View {
                 .frame(minHeight: 26)
             }
             .padding(14)
-            .card(radius: 14, fill: isHovering && status != .soon ? Palette.raised : Palette.surface,
+            .card(radius: Radius.large, fill: isHovering && status != .soon ? Palette.raised : Palette.surface,
                   stroke: isHovering && status != .soon ? Palette.lineStrong : Palette.line)
             .opacity(status == .soon || status == .off ? 0.7 : 1)
             .contentShape(.rect)

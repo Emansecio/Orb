@@ -84,8 +84,8 @@ enum ContextSnapshots {
         return AnyView(
             ContextPopover(reading: reading, result: result, compact: { _ in CompactionResult(status: .busy, message: "") }, adjustMemory: {})
                 .background(Palette.chrome)
-                .clipShape(.rect(cornerRadius: 12))
-                .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(Palette.lineStrong) }
+                .clipShape(.rect(cornerRadius: Radius.card))
+                .overlay { RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Palette.lineStrong) }
                 .padding(40)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 .background(Palette.canvas))

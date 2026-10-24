@@ -206,7 +206,7 @@ struct QuickAskView: View {
                 .iconTip("Enviar (↩)", label: "Enviar")
             }
             .padding(10)
-            .card(radius: 10)
+            .card(radius: Radius.medium)
             // What appears here fades in by itself (`.quiet`, 0.15 s) and the panel, a window that fits its content, takes its
             // new height at once: animating the height would resize the window on every frame (§2.13).
             if let note {
@@ -422,7 +422,7 @@ struct QuickAskReply: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .card(radius: 10)
+        .card(radius: Radius.medium)
         .accessibilityElement(children: .contain)
     }
 }
@@ -562,7 +562,7 @@ struct QuickAskApprovalCard: View {
             }
         }
         .padding(10)
-        .card(radius: 10, stroke: Palette.lineStrong)
+        .card(radius: Radius.medium, stroke: Palette.lineStrong)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(request.isQuestion ? "\(entry.bot.name) pergunta" : request.isHandoff ? "\(entry.bot.name) espera você terminar no navegador" : "\(entry.bot.name) precisa da sua permissão")
     }

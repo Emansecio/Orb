@@ -69,7 +69,7 @@ struct NewGroupSheet: View {
                         .font(.system(size: 14))
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
-                        .background(Palette.surface, in: .rect(cornerRadius: 10))
+                        .background(Palette.surface, in: .rect(cornerRadius: Radius.medium))
                         .accessibilityLabel("Nome do grupo")
                 }
                 TitledSection("Orbs") {
@@ -97,7 +97,7 @@ struct NewGroupSheet: View {
                         .lineLimit(2...3)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
-                        .background(Palette.surface, in: .rect(cornerRadius: 10))
+                        .background(Palette.surface, in: .rect(cornerRadius: Radius.medium))
                 }
             }
             .padding(20)
@@ -195,10 +195,10 @@ private struct OrbChoiceCard: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 10)
                 .padding(.horizontal, 6)
-                .background(isChosen ? Palette.surface : Palette.chrome, in: .rect(cornerRadius: 14))
-                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(isChosen ? core : Palette.line, lineWidth: isChosen ? 2 : 1))
+                .background(isChosen ? Palette.surface : Palette.chrome, in: .rect(cornerRadius: Radius.large))
+                .overlay(RoundedRectangle(cornerRadius: Radius.large).strokeBorder(isChosen ? core : Palette.line, lineWidth: isChosen ? 2 : 1))
                 .opacity(isEnabled || isChosen ? 1 : 0.45)
-                .contentShape(.rect(cornerRadius: 14))
+                .contentShape(.rect(cornerRadius: Radius.large))
             }
             .buttonStyle(.plain)
             .disabled(!isEnabled && !isChosen)

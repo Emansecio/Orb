@@ -95,10 +95,10 @@ struct QuestionCard: View {
             }
         }
         .padding(14)
-        .card(radius: 12, stroke: Palette.lineStrong)
+        .card(radius: Radius.card, stroke: Palette.lineStrong)
         .overlay {
             if ApprovalPulse.pulses(isNew: pulsesOnArrival, reduceMotion: reduceMotion) {
-                ApprovalPulseBorder(radius: 12, trigger: pulse)
+                ApprovalPulseBorder(radius: Radius.card, trigger: pulse)
             }
         }
         .onAppear { if pulsesOnArrival { pulse += 1 } }
@@ -128,7 +128,7 @@ struct QuestionCard: View {
             .onSubmit { answer(reply) }
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
-            .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: 8))
+            .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: Radius.small))
             .accessibilityLabel(question.options.isEmpty ? "Sua resposta" : "Outra resposta")
     }
 
@@ -243,8 +243,8 @@ private struct QuestionOptionButton: View {
             .font(.system(size: 13))
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .hoverFill(isHovering, in: .rect(cornerRadius: 8), color: Palette.raised, resting: Palette.surface)
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Palette.line))
+            .hoverFill(isHovering, in: .rect(cornerRadius: Radius.small), color: Palette.raised, resting: Palette.surface)
+            .overlay(RoundedRectangle(cornerRadius: Radius.small).strokeBorder(Palette.line))
             .contentShape(.rect)
         }
         .buttonStyle(.plain)

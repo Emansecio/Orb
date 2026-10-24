@@ -516,9 +516,9 @@ private struct OptionCell: View {
             .padding(.vertical, 6)
             // The chosen one keeps its own fill, which changes with the press curve; hover is the shared fade (in 0.10 s,
             // out 0.22 s), colors only, so it stays under Reduce Motion too.
-            .background { RoundedRectangle(cornerRadius: 12).fill(Palette.ghostSelected).opacity(isSelected ? 1 : 0) }
-            .hoverFill(isHovering && !isSelected, in: .rect(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(isSelected ? Palette.lineStrong : .clear))
+            .background { RoundedRectangle(cornerRadius: Radius.card).fill(Palette.ghostSelected).opacity(isSelected ? 1 : 0) }
+            .hoverFill(isHovering && !isSelected, in: .rect(cornerRadius: Radius.card))
+            .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(isSelected ? Palette.lineStrong : .clear))
             .animation(Motion.press, value: isSelected)
             .contentShape(.rect)
         }
@@ -542,8 +542,8 @@ private struct OptionCell: View {
             // view, which the clip shape would not cut.
             OrbView(config: preview, size: 80, animated: false, followsPointer: false)
                 .frame(width: 70, height: 52)
-                .clipShape(.rect(cornerRadius: 14))
-                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.white.opacity(0.06)))
+                .clipShape(.rect(cornerRadius: Radius.large))
+                .overlay(RoundedRectangle(cornerRadius: Radius.large).strokeBorder(Color.white.opacity(0.06)))
         }
     }
 }
@@ -582,9 +582,9 @@ private struct TemperamentRow: View {
             .padding(.vertical, 9)
             // The chosen one keeps its own fill, which changes with the press curve; hover is the shared fade (in 0.10 s,
             // out 0.22 s), colors only, so it stays under Reduce Motion too.
-            .background { RoundedRectangle(cornerRadius: 12).fill(Palette.ghostSelected).opacity(isSelected ? 1 : 0) }
-            .hoverFill(isHovering && !isSelected, in: .rect(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(isSelected ? Palette.lineStrong : .clear))
+            .background { RoundedRectangle(cornerRadius: Radius.card).fill(Palette.ghostSelected).opacity(isSelected ? 1 : 0) }
+            .hoverFill(isHovering && !isSelected, in: .rect(cornerRadius: Radius.card))
+            .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(isSelected ? Palette.lineStrong : .clear))
             .animation(Motion.press, value: isSelected)
             .contentShape(.rect)
         }

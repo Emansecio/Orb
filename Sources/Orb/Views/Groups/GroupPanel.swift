@@ -198,7 +198,7 @@ private struct MemberRow: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
-        .hoverFill(isHovering, in: .rect(cornerRadius: 10))
+        .hoverFill(isHovering, in: .rect(cornerRadius: Radius.medium))
         .onHover { isHovering = $0 }
         .accessibilityElement(children: .contain)
     }
@@ -240,7 +240,7 @@ private struct GroupSettingsTab: View {
                         .font(.system(size: 13))
                         .padding(.horizontal, 10)
                         .padding(.vertical, 7)
-                        .background(Palette.surface, in: .rect(cornerRadius: 8))
+                        .background(Palette.surface, in: .rect(cornerRadius: Radius.small))
                         .focused($isNameFocused)
                         .onSubmit { commitName() }
                 }

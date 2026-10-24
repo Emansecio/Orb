@@ -520,7 +520,7 @@ struct FirstRunCard: View {
                             .textFieldStyle(.plain)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 7)
-                            .background(Palette.raised, in: .rect(cornerRadius: 8))
+                            .background(Palette.raised, in: .rect(cornerRadius: Radius.small))
                             .focused($keyFocused)
                             .onSubmit(connectKey)
                             .accessibilityLabel("Chave de API de \(keyKind.shortName)")
@@ -547,7 +547,7 @@ struct FirstRunCard: View {
                 .transition(.opacity)
             }
         }
-        .card(radius: 12, stroke: isKeyOpen ? Palette.lineStrong : Palette.line)
+        .card(radius: Radius.card, stroke: isKeyOpen ? Palette.lineStrong : Palette.line)
     }
 
     private func connectKey() {
@@ -618,9 +618,9 @@ private struct FirstRunRow: View {
 
         Button(action: action) {
             if framed {
-                content.card(radius: 12, fill: isHovering && isEnabled ? Palette.raised : Palette.surface)
+                content.card(radius: Radius.card, fill: isHovering && isEnabled ? Palette.raised : Palette.surface)
             } else {
-                content.background(isHovering && isEnabled ? Palette.ghostHover : .clear, in: .rect(cornerRadius: 12))
+                content.background(isHovering && isEnabled ? Palette.ghostHover : .clear, in: .rect(cornerRadius: Radius.card))
             }
         }
         .buttonStyle(.plain)
@@ -767,7 +767,7 @@ struct FirstRunBanner: View {
         }
         .padding(isCompact ? 10 : 14)
         .animation(reduceMotion ? nil : Motion.content, value: isCompact)
-        .card(radius: 14, stroke: isPulsing ? Palette.accent : Palette.line, lineWidth: isPulsing ? 2 : 1)
+        .card(radius: Radius.large, stroke: isPulsing ? Palette.accent : Palette.line, lineWidth: isPulsing ? 2 : 1)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: isPulsing)
         // The phrases and the buttons that change as the connection goes (waiting, failed, ready) swap in place.
         .animateChanges(of: BannerPhase(connectedName: steps.connectedName, working: steps.working, failure: steps.failure?.message))

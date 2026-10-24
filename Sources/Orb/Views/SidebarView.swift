@@ -233,8 +233,8 @@ private struct FooterPageButton: View {
             .foregroundStyle(isSelected ? Palette.ink : Palette.muted)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 6)
-            .hoverFill(isHovering && !isSelected, in: .rect(cornerRadius: 10))
-            .background(RoundedRectangle(cornerRadius: 10).fill(isSelected ? Palette.ghostSelected : .clear))
+            .hoverFill(isHovering && !isSelected, in: .rect(cornerRadius: Radius.medium))
+            .background(RoundedRectangle(cornerRadius: Radius.medium).fill(isSelected ? Palette.ghostSelected : .clear))
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -271,10 +271,10 @@ struct SidebarRow<Content: View>: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .hoverFill(isHovering && !isSelected, in: .rect(cornerRadius: 10))
+                .hoverFill(isHovering && !isSelected, in: .rect(cornerRadius: Radius.medium))
                 .overlay {
                     if isDashed {
-                        RoundedRectangle(cornerRadius: 10)
+                        RoundedRectangle(cornerRadius: Radius.medium)
                             .strokeBorder(Palette.line, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
                     }
                 }
@@ -312,7 +312,7 @@ private struct SidebarSelectionFill: View {
     @Environment(\.sidebarListChanged) private var listChanged
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 10)
+        RoundedRectangle(cornerRadius: Radius.medium)
             .fill(Palette.ghostSelected)
             .matchedGeometryEffect(id: SidebarSelection.id, in: selectionSpace)
             // The list changed in this update (a new Orb that is chosen, a deleted one): the rows come and go, and the

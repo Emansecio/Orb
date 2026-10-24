@@ -104,8 +104,8 @@ extension Snapshot {
     private static func popover(_ content: some View) -> some View {
         content
             .background(Palette.chrome)
-            .clipShape(.rect(cornerRadius: 12))
-            .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(Palette.lineStrong) }
+            .clipShape(.rect(cornerRadius: Radius.card))
+            .overlay { RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Palette.lineStrong) }
             .padding(40)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             .background(Palette.canvas)

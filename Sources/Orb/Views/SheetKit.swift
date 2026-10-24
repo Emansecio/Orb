@@ -248,7 +248,7 @@ extension View {
         textFieldStyle(.plain)
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
-            .background(Palette.raised, in: .rect(cornerRadius: 8))
+            .background(Palette.raised, in: .rect(cornerRadius: Radius.small))
     }
 
     /// The gray line under a switch or a picker in the Orb's panel ("Rodar comandos e ler e escrever arquivos").
@@ -276,7 +276,7 @@ struct PlaceholderTextEditor: View {
             .scrollIndicators(fitsWithoutScrolling ? .never : .automatic)
             .padding(6)
             .frame(minHeight: minHeight)
-            .background(Palette.raised, in: .rect(cornerRadius: 8))
+            .background(Palette.raised, in: .rect(cornerRadius: Radius.small))
             .overlay(alignment: .topLeading) {
                 if text.isEmpty {
                     Text(placeholder)

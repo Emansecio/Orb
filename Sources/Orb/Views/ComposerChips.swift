@@ -297,9 +297,9 @@ struct SkillRow: View {
             // Hover fades (fast in, slow out); the keyboard highlight does not: like a native menu it moves at once,
             // so holding ↓ never leaves a trail of rows fading out behind it. Both fills are rounded and sit 4 pt in
             // from the list's edges, so the corners of the list never show a square patch.
-            .hoverFill(isHovering && !isHighlighted, in: .rect(cornerRadius: 8), color: Palette.ghostSelected)
+            .hoverFill(isHovering && !isHighlighted, in: .rect(cornerRadius: Radius.small), color: Palette.ghostSelected)
             .background {
-                RoundedRectangle(cornerRadius: 8).fill(Palette.ghostSelected)
+                RoundedRectangle(cornerRadius: Radius.small).fill(Palette.ghostSelected)
                     .opacity(isHighlighted ? 1 : 0)
                     .animation(nil, value: isHighlighted)
             }

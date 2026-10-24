@@ -90,7 +90,7 @@ private struct FindWash: View {
     let isOn: Bool
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 12)
+        RoundedRectangle(cornerRadius: Radius.card)
             .fill(Palette.findWash)
             .padding(.horizontal, -10)
             .padding(.vertical, -4)
@@ -909,7 +909,7 @@ struct ToolCallLine: View {
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .card(radius: 10)
+                .card(radius: Radius.medium)
                 .transition(.adapted(.unfold, reduceMotion: reduceMotion))
             }
         }
@@ -1357,7 +1357,7 @@ private struct NoticeLine: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color.primary.opacity(0.05), in: .rect(cornerRadius: 12))
+        .background(Color.primary.opacity(0.05), in: .rect(cornerRadius: Radius.card))
     }
 
     private func buttons(_ actions: [NoticeAction], otherModels: [(ref: String, name: String, provider: String)]) -> some View {
@@ -1625,7 +1625,7 @@ struct ApprovalCard: View {
                     .onAppear { noteFocused = true }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 7)
-                    .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: 8))
+                    .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: Radius.small))
                     .accessibilityLabel("Instrução ao negar")
                     .transition(.adapted(.unfold, reduceMotion: reduceMotion))
             } else {
@@ -1651,10 +1651,10 @@ struct ApprovalCard: View {
         // (§2.13). Focus goes to the field at once.
         .motion(Motion.content, value: showsNote)
         .padding(14)
-        .card(radius: 12, stroke: Palette.lineStrong)
+        .card(radius: Radius.card, stroke: Palette.lineStrong)
         .overlay {
             if ApprovalPulse.pulses(isNew: pulsesOnArrival, reduceMotion: reduceMotion) {
-                ApprovalPulseBorder(radius: 12, trigger: pulse)
+                ApprovalPulseBorder(radius: Radius.card, trigger: pulse)
             }
         }
         .onAppear { if pulsesOnArrival { pulse += 1 } }
@@ -1711,7 +1711,7 @@ struct ApprovalCard: View {
             }
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Palette.raised, in: .rect(cornerRadius: 8))
+            .background(Palette.raised, in: .rect(cornerRadius: Radius.small))
         }
         if let note = request.note {
             Text("Você disse: \(note)")
@@ -1763,7 +1763,7 @@ struct ApprovalCard: View {
         .textSelection(.enabled)
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Palette.raised, in: .rect(cornerRadius: 8))
+        .background(Palette.raised, in: .rect(cornerRadius: Radius.small))
     }
 
     private var denyButton: some View {
@@ -1895,7 +1895,7 @@ struct ApprovalCard: View {
             if isOpen {
                 VStack(alignment: .leading, spacing: 10) { details }
                     .padding(14)
-                    .card(radius: 12, stroke: Palette.line)
+                    .card(radius: Radius.card, stroke: Palette.line)
                     .transition(.adapted(.unfold, reduceMotion: reduceMotion))
             }
         }

@@ -919,8 +919,8 @@ struct SuggestionButton: View {
             .font(.system(size: 13))
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .hoverFill(isHovering, in: .rect(cornerRadius: 12), color: Palette.raised, resting: Palette.surface)
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Palette.line))
+            .hoverFill(isHovering, in: .rect(cornerRadius: Radius.card), color: Palette.raised, resting: Palette.surface)
+            .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Palette.line))
             .contentShape(.rect)
         }
         .buttonStyle(.plain)

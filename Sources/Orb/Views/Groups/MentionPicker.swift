@@ -62,7 +62,7 @@ struct MentionPicker: View {
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(index == selected ? Palette.ghostSelected : Color.clear, in: .rect(cornerRadius: 8))
+                    .background(index == selected ? Palette.ghostSelected : Color.clear, in: .rect(cornerRadius: Radius.small))
                     .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
@@ -71,7 +71,7 @@ struct MentionPicker: View {
         }
         .padding(6)
         .frame(width: 260, alignment: .leading)
-        .card(radius: 12, fill: Palette.surface)
+        .card(radius: Radius.card, fill: Palette.surface)
         .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
         .transition(.adapted(.rise, reduceMotion: reduceMotion))
         .accessibilityElement(children: .contain)

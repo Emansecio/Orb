@@ -532,11 +532,11 @@ private struct WelcomeChoice: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
-            .background(Color.white.opacity(isHovering ? 0.08 : 0.04), in: .rect(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(isHovering ? Palette.lineStrong : Palette.line))
+            .background(Color.white.opacity(isHovering ? 0.08 : 0.04), in: .rect(cornerRadius: Radius.card))
+            .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(isHovering ? Palette.lineStrong : Palette.line))
             .scaleEffect(isHovering && !reduceMotion ? 1.03 : 1)
             .animation(Motion.hover(isHovering), value: isHovering)
-            .contentShape(.rect(cornerRadius: 12))
+            .contentShape(.rect(cornerRadius: Radius.card))
         }
         .buttonStyle(.plain)
         .focusEffectDisabled()
@@ -592,7 +592,7 @@ struct KeptStartCard: View {
         }
         .padding(.bottom, 2)
         .frame(width: 420)
-        .card(radius: 14, fill: Palette.surface.opacity(0.9))
+        .card(radius: Radius.large, fill: Palette.surface.opacity(0.9))
         .accessibilityElement(children: .contain)
     }
 }
@@ -622,7 +622,7 @@ private struct KeptStartRow: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .hoverFill(isHovering, in: .rect(cornerRadius: 10))
+            .hoverFill(isHovering, in: .rect(cornerRadius: Radius.medium))
             .contentShape(.rect)
         }
         .buttonStyle(.plain)

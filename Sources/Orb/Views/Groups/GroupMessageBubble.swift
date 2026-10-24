@@ -241,7 +241,7 @@ struct GroupAssignmentLine: View {
                     .textSelection(.enabled)
                     .padding(12)
                     .frame(maxWidth: 680, alignment: .leading)
-                    .card(radius: 10)
+                    .card(radius: Radius.medium)
                     .transition(.adapted(.unfold, reduceMotion: reduceMotion))
             }
         }

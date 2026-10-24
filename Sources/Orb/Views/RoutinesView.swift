@@ -218,8 +218,8 @@ private struct TemplateCard: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .padding(14)
-            .hoverCard(isHovering, radius: 12)
-            .contentShape(.rect(cornerRadius: 12))
+            .hoverCard(isHovering, radius: Radius.card)
+            .contentShape(.rect(cornerRadius: Radius.card))
         }
         .buttonStyle(.plain)
         .help("\(template.prompt)\n\n\(Tip.routineTemplate(for: start))") // the card cuts a long prompt; the tooltip has it whole
@@ -367,7 +367,7 @@ private struct RoutineCard: View {
         .padding(Spacing.cardPadding)
         // The cards of one row are as tall as the tallest, with their buttons on the same line at the bottom.
         .frame(maxHeight: .infinity, alignment: .top)
-        .card(radius: 14)
+        .card(radius: Radius.large)
         .animateChanges(of: routine.isEnabled)
         .animateChanges(of: lastRunFailed)
         .confirmationDialog("Apagar “\(RoutineText.resolvedName(routine.name, prompt: routine.prompt))”?",

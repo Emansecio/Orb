@@ -98,10 +98,10 @@ struct SidebarGroupRow: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .hoverFill(isHovering && !isSelected, in: .rect(cornerRadius: 10))
+            .hoverFill(isHovering && !isSelected, in: .rect(cornerRadius: Radius.medium))
             .background {
                 if isSelected {
-                    RoundedRectangle(cornerRadius: 10)
+                    RoundedRectangle(cornerRadius: Radius.medium)
                         .fill(Palette.ghostSelected)
                         .matchedGeometryEffect(id: SidebarSelection.id, in: selectionSpace)
                 }

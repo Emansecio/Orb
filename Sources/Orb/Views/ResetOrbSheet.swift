@@ -116,7 +116,7 @@ private struct ResetShield: ViewModifier {
                                     .foregroundStyle(Palette.secondary)
                             }
                             .padding(20)
-                            .background(Palette.raised, in: RoundedRectangle(cornerRadius: 12))
+                            .background(Palette.raised, in: RoundedRectangle(cornerRadius: Radius.card))
                         }
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel("Redefinindo o Orb")

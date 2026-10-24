@@ -133,9 +133,9 @@ struct SidebarDropGap: View {
 
     var body: some View {
         if let gap {
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: Radius.medium)
                 .fill(Palette.ghostHover)
-                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Palette.lineStrong, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+                .overlay(RoundedRectangle(cornerRadius: Radius.medium).strokeBorder(Palette.lineStrong, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
                 .frame(width: gap.width, height: gap.height)
                 .offset(x: gap.minX, y: gap.minY)
                 .transition(.opacity)
@@ -198,7 +198,7 @@ private struct SidebarCategoryHeader: View {
                     .foregroundStyle(Palette.faint)
                     .monospacedDigit()
             }
-            .hoverFill(isTargeted, in: .rect(cornerRadius: 10))
+            .hoverFill(isTargeted, in: .rect(cornerRadius: Radius.medium))
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(CategoryText.accessibilityLabel(name: category.name, orbCount: ids.count, collapsed: collapsed,
                                                                 waiting: waiting, unread: unread))
@@ -288,9 +288,9 @@ private struct CategoryNameField: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: 10))
+        .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: Radius.medium))
         // A hairline, so the field does not read as the selected row.
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Palette.lineStrong))
+        .overlay(RoundedRectangle(cornerRadius: Radius.medium).strokeBorder(Palette.lineStrong))
         .onAppear { isFocused = true }
         .onChange(of: isFocused) { if !isFocused { finish(keeping: true) } }
     }

@@ -194,7 +194,7 @@ private struct InstalledSkills: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .card(radius: 12, stroke: filterFocused.wrappedValue ? Palette.lineStrong : Palette.line)
+        .card(radius: Radius.card, stroke: filterFocused.wrappedValue ? Palette.lineStrong : Palette.line)
         .padding(.bottom, 4)
     }
 
@@ -226,7 +226,7 @@ private struct InstalledSkills: View {
                         .help("Abre a proposta para salvar ou descartar")
                 }
                 .padding(Spacing.cardPadding)
-                .card(radius: 14)
+                .card(radius: Radius.large)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -356,7 +356,7 @@ private struct InstalledSkillRow: View {
             .accessibilityLabel("Mais opções de \(skill.name)")
         }
         .padding(Spacing.cardPadding)
-        .card(radius: 14)
+        .card(radius: Radius.large)
         .animateChanges(of: skill.isEnabled)
     }
 
@@ -426,7 +426,7 @@ private struct ExploreSkills: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .card(radius: 14)
+        .card(radius: Radius.large)
         .transition(.opacity)
     }
 
@@ -509,7 +509,7 @@ private struct CatalogSkillCard: View {
                 }
             }
             .padding(12)
-            .hoverCard(isHovering, radius: 14, strongOutline: true)
+            .hoverCard(isHovering, radius: Radius.large, strongOutline: true)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -586,7 +586,7 @@ struct SkillPreview: View {
                             MarkdownChunk(source: document.instructions).equatable()
                                 .padding(12)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(Palette.raised, in: .rect(cornerRadius: 10))
+                                .background(Palette.raised, in: .rect(cornerRadius: Radius.medium))
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .transition(.opacity)

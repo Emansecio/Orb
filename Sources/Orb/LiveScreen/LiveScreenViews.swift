@@ -60,11 +60,11 @@ private struct LiveScreenCard: View {
         }
         .padding(10)
         .frame(height: 92)
-        .card(radius: 12)
+        .card(radius: Radius.card)
         .overlay {
             // "Precisa de você" comes in once, with emphasis, and stays still: no pulse, no sound.
             if state == .needsYou {
-                RoundedRectangle(cornerRadius: 12).strokeBorder(Palette.warn.opacity(0.4), lineWidth: 1)
+                RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Palette.warn.opacity(0.4), lineWidth: 1)
                     .entrance(EntranceStyle(distance: 0, scale: 0.97, animation: Motion.emphasis))
                     .allowsHitTesting(false)
             }
@@ -92,10 +92,10 @@ private struct LiveScreenCard: View {
             }
         }
         .frame(width: Self.thumbnail.width, height: Self.thumbnail.height)
-        .clipShape(.rect(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Palette.line))
+        .clipShape(.rect(cornerRadius: Radius.small))
+        .overlay(RoundedRectangle(cornerRadius: Radius.small).strokeBorder(Palette.line))
         .motion(Motion.content, value: state.veil)
-        .contentShape(.rect(cornerRadius: 8))
+        .contentShape(.rect(cornerRadius: Radius.small))
         .onTapGesture { if state.enlarges { enlarge() } }
         .help(state.enlarges ? Tip.enlargeScreen : "")
         .accessibilityHidden(true)
@@ -391,8 +391,8 @@ struct LiveScreenTab: View {
             }
             .aspectRatio(1.6, contentMode: .fit)
             .frame(maxWidth: .infinity)
-            .clipShape(.rect(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Palette.line))
+            .clipShape(.rect(cornerRadius: Radius.small))
+            .overlay(RoundedRectangle(cornerRadius: Radius.small).strokeBorder(Palette.line))
             .motion(Motion.content, value: state.veil)
             .accessibilityLabel(LiveScreenText.spoken(caption: live.shownWork?.headline ?? "sem atividade"))
             if state == .needsYou {
@@ -433,8 +433,8 @@ struct LiveScreenTab: View {
             }
             .aspectRatio(1.6, contentMode: .fit)
             .frame(maxWidth: .infinity)
-            .clipShape(.rect(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Palette.line))
+            .clipShape(.rect(cornerRadius: Radius.small))
+            .overlay(RoundedRectangle(cornerRadius: Radius.small).strokeBorder(Palette.line))
             .accessibilityLabel("Última tela do navegador, \(focus.host)")
         }
     }

@@ -146,8 +146,8 @@ struct WelcomeReasonNote: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
         .frame(maxWidth: 460, alignment: .leading)
-        .background(Color.white.opacity(0.04), in: .rect(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Palette.line))
+        .background(Color.white.opacity(0.04), in: .rect(cornerRadius: Radius.medium))
+        .overlay(RoundedRectangle(cornerRadius: Radius.medium).strokeBorder(Palette.line))
         .accessibilityElement(children: .combine)
         .onAppear { AccessibilityNotification.Announcement(reason.message).post() }
     }

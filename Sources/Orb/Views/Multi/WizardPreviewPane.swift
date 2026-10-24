@@ -176,7 +176,7 @@ struct WizardPreviewPane: View {
                 .contentTransition(.opacity)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 2)
-                .background(wash(.name), in: .rect(cornerRadius: 8))
+                .background(wash(.name), in: .rect(cornerRadius: Radius.small))
                 .motion(Motion.content, value: draft.name)
             Text(draft.role.isEmpty ? " " : draft.role)
                 .font(.system(size: 13))
@@ -186,7 +186,7 @@ struct WizardPreviewPane: View {
                 .contentTransition(.opacity)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 2)
-                .background(wash(.role), in: .rect(cornerRadius: 8))
+                .background(wash(.role), in: .rect(cornerRadius: Radius.small))
                 .motion(Motion.content, value: draft.role)
         }
         .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: flashed)
@@ -223,8 +223,8 @@ struct WizardPreviewPane: View {
                 .motion(Motion.content, value: draft.instructions)
         }
         .padding(12)
-        .background(wash(.instructions), in: .rect(cornerRadius: 12))
-        .card(radius: 12)
+        .background(wash(.instructions), in: .rect(cornerRadius: Radius.card))
+        .card(radius: Radius.card)
         .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: isHowOpen)
         .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: flashed)
     }
@@ -352,7 +352,7 @@ struct WizardReadyCard: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .card(radius: 14)
+        .card(radius: Radius.large)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Tudo pronto para criar \(draft.name). Clique em Criar Orb, ou escolha Ajustar ou Voltar a conversar.")
     }

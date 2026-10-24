@@ -26,7 +26,7 @@ enum SystemSnapshots {
             .padding(14)
             .frame(width: 340)
             .background(Color(white: 0.12))
-            .clipShape(.rect(cornerRadius: 12))
+            .clipShape(.rect(cornerRadius: Radius.card))
             .padding(24)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading))
         }
@@ -39,7 +39,7 @@ enum SystemSnapshots {
             QuickAskView()
         }
         .background(Color(white: 0.12))
-        .clipShape(.rect(cornerRadius: 12))
+        .clipShape(.rect(cornerRadius: Radius.card))
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading))
     }

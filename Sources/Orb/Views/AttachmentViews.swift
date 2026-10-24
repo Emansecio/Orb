@@ -95,7 +95,7 @@ struct ImageTile: View {
         ImageThumbnail(path: path, size: size, decodeSide: decodeSide)
             .overlay {
                 if more > 0 {
-                    RoundedRectangle(cornerRadius: 10).fill(.black.opacity(0.45))
+                    RoundedRectangle(cornerRadius: Radius.medium).fill(.black.opacity(0.45))
                     Text("+\(more)").font(.system(size: 17, weight: .medium)).foregroundStyle(Palette.ink)
                 }
             }
@@ -136,7 +136,7 @@ struct FileCard: View {
                 .font(.system(size: isCompact ? 13 : 15))
                 .foregroundStyle(info.state == .missing ? Palette.warn : Palette.muted)
                 .frame(width: isCompact ? 28 : 32, height: isCompact ? 28 : 32)
-                .background(Palette.surface, in: .rect(cornerRadius: 8))
+                .background(Palette.surface, in: .rect(cornerRadius: Radius.small))
             VStack(alignment: .leading, spacing: 1) {
                 Text(info.name)
                     .font(.system(size: 12.5, weight: .medium))
@@ -156,8 +156,8 @@ struct FileCard: View {
         }
         .padding(.horizontal, 8)
         .frame(maxWidth: isCompact ? 280 : AttachmentStack.width, minHeight: minHeight ?? (isCompact ? 40 : 48), alignment: .leading)
-        .hoverFill(isHovering && info.state == .ok, in: .rect(cornerRadius: 10), color: Palette.raisedHover, resting: Palette.raised)
-        .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Palette.line) }
+        .hoverFill(isHovering && info.state == .ok, in: .rect(cornerRadius: Radius.medium), color: Palette.raisedHover, resting: Palette.raised)
+        .overlay { RoundedRectangle(cornerRadius: Radius.medium).strokeBorder(Palette.line) }
         .opacity(info.state == .missing ? 0.55 : 1)
         .motion(Motion.fade, value: info)
         .onHover { isHovering = $0 }

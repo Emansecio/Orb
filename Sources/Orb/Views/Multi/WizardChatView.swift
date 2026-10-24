@@ -148,8 +148,8 @@ struct WizardChatView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(isFocused ? Palette.surfaceFocused : Palette.surface, in: .rect(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(isFocused ? Palette.lineStrong : Palette.line))
+        .background(isFocused ? Palette.surfaceFocused : Palette.surface, in: .rect(cornerRadius: Radius.large))
+        .overlay(RoundedRectangle(cornerRadius: Radius.large).strokeBorder(isFocused ? Palette.lineStrong : Palette.line))
         .animation(Motion.fade, value: isFocused)
         .padding(.horizontal, 14)
         .padding(.top, 6)

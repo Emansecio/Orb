@@ -205,7 +205,7 @@ struct CatalogSearchHeader: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .card(radius: 12, stroke: isFocused ? Palette.lineStrong : Palette.line)
+            .card(radius: Radius.card, stroke: isFocused ? Palette.lineStrong : Palette.line)
             .background {
                 // ⌘F, like the search of the other pages.
                 Button("Buscar") { isFocused = true }
@@ -273,8 +273,8 @@ struct CatalogIcon: View {
             .font(.system(size: 15, weight: .medium))
             .foregroundStyle(Palette.secondary)
             .frame(width: 36, height: 36)
-            .background(Palette.raised, in: .rect(cornerRadius: 10))
-            .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Palette.line, lineWidth: 1) }
+            .background(Palette.raised, in: .rect(cornerRadius: Radius.medium))
+            .overlay { RoundedRectangle(cornerRadius: Radius.medium).strokeBorder(Palette.line, lineWidth: 1) }
     }
 }
 
@@ -363,7 +363,7 @@ private struct SkeletonCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
-                RoundedRectangle(cornerRadius: 10).fill(Palette.raised).frame(width: 36, height: 36)
+                RoundedRectangle(cornerRadius: Radius.medium).fill(Palette.raised).frame(width: 36, height: 36)
                 VStack(alignment: .leading, spacing: 6) {
                     RoundedRectangle(cornerRadius: 3).fill(Palette.raised).frame(width: 120, height: 10)
                     RoundedRectangle(cornerRadius: 3).fill(Palette.raised.opacity(0.6)).frame(width: 80, height: 8)
@@ -377,7 +377,7 @@ private struct SkeletonCard: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .card(radius: 14)
+        .card(radius: Radius.large)
     }
 }
 

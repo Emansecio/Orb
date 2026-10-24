@@ -322,7 +322,7 @@ struct ContextPopover: View {
                     .font(.system(size: 12))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
-                    .background(Palette.raised, in: .rect(cornerRadius: 8))
+                    .background(Palette.raised, in: .rect(cornerRadius: Radius.small))
                     .disabled(isWorking)
                     .onSubmit(run)
                     .accessibilityLabel("Foco do resumo")
@@ -384,7 +384,7 @@ struct ContextPopover: View {
             Spacer(minLength: 0)
         }
         .padding(10)
-        .background(Palette.raised, in: .rect(cornerRadius: 10))
+        .background(Palette.raised, in: .rect(cornerRadius: Radius.medium))
         .accessibilityElement(children: .combine)
         .transition(.opacity)
     }

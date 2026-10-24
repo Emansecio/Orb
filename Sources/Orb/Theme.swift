@@ -127,6 +127,16 @@ extension View {
     }
 }
 
+/// The corner radii shared by cards, fields and hover shapes. Other values (1-7, 9, 16, 18, 20) are one-off shapes
+/// and stay literal where they are drawn.
+enum Radius {
+    static let small: CGFloat = 8
+    static let medium: CGFloat = 10
+    /// The default of `card(radius:)`.
+    static let card: CGFloat = 12
+    static let large: CGFloat = 14
+}
+
 /// Heights of the buttons, so a primary, a secondary and a ghost button in one row are the same height.
 enum ControlHeight {
     static let regular: CGFloat = 30
@@ -137,7 +147,7 @@ enum ControlHeight {
 // MARK: Surfaces
 
 struct CardBackground: ViewModifier {
-    var radius: CGFloat = 12
+    var radius: CGFloat = Radius.card
     var fill: Color = Palette.surface
     var stroke: Color = Palette.line
     var lineWidth: CGFloat = 1
@@ -150,7 +160,7 @@ struct CardBackground: ViewModifier {
 }
 
 extension View {
-    func card(radius: CGFloat = 12, fill: Color = Palette.surface, stroke: Color = Palette.line,
+    func card(radius: CGFloat = Radius.card, fill: Color = Palette.surface, stroke: Color = Palette.line,
               lineWidth: CGFloat = 1) -> some View {
         modifier(CardBackground(radius: radius, fill: fill, stroke: stroke, lineWidth: lineWidth))
     }

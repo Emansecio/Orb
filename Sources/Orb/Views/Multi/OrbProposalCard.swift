@@ -160,9 +160,9 @@ struct OrbProposalCard: View {
             buttons
         }
         .padding(16)
-        .card(radius: 14, stroke: Palette.lineStrong)
+        .card(radius: Radius.large, stroke: Palette.lineStrong)
         .overlay {
-            if ApprovalPulse.pulses(isNew: pulses, reduceMotion: reduceMotion) { ApprovalPulseBorder(radius: 14, trigger: pulse) }
+            if ApprovalPulse.pulses(isNew: pulses, reduceMotion: reduceMotion) { ApprovalPulseBorder(radius: Radius.large, trigger: pulse) }
         }
         .scaleEffect(reduceMotion || entered ? 1 : 0.97, anchor: .topLeading)
         .opacity(entered ? 1 : 0)
@@ -355,7 +355,7 @@ struct OrbProposalCard: View {
                 .font(.system(size: 12))
                 .frame(height: 104)
                 .padding(4)
-                .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: 8))
+                .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: Radius.small))
                 .onChange(of: draft.instructions) {
                     if draft.instructions.count > OrbProposeTool.instructionsLimit {
                         draft.instructions = String(draft.instructions.prefix(OrbProposeTool.instructionsLimit))
@@ -558,7 +558,7 @@ struct OrbProposalCard: View {
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .card(radius: 14, stroke: Palette.line)
+                .card(radius: Radius.large, stroke: Palette.line)
                 .transition(.adapted(.unfold, reduceMotion: reduceMotion))
             }
         }
@@ -620,6 +620,6 @@ private extension View {
     func fieldBackground() -> some View {
         padding(.horizontal, 8)
             .padding(.vertical, 5)
-            .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: 8))
+            .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: Radius.small))
     }
 }

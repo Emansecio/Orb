@@ -873,12 +873,12 @@ private struct InspectorTabBar: View {
                     .padding(.horizontal, 2)
                     .background {
                         if isSelected {
-                            RoundedRectangle(cornerRadius: 8)
+                            RoundedRectangle(cornerRadius: Radius.small)
                                 .fill(Palette.ghostSelected)
                                 .matchedGeometryEffect(id: "destaque", in: highlight)
                         }
                     }
-                    .contentShape(.rect(cornerRadius: 8))
+                    .contentShape(.rect(cornerRadius: Radius.small))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(tab.title)
@@ -1127,7 +1127,7 @@ private struct RoutineRow: View {
         .padding(.vertical, 4)
         // The task the Orb just scheduled is marked for a moment (`AppModel.freshRoutine`).
         .background {
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: Radius.medium)
                 .fill(Palette.accent.opacity(model.freshRoutine == routine.id ? 0.12 : 0))
                 .padding(.horizontal, -8).padding(.vertical, -4)
         }
@@ -1220,7 +1220,7 @@ private struct RoutineGlyph: View {
             .font(.system(size: 13, weight: .semibold))
             .foregroundStyle(isOn ? Palette.accentText : Palette.muted)
             .frame(width: Self.side, height: Self.side)
-            .background((isOn ? Palette.accent.opacity(0.16) : Palette.raised), in: .rect(cornerRadius: 8))
+            .background((isOn ? Palette.accent.opacity(0.16) : Palette.raised), in: .rect(cornerRadius: Radius.small))
             .contentTransition(.symbolEffect(.replace))
             .accessibilityHidden(true)
     }

@@ -82,7 +82,7 @@ struct OrbMessageRow: View {
                 .transition(AnyTransition.adapted(.unfold, reduceMotion: reduceMotion))
             }
         }
-        .card(radius: 12, stroke: awaits ? Palette.accentText.opacity(0.3) : Palette.line)
+        .card(radius: Radius.card, stroke: awaits ? Palette.accentText.opacity(0.3) : Palette.line)
         .frame(maxWidth: 560, alignment: .leading)
         .onGeometryChange(for: Bool.self) { $0.size.width < Self.narrowBelow } action: { isNarrow = $0 }
         .frame(maxWidth: .infinity, alignment: .leading)
