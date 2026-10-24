@@ -6,12 +6,13 @@ import AppKit
 
 /// What a command asks of an Orb's chat: the cursor in the composer (⌘L), the list of earlier conversations (⌘Y,
 /// the sidebar's menu), the appearance editor (the sidebar's "Personalizar…") or the name field (its "Renomear…").
+/// `renameGroup` is the group panel's name field: its `botID` is the group's id.
 ///
 /// It is a request waiting in the model, not a notification: the chat of an Orb that was not open does not exist yet
 /// when the command runs, so a notification would be sent before anyone listens. The chat takes it in `onAppear` (it
 /// has just been created) and in `onChange` (it was already open).
 struct PendingChatRequest: Equatable {
-    enum Kind: Equatable { case focusComposer, editLook, renameOrb, findInConversation, showTab(InspectorTab) }
+    enum Kind: Equatable { case focusComposer, editLook, renameOrb, renameGroup, findInConversation, showTab(InspectorTab) }
     let kind: Kind
     let botID: UUID
 }
@@ -150,6 +151,13 @@ extension AppModel {
     func showNameEditor(of botID: UUID) {
         setInspector(true)
         request(.renameOrb, of: botID)
+    }
+
+    /// Opens the group with its panel, on the Ajustes tab with the cursor in the name field. The panel takes the request.
+    func showGroupNameEditor(of groupID: UUID) {
+        selection = .group(groupID)
+        setInspector(true)
+        pendingChatRequest = PendingChatRequest(kind: .renameGroup, botID: groupID)
     }
 
     /// Orb number `index` (0-based) in the sidebar's order, as ⌘1…⌘9 pick it.

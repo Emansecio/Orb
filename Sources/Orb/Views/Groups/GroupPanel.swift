@@ -6,6 +6,8 @@ struct GroupPanel: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let groupID: UUID
     @State private var tab = GroupPanelTab.members
+    /// "Renomear…" in the sidebar asked for the name field: the Ajustes tab takes it once it is on screen.
+    @State private var isFocusingName = false
 
     var body: some View {
         if let group = model.groups.first(where: { $0.id == groupID }) {
@@ -24,7 +26,7 @@ struct GroupPanel: View {
                     case .board:
                         GroupBoardTab(groupID: group.id)
                     case .settings:
-                        GroupSettingsTab(group: group)
+                        GroupSettingsTab(group: group, focusName: $isFocusingName)
                     }
                 }
                 .id(tab)
@@ -34,6 +36,15 @@ struct GroupPanel: View {
             }
             .frame(maxHeight: .infinity, alignment: .top)
             .background(Palette.chrome)
+            .onAppear { takeRequests() }
+            .onChange(of: model.pendingChatRequest) { takeRequests() }
+        }
+    }
+
+    private func takeRequests() {
+        if model.takeChatRequest(.renameGroup, of: groupID) {
+            tab = .settings
+            isFocusingName = true
         }
     }
 }
@@ -80,7 +91,8 @@ private struct GroupMembersTab: View {
                 .menuStyle(.button)
                 .buttonStyle(GhostStyle())
                 .disabled(looks.count >= OrbGroup.memberLimits.upperBound || candidates.isEmpty)
-                .help(looks.count >= OrbGroup.memberLimits.upperBound ? "Um grupo tem até 8 Orbs" : "Põe mais um Orb neste grupo")
+                .help(looks.count >= OrbGroup.memberLimits.upperBound ? "Um grupo tem até 8 Orbs"
+                      : candidates.isEmpty ? "Todos os seus Orbs já estão neste grupo" : "Põe mais um Orb neste grupo")
                 .padding(.top, 8)
                 // The "+" lines up with the avatars above (the rows' own 8 pt), not with the button's hover shape.
                 .padding(.leading, Spacing.s - Spacing.ghostInset)
@@ -136,23 +148,33 @@ private struct MemberRow: View {
     var body: some View {
         let isOrchestrator = look.id == group.orchestratorID
         HStack(spacing: 10) {
-            BotAvatar(orb: look.orb, size: 30, animated: false)
-                .frame(width: 30, height: 30)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(look.name)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Palette.ink)
-                Text(isOrchestrator ? "Orquestrador" : (look.role.isEmpty ? "Membro" : look.role))
-                    .font(.system(size: 11))
-                    .foregroundStyle(Palette.faint)
-                    .lineLimit(1)
+            // Avatar, name and role open the member's own chat; the icon buttons stay outside, as a button cannot hold a button.
+            Button {
+                model.selection = .bot(look.id)
+            } label: {
+                HStack(spacing: 10) {
+                    BotAvatar(orb: look.orb, size: 30, animated: false)
+                        .frame(width: 30, height: 30)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(look.name)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Palette.ink)
+                        Text(isOrchestrator ? "Orquestrador" : (look.role.isEmpty ? "Membro" : look.role))
+                            .font(.system(size: 11))
+                            .foregroundStyle(Palette.faint)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 4)
+                }
+                .contentShape(.rect)
             }
-            Spacer(minLength: 4)
+            .buttonStyle(.plain)
+            .help("Abrir a conversa de \(look.name)")
             if isOrchestrator {
                 Image(systemName: "star.fill")
                     .font(.system(size: 12))
-                    .foregroundStyle(Palette.warn)
+                    .foregroundStyle(Palette.accentText)
                     .frame(width: 26, height: 26) // as wide as the round buttons beside it, so the stars line up
                     .accessibilityLabel("Orquestrador")
             } else {
@@ -206,6 +228,7 @@ private struct GroupSettingsTab: View {
     let group: OrbGroup
     @State private var nameDraft = ""
     @State private var isConfirmingDelete = false
+    @Binding var focusName: Bool
     @FocusState private var isNameFocused: Bool
 
     var body: some View {
@@ -234,15 +257,17 @@ private struct GroupSettingsTab: View {
                 }
                 Button("Apagar grupo…", systemImage: "trash") { isConfirmingDelete = true }
                     .buttonStyle(GhostStyle(tint: Palette.danger))
-                    .confirmationDialog("Apagar o grupo \(group.name)?", isPresented: $isConfirmingDelete, titleVisibility: .visible) {
-                        Button("Apagar grupo", role: .destructive) { delete() }
-                    } message: {
-                        Text("A conversa do grupo e o quadro saem com ele. Os Orbs continuam como estavam.")
-                    }
+                    .deleteGroupDialog(group, isPresented: $isConfirmingDelete)
             }
             .padding(16)
         }
         .onAppear { nameDraft = group.name }
+        // A task, not an `onChange`: when the request also switched the tab, this view is new and `focusName` was set before it.
+        .task(id: focusName) {
+            guard focusName else { return }
+            focusName = false
+            isNameFocused = true
+        }
         .onChange(of: group.name) { nameDraft = group.name }
         // Leaving the field (another tab, the panel closed, another group) keeps what was typed, as the Orb's inspector does.
         .onChange(of: isNameFocused) { old, new in if old && !new { commitName() } }
@@ -252,11 +277,6 @@ private struct GroupSettingsTab: View {
     private func commitName() {
         guard let name = GroupNameEdit.commit(draft: nameDraft, current: group.name) else { nameDraft = group.name; return }
         model.renameGroup(group.id, to: name)
-    }
-
-    private func delete() {
-        model.deleteGroup(group.id)
-        model.selection = model.botIDs.first.map { .bot($0) }
     }
 }
 

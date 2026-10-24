@@ -460,6 +460,20 @@ import Testing
         #expect(!model.takeChatRequest(.renameOrb, of: model.botIDs[1]), "taken once")
     }
 
+    @Test @MainActor func groupNameEditorOpensThePanelOfThatGroup() throws {
+        let model = model()
+        let group = try #require(model.createGroup(name: "Time", members: model.botIDs))
+        model.selection = .bot(model.botIDs[0])
+        model.showInspector = false
+        model.showGroupNameEditor(of: group.id)
+        #expect(model.showInspector)
+        #expect(model.selection == .group(group.id))
+        #expect(!model.takeChatRequest(.renameGroup, of: UUID()), "another group's panel does not take it")
+        #expect(!model.takeChatRequest(.renameOrb, of: group.id), "it is not an Orb's rename")
+        #expect(model.takeChatRequest(.renameGroup, of: group.id))
+        #expect(!model.takeChatRequest(.renameGroup, of: group.id), "taken once")
+    }
+
     @Test @MainActor func menuCommandsWaitWhileASheetIsOpen() {
         let model = model()
         #expect(!model.hasOpenSheet)

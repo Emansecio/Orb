@@ -29,7 +29,8 @@ struct SidebarGroupsSection: View {
             SectionTitle("Grupos") {
                 Button { model.showNewGroup = true } label: { SectionPlus() }
                     .buttonStyle(.plain)
-                    .help(Tip.newGroup())
+                    .disabled(model.botIDs.count < 2)
+                    .help(model.botIDs.count < 2 ? "Crie ao menos 2 Orbs para formar um grupo" : Tip.newGroup())
                     .accessibilityLabel("Novo grupo")
                     .accessibilityIdentifier("sidebar-new-group")
             }
@@ -111,19 +112,13 @@ struct SidebarGroupRow: View {
         .onHover { isHovering = $0 }
         .contextMenu {
             Button("Abrir o grupo", systemImage: "person.3") { model.selection = .group(group.id) }
+            Button("Renomear…", systemImage: "pencil") { model.showGroupNameEditor(of: group.id) }
             Button("Parar grupo", systemImage: "stop.circle") { model.stopGroup(group.id) }
                 .disabled(live.runState == .idle)
             Divider()
             Button("Apagar grupo…", systemImage: "trash", role: .destructive) { isConfirmingDelete = true }
         }
-        .confirmationDialog("Apagar o grupo \(group.name)?", isPresented: $isConfirmingDelete, titleVisibility: .visible) {
-            Button("Apagar grupo", role: .destructive) {
-                model.deleteGroup(group.id)
-                if model.selection == .group(group.id) { model.selection = model.botIDs.first.map { .bot($0) } }
-            }
-        } message: {
-            Text("A conversa do grupo e o quadro saem com ele. Os Orbs continuam como estavam.")
-        }
+        .deleteGroupDialog(group, isPresented: $isConfirmingDelete)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(GroupRowText.accessibilityLabel(name: group.name, orbCount: looks.count, unread: live.unread,
                                                             working: working, waiting: live.needsYou))
