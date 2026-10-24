@@ -63,6 +63,8 @@ enum CatalogSnapshots {
         case "skill-proposal", "skill-proposal-update":
             guard let bot = model.bots.first, let draft = SkillSnapshots.draft(of: bot, update: screen.hasSuffix("update")) else { return nil }
             return AnyView(SkillEditor(skill: draft.skill, proposal: draft))
+        case "skills-pending":
+            return AnyView(PendingSkillsScene(model: model))
         case "skill-preview", "skill-preview-installed":
             let id = screen == "skill-preview" ? "anthropics/skills/docx" : "anthropics/skills/pdf"
             let entry = CatalogSkill(id: id, repo: "anthropics/skills", skillId: id.split(separator: "/").last.map(String.init) ?? "", name: "Documentos", installs: 206_000)
@@ -146,6 +148,21 @@ enum CatalogSnapshots {
     private static func template(_ id: String, phase: ConnectorEditor.Phase = .form) -> AnyView? {
         guard let template = (ConnectorTemplate.all + ConnectorTemplate.retired).first(where: { $0.id == id }) else { return nil }
         return AnyView(ConnectorEditor(draft: ConnectorDraft(template: template), initialPhase: phase))
+    }
+}
+
+/// The Skills page with a proposal from each of the first two Orbs waiting. They are written before the page opens,
+/// because it reads them once when it appears.
+private struct PendingSkillsScene: View {
+    let model: AppModel
+    @State private var ready = false
+
+    var body: some View {
+        Group { if ready { SkillsView() } }
+            .task {
+                for bot in model.bots.prefix(2) { _ = await model.memory.bank(for: bot.id).proposeSkill(SkillSnapshots.proposal) }
+                ready = true
+            }
     }
 }
 

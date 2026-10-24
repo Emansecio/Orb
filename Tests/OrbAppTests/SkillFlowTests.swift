@@ -432,6 +432,46 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
         #expect(model.skills.count == before)
     }
 
+    // MARK: The Skills page
+
+    @Test @MainActor func theSkillsPageListsTheProposalsOfEveryOrbEvenWithTheSameCommand() async throws {
+        let (model, firstID) = setUp(CallScript([said("oi")]))
+        let second = Bot(name: "Luna", role: "", orb: OrbConfig())
+        model.bots.append(second)
+        #expect(await model.pendingSkillDrafts().isEmpty)
+        await propose(SkillSamples.good, in: model, firstID)
+        await propose(SkillSamples.good, in: model, second.id)
+        let pending = await model.pendingSkillDrafts()
+        #expect(pending.count == 2 && Set(pending.map(\.id)).count == 2)
+        #expect(Set(pending.map(\.botID)) == [firstID, second.id])
+        // Deciding on one takes only that one off the list.
+        let draft = try #require(pending.first { $0.botID == second.id })
+        model.finishSkillDraft(draft)
+        await waitUntil("the proposal to go") { !(await model.hasSkillProposal(draft.slug, of: second.id)) }
+        #expect(await model.pendingSkillDrafts().map(\.botID) == [firstID])
+    }
+
+    @Test func theInstalledListFiltersByNameCommandAndSummaryWithoutCaseOrAccents() {
+        let skill = Skill(slug: "resumir", name: "Resumo rápido", summary: "Condensa textos longos", instructions: "x")
+        for query in ["", "  ", "resumo", "RAPIDO", "resum", "condensa", "longos"] {
+            #expect(InstalledSkillFilter.matches(skill, query: query), "\(query)")
+        }
+        #expect(!InstalledSkillFilter.matches(skill, query: "planilha"))
+    }
+
+    @Test func onlyACatalogSkillSaysWhereItCameFrom() {
+        func note(_ source: String?) -> String? {
+            SkillBadge.catalogNote(for: Skill(slug: "a", name: "A", summary: "", instructions: "x", source: source))
+        }
+        #expect(note("anthropics/skills/pdf") == "Veio de anthropics/skills. A edição fica só neste Mac.")
+        #expect(note(nil) == nil && note(Skill.builtInSource) == nil && note(Skill.learnedSource) == nil)
+    }
+
+    @Test func aPreviewThatCouldNotLoadSaysItInPlainWords() {
+        #expect(CatalogError.previewText(for: URLError(.notConnectedToInternet)) == "Sem conexão com o catálogo.")
+        #expect(CatalogError.previewText(for: CatalogError.http(500)) == "O catálogo respondeu HTTP 500.")
+    }
+
     // MARK: The gate before the review
 
     /// An Orb whose account has a cheap model of its maker (the gate's), so the gate runs before the review.

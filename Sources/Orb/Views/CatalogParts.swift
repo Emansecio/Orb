@@ -18,6 +18,8 @@ struct CatalogTabBar: View {
     let installedCount: Int
     /// The title of the gallery pill; nil leaves the pill out.
     var galleryTitle: String?
+    /// What ⌘F does on the installed tab instead of going to the catalog; nil when that list has nothing to search.
+    var findInstalled: (() -> Void)?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The one dark pill slides to the chosen tab through this namespace.
     @Namespace private var pillSpace
@@ -34,9 +36,12 @@ struct CatalogTabBar: View {
         .background(Color.white.opacity(0.06), in: .capsule)
         .background {
             // ⌘F outside the explore tab (the explore tab's header has its own button for it). Only the catalog has a
-            // search field, so the page goes there (the field takes focus when it appears).
+            // search field, so the page goes there (the field takes focus when it appears), unless the installed list
+            // has a filter of its own (`findInstalled`: Skills, when the list is long).
             if tab != .explore {
-                Button("Buscar no catálogo") { tab = .explore }
+                Button("Buscar no catálogo") {
+                    if tab == .installed, let findInstalled { findInstalled() } else { tab = .explore }
+                }
                     .keyboardShortcut(AppShortcut.find)
                     .opacity(0)
                     .frame(width: 0, height: 0)

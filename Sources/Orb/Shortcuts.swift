@@ -70,7 +70,7 @@ enum AppShortcut {
     static let chooseModel = KeyboardShortcut("m", modifiers: [.command, .shift])
     /// ⌘Z while the "esqueceu isso" toast is up (a field with something to undo keeps its own).
     static let undoForget = KeyboardShortcut("z", modifiers: .command)
-    /// ⌘F in a chat (the find bar) and in Skills and Conectores (the catalog's search).
+    /// ⌘F in a chat (the find bar) and in Skills and Conectores (the catalog's search; Skills with many installed: their filter).
     static let find = KeyboardShortcut("f", modifiers: .command)
     /// ⌘G and ⇧⌘G while the find bar of a chat is open: the next and the previous result.
     static let findNext = KeyboardShortcut("g", modifiers: .command)
@@ -177,7 +177,7 @@ enum ShortcutCatalog {
             ShortcutItem(.stopAndSend, AppShortcut.commandReturn, "Parar e enviar agora (Orb trabalhando e algo escrito, fora da edição de uma mensagem e sem pedido aberto)"),
             ShortcutItem(.chooseModel, AppShortcut.chooseModel, "Escolher o modelo do Orb"),
             ShortcutItem(command: .cancelEdit, keys: "esc", title: "Cancelar a edição de uma mensagem (com o cursor no campo; a lista de skills aberta fecha primeiro; o campo volta como estava)"),
-            ShortcutItem(.find, AppShortcut.find, CommandName.findInConversation + " (em Skills e Conectores, busca no catálogo)"),
+            ShortcutItem(.find, AppShortcut.find, CommandName.findInConversation + " (em Skills e Conectores, busca no catálogo; em Skills com muitas instaladas, filtra a lista)"),
             ShortcutItem(.findNext, AppShortcut.findNext, "Próximo resultado da busca na conversa (também ↩ e ↓ no campo de busca; esc fecha)"),
             ShortcutItem(.findPrevious, AppShortcut.findPrevious, "Resultado anterior da busca na conversa (também ⇧↩ e ↑ no campo de busca)"),
         ]),

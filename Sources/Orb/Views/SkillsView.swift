@@ -6,6 +6,8 @@ struct SkillsView: View {
     @Environment(AppModel.self) private var model
     @State private var tab: CatalogTab
     @State private var editing: Skill?
+    /// The filter of the installed list, which ⌘F focuses (the tab bar holds the shortcut).
+    @FocusState private var filterFocused: Bool
 
     init(tab: CatalogTab = .installed) {
         _tab = State(initialValue: tab)
@@ -13,12 +15,13 @@ struct SkillsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            CatalogTabBar(tab: $tab, installedTitle: "Instaladas", installedCount: model.skills.count)
+            CatalogTabBar(tab: $tab, installedTitle: "Instaladas", installedCount: model.skills.count,
+                           findInstalled: model.skills.count >= InstalledSkillFilter.threshold ? { filterFocused = true } : nil)
                 .padding(.top, 16)
                 .padding(.bottom, 4)
             CatalogTabContent(tab: tab) {
                 switch tab {
-                case .installed, .gallery: InstalledSkills(editing: $editing, explore: { tab = .explore }) // only connectors have a gallery
+                case .installed, .gallery: InstalledSkills(editing: $editing, filterFocused: $filterFocused, explore: { tab = .explore }) // only connectors have a gallery
                 case .explore: ExploreSkills()
                 }
             }
@@ -27,14 +30,25 @@ struct SkillsView: View {
         .navigationTitle("Skills")
         .navigationSubtitle("Instruções prontas: comece a mensagem com /nome")
         .toolbar {
-            Button("Nova skill", systemImage: "plus") {
-                editing = Skill(slug: "", name: "", summary: "", instructions: "")
+            ToolbarItem {
+                Menu {
+                    Button("Nova skill", systemImage: "plus", action: newSkill)
+                    Button("Do catálogo", systemImage: "sparkle.magnifyingglass") { tab = .explore }
+                } label: {
+                    Label("Nova skill", systemImage: "plus")
+                } primaryAction: {
+                    newSkill()
+                }
+                .help(Tip.newSkill)
             }
-            .help(Tip.newSkill)
         }
         .sheet(item: $editing) { skill in
             SkillEditor(skill: skill)
         }
+    }
+
+    private func newSkill() {
+        editing = Skill(slug: "", name: "", summary: "", instructions: "")
     }
 }
 
@@ -84,37 +98,71 @@ struct UseSkillButton: View {
 
 // MARK: Installed
 
+/// The filter of the installed list: by name, command or summary, case and accents aside.
+enum InstalledSkillFilter {
+    /// From this many skills on the list gets a field (and ⌘F goes to it instead of the catalog).
+    static let threshold = 8
+
+    static func matches(_ skill: Skill, query: String) -> Bool {
+        let term = query.trimmingCharacters(in: .whitespaces)
+        return term.isEmpty || [skill.name, skill.slug, skill.summary].contains { $0.localizedStandardContains(term) }
+    }
+}
+
 private struct InstalledSkills: View {
     @Environment(AppModel.self) private var model
     @Binding var editing: Skill?
+    var filterFocused: FocusState<Bool>.Binding
     let explore: () -> Void
     @State private var deleting: Skill?
+    @State private var query = ""
+    /// What the Orbs proposed and waits for you, read from their memories when the page opens and when a review ends.
+    @State private var pending: [SkillDraft] = []
+    @State private var reviewing: SkillDraft?
+
+    private var showsFilter: Bool { model.skills.count >= InstalledSkillFilter.threshold }
+    /// A filter typed before the list got short is gone with its field, not kept hiding skills.
+    private var activeQuery: String { showsFilter ? query : "" }
 
     var body: some View {
         @Bindable var model = model
+        let visible = $model.skills.filter { InstalledSkillFilter.matches($0.wrappedValue, query: activeQuery) }
         ScrollView {
-            LazyVStack(spacing: 8) {
-                ForEach($model.skills) { $skill in
-                    InstalledSkillRow(skill: $skill) {
-                        editing = skill
-                    } onDelete: {
-                        deleting = skill
+            VStack(spacing: 8) {
+                if showsFilter { filterField }
+                if !pending.isEmpty { pendingReview }
+                if visible.isEmpty, !model.skills.isEmpty {
+                    ContentUnavailableView.search(text: activeQuery)
+                }
+                LazyVStack(spacing: 8) {
+                    ForEach(visible) { skill in
+                        InstalledSkillRow(skill: skill) {
+                            editing = skill.wrappedValue
+                        } onDelete: {
+                            deleting = skill.wrappedValue
+                        }
                     }
                 }
             }
             .pageColumn()
         }
         .overlay {
-            if model.skills.isEmpty {
+            if model.skills.isEmpty, pending.isEmpty {
                 ContentUnavailableView {
                     Label("Nenhuma skill instalada", systemImage: "wand.and.stars")
                 } description: {
                     Text("Encontre skills prontas no catálogo ou crie a sua.")
                 } actions: {
-                    Button("Explorar catálogo", action: explore).buttonStyle(PrimaryPillStyle())
+                    Button("Explorar", action: explore).buttonStyle(PrimaryPillStyle())
                         .help(Tip.exploreSkills)
                 }
             }
+        }
+        .task { pending = await model.pendingSkillDrafts() }
+        .sheet(item: $reviewing, onDismiss: {
+            Task { pending = await model.pendingSkillDrafts() }
+        }) { draft in
+            SkillEditor(skill: draft.skill, proposal: draft)
         }
         .confirmationDialog("Apagar a skill “\(deleting?.name ?? "")”?", isPresented: Binding(
             get: { deleting != nil }, set: { if !$0 { deleting = nil } }
@@ -125,6 +173,64 @@ private struct InstalledSkills: View {
         } message: {
             Text(deleting.map(SkillDeleteCopy.message) ?? "")
         }
+    }
+
+    /// The same field as the catalog's search (without its ⌘F button: the tab bar owns the shortcut).
+    private var filterField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(Palette.faint)
+            TextField("Filtrar skills instaladas", text: $query)
+                .textFieldStyle(.plain)
+                .font(.system(size: 14))
+                .focused(filterFocused)
+            if !query.isEmpty {
+                Button("Limpar", systemImage: "xmark.circle.fill") { query = "" }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Palette.faint)
+                    .help(Tip.clearSearch)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .card(radius: 12, stroke: filterFocused.wrappedValue ? Palette.lineStrong : Palette.line)
+        .padding(.bottom, 4)
+    }
+
+    /// The skills the Orbs learned and proposed, from every Orb: nothing is saved until you read it and say so.
+    private var pendingReview: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Aguardando sua revisão (\(pending.count))")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Palette.ink)
+            ForEach(pending) { draft in
+                HStack(spacing: 14) {
+                    CatalogIcon(symbol: "sparkles")
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Text(draft.skill.name)
+                                .font(.system(size: 14, weight: .semibold))
+                            Text("de \(draft.orbName)")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Palette.muted)
+                        }
+                        if draft.isUpdate {
+                            CatalogBadge(text: "Melhoria de /\(draft.slug)", symbol: "arrow.triangle.2.circlepath")
+                        }
+                    }
+                    Spacer(minLength: 12)
+                    Button("Revisar") { reviewing = draft }
+                        .buttonStyle(SecondaryPillStyle())
+                        .accessibilityLabel("Revisar \(draft.skill.name), proposta de \(draft.orbName)")
+                        .help("Abre a proposta para salvar ou descartar")
+                }
+                .padding(Spacing.cardPadding)
+                .card(radius: 14)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.bottom, 8)
     }
 }
 
@@ -144,6 +250,16 @@ enum SkillDeleteCopy {
 enum SkillBadge {
     /// "Aprendida por Atlas" (just "Aprendida" when the Orb that proposed it is gone).
     static func learned(by orb: String?) -> String { orb.map { "Aprendida por \($0)" } ?? "Aprendida" }
+
+    /// "owner/repo" of a catalog skill's source.
+    static func origin(of source: String) -> String { source.split(separator: "/").prefix(2).joined(separator: "/") }
+
+    /// What the editor says of a skill that came from the catalog: the copy on this Mac is its own from the first edit.
+    /// nil for yours, the app's and the ones an Orb learned.
+    static func catalogNote(for skill: Skill) -> String? {
+        guard let source = skill.source, source != Skill.builtInSource, source != Skill.learnedSource else { return nil }
+        return "Veio de \(origin(of: source)). A edição fica só neste Mac."
+    }
 }
 
 private struct InstalledSkillRow: View {
@@ -155,50 +271,65 @@ private struct InstalledSkillRow: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
+        // A switched-off skill dims its icon and title only: the badge says why, and the buttons stay legible.
+        let dimmed = skill.isEnabled ? 1.0 : 0.55
         HStack(alignment: .center, spacing: 14) {
-            CatalogIcon(symbol: skill.source == nil || skill.source == Skill.builtInSource || skill.source == Skill.learnedSource ? "wand.and.stars" : "shippingbox")
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text(skill.name)
-                        .font(.system(size: 14, weight: .semibold))
-                    Text("/\(skill.slug)")
-                        .font(.system(size: 12).monospaced())
-                        .foregroundStyle(Palette.muted)
-                    Button(copied.isOn ? "Copiado" : "Copiar /\(skill.slug)", systemImage: copied.isOn ? "checkmark" : "doc.on.doc", action: copy)
-                        .labelStyle(.iconOnly)
-                        .buttonStyle(.plain)
-                        .font(.system(size: 11))
-                        .foregroundStyle(copied.isOn ? Palette.ok : Palette.faint)
-                        // The symbol is replaced by the check, as in the chat (a plain change under Reduce Motion); in on the
-                        // press curve, back on the content one.
-                        .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
-                        .animation(copied.isOn ? Motion.press : Motion.content, value: copied.isOn)
-                        .help(Tip.copySlug(skill.slug))
-                }
-                if !skill.summary.isEmpty {
-                    Text(MemoryText.tidyEllipsis(skill.summary))
-                        .font(.system(size: 12))
-                        .foregroundStyle(Palette.muted)
-                        .lineLimit(2)
-                }
-                HStack(spacing: 6) {
-                    if skill.source == Skill.builtInSource {
-                        CatalogBadge(text: "Incluída no app", symbol: "circle.hexagongrid")
-                    } else if skill.source == Skill.learnedSource {
-                        CatalogBadge(text: SkillBadge.learned(by: model.bots.first { $0.id == skill.learnedBy }?.name), symbol: "sparkles")
-                    } else if let source = skill.source {
-                        CatalogBadge(text: source.split(separator: "/").prefix(2).joined(separator: "/"), symbol: "shippingbox")
-                    } else {
-                        CatalogBadge(text: "Criada por você", symbol: "person")
+            // A click anywhere on this part opens the editor; the copy button here and the controls beside it keep their own.
+            HStack(alignment: .center, spacing: 14) {
+                CatalogIcon(symbol: skill.source == nil || skill.source == Skill.builtInSource || skill.source == Skill.learnedSource ? "wand.and.stars" : "shippingbox")
+                    .opacity(dimmed)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(skill.name)
+                            .font(.system(size: 14, weight: .semibold))
+                            .opacity(dimmed)
+                        Text("/\(skill.slug)")
+                            .font(.system(size: 12).monospaced())
+                            .foregroundStyle(Palette.muted)
+                        Button(copied.isOn ? "Copiado" : "Copiar /\(skill.slug)", systemImage: copied.isOn ? "checkmark" : "doc.on.doc", action: copy)
+                            .labelStyle(.iconOnly)
+                            .buttonStyle(.plain)
+                            .font(.system(size: 11))
+                            .foregroundStyle(copied.isOn ? Palette.ok : Palette.faint)
+                            // The symbol is replaced by the check, as in the chat (a plain change under Reduce Motion); in on the
+                            // press curve, back on the content one.
+                            .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
+                            .animation(copied.isOn ? Motion.press : Motion.content, value: copied.isOn)
+                            .help(Tip.copySlug(skill.slug))
                     }
-                    if skill.orbIDs != nil {
-                        CatalogBadge(text: OrbScopeText.summary(orbIDs: skill.orbIDs, bots: model.bots), symbol: "person.2")
+                    if !skill.summary.isEmpty {
+                        Text(MemoryText.tidyEllipsis(skill.summary))
+                            .font(.system(size: 12))
+                            .foregroundStyle(Palette.muted)
+                            .lineLimit(2)
                     }
-                    if skill.uses > 0 {
-                        CatalogBadge(text: skill.uses == 1 ? "1 uso" : "\(skill.uses) usos")
+                    HStack(spacing: 6) {
+                        if !skill.isEnabled {
+                            CatalogBadge(text: "Desativada", symbol: "pause.circle")
+                        }
+                        if skill.source == Skill.builtInSource {
+                            CatalogBadge(text: "Incluída no app", symbol: "circle.hexagongrid")
+                        } else if skill.source == Skill.learnedSource {
+                            CatalogBadge(text: SkillBadge.learned(by: model.bots.first { $0.id == skill.learnedBy }?.name), symbol: "sparkles")
+                        } else if let source = skill.source {
+                            CatalogBadge(text: SkillBadge.origin(of: source), symbol: "shippingbox")
+                        } else {
+                            CatalogBadge(text: "Criada por você", symbol: "person")
+                        }
+                        if skill.orbIDs != nil {
+                            CatalogBadge(text: OrbScopeText.summary(orbIDs: skill.orbIDs, bots: model.bots), symbol: "person.2")
+                        }
+                        if skill.uses > 0 {
+                            CatalogBadge(text: skill.uses == 1 ? "1 uso" : "\(skill.uses) usos")
+                        }
                     }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(.rect)
+            .onTapGesture(perform: onEdit)
+            .accessibilityAction(named: "Editar", onEdit)
+            .help("Abre a skill para ler e editar")
             Spacer(minLength: 12)
             UseSkillButton(skill: skill)
             Toggle("Ativa", isOn: $skill.isEnabled)
@@ -224,10 +355,8 @@ private struct InstalledSkillRow: View {
             .help(Tip.moreOptions(of: skill.name))
             .accessibilityLabel("Mais opções de \(skill.name)")
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
+        .padding(Spacing.cardPadding)
         .card(radius: 14)
-        .opacity(skill.isEnabled ? 1 : 0.55)
         .animateChanges(of: skill.isEnabled)
     }
 
@@ -412,14 +541,18 @@ struct SkillPreview: View {
     var body: some View {
         content
             .orbSheet(document?.name ?? entry.name, subtitle: "Revise o que a skill diz antes de instalar.", size: .large) { footer }
-            .task {
-                guard document == nil else { return }
-                do {
-                    document = try await SkillCatalog.shared.document(for: entry)
-                } catch {
-                    self.error = error.localizedDescription
-                }
-            }
+            .task { await load() }
+    }
+
+    /// Reads the SKILL.md; "Tentar de novo" runs it again.
+    private func load() async {
+        guard document == nil else { return }
+        error = nil
+        do {
+            document = try await SkillCatalog.shared.document(for: entry)
+        } catch {
+            if !Task.isCancelled { self.error = CatalogError.previewText(for: error) }
+        }
     }
 
     private var content: some View {
@@ -458,9 +591,13 @@ struct SkillPreview: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .transition(.opacity)
                     } else if let error {
-                        Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(Palette.danger)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .transition(.opacity)
+                        VStack(alignment: .leading, spacing: 10) {
+                            Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(Palette.danger)
+                            Button("Tentar de novo") { Task { await load() } }
+                                .buttonStyle(SecondaryPillStyle())
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .transition(.opacity)
                     } else {
                         DelayedSpinner().frame(maxWidth: .infinity).padding(.top, 40)
                             .transition(.opacity)
@@ -577,9 +714,13 @@ struct SkillEditor: View {
                 }
                 TextField("O que faz", text: $skill.summary, prompt: Text("ex.: Resume um texto em 5 tópicos"))
             } footer: { FormFootnote {
-                Text(finalSlug.isEmpty ? "O comando é o que você escreve no chat para usar a skill."
-                     : "Para usar, escreva /\(finalSlug) no começo da mensagem no chat.")
-                    .textSwap(finalSlug.isEmpty)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(finalSlug.isEmpty ? "O comando é o que você escreve no chat para usar a skill."
+                         : "Para usar, escreva /\(finalSlug) no começo da mensagem no chat.")
+                        .textSwap(finalSlug.isEmpty)
+                    // A catalog skill is edited as a copy: the repository is not touched, and what changes stays here.
+                    if let note = SkillBadge.catalogNote(for: skill) { Text(note) }
+                }
             } }
             Section {
                 PlaceholderTextEditor(placeholder: "Quando eu pedir /\(finalSlug.isEmpty ? "resumir" : finalSlug), leia o texto e responda em 5 tópicos curtos.",

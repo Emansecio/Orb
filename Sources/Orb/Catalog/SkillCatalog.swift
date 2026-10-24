@@ -244,6 +244,12 @@ enum CatalogError: LocalizedError {
 }
 
 extension CatalogError {
+    /// What the preview says when the SKILL.md did not come: the catalog's own sentences (already in Portuguese), and a
+    /// plain one for a network failure, whose system text is neither.
+    static func previewText(for error: Error) -> String {
+        error is URLError ? "Sem conexão com o catálogo." : error.localizedDescription
+    }
+
     /// What a skill's card says when its SKILL.md is not there: the short form of the reason.
     static func cardText(for error: Error) -> String {
         switch error as? CatalogError {

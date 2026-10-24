@@ -735,7 +735,7 @@ tem a **Galeria**, os **Instalados** e **Explorar**.
 | Esc | Num cartão de aprovação: não permitir (não vale enquanto você digita). Também fecha a paleta e a lista de skills; com o cursor no campo, desiste da edição de uma mensagem (depois de fechar a lista de skills, se estiver aberta) |
 | ⇧⌘M | Escolher o modelo do Orb |
 | ⌘Z | Desfazer "Esquecer" da memória (enquanto o aviso está na tela) |
-| ⌘F | Buscar na conversa aberta. Em Skills e Conectores: buscar no catálogo (fora da aba Explorar leva ao catálogo, em Explorar) |
+| ⌘F | Buscar na conversa aberta. Em Skills e Conectores: buscar no catálogo (fora da aba Explorar leva ao catálogo, em Explorar; em Skills com 8 ou mais instaladas, foca o filtro da lista) |
 | ⌘G / ⇧⌘G | Com a busca da conversa aberta: próximo resultado / anterior (também ↩ ou ↓ e ⇧↩ ou ↑ no campo; Esc fecha) |
 | ⌃⌥Espaço | De **qualquer app**: abre o painel da barra de menus. Opcional, desligado por padrão |
 

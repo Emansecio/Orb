@@ -5,7 +5,8 @@ import Foundation
 
 /// A proposal on its way to the editor: the skill it would be (new, or an existing one with the proposed text).
 struct SkillDraft: Identifiable {
-    var id: String { slug }
+    /// Per Orb: two Orbs may propose the same command, and the Skills page lists them together.
+    var id: String { "\(botID.uuidString)/\(slug)" }
     var skill: Skill
     /// The command of the proposal (the one in the file; the editor may rename the skill).
     var slug: String
@@ -113,6 +114,21 @@ extension AppModel {
     /// The proposal as the editor shows it: nil when it is gone.
     func skillDraft(_ slug: String, from botID: UUID) async -> SkillDraft? {
         guard let proposal = await memory.bank(for: botID).proposal(slug) else { return nil }
+        return skillDraft(proposal, from: botID)
+    }
+
+    /// Every proposal of every Orb that waits for you (the Skills page lists them; newest first within each Orb). The
+    /// folders are read inside each Orb's memory actor, not on the main thread.
+    func pendingSkillDrafts() async -> [SkillDraft] {
+        var drafts: [SkillDraft] = []
+        for id in bots.map(\.id) {
+            drafts += await memory.bank(for: id).proposals().map { skillDraft($0, from: id) }
+        }
+        return drafts
+    }
+
+    private func skillDraft(_ proposal: SkillProposal, from botID: UUID) -> SkillDraft {
+        let slug = proposal.slug
         let orb = bot(botID)?.name ?? "O Orb"
         if var current = skills(for: botID).first(where: { $0.slug == slug && $0.isImprovable }) {
             current.summary = proposal.summary
