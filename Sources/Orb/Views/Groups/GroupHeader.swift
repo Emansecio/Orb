@@ -30,6 +30,7 @@ struct GroupHeader: View {
                 Text(GroupUsageText.summary(turns: usage.turnsUsed, tokens: usage.tokensUsed))
                     .font(.system(size: 12).monospacedDigit())
                     .foregroundStyle(Palette.muted)
+                    .lineLimit(1)
                     .contentTransition(reduceMotion ? .identity : .numericText())
                     .help("Usados neste pedido")
                     .transition(.adapted(.opacity, reduceMotion: reduceMotion))
@@ -41,6 +42,8 @@ struct GroupHeader: View {
                         .labelStyle(.titleAndIcon)
                 }
                 .buttonStyle(GhostStyle(tint: Palette.danger))
+                // Never squeezed: in a narrow window it broke letter by letter while the name still had room to shrink.
+                .fixedSize()
                 .help("Parar o grupo: cancela os turnos e a fila (⌘.)")
                 .transition(.adapted(.opacity, reduceMotion: reduceMotion))
             }

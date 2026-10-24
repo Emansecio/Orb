@@ -39,16 +39,19 @@ struct RoutinesView: View {
                 } else {
                     // One header per Orb, in the order of the sidebar, with that Orb's cards under it. Not sorted by next run:
                     // a run would make the cards jump. Each group walks the bound list again (a handful of routines) so every
-                    // card keeps a binding by id.
+                    // card keeps a binding by id. With a single Orb the header would only repeat what every card shows.
+                    let owners = model.bots.filter { bot in model.routines.contains { $0.botID == bot.id } }
                     VStack(alignment: .leading, spacing: Spacing.section) {
-                        ForEach(model.bots.filter { bot in model.routines.contains { $0.botID == bot.id } }) { bot in
+                        ForEach(owners) { bot in
                             VStack(alignment: .leading, spacing: Spacing.m) {
-                                HStack(spacing: 8) {
-                                    BotAvatar(bot: bot, size: 22, activity: .idle, animated: false)
-                                    Text(bot.name)
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .lineLimit(1)
-                                        .accessibilityAddTraits(.isHeader)
+                                if owners.count > 1 {
+                                    HStack(spacing: 8) {
+                                        BotAvatar(bot: bot, size: 22, activity: .idle, animated: false)
+                                        Text(bot.name)
+                                            .font(.system(size: 14, weight: .semibold))
+                                            .lineLimit(1)
+                                            .accessibilityAddTraits(.isHeader)
+                                    }
                                 }
                                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 340), spacing: Spacing.cardSpacing, alignment: .top)],
                                           alignment: .leading, spacing: Spacing.cardSpacing) {

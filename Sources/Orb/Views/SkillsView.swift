@@ -283,9 +283,11 @@ private struct InstalledSkillRow: View {
                         Text(skill.name)
                             .font(.system(size: 14, weight: .semibold))
                             .opacity(dimmed)
+                        // One line: in a narrow window it broke letter by letter ("/organiza r"). The copy button keeps the whole command.
                         Text("/\(skill.slug)")
                             .font(.system(size: 12).monospaced())
                             .foregroundStyle(Palette.muted)
+                            .lineLimit(1)
                         Button(copied.isOn ? "Copiado" : "Copiar /\(skill.slug)", systemImage: copied.isOn ? "checkmark" : "doc.on.doc", action: copy)
                             .labelStyle(.iconOnly)
                             .buttonStyle(.plain)

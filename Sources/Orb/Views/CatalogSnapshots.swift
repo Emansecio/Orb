@@ -158,7 +158,8 @@ private struct PendingSkillsScene: View {
     @State private var ready = false
 
     var body: some View {
-        Group { if ready { SkillsView() } }
+        // A view that is always there: `.task` on an empty Group never runs, and the page would stay blank.
+        ZStack { if ready { SkillsView() } else { Color.clear } }
             .task {
                 for bot in model.bots.prefix(2) { _ = await model.memory.bank(for: bot.id).proposeSkill(SkillSnapshots.proposal) }
                 ready = true

@@ -175,6 +175,8 @@ private struct GroupApprovalBar: View {
                         ApprovalCard(request: entry.request, botID: entry.look.id, showsKeyHints: false)
                     }
                 }
+                // The thread's full column: sized to its text, the bar shrank and sat off the thread's avatars.
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .overlay(alignment: .topLeading) {
                     BotAvatar(orb: entry.look.orb, size: 28, activity: .waiting)
                         .frame(width: 28, height: 28)
