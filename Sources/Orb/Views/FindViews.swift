@@ -53,7 +53,7 @@ struct FindBar: View {
         .frame(maxWidth: 480)
         .background(Palette.surface, in: .rect(cornerRadius: Radius.card))
         .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Palette.lineStrong))
-        .shadow(color: .black.opacity(0.35), radius: 10, y: 3)
+        .shadow(color: Shadow.popover, radius: 10, y: 3)
         .background {
             // ⌘G and ⇧⌘G, while the bar is open (the app has no Edit menu to carry them).
             Group {

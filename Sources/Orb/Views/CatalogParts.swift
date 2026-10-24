@@ -33,7 +33,7 @@ struct CatalogTabBar: View {
         // Bound to the choice: the pill slides and the titles change color with it; it jumps under Reduce Motion.
         .animation(Motion.selection(reduceMotion: reduceMotion), value: tab)
         .padding(3)
-        .background(Color.white.opacity(0.06), in: .capsule)
+        .background(Palette.chipFill, in: .capsule)
         .background {
             // ⌘F outside the explore tab (the explore tab's header has its own button for it). Only the catalog has a
             // search field, so the page goes there (the field takes focus when it appears), unless the installed list
@@ -105,7 +105,7 @@ struct PillTabs<Value: Hashable>: View {
         }
         .animation(Motion.selection(reduceMotion: reduceMotion), value: selection)
         .padding(3)
-        .background(Color.white.opacity(0.06), in: .capsule)
+        .background(Palette.chipFill, in: .capsule)
         .opacity(isEnabled ? 1 : 0.5)
     }
 

@@ -72,7 +72,7 @@ struct MentionPicker: View {
         .padding(6)
         .frame(width: 260, alignment: .leading)
         .card(radius: Radius.card, fill: Palette.surface)
-        .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
+        .shadow(color: Shadow.popover, radius: 12, y: 4)
         .transition(.adapted(.rise, reduceMotion: reduceMotion))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Chamar um Orb")

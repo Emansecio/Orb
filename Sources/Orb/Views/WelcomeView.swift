@@ -491,7 +491,7 @@ private struct WelcomePointView: View {
             .font(.system(size: 13, weight: .medium))
             .foregroundStyle(Palette.secondary)
             .frame(width: 30, height: 30)
-            .background(Color.white.opacity(0.06), in: .circle)
+            .background(Palette.chipFill, in: .circle)
             .overlay(Circle().strokeBorder(Palette.line))
     }
 

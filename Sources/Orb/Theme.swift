@@ -22,7 +22,9 @@ extension Color {
 enum Palette {
     // Surfaces (dark tokens: base / subtle / elevated)
     static let chrome = Color(hex: 0x111111)        // sidebar, details pane
-    static let canvas = Color(hex: 0x070707)        // conversation
+    /// The conversation's background as hex, so the text-contrast math (`OrbInk`) uses the same number.
+    static let canvasHex: UInt32 = 0x070707
+    static let canvas = Color(hex: canvasHex)       // conversation
     static let surface = Color(hex: 0x181818)       // cards, composer
     static let surfaceFocused = Color(hex: 0x1D1D1D) // surface 2 % lighter: the composer while it has the focus
     static let raised = Color(hex: 0x222222)        // code blocks, chips
@@ -49,6 +51,8 @@ enum Palette {
     static let lineStrong = Color(hex: 0xFCFCFC, opacity: 0.15)
     static let ghostHover = Color.white.opacity(0.05)
     static let ghostSelected = Color.white.opacity(0.09)
+    /// The resting fill of a small chip or round badge.
+    static let chipFill = Color.white.opacity(0.06)
     /// A round icon button under the pointer, and pressed: lighter than `ghostSelected`, which on the canvas (#070707)
     /// reads as almost nothing around a 24 pt symbol.
     static let ghostCircleHover = Color.white.opacity(0.14)
@@ -78,6 +82,12 @@ enum Palette {
     static let narrationLineSpacing: CGFloat = 4
 }
 
+
+/// Shadows under floating cards.
+enum Shadow {
+    /// Black under a popover, a picker or a floating card.
+    static let popover = Color.black.opacity(0.35)
+}
 
 // MARK: Spacing
 

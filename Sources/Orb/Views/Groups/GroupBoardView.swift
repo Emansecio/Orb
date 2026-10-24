@@ -146,7 +146,7 @@ private struct UndoForgetToast: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .card(radius: Radius.card, fill: Palette.surface)
-        .shadow(color: .black.opacity(0.3), radius: 10, y: 3)
+        .shadow(color: Shadow.popover, radius: 10, y: 3)
     }
 }
 

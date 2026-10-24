@@ -894,7 +894,7 @@ struct ComposerSurface: View {
 
     /// The card's shadow: black below it; while a file is dragged over, an accent glow all around.
     static func shadow(isDropTargeted: Bool) -> (color: Color, y: CGFloat) {
-        isDropTargeted ? (Palette.accent.opacity(0.35), 0) : (.black.opacity(0.35), 8)
+        isDropTargeted ? (Palette.accent.opacity(0.35), 0) : (Shadow.popover, 8)
     }
 
     /// The card's fill: `surface`, 2 % lighter while the field has the focus.

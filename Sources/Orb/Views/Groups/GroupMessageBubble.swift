@@ -15,7 +15,7 @@ enum OrbColor {
 enum OrbInk {
     static let minimumContrast = 4.5
     /// Palette.canvas (#070707), the background the words sit on.
-    static let canvas: UInt32 = 0x070707
+    static let canvas: UInt32 = Palette.canvasHex
 
     /// The name color of an Orb's words; a readable gray for an Orb that is gone.
     static func readableName(for orb: OrbConfig?) -> Color {
