@@ -100,7 +100,7 @@ struct BrowserStatus: Sendable, Equatable {
     var userMessage: String? {
         guard !missing.isEmpty else { return nil }
         let names = missing.map(\.name).joined(separator: " e ")
-        return "Falta instalar \(names) para o navegador do Orb. Abra Ajustes → Navegador e toque em Instalar."
+        return "Falta instalar \(names) para o navegador do Orb. Abra Ajustes → Navegador e clique em Instalar."
     }
 
     /// For the model's prompt: one short line (English), so it can tell the user once.

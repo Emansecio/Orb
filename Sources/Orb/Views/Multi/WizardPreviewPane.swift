@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The right side of "Quem ele é" (in the assistant and in the form): the Orb being made, alive on a stage with its glow on the
 /// floor, its name and role, how it works and what it may use. The look is always the one the PERSON chose (`look`: the assistant
-/// never designs it), with "Desenhar" and "Aleatório" under the Orb. In the assistant each `orb_draft` call changes the rest in
+/// never designs it), with "Personalizar" and "Sortear" under the Orb. In the assistant each `orb_draft` call changes the rest in
 /// front of the person (`OrbDraft.revision`): a new name or role changes by fading and is washed for a moment, the instructions
 /// unfold, the chips come in one after another; a new look cross-fades and the Orb hops. When the assistant says it is ready the
 /// final card enters at the foot. Under Reduce Motion nothing slides, scales or hops: everything changes by opacity.
@@ -13,9 +13,9 @@ struct WizardPreviewPane: View {
     var emptyText = "Seu Orb aparece aqui conforme vocês conversam"
     let onAdjust: () -> Void
     let onBack: () -> Void
-    /// "Desenhar": the Aparência tab.
+    /// "Personalizar": the Aparência tab.
     let onDraw: () -> Void
-    /// "Aleatório": a new look, in place.
+    /// "Sortear": a new look, in place.
     let onRandom: () -> Void
 
     /// `flashed`: the parts washed at the start (a review snapshot of the moment a call changed them).
@@ -75,7 +75,7 @@ struct WizardPreviewPane: View {
             }
             .scrollBounceBehavior(.basedOnSize)
             // What scrolls under the final card fades out instead of being cut. A gradient on top, not a mask: a mask makes the
-            // scroll content one flat layer, and the buttons in it (Desenhar, Aleatório) stop being found under the pointer.
+            // scroll content one flat layer, and the buttons in it (Personalizar, Sortear) stop being found under the pointer.
             .overlay(alignment: .bottom) {
                 LinearGradient(colors: [Palette.chrome.opacity(0), Palette.chrome], startPoint: .top, endPoint: .bottom)
                     .frame(height: 16)
@@ -101,7 +101,7 @@ struct WizardPreviewPane: View {
             poke += 1
         }
         .onChange(of: draft.revision) { revisionChanged() }
-        // A new look, from "Aleatório" here or from the editor: the Orb that is in hops (the crossfade is the stage's).
+        // A new look, from "Sortear" here or from the editor: the Orb that is in hops (the crossfade is the stage's).
         .onChange(of: look) { lookChanged() }
         .onChange(of: draft.ready) { readyChanged() }
         .onDisappear {
@@ -130,7 +130,7 @@ struct WizardPreviewPane: View {
                                      center: .center, startRadius: 0, endRadius: 150))
                 .frame(width: 360, height: 300)
                 .offset(y: -6)
-                .allowsHitTesting(false).accessibilityHidden(true) // light only: it spills past the stage onto Desenhar/Aleatório
+                .allowsHitTesting(false).accessibilityHidden(true) // light only: it spills past the stage onto Personalizar/Sortear
             ZStack {
                 OrbView(config: look, activity: shownActivity, size: size, poke: poke, interactive: true,
                         accessibilityText: "Prévia do Orb: \(look.summary). \(shownActivity.label).")
@@ -145,17 +145,17 @@ struct WizardPreviewPane: View {
         .accessibilityElement(children: .contain)
     }
 
-    /// "Desenhar" (the Aparência tab) and "Aleatório" (a new look, here): the look is the person's, one click away.
+    /// "Personalizar" (the Aparência tab) and "Sortear" (a new look, here): the look is the person's, one click away.
     private var lookActions: some View {
         HStack(spacing: 8) {
             Button(action: onDraw) {
-                Label("Desenhar", systemImage: "paintbrush")
+                Label("Personalizar", systemImage: "paintbrush")
             }
             .buttonStyle(SecondaryPillStyle())
-            .help("Abre a aba Aparência, para desenhar o Orb")
+            .help("Abre a aba Aparência para personalizar o Orb")
             .accessibilityIdentifier("preview-draw")
             Button(action: onRandom) {
-                Label("Aleatório", systemImage: "dice")
+                Label("Sortear", systemImage: "dice")
             }
             .buttonStyle(SecondaryPillStyle())
             .help("Sorteia outra aparência para o Orb")
@@ -335,7 +335,7 @@ struct WizardReadyCard: View {
                         .foregroundStyle(Palette.ok)
                         .accessibilityHidden(true)
                 }
-                Text("Revise ao lado e toque em Criar Orb.")
+                Text("Revise ao lado e clique em Criar Orb.")
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.muted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -354,6 +354,6 @@ struct WizardReadyCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .card(radius: 14)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Tudo pronto para criar \(draft.name). Toque em Criar Orb, ou escolha Ajustar ou Voltar a conversar.")
+        .accessibilityLabel("Tudo pronto para criar \(draft.name). Clique em Criar Orb, ou escolha Ajustar ou Voltar a conversar.")
     }
 }

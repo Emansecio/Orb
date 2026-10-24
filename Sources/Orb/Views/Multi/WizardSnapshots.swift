@@ -58,7 +58,7 @@ enum WizardSnapshots {
 
     private static let readyTail: [TranscriptItem] = [
         user("Pode usar a web, sim."),
-        bot("Tudo certo: a Maia está pronta. É só tocar em Criar."),
+        bot("Tudo certo: a Maia está pronta. É só clicar em Criar."),
     ]
 
     private static let look = OrbConfig(color: "menta", eyes: "pilulas", mouth: "sorriso", cheeks: "blush", hair: "franja",

@@ -10,8 +10,6 @@ struct OrbEditor: View {
     var name = ""
     /// true/false forces the compact stage on or off; nil picks it from the editor's height.
     var compact: Bool?
-    /// What the dice button is called ("Aleatório" in the new-Orb sheet, where the look is the person's to draw).
-    var randomTitle = "Sortear"
 
     @State private var category: OrbCategory
     @State private var previewActivity: OrbActivity = .idle
@@ -25,8 +23,7 @@ struct OrbEditor: View {
     /// Measured: the editor is shorter than `compactBelow` (used when `compact` is nil).
     @State private var isShort = false
 
-    init(config: Binding<OrbConfig>, name: String = "", category: OrbCategory = .color, compact: Bool? = nil, randomTitle: String = "Sortear") {
-        self.randomTitle = randomTitle
+    init(config: Binding<OrbConfig>, name: String = "", category: OrbCategory = .color, compact: Bool? = nil) {
         _config = config
         self.name = name
         self.compact = compact
@@ -235,7 +232,7 @@ struct OrbEditor: View {
     }
 
     private var randomButton: some View {
-        Button(randomTitle, systemImage: "dice") {
+        Button("Sortear", systemImage: "dice") {
             // A new look that hangs together; the temperament stays.
             edit { config in
                 let temperament = config.temperament
