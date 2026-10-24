@@ -29,8 +29,8 @@ enum ContextSnapshots {
         case "settings-context":
             model.learnContextWindow(8_192, of: "ollama/gpt-5")
             model.learnContextWindow(32_000, of: "ollama/qwen3", stated: false)
-            return AnyView(GeneralSettings()
-                .frame(width: 640, height: SettingsTab.general.height)
+            return AnyView(OrbsSettings()
+                .frame(width: 640, height: SettingsTab.orbs.height)
                 .background(Palette.chrome)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading))
         default:

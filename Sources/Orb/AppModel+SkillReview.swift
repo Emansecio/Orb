@@ -27,7 +27,7 @@ extension AppModel {
 
     // MARK: The review
 
-    /// Ajustes → Geral: the Orbs review their work and propose skills (on unless turned off).
+    /// Ajustes → Orbs: the Orbs review their work and propose skills (on unless turned off).
     var proposesSkills: Bool { preferences.object(forKey: SkillReview.settingKey) as? Bool ?? true }
 
     /// Starts the review of the conversation when the turn that just ended took enough steps with tools: in the

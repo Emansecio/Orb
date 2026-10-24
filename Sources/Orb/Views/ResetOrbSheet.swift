@@ -187,7 +187,7 @@ enum ResetWarning {
         let named = report.failures.prefix(namedLimit).joined(separator: ", ")
         let more = report.failures.count > namedLimit ? " e mais \(report.failures.count - namedLimit)" : ""
         return "O resto foi redefinido, mas não deu para remover, mover ou gravar: \(named)\(more). "
-            + "Com o Orb fechado, dá para apagar esses itens à mão na pasta de dados (Ajustes → Geral → Pasta de dados)."
+            + "Com o Orb fechado, dá para apagar esses itens à mão na pasta de dados (Ajustes → Geral → Local dos dados)."
     }
 
     static func present(_ report: ResetReport) {

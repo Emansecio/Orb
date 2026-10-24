@@ -196,7 +196,7 @@ private struct ContextPopoverHost: View {
                        compact: { model.compactFromMeter(botID, focus: $0) },
                        adjustMemory: {
                            close()
-                           SettingsRouter.open(.general, using: openSettings)
+                           SettingsRouter.open(.orbs, using: openSettings)
                        })
     }
 }

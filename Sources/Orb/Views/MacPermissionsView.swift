@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import UserNotifications
 
-// The "Permissões" settings tab: what macOS lets the Orb do, row by row, with a way to ask and a way to change it.
+// The "Acesso ao Mac" settings tab: what macOS lets the Orb do, row by row, with a way to ask and a way to change it.
 
 @MainActor @Observable
 final class MacPermissionsModel {

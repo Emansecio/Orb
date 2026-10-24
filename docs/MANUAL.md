@@ -549,7 +549,7 @@ aviso dizendo por quê.
 
 ## Orbs juntos
 
-Com **Orbs podem conversar entre si** ligado em Ajustes → Geral, um Orb pede ajuda a outro sozinho, com a ferramenta `orbs`:
+Com **Orbs podem conversar entre si** ligado em Ajustes → Orbs, um Orb pede ajuda a outro sozinho, com a ferramenta `orbs`:
 - **`ask`** acorda o outro Orb, que trabalha numa conversa à parte; a resposta volta como mensagem e acorda quem pediu. Quem
   pediu a vários é acordado **uma vez**, quando todas as respostas chegaram: cada linha marca ✓ assim que a sua resposta chega,
   e a linha de trabalho mostra quem falta ("Esperando Revisor").
@@ -558,7 +558,7 @@ Com **Orbs podem conversar entre si** ligado em Ajustes → Geral, um Orb pede a
 - **`list`** mostra os colegas e se estão livres, ocupados ou esperando a sua aprovação. Num grupo, mostra o que cada membro
   está fazendo ("trabalhando em “…” (pedido de Atlas, há 4 min)", "na fila", "esperando Revisor"). Fora do grupo, mostra
   também os grupos de que o Orb faz parte, que ele já conhece pelo prompt.
-- **Conversas abertas.** Em Ajustes, sob os interruptores, "Conversas abertas entre Orbs" lista os pedidos em andamento fora
+- **Conversas abertas.** Em Ajustes → Orbs, sob os interruptores, "Conversas abertas entre Orbs" lista os pedidos em andamento fora
   de grupo: quem pediu a quem, o quê, em que pé está e há quanto tempo, com **Parar** para a conversa inteira. Os de um grupo
   ficam na tela do grupo.
 - **Criar um grupo pelo chat.** Com **Orbs podem acionar grupos** ligado (padrão), peça ao Orb: "cria um grupo Lançamento com
@@ -606,7 +606,7 @@ janela vai antes para a memória do Orb. As mensagens continuam salvas na conver
   local (Ollama, LM Studio) a nota cede a vez à sua próxima mensagem. A nota vai para o resumo, ao lado do pedido original, das
   decisões e dos arquivos, e para a memória do Orb. É uma chamada pequena por trecho, não aparece na conversa, e sem rede
   ou com o modelo ocupado o Orb resume do jeito de sempre.
-- **Ajustes → Geral → Contexto das conversas**: *Econômico* (cerca de 40 mil tokens palavra por palavra, gasta menos por
+- **Ajustes → Orbs → Contexto das conversas**: *Econômico* (cerca de 40 mil tokens palavra por palavra, gasta menos por
   mensagem), *Equilibrado* (80 mil, o padrão) ou *Amplo* (até 60% da janela, nunca menos que o Equilibrado; custa mais por mensagem). Vale para todos os Orbs.
 - Um resultado de ferramenta que não se pede de novo igual (um comando, uma página, um conector; não a leitura de um arquivo)
   e passa de 4 mil caracteres é salvo também num arquivo, em `saidas/`. Quando a conversa mais tarde o encurta, o caminho fica
@@ -710,7 +710,7 @@ tem a **Galeria**, os **Instalados** e **Explorar**.
   seguindo (o mesmo vale para "Guardado na memória" e a unificação de memória): abre o texto inteiro, que você edita, e **Salvar skill** ou **Descartar**.
   Nada é salvo sem você, e a proposta rasa (genérica, sem passos concretos, armadilhas e como verificar, com data do dia ou segredo) nem chega a você.
   A skill aprendida fica marcada "Aprendida por <Orb>" e vale só para ele até você ampliar em "Usar com". Você também pode
-  pedir "transforme isso numa skill". Em Ajustes → Geral dá para desligar ("Propor skills com o que os Orbs aprendem"); a revisão
+  pedir "transforme isso numa skill". Em Ajustes → Orbs dá para desligar ("Propor skills com o que os Orbs aprendem"); a revisão
   costuma usar uma chamada extra ao modelo (até 6 quando propõe algo: ler, procurar, propor e responder), quase toda em cache.
 
 ## Atalhos
@@ -750,7 +750,7 @@ como no chat (numa rotina, o painel avisa que ela precisa terminar). "Ver conver
 
 Em Ajustes → Geral: **Abrir ao iniciar sessão**, **Me avisar quando um Orb terminar ou precisar de mim** (banners só aparecem com o
 app em segundo plano; também avisam quando uma rotina não termina, com o motivo, e quando um Orb parece andar em círculos ou passa
-de 3 h num pedido, com **Parar**), a **Pasta de dados**, as **Memórias guardadas**, a **Pasta dos Orbs** com "Mostrar no Finder" e
+de 3 h num pedido, com **Parar**), o **Local dos dados**, as **Memórias guardadas**, a **Pasta dos Orbs** com "Mostrar no Finder" e
 **Redefinir o Orb…**.
 
 ## Redefinir o Orb
@@ -778,13 +778,13 @@ não confirma. O app
 para tudo (conversas em andamento, rotinas, pedidos de permissão, conectores, processos em segundo plano), cobre a janela
 enquanto trabalha (nada de mensagem nova nem de Novo Orb), apaga e abre de novo.
 Se algo da pasta de dados não puder ser removido, movido ou gravado, o Orb avisa antes de fechar e abrir de novo ("A redefinição
-não removeu tudo"): lista os itens (até 5, mais a contagem do resto) e indica Ajustes → Geral → Pasta de dados, para apagá-los à mão.
+não removeu tudo"): lista os itens (até 5, mais a contagem do resto) e indica Ajustes → Geral → Local dos dados, para apagá-los à mão.
 Rodando pelo SwiftPM (sem um `.app`), ele só fecha: abra de novo. Nos modos de desenvolvedor (`--snapshot`…) a redefinição nunca roda.
 
 ## Privacidade
 
 - **Local.** Conversas, memórias, ajustes, anexos, saídas de ferramentas e o histórico de uso (só números, por hora) são arquivos comuns, sem criptografia própria, em
-  `~/Library/Application Support/Orb` (Ajustes → Geral → Pasta de dados → Mostrar no Finder). O Orb não envia estatísticas de
+  `~/Library/Application Support/Orb` (Ajustes → Geral → Local dos dados → Mostrar no Finder). O Orb não envia estatísticas de
   uso nem relatórios de erro.
 - **Logotipos.** Os logotipos dos serviços (galeria de conectores) vêm do [Simple Icons](https://simpleicons.org) 16.34.0 (o do Slack, da 13.21.0, a última que o tinha; CC0, domínio público), embutidos no código: o app não baixa imagem nenhuma para isso. As marcas pertencem aos seus donos e aparecem só para dizer a que serviço o conector se liga; o Orb não tem vínculo nem aprovação deles.
 - **Chaves.** As chaves de API, o login do ChatGPT e os segredos dos conectores ficam no **Keychain** do macOS (no arquivo de dados
@@ -819,7 +819,7 @@ Rodando pelo SwiftPM (sem um `.app`), ele só fecha: abra de novo. Nos modos de 
 | Claude Code "não encontrado neste Mac" | Instale o `claude` ([guia](https://code.claude.com/docs/en/setup)) e use "Verificar de novo" em Ajustes → Modelos |
 | Ollama ou LM Studio "Servidor não encontrado" | Abra o app e ligue o servidor local (LM Studio: o servidor precisa estar ligado e com um modelo carregado); baixe pelo menos um modelo |
 | "A conversa ficou grande demais para este modelo" | Compactar agora, ou escolha o Contexto das conversas "Econômico" |
-| O Orb diz que falta uma permissão do macOS | Ajustes → Permissões (ou o botão "Permitir…" na linha da ferramenta). Reabra o app depois de Gravação do Áudio do Sistema e da Tela e Acesso Total ao Disco |
+| O Orb diz que falta uma permissão do macOS | Ajustes → Acesso ao Mac (ou o botão "Permitir…" na linha da ferramenta). Reabra o app depois de Gravação do Áudio do Sistema e da Tela e Acesso Total ao Disco |
 | As permissões do macOS somem a cada compilação | [Assinatura estável](../README.md#assinatura-estável-recomendado) |
 | O Orb parou numa pergunta | Veja o cartão na conversa, o ponto na barra de menus ou a notificação |
 | Não aparecem notificações | Ajustes → Geral mostra o estado; "Abrir Ajustes do Sistema" leva ao painel de notificações |

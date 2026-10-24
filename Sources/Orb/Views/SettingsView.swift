@@ -2,26 +2,29 @@ import SwiftUI
 import AppKit
 import ServiceManagement
 
-// Ajustes: five tabs (Geral, Modelos, Navegador, Uso, Permissões) that anything in the app can open directly.
+// Ajustes: six tabs (Geral, Orbs, Modelos, Navegador, Uso, Acesso ao Mac) that anything in the app can open directly.
 
 enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
-    case general, models, browser, usage, permissions
+    // `permissions` keeps its raw value: it is what the app stored as the last tab, and it must still open that tab.
+    case general, orbs, models, browser, usage, permissions
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .general: "Geral"
+        case .orbs: "Orbs"
         case .models: "Modelos"
         case .browser: "Navegador"
         case .usage: "Uso"
-        case .permissions: "Permissões"
+        case .permissions: "Acesso ao Mac"
         }
     }
 
     var symbol: String {
         switch self {
         case .general: "gearshape"
+        case .orbs: "person.2"
         case .models: "cpu"
         case .browser: "globe"
         case .usage: "chart.bar"
@@ -84,6 +87,9 @@ struct SettingsView: View {
             GeneralSettings()
                 .tabItem { Label(SettingsTab.general.title, systemImage: SettingsTab.general.symbol) }
                 .tag(SettingsTab.general)
+            OrbsSettings()
+                .tabItem { Label(SettingsTab.orbs.title, systemImage: SettingsTab.orbs.symbol) }
+                .tag(SettingsTab.orbs)
             ProviderSettings()
                 .tabItem { Label(SettingsTab.models.title, systemImage: SettingsTab.models.symbol) }
                 .tag(SettingsTab.models)
@@ -115,10 +121,7 @@ struct SettingsView: View {
 
 struct GeneralSettings: View {
     @Environment(AppModel.self) private var model
-    @State private var learnedWindows: [LearnedWindowRow] = []
     @AppStorage(AppModel.notifyWhenDoneKey) private var notifyWhenDone = true
-    @AppStorage(SkillReview.settingKey) private var proposeSkills = true
-    @AppStorage(SessionNote.settingKey) private var summarizeSessions = false
     @AppStorage(DictationReview.settingKey) private var reviewDictation = true
     @AppStorage(GlobalHotKey.defaultsKey) private var globalShortcut = false
     /// Starts from the last reading (false the first time): asking the system on every init made each tab switch query it.
@@ -132,26 +135,6 @@ struct GeneralSettings: View {
     @State private var keptCount = 0
     @State private var hasOrbsFolder = false
     @State private var isShowingReset = false
-    @State private var orbsCanTalk = true
-    @State private var orbsCanStartGroups = true
-    @State private var openTalks: [DelegationHub.OpenTalk] = []
-    /// The open talks a review snapshot shows in place of the hub's (`settings-orbs`).
-    private let sampleTalks: [DelegationHub.OpenTalk]?
-
-    init(sampleTalks: [DelegationHub.OpenTalk]? = nil) {
-        self.sampleTalks = sampleTalks
-    }
-    @State private var isConfirmingOrbsOff = false
-
-    /// Turning it off while Orbs talk asks first (it stops their conversations); turning it on never does.
-    private func setOrbsCanTalk(_ on: Bool) {
-        if !on, model.delegation.hasActiveChains { isConfirmingOrbsOff = true } else { applyOrbsCanTalk(on) }
-    }
-
-    private func applyOrbsCanTalk(_ on: Bool) {
-        orbsCanTalk = on
-        model.orbsCanTalk = on
-    }
 
     var body: some View {
         Form {
@@ -180,24 +163,6 @@ struct GeneralSettings: View {
                 Toggle("Me avisar quando um Orb terminar ou precisar de mim", isOn: $notifyWhenDone)
                     .help(Tip.notifyWhenDone)
                 notificationState
-                Toggle(isOn: $proposeSkills) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Propor skills com o que os Orbs aprendem")
-                        Text("Depois de tarefas longas, o Orb pode propor uma skill. Nada é salvo sem você aprovar.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .help(Tip.proposeSkills)
-                Toggle(isOn: $summarizeSessions) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Resumir com o modelo as conversas longas que vão para a memória")
-                        Text("Um resumo curto, escrito pelo modelo, de cada conversa longa guardada. Conversas com conectores, modelos locais ou o Claude Code ficam de fora.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .help(Tip.summarizeSessions)
                 if Dictation.isSupported {
                     Toggle(isOn: $reviewDictation) {
                         VStack(alignment: .leading, spacing: 2) {
@@ -209,49 +174,9 @@ struct GeneralSettings: View {
                     }
                     .help(Tip.reviewDictation)
                 }
-                // MARK: MultiOrb (WP1)
-                Toggle(isOn: Binding(get: { orbsCanTalk }, set: { setOrbsCanTalk($0) })) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Orbs podem conversar entre si")
-                        Text("Os Orbs pedem ajuda uns aos outros sem cartão por mensagem, cada um com as próprias permissões. Não afeta grupos.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .help(Tip.orbsCanTalk)
-                .onAppear { orbsCanTalk = model.orbsCanTalk }
-                .confirmationDialog("Desligar a conversa entre Orbs?", isPresented: $isConfirmingOrbsOff, titleVisibility: .visible) {
-                    Button("Desligar e parar as conversas", role: .destructive) { applyOrbsCanTalk(false) }
-                    Button("Cancelar", role: .cancel) {}
-                } message: {
-                    Text("Há Orbs conversando agora. Desligar interrompe essas conversas.")
-                }
-                Toggle(isOn: Binding(get: { orbsCanStartGroups }, set: { orbsCanStartGroups = $0; model.orbsCanStartGroups = $0 })) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Orbs podem acionar grupos")
-                        Text("Quando você pede no chat, o Orb cria um grupo ou manda um pedido a um grupo de que faz parte; a resposta final do grupo volta para o chat. Nunca por conta própria.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .help(Tip.orbsCanStartGroups)
-                .onAppear { orbsCanStartGroups = model.orbsCanStartGroups }
-                // The hub is not observed: the open requests are read again every two seconds while Ajustes is open.
-                .task {
-                    if let sampleTalks { openTalks = sampleTalks; return }
-                    while !Task.isCancelled {
-                        let now = model.delegation.openTalks()
-                        if now != openTalks { openTalks = now }
-                        try? await Task.sleep(for: .seconds(2))
-                    }
-                }
-                // MARK: end MultiOrb (WP1)
             }
-            OpenTalksSection(talks: $openTalks)
-            ContextMemorySettings()
-            LearnedWindowsSettings(rows: $learnedWindows)
             Section {
-                dataRow("Pasta de dados", "Conversas, memórias e ajustes", button: "Mostrar no Finder", isEnabled: true,
+                dataRow("Local dos dados", "Conversas, memórias e ajustes", button: "Mostrar no Finder", isEnabled: true,
                         help: Tip.dataFolder) {
                     NSWorkspace.shared.activateFileViewerSelecting([Store.standard.directory])
                 }
@@ -276,18 +201,26 @@ struct GeneralSettings: View {
                 Toggle(CommandName.globalShortcut, isOn: GlobalHotKey.toggleBinding($globalShortcut))
                 .help(Tip.globalShortcut)
             }
-            // The whole list, from the same catalog as the "Atalhos do teclado" sheet (Ajuda → Atalhos do teclado).
-            ForEach(ShortcutCatalog.groups) { group in
-                Section("Atalhos · \(group.title)") {
-                    ForEach(group.items) { item in
-                        let lines = ShortcutItem.lines(item.titleInGeneral ?? item.title)
-                        LabeledContent {
-                            Text(item.keys)
-                                .font(.system(size: 12, design: .monospaced))
-                                .foregroundStyle(Palette.muted)
-                        } label: {
-                            Text(lines.main)
-                            if let note = lines.note { Text(note).capabilityCaption() }
+            // The whole list, from the same catalog as the "Atalhos do teclado" sheet (Ajuda → Atalhos do teclado). Closed:
+            // thirty rows of keys made Geral a wall, and few people come here for them.
+            Section {
+                DisclosureGroup("Atalhos do teclado") {
+                    ForEach(ShortcutCatalog.groups) { group in
+                        Text(group.title)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Palette.muted)
+                            .padding(.top, 6)
+                            .accessibilityAddTraits(.isHeader)
+                        ForEach(group.items) { item in
+                            let lines = ShortcutItem.lines(item.titleInGeneral ?? item.title)
+                            LabeledContent {
+                                Text(item.keys)
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundStyle(Palette.muted)
+                            } label: {
+                                Text(lines.main)
+                                if let note = lines.note { Text(note).capabilityCaption() }
+                            }
                         }
                     }
                 }
@@ -359,7 +292,6 @@ struct GeneralSettings: View {
 
     private func refresh() async {
         readLoginItem() // the item may have been changed in the System Settings meanwhile (before any await: no flicker)
-        learnedWindows = model.learnedWindowRows()
         notifications = await NotificationPermission.current()
         // A look at the disk, once, off the render path.
         let memories = model.memory.root
@@ -414,6 +346,107 @@ struct GeneralSettings: View {
     }
 }
 
+// MARK: - Orbs
+
+/// What the Orbs do on their own and with each other: talking, starting groups, learning skills, how much conversation they
+/// keep. Moved out of Geral so that tab holds only what concerns the app and the person.
+struct OrbsSettings: View {
+    @Environment(AppModel.self) private var model
+    @AppStorage(SkillReview.settingKey) private var proposeSkills = true
+    @AppStorage(SessionNote.settingKey) private var summarizeSessions = false
+    @State private var orbsCanTalk = true
+    @State private var orbsCanStartGroups = true
+    @State private var isConfirmingOrbsOff = false
+    @State private var openTalks: [DelegationHub.OpenTalk] = []
+    @State private var learnedWindows: [LearnedWindowRow] = []
+    /// The open talks a review snapshot shows in place of the hub's (`settings-orbs`).
+    private let sampleTalks: [DelegationHub.OpenTalk]?
+
+    init(sampleTalks: [DelegationHub.OpenTalk]? = nil) {
+        self.sampleTalks = sampleTalks
+    }
+
+    /// Turning it off while Orbs talk asks first (it stops their conversations); turning it on never does.
+    private func setOrbsCanTalk(_ on: Bool) {
+        if !on, model.delegation.hasActiveChains { isConfirmingOrbsOff = true } else { applyOrbsCanTalk(on) }
+    }
+
+    private func applyOrbsCanTalk(_ on: Bool) {
+        orbsCanTalk = on
+        model.orbsCanTalk = on
+    }
+
+    var body: some View {
+        Form {
+            Section("Orbs") {
+                Toggle(isOn: Binding(get: { orbsCanTalk }, set: { setOrbsCanTalk($0) })) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Orbs podem conversar entre si")
+                        Text("Os Orbs pedem ajuda uns aos outros sem cartão por mensagem, cada um com as próprias permissões. Não afeta grupos.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .help(Tip.orbsCanTalk)
+                .onAppear { orbsCanTalk = model.orbsCanTalk }
+                .confirmationDialog("Desligar a conversa entre Orbs?", isPresented: $isConfirmingOrbsOff, titleVisibility: .visible) {
+                    Button("Desligar e parar as conversas", role: .destructive) { applyOrbsCanTalk(false) }
+                    Button("Cancelar", role: .cancel) {}
+                } message: {
+                    Text("Há Orbs conversando agora. Desligar interrompe essas conversas.")
+                }
+                Toggle(isOn: Binding(get: { orbsCanStartGroups }, set: { orbsCanStartGroups = $0; model.orbsCanStartGroups = $0 })) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Orbs podem acionar grupos")
+                        Text("Quando você pede no chat, o Orb cria um grupo ou manda um pedido a um grupo de que faz parte; a resposta final do grupo volta para o chat. Nunca por conta própria.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .help(Tip.orbsCanStartGroups)
+                .onAppear { orbsCanStartGroups = model.orbsCanStartGroups }
+                Toggle(isOn: $proposeSkills) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Propor skills com o que os Orbs aprendem")
+                        Text("Depois de tarefas longas, o Orb pode propor uma skill. Nada é salvo sem você aprovar.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .help(Tip.proposeSkills)
+                Toggle(isOn: $summarizeSessions) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Resumir com o modelo as conversas longas que vão para a memória")
+                        Text("Um resumo curto, escrito pelo modelo, de cada conversa longa guardada. Conversas com conectores, modelos locais ou o Claude Code ficam de fora.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .help(Tip.summarizeSessions)
+            }
+            OpenTalksSection(talks: $openTalks)
+            ContextMemorySettings()
+            LearnedWindowsSettings(rows: $learnedWindows)
+        }
+        .formStyle(.grouped)
+        .orbFormBackground()
+        // The hub is not observed: the open requests are read again every two seconds while Ajustes is open.
+        .task {
+            learnedWindows = model.learnedWindowRows()
+            if let sampleTalks { openTalks = sampleTalks; return }
+            while !Task.isCancelled {
+                let now = model.delegation.openTalks()
+                if now != openTalks { openTalks = now }
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
+        // The windows are learned from refusals in the chat, so they are read again when the app comes back.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            learnedWindows = model.learnedWindowRows()
+        }
+    }
+}
+
 // MARK: - Login item
 
 /// How the Mac's login item reads on the switch "Abrir ao iniciar sessão": on only when enabled; and what to tell when it is
@@ -444,7 +477,7 @@ struct LoginItemState: Equatable {
 #if DEBUG || ORB_DEV_TOOLS
 /// `--snapshot settings-general | settings-profile | settings-orbs | settings-reset | settings-models | settings-perms[-tested|-stale] | settings-usage[...] | first-run-banner`:
 /// each tab of Ajustes on its own (the tab bar does not render offscreen), at the size the window gives it. Two differ:
-/// `settings-orbs` is all of Geral at 2000 pt, tall enough to reach the Orbs' switches and the open talks (with samples), and
+/// `settings-orbs` is the whole Orbs tab at 2000 pt, tall enough to reach the open talks (with samples) and what follows, and
 /// `settings-usage[...]` is drawn by `UsageSnapshots` (it needs the model).
 @MainActor
 enum SettingsSnapshots {
@@ -459,7 +492,7 @@ enum SettingsSnapshots {
         switch screen {
         case "settings-general", "settings-profile": (tab, content) = (.general, AnyView(GeneralSettings()))
         case "settings-orbs":
-            // All of Geral, tall enough to reach the Orbs' switches and the open talks below them.
+            // The whole Orbs tab, tall enough to reach the open talks below the switches and what follows them.
             let talks = [
                 DelegationHub.OpenTalk(id: UUID(), chainID: UUID(), title: "Atlas → Pesquisador",
                                        detail: "“Pesquise o preço do Mac mini M5 em três lojas” · esperando Revisor · há 4 min"),
@@ -468,7 +501,7 @@ enum SettingsSnapshots {
                 DelegationHub.OpenTalk(id: UUID(), chainID: UUID(), title: "Lia (rotina) → Atlas",
                                        detail: "“Resuma os e-mails de ontem” · na fila · há menos de 1 min"),
             ]
-            return AnyView(GeneralSettings(sampleTalks: talks)
+            return AnyView(OrbsSettings(sampleTalks: talks)
                 .frame(width: 640, height: 2000)
                 .background(Palette.chrome)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading))
@@ -490,7 +523,7 @@ enum SettingsSnapshots {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading))
     }
 
-    /// Permissões with fixed rows, read from nothing: `settings-perms-tested` after both tests (Accessibility works, the
+    /// Acesso ao Mac with fixed rows, read from nothing: `settings-perms-tested` after both tests (Accessibility works, the
     /// capture came back empty), `settings-perms-stale` with Accessibility refused despite its flag and Screen Recording
     /// waiting for the Orb to reopen.
     private static func permissionsSample(_ screen: String) -> MacPermissionsModel {

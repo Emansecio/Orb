@@ -12,7 +12,7 @@ enum SkillReview {
     /// Model calls of one review: reading a skill, looking for a procedure, proposing and answering, with room to fix a refusal.
     static let maxSteps = 6
     static let tools: Set<String> = ["recall", "remember"]
-    /// Ajustes → Geral: whether the Orbs review their work and propose skills (on unless turned off).
+    /// Ajustes → Orbs: whether the Orbs review their work and propose skills (on unless turned off).
     static let settingKey = "proposeSkills"
 
     // MARK: The gate

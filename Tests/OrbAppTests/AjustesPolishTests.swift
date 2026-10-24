@@ -226,8 +226,19 @@ struct SettingsRouterTests {
         #expect(defaults.string(forKey: SettingsRouter.requestKey) == "permissions")
     }
 
-    @Test func tabsAreInTheOrderGeralModelosNavegadorUsoPermissoes() {
-        #expect(SettingsTab.allCases.map(\.title) == ["Geral", "Modelos", "Navegador", "Uso", "Permissões"])
+    @Test func tabsAreInTheOrderGeralOrbsModelosNavegadorUsoAcessoAoMac() {
+        #expect(SettingsTab.allCases.map(\.title) == ["Geral", "Orbs", "Modelos", "Navegador", "Uso", "Acesso ao Mac"])
+    }
+
+    @Test func renamedTabsKeepTheValueAlreadyStoredAndTheModelTextNamesTheShownTitle() {
+        // "Acesso ao Mac" was "Permissões": a stored "permissions" must still open it.
+        #expect(SettingsTab(rawValue: "permissions") == .permissions && SettingsTab.permissions.title == "Acesso ao Mac")
+        #expect(SettingsTab(rawValue: "orbs") == .orbs)
+        #expect(SettingsRouter.initialTab(request: "", stored: "orbs", isProviderReady: true) == .orbs)
+        // The text a tool returns to the model points at the tab by the name the window shows.
+        for problem in [MacPermissionProblem.accessibility, .screenRecording, .fullDiskAccess, .automation(app: "Mail")] {
+            #expect(problem.instruction.contains("\"\(SettingsTab.permissions.title)\""))
+        }
     }
 
     @Test @MainActor func theVersionLineReadsTheBundleOrSaysItIsADevBuild() {

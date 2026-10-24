@@ -394,7 +394,7 @@ modelo e não decide nada por conta própria:
 
 ## Permissões do macOS (TCC)
 
-Separadas das anteriores: dizem o que o **macOS** deixa o app fazer. Ficam em Ajustes → Permissões
+Separadas das anteriores: dizem o que o **macOS** deixa o app fazer. Ficam em Ajustes → Acesso ao Mac
 (`MacPermissionsView`, `MacPermissions.swift`).
 
 | Permissão | Como o app descobre | Quem usa |

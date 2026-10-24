@@ -38,7 +38,7 @@ histórico (tokens) = máx( 2 000,  mín( 90% da janela − sobrecarga − reser
 | Janela | a do catálogo do modelo (`ProviderModel.contextLength`); senão 16 000 (Ollama e LM Studio), 128 000 (chat e Responses) ou 200 000 (Messages e Claude Code); o menor entre ela e a **janela aprendida** |
 | Sobrecarga | prompt do sistema + especificações das ferramentas. O motor mede a real (`ContextBudget.overheadTokens`) e avisa o app (`onOverheadMeasured`); antes disso vale 8 000 |
 | Reserva da resposta | 16 000 (Messages, Claude Code) ou 4 000 (demais), nunca mais que 1/8 da janela; no formato Messages vai como `max_tokens` do pedido (`ProviderAccount.client(…, replyTokens:)`), então a resposta nunca pede mais do que o orçamento deixou |
-| Teto do nível | "Contexto das conversas" em Ajustes → Geral: **Econômico** 40 000 · **Equilibrado** 80 000 (padrão) · **Amplo** 60% da janela, nunca menos que o Equilibrado (em janelas abaixo de ~133 mil, 60% seria menos que 80 000). `ContextMemoryLevel`, salvo em `AppState.contextMemory` |
+| Teto do nível | "Contexto das conversas" em Ajustes → Orbs: **Econômico** 40 000 · **Equilibrado** 80 000 (padrão) · **Amplo** 60% da janela, nunca menos que o Equilibrado (em janelas abaixo de ~133 mil, 60% seria menos que 80 000). `ContextMemoryLevel`, salvo em `AppState.contextMemory` |
 | Folga para o pedido | `leavingRoom`: tira do orçamento a mensagem nova e o prefácio (até 4 000 caracteres de reserva, `AppModel.prefaceAllowance`), nunca mais que a metade |
 
 Um modelo fora do catálogo usa o formato do provedor (ou o `format` da conta, no gateway próprio). O Claude Code tem orçamento como
@@ -57,7 +57,7 @@ Se o provedor recusa o pedido por tamanho (HTTP 400/413 ou erro dentro do stream
 Em ambos a nova tentativa é **sempre menor** que a que falhou (senão o teto do nível reenviaria o mesmo pedido). Se o
 histórico já não encolhe (o que sobra é o próprio pedido), não há segundo envio: o turno para com `AgentEngine.doesNotFit`. Se a
 tentativa menor funciona, `onContextLearned` grava o valor em `AppState.learnedContexts["provedor/modelo"]`
-(`LearnedContext`). Vale 21 dias (7 se foi só estimada) e aparece em Ajustes → Geral → "Janelas aprendidas", com "Esquecer"
+(`LearnedContext`). Vale 21 dias (7 se foi só estimada) e aparece em Ajustes → Orbs → "Janelas aprendidas", com "Esquecer"
 (útil depois de aumentar o limite do servidor).
 
 ## Marca d'água baixa e lote

@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-// Ajustes → Geral: how much conversation the Orbs remember word for word, and the windows Orb learned from refusals.
+// Ajustes → Orbs: how much conversation the Orbs remember word for word, and the windows Orb learned from refusals.
 
 /// "Contexto das conversas": the three levels with a line each, as a group of radio rows.
 struct ContextMemorySettings: View {
@@ -56,7 +56,7 @@ struct RadioChoiceRow: View {
 }
 
 /// "Janelas aprendidas": models whose window a refusal once showed to be smaller than assumed, each with "Esquecer".
-/// Nothing at all while there are none. The rows are the caller's (`GeneralSettings` reads them with its other
+/// Nothing at all while there are none. The rows are the caller's (`OrbsSettings` reads them with its other
 /// look at the world when it appears and when the app comes back): a view with nothing in it never appears itself.
 struct LearnedWindowsSettings: View {
     @Environment(AppModel.self) private var model

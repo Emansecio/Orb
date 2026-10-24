@@ -108,7 +108,7 @@ as últimas decisões ("Decidido: …") e o que ficou pendente (`MemoryRow.detai
   instruções" (a nota também resume o que ferramentas devolveram, páginas web e arquivos: na memória ela é fato sobre o
   passado, não ordem). A nota é feita em
   segundo plano pelo modelo mais barato do mesmo fabricante (veja "Nota do modelo sobre o trecho" em [CONTEXTO.md](CONTEXTO.md));
-  uma página gravada por tempo parado ou abertura do app só a tem com **Ajustes → "Resumir com o modelo as conversas longas
+  uma página gravada por tempo parado ou abertura do app só a tem com **Ajustes → Orbs → "Resumir com o modelo as conversas longas
   que vão para a memória"** ligado (desligado por padrão; `SessionNote`): então uma conversa de 6 pedidos ou mais, sem
   conector, ganha a nota do mesmo modelo menor depois que a página já foi gravada pelas regras, na mesma página (sair do app ou
   uma chamada que falha nunca custa a página; rotinas, modelos locais e o Claude Code não são resumidos; o custo vai para o Uso
@@ -317,7 +317,7 @@ skill vai dentro de `remember` e `recall`.
   `requestUsage`, no modelo do turno). É cancelada quando você escreve (ou uma rotina começa) ou quando o Orb
   é redefinido, nunca roda junto com um turno, nem num Orb "Só leitura". O aviso de proposta não cai na conversa de uma rotina: espera o fim do próximo turno. O prompt pede skill no nível da classe de tarefa, "lições, não
   registros", melhorar antes de criar, incorporar o procedimento da memória sobre o mesmo assunto e responder "Nothing to save."
-  quando não há técnica não trivial, correção sua ou skill errada. Em Ajustes → Geral dá para desligar.
+  quando não há técnica não trivial, correção sua ou skill errada. Em Ajustes → Orbs dá para desligar.
 - **Aprovar.** Depois do turno ou da revisão, o chat ganha **um** aviso por proposta nova ("Skill proposta: /x — Nome" ou "Melhoria
   proposta para /x") num cartão com o botão **Revisar**, que fica enquanto a proposta espera (mesmo com a conversa seguindo) e abre o editor de skills com o texto inteiro e editável. **Salvar skill** cria a
   skill (origem `aprendida`, `learnedBy` e escopo só o Orb que propôs; você amplia em "Usar com") ou troca as instruções da que

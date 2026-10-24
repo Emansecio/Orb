@@ -1,7 +1,7 @@
 import Foundation
 
 extension AppModel {
-    /// The preference behind Ajustes → Geral → "Orbs podem conversar entre si".
+    /// The preference behind Ajustes → Orbs → "Orbs podem conversar entre si".
     static let orbsCanTalkKey = "orbsCanTalk"
 
     /// Whether Orbs see their teammates and ask each other for work. On unless the person switched it off. Groups do not depend on it.
@@ -14,7 +14,7 @@ extension AppModel {
         }
     }
 
-    /// The preference behind Ajustes → Geral → "Orbs podem acionar grupos".
+    /// The preference behind Ajustes → Orbs → "Orbs podem acionar grupos".
     static let orbsCanStartGroupsKey = "orbsCanStartGroups"
 
     /// Whether an Orb, in its own chat and only when you ask in that turn, may send a request to a group it is in (`orbs ask`
