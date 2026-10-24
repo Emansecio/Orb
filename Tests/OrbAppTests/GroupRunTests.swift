@@ -343,6 +343,29 @@ struct GroupStopTests {
         world.model.setAwaitingApproval(false, of: world.pesquisador.id)
         #expect(!world.live.needsYou && world.live.waiting.isEmpty)
     }
+
+    /// The card a member raises is born in its side conversation (the chat is parked meanwhile): the group's approval bar reads
+    /// it from `pendingApprovals(of:)` and answers it with `decide`, and the group stops waiting.
+    @Test @MainActor func aMembersCardInItsSideConversationIsListedAndAnsweredByDecide() async throws {
+        let world = GroupWorld()
+        let first = await startOrchestratorTurn(world)
+        let work = try world.fake.ask(from: world.atlas.id, to: world.pesquisador.id, text: "pesquise", parent: first)
+        world.fake.finish(first, reply: "Delego.")
+        await world.fake.start(work)
+        let session = world.model.session(world.pesquisador.id)
+        let chain = ChainContext(chainID: work.envelope.chainID, hop: 1, path: [world.pesquisador.id], groupID: world.groupID,
+                                 serving: work.envelope.id)
+        session.startRoutineRun(world.groupID, conversation: Conversation(), at: .now, kind: .group, chain: chain, serving: work.envelope.id)
+        let request = ApprovalRequest(toolName: "run_command", title: "Rodando", command: "ls", reason: "")
+        session.append(.approval(request))
+        world.model.setAwaitingApproval(true, of: world.pesquisador.id)
+        #expect(world.model.pendingApprovals(of: world.pesquisador.id).map(\.id) == [request.id])
+        #expect(world.live.waiting == [world.pesquisador.id])
+        world.model.decide(.once, approvalID: request.id, botID: world.pesquisador.id)
+        #expect(world.model.pendingApprovals(of: world.pesquisador.id).isEmpty)
+        #expect(!world.live.needsYou && world.live.waiting.isEmpty)
+        session.endSideRun()
+    }
 }
 
 struct GroupUnreadAndNoticeTests {

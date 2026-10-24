@@ -74,6 +74,7 @@ private struct GroupConversation: View {
         VStack(spacing: 0) {
             GroupHeaderBar(group: group, live: live)
             GroupThreadView(group: group, transcript: session.transcript)
+            GroupApprovalBar(live: live)
             GroupPresenceBar(group: group, live: live)
             GroupComposer(names: names, text: Binding(get: { model.draftText(group.id) },
                                                       set: { model.setDraft($0, for: group.id) })) { message in
@@ -97,6 +98,87 @@ private struct GroupHeaderBar: View {
                     members: looks.map { StackedAvatars.Member(id: $0.id, orb: $0.orb, activity: model.live($0.id).activity) },
                     orbCount: looks.count, usage: live.usage, isActive: live.runState != .idle,
                     onStop: { model.stopGroup(group.id) }, onPanel: { model.toggleInspector() })
+    }
+}
+
+/// The open cards of the members that wait for you. A member runs on a side conversation, so its card is not in the group's
+/// thread nor in its own chat: this is where it is answered (`decide` writes to the same side conversation).
+private struct GroupApprovalBar: View {
+    @Environment(AppModel.self) private var model
+    let live: GroupLive
+
+    private struct Entry {
+        var look: BotLook
+        var request: ApprovalRequest
+    }
+
+    var body: some View {
+        let entries = openCards()
+        // The `onChange` stays on the root, which is always there: on the bar it would only exist once a member waited already.
+        Group {
+            if !entries.isEmpty {
+                // Scrolls past a height, so several waiting members do not push the thread off the screen.
+                ViewThatFits(in: .vertical) {
+                    cards(entries)
+                    ScrollView { cards(entries) }
+                        .frame(maxHeight: 300)
+                }
+                .padding(.horizontal, 28)
+                .padding(.vertical, 8)
+                .frame(maxWidth: 760)
+                .frame(maxWidth: .infinity)
+                .transition(.quiet)
+            }
+        }
+        .onChange(of: live.waiting) { old, new in announce(new.filter { !old.contains($0) }) }
+    }
+
+    /// The open cards of the members that wait. The conversations are read only while one does, so a group at work is not
+    /// drawn again for every token.
+    private func openCards() -> [Entry] {
+        var entries: [Entry] = []
+        for id in live.waiting {
+            guard let look = model.liveBot(id)?.look else { continue }
+            // A proposal of a new Orb is not offered to a group's members, so there is no card for it here.
+            for request in model.pendingApprovals(of: id) where request.proposal == nil {
+                entries.append(Entry(look: look, request: request))
+            }
+        }
+        return entries
+    }
+
+    private func cards(_ entries: [Entry]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(entries, id: \.request.id) { entry in
+                VStack(alignment: .leading, spacing: 6) {
+                    // The question card already says who asks; the permission card does not.
+                    if !entry.request.isQuestion {
+                        Text(entry.look.name)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Palette.muted)
+                            .padding(.leading, gutter)
+                    }
+                    // The keys (⌘↩, esc) answer the card of the Orb that is selected, and here the group is: no hint of them.
+                    if let question = entry.request.question {
+                        QuestionCard(request: entry.request, question: question, botID: entry.look.id, showsKeyHints: false)
+                    } else {
+                        ApprovalCard(request: entry.request, botID: entry.look.id, showsKeyHints: false)
+                    }
+                }
+                .overlay(alignment: .topLeading) {
+                    BotAvatar(orb: entry.look.orb, size: 28, activity: .waiting)
+                        .frame(width: 28, height: 28)
+                        .accessibilityHidden(true)
+                }
+            }
+        }
+    }
+
+    /// For VoiceOver: the banner does not speak while the group is open, and `announceApproval` only does for a selected Orb.
+    private func announce(_ added: [UUID]) {
+        let names = added.compactMap { model.liveBot($0)?.look.name }
+        guard !names.isEmpty else { return }
+        model.announceForAccessibility("\(PortugueseList.join(names)) \(names.count == 1 ? "precisa" : "precisam") de você")
     }
 }
 

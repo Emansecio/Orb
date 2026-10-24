@@ -65,11 +65,6 @@ extension AppModel {
                     sideWorkToShow = SideWorkTarget(botID: botID, requestID: request)
                     return
                 }
-            case .group:
-                if let group = session.chain?.groupID, groups.contains(where: { $0.id == group }) {
-                    selection = .group(group)
-                    return
-                }
             default: break
             }
         }

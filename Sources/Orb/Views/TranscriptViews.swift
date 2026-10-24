@@ -1512,6 +1512,8 @@ struct ApprovalCard: View {
     @Environment(AppModel.self) private var model
     let request: ApprovalRequest
     let botID: UUID
+    /// False where the keys do not reach the card (a group's approval bar: ⌘↩ and esc answer the selected Orb's card).
+    let showsKeyHints: Bool
 
     /// The card arrived while the chat was open: its border pulses once (the list says so, see `TranscriptRow`). Decided
     /// when the card is made and kept: the row's "entering" is not part of its identity and reads false again as soon as
@@ -1534,9 +1536,10 @@ struct ApprovalCard: View {
     @State private var pressed: ApprovalShortcut?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    init(request: ApprovalRequest, botID: UUID, pulses: Bool = false) {
+    init(request: ApprovalRequest, botID: UUID, pulses: Bool = false, showsKeyHints: Bool = true) {
         self.request = request
         self.botID = botID
+        self.showsKeyHints = showsKeyHints
         _pulsesOnArrival = State(initialValue: pulses)
     }
 
@@ -1545,7 +1548,7 @@ struct ApprovalCard: View {
 
     private var isPending: Bool { request.decision == nil }
     /// Whether this is the card ⌘↩ and esc answer, so its buttons name the keys.
-    private var showsKeys: Bool { model.showsApprovalKeys(request.id, of: botID) }
+    private var showsKeys: Bool { showsKeyHints && model.showsApprovalKeys(request.id, of: botID) }
     private var allowTitle: String { request.isHandoff ? "Pronto" : request.isBatch ? "Permitir as \(request.items.count)" : "Permitir" }
     private var denyTitle: String { request.isHandoff ? "Cancelar" : "Não permitir" }
     /// A request the gate marks as risky (deleting files, sudo, force push) gets the red pill: white is "go ahead".

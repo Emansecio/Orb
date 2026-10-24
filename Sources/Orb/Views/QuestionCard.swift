@@ -10,6 +10,8 @@ struct QuestionCard: View {
     let request: ApprovalRequest
     let question: OrbQuestion
     let botID: UUID
+    /// False where the keys do not reach the card (a group's approval bar: esc skips the selected Orb's card).
+    let showsKeyHints: Bool
 
     /// The card arrived while the chat was open: its border pulses once (as an approval card's does).
     @State private var pulsesOnArrival: Bool
@@ -20,16 +22,17 @@ struct QuestionCard: View {
     @State private var isTyping = false
     @State private var pressed: ApprovalShortcut?
 
-    init(request: ApprovalRequest, question: OrbQuestion, botID: UUID, pulses: Bool = false) {
+    init(request: ApprovalRequest, question: OrbQuestion, botID: UUID, pulses: Bool = false, showsKeyHints: Bool = true) {
         self.request = request
         self.question = question
         self.botID = botID
+        self.showsKeyHints = showsKeyHints
         _pulsesOnArrival = State(initialValue: pulses)
     }
 
     private var isPending: Bool { request.decision == nil }
     /// Whether this is the card esc answers, so "Pular" names the key.
-    private var showsKeys: Bool { model.showsApprovalKeys(request.id, of: botID) }
+    private var showsKeys: Bool { showsKeyHints && model.showsApprovalKeys(request.id, of: botID) }
     private var orbName: String { model.live(botID).look.name }
 
     var body: some View {

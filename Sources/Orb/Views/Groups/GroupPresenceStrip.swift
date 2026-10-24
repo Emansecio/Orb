@@ -112,11 +112,13 @@ struct GroupPresenceStrip: View {
             }
             Spacer(minLength: 0)
         }
-        .frame(height: text == nil ? 0 : 30, alignment: .leading)
+        // The height is always reserved (only the opacity changes), so the thread and the composer do not jump when it comes and goes.
+        .frame(height: 30, alignment: .leading)
         .padding(.horizontal, 28)
         .frame(maxWidth: 760, alignment: .leading)
         .frame(maxWidth: .infinity)
         .clipped()
+        .opacity(text == nil ? 0 : 1)
         .animation(reduceMotion ? Motion.fade : Motion.enter, value: text)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(text ?? "")

@@ -26,7 +26,9 @@ A revisão de 12/10 (`REVISAO-ORBS-2026-10-12.md`) deixou "a orquestração entr
   encadeamentos não travam idas e voltas, e só o orçamento do grupo segura loops.
 - **Orçamento por pedido.** São 12 turnos e 150 mil tokens (`GroupBudget`). Quando acaba, aparece o cartão
   Continuar/Encerrar.
-- **Aprovações.** Os cartões de aprovação dos membros aparecem na tela do grupo (`showGroupOfMember`).
+- **Aprovações.** O banner e `showGroupOfMember` levam à tela do grupo, mas até 23/10 os cartões dos membros não apareciam
+  lá: o membro roda numa conversa lateral e o fio descarta `.approval`, então só o painel da barra de menus respondia. Desde 24/10
+  uma barra de cartões (`GroupApprovalBar`) fica entre o fio e a faixa de presença.
 
 **O que já funciona bem:**
 - o ciclo pedir, responder e acordar, com a fila por Orb;

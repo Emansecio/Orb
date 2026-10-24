@@ -2,14 +2,15 @@
 import SwiftUI
 
 /// `--snapshot` modes of the group screens: groups-sidebar, group-chat, group-working (presence and what the request spent),
-/// group-new, group-panel, group-board and group-empty. group-panel-readonly and group-new-readonly put Atlas (the orchestrator)
+/// group-new, group-panel, group-board and group-empty. group-approval has the Pesquisador waiting on a permission and the Revisor
+/// on a question (the bar of cards above the presence line). group-panel-readonly and group-new-readonly put Atlas (the orchestrator)
 /// and the Revisor in Só leitura; group-chat-requests adds a request a member sent from its chat and a notice. Each mode seeds four Orbs and the
 /// sample groups into the model, with the live state that mode shows.
 @MainActor
 enum GroupSnapshots {
     static func view(_ screen: String, model: AppModel) -> AnyView? {
         let modes: Set<String> = ["groups-sidebar", "group-chat", "group-working", "group-new", "group-panel", "group-board",
-                                  "group-empty", "group-panel-readonly", "group-new-readonly", "group-chat-requests"]
+                                  "group-empty", "group-panel-readonly", "group-new-readonly", "group-chat-requests", "group-approval"]
         guard modes.contains(screen) else { return nil }
         let sample = SampleGroups(model: model, mode: screen)
         switch screen {
@@ -70,11 +71,15 @@ private struct SampleGroups {
             conversation.items += Self.fromChat(atlas: atlas, research: research, review: review, group: launch.id)
         }
         let working = mode == "group-working" || mode == "groups-sidebar"
+        if mode == "group-approval" { Self.seedWaiting(model, research: research, review: review) }
         model.groupSessions[launch.id] = GroupSession(groupID: launch.id, conversation: conversation)
         model.groupSessions[empty.id] = GroupSession(groupID: empty.id)
 
         let live = model.groupLive(launch.id)
-        if working {
+        if mode == "group-approval" {
+            live.update(runState: .running, typing: [research.id, review.id], work: nil, needsYou: true, unread: 0,
+                        usage: GroupUsage(turnsUsed: 4, tokensUsed: 31_000))
+        } else if working {
             live.update(runState: .running, typing: [research.id, review.id], work: nil, needsYou: false, unread: 0,
                         usage: GroupUsage(turnsUsed: 9, tokensUsed: 96_000))
         } else {
@@ -82,6 +87,19 @@ private struct SampleGroups {
         }
         model.groupLive(revision.id).update(runState: .running, typing: [], work: nil, needsYou: true, unread: 2, usage: nil)
         model.groupLive(general.id).update(runState: .idle, typing: [], work: nil, needsYou: false, unread: 3, usage: nil)
+    }
+
+    /// The cards the two members raised, in the side conversations their turns run on (as `startSideRun` leaves them).
+    private static func seedWaiting(_ model: AppModel, research: Bot, review: Bot) {
+        let permission = ApprovalRequest(toolName: "run_command", title: "Rodando no Terminal", command: "curl -s https://todoist.com/pricing",
+                                         reason: "Conferir o preço do plano anual.")
+        let question = ApprovalRequest.question(OrbQuestion(text: "Reviso só o texto da página inicial ou também o dos e-mails?",
+                                                            options: ["Só a página", "Também os e-mails"]), botName: review.name)
+        for (bot, card) in [(research, permission), (review, question)] {
+            let session = model.session(bot.id)
+            session.isUnloaded = false
+            session.conversation = Conversation(items: [TranscriptItem(.approval(card))])
+        }
     }
 
     /// What the chat of "Lançamento" says: the request, the assignments, the answers and the orchestrator's word.
