@@ -710,9 +710,7 @@ enum Schedule: Codable, Hashable, Sendable {
         case .once(let moment):
             return moment > now ? nil : "Escolha uma data e hora no futuro."
         case .cron(let expression, let timeZone):
-            if let timeZone, TimeZone(identifier: timeZone) == nil {
-                return "Fuso desconhecido: “\(timeZone)”. Use um nome como America/Sao_Paulo."
-            }
+            if let timeZone, let unknown = Self.zoneProblem(timeZone) { return unknown }
             do { _ = try CronExpression(expression) } catch {
                 return (error as? CronExpression.Invalid)?.reason ?? "Expressão cron inválida."
             }
@@ -720,6 +718,11 @@ enum Schedule: Codable, Hashable, Sendable {
         default:
             return nil
         }
+    }
+
+    /// Why `identifier` is no time zone this Mac knows, or nil. The editor repeats it under the field.
+    static func zoneProblem(_ identifier: String) -> String? {
+        TimeZone(identifier: identifier) == nil ? "Fuso desconhecido: “\(identifier)”. Use um nome como America/Sao_Paulo." : nil
     }
 
     /// `base` in `timeZone`, when it names one this Mac knows.
@@ -744,6 +747,14 @@ enum Schedule: Codable, Hashable, Sendable {
         case .cron(let expression, let timeZone):
             "Cron “\(expression)”" + (timeZone.map { " (fuso \($0))" } ?? "")
         }
+    }
+
+    /// What the screen shows for the schedule: a common cron line in words. `label` stays as it is, because it goes to
+    /// the model and the chat.
+    var plainLabel: String {
+        guard case .cron(let expression, let timeZone) = self,
+              let text = (try? CronExpression(expression))?.plainText() else { return label }
+        return text + (timeZone.map { " (fuso \($0))" } ?? "")
     }
 
     /// "em 14/10/2026 às 09:00", on this Mac's clock.

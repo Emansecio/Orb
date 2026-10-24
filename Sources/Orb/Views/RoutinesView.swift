@@ -37,21 +37,42 @@ struct RoutinesView: View {
                                        onTemplate: { newRoutine($0) })
                         .transition(.opacity)
                 } else {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 340), spacing: Spacing.cardSpacing, alignment: .top)],
-                              alignment: .leading, spacing: Spacing.cardSpacing) {
-                        ForEach($model.routines) { $routine in
-                            if let bot = model.bot(routine.botID) {
-                                RoutineCard(routine: $routine, bot: bot, isRunning: model.isRoutineRunning(routine.id),
-                                            isQueued: model.isRoutineQueued(routine.id),
-                                            onRun: { model.runRoutine(routine.id) },
-                                            onEdit: { sheet = .edit(routine) },
-                                            onOpen: { sheet = .conversation(routine.id) },
-                                            onOpenRun: { sheet = .run(routine: routine.id, run: $0) })
-                                    .transition(.adapted(.arrive, reduceMotion: reduceMotion))
+                    // One header per Orb, in the order of the sidebar, with that Orb's cards under it. Not sorted by next run:
+                    // a run would make the cards jump. Each group walks the bound list again (a handful of routines) so every
+                    // card keeps a binding by id.
+                    VStack(alignment: .leading, spacing: Spacing.section) {
+                        ForEach(model.bots.filter { bot in model.routines.contains { $0.botID == bot.id } }) { bot in
+                            VStack(alignment: .leading, spacing: Spacing.m) {
+                                HStack(spacing: 8) {
+                                    BotAvatar(bot: bot, size: 22, activity: .idle, animated: false)
+                                    Text(bot.name)
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .lineLimit(1)
+                                        .accessibilityAddTraits(.isHeader)
+                                }
+                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 340), spacing: Spacing.cardSpacing, alignment: .top)],
+                                          alignment: .leading, spacing: Spacing.cardSpacing) {
+                                    ForEach($model.routines) { $routine in
+                                        if routine.botID == bot.id {
+                                            RoutineCard(routine: $routine, bot: bot, isRunning: model.isRoutineRunning(routine.id),
+                                                        isQueued: model.isRoutineQueued(routine.id),
+                                                        onRun: { model.runRoutine(routine.id) },
+                                                        onEdit: { sheet = .edit(routine) },
+                                                        onOpen: { sheet = .conversation(routine.id) },
+                                                        onOpenRun: { sheet = .run(routine: routine.id, run: $0) },
+                                                        onOpenOrb: {
+                                                            model.setInspector(true)
+                                                            model.request(.showTab(.routines), of: bot.id)
+                                                        },
+                                                        onDelete: { model.deleteRoutine(routine.id) })
+                                                .transition(.adapted(.arrive, reduceMotion: reduceMotion))
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
-                    .animateChanges(of: model.routines.map(\.id))
+                    .animateChanges(of: model.routines.map { "\($0.id)\($0.botID)" })
                     .transition(.opacity)
                 }
             }
@@ -220,15 +241,32 @@ private struct RoutineCard: View {
     let onEdit: () -> Void
     let onOpen: () -> Void
     let onOpenRun: (UUID) -> Void
+    /// Opens the Orb that owns the routine, with its panel on the routines tab.
+    let onOpenOrb: () -> Void
+    let onDelete: () -> Void
+    @State private var isConfirmingDelete = false
+
+    /// The last run failed: said in the header, not only in the line at the bottom.
+    private var lastRunFailed: Bool { routine.runs.first?.succeeded == false }
+    /// A paused routine dims only its name and its Orb; the badge and the switch that bring it back stay at full contrast.
+    private var dimming: Double { routine.isEnabled ? 1 : 0.6 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
-                BotAvatar(bot: bot, size: 30, activity: routine.isEnabled ? .idle : .sleepy, animated: false)
-                Text(bot.name)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Palette.secondary)
-                    .lineLimit(1)
+                Button(action: onOpenOrb) {
+                    HStack(spacing: 8) {
+                        BotAvatar(bot: bot, size: 30, activity: routine.isEnabled ? .idle : .sleepy, animated: false)
+                        Text(bot.name)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Palette.secondary)
+                            .lineLimit(1)
+                    }
+                    .opacity(dimming)
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .help("Abrir \(bot.name) e suas rotinas")
                 if let mode = routine.permissionMode {
                     Label(mode.label, systemImage: mode.symbol)
                         .font(.caption2.weight(.medium))
@@ -247,11 +285,18 @@ private struct RoutineCard: View {
                     .disabled(datePassed)
                     .help(datePassed ? Tip.routineDatePassed : Tip.routineToggle(isOn: routine.isEnabled))
             }
-            Text(routine.name)
-                .font(.system(size: 15, weight: .semibold))
-                .lineLimit(2)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(routine.name)
+                    .font(.system(size: 15, weight: .semibold))
+                    .lineLimit(2)
+                    .opacity(dimming)
+                if lastRunFailed {
+                    CatalogBadge(text: "Falhou", symbol: "exclamationmark.triangle.fill", tint: Palette.danger)
+                        .fixedSize()
+                }
+            }
             VStack(alignment: .leading, spacing: 4) {
-                Label(routine.schedule.label, systemImage: "clock")
+                Label(routine.schedule.plainLabel, systemImage: "clock")
                     .font(.callout)
                 if let mismatch = RoutineText.nameMismatch(of: routine) {
                     Label(mismatch, systemImage: "exclamationmark.triangle.fill")
@@ -281,6 +326,21 @@ private struct RoutineCard: View {
                 Button("Ver conversa", systemImage: "text.bubble", action: onOpen)
                     .buttonStyle(GhostStyle())
                     .help(Tip.routineConversation)
+                Menu {
+                    Button("Editar…", action: onEdit)
+                        .help(Tip.editRoutine)
+                    Divider()
+                    Button("Apagar…", role: .destructive) { isConfirmingDelete = true }
+                        .help(Tip.deleteRoutine)
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .frame(width: 26, height: 22)
+                        .contentShape(.rect)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .iconTip("Edita ou apaga a rotina", label: Tip.moreOptions(of: routine.name))
                 Spacer()
                 // "Rodar agora", "Rodando…" and "Na fila" swap in place: one over the other, cross-fading, for the
                 // card not to shift while they trade places.
@@ -307,9 +367,15 @@ private struct RoutineCard: View {
         .padding(Spacing.cardPadding)
         // The cards of one row are as tall as the tallest, with their buttons on the same line at the bottom.
         .frame(maxHeight: .infinity, alignment: .top)
-        .card(radius: 12)
-        .opacity(routine.isEnabled ? 1 : 0.6)
+        .card(radius: 14)
         .animateChanges(of: routine.isEnabled)
+        .animateChanges(of: lastRunFailed)
+        .confirmationDialog("Apagar “\(RoutineText.resolvedName(routine.name, prompt: routine.prompt))”?",
+                            isPresented: $isConfirmingDelete) {
+            Button("Apagar rotina", role: .destructive, action: onDelete)
+        } message: {
+            Text("A rotina e o histórico dela serão apagados. Não dá para desfazer.")
+        }
     }
 }
 
@@ -781,6 +847,16 @@ struct RoutineEditor: View {
         !isNew && draftSchedule == routine.schedule ? nil : draftSchedule.problem()
     }
 
+    /// The cron line in words, when it parses and is one of the common ones.
+    private var cronPlainText: String? {
+        (try? CronExpression(cronExpression.trimmingCharacters(in: .whitespaces)))?.plainText()
+    }
+
+    private var zoneProblem: String? {
+        let zone = cronTimeZone.trimmingCharacters(in: .whitespaces)
+        return zone.isEmpty ? nil : Schedule.zoneProblem(zone)
+    }
+
     var body: some View {
         Form {
             Section {
@@ -802,7 +878,7 @@ struct RoutineEditor: View {
                     Text("A cada X horas").tag(Kind.hourly)
                     Text("A cada X minutos").tag(Kind.minutes)
                     Text("Uma vez só").tag(Kind.once)
-                    Text("Expressão cron").tag(Kind.cron)
+                    Text("Agenda avançada").tag(Kind.cron)
                 }
                 // What the kind of repetition adds or swaps fades by itself (`.quiet`): a Form is a table, and its rows
                 // taking their new height at once looks calmer than a table sliding them.
@@ -826,8 +902,22 @@ struct RoutineEditor: View {
                         .font(.body.monospaced())
                         .help(Tip.cronExpression)
                         .transition(.quiet)
+                    if let plain = cronPlainText {
+                        Text(plain)
+                            .font(.caption)
+                            .foregroundStyle(Palette.muted)
+                            .transition(.quiet)
+                    }
                     TextField("Fuso", text: $cronTimeZone, prompt: Text(TimeZone.current.identifier))
                         .transition(.quiet)
+                    if let zoneProblem {
+                        // Also in the footer, but there it is far from the field that is wrong.
+                        Text(zoneProblem)
+                            .font(.caption)
+                            .foregroundStyle(Palette.warn)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .transition(.quiet)
+                    }
                 } else {
                     DatePicker("Horário", selection: $time, displayedComponents: .hourAndMinute)
                         .transition(.quiet)

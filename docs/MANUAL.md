@@ -543,7 +543,7 @@ aviso dizendo por quê.
 - **Permissões.** Ninguém está lá para responder, então uma rotina em "Perguntar antes" **espera por você** (o editor avisa e
   oferece "Usar Automático" e "Usar Só leitura"). Em Avançado: "Permissões da rotina" (Igual ao Orb, Automático ou Só leitura).
 - Se o Orb está ocupado, a rotina entra na fila ("Na fila") e roda quando ele terminar. "Rodar agora" e "Rodar uma vez
-  agora, para testar" ao criar. O mesmo vale para "Rodar agora" no painel do Orb. Rotina desativada fica "Pausada".
+  agora, para testar" ao criar. O mesmo vale para "Rodar agora" no painel do Orb. Rotina desativada fica "Pausada". Na página, os cartões ficam agrupados por Orb; clicar no Orb do cartão abre o painel dele na aba Rotinas, o cartão mostra "Falhou" quando a última execução falhou, e o "…" tem "Editar…" e "Apagar…" (com confirmação). Em "Agenda avançada" (cron), as formas comuns aparecem em palavras ("De segunda a sexta às 9h30").
 - **Pedir a outro Orb.** Uma rotina que pede algo a outro Orb (`orbs ask`) espera a resposta: a execução segue na conversa
   dela quando a resposta chega, e só então entra no histórico, com o relatório final (o banner também espera). Seu chat não ganha
   turno com isso. Enquanto ela espera, o próximo horário não dispara outra execução. Se você para a conversa entre Orbs, ou se o

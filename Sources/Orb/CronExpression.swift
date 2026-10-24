@@ -62,6 +62,26 @@ struct CronExpression: Hashable, Sendable {
         return nil
     }
 
+    /// The few lines people actually write, in words ("Todo dia às 9h", "De segunda a sexta às 9h30", "Aos fins de semana
+    /// às 18h"); nil for the rest (lists, steps, one weekday, a day of the month, a month), where the next run is what's shown.
+    /// Read off the parsed sets, so "0 9 * * *" and "0 9 * * 0-6" say the same, as they mean the same.
+    func plainText() -> String? {
+        // "*" in the day of the month and every month: only the weekdays tell the days apart. A day of the month that is
+        // listed (even "1-31") would make either field enough, so it is left to the next-run line.
+        guard minutes.count == 1, hours.count == 1, anyDay, days.count == 31, months.count == 12 else { return nil }
+        let phrase: String
+        switch weekdays {
+        case Set(1...7): phrase = "Todo dia"
+        case [2, 3, 4, 5, 6]: phrase = "De segunda a sexta"
+        case [1, 7]: phrase = "Aos fins de semana"
+        default: return nil
+        }
+        // Portuguese says "à 1h" but "às 9h"; midnight reads "à 0h".
+        let article = hours[0] < 2 ? "à" : "às"
+        let minute = minutes[0] == 0 ? "" : String(format: "%02d", minutes[0])
+        return "\(phrase) \(article) \(hours[0])h\(minute)"
+    }
+
     /// A field that starts with `*` (`*`, `*/2`) still holds its values; it only makes the two fields both count, as in
     /// Vixie cron.
     private func matches(day: Int?, weekday: Int?) -> Bool {
