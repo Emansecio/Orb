@@ -29,6 +29,33 @@ Notação: impacto **A/M/B**, esforço **P/M/G**. Os caminhos são relativos a `
 
 A seção 4 traz a ordem revista.
 
+**24/10: implementação.** As fases 2 a 8 da seção 4 foram feitas, de `90f0e7f` a `a4951ee`. Cada pacote
+seguiu o parecer, com as diferenças abaixo:
+
+| Fase | Commits | Diferenças em relação ao parecer |
+|---|---|---|
+| 2. Pedidos de membro no grupo | `c5adf3d` | O cartão mostra o avatar do membro na calha. Propostas de Orb não entram na barra. |
+| 3. Casca | `90f0e7f`, `1fd481d`, `518a88a`, `42ba264` | Conversas vazias ("Nova conversa") não entram na paleta. O subtítulo "Pasta de trabalho" virou "Pasta de <Orb>". |
+| 3. Painel do Orb | `afdec17`, `c35a359`, `d4cbf93` | O aviso de nome é uma função pura (`NameCheck`). O anel de foco do `InlineLinkNote` fica visível. |
+| 3. Grupo | `5d43694`, `f9925a8`, `cfa678f` | Sem `deleteGroupAndLeave`: o `deleteGroup` já tira a seleção do grupo. `.refused` continua laranja. |
+| 3. Chat e compositor | `b1e7537`, `d7137be`, `aa71790`, `1729c3f` | O menu do botão de enviar só aparece quando o Orb aceita direcionar. A tela ao vivo tem uma variante de rótulos curtos. |
+| 4. Ajustes e vocabulário | `e15c575`, `d974bdc`, e as trocas nos pacotes de cada tela | "Propor skills" e "Resumir conversas longas" também foram para a aba Orbs. O `rawValue` da aba antiga continua abrindo "Acesso ao Mac". |
+| 5. Wizard | `8ef5880`, `b9b3fa2` | O papel também conta como trabalho a perder. O texto colado no painel de importação não conta. |
+| 5–6. Skills | `99c57d0` | A linha abre o editor por `onTapGesture` com ação de acessibilidade, porque botão aninhado em `Button` falha no macOS. |
+| 6. Rotinas e Conectores | `c75a11d`, `07db17d` | Cabeçalho por Orb e Orb no cartão aparecem juntos (conferir se fica redundante). "Resolver" na galeria continua abrindo o editor. |
+| 8. Resumo do plano | `3a1c627` | Usa `.event(OrbEvent)`, que não vai ao histórico do modelo, e não um `Kind` novo. |
+| 8. Anexos no grupo | `7d26b2e` | A imagem vai ao orquestrador ou aos mencionados, só no turno que recebe a mensagem. O repasse entre Orbs fica de fora (faltaria um campo no `OrbEnvelope`). |
+| 7. Tokens | `f29017d`, `14cd52c`, `4419fa2`, `a4951ee` | Ficaram 153 raios em `Radius`, 318 fontes em `Typography`, mais `chipFill`, `Shadow.popover` e `canvasHex`. Nenhum valor mudou, exceto duas sombras de 0,3 para 0,35. Pesos, `design` e raios fora de 8–14 seguem literais. |
+
+Ficaram de fora, pelo parecer:
+
+- QuickAsk com grupos;
+- "Abrir no assistente" no cartão de proposta;
+- trocar o prefixo "Não deu certo";
+- mudar a largura mínima do painel.
+
+Debug e release compilam na `main`. Os testes filtrados das suítes tocadas passam (2.245 testes em 295 suítes). Nenhuma tela desta rodada foi conferida com `--snapshot`, e a suíte completa não rodou.
+
 ---
 
 ## 1. As 12 que eu atacaria primeiro
