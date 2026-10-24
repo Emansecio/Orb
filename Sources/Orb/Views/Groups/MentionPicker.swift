@@ -54,7 +54,7 @@ struct MentionPicker: View {
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(Palette.ink)
                         Text(detail(for: option))
-                            .font(.system(size: 11))
+                            .font(Typography.small)
                             .foregroundStyle(Palette.faint)
                             .lineLimit(1)
                         Spacer(minLength: 0)

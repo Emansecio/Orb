@@ -548,7 +548,7 @@ struct LearnMoreNote: View {
     var body: some View {
         InlineLinkNote(text: short, link: "Saiba mais", hint: "Mostra mais detalhes", edge: .bottom) {
             Text(more)
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(width: 300, alignment: .leading)
                 .padding(12)

@@ -112,7 +112,7 @@ private struct QueuedBubble: View {
     private var stateLine: some View {
         let hint = hovered.map(hintText)
         return Label(hint ?? whenText, systemImage: hovered.map(hintSymbol) ?? symbol)
-            .font(.system(size: 11))
+            .font(Typography.small)
             .foregroundStyle(hint == nil ? Palette.muted : Palette.secondary)
             .lineLimit(1)
             .contentTransition(.identity)

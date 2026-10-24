@@ -212,7 +212,7 @@ private struct InstalledSkills: View {
                             Text(draft.skill.name)
                                 .font(.system(size: 14, weight: .semibold))
                             Text("de \(draft.orbName)")
-                                .font(.system(size: 12))
+                                .font(Typography.label)
                                 .foregroundStyle(Palette.muted)
                         }
                         if draft.isUpdate {
@@ -289,7 +289,7 @@ private struct InstalledSkillRow: View {
                         Button(copied.isOn ? "Copiado" : "Copiar /\(skill.slug)", systemImage: copied.isOn ? "checkmark" : "doc.on.doc", action: copy)
                             .labelStyle(.iconOnly)
                             .buttonStyle(.plain)
-                            .font(.system(size: 11))
+                            .font(Typography.small)
                             .foregroundStyle(copied.isOn ? Palette.ok : Palette.faint)
                             // The symbol is replaced by the check, as in the chat (a plain change under Reduce Motion); in on the
                             // press curve, back on the content one.
@@ -299,7 +299,7 @@ private struct InstalledSkillRow: View {
                     }
                     if !skill.summary.isEmpty {
                         Text(MemoryText.tidyEllipsis(skill.summary))
-                            .font(.system(size: 12))
+                            .font(Typography.label)
                             .foregroundStyle(Palette.muted)
                             .lineLimit(2)
                     }
@@ -420,7 +420,7 @@ private struct ExploreSkills: View {
             Label("Escolha um tema ou digite o que você precisa", systemImage: "sparkle.magnifyingglass")
                 .font(.system(size: 14, weight: .semibold))
             Text("As skills vêm do catálogo aberto Skills.sh e o conteúdo é de quem publicou, no GitHub. Você lê as instruções antes de instalar e depois usa com /comando no chat.")
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -496,7 +496,7 @@ private struct CatalogSkillCard: View {
                         Text("Carregando descrição…").foregroundStyle(Palette.faint)
                     }
                 }
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.muted)
                 .lineLimit(3, reservesSpace: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -575,7 +575,7 @@ struct SkillPreview: View {
                         VStack(alignment: .leading, spacing: 14) {
                             if !document.description.isEmpty {
                                 Text(document.description)
-                                    .font(.system(size: 13))
+                                    .font(Typography.text)
                                     .foregroundStyle(Palette.secondary)
                             }
                             // In normal case, as every other heading in the app's sheets ("Chave", "Usar com", "Quando").

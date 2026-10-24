@@ -64,7 +64,7 @@ struct WelcomeOfferView: View {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
                 Text(offer.workingTitle)
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.secondary)
                 if run.working == .claudeCode {
                     Button("Cancelar", action: run.cancel)
@@ -76,14 +76,14 @@ struct WelcomeOfferView: View {
             }
         } else if let failure {
             Label(failure, systemImage: "exclamationmark.triangle.fill")
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.danger)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: 400)
         } else {
             Text(offer.detail)
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.muted)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -101,7 +101,7 @@ struct WelcomeOfferView: View {
                     .font(.system(size: 9, weight: .semibold))
                     .accessibilityHidden(true)
             }
-            .font(.system(size: 12))
+            .font(Typography.label)
             .foregroundStyle(Palette.secondary)
             .padding(.vertical, 4)
             .contentShape(.rect)
@@ -135,11 +135,11 @@ struct WelcomeReasonNote: View {
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "info.circle")
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.muted)
                 .accessibilityHidden(true)
             Text(reason.message)
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }

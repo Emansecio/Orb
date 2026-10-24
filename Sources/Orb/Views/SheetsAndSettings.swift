@@ -308,7 +308,7 @@ struct NewBotSheet: View {
     /// The import in "Criar conversando", where the form's "Começar de" is not shown: it opens on the Grok Bot gallery.
     private var assistantImportLink: some View {
         Button { isImporting = true } label: {
-            Label(ImportText.fromMarketplace, systemImage: "square.and.arrow.down").font(.system(size: 12))
+            Label(ImportText.fromMarketplace, systemImage: "square.and.arrow.down").font(Typography.label)
         }
         .buttonStyle(.plain)
         .foregroundStyle(Palette.accentText)

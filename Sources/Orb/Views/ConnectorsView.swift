@@ -265,7 +265,7 @@ private struct ConnectorCard: View {
             if let usedBy {
                 Label(usedBy.isEmpty ? "Nenhum Orb usa" : "Usado por \(usedBy)",
                       systemImage: usedBy.isEmpty ? "person.crop.circle.badge.exclamationmark" : "person.2")
-                    .font(.system(size: 11))
+                    .font(Typography.small)
                     .foregroundStyle(usedBy.isEmpty ? Palette.warn : Palette.muted)
                     .lineLimit(1)
                     .help(usedBy.isEmpty ? "Ligue “Conectores” no painel de um Orb, ou escolha os Orbs em Editar" : "")
@@ -344,17 +344,17 @@ private struct ConnectorCard: View {
                     ProgressView().controlSize(.mini)
                     Text("Abrimos o navegador. Termine o login lá e volte.").foregroundStyle(Palette.muted)
                 }
-                .font(.system(size: 12))
+                .font(Typography.label)
                 Button("Cancelar") { loginTask?.cancel(); onCancelSignIn() }.buttonStyle(GhostStyle()).controlSize(.small).help(Tip.cancelLogin)
             default:
                 Label(loginMessage(ask), systemImage: ask == .signIn ? "person.crop.circle.badge.exclamationmark" : "exclamationmark.triangle.fill")
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.warn)
                     .lineLimit(3)
                     .multilineTextAlignment(.leading)
                 if case .failed(let message) = login {
                     Text(ConnectorStatusText.shortError(message))
-                        .font(.system(size: 11))
+                        .font(Typography.small)
                         .foregroundStyle(Palette.muted)
                         .lineLimit(2)
                 }
@@ -447,7 +447,7 @@ private struct ConnectorCard: View {
                 EmptyView()
             }
         }
-        .font(.system(size: 11))
+        .font(Typography.small)
         .transition(.opacity)
         .accessibilityElement(children: .combine)
     }
@@ -456,7 +456,7 @@ private struct ConnectorCard: View {
     private func needsAttention(_ message: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Label(message, systemImage: "exclamationmark.triangle.fill")
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.warn)
                 .lineLimit(3)
                 .multilineTextAlignment(.leading)
@@ -472,7 +472,7 @@ private struct ConnectorCard: View {
                 isShowingDetail = true
             } label: {
                 Text("Não conectou: \(ConnectorStatusText.shortError(message))")
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.danger)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
@@ -619,7 +619,7 @@ struct ConnectorToolsSheet: View {
         } else {
             Text(catalog == nil ? "O Orb ainda não conhece as ferramentas deste conector. Use “Testar” no cartão."
                                 : "Este conector não oferece ferramentas.")
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.muted)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -641,7 +641,7 @@ struct ConnectorToolsSheet: View {
                 }
             }
             Text(tool.description.split(whereSeparator: \.isNewline).first.map(String.init) ?? "Sem descrição.")
-                .font(.system(size: 11))
+                .font(Typography.small)
                 .foregroundStyle(Palette.muted)
                 .lineLimit(1)
         }
@@ -670,7 +670,7 @@ private struct ExploreConnectors: View {
                                     info: "A busca usa o registro oficial do MCP (registry.modelcontextprotocol.io). O nome de cada servidor é verificado pelo registro, mas o código é de quem publicou.")
                 Label("Os servidores do registro são de quem os publicou. Só os marcados “Oficial” vêm do projeto do MCP; os outros rodam código de terceiros no seu Mac. Confira quem publicou antes de instalar. Para os serviços mais usados, veja a galeria.",
                       systemImage: "exclamationmark.shield")
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.muted)
                     .fixedSize(horizontal: false, vertical: true)
                 if !isSearching {
@@ -759,7 +759,7 @@ private struct RegistryServerCard: View {
                     }
                 }
                 Text(server.summary.isEmpty ? "Sem descrição." : server.summary)
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.muted)
                     .lineLimit(3, reservesSpace: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1064,7 +1064,7 @@ struct ConnectorEditor: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .help("Escolhe se o app do Slack só lê ou também envia mensagens")
-                Text(slackPreset.detail).font(.system(size: 11)).foregroundStyle(Palette.faint)
+                Text(slackPreset.detail).font(Typography.small).foregroundStyle(Palette.faint)
             }
             VStack(alignment: .leading, spacing: 8) {
                 Text("2. Crie o seu app do Slack").font(.system(size: 13, weight: .semibold))
@@ -1072,7 +1072,7 @@ struct ConnectorEditor: View {
                     .buttonStyle(SecondaryPillStyle())
                     .help("Abre o Slack no navegador com o app já preenchido")
                 Text("O Slack abre no navegador com tudo preenchido. Escolha o seu workspace e clique em **“Create”**. Depois, em **“Install App”**, clique em **“Install to Workspace”** e em **“Allow”**.")
-                    .font(.system(size: 11)).foregroundStyle(Palette.faint)
+                    .font(Typography.small).foregroundStyle(Palette.faint)
             }
             VStack(alignment: .leading, spacing: 8) {
                 Text("3. Como entrar").font(.system(size: 13, weight: .semibold))
@@ -1085,13 +1085,13 @@ struct ConnectorEditor: View {
                 .help("Escolhe entre entrar com o app do Slack ou colar o token")
                 if pastesToken {
                     Text("Em OAuth & Permissions, copie o User OAuth Token (começa com xoxp-) e cole na chave abaixo.")
-                        .font(.system(size: 11)).foregroundStyle(Palette.faint)
+                        .font(Typography.small).foregroundStyle(Palette.faint)
                 } else {
                     TextField("Client ID", text: $clientID, prompt: Text("Em “Basic Information” → “App Credentials”"))
                         .textFieldStyle(.roundedBorder)
                         .help("O Client ID do app do Slack, que o Orb usa para entrar com a sua conta")
                     Text("Copie o Client ID do app e clique em Entrar com Slack: o Slack pede a sua licença no navegador. Não precisa copiar token.")
-                        .font(.system(size: 11)).foregroundStyle(Palette.faint)
+                        .font(Typography.small).foregroundStyle(Palette.faint)
                 }
             }
         } header: {
@@ -1242,7 +1242,7 @@ struct ConnectorEditor: View {
             }
             Text(title).font(.system(size: 15, weight: .semibold)).contentTransition(.opacity)
             Text(detail)
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.muted)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 360)
@@ -1465,7 +1465,7 @@ private struct KeyValueField: View {
             }
             if let input, !input.summary.isEmpty || input.isRequired {
                 Text((input.isRequired ? "Obrigatório. " : "") + input.summary)
-                    .font(.system(size: 11))
+                    .font(Typography.small)
                     .foregroundStyle(Palette.faint)
                     .lineLimit(2)
             }

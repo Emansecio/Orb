@@ -97,7 +97,7 @@ struct ReplyImageView: View, Equatable {
                       decodeSide: max(Self.maxSize.width, Self.maxSize.height))
             if !alt.isEmpty {
                 Text(alt)
-                    .font(.system(size: 11))
+                    .font(Typography.small)
                     .foregroundStyle(Palette.muted)
                     .frame(maxWidth: size.width, alignment: .leading)
                     .accessibilityHidden(true)
@@ -176,7 +176,7 @@ struct CodeBlockView: View, Equatable {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Text(language ?? "código")
-                    .font(.system(size: 11))
+                    .font(Typography.small)
                     .foregroundStyle(Palette.muted)
                 Spacer(minLength: 8)
                 Button(action: copy) {
@@ -307,7 +307,7 @@ struct TableBlockView: View, Equatable {
             Divider().gridCellUnsizedAxes(.horizontal).overlay(Palette.line)
             rows(floors)
         }
-        .font(.system(size: 13))
+        .font(Typography.text)
         .padding(Self.inset)
         .background(Palette.raised.opacity(0.7), in: .rect(cornerRadius: Radius.small))
         .overlay(RoundedRectangle(cornerRadius: Radius.small).strokeBorder(Palette.line, lineWidth: 1))

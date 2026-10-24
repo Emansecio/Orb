@@ -8,7 +8,7 @@ struct GroupPauseCard: View {
     var body: some View {
         Label(pause.state == .continued ? "Continuado" : "Encerrado",
               systemImage: pause.state == .continued ? "play.circle" : "stop.circle")
-            .font(.system(size: 12))
+            .font(Typography.label)
             .foregroundStyle(Palette.muted)
             .frame(maxWidth: .infinity)
             .accessibilityIdentifier("group-pause-record")

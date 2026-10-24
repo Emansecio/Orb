@@ -42,7 +42,7 @@ struct SidebarCategorySection: View {
                 }
                 if ids.isEmpty {
                     Text("Arraste um Orb para cá")
-                        .font(.system(size: 11))
+                        .font(Typography.small)
                         .foregroundStyle(Palette.faint)
                         .padding(.leading, SidebarCategoryLayout.titleInset)
                         .padding(.vertical, 4)
@@ -182,7 +182,7 @@ private struct SidebarCategoryHeader: View {
                 ZStack {
                     if collapsed && waiting {
                         Image(systemName: "exclamationmark.bubble.fill")
-                            .font(.system(size: 12))
+                            .font(Typography.label)
                             .foregroundStyle(Palette.warn)
                             .transition(.adapted(.mark, reduceMotion: reduceMotion))
                     } else if collapsed && unread {
@@ -194,7 +194,7 @@ private struct SidebarCategoryHeader: View {
                 }
                 .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: collapsed && (waiting || unread))
                 Text("\(ids.count)")
-                    .font(.system(size: 11))
+                    .font(Typography.small)
                     .foregroundStyle(Palette.faint)
                     .monospacedDigit()
             }

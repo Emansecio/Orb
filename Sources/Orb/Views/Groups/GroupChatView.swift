@@ -320,7 +320,7 @@ private struct GroupRow: View, Equatable {
             GroupPauseCard(pause: pause)
         case .notice(let text):
             Text(text)
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.muted)
                 .frame(maxWidth: .infinity)
                 .multilineTextAlignment(.center)
@@ -383,7 +383,7 @@ struct GroupEmptyState: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(Palette.ink)
                 Text("\(orchestrator?.name ?? "O orquestrador") coordena, divide o trabalho e chama os outros. Você pode entrar a qualquer momento.")
-                    .font(.system(size: 13))
+                    .font(Typography.text)
                     .foregroundStyle(Palette.muted)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 420)

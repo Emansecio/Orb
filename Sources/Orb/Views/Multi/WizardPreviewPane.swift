@@ -61,7 +61,7 @@ struct WizardPreviewPane: View {
                         if !draft.instructions.isEmpty { howItWorks.transition(.adapted(.unfold, reduceMotion: reduceMotion)) }
                     } else {
                         Text("\(emptyText)")
-                            .font(.system(size: 13))
+                            .font(Typography.text)
                             .foregroundStyle(Palette.faint)
                             .multilineTextAlignment(.center)
                             .padding(.top, 6)
@@ -161,7 +161,7 @@ struct WizardPreviewPane: View {
             .help("Sorteia outra aparência para o Orb")
             .accessibilityIdentifier("preview-random")
         }
-        .font(.system(size: 12))
+        .font(Typography.label)
         .padding(.top, -8)
     }
 
@@ -179,7 +179,7 @@ struct WizardPreviewPane: View {
                 .background(wash(.name), in: .rect(cornerRadius: Radius.small))
                 .motion(Motion.content, value: draft.name)
             Text(draft.role.isEmpty ? " " : draft.role)
-                .font(.system(size: 13))
+                .font(Typography.text)
                 .foregroundStyle(Palette.muted)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
@@ -202,7 +202,7 @@ struct WizardPreviewPane: View {
                         .foregroundStyle(Palette.faint)
                     Spacer(minLength: 4)
                     Text(isHowOpen ? "Mostrar menos" : "Ver tudo")
-                        .font(.system(size: 11))
+                        .font(Typography.small)
                         .foregroundStyle(Palette.faint)
                     Image(systemName: isHowOpen ? "chevron.up" : "chevron.down")
                         .font(.system(size: 9, weight: .semibold))
@@ -213,7 +213,7 @@ struct WizardPreviewPane: View {
             .buttonStyle(.plain)
             .accessibilityLabel(isHowOpen ? "Como funciona, recolher" : "Como funciona, expandir")
             Text(draft.instructions)
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.secondary)
                 .lineSpacing(3)
                 .lineLimit(isHowOpen ? nil : 3)
@@ -336,7 +336,7 @@ struct WizardReadyCard: View {
                         .accessibilityHidden(true)
                 }
                 Text("Revise ao lado e clique em Criar Orb.")
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }

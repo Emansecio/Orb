@@ -149,7 +149,7 @@ private struct RoutinesEmptyState: View {
                     .font(.system(size: 17, weight: .semibold))
                     .accessibilityAddTraits(.isHeader)
                 Text("Uma rotina é uma tarefa que um Orb faz sozinho, no horário. O app precisa estar aberto.")
-                    .font(.system(size: 13))
+                    .font(Typography.text)
                     .foregroundStyle(Palette.muted)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 420)
@@ -359,7 +359,7 @@ private struct RoutineCard: View {
                             .transition(.opacity)
                     }
                 }
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .animateChanges(of: RoutineRunState(isRunning: isRunning, isQueued: isQueued))
             }
             .controlSize(.small)
@@ -635,12 +635,12 @@ private struct RoutineRunSheet: View {
         VStack(alignment: .leading, spacing: 10) {
             if !run.succeeded {
                 Label(run.summary, systemImage: "exclamationmark.triangle")
-                    .font(.system(size: 13))
+                    .font(Typography.text)
                     .foregroundStyle(Palette.danger)
                     .fixedSize(horizontal: false, vertical: true)
             } else if (run.report ?? "").isEmpty {
                 Text(run.summary)
-                    .font(.system(size: 13))
+                    .font(Typography.text)
                     .foregroundStyle(Palette.secondary)
             }
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
@@ -715,11 +715,11 @@ private struct ReportBlockView: View {
                 Text("•").foregroundStyle(Palette.faint)
                 Text(MarkdownCache.attributed(text))
             }
-            .font(.system(size: 13))
+            .font(Typography.text)
             .foregroundStyle(Palette.secondary)
         case .paragraph(let text):
             Text(MarkdownCache.attributed(text))
-                .font(.system(size: 13))
+                .font(Typography.text)
                 .foregroundStyle(Palette.secondary)
                 .lineSpacing(3)
         }
@@ -1003,7 +1003,7 @@ struct RoutineEditor: View {
             } icon: {
                 Image(systemName: "hand.raised")
             }
-            .font(.system(size: 12))
+            .font(Typography.label)
             .foregroundStyle(Palette.warn)
             HStack(spacing: 8) {
                 Button("Usar Automático") { choose(.auto) }

@@ -115,10 +115,10 @@ struct PermissionPopover: View {
                         Button("Gerenciar", action: manage)
                             .buttonStyle(.link)
                             .help(Tip.manageGrants)
-                            .font(.system(size: 12))
+                            .font(Typography.label)
                     }
                     Text(PermissionMode.grantsNote)
-                        .font(.system(size: 11))
+                        .font(Typography.small)
                         .foregroundStyle(Palette.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -148,7 +148,7 @@ private struct PermissionRow: View {
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(mode == .bypass ? Palette.warn : Palette.ink)
                     Text(mode.shortSummary)
-                        .font(.system(size: 12))
+                        .font(Typography.label)
                         .foregroundStyle(Palette.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -263,7 +263,7 @@ struct SkillsPopover: View {
     private func empty(_ title: String, _ detail: String) -> some View {
         VStack(spacing: 4) {
             Text(title).font(.system(size: 13, weight: .medium))
-            Text(detail).font(.system(size: 12)).foregroundStyle(Palette.muted).multilineTextAlignment(.center)
+            Text(detail).font(Typography.label).foregroundStyle(Palette.muted).multilineTextAlignment(.center)
         }
         .padding(24)
         .frame(maxWidth: .infinity)
@@ -285,7 +285,7 @@ struct SkillRow: View {
                 }
                 if !skill.summary.isEmpty {
                     Text(skill.summary)
-                        .font(.system(size: 12))
+                        .font(Typography.label)
                         .foregroundStyle(Palette.muted)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
@@ -365,7 +365,7 @@ struct RoutineStrip: View {
                 .buttonStyle(ComposerChipStyle())
                 .help(ComposerAction.stop.help(isRoutine: true))
         }
-        .font(.system(size: 11))
+        .font(Typography.small)
         .padding(.horizontal, 4)
         .accessibilityElement(children: .contain) // the stop button stays reachable
     }
@@ -396,7 +396,7 @@ struct ElsewhereStrip: View {
             .help("Voltar para “\(chatTitle)”")
             .accessibilityLabel(needsYou ? "Responder em “\(chatTitle)”" : "Voltar para a conversa “\(chatTitle)”")
         }
-        .font(.system(size: 11))
+        .font(Typography.small)
         .padding(.horizontal, 4)
         .accessibilityElement(children: .contain)
     }
@@ -456,7 +456,7 @@ struct JobsStrip: View {
                 .accessibilityLabel(isExpanded ? "Mostrar menos processos" : "Mostrar mais \(hidden) processos em segundo plano")
             }
         }
-        .font(.system(size: 11))
+        .font(Typography.small)
         .padding(.horizontal, 4)
         // Back to the short list once it is short enough, so a later crowd starts folded again.
         .onChange(of: jobs.count) { if jobs.count <= Self.collapsedLimit { isExpanded = false } }

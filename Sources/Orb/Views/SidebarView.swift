@@ -467,7 +467,7 @@ private struct FirstOrbInvitation: View {
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(isSelected ? Palette.ink : Palette.secondary)
                 Text("Seus Orbs aparecem aqui")
-                    .font(.system(size: 11))
+                    .font(Typography.small)
                     .foregroundStyle(Palette.faint)
             }
             Spacer(minLength: 4)
@@ -571,7 +571,7 @@ private struct BotRowContent: View, Equatable {
                     // The shortcut takes the time's place while the pointer is on the row.
                     if let hint = row.hint {
                         Text(hint)
-                            .font(.system(size: 11))
+                            .font(Typography.small)
                             .foregroundStyle(Palette.muted)
                             .accessibilityHidden(true)
                     } else if let reply = row.reply {
@@ -618,13 +618,13 @@ private struct BotRowContent: View, Equatable {
                             Text(look.role).foregroundStyle(Palette.faint)
                         }
                     }
-                    .font(.system(size: 11))
+                    .font(Typography.small)
                     .lineLimit(1)
                     Spacer(minLength: 4)
                     ZStack {
                         if needsYou {
                             Image(systemName: "exclamationmark.bubble.fill")
-                                .font(.system(size: 12))
+                                .font(Typography.label)
                                 .foregroundStyle(Palette.warn)
                                 .transition(.scale.combined(with: .opacity))
                                 .accessibilityLabel("Precisa da sua permissão")

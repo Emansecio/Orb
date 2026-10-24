@@ -209,7 +209,7 @@ struct CommandPalette: View {
             if results.isEmpty {
                 VStack(spacing: 12) {
                     Text("Nada encontrado para “\(query)”.")
-                        .font(.system(size: 13))
+                        .font(Typography.text)
                         .foregroundStyle(Palette.muted)
                     Button("Novo Orb") { go(.newBot) }
                     .buttonStyle(SecondaryPillStyle())
@@ -267,7 +267,7 @@ struct CommandPalette: View {
     private func hint(_ keys: String, _ text: String) -> some View {
         HStack(spacing: 5) {
             Text(keys).font(.system(size: 11, weight: .medium, design: .rounded)).foregroundStyle(Palette.secondary)
-            Text(text).font(.system(size: 11)).foregroundStyle(Palette.muted)
+            Text(text).font(Typography.small).foregroundStyle(Palette.muted)
         }
     }
 
@@ -336,7 +336,7 @@ private struct PaletteRow: View {
                     BotAvatar(orb: orb, size: 22, animated: false)
                 } else {
                     Image(systemName: entry.symbol)
-                        .font(.system(size: 13))
+                        .font(Typography.text)
                         .foregroundStyle(isSelected ? Palette.ink : Palette.muted)
                 }
             }
@@ -349,7 +349,7 @@ private struct PaletteRow: View {
                     .lineLimit(1)
                 if let subtitle = entry.subtitle {
                     Text(subtitle)
-                        .font(.system(size: 11))
+                        .font(Typography.small)
                         .foregroundStyle(Palette.muted)
                         .lineLimit(1)
                 }
@@ -398,11 +398,11 @@ struct ShortcutsSheet: View {
                                     .frame(width: 76, alignment: .leading)
                                 VStack(alignment: .leading, spacing: 1) {
                                     Text(lines.main)
-                                        .font(.system(size: 13))
+                                        .font(Typography.text)
                                         .foregroundStyle(Palette.secondary)
                                     if let note = lines.note {
                                         Text(note)
-                                            .font(.system(size: 11))
+                                            .font(Typography.small)
                                             .foregroundStyle(Palette.faint)
                                             .fixedSize(horizontal: false, vertical: true)
                                     }

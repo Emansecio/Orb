@@ -114,7 +114,7 @@ private struct ReadOnlyNotes: View {
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(lines, id: \.text) { line in
                     Label(line.text, systemImage: "exclamationmark.triangle.fill")
-                        .font(.system(size: 12))
+                        .font(Typography.label)
                         .foregroundStyle(Palette.warn)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
@@ -161,7 +161,7 @@ private struct MemberRow: View {
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(Palette.ink)
                         Text(isOrchestrator ? "Orquestrador" : (look.role.isEmpty ? "Membro" : look.role))
-                            .font(.system(size: 11))
+                            .font(Typography.small)
                             .foregroundStyle(Palette.faint)
                             .lineLimit(1)
                     }
@@ -173,7 +173,7 @@ private struct MemberRow: View {
             .help("Abrir a conversa de \(look.name)")
             if isOrchestrator {
                 Image(systemName: "star.fill")
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.accentText)
                     .frame(width: 26, height: 26) // as wide as the round buttons beside it, so the stars line up
                     .accessibilityLabel("Orquestrador")
@@ -237,7 +237,7 @@ private struct GroupSettingsTab: View {
                 TitledSection("Nome") {
                     TextField("Nome do grupo", text: $nameDraft)
                         .textFieldStyle(.plain)
-                        .font(.system(size: 13))
+                        .font(Typography.text)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 7)
                         .background(Palette.surface, in: .rect(cornerRadius: Radius.small))
@@ -248,11 +248,11 @@ private struct GroupSettingsTab: View {
                     Toggle(isOn: Binding(
                         get: { group.policy.membersMayTalk },
                         set: { model.setGroupPolicy(GroupPolicy(membersMayTalk: $0), of: group.id) })) {
-                        Text("Membros podem conversar entre si").font(.system(size: 13))
+                        Text("Membros podem conversar entre si").font(Typography.text)
                     }
                     .toggleStyle(.switch)
                     Text("Desligado, os membros respondem só ao orquestrador e a você.")
-                        .font(.system(size: 11))
+                        .font(Typography.small)
                         .foregroundStyle(Palette.faint)
                 }
                 Button("Apagar grupo…", systemImage: "trash") { isConfirmingDelete = true }

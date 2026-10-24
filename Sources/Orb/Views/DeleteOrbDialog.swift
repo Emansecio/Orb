@@ -95,7 +95,7 @@ struct SummaryLine: View {
                 .frame(width: 18)
                 .accessibilityHidden(true)
             Text(text)
-                .font(.system(size: 13))
+                .font(Typography.text)
                 .foregroundStyle(Palette.ink)
                 .fixedSize(horizontal: false, vertical: true)
                 // A count that arrives later, an option that changes the sentence.
@@ -120,7 +120,7 @@ struct DeleteOrbSheet: View {
                     if let undone = summary.undone { SummaryLine(.goes, undone) }
                     SummaryLine(.stays, summary.stays)
                     Text(DeleteOrbSummary.memoryNote)
-                        .font(.system(size: 12))
+                        .font(Typography.label)
                         .foregroundStyle(Palette.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -163,7 +163,7 @@ struct KeptMemoryBanner: View {
                         Button("Mostrar no Finder") { model.revealKeptMemory(notice) }
                             .buttonStyle(.link)
                             .help(Tip.keptMemoryInFinder)
-                            .font(.system(size: 12))
+                            .font(Typography.label)
                             .disabled(!notice.isKept)
                     }
                     Spacer(minLength: 4)

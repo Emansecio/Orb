@@ -107,18 +107,18 @@ struct TaskPlanSteps: View {
                 let step = plan.steps[index]
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Image(systemName: TaskPlanRing.symbol(step.state))
-                        .font(.system(size: 11))
+                        .font(Typography.small)
                         .foregroundStyle(step.state == .blocked ? Palette.danger : step.state == .inProgress ? Palette.accentText : Palette.faint)
                         .frame(width: 14)
                         .accessibilityLabel(TaskPlanRing.stateName(step.state))
                     Text(step.text + (step.reason.map { " — " + $0 } ?? ""))
-                        .font(.system(size: 12))
+                        .font(Typography.label)
                         .foregroundStyle(step.state == .done ? Palette.faint : Palette.secondary)
                 }
             }
             if let next = plan.next {
                 Text("Próximo: " + next)
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.muted)
                     .padding(.top, 2)
             }

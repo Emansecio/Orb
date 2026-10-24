@@ -48,13 +48,13 @@ struct ModelPopover: View {
                     }
                     if listing.groups.isEmpty && isSearch {
                         Text("Nenhum modelo encontrado.")
-                            .font(.system(size: 12))
+                            .font(Typography.label)
                             .foregroundStyle(Palette.muted)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 24)
                     } else if listing.groups.isEmpty {
                         Text("Conecte um provedor para escolher modelos.")
-                            .font(.system(size: 12))
+                            .font(Typography.label)
                             .foregroundStyle(Palette.muted)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 16)
@@ -72,7 +72,7 @@ struct ModelPopover: View {
                 SettingsRouter.open(.models, using: openSettings)
             } label: {
                 Label("Gerenciar provedores…", systemImage: "gearshape")
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
@@ -166,14 +166,14 @@ struct ModelPopoverRow: View {
             HStack(spacing: 6) {
                 Text(name).lineLimit(1).truncationMode(.middle)
                 if !detail.isEmpty {
-                    Text(detail).font(.system(size: 11)).foregroundStyle(Palette.muted).lineLimit(1)
+                    Text(detail).font(Typography.small).foregroundStyle(Palette.muted).lineLimit(1)
                 }
                 Spacer(minLength: 8)
                 if isSelected {
                     Image(systemName: "checkmark").font(.system(size: 11, weight: .semibold)).foregroundStyle(Palette.accentText)
                 }
             }
-            .font(.system(size: 13))
+            .font(Typography.text)
             .padding(.horizontal, 12)
             .padding(.vertical, 5)
             .frame(maxWidth: .infinity, alignment: .leading)

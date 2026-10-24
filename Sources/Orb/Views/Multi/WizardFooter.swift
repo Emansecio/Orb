@@ -17,14 +17,14 @@ struct WizardFooter: View {
         SheetFooterBar {
             if !canCreate {
                 Text(hitLimit ? "A conversa chegou ao limite sem um nome." : "O assistente ainda não escolheu um nome.")
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.muted)
                     .lineLimit(1)
                     .transition(.opacity)
                 if hitLimit {
                     Button("Ir para o Formulário", action: toForm)
                         .buttonStyle(.plain)
-                        .font(.system(size: 12))
+                        .font(Typography.label)
                         .foregroundStyle(Palette.accentText)
                         .help("Leva o que o assistente já entendeu para o formulário, onde você dá o nome")
                         .accessibilityIdentifier("wizard-to-form")

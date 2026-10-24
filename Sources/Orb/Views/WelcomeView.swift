@@ -501,7 +501,7 @@ private struct WelcomePointView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Palette.ink)
             Text(point.detail)
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -579,7 +579,7 @@ struct KeptStartCard: View {
                 Divider().overlay(Palette.line).padding(.leading, 48)
                 Button(action: onShowAll) {
                     Text("Ver todas (\(memories.count))")
-                        .font(.system(size: 12))
+                        .font(Typography.label)
                         .foregroundStyle(Palette.accentText)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
@@ -611,7 +611,7 @@ private struct KeptStartRow: View {
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Palette.ink)
                     Text(memory.shortDetail)
-                        .font(.system(size: 11))
+                        .font(Typography.small)
                         .foregroundStyle(Palette.faint)
                         .lineLimit(1)
                 }

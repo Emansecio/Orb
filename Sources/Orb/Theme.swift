@@ -82,6 +82,17 @@ enum Palette {
     static let narrationLineSpacing: CGFloat = 4
 }
 
+/// The small regular sizes the interface repeats, named by role (not `caption`/`body`, which are the system's own styles).
+/// Fixed sizes for now: they do not follow the system text size.
+enum Typography {
+    /// Details, durations, counters and captions.
+    static let small = Font.system(size: 11)
+    /// Labels, buttons and secondary lines.
+    static let label = Font.system(size: 12)
+    /// Running text in cards and rows.
+    static let text = Font.system(size: 13)
+}
+
 
 /// Shadows under floating cards.
 enum Shadow {

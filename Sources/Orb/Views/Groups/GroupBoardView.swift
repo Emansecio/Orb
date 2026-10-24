@@ -41,7 +41,7 @@ struct GroupBoardView: View {
                 TitledSection("Objetivo", isHeader: true) {
                     TextField("Para que o grupo existe", text: $objective, axis: .vertical)
                         .textFieldStyle(.plain)
-                        .font(.system(size: 13))
+                        .font(Typography.text)
                         .lineLimit(2...5)
                         .padding(10)
                         .background(Palette.surface, in: .rect(cornerRadius: Radius.medium))
@@ -55,7 +55,7 @@ struct GroupBoardView: View {
                     }
                     TextField("Novo combinado (↩ salva)", text: $agreement)
                         .textFieldStyle(.plain)
-                        .font(.system(size: 13))
+                        .font(Typography.text)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 7)
                         .background(Palette.surface, in: .rect(cornerRadius: Radius.small))
@@ -70,11 +70,11 @@ struct GroupBoardView: View {
                     MemorySearchField(query: $query)
                     if memory.items.isEmpty {
                         Text("Ainda não há nada no quadro. Os membros guardam aqui o que vale para todos: decisões, links e combinados.")
-                            .font(.system(size: 12))
+                            .font(Typography.label)
                             .foregroundStyle(Palette.muted)
                     } else if groups.isEmpty && agreements.isEmpty {
                         Text("Nada no quadro com “\(query)”.")
-                            .font(.system(size: 12))
+                            .font(Typography.label)
                             .foregroundStyle(Palette.muted)
                     }
                     // The kinds of memory are told apart by the space between them, wider than the one inside a kind.
@@ -137,7 +137,7 @@ private struct UndoForgetToast: View {
     var body: some View {
         HStack(spacing: 10) {
             Text("Esquecido: \(title)")
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.secondary)
                 .lineLimit(1)
             Button("Desfazer", action: undo)

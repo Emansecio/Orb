@@ -59,7 +59,7 @@ struct ComposerView: View {
         VStack(spacing: 0) {
             card(lane, hint: hintText)
             Text(hintText)
-                .font(.system(size: 11))
+                .font(Typography.small)
                 .foregroundStyle(Palette.muted)
                 .lineLimit(1)
                 .frame(height: 14)

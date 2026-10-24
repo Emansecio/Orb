@@ -42,7 +42,7 @@ struct MemoryTab: View {
             }
             if !memory.items.isEmpty && groups.isEmpty {
                 Text("Nada na memória com “\(query)”.")
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.muted)
             }
         } header: {
@@ -263,7 +263,7 @@ struct MemoryRow: View {
                     }
                 }
                 Text(Self.caption(of: item))
-                    .font(.system(size: 11))
+                    .font(Typography.small)
                     .foregroundStyle(Palette.faint)
                     .padding(.top, 1)
             }
@@ -272,7 +272,7 @@ struct MemoryRow: View {
                 .labelStyle(.iconOnly)
                 .buttonStyle(.borderless)
                 .foregroundStyle(Palette.muted)
-                .font(.system(size: 11))
+                .font(Typography.small)
                 // Only under the pointer: a list of lembranças, not of trash cans. VoiceOver and the menu always have it.
                 .opacity(isHovering ? 1 : 0)
                 .animation(Motion.hover(isHovering), value: isHovering)
@@ -404,7 +404,7 @@ struct MemorySheet: View {
                 .help(Tip.memoryFolder)
                 .hangsOnLeadingEdge()
                 Text("Um arquivo .md por lembrança.")
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.muted)
                     .lineLimit(1)
                 Spacer(minLength: Spacing.m)
@@ -438,7 +438,7 @@ struct MemoryUndoToast: View {
             if let entry = undo.entry {
                 HStack(spacing: 10) {
                     Text("\(model.liveBot(entry.botID)?.look.name ?? "O Orb") esqueceu isso.")
-                        .font(.system(size: 12))
+                        .font(Typography.label)
                         .foregroundStyle(Palette.ink)
                     Button("Desfazer") { undo.undo(in: model) }
                         .buttonStyle(.link)

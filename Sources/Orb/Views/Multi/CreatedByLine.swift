@@ -26,7 +26,7 @@ struct CreatedByLine: View {
                 }
                 Spacer(minLength: 0)
             }
-            .font(.system(size: 11))
+            .font(Typography.small)
             .lineLimit(1)
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Criado por \(name)")

@@ -549,7 +549,7 @@ struct OpenPrivacySettingsButton: View {
             Task { await allow() }
         } label: {
             Label("Permitir…", systemImage: "lock.shield")
-                .font(.system(size: 11))
+                .font(Typography.small)
         }
         .buttonStyle(.plain)
         .foregroundStyle(Palette.accentText)

@@ -104,7 +104,7 @@ struct WizardChatView: View {
                 WizardTypingDots(animated: !reduceMotion)
                     .frame(width: 22, height: 8)
                 Text("escrevendo…")
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.muted)
             }
         }
@@ -235,7 +235,7 @@ private struct WizardFailure: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Palette.warn)
             Text(message)
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.muted)
                 .multilineTextAlignment(.center)
                 .textSelection(.enabled)

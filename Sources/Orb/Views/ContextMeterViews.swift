@@ -245,14 +245,14 @@ struct ContextPopover: View {
                     .monospacedDigit()
                     .foregroundStyle(reading.tone == .calm ? Palette.ink : reading.tone.color)
                 Text(reading.usageWords.prefix(1).uppercased() + reading.usageWords.dropFirst())
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             ProgressCapsule(fraction: reading.fraction, tone: reading.tone)
             if !reading.windowIsStated {
                 Text("O provedor não informou a janela deste modelo: o limite é uma estimativa, que o Orb corrige se uma conversa for recusada.")
-                    .font(.system(size: 11))
+                    .font(Typography.small)
                     .foregroundStyle(Palette.faint)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -282,7 +282,7 @@ struct ContextPopover: View {
             Button("Ajustar o contexto das conversas…", action: adjustMemory)
                 .buttonStyle(.link)
                 .help(Tip.adjustContext)
-                .font(.system(size: 11))
+                .font(Typography.small)
         }
         .padding(.horizontal, 14)
     }
@@ -290,16 +290,16 @@ struct ContextPopover: View {
     private func row(_ symbol: String, _ text: String, detail: String? = nil) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: symbol)
-                .font(.system(size: 11))
+                .font(Typography.small)
                 .foregroundStyle(Palette.muted)
                 .frame(width: 16)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 Text(text)
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.secondary)
                 if let detail {
-                    Text(detail).font(.system(size: 11)).foregroundStyle(Palette.faint)
+                    Text(detail).font(Typography.small).foregroundStyle(Palette.faint)
                 }
             }
             .fixedSize(horizontal: false, vertical: true)
@@ -312,14 +312,14 @@ struct ContextPopover: View {
     private var compactSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(compactingExplanation)
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.muted)
                 .fixedSize(horizontal: false, vertical: true)
             if reading.canCompact {
                 // Same field look as the app's multi-line inputs (PlaceholderTextEditor), not the system bezel.
                 TextField("No que focar no resumo?", text: $focus)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
                     .background(Palette.raised, in: .rect(cornerRadius: Radius.small))
@@ -331,7 +331,7 @@ struct ContextPopover: View {
             HStack {
                 if isWorking {
                     Text("Espere o Orb terminar para compactar.")
-                        .font(.system(size: 11))
+                        .font(Typography.small)
                         .foregroundStyle(Palette.faint)
                 }
                 Spacer(minLength: 8)
@@ -372,11 +372,11 @@ struct ContextPopover: View {
                         .foregroundStyle(Palette.ink)
                     if result.savedToMemory {
                         Text("O essencial vai para a memória do Orb.")
-                            .font(.system(size: 11)).foregroundStyle(Palette.muted)
+                            .font(Typography.small).foregroundStyle(Palette.muted)
                     }
                 } else {
                     Text(result.message)
-                        .font(.system(size: 12))
+                        .font(Typography.label)
                         .foregroundStyle(Palette.secondary)
                 }
             }

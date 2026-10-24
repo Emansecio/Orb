@@ -70,7 +70,7 @@ struct SidebarGroupRow: View {
                         .foregroundStyle(Palette.ink)
                         .lineLimit(1)
                     Text(GroupRowText.secondLine(presence: presence, orbCount: looks.count))
-                        .font(.system(size: 11))
+                        .font(Typography.small)
                         .foregroundStyle(live.needsYou ? Palette.warn : Palette.faint)
                         .lineLimit(1)
                         .contentTransition(.opacity)
@@ -83,7 +83,7 @@ struct SidebarGroupRow: View {
                     if working { WorkingRing() }
                     if live.needsYou {
                         Image(systemName: "exclamationmark.bubble.fill")
-                            .font(.system(size: 12))
+                            .font(Typography.label)
                             .foregroundStyle(Palette.warn)
                             .transition(.adapted(.mark, reduceMotion: reduceMotion))
                     } else if live.unread > 0 {

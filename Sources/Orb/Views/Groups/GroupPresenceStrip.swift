@@ -98,7 +98,7 @@ struct GroupPresenceStrip: View {
             }
             if let text {
                 Text(text)
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(waiting ? Palette.warn : Palette.muted)
                     .lineLimit(1)
                     .contentTransition(.opacity)

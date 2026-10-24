@@ -174,7 +174,7 @@ private struct ChatTitleField: View {
     var body: some View {
         TextField("Nome da conversa", text: $text, prompt: Text("Nome da conversa"))
             .textFieldStyle(.plain)
-            .font(.system(size: 12))
+            .font(Typography.label)
             .foregroundStyle(Palette.ink)
             .focused($isFocused)
             .onSubmit { finish(keeping: true) }

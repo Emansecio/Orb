@@ -19,7 +19,7 @@ struct EventLineView: View {
                 HStack(spacing: 6) {
                     MiniOrb(botID: asker.id)
                     Text(event.sentence)
-                        .font(.system(size: 12))
+                        .font(Typography.label)
                         .foregroundStyle(Palette.muted)
                         .lineLimit(2)
                         .multilineTextAlignment(centered ? .center : .leading)
@@ -87,11 +87,11 @@ struct EventLineView: View {
     private func line(opens: Bool) -> some View {
         HStack(spacing: 6) {
             Image(systemName: Self.symbol(for: event.kind))
-                .font(.system(size: 11))
+                .font(Typography.small)
                 .foregroundStyle(Palette.muted)
                 .accessibilityHidden(true)
             Text(event.sentence)
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.muted)
                 .multilineTextAlignment(centered ? .center : .leading)
                 .contentTransition(.opacity)
@@ -152,11 +152,11 @@ struct EventsSummary: View {
     private var folded: some View {
         HStack(spacing: 6) {
             Image(systemName: EventLineView.symbol(for: kind))
-                .font(.system(size: 11))
+                .font(Typography.small)
                 .foregroundStyle(Palette.muted)
                 .accessibilityHidden(true)
             Text(TranscriptFolding.eventsTitle(kind, items))
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.muted)
                 .multilineTextAlignment(.leading)
                 .contentTransition(.opacity)
@@ -185,7 +185,7 @@ struct RoutineRunLine: View {
         let outcome = mark ?? event.outcome
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Image(systemName: outcome.symbol)
-                .font(.system(size: 11))
+                .font(Typography.small)
                 .foregroundStyle(outcome.tint)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
@@ -210,7 +210,7 @@ struct RoutineRunLine: View {
                 }
             }
         }
-        .font(.system(size: 12))
+        .font(Typography.label)
         .multilineTextAlignment(.leading)
         .frame(maxWidth: 560, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: .leading)

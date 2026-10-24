@@ -127,13 +127,13 @@ struct GroupMessageBubble: View {
                 .foregroundStyle(OrbInk.readableName(for: look?.orb))
             if let role = look?.role, !role.isEmpty {
                 Text(role)
-                    .font(.system(size: 11))
+                    .font(Typography.small)
                     .foregroundStyle(Palette.faint)
                     .lineLimit(1)
             }
             if isOrchestrator {
                 Label("orquestrador", systemImage: "arrow.triangle.branch")
-                    .font(.system(size: 11))
+                    .font(Typography.small)
                     .foregroundStyle(Palette.faint)
                     .labelStyle(.titleAndIcon)
             }
@@ -219,7 +219,7 @@ struct GroupAssignmentLine: View {
                     miniAvatar(to)
                     Text(GroupAssignmentLine.sentence(kind: message.kind, toName: toName, text: message.text,
                                                       fromChat: message.fromChat == true))
-                        .font(.system(size: 12))
+                        .font(Typography.label)
                         .foregroundStyle(Palette.muted)
                         .lineLimit(1)
                     Spacer(minLength: 4)
@@ -236,7 +236,7 @@ struct GroupAssignmentLine: View {
             .help(expanded ? "Recolhe o texto do pedido" : "Mostra o texto do pedido")
             if expanded {
                 Text(message.text)
-                    .font(.system(size: 13))
+                    .font(Typography.text)
                     .foregroundStyle(Palette.secondary)
                     .textSelection(.enabled)
                     .padding(12)

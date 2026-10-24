@@ -176,11 +176,11 @@ struct OrbProposalCard: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(request.title)
-                .font(.system(size: 13))
+                .font(Typography.text)
                 .foregroundStyle(Palette.secondary)
             if !request.reason.isEmpty {
                 Text(request.reason)
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.faint)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -235,7 +235,7 @@ struct OrbProposalCard: View {
                 .foregroundStyle(Palette.ink)
             if !shown.role.isEmpty {
                 Text(shown.role)
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.muted)
             }
             if !shown.instructions.isEmpty {
@@ -251,7 +251,7 @@ struct OrbProposalCard: View {
         let isLong = excerpt != shown.instructions
         return VStack(alignment: .leading, spacing: 4) {
             Text(showsAll || !isLong ? shown.instructions : excerpt)
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.secondary)
                 .lineLimit(showsAll ? nil : 3)
                 .fixedSize(horizontal: false, vertical: true)
@@ -327,7 +327,7 @@ struct OrbProposalCard: View {
             Text(text)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .font(.system(size: 11))
+        .font(Typography.small)
         .foregroundStyle(tint)
     }
 
@@ -345,14 +345,14 @@ struct OrbProposalCard: View {
             TextField("O que ele faz, numa linha", text: $draft.role)
                 .focused($fieldFocused)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .fieldBackground()
                 .onChange(of: draft.role) { if draft.role.count > OrbProposal.roleLimit { draft.role = String(draft.role.prefix(OrbProposal.roleLimit)) } }
                 .accessibilityLabel("Papel do Orb")
             TextEditor(text: $draft.instructions)
                 .focused($fieldFocused)
                 .scrollContentBackground(.hidden)
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .frame(height: 104)
                 .padding(4)
                 .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: Radius.small))
@@ -363,7 +363,7 @@ struct OrbProposalCard: View {
                 }
                 .accessibilityLabel("Como funciona")
             Text("\(draft.instructions.count)/\(OrbProposeTool.instructionsLimit)")
-                .font(.system(size: 11))
+                .font(Typography.small)
                 .foregroundStyle(Palette.faint)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
@@ -386,7 +386,7 @@ struct OrbProposalCard: View {
                             .accessibilityHidden(true)
                         Text(capability.label)
                     }
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(has ? Palette.secondary : Palette.faint)
                     .frame(width: 200, alignment: .leading)
                     Toggle(capability.label, isOn: Binding(get: { draft.capabilities.contains(capability) && has },
@@ -399,7 +399,7 @@ struct OrbProposalCard: View {
                         .disabled(!has)
                     if !has {
                         Text("\(creator) não tem isso")
-                            .font(.system(size: 11))
+                            .font(Typography.small)
                             .foregroundStyle(Palette.faint)
                     }
                     Spacer(minLength: 0)
@@ -407,7 +407,7 @@ struct OrbProposalCard: View {
             }
             HStack(spacing: 8) {
                 Text("Permissões")
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.secondary)
                 if draft.allowedModes.count > 1 {
                     Picker("Permissões", selection: $draft.mode) {
@@ -417,11 +417,11 @@ struct OrbProposalCard: View {
                     .labelsHidden()
                     .fixedSize()
                 } else {
-                    Text(draft.mode.label).font(.system(size: 12)).foregroundStyle(Palette.muted)
+                    Text(draft.mode.label).font(Typography.label).foregroundStyle(Palette.muted)
                 }
                 if draft.modeCeiling != .auto {
                     Text("até onde \(creator) chega")
-                        .font(.system(size: 11))
+                        .font(Typography.small)
                         .foregroundStyle(Palette.faint)
                 }
                 Spacer(minLength: 0)
@@ -459,7 +459,7 @@ struct OrbProposalCard: View {
                 Text("Criar")
                 if showsKeys {
                     Text(AppShortcut.commandReturn.label)
-                        .font(.system(size: 11))
+                        .font(Typography.small)
                         .opacity(0.55)
                 }
             }
@@ -495,7 +495,7 @@ struct OrbProposalCard: View {
                 Text("Não criar")
                 if showsKeys {
                     Text("esc")
-                        .font(.system(size: 11))
+                        .font(Typography.small)
                         .foregroundStyle(Palette.muted)
                 }
             }
@@ -521,17 +521,17 @@ struct OrbProposalCard: View {
                 HStack(spacing: 8) {
                     BotAvatar(orb: shown.orb, size: 18, animated: false)
                     Image(systemName: wasCreated ? "checkmark.circle.fill" : "xmark.circle")
-                        .font(.system(size: 11))
+                        .font(Typography.small)
                         .foregroundStyle(wasCreated ? Palette.ok : Palette.danger)
                         .frame(width: 14)
                         .transition(.adapted(.mark, reduceMotion: reduceMotion))
                     Text(title)
-                        .font(.system(size: 12))
+                        .font(Typography.label)
                         .foregroundStyle(wasCreated ? Palette.secondary : Palette.muted)
                         .lineLimit(1)
                     if let note = request.note, !note.isEmpty {
                         Text(note)
-                            .font(.system(size: 12))
+                            .font(Typography.label)
                             .foregroundStyle(Palette.faint)
                             .lineLimit(1)
                     }

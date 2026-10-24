@@ -234,7 +234,7 @@ struct ImportPanel: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
             Button(action: onBack) {
-                Label("Voltar", systemImage: "chevron.left").font(.system(size: 12))
+                Label("Voltar", systemImage: "chevron.left").font(Typography.label)
             }
             .buttonStyle(GhostStyle())
             .hangsOnLeadingEdge()
@@ -258,7 +258,7 @@ struct ImportPanel: View {
         VStack(alignment: .leading, spacing: 10) {
             StepLabel("1. Escolha um bot")
             Text("O Orb lê as instruções, as memórias e as skills do bot que você escolher.")
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.muted)
                 .fixedSize(horizontal: false, vertical: true)
             MarketplaceGallery(chosen: draft?.link, reading: readingLink) { bot in read(link: .page(bot.id)) }
@@ -267,7 +267,7 @@ struct ImportPanel: View {
                 Image(systemName: "link").foregroundStyle(Palette.faint).accessibilityHidden(true)
                 TextField("Link do bot", text: $link, prompt: Text("Ou cole o link de um bot: https://x.ai/bot/…"))
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .onSubmit { readLinkSoon(delay: .zero) }
                 ZStack {
                     if isReading, let readingLink, GrokMarketplace.link(in: link)?.url.absoluteString == readingLink {
@@ -281,7 +281,7 @@ struct ImportPanel: View {
             .card(radius: Radius.medium)
             if let error {
                 Text(error)
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.danger)
                     .fixedSize(horizontal: false, vertical: true)
                     .transition(.adapted(.rise, reduceMotion: reduceMotion))
@@ -294,7 +294,7 @@ struct ImportPanel: View {
         VStack(alignment: .leading, spacing: 8) {
             StepLabel("1. Peça um arquivo a ele")
             Text("Copie este prompt e cole no ChatGPT, Gemini, Claude, Copilot ou no assistente que já conhece você.")
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.muted)
                 .fixedSize(horizontal: false, vertical: true)
             Button(action: copyPrompt) {
@@ -318,9 +318,9 @@ struct ImportPanel: View {
                 .frame(height: 150)
                 .background(Palette.raised, in: .rect(cornerRadius: Radius.small))
             }
-            .font(.system(size: 12))
+            .font(Typography.label)
             Text("Num GPT, Gem ou Projeto, cole o prompt dentro dele. Se ele não mostrar as instruções, copie o texto da tela de configuração e cole abaixo.")
-                .font(.system(size: 11))
+                .font(Typography.small)
                 .foregroundStyle(Palette.faint)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -336,7 +336,7 @@ struct ImportPanel: View {
                     .fixedSize()
                     .help(Tip.importChooseFile)
                 Text("ou solte arquivo ou pasta aqui")
-                    .font(.system(size: 11))
+                    .font(Typography.small)
                     .foregroundStyle(Palette.faint)
                     .lineLimit(1)
                     .layoutPriority(1)
@@ -348,7 +348,7 @@ struct ImportPanel: View {
             }
             if let error {
                 Text(error)
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.danger)
                     .fixedSize(horizontal: false, vertical: true)
                     .transition(.adapted(.rise, reduceMotion: reduceMotion))
@@ -358,7 +358,7 @@ struct ImportPanel: View {
                     Text("Neste Mac").font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.secondary)
                     ForEach(locals) { local in
                         HStack {
-                            Text("\(local.name) · \(local.display)").font(.system(size: 12)).foregroundStyle(Palette.muted)
+                            Text("\(local.name) · \(local.display)").font(Typography.label).foregroundStyle(Palette.muted)
                             Spacer()
                             Button("Ler") { read(local.url) }.buttonStyle(GhostStyle())
                                 .help(Tip.importReadLocal)
@@ -520,9 +520,9 @@ private struct ImportPreview: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("De: \(imported.source)").font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.secondary)
                 let who = [imported.name, imported.role].filter { !$0.isEmpty }.joined(separator: " · ")
-                if !who.isEmpty { Text(who).font(.system(size: 12)).foregroundStyle(Palette.muted) }
+                if !who.isEmpty { Text(who).font(Typography.label).foregroundStyle(Palette.muted) }
                 Text(plan.isEmpty ? ImportText.nothingChecked : "Vai importar: \(plan.summary)")
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.faint)
             }
             if imported.isFreeText {
@@ -539,10 +539,10 @@ private struct ImportPreview: View {
                         ImportRow(item: Binding(get: { imported.identity ?? ImportItem("") }, set: { imported.identity = $0 }), lines: nil)
                         if let identity = imported.identity {
                             if identity.text.count > ImportLimits.identity {
-                                Text(ImportText.overflow).font(.system(size: 11)).foregroundStyle(Palette.faint)
+                                Text(ImportText.overflow).font(Typography.small).foregroundStyle(Palette.faint)
                             }
                             if identity.omitted > 0 {
-                                Text(ImportText.omitted(identity.omitted)).font(.system(size: 11)).foregroundStyle(Palette.warn)
+                                Text(ImportText.omitted(identity.omitted)).font(Typography.small).foregroundStyle(Palette.warn)
                             }
                         }
                     }
@@ -605,12 +605,12 @@ private struct ImportRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 if !item.title.isEmpty { Text(item.title).font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.ink) }
                 Text(ImportRow.shown(item.text))
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.secondary)
                     .lineLimit(lines)
                     .fixedSize(horizontal: false, vertical: true)
                 if item.isSuspicious {
-                    Text(ImportText.suspicious).font(.system(size: 11)).foregroundStyle(Palette.warn)
+                    Text(ImportText.suspicious).font(Typography.small).foregroundStyle(Palette.warn)
                 }
             }
         }
@@ -640,9 +640,9 @@ private struct ImportSkillRow: View {
                 Toggle(isOn: $skill.isOn) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("/\(skill.slug)").font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.ink)
-                        Text(skill.summary).font(.system(size: 12)).foregroundStyle(Palette.secondary).lineLimit(2)
+                        Text(skill.summary).font(Typography.label).foregroundStyle(Palette.secondary).lineLimit(2)
                         if skill.isSuspicious {
-                            Text(ImportText.suspicious).font(.system(size: 11)).foregroundStyle(Palette.warn)
+                            Text(ImportText.suspicious).font(Typography.small).foregroundStyle(Palette.warn)
                         }
                     }
                 }
@@ -683,7 +683,7 @@ struct ImportSummaryRow: View {
             HStack(spacing: 8) {
                 Image(systemName: "square.and.arrow.down").foregroundStyle(Palette.muted)
                 Text(ImportText.summary(imported))
-                    .font(.system(size: 13))
+                    .font(Typography.text)
                     .fixedSize(horizontal: false, vertical: true)
             }
             HStack(spacing: 4) {

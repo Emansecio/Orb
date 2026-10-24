@@ -196,7 +196,7 @@ struct CatalogSearchHeader: View {
                         .help(info)
                         .popover(isPresented: $isShowingInfo, arrowEdge: .bottom) {
                             Text(info)
-                                .font(.system(size: 12))
+                                .font(Typography.label)
                                 .foregroundStyle(Palette.secondary)
                                 .frame(width: 260, alignment: .leading)
                                 .padding(14)
@@ -332,7 +332,7 @@ struct CatalogStateView: View {
                     }
                     DelayedSpinner()
                     if isSlow, let slowHint {
-                        Text(slowHint).font(.system(size: 12)).foregroundStyle(Palette.faint)
+                        Text(slowHint).font(Typography.label).foregroundStyle(Palette.faint)
                             .transition(.opacity)
                     }
                 }
@@ -430,7 +430,7 @@ struct OrbScopePicker: View {
             Text(orbIDs == nil
                  ? "Todos os Orbs, inclusive os que você criar depois, podem usar \(noun).\(allNote.isEmpty ? "" : " " + allNote) Você pode mudar depois."
                  : "Só os Orbs marcados usam \(noun). Você pode mudar depois.")
-                .font(.system(size: 11))
+                .font(Typography.small)
                 .foregroundStyle(Palette.faint)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSwap(orbIDs == nil)

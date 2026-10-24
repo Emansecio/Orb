@@ -21,7 +21,7 @@ struct GroupHeader: View {
                 .foregroundStyle(Palette.ink)
                 .lineLimit(1)
             Text(orbCount == 1 ? "· 1 Orb" : "· \(orbCount) Orbs")
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.faint)
                 .lineLimit(1)
                 .accessibilityIdentifier("group-orb-count")

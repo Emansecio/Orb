@@ -134,7 +134,7 @@ struct CompactedFoldLine: View {
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(Palette.accentText)
             }
-            .font(.system(size: 12))
+            .font(Typography.label)
             .lineLimit(1)
             .padding(.horizontal, 14)
             .padding(.vertical, 7)
@@ -194,7 +194,7 @@ struct ChatDropOverlay: View {
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(Palette.ink)
             Text(detail)
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.muted)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -819,12 +819,12 @@ private struct EmptyChatView: View {
                         .font(.system(size: 22, weight: .semibold))
                         .foregroundStyle(Palette.ink)
                     Text(look.role.isEmpty ? "Seu assistente" : look.role)
-                        .font(.system(size: 13))
+                        .font(Typography.text)
                         .foregroundStyle(Palette.muted)
                     // One of several conversations (`OrbChats`): what it starts from.
                     if live.chats != nil {
                         Text(EmptyChatContent.newChatNote)
-                            .font(.system(size: 12))
+                            .font(Typography.label)
                             .foregroundStyle(Palette.faint)
                             .multilineTextAlignment(.center)
                             .frame(maxWidth: 360)
@@ -878,7 +878,7 @@ private struct OrbContextLine: View {
                 Text(capabilities.joined(separator: "  ·  "))
             }
         }
-        .font(.system(size: 12))
+        .font(Typography.label)
         .foregroundStyle(Palette.faint)
         .multilineTextAlignment(.center)
         .accessibilityElement(children: .combine)
@@ -916,7 +916,7 @@ struct SuggestionButton: View {
                     .animation(Motion.hover(isHovering), value: isHovering)
                     .accessibilityHidden(true)
             }
-            .font(.system(size: 13))
+            .font(Typography.text)
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .hoverFill(isHovering, in: .rect(cornerRadius: Radius.card), color: Palette.raised, resting: Palette.surface)
@@ -1043,7 +1043,7 @@ private struct WorkingLine: View {
                 // The card is in the routine's conversation, not in this chat.
                 Button("Ver pedido") { model.showRoutineRequest(of: look.id) }
                     .buttonStyle(.link)
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .lineLimit(1)
                     .fixedSize()
                     .layoutPriority(1) // never the part that is cut off: it is the way to the routine's card
@@ -1064,14 +1064,14 @@ struct WorkPhraseView: View {
             if let prefix = work.prefix, work.routine == nil {
                 // MARK: MultiOrb (WP2): "Pedido de Atlas:" in front of what the Orb does for it.
                 Text("\(prefix):")
-                    .font(.system(size: 13))
+                    .font(Typography.text)
                     .foregroundStyle(Palette.faint)
                     .lineLimit(1)
                     .layoutPriority(-1)
             }
             if let routine = work.routine {
                 Text("\(routine) ·")
-                    .font(.system(size: 13))
+                    .font(Typography.text)
                     .foregroundStyle(Palette.faint)
                     .lineLimit(1)
                     .layoutPriority(-1) // a long routine name is cut before the phrase
@@ -1084,13 +1084,13 @@ struct WorkPhraseView: View {
     private var phrase: some View {
         HStack(alignment: .firstTextBaseline, spacing: 5) {
             Text(work.shownTarget == nil ? work.phrase : work.verb)
-                .font(.system(size: 13))
+                .font(Typography.text)
                 .lineLimit(1)
                 .fixedSize(horizontal: work.shownTarget != nil, vertical: false) // the target is what gives way, not its verb
             if let target = work.shownTarget {
                 // The system face like the rest of the Orb: what the target is (a command, a file) is said by its words.
                 Text(target)
-                    .font(.system(size: 13))
+                    .font(Typography.text)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .layoutPriority(-1)

@@ -32,7 +32,7 @@ struct AttachmentStack: View {
                         }
                         .buttonStyle(.plain)
                         .help(Tip.moreAttachments)
-                        .font(.system(size: 11))
+                        .font(Typography.small)
                         .foregroundStyle(Palette.muted)
                     }
                 }
@@ -146,7 +146,7 @@ struct FileCard: View {
                 let caption = [info.caption, info.state == .ok ? note : nil].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
                 if !caption.isEmpty {
                     Text(caption)
-                        .font(.system(size: 11))
+                        .font(Typography.small)
                         .foregroundStyle(Palette.muted)
                         .lineLimit(1)
                         .contentTransition(.opacity)
@@ -225,7 +225,7 @@ private struct ProducedFilesLine: View {
                 naming(0)
             }
         }
-        .font(.system(size: 12))
+        .font(Typography.label)
         .accessibilityElement(children: .contain)
     }
 
@@ -299,7 +299,7 @@ struct ScreenStepsStrip: View {
         let all = steps.map(\.path)
         VStack(alignment: .leading, spacing: 6) {
             Text("\(steps.count) capturas, em ordem")
-                .font(.system(size: 11))
+                .font(Typography.small)
                 .foregroundStyle(Palette.faint)
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 8) {

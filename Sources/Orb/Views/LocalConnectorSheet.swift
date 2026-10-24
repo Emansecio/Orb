@@ -102,7 +102,7 @@ struct LocalConnectorSheet: View {
                                 .foregroundStyle(Palette.onInk)
                                 .frame(width: 18, height: 18)
                                 .background(Palette.ink, in: .circle)
-                            Text(step).font(.system(size: 12)).foregroundStyle(Palette.secondary)
+                            Text(step).font(Typography.label).foregroundStyle(Palette.secondary)
                         }
                     }
                 }
@@ -112,7 +112,7 @@ struct LocalConnectorSheet: View {
                     .help("Abre as Contas de Internet nos Ajustes do Sistema, onde você entra com o Google")
             } else {
                 Text(state == .denied ? deniedText : state.message)
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.muted)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 380)
@@ -164,7 +164,7 @@ struct LocalConnectorSheet: View {
             }
             Text(title).font(.system(size: 15, weight: .semibold))
             Text(detail)
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.muted)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 360)

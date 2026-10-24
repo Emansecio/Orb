@@ -412,7 +412,7 @@ struct FirstRunCard: View {
                         .foregroundStyle(Palette.ink)
                         .accessibilityAddTraits(.isHeader)
                     Text(style.subtitle)
-                        .font(.system(size: 12))
+                        .font(Typography.label)
                         .foregroundStyle(Palette.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -446,7 +446,7 @@ struct FirstRunCard: View {
                     Button("Mais opções em Ajustes") { SettingsRouter.open(.models, using: openSettings) }
                         .buttonStyle(.plain)
                         .help(Tip.modelSettings)
-                        .font(.system(size: 12))
+                        .font(Typography.label)
                         .foregroundStyle(Palette.accentText)
                         .frame(maxWidth: .infinity)
                 }
@@ -531,14 +531,14 @@ struct FirstRunCard: View {
                     HStack {
                         if let page = keyKind.keyPage {
                             Link("Obter chave de \(keyKind.shortName)", destination: page)
-                                .font(.system(size: 12))
+                                .font(Typography.label)
                                 .help(Tip.getKey)
                         }
                         Spacer()
                     }
                     if let failure = steps.failure, failure.choice == .key {
                         Label(failure.message, systemImage: "exclamationmark.triangle.fill")
-                            .font(.system(size: 12))
+                            .font(Typography.label)
                             .foregroundStyle(Palette.danger)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -595,16 +595,16 @@ private struct FirstRunRow: View {
                 switch phase {
                 case .idle:
                     Text(subtitle)
-                        .font(.system(size: 12))
+                        .font(Typography.label)
                         .foregroundStyle(Palette.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 case .working:
                     Text(workingText)
-                        .font(.system(size: 12))
+                        .font(Typography.label)
                         .foregroundStyle(Palette.secondary)
                 case .failed(let message):
                     Text(message)
-                        .font(.system(size: 12))
+                        .font(Typography.label)
                         .foregroundStyle(Palette.danger)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -631,7 +631,7 @@ private struct FirstRunRow: View {
             // A real link or button beside the row, not inside the button (nothing inside a button takes its own click).
             if let trailingLink, let url = trailingLink.url {
                 Link(trailingLink.title, destination: url)
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .padding(.trailing, 12)
             } else if phase == .working, let onCancel {
                 Button("Cancelar", action: onCancel)
@@ -715,7 +715,7 @@ struct FirstRunBanner: View {
                         .contentTransition(.opacity)
                     if !(isCompact && steps.failure == nil && steps.working == nil && steps.connectedName == nil) {
                         Text(subtitle)
-                            .font(.system(size: 12))
+                            .font(Typography.label)
                             .foregroundStyle(steps.failure == nil ? Palette.muted : Palette.danger)
                             .fixedSize(horizontal: false, vertical: true)
                             .contentTransition(.opacity)
@@ -812,7 +812,7 @@ struct FirstRunBanner: View {
             SecureField("Cole sua chave", text: $key)
                 .onSubmit(connect)
             HStack {
-                if let page = keyKind.keyPage { Link("Obter chave", destination: page).font(.system(size: 12)) }
+                if let page = keyKind.keyPage { Link("Obter chave", destination: page).font(Typography.label) }
                 Spacer()
                 Button("Conectar", action: connect)
                     .buttonStyle(PrimaryPillStyle())

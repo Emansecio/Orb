@@ -93,7 +93,7 @@ struct NewGroupSheet: View {
                 TitledSection("Objetivo (opcional)") {
                     TextField("O que o grupo deve entregar", text: $objective, axis: .vertical)
                         .textFieldStyle(.plain)
-                        .font(.system(size: 13))
+                        .font(Typography.text)
                         .lineLimit(2...3)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
@@ -107,7 +107,7 @@ struct NewGroupSheet: View {
             HStack(spacing: 10) {
                 if !canCreate {
                     Text("Escolha pelo menos 2 Orbs")
-                        .font(.system(size: 12))
+                        .font(Typography.label)
                         .foregroundStyle(Palette.muted)
                 }
                 Spacer(minLength: 8)
@@ -183,7 +183,7 @@ private struct OrbChoiceCard: View {
                         .foregroundStyle(Palette.ink)
                         .lineLimit(1)
                     Text(look.role.isEmpty ? " " : look.role)
-                        .font(.system(size: 11))
+                        .font(Typography.small)
                         .foregroundStyle(Palette.faint)
                         .lineLimit(1)
                     // Always one line, so the cards of a row keep the same height.

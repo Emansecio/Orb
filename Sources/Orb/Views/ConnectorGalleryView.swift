@@ -14,7 +14,7 @@ struct ConnectorGalleryView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Escolha um serviço e clique em Conectar. Os Orbs que você escolher passam a usá-lo, sempre pedindo antes de enviar ou apagar algo.")
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.muted)
                 // A warning line under one card would make it taller than its neighbours: while any card has one, all keep its room.
                 let statuses = ConnectorGallery.services.map { ($0, status(of: $0)) }
@@ -29,7 +29,7 @@ struct ConnectorGalleryView: View {
                     Button("Explorar o registro de conectores", action: explore).buttonStyle(.link)
                         .help("Abre a busca no registro oficial de conectores")
                 }
-                .font(.system(size: 12))
+                .font(Typography.label)
             }
             .pageColumn()
         }
@@ -151,7 +151,7 @@ private struct ServiceCard: View {
                     Spacer(minLength: 0)
                 }
                 Text(service.summary)
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.muted)
                     .lineLimit(2, reservesSpace: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -186,7 +186,7 @@ private struct ServiceCard: View {
 
     private func note(_ message: String) -> some View {
         Label(message, systemImage: "exclamationmark.triangle.fill")
-            .font(.system(size: 11))
+            .font(Typography.small)
             .foregroundStyle(Palette.warn)
             .lineLimit(2)
             .frame(maxWidth: .infinity, minHeight: 30, alignment: .topLeading)

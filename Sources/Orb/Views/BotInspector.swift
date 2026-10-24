@@ -248,7 +248,7 @@ struct BotInspector: View {
                         isEditingOrb = true
                     }
                     .buttonStyle(QuietTextStyle())
-                    .font(.system(size: 11))
+                    .font(Typography.small)
                     .fixedSize()
                     .help("\(Tip.customizeOrb) (\(summary))")
                     Spacer(minLength: 4)
@@ -351,7 +351,7 @@ struct BotInspector: View {
                         .help(modelName) // cut in a narrow panel: the hover text has it whole
                     if let warning {
                         Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 11))
+                            .font(Typography.small)
                             .foregroundStyle(Palette.warn)
                             .help(warning)
                             .accessibilityHidden(true)
@@ -457,7 +457,7 @@ struct BotInspector: View {
         HStack(spacing: 6) {
             ForEach(Capability.allCases) { capability in
                 Image(systemName: capability.symbol)
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.secondary)
                     .frame(width: 20, height: 20)
                     .background(Palette.raised, in: .rect(cornerRadius: 6))
@@ -862,7 +862,7 @@ private struct InspectorTabBar: View {
                     VStack(spacing: 3) {
                         Image(systemName: tab.symbol)
                             .frame(height: 16)
-                            .font(.system(size: 13))
+                            .font(Typography.text)
                         Text(tab.shortTitle)
                             .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
                             .lineLimit(1)
@@ -1100,11 +1100,11 @@ private struct RoutineRow: View {
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                     Text(current.schedule.label)
-                        .font(.system(size: 12))
+                        .font(Typography.label)
                         .foregroundStyle(Palette.muted)
                     if let mismatch = RoutineText.nameMismatch(of: current) {
                         Label(mismatch, systemImage: "exclamationmark.triangle.fill")
-                            .font(.system(size: 11))
+                            .font(Typography.small)
                             .foregroundStyle(Palette.warn)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -1144,7 +1144,7 @@ private struct RoutineRow: View {
         HStack(spacing: 4) {
             if isConfirmingDelete {
                 Text("Apagar esta rotina?")
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .lineLimit(1)
                     .foregroundStyle(Palette.secondary)
                 Spacer(minLength: 4)
@@ -1159,12 +1159,12 @@ private struct RoutineRow: View {
                 ZStack(alignment: .leading) {
                     if model.isRoutineRunning(routine.id) {
                         Label("Rodando…", systemImage: "hourglass")
-                            .font(.system(size: 12))
+                            .font(Typography.label)
                             .foregroundStyle(Palette.muted)
                             .transition(.opacity)
                     } else if model.isRoutineQueued(routine.id) {
                         Label("Na fila", systemImage: "clock")
-                            .font(.system(size: 12))
+                            .font(Typography.label)
                             .foregroundStyle(Palette.muted)
                             .help(Tip.queuedRoutine)
                             .transition(.opacity)
@@ -1246,16 +1246,16 @@ private struct RoutineNextLine: View {
                 } icon: {
                     Image(systemName: isLate ? "clock.badge.exclamationmark" : "arrow.forward.circle")
                 }
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.secondary)
             }
         } else if RoutineText.isConcluded(routine) {
             Label("Concluída: rodou no horário marcado", systemImage: "checkmark.circle")
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.muted)
         } else {
             Label("Pausada: não roda até você ligar de novo", systemImage: "pause.circle")
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.muted)
         }
     }
@@ -1276,7 +1276,7 @@ private struct RoutineLastLine: View {
                 Image(systemName: run.succeeded ? "checkmark.circle.fill" : "xmark.circle.fill")
                     .foregroundStyle(run.succeeded ? Palette.ok : Palette.danger)
             }
-            .font(.system(size: 12))
+            .font(Typography.label)
             .foregroundStyle(Palette.muted)
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Última execução \(run.succeeded ? "deu certo" : "não deu certo"), \(RoutineText.stamp(run.date)). \(run.summary)")
@@ -1287,7 +1287,7 @@ private struct RoutineLastLine: View {
             .motion(Motion.content, value: isExpanded)
         } else {
             Label(routine.lastResult ?? "Ainda não rodou", systemImage: "circle.dashed")
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.faint)
                 .lineLimit(2)
         }
@@ -1388,7 +1388,7 @@ struct PanelEmptyNote: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Palette.ink)
             Text(detail)
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -1418,7 +1418,7 @@ private struct QuietDeleteStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 12))
+            .font(Typography.label)
             .foregroundStyle(configuration.isPressed || isHovering ? Palette.danger : Palette.muted)
             .contentShape(Rectangle())
             .onHover { isHovering = $0 }

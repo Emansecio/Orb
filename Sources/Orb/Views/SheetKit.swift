@@ -63,7 +63,7 @@ private struct OrbSheetFrame<Footer: View>: ViewModifier {
                         .accessibilityAddTraits(.isHeader)
                     if let subtitle {
                         Text(subtitle)
-                            .font(.system(size: 12))
+                            .font(Typography.label)
                             .foregroundStyle(Palette.muted)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -168,7 +168,7 @@ struct SheetFooter: View {
             }
             if let message {
                 Text(message)
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.muted)
                     .lineLimit(2)
                     .contentTransition(.opacity)
@@ -269,7 +269,7 @@ struct PlaceholderTextEditor: View {
 
     var body: some View {
         TextEditor(text: $text)
-            .font(.system(size: 13))
+            .font(Typography.text)
             .scrollContentBackground(.hidden)
             // A short line has nothing to scroll: no bar (nor the always-shown track, which `.hidden` keeps) until the text
             // could outgrow the field.
@@ -280,7 +280,7 @@ struct PlaceholderTextEditor: View {
             .overlay(alignment: .topLeading) {
                 if text.isEmpty {
                     Text(placeholder)
-                        .font(.system(size: 13))
+                        .font(Typography.text)
                         .foregroundStyle(Palette.faint)
                         .padding(.horizontal, 11)
                         .padding(.vertical, 6)

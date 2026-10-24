@@ -21,12 +21,12 @@ struct FindBar: View {
         let hasResults = (find.results?.hits.isEmpty == false)
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.muted)
                 .accessibilityHidden(true)
             TextField("Buscar na conversa", text: $find.query, prompt: Text("Buscar na conversa"))
                 .textFieldStyle(.plain)
-                .font(.system(size: 13))
+                .font(Typography.text)
                 .focused($isFieldFocused)
                 .onKeyPress(.return, phases: .down) { press in
                     if press.modifiers.contains(.shift) { find.previous() } else { find.next() }
@@ -128,7 +128,7 @@ private struct FindResultsList: View {
                     }
                     if find.results?.isTruncated == true {
                         Text("Só os primeiros \(hits.count) resultados aparecem. Escreva mais para afinar a busca.")
-                            .font(.system(size: 11))
+                            .font(Typography.small)
                             .foregroundStyle(Palette.muted)
                             .padding(10)
                     }
@@ -168,7 +168,7 @@ private struct FindResultRow: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Palette.muted)
                 Text(snippet)
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.secondary)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)

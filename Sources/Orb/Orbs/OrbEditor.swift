@@ -304,7 +304,7 @@ struct OrbEditor: View {
                 if labeled {
                     VStack(spacing: 2) {
                         Image(systemName: item.symbol)
-                            .font(.system(size: 13))
+                            .font(Typography.text)
                             .frame(width: 16, height: 16)
                         Text(item.label)
                             .font(.system(size: 10, weight: isSelected ? .semibold : .medium))
@@ -314,7 +314,7 @@ struct OrbEditor: View {
                 } else {
                     HStack(spacing: 5) {
                         Image(systemName: item.symbol)
-                            .font(.system(size: 13))
+                            .font(Typography.text)
                             .frame(width: 16, height: 16)
                         if isSelected {
                             Text(item.label)
@@ -389,7 +389,7 @@ struct OrbEditor: View {
         } label: {
             VStack(spacing: 3) {
                 Image(systemName: item.symbol)
-                    .font(.system(size: 13))
+                    .font(Typography.text)
                     .frame(height: 16)
                 Text(item.label)
                     .font(.system(size: 10.5, weight: .medium))
@@ -467,11 +467,11 @@ struct OrbEditor: View {
             }
         case .accessories:
             Text("Combine quantos acessórios quiser. Clique de novo para remover.")
-                .font(.system(size: 11))
+                .font(Typography.small)
                 .foregroundStyle(Palette.faint)
         case .temperament:
             Text("O jeito muda como o Orb se mexe, pisca e reage ao ponteiro, não a aparência.")
-                .font(.system(size: 11))
+                .font(Typography.small)
                 .foregroundStyle(Palette.faint)
         default:
             EmptyView()
@@ -567,7 +567,7 @@ private struct TemperamentRow: View {
                         .font(.system(size: 12.5, weight: isSelected ? .semibold : .medium))
                         .foregroundStyle(isSelected ? Palette.ink : Palette.secondary)
                     Text(temperament.summary)
-                        .font(.system(size: 11))
+                        .font(Typography.small)
                         .foregroundStyle(Palette.muted)
                         .lineLimit(2)
                 }

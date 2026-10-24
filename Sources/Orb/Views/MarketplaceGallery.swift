@@ -31,14 +31,14 @@ struct MarketplaceGallery: View {
             case .loading:
                 HStack(spacing: 8) {
                     DelayedSpinner()
-                    Text("Lendo o marketplace…").font(.system(size: 12)).foregroundStyle(Palette.muted)
+                    Text("Lendo o marketplace…").font(Typography.label).foregroundStyle(Palette.muted)
                 }
                 .frame(maxWidth: .infinity, minHeight: 120)
                 .card(radius: Radius.card)
             case .failed(let message):
                 VStack(alignment: .leading, spacing: 8) {
                     Text(message)
-                        .font(.system(size: 12))
+                        .font(Typography.label)
                         .foregroundStyle(Palette.danger)
                         .fixedSize(horizontal: false, vertical: true)
                     Button("Tentar de novo") { attempt += 1 }
@@ -69,7 +69,7 @@ struct MarketplaceGallery: View {
                 .padding(4)
                 if shown.isEmpty {
                     Text(query.isEmpty ? "Nenhum bot nesta categoria." : "Nenhum bot com “\(query)”.")
-                        .font(.system(size: 12))
+                        .font(Typography.label)
                         .foregroundStyle(Palette.faint)
                         .frame(maxWidth: .infinity, minHeight: 80)
                 }
@@ -78,7 +78,7 @@ struct MarketplaceGallery: View {
             .card(radius: Radius.card)
             HStack {
                 Text(shown.count == bots.count ? "\(bots.count) bots" : "\(shown.count) de \(bots.count) bots")
-                    .font(.system(size: 11))
+                    .font(Typography.small)
                     .foregroundStyle(Palette.faint)
                     .contentTransition(.numericText())
                 Spacer(minLength: 0)
@@ -95,7 +95,7 @@ struct MarketplaceGallery: View {
             Image(systemName: "magnifyingglass").foregroundStyle(Palette.faint)
             TextField("Buscar bot", text: $query, prompt: Text("Buscar por nome, assunto ou autor"))
                 .textFieldStyle(.plain)
-                .font(.system(size: 13))
+                .font(Typography.text)
                 .focused($isSearching)
             if !query.isEmpty {
                 Button("Limpar", systemImage: "xmark.circle.fill") { query = "" }
@@ -180,12 +180,12 @@ private struct MarketplaceRow: View {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(bot.name).font(.system(size: 13, weight: .semibold)).foregroundStyle(Palette.ink).lineLimit(1)
                         if !bot.creatorName.isEmpty {
-                            Text("de \(bot.creatorName)").font(.system(size: 11)).foregroundStyle(Palette.faint).lineLimit(1)
+                            Text("de \(bot.creatorName)").font(Typography.small).foregroundStyle(Palette.faint).lineLimit(1)
                         }
                     }
                     if !summary.isEmpty {
                         Text(summary)
-                            .font(.system(size: 12))
+                            .font(Typography.label)
                             .foregroundStyle(Palette.muted)
                             .lineLimit(2)
                             .fixedSize(horizontal: false, vertical: true)

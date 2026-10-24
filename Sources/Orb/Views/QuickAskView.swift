@@ -211,7 +211,7 @@ struct QuickAskView: View {
             // new height at once: animating the height would resize the window on every frame (§2.13).
             if let note {
                 Text(note)
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.warn)
                     .transition(.quiet)
             }
@@ -220,12 +220,12 @@ struct QuickAskView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "cpu").foregroundStyle(Palette.warn)
                     Text("Conecte um modelo.")
-                        .font(.system(size: 12))
+                        .font(Typography.label)
                         .foregroundStyle(Palette.secondary)
                     Spacer(minLength: 4)
                     Button("Abrir Ajustes") { SettingsRouter.open(.models, using: openSettings) }
                     .buttonStyle(.link)
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .help(Tip.connectModel)
                 }
                 .transition(.quiet)
@@ -247,12 +247,12 @@ struct QuickAskView: View {
             HStack {
                 // Same link, same size as "Abrir Ajustes" above; the key hint is one step smaller, as in the composer.
                 Button("Abrir o app") { open() }
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .help(Tip.openMainWindow)
                 Spacer()
                 Text(QuickAskSend.hint(isWorking: selectedID.map(model.isWorking) ?? false,
                                        canSteer: selectedID.map(model.canSteer) ?? false))
-                    .font(.system(size: 11))
+                    .font(Typography.small)
                     .foregroundStyle(Palette.muted)
             }
             .buttonStyle(.link)
@@ -275,7 +275,7 @@ struct QuickAskView: View {
     @ViewBuilder private func chosenLabel(_ selected: BotLook?) -> some View {
         if let selected {
             Text(selected.role.isEmpty ? selected.name : "\(selected.name) · \(selected.role)")
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.muted)
                 .lineLimit(1)
         }
@@ -418,7 +418,7 @@ struct QuickAskReply: View {
             Button("Ver conversa", action: openChat)
                 .help(Tip.openChatInApp)
                 .buttonStyle(.link)
-                .font(.system(size: 12))
+                .font(Typography.label)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -447,7 +447,7 @@ private struct ReplyExcerpt: View {
                                                 options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
                 .map { Text($0) } ?? plain
             styled
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .textSelection(.enabled)
@@ -511,7 +511,7 @@ struct QuickAskApprovalCard: View {
                 .font(.system(size: 13, weight: .medium))
             if !request.reason.isEmpty, !request.isBatch {
                 Text(request.reason)
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.secondary)
                     .lineLimit(3)
             }
@@ -519,7 +519,7 @@ struct QuickAskApprovalCard: View {
                 VStack(alignment: .leading, spacing: 1) {
                     if let title = row.title, !title.isEmpty {
                         Text(title)
-                            .font(.system(size: 11))
+                            .font(Typography.small)
                             .foregroundStyle(Palette.muted)
                     }
                     Text(row.command)
@@ -532,12 +532,12 @@ struct QuickAskApprovalCard: View {
             }
             if let extra = preview.extraLabel {
                 Text(extra)
-                    .font(.system(size: 11))
+                    .font(Typography.small)
                     .foregroundStyle(Palette.muted)
             }
             if request.isDangerous {
                 Label("Ação arriscada. Abra o app para revisar.", systemImage: "exclamationmark.triangle.fill")
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.warn)
             }
             ActionRow {

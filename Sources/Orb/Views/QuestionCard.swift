@@ -77,7 +77,7 @@ struct QuestionCard: View {
                 Button(action: skip) {
                     HStack(spacing: 6) {
                         Text("Pular")
-                        if showsKeys { Text("esc").font(.system(size: 11)).foregroundStyle(Palette.muted) }
+                        if showsKeys { Text("esc").font(Typography.small).foregroundStyle(Palette.muted) }
                     }
                 }
                 .buttonStyle(GhostStyle())
@@ -109,7 +109,7 @@ struct QuestionCard: View {
     private func header(asked: Bool) -> some View {
         HStack(spacing: 7) {
             Image(systemName: "questionmark.bubble")
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.accentText)
                 .accessibilityHidden(true)
             Text("\(orbName.isEmpty ? "O Orb" : orbName) \(asked ? "perguntou" : "pergunta")")
@@ -122,7 +122,7 @@ struct QuestionCard: View {
     private var replyField: some View {
         TextField(question.options.isEmpty ? "Sua resposta…" : "Outra resposta…", text: $reply, axis: .vertical)
             .textFieldStyle(.plain)
-            .font(.system(size: 13))
+            .font(Typography.text)
             .lineLimit(1...5)
             .focused($replyFocused)
             .onSubmit { answer(reply) }
@@ -138,7 +138,7 @@ struct QuestionCard: View {
         VStack(alignment: .leading, spacing: 6) {
             header(asked: true)
             Text(question.text)
-                .font(.system(size: 13))
+                .font(Typography.text)
                 .foregroundStyle(Palette.secondary)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
@@ -155,11 +155,11 @@ struct QuestionCard: View {
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
                     Image(systemName: "arrow.uturn.forward")
-                        .font(.system(size: 11))
+                        .font(Typography.small)
                         .foregroundStyle(Palette.faint)
                         .accessibilityHidden(true)
                     Text("Sem resposta")
-                        .font(.system(size: 13))
+                        .font(Typography.text)
                         .foregroundStyle(Palette.faint)
                 }
             }
@@ -240,7 +240,7 @@ private struct QuestionOptionButton: View {
                     .animation(Motion.hover(isHovering), value: isHovering)
                     .accessibilityHidden(true)
             }
-            .font(.system(size: 13))
+            .font(Typography.text)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .hoverFill(isHovering, in: .rect(cornerRadius: Radius.small), color: Palette.raised, resting: Palette.surface)

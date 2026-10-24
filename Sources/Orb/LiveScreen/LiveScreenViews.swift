@@ -116,7 +116,7 @@ private struct LiveScreenCard: View {
                 Text(host).lineLimit(1).truncationMode(.middle)
             }
         }
-        .font(.system(size: 11))
+        .font(Typography.small)
         .foregroundStyle(Palette.faint)
         .motion(Motion.content, value: state)
     }
@@ -131,7 +131,7 @@ private struct LiveScreenCard: View {
 
     @ViewBuilder private func captionLine(_ caption: String, state: LiveCardState, work: WorkLine?) -> some View {
         let text = Text(caption)
-            .font(.system(size: 12))
+            .font(Typography.label)
             .foregroundStyle(Palette.secondary)
             .lineLimit(1)
             .truncationMode(.tail)
@@ -181,7 +181,7 @@ private struct LiveScreenCard: View {
             Button { if let handoff { model.decide(.once, approvalID: handoff.id, botID: botID) } } label: {
                 HStack(spacing: 7) {
                     Text("Terminei")
-                    if showsKeys { Text(AppShortcut.commandReturn.label).font(.system(size: 11)).opacity(0.55) }
+                    if showsKeys { Text(AppShortcut.commandReturn.label).font(Typography.small).opacity(0.55) }
                 }
             }
             .buttonStyle(PrimaryPillStyle())
@@ -191,7 +191,7 @@ private struct LiveScreenCard: View {
             Button { if let handoff { model.decide(.deny, approvalID: handoff.id, botID: botID) } } label: {
                 HStack(spacing: 6) {
                     Text("Cancelar")
-                    if showsKeys { Text("esc").font(.system(size: 11)).foregroundStyle(Palette.muted) }
+                    if showsKeys { Text("esc").font(Typography.small).foregroundStyle(Palette.muted) }
                 }
             }
             .buttonStyle(GhostStyle())
@@ -258,20 +258,20 @@ private struct LiveScreenClosedLine: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: ToolCall.Kind.browser.symbol)
-                .font(.system(size: 11))
+                .font(Typography.small)
                 .foregroundStyle(Palette.faint)
                 .frame(width: 22, height: 22)
                 .background(Palette.raised, in: .rect(cornerRadius: 6))
                 .accessibilityHidden(true)
             Text(LiveScreenText.closingLine(view))
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.faint)
                 .lineLimit(1)
                 .truncationMode(.middle)
             if hasLastScreen {
                 Button("Ver última tela") { showLastScreen() }
                     .buttonStyle(.plain)
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.accentText)
                     .clickablePointer()
                     .help(Tip.lastScreen)
@@ -366,7 +366,7 @@ struct LiveScreenTab: View {
                     }
                     .foregroundStyle(state == .needsYou ? Palette.warn : state.pulses ? Palette.ok : Palette.faint)
                 }
-                if let host { Text(host).font(.system(size: 11)).foregroundStyle(Palette.faint).lineLimit(1).truncationMode(.middle) }
+                if let host { Text(host).font(Typography.small).foregroundStyle(Palette.faint).lineLimit(1).truncationMode(.middle) }
                 Spacer(minLength: 0)
                 if state == .live || state == .connecting {
                     Button("Ocultar tela") { store.isPrivate = true }
@@ -397,7 +397,7 @@ struct LiveScreenTab: View {
             .accessibilityLabel(LiveScreenText.spoken(caption: live.shownWork?.headline ?? "sem atividade"))
             if state == .needsYou {
                 Text(LiveScreenText.handoffCaption(page: handoff?.command ?? ""))
-                    .font(.system(size: 12)).foregroundStyle(Palette.secondary)
+                    .font(Typography.label).foregroundStyle(Palette.secondary)
             }
         }
     }
@@ -414,7 +414,7 @@ struct LiveScreenTab: View {
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Palette.faint)
                 if !focus.host.isEmpty {
-                    Text(focus.host).font(.system(size: 11)).foregroundStyle(Palette.faint).lineLimit(1).truncationMode(.middle)
+                    Text(focus.host).font(Typography.small).foregroundStyle(Palette.faint).lineLimit(1).truncationMode(.middle)
                 }
                 Spacer(minLength: 0)
                 Button("Ao vivo") { LiveScreenFocus.shared.clear(of: botID) }
@@ -442,7 +442,7 @@ struct LiveScreenTab: View {
     private func placeholder(_ text: String) -> some View {
         VStack(spacing: 6) {
             Image(systemName: ToolCall.Kind.browser.symbol).font(.system(size: 18))
-            Text(text).font(.system(size: 12)).multilineTextAlignment(.center)
+            Text(text).font(Typography.label).multilineTextAlignment(.center)
         }
         .foregroundStyle(Palette.faint)
         .padding(12)

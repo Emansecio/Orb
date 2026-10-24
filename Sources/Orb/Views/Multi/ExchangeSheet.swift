@@ -35,7 +35,7 @@ struct ExchangeSheet: View {
                 header
                 if messages.isEmpty {
                     Text("Nada foi trocado ainda.")
-                        .font(.system(size: 13))
+                        .font(Typography.text)
                         .foregroundStyle(Palette.faint)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 24)
@@ -49,7 +49,7 @@ struct ExchangeSheet: View {
                                                    isOrchestrator: false, showsHeader: !continues)
                                 if let caption = Self.caption(for: message.state) {
                                     Text(caption.text)
-                                        .font(.system(size: 11))
+                                        .font(Typography.small)
                                         .foregroundStyle(caption.tint)
                                         .padding(.leading, 44) // under the bubble, which `GroupMessageBubble` sets 44 pt from the edge
                                 }
@@ -98,7 +98,7 @@ struct ExchangeSheet: View {
         VStack(spacing: 6) {
             BotAvatar(orb: model.live(party.id).look.orb, size: 48, animated: false)
             Text(party.name)
-                .font(.system(size: 11))
+                .font(Typography.small)
                 .foregroundStyle(Palette.muted)
                 .fixedSize()
         }

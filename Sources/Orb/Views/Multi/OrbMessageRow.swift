@@ -41,7 +41,7 @@ struct OrbMessageRow: View {
                             .foregroundStyle(Palette.secondary)
                         if !unfolded, !preview.isEmpty {
                             Text(preview)
-                                .font(.system(size: 12))
+                                .font(Typography.label)
                                 .foregroundStyle(Palette.faint)
                         }
                     }
@@ -68,7 +68,7 @@ struct OrbMessageRow: View {
             if unfolded {
                 VStack(alignment: .leading, spacing: 10) {
                     Text(message.text.isEmpty ? "Sem texto." : message.text)
-                        .font(.system(size: 13))
+                        .font(Typography.text)
                         .foregroundStyle(Palette.ink)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -118,7 +118,7 @@ struct ExchangeStateMark: View {
             symbol
             if state != .replied, showsWord {
                 Text(Self.tooltip(state))
-                    .font(.system(size: 11))
+                    .font(Typography.small)
                     .foregroundStyle(tint)
                     .lineLimit(1)
                     .fixedSize()
@@ -148,7 +148,7 @@ struct ExchangeStateMark: View {
                 .transition(AnyTransition.adapted(.mark, reduceMotion: reduceMotion))
         case .failed, .refused:
             Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 11))
+                .font(Typography.small)
                 .foregroundStyle(tint)
         case .cancelled:
             Image(systemName: "xmark")
@@ -156,7 +156,7 @@ struct ExchangeStateMark: View {
                 .foregroundStyle(tint)
         case .lost:
             Image(systemName: "clock.badge.questionmark")
-                .font(.system(size: 11))
+                .font(Typography.small)
                 .foregroundStyle(tint)
         }
     }
@@ -248,7 +248,7 @@ struct ExchangeSummary: View {
                 }
             }
             Text(TranscriptFolding.exchangeTitle(items, botID: botID))
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.muted)
                 .lineLimit(1)
             // The chevron turns its sign rather than turning: nothing rotates in a row that folds under Reduce Motion.

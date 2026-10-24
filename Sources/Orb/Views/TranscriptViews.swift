@@ -220,7 +220,7 @@ private struct UserBubble: View {
                 if duringTask {
                     HStack(spacing: 4) {
                         Label("Durante a tarefa", systemImage: "arrow.turn.down.right")
-                            .font(.system(size: 11))
+                            .font(Typography.small)
                             .foregroundStyle(Palette.muted)
                             .accessibilityHidden(!text.isEmpty) // the bubble's label already says it
                         SendNowButton(botID: botID, itemID: itemID)
@@ -263,7 +263,7 @@ private struct QuotedPassage: View {
                     .fill(hovering ? Palette.accentText : Palette.lineStrong)
                     .frame(width: 2)
                 Text(quote)
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.secondary)
                     .lineLimit(3)
                     .multilineTextAlignment(.leading)
@@ -834,12 +834,12 @@ struct ToolCallLine: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: call.kind.symbol)
-                        .font(.system(size: 11))
+                        .font(Typography.small)
                         .foregroundStyle(Palette.faint)
                         .frame(width: 14)
                     (Text(words.main).foregroundColor(call.state == .running ? Palette.faint : Palette.muted)
                         + Text(words.rest.map { "  \($0)" } ?? "").foregroundColor(Palette.faint))
-                        .font(.system(size: 12))
+                        .font(Typography.label)
                         .lineLimit(1)
                         // Cut in the middle: the verb stays and so does the end of a command, where what tells two runs
                         // apart usually is ("… --filter Suite26").
@@ -856,7 +856,7 @@ struct ToolCallLine: View {
                     // How long it took, on hover only (as on a folded line): after the chevron, so nothing before it moves.
                     if isHovering, call.state == .done, let duration = call.duration {
                         (Text(duration, format: .number.precision(.fractionLength(1))) + Text(" s"))
-                            .font(.system(size: 11))
+                            .font(Typography.small)
                             .monospacedDigit()
                             .foregroundStyle(Palette.faint)
                             .lineLimit(1)
@@ -892,7 +892,7 @@ struct ToolCallLine: View {
                     if let hidden {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(hidden.title)
-                                .font(.system(size: 11))
+                                .font(Typography.small)
                                 .foregroundStyle(Palette.faint)
                             Text(hidden.detail)
                                 .font(.system(size: 12, design: .monospaced))
@@ -931,7 +931,7 @@ struct ToolCallLine: View {
             EmptyView()
         case .failed:
             Image(systemName: "exclamationmark.circle")
-                .font(.system(size: 11))
+                .font(Typography.small)
                 .foregroundStyle(Palette.danger)
                 .accessibilityLabel("Falhou")
                 .transition(markTransition)
@@ -1003,11 +1003,11 @@ struct ToolGroupRow: View, Equatable {
             FittingWords(variants: variants) { summary in
                 HStack(spacing: 8) {
                     Image(systemName: symbol)
-                        .font(.system(size: 11))
+                        .font(Typography.small)
                         .foregroundStyle(Palette.faint)
                         .frame(width: 14)
                     Text(summary)
-                        .font(.system(size: 12))
+                        .font(Typography.label)
                         .foregroundStyle(isRunning ? Palette.faint : Palette.muted)
                         .lineLimit(1)
                         // The words give way before the marks do, when even the shortest wording is too long.
@@ -1029,7 +1029,7 @@ struct ToolGroupRow: View, Equatable {
                         .overlay(alignment: .trailing) {
                             if isHovering, let marks = marks(span: span, count: count) {
                                 marks
-                                    .font(.system(size: 11))
+                                    .font(Typography.small)
                                     .monospacedDigit()
                                     .foregroundStyle(Palette.faint)
                                     .lineLimit(1)
@@ -1096,7 +1096,7 @@ private struct ErrorMark: View {
     var body: some View {
         if failures.recovered {
             Text(failures.text)
-                .font(.system(size: 11))
+                .font(Typography.small)
                 .foregroundStyle(Palette.faint)
                 .lineLimit(1)
         } else {
@@ -1104,7 +1104,7 @@ private struct ErrorMark: View {
                 Image(systemName: "exclamationmark.circle")
                 Text(failures.text)
             }
-            .font(.system(size: 11))
+            .font(Typography.small)
             .foregroundStyle(Palette.danger)
             .lineLimit(1)
         }
@@ -1170,11 +1170,11 @@ struct WorkGroupRow<Content: View>: View, Equatable {
             Button(action: toggle) {
                 HStack(spacing: 8) {
                     Image(systemName: outcome.symbol)
-                        .font(.system(size: 11))
+                        .font(Typography.small)
                         .foregroundStyle(outcome.tint)
                         .frame(width: 14)
                     Text(line)
-                        .font(.system(size: 12))
+                        .font(Typography.label)
                         .foregroundStyle(outcome == .running ? Palette.faint : Palette.muted)
                         .lineLimit(1)
                         .layoutPriority(-1)
@@ -1256,7 +1256,7 @@ private struct NoticeLine: View {
         HStack(spacing: 10) {
             Rectangle().fill(Palette.line).frame(height: 1)
             Text(text)
-                .font(.system(size: 11))
+                .font(Typography.small)
                 .foregroundStyle(Palette.faint)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1289,7 +1289,7 @@ private struct NoticeLine: View {
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(Palette.danger)
                             Text(parts.sentence)
-                                .font(.system(size: 12))
+                                .font(Typography.label)
                                 .foregroundStyle(Palette.muted)
                                 .multilineTextAlignment(.leading)
                                 .textSelection(.enabled)
@@ -1297,7 +1297,7 @@ private struct NoticeLine: View {
                         }
                     } else {
                         Text(text)
-                            .font(.system(size: 12))
+                            .font(Typography.label)
                             .foregroundStyle(Palette.muted)
                             .multilineTextAlignment(.leading)
                     }
@@ -1336,11 +1336,11 @@ private struct NoticeLine: View {
         let symbol = NoticeAction.actions(for: text).first?.symbol ?? "sparkles"
         let words = HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: symbol)
-                .font(.system(size: 11))
+                .font(Typography.small)
                 .foregroundStyle(showsButtons ? Palette.accentText : Palette.faint)
                 .accessibilityHidden(true)
             Text(text)
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(showsButtons ? Palette.muted : Palette.faint)
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1399,7 +1399,7 @@ private struct NoticeLine: View {
                         .font(.system(size: 8, weight: .semibold))
                         .rotationEffect(.degrees(showsProviderDetail ? 90 : 0))
                 }
-                .font(.system(size: 11))
+                .font(Typography.small)
                 .foregroundStyle(Palette.faint)
                 .contentShape(.rect)
             }
@@ -1614,7 +1614,7 @@ struct ApprovalCard: View {
             } else if showsNote {
                 TextField("Diga o que fazer em vez disso…", text: $note)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .focused($noteFocused)
                     .onSubmit(deny)
                     .onKeyPress(.escape) {
@@ -1668,7 +1668,7 @@ struct ApprovalCard: View {
         HStack(spacing: 8) {
             if request.isDangerous {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.warn)
                     .accessibilityLabel("Ação arriscada")
             }
@@ -1680,14 +1680,14 @@ struct ApprovalCard: View {
             // At the end of the line, so the title starts where every other card's title does.
             if request.isHandoff {
                 Image(systemName: "macwindow")
-                    .font(.system(size: 12))
+                    .font(Typography.label)
                     .foregroundStyle(Palette.accentText)
                     .accessibilityHidden(true)
             }
         }
         if !request.reason.isEmpty {
             Text(request.reason)
-                .font(.system(size: 13))
+                .font(Typography.text)
                 .foregroundStyle(Palette.muted)
         }
         if request.isBatch {
@@ -1715,7 +1715,7 @@ struct ApprovalCard: View {
         }
         if let note = request.note {
             Text("Você disse: \(note)")
-                .font(.system(size: 12))
+                .font(Typography.label)
                 .foregroundStyle(Palette.muted)
         }
     }
@@ -1749,7 +1749,7 @@ struct ApprovalCard: View {
                     withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) { showsAllItems = true }
                 } label: {
                     Text("e mais \(request.items.count - Self.visibleItems)")
-                        .font(.system(size: 12))
+                        .font(Typography.label)
                         .foregroundStyle(Palette.muted)
                         .contentTransition(.numericText())
                         .contentShape(.rect)
@@ -1772,7 +1772,7 @@ struct ApprovalCard: View {
                 Text(denyTitle)
                 if showsKeys {
                     Text("esc")
-                        .font(.system(size: 11))
+                        .font(Typography.small)
                         .foregroundStyle(Palette.muted)
                 }
             }
@@ -1797,7 +1797,7 @@ struct ApprovalCard: View {
                         .contentTransition(.numericText())
                     if showsKeys {
                         Text(AppShortcut.commandReturn.label)
-                            .font(.system(size: 11))
+                            .font(Typography.small)
                             .opacity(0.55)
                     }
                 }
@@ -1866,14 +1866,14 @@ struct ApprovalCard: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: request.decision == .deny ? "xmark.circle" : "checkmark.circle")
-                        .font(.system(size: 11))
+                        .font(Typography.small)
                         .foregroundStyle(request.decision == .deny ? Palette.danger : Palette.faint)
                         .frame(width: 14)
                     (Text(ApprovalSummary.label(request))
                         .foregroundColor(request.decision == .deny ? Palette.danger : Palette.muted)
                         + Text(" · \(ApprovalSummary.title(request))").foregroundColor(Palette.muted)
                         + Text("  \(ApprovalSummary.detail(request))").foregroundColor(Palette.faint))
-                        .font(.system(size: 12))
+                        .font(Typography.label)
                         .lineLimit(1)
                         .truncationMode(.middle) // a long command keeps its start and its end
                         .contentTransition(.opacity)
