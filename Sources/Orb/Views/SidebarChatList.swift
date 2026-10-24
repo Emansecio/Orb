@@ -106,7 +106,7 @@ private struct SidebarChatRow: View {
                 } else {
                     Text(ReplyTime.label(entry.updated))
                         .font(.system(size: 10.5).monospacedDigit())
-                        .foregroundStyle(Palette.hint)
+                        .foregroundStyle(Palette.faint)
                 }
             }
             .font(.system(size: 12, weight: isShown || isUnread ? .medium : .regular))
@@ -141,7 +141,7 @@ private struct SidebarChatAction: View {
                 Text(title)
             }
             .font(.system(size: 11.5))
-            .foregroundStyle(isHovering ? Palette.muted : Palette.hint)
+            .foregroundStyle(isHovering ? Palette.muted : Palette.faint)
             .padding(.horizontal, SidebarChatList.rowInset)
             .padding(.vertical, 4)
             .frame(maxWidth: .infinity, alignment: .leading)

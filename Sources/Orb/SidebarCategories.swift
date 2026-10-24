@@ -307,6 +307,21 @@ extension AppModel {
         categories[index].isCollapsed = collapsed
     }
 
+    /// Moves the category one place up (-1) or down (+1) in the list. The array order is the persisted one, so there is
+    /// nothing to migrate; at either end it does nothing.
+    func moveCategory(_ id: UUID, by step: Int) {
+        guard let index = categories.firstIndex(where: { $0.id == id }), step != 0 else { return }
+        let target = index + (step < 0 ? -1 : 1)
+        guard categories.indices.contains(target) else { return }
+        categories.swapAt(index, target)
+    }
+
+    /// Whether `moveCategory` would move it: the menu dims its item at the ends.
+    func canMoveCategory(_ id: UUID, by step: Int) -> Bool {
+        guard let index = categories.firstIndex(where: { $0.id == id }) else { return false }
+        return categories.indices.contains(index + (step < 0 ? -1 : 1))
+    }
+
     /// Removes the category and nothing else: its Orbs go back to the loose list with everything they have. On purpose this
     /// touches `categories` only, never `bots`, a conversation or a memory.
     func deleteCategory(_ id: UUID) {

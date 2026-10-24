@@ -92,6 +92,33 @@ struct SidebarCategoryDeletingTests {
         #expect(model.bots.count == 4)
     }
 
+    @Test @MainActor func movingACategoryChangesOnlyTheOrderAndStopsAtTheEnds() throws {
+        let world = CategoryWorld()
+        let model = world.model
+        let a = try #require(model.createCategory(named: "A", moving: world.ids[0]))
+        let b = try #require(model.createCategory(named: "B", moving: world.ids[1]))
+        let c = try #require(model.createCategory(named: "C", moving: world.ids[2]))
+        #expect(!model.canMoveCategory(a.id, by: -1))
+        #expect(model.canMoveCategory(a.id, by: 1))
+        #expect(!model.canMoveCategory(c.id, by: 1))
+
+        model.moveCategory(c.id, by: -1)
+        #expect(model.categories.map(\.id) == [a.id, c.id, b.id])
+        model.moveCategory(a.id, by: -1) // already first: nothing happens
+        #expect(model.categories.map(\.id) == [a.id, c.id, b.id])
+        model.moveCategory(a.id, by: 1)
+        #expect(model.categories.map(\.id) == [c.id, a.id, b.id])
+        model.moveCategory(UUID(), by: 1) // unknown id
+        #expect(model.categories.map(\.id) == [c.id, a.id, b.id])
+        #expect(!model.canMoveCategory(UUID(), by: 1))
+        #expect(model.category(of: world.ids[0])?.id == a.id) // the Orbs stay where they were
+        #expect(model.botIDs == world.ids)
+
+        // The order is the persisted one.
+        world.relaunch()
+        #expect(world.model.categories.map(\.id) == [c.id, a.id, b.id])
+    }
+
     /// No path of this feature can reach the deletion of an Orb: its code never names it.
     @Test func theCategoryCodeNeverCallsTheDeletionOfAnOrb() throws {
         let sources = URL(fileURLWithPath: #filePath)

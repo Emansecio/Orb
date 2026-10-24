@@ -116,15 +116,23 @@ struct SidebarView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(alignment: .leading, spacing: 8) {
                 KeptMemoryBanner()
+                // Two rows: the pages with a caption under each icon (a label beside the icon does not fit in the 240 pt
+                // column), then the profile and Ajustes.
+                VStack(alignment: .leading, spacing: 0) {
+                    SectionTitle("Espaço de trabalho") { EmptyView() }
+                    HStack(spacing: 4) {
+                        FooterPageButton(item: .routines, name: "Rotinas", symbol: "clock.arrow.circlepath",
+                                         tip: Tip.allRoutines, shortcut: AppShortcut.routines.label)
+                        FooterPageButton(item: .connectors, name: "Conectores", symbol: "point.3.filled.connected.trianglepath.dotted",
+                                         tip: Tip.manageConnectors, shortcut: AppShortcut.connectors.label)
+                        FooterPageButton(item: .skills, name: "Skills", symbol: "wand.and.stars",
+                                         tip: Tip.skillsPage, shortcut: AppShortcut.skills.label)
+                    }
+                }
+                .padding(.horizontal, 8)
                 HStack(spacing: 6) {
                     ProfileAvatarButton()
                     Spacer(minLength: 0)
-                    FooterPageButton(item: .routines, name: "Rotinas", symbol: "clock.arrow.circlepath",
-                                     tip: Tip.allRoutines, shortcut: AppShortcut.routines.label)
-                    FooterPageButton(item: .connectors, name: "Conectores", symbol: "point.3.filled.connected.trianglepath.dotted",
-                                     tip: Tip.manageConnectors, shortcut: AppShortcut.connectors.label)
-                    FooterPageButton(item: .skills, name: "Skills", symbol: "wand.and.stars",
-                                     tip: Tip.skillsPage, shortcut: AppShortcut.skills.label)
                     Button("Ajustes", systemImage: "gearshape") { SettingsRouter.show(using: openSettings) }
                         .labelStyle(.iconOnly)
                         .buttonStyle(CircleGhostStyle(side: 32, fontSize: 14))
@@ -204,8 +212,8 @@ private struct NewOrbMenu: View {
     }
 }
 
-/// One of the pages at the foot of the sidebar (Rotinas, Conectores, Skills): a round icon like Ajustes, with the
-/// selected page marked.
+/// One of the pages at the foot of the sidebar (Rotinas, Conectores, Skills): the icon with a short caption under it,
+/// the selected page marked like a selected row.
 private struct FooterPageButton: View {
     @Environment(AppModel.self) private var model
     let item: SidebarItem
@@ -213,16 +221,27 @@ private struct FooterPageButton: View {
     let symbol: String
     let tip: String
     let shortcut: String
+    @State private var isHovering = false
 
     var body: some View {
         let isSelected = model.selection == item
-        Button(name, systemImage: symbol) { model.selection = item }
-            .labelStyle(.iconOnly)
-            .buttonStyle(CircleGhostStyle(side: 32, fontSize: 14))
+        Button { model.selection = item } label: {
+            VStack(spacing: 2) {
+                Image(systemName: symbol).font(.system(size: 14))
+                Text(name).font(.system(size: 10)).lineLimit(1)
+            }
             .foregroundStyle(isSelected ? Palette.ink : Palette.muted)
-            .background(Circle().fill(isSelected ? Palette.ghostSelected : .clear))
-            .iconTip("\(tip) (\(shortcut))", label: name)
-            .accessibilityAddTraits(isSelected ? .isSelected : [])
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .hoverFill(isHovering && !isSelected, in: .rect(cornerRadius: 10))
+            .background(RoundedRectangle(cornerRadius: 10).fill(isSelected ? Palette.ghostSelected : .clear))
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .help("\(tip) (\(shortcut))")
+        .accessibilityLabel(name)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 
@@ -609,11 +628,23 @@ private struct BotRowContent: View, Equatable {
                                 .transition(.scale.combined(with: .opacity))
                                 .accessibilityLabel("Precisa da sua permissão")
                         } else if row.unread > 0 {
-                            Circle()
-                                .fill(Palette.accentText)
-                                .frame(width: 7, height: 7)
-                                .transition(.scale.combined(with: .opacity))
-                                .accessibilityLabel(SidebarText.unread(row.unread))
+                            // One unread is a dot; from two on the count is worth its width.
+                            Group {
+                                if row.unread >= 2 {
+                                    Text(row.unread > 99 ? "99+" : "\(row.unread)")
+                                        .font(.system(size: 10, weight: .semibold).monospacedDigit())
+                                        .foregroundStyle(Palette.onInk)
+                                        .padding(.horizontal, 5)
+                                        .frame(minWidth: 16, minHeight: 16)
+                                        .background(Capsule().fill(Palette.accentText))
+                                } else {
+                                    Circle()
+                                        .fill(Palette.accentText)
+                                        .frame(width: 7, height: 7)
+                                }
+                            }
+                            .transition(.scale.combined(with: .opacity))
+                            .accessibilityLabel(SidebarText.unread(row.unread))
                         }
                     }
                     .animateChanges(of: needsYou || row.unread > 0)

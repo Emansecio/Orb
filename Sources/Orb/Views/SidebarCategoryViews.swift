@@ -209,6 +209,10 @@ private struct SidebarCategoryHeader: View {
                 model.setCategory(category.id, collapsed: !collapsed)
             }
             Button("Renomear", systemImage: "pencil") { model.categoryNaming = .rename(category.id) }
+            Button("Mover para cima", systemImage: "arrow.up") { model.moveCategory(category.id, by: -1) }
+                .disabled(!model.canMoveCategory(category.id, by: -1))
+            Button("Mover para baixo", systemImage: "arrow.down") { model.moveCategory(category.id, by: 1) }
+                .disabled(!model.canMoveCategory(category.id, by: 1))
             Divider()
             // Not red: nothing is lost, the Orbs stay. An empty category goes without asking.
             if ids.isEmpty {
