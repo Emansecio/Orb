@@ -507,6 +507,15 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
         #expect(model.isEditing(id) && model.composerLane(id).error == nil)
     }
 
+    @MainActor @Test func redoingFromTheMenuSaysWhyWhenTheReplyCannotBeRedone() async {
+        let (model, id) = model(with: conversation(["a"]))
+        await model.loadedConversation(id)
+        #expect(model.redoOrExplain(id) && model.composerLane(id).error == nil)
+
+        model.setStatus("Pensando", of: id)
+        #expect(!model.redoOrExplain(id) && model.composerLane(id).error == RewindRefusal.busy.reason)
+    }
+
     @MainActor @Test func sendingAnEditReplacesTheMessageAndDropsEverythingAfterIt() async throws {
         var chat = conversation(["a", "b", "c"])
         chat.items.insert(notice("Você interrompeu esta resposta"), at: 4)

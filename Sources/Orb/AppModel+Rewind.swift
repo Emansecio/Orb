@@ -95,6 +95,15 @@ extension AppModel {
         return rewind(botID, itemID: id, tail: tail, request: request, animated: animated, stillWanted: { true }, finished: { _ in })
     }
 
+    /// "Refazer" from the reply's menu or from VoiceOver, which are there whether or not the reply can be redone now:
+    /// true when it can (the caller confirms if needed and runs it), else says why not, under the composer and aloud.
+    func redoOrExplain(_ botID: UUID) -> Bool {
+        guard let reason = regenerateRefusal(botID)?.reason else { return true }
+        composerLane(botID).error = reason
+        announceForAccessibility(reason)
+        return false
+    }
+
     // MARK: Editar
 
     /// Whether the composer holds a message being edited.

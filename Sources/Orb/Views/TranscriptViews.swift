@@ -361,6 +361,21 @@ private struct BotMessage: View {
     @State private var hovering = false
     /// What is selected in the reply's text, for "Citar".
     @State private var selection: String?
+    /// "Refazer" asking first. Here and not in the hover button: the button leaves with the pointer, and a dialog opened
+    /// from the menu or by VoiceOver would go with it.
+    @State private var isConfirmingRedo = false
+    /// The dialog's sentence, read when it opens: `body` must not look into the Orb's conversation (it would redraw per token).
+    @State private var redoMessage = ""
+
+    /// The one path of "Refazer" (button, menu, VoiceOver): says why not when it cannot, asks first when the steps that
+    /// go may have changed things on the Mac. The refusal is read here, not in `body`, which must not watch the Orb's state.
+    private func redo() {
+        guard model.redoOrExplain(botID) else { return }
+        if model.regenerateDropsChanges(botID) {
+            redoMessage = RewindWords.redoMessage(savedToMemory: model.regenerateSavedToMemory(botID))
+            isConfirmingRedo = true
+        } else { model.regenerateLastReply(botID, animated: true) }
+    }
 
     /// Read from this Orb's own state, so reordering or adding Orbs does not redraw the reply. A deleted Orb's
     /// stand-in has no name.
@@ -396,7 +411,7 @@ private struct BotMessage: View {
                 // Shown while something is selected too: "Citar" is for the selection.
                 // Not mounted at all otherwise: a long chat does not carry a hidden set of buttons on every reply.
                 if live == nil, hovering || selection != nil {
-                    MessageActions(text: text, botID: botID, offersRedo: offersRedo, selection: selection)
+                    MessageActions(text: text, botID: botID, offersRedo: offersRedo, selection: selection, redo: redo)
                         .fixedSize()
                         .alignmentGuide(.trailing) { $0[.leading] - 6 }
                         .transition(.opacity)
@@ -435,12 +450,22 @@ private struct BotMessage: View {
                 if live == nil {
                     Button("Copiar") { Clipboard.copy(MarkdownBlocks.plainText(of: text)) }
                     Button("Copiar como Markdown") { Clipboard.copy(text) }
+                    if offersRedo { Button("Refazer", action: redo) }
                 }
             }
             .accessibilityElement(children: .contain)
             .accessibilityLabel(TranscriptSpeech.reply(of: orbName))
-            .accessibilityAction(named: "Copiar resposta") {
-                if live == nil { Clipboard.copy(MarkdownBlocks.plainText(of: text)) }
+            .accessibilityActions {
+                if live == nil {
+                    Button("Copiar resposta") { Clipboard.copy(MarkdownBlocks.plainText(of: text)) }
+                    Button("Copiar como Markdown") { Clipboard.copy(text) }
+                    if offersRedo { Button("Refazer", action: redo) }
+                }
+            }
+            .confirmationDialog(RewindWords.redoTitle, isPresented: $isConfirmingRedo, titleVisibility: .visible) {
+                Button(RewindWords.redoConfirm, role: .destructive) { model.regenerateLastReply(botID, animated: true) }
+            } message: {
+                Text(redoMessage)
             }
     }
 
@@ -515,6 +540,8 @@ private struct MessageActions: View {
     let offersRedo: Bool
     /// The words selected in the reply: "Citar" puts them in your next message.
     var selection: String?
+    /// "Refazer", decided by the reply (it also owns the confirmation).
+    let redo: () -> Void
 
     var body: some View {
         HStack(spacing: 4) {
@@ -539,29 +566,22 @@ private struct MessageActions: View {
             CopyButton(symbol: "number", help: Tip.copyMarkdown, copiedHelp: "Markdown copiado") {
                 Clipboard.copy(text)
             }
-            if offersRedo { RedoReplyButton(botID: botID) }
+            if offersRedo { RedoReplyButton(botID: botID, action: redo) }
         }
     }
 }
 
-/// "Refazer": the reply and the steps of its turn leave the conversation and the same request runs again. When those
-/// steps may have changed things on the Mac, it asks first (what the Orb did stays done).
+/// "Refazer": the reply and the steps of its turn leave the conversation and the same request runs again (the reply
+/// asks first when those steps may have changed things on the Mac: what the Orb did stays done).
 private struct RedoReplyButton: View {
     @Environment(AppModel.self) private var model
     let botID: UUID
-    @State private var isConfirming = false
+    let action: () -> Void
 
     var body: some View {
         let refusal = model.regenerateRefusal(botID)
         if refusal == nil || refusal?.hidesButton == false {
-            ActionCircleButton(symbol: "arrow.clockwise", help: refusal?.reason ?? Tip.redoReply, isEnabled: refusal == nil) {
-                if model.regenerateDropsChanges(botID) { isConfirming = true } else { model.regenerateLastReply(botID, animated: true) }
-            }
-            .confirmationDialog(RewindWords.redoTitle, isPresented: $isConfirming, titleVisibility: .visible) {
-                Button(RewindWords.redoConfirm, role: .destructive) { model.regenerateLastReply(botID, animated: true) }
-            } message: {
-                Text(RewindWords.redoMessage(savedToMemory: model.regenerateSavedToMemory(botID)))
-            }
+            ActionCircleButton(symbol: "arrow.clockwise", help: refusal?.reason ?? Tip.redoReply, isEnabled: refusal == nil, action: action)
         }
     }
 }
