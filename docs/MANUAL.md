@@ -185,7 +185,8 @@ Se o navegador não estiver instalado, o Orb fica só com `web_fetch` e `web_sea
   **↩ direciona** (a mensagem chega ao Orb no próximo passo da tarefa, sem interrompê-la), **⇥ põe na fila** (ela espera a
   tarefa terminar e segue como o próximo pedido; várias juntas, na ordem em que você enviou) e **⌘↩ para e envia agora** (leva
   as duas); com um pedido de permissão aberto, isso recusa o pedido (parar sempre recusa) e envia. O ⇥ só vale com o Orb
-  trabalhando e algo no campo; com as sugestões de skill abertas ele completa a skill, como antes. Cada mensagem pendente
+  trabalhando e algo no campo; com as sugestões de skill abertas ele completa a skill, como antes. O botão de enviar também
+  tem as duas entregas no botão direito ("Direcionar agora" e "Depois da tarefa") e nas ações do VoiceOver. Cada mensagem pendente
   diz para onde vai ("Entra no próximo passo", "Depois da tarefa"), e o balão tem ícones para editar, trocar o modo depois
   de enviada (relógio: pôr na fila; seta: direcionar) e parar e enviar; passar o mouse sobre um ícone diz o que ele faz na
   linha do balão. Parar e enviar também leva a mensagem que acabou de entrar na tarefa e ainda não teve resposta (ela sai
@@ -208,7 +209,8 @@ Se o navegador não estiver instalado, o Orb fica só com `web_fetch` e `web_sea
   demora a iniciar ou uma captura de tela travada também param na hora.
 - **Refazer e Editar** (com o Orb parado). Passe o mouse sobre a **última resposta**: ao lado de "Copiar" há o botão
   **Refazer**, que descarta a resposta e tudo o que o pedido acrescentou (linhas de ferramenta, avisos) e faz o mesmo pedido de novo, como se
-  fosse a primeira vez. Sobre **qualquer mensagem sua** aparece o lápis **Editar**: a mensagem (e os anexos que ainda existem) vai para o
+  fosse a primeira vez. "Refazer" também está no menu do botão direito da última resposta e nas ações do VoiceOver; se não puder ser feito
+  agora, o motivo aparece sob o campo. Sobre **qualquer mensagem sua** aparece o lápis **Editar**: a mensagem (e os anexos que ainda existem) vai para o
   campo, sob a faixa "Editando mensagem · Esc cancela" (o Esc vale com o cursor no campo; com a lista de skills aberta ele fecha a lista
   primeiro; o botão "Cancelar" da faixa também desiste), e o que estava no campo espera e volta ao enviar ou cancelar. Qualquer outro envio
   que comece com a edição aberta (um "Continuar" de aviso, uma resposta da saudação, o painel da barra de menus) desiste da edição e
@@ -494,7 +496,7 @@ A seta ao lado do nome do Orb (ou **Recolher conversas** no menu dele) esconde a
 abrir de novo. Passar o mouse sobre qualquer Orb mostra um **+** ao lado do nome, que abre uma conversa nova nele.
 
 Trocar de conversa com o Orb trabalhando não interrompe nada: a tarefa termina na conversa em que começou (um ponto pulsa ao
-lado dela na lateral), a faixa acima da caixa de mensagem diz qual é, com **Ver** para voltar, e o que você escrever na outra
+lado dela na lateral), a faixa acima da caixa de mensagem diz qual é, com **Voltar** (ou **Responder**, quando o Orb precisa de você) para ir até ela, e o que você escrever na outra
 espera ela acabar.
 
 A resposta de um pedido a outro Orb volta para a conversa que pediu, mesmo com outra na tela: o Orb continua nela por trás, do

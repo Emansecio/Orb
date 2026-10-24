@@ -813,6 +813,9 @@ final class AppModel {
     /// and the Orb watches you type until you pause (see `BotLive.noteComposing`).
     func editDraft(_ text: String, for botID: UUID) {
         dictation.draftEdited(text, for: botID)
+        // The warning under the field was about what was there before: gone once the text really changes (the field
+        // also reports a commit with the same text, which is no typing). It never creates the lane just to clear it.
+        if drafts[botID, default: ""] != text, let lane = sessions[botID]?.lane, lane.error != nil { lane.error = nil }
         setDraft(text, for: botID)
         liveBot(botID)?.noteComposing(draftIsEmpty: text.isEmpty)
     }

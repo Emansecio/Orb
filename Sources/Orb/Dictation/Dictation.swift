@@ -63,6 +63,8 @@ final class Dictation {
     }
 
     static let deniedMessage = "O Orb não tem acesso ao microfone. Libere em Ajustes do Sistema → Privacidade e Segurança → Microfone."
+    /// The Microphone pane that message points to (the composer's error offers a button to it).
+    static let microphoneSettingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
 
     func isActive(for botID: UUID) -> Bool { self.botID == botID && phase != .idle }
 

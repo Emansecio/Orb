@@ -516,6 +516,16 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
         #expect(!model.redoOrExplain(id) && model.composerLane(id).error == RewindRefusal.busy.reason)
     }
 
+    @MainActor @Test func theWarningUnderTheFieldGoesWhenTheTextChangesButNotWhenItIsCommittedAsItWas() async {
+        let (model, id) = model(with: conversation(["a"]))
+        await model.loadedConversation(id)
+        model.composerLane(id).error = "Não foi possível ler uma das imagens."
+        model.editDraft("", for: id) // the field reporting the same text is no typing
+        #expect(model.composerLane(id).error != nil)
+        model.editDraft("o", for: id)
+        #expect(model.composerLane(id).error == nil)
+    }
+
     @MainActor @Test func sendingAnEditReplacesTheMessageAndDropsEverythingAfterIt() async throws {
         var chat = conversation(["a", "b", "c"])
         chat.items.insert(notice("Você interrompeu esta resposta"), at: 4)

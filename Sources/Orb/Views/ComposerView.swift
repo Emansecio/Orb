@@ -57,7 +57,7 @@ struct ComposerView: View {
         let lane = lane
         let hintText = hint(lane)
         VStack(spacing: 0) {
-            card(lane)
+            card(lane, hint: hintText)
             Text(hintText)
                 .font(.system(size: 11))
                 .foregroundStyle(Palette.muted)
@@ -124,7 +124,7 @@ struct ComposerView: View {
 
     // MARK: Card
 
-    private func card(_ lane: ComposerLane) -> some View {
+    private func card(_ lane: ComposerLane, hint hintText: String) -> some View {
         let matches = slashMatches
         let jobs = model.live(botID).jobs
         return VStack(alignment: .leading, spacing: 10) {
@@ -145,12 +145,7 @@ struct ComposerView: View {
                 attachmentStrip(lane).transition(.adapted(.unfold, reduceMotion: reduceMotion))
             }
             if let error = lane.error {
-                // Said as the app's other warnings are: the mark, then the sentence, wrapping under itself.
-                Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(Palette.danger)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 4)
+                errorLine(error, lane: lane)
                     .transition(.adapted(.unfold, reduceMotion: reduceMotion))
             }
             slashSuggestions(matches)
@@ -164,6 +159,8 @@ struct ComposerView: View {
                     .font(Palette.conversationFont)
                     .foregroundStyle(Palette.ink)
                     .focused($isFocused)
+                    // The line under the card is hidden from VoiceOver (it would be read twice); the keys it names are said here.
+                    .accessibilityHint(ComposerHint.spoken(hintText))
                     .onSubmit { send() }
                     .onKeyPress(.upArrow) { moveSlash(-1) }
                     .onKeyPress(.downArrow) { moveSlash(1) }
@@ -201,6 +198,35 @@ struct ComposerView: View {
                             reduceMotion: reduceMotion)
         }
         .onGeometryChange(for: Bool.self) { $0.size.width < Self.compactBelow } action: { isCompact = $0 }
+    }
+
+    /// A warning under the field. Said as the app's other warnings are: the mark, then the sentence, wrapping under
+    /// itself. It goes with its button or when the text changes (`AppModel.editDraft`); a microphone that was denied also
+    /// gets the way to the pane that fixes it.
+    private func errorLine(_ error: String, lane: ComposerLane) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(Palette.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+                if error == Dictation.deniedMessage, let url = Dictation.microphoneSettingsURL {
+                    Button("Abrir Ajustes do Sistema") { NSWorkspace.shared.open(url) }
+                        .buttonStyle(.plain)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Palette.accentText)
+                }
+            }
+            Spacer(minLength: 8)
+            Button("Fechar aviso", systemImage: "xmark") { lane.error = nil }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Palette.muted)
+                .iconTip(Tip.dismissNotice)
+        }
+        .padding(.horizontal, 4)
+        .accessibilityElement(children: .contain)
     }
 
     /// The line above the field while a message of the chat is being edited: what it is, how to leave, and the button for it.
@@ -294,7 +320,7 @@ struct ComposerView: View {
         let secondaryStop = action.showsSecondaryStop(waitsOnChain: waitsOnChain)
         return HStack(spacing: 2) {
             ComposerPlusMenu(botID: botID, attach: { isImporting = true }) { insert("/\($0) ") }
-            PermissionChip(botID: botID) { isFocused = true }
+            PermissionChip(botID: botID, compact: isCompact) { isFocused = true }
             Spacer(minLength: 8)
             ContextMeterChip(botID: botID, gauge: gauge, compact: isCompact)
             ModelChip(botID: botID, isOpen: $isModelOpen)
@@ -342,6 +368,18 @@ struct ComposerView: View {
         .help(action.help(isRoutine: routine != nil, elsewhere: elsewhere))
         // ⌘↩ sends when the Orb is free; while it works ⌘↩ means "stop and send" (see `shortcuts`).
         .keyboardShortcut(action == .send ? AppShortcut.commandReturn : nil)
+        // ⇥ has no button: the other delivery of a message typed during a turn is offered here too, by the right click and
+        // by VoiceOver. Only when the Orb takes messages into its task: with a routine or another conversation running,
+        // every message waits for the end and the button already says so.
+        .contextMenu {
+            if action == .queue, model.canSteer(botID) {
+                Button("Direcionar agora") { send() }
+                Button("Depois da tarefa") { send(delivery: .afterTask) }
+            }
+        }
+        .accessibilityActions {
+            if action == .queue, model.canSteer(botID) { Button("Enviar para depois da tarefa") { send(delivery: .afterTask) } }
+        }
     }
 
     /// Shortcuts that belong to the composer without a visible button: ⌘↩ to stop and send, ⇧⌘M for the model list.
@@ -735,6 +773,9 @@ enum ComposerAction: Equatable {
         return needsYou ? "“\(shown)” precisa de você" : "Trabalhando em “\(shown)” · o que você escrever vai depois"
     }
 
+    /// The button of that strip: back to the conversation, or straight to the question it is waiting on.
+    static func elsewhereButton(needsYou: Bool) -> String { needsYou ? "Responder" : "Voltar" }
+
     /// The field's placeholder when the Orb is free (or runs a routine): short, with the Orb's name.
     static func placeholder(orbName: String) -> String {
         let name = orbName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -761,7 +802,7 @@ enum ComposerAction: Equatable {
     var help: String {
         switch self {
         case .send: "Enviar (↩)"
-        case .queue: "Direcionar o Orb (↩); ⇥ deixa para depois da tarefa"
+        case .queue: "Direcionar o Orb (↩); ⇥ ou o botão direito deixa para depois da tarefa"
         case .stop: "\(CommandName.stop) (\(AppShortcut.stop.label))"
         }
     }
@@ -811,6 +852,17 @@ enum ComposerHint {
             return compact ? keys : "\(keys) · responda ao pedido acima"
         }
         return compact ? keys : "\(keys) · \(command) para a tarefa e envia"
+    }
+
+    /// The same line for the field's VoiceOver hint: the key symbols are not read as words, so they become the keys' names.
+    static func spoken(_ hint: String) -> String {
+        let names: [Character: String] = ["↩": "Return", "⇥": "Tab", "⇧": "Shift", "⌘": "Command", "⌥": "Option", "⌃": "Control"]
+        var words = ""
+        for character in hint {
+            if let name = names[character] { words += " \(name) " } else { words.append(character == "·" ? "," : character) }
+        }
+        // Spaces from the substitution and from " · " collapse, and a comma never follows a space.
+        return words.split(separator: " ").joined(separator: " ").replacingOccurrences(of: " ,", with: ",")
     }
 }
 

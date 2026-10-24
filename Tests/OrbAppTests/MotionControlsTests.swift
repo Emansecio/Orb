@@ -119,7 +119,7 @@ struct MotionControlsTests {
         #expect(ComposerAction.send.title == "Enviar")
         #expect(ComposerAction.send.help == "Enviar (↩)")
         #expect(ComposerAction.queue.title == "Direcionar")
-        #expect(ComposerAction.queue.help == "Direcionar o Orb (↩); ⇥ deixa para depois da tarefa")
+        #expect(ComposerAction.queue.help == "Direcionar o Orb (↩); ⇥ ou o botão direito deixa para depois da tarefa")
         #expect(ComposerAction.stop.title == "Parar")
         #expect(ComposerAction.stop.help == "\(CommandName.stop) (\(AppShortcut.stop.label))")
         #expect(ComposerAction.stop.help.contains("⌘."))

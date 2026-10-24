@@ -27,6 +27,8 @@ struct ComposerChipStyle: ButtonStyle {
 struct PermissionChip: View {
     @Environment(AppModel.self) private var model
     let botID: UUID
+    /// The composer is too narrow for words on its chips (like `ContextMeterChip`'s): only the icon shows.
+    var compact = false
     /// The list closed (a mode chosen, "Gerenciar", or a click away): the composer takes the focus back.
     var onClose: () -> Void = {}
     @State private var isOpen = false
@@ -34,10 +36,14 @@ struct PermissionChip: View {
 
     var body: some View {
         let permission = model.live(botID).permission
-        // Icon only: the mode's name lives in the tooltip and for VoiceOver (the icon's colour already tells the unusual ones).
+        // Icon only for the usual modes: the name lives in the tooltip and for VoiceOver. The two unusual ones (no
+        // questions at all, or nothing may change) say their name too, unless the bar is narrow.
         Button { isOpen.toggle() } label: {
-            Image(systemName: permission.mode.symbol)
-                .foregroundStyle(Self.tint(permission.mode))
+            HStack(spacing: 4) {
+                Image(systemName: permission.mode.symbol)
+                if Self.showsName(permission.mode, compact: compact) { Text(permission.mode.label).lineLimit(1) }
+            }
+            .foregroundStyle(Self.tint(permission.mode))
         }
         .buttonStyle(ComposerChipStyle())
         .help("Permissões: \(PermissionChipText.spoken(permission)) · \(Tip.withoutFullStop(permission.mode.shortSummary))" + grantsHelp(permission))
@@ -48,6 +54,10 @@ struct PermissionChip: View {
         }
         .bypassConfirmation(isPresented: $isConfirmingBypass) { apply(.bypass) }
         .onChange(of: isOpen) { if !isOpen { onClose() } }
+    }
+
+    static func showsName(_ mode: PermissionMode, compact: Bool) -> Bool {
+        !compact && (mode == .bypass || mode == .readOnly)
     }
 
     static func tint(_ mode: PermissionMode) -> Color {
@@ -379,11 +389,12 @@ struct ElsewhereStrip: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer(minLength: 4)
-            Button("Ver") {
+            Button(ComposerAction.elsewhereButton(needsYou: needsYou)) {
                 if let working = model.sessions[botID]?.workingChatID { model.openChat(working, of: botID) }
             }
             .buttonStyle(ComposerChipStyle())
             .help("Voltar para “\(chatTitle)”")
+            .accessibilityLabel(needsYou ? "Responder em “\(chatTitle)”" : "Voltar para a conversa “\(chatTitle)”")
         }
         .font(.system(size: 11))
         .padding(.horizontal, 4)
@@ -397,12 +408,22 @@ struct ElsewhereStrip: View {
 /// button to stop it. Once the turn that started them ends nothing else on screen says they are there.
 struct JobsStrip: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let botID: UUID
     let jobs: [BackgroundJobs.Snapshot]
+    /// The rest of a long list is shown (see `visibleCount`).
+    @State private var isExpanded = false
+
+    /// More than this many processes and only this many show until the person asks for the rest: the strip is the one
+    /// part of the card that would otherwise grow with the number of processes (up to 8) and take the chat's height.
+    static let collapsedLimit = 2
+
+    static func visibleCount(total: Int, isExpanded: Bool) -> Int { isExpanded ? total : min(total, collapsedLimit) }
 
     var body: some View {
+        let shown = Self.visibleCount(total: jobs.count, isExpanded: isExpanded)
         VStack(alignment: .leading, spacing: 2) {
-            ForEach(jobs, id: \.id) { job in
+            ForEach(jobs.prefix(shown), id: \.id) { job in
                 HStack(spacing: 6) {
                     Image(systemName: "terminal")
                         .foregroundStyle(Palette.faint)
@@ -424,8 +445,20 @@ struct JobsStrip: View {
                 }
                 .accessibilityElement(children: .contain) // the stop button stays reachable
             }
+            if jobs.count > Self.collapsedLimit {
+                let hidden = jobs.count - Self.collapsedLimit
+                Button(isExpanded ? "Mostrar menos" : "+\(hidden) em segundo plano") {
+                    withAnimation(Motion.adapted(Motion.content, reduceMotion: reduceMotion)) { isExpanded.toggle() }
+                }
+                .buttonStyle(ComposerChipStyle())
+                .foregroundStyle(Palette.muted)
+                .help(isExpanded ? "Recolhe a lista de processos" : "Mostra todos os processos em segundo plano")
+                .accessibilityLabel(isExpanded ? "Mostrar menos processos" : "Mostrar mais \(hidden) processos em segundo plano")
+            }
         }
         .font(.system(size: 11))
         .padding(.horizontal, 4)
+        // Back to the short list once it is short enough, so a later crowd starts folded again.
+        .onChange(of: jobs.count) { if jobs.count <= Self.collapsedLimit { isExpanded = false } }
     }
 }

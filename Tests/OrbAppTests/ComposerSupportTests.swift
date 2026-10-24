@@ -57,6 +57,35 @@ struct ComposerSupportTests {
         #expect(elsewhere.contains("\(key) permite o pedido") && !elsewhere.contains("para a tarefa e envia"))
     }
 
+    @Test func theFieldHintForVoiceOverNamesTheKeysInsteadOfTheirSymbols() {
+        #expect(ComposerHint.spoken("↩ envia · \(CommandName.newLineKeys) nova linha") == "Return envia, Shift Return nova linha")
+        #expect(ComposerHint.spoken(ComposerHint.queueing(needsYou: false, typesInComposer: true))
+                == "Return envia agora, Tab depois da tarefa, Command Return para a tarefa e envia")
+        #expect(ComposerHint.spoken("") == "")
+        #expect(ComposerHint.spoken("sem teclas") == "sem teclas")
+        // The visible line is not touched by it.
+        #expect(ComposerHint.queueing(needsYou: false, typesInComposer: true, compact: true) == "↩ envia agora · ⇥ depois da tarefa")
+    }
+
+    @Test func theStripOfAnotherChatOffersToGoBackOrToAnswer() {
+        #expect(ComposerAction.elsewhereButton(needsYou: false) == "Voltar")
+        #expect(ComposerAction.elsewhereButton(needsYou: true) == "Responder")
+    }
+
+    @Test @MainActor func thePermissionChipSaysItsNameOnlyForTheUnusualModesAndOnlyWhenThereIsRoom() {
+        for mode in PermissionMode.allCases {
+            #expect(!PermissionChip.showsName(mode, compact: true))
+            #expect(PermissionChip.showsName(mode, compact: false) == (mode == .bypass || mode == .readOnly))
+        }
+    }
+
+    @Test @MainActor func fewProcessesShowAllAndManyFoldToTheFirstTwoUntilAsked() {
+        #expect(JobsStrip.visibleCount(total: 0, isExpanded: false) == 0)
+        #expect(JobsStrip.visibleCount(total: 2, isExpanded: false) == 2)
+        #expect(JobsStrip.visibleCount(total: 5, isExpanded: false) == 2)
+        #expect(JobsStrip.visibleCount(total: 5, isExpanded: true) == 5)
+    }
+
     @Test func aMessageWaitsForThePicturesStillBeingPrepared() {
         func canSend(content: Bool = true, working: Bool = false, steer: Bool = false, pending: Int = 0) -> Bool {
             ComposerAction.canSend(hasContent: content, isWorking: working, canQueue: steer, pendingPictures: pending)
