@@ -9,6 +9,7 @@ struct EventLineView: View {
     /// Centred in a group's thread, where notices sit centred among the bubbles; on the replies' left edge in an Orb's chat.
     var centered = false
     @State private var showsExchange = false
+    @State private var showsPlan = false
 
     var body: some View {
         if event.kind == .delegationReceived, let asker = event.actor, let chain = event.chainID {
@@ -40,6 +41,23 @@ struct EventLineView: View {
             }
         } else if event.kind == .routineRun {
             RoutineRunLine(event: event)
+        } else if event.kind == .planDone, let plan = event.plan {
+            // The steps open in the same popover the plan's ring uses while the plan is open.
+            Button {
+                showsPlan.toggle()
+            } label: {
+                line(opens: true)
+            }
+            .buttonStyle(.plain)
+            .help("Ver as etapas")
+            .popover(isPresented: $showsPlan, arrowEdge: .bottom) {
+                TaskPlanSteps(plan: plan)
+                    .padding(14)
+                    .frame(width: 320, alignment: .leading)
+            }
+            .accessibilityLabel(event.sentence)
+            .accessibilityHint("Mostra as etapas")
+            .accessibilityIdentifier("event-line")
         } else if let group = openableGroup {
             Button {
                 model.selection = .group(group)
@@ -99,6 +117,7 @@ struct EventLineView: View {
         case .tellFailed: "exclamationmark.circle"
         case .groupRunDone: "checkmark.circle"
         case .delegationReceived: "bubble.left"
+        case .planDone: "checklist"
         case .unknown: "info.circle"
         }
     }

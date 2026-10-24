@@ -20,6 +20,8 @@ extension Snapshot {
             return view
         case "chat-working-long":
             return longTask(model: model, bot: bot)
+        case "chat-plan-done":
+            return planDone(model: model, bot: bot)
         case "chat-working", "chat-working-wait", "chat-working-retry", "chat-attachments-queued", "chat-working-steered",
              "chat-working-streaming":
             return workingTurn(screen, model: model, bot: bot)
@@ -191,6 +193,28 @@ extension Snapshot {
             if screen == "chat-working-streaming" {
                 model.apply(.text("Compilei e encontrei **2 erros**, os dois no módulo Engine:\n\n- `Turn.swift:42`: um tipo que não"), to: id)
             }
+        })
+    }
+
+    /// `chat-plan-done`: a task finished with all of its plan done, the Orb idle: the answer and, under it, the line
+    /// "Plano concluído · 5 etapas" (`OrbEvent.planDone`), which opens the steps.
+    @MainActor
+    private static func planDone(model: AppModel, bot: Bot) -> AnyView {
+        let id = bot.id
+        let plan = TaskPlan(goal: "Organizar a pasta Downloads por tipo",
+                            steps: ["Listar o que há na pasta", "Criar as subpastas por tipo", "Mover os arquivos",
+                                    "Conferir o que sobrou", "Resumir o que mudou"].map { TaskPlan.Step(text: $0, state: .done) })
+        let list = ToolCall(kind: .shell, title: "Rodando no Terminal", detail: "ls ~/Downloads", state: .done, output: "ok",
+                            startedAt: .now - 40, finishedAt: .now - 39)
+        let items = [TranscriptItem(.user(text: "Organize minha pasta Downloads por tipo", attachments: [])),
+                     TranscriptItem(.tool(list)),
+                     TranscriptItem(.bot(text: "Pronto: 148 arquivos agora estão em **Imagens**, **Documentos**, **Instaladores** e **Outros**.",
+                                         isStreaming: false)),
+                     TranscriptItem(.event(OrbEvent(planDone: plan)))]
+        // After the Orb's own conversation has been read from disk, which would replace this one.
+        return AnyView(ChatView(botID: id).task {
+            try? await Task.sleep(for: .seconds(1))
+            model.seedConversation(Conversation(items: items), for: id)
         })
     }
 

@@ -38,6 +38,7 @@ extension BotSession {
         browserViewID = nil
         clearBeats()
         resetWork()
+        planAtTurnStart = conversation?.taskPlan
         model?.workAnnouncer.reset()
         model?.live(id).setTurnSpend(nil)
         // Written at once, with the message that opened the turn: a crash in the next seconds no longer loses it.
@@ -336,6 +337,14 @@ extension BotSession {
         }
     }
 
+    /// The line "Plano concluído · 5 etapas" at the end of the chat, after the turn's notices (a notice that closes a
+    /// work row must stay inside its range, or the row would not fold). Not after a notice that offers a button
+    /// ("Tentar de novo", "Continuar"): the buttons only show on the last item, and they matter more than the line.
+    private func appendPlanSummary(_ plan: TaskPlan) {
+        if case .notice(let text)? = conversation?.items.last?.kind, !NoticeAction.actions(for: text).isEmpty { return }
+        append(.event(OrbEvent(planDone: plan)))
+    }
+
     /// Hands what the running turn used to the usage history (see `AppModel.recordUsage`).
     private func recordUsage(_ totals: UsageTotals, label: UsageLabel? = nil) {
         guard let model, let label = label ?? usageLabel else { return }
@@ -399,6 +408,11 @@ extension BotSession {
         stopSpeaking()
         closeStreaming()
         closeBrowserView(succeeded ? .done : .failed)
+        // A routine's run, or another Orb's request, is a report and not a chat with you: no plan line there.
+        if routineID == nil, let finished = TaskPlan.finishedInTurn(from: planAtTurnStart, to: conversation?.taskPlan) {
+            appendPlanSummary(finished)
+        }
+        planAtTurnStart = nil
         model.setStatus(nil, of: id)
         resetWork()
         if routineID != nil {

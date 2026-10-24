@@ -36,7 +36,7 @@ struct TaskPlanRing: View {
             .clickablePointer()
             .help("Plano: " + Self.summary(plan))
             .popover(isPresented: $showsSteps, arrowEdge: .bottom) {
-                steps(plan)
+                TaskPlanSteps(plan: plan)
                     .padding(14)
                     .frame(width: 320, alignment: .leading)
             }
@@ -58,34 +58,6 @@ struct TaskPlanRing: View {
         }
         .frame(width: 10, height: 10)
         .accessibilityHidden(true)
-    }
-
-    private func steps(_ plan: TaskPlan) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(plan.goal)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Palette.secondary)
-            ForEach(plan.steps.indices, id: \.self) { index in
-                let step = plan.steps[index]
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Image(systemName: Self.symbol(step.state))
-                        .font(.system(size: 11))
-                        .foregroundStyle(step.state == .blocked ? Palette.danger : step.state == .inProgress ? Palette.accentText : Palette.faint)
-                        .frame(width: 14)
-                        .accessibilityLabel(Self.stateName(step.state))
-                    Text(step.text + (step.reason.map { " — " + $0 } ?? ""))
-                        .font(.system(size: 12))
-                        .foregroundStyle(step.state == .done ? Palette.faint : Palette.secondary)
-                }
-            }
-            if let next = plan.next {
-                Text("Próximo: " + next)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Palette.muted)
-                    .padding(.top, 2)
-            }
-        }
-        .textSelection(.enabled)
     }
 
     /// Whether the model marks the steps as it goes: one of them is done, in progress or blocked.
@@ -119,6 +91,39 @@ struct TaskPlanRing: View {
         case .done: "Feita"
         case .blocked: "Bloqueada"
         }
+    }
+}
+
+/// The goal and the steps of a plan, with the state of each: the popover of the ring and of the line of a finished plan.
+struct TaskPlanSteps: View {
+    let plan: TaskPlan
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(plan.goal)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Palette.secondary)
+            ForEach(plan.steps.indices, id: \.self) { index in
+                let step = plan.steps[index]
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: TaskPlanRing.symbol(step.state))
+                        .font(.system(size: 11))
+                        .foregroundStyle(step.state == .blocked ? Palette.danger : step.state == .inProgress ? Palette.accentText : Palette.faint)
+                        .frame(width: 14)
+                        .accessibilityLabel(TaskPlanRing.stateName(step.state))
+                    Text(step.text + (step.reason.map { " — " + $0 } ?? ""))
+                        .font(.system(size: 12))
+                        .foregroundStyle(step.state == .done ? Palette.faint : Palette.secondary)
+                }
+            }
+            if let next = plan.next {
+                Text("Próximo: " + next)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.muted)
+                    .padding(.top, 2)
+            }
+        }
+        .textSelection(.enabled)
     }
 }
 

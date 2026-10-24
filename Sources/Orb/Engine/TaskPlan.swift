@@ -43,6 +43,14 @@ struct TaskPlan: Codable, Sendable, Equatable {
     /// The step being worked on, else the first one still open.
     var current: Step? { steps.first { $0.state == .inProgress } ?? steps.first { $0.state != .done } }
 
+    /// The plan a turn finished: all its steps done at the end, and not the very plan it began with already done (a turn
+    /// that only touches a finished plan, or a reopened chat, says nothing again). `before` is the plan when the turn began.
+    static func finishedInTurn(from before: TaskPlan?, to after: TaskPlan?) -> TaskPlan? {
+        guard let after, !after.steps.isEmpty, !after.isActive else { return nil }
+        if let before, !before.isActive, before.goal == after.goal, before.steps.map(\.text) == after.steps.map(\.text) { return nil }
+        return after
+    }
+
     // MARK: Rendering
 
     static let heading = "[Plano da tarefa] "

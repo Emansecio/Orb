@@ -5,7 +5,7 @@ import Foundation
 struct OrbEvent: Codable, Equatable, Sendable {
     enum Kind: String, Codable, Sendable {
         case orbCreated, joinedGroup, leftGroup, groupCreated, routineCreated, renamed
-        case chainStopped, groupRunDone, groupStopped, delegationReceived, routineRun, tellFailed, groupWorked, unknown
+        case chainStopped, groupRunDone, groupStopped, delegationReceived, routineRun, tellFailed, groupWorked, planDone, unknown
 
         /// A kind from a newer version reads as `unknown`.
         init(from decoder: Decoder) throws { self = try decoder.rawValue(Self.self, fallback: .unknown) }
@@ -33,6 +33,9 @@ struct OrbEvent: Codable, Equatable, Sendable {
     /// For `groupWorked`: what the Orb's chat is told of its work in the group (the request, what it said, the result). Never
     /// shown: the line is the sentence.
     var context: String?
+    /// For `planDone`: the plan the turn finished, kept whole so the line can show its steps later. Never sent to the
+    /// model: like every event, the line is only for the screen.
+    var plan: TaskPlan?
 
     /// The line as the chat shows it ("Atlas criou o Pesquisador"). Pure: the same event always reads the same.
     var sentence: String {
@@ -72,6 +75,10 @@ struct OrbEvent: Codable, Equatable, Sendable {
             return "\(actorName) não conseguiu fazer o que você pediu" + (detail.isEmpty ? "" : ": " + detail)
         case .groupWorked:
             return "\(subject?.name ?? "Um Orb") trabalhou no grupo \(detail)"
+        case .planDone:
+            // A version that does not know this kind reads it as `unknown` and shows `detail`, so it carries the same words.
+            guard let count = plan?.steps.count else { return detail.isEmpty ? "Plano concluído" : detail }
+            return "Plano concluído · \(count) \(count == 1 ? "etapa" : "etapas")"
         case .unknown:
             return detail
         }
@@ -105,6 +112,15 @@ extension OrbEvent {
         outcome = (try? c.decodeIfPresent(Outcome.self, forKey: .outcome)) ?? nil
         runID = (try? c.decodeIfPresent(UUID.self, forKey: .runID)) ?? nil
         context = (try? c.decodeIfPresent(String.self, forKey: .context)) ?? nil
+        plan = (try? c.decodeIfPresent(TaskPlan.self, forKey: .plan)) ?? nil
+    }
+
+    /// The line for a plan whose steps are all done. Its `next` is dropped (nothing is next), and `detail` holds the words.
+    init(planDone plan: TaskPlan) {
+        var finished = plan
+        finished.next = nil
+        self.init(kind: .planDone, plan: finished)
+        detail = sentence
     }
 
     /// A run told as text by versions before the event: "Rotina “X” terminou: … (relatório em …)". nil for any other notice.

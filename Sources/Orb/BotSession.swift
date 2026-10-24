@@ -114,6 +114,9 @@ final class BotSession {
         transcript?.showPlan(shownPlan)
     }
 
+    /// The task plan when the running turn began: the turn that finishes it leaves a line in the chat (`finishTurn`).
+    @ObservationIgnored var planAtTurnStart: TaskPlan?
+
     /// The plan of the conversation on show, while it still steers the work.
     var shownPlan: TaskPlan? { (parkedChat ?? conversation)?.activePlan }
 
