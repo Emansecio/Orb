@@ -409,6 +409,10 @@ final class ShimmerBandView: NSView {
 
 // MARK: Buttons
 
+// Which style for a secondary action: a pill (`SecondaryPillStyle`, and `chipButton()` for its small form) for an
+// action that does something; `GhostStyle` for one that opens something (a sheet, a page, a list); a `Link` or the
+// `.link` style only for an external address.
+
 /// Measures of the pill buttons, which follow the control size: `.small` (the buttons inside cards and rows) is the
 /// compact one.
 struct PillMetrics {
