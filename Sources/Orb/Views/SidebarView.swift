@@ -135,13 +135,18 @@ struct SidebarView: View {
                     Spacer(minLength: 0)
                     Button("Ajustes", systemImage: "gearshape") { SettingsRouter.show(using: openSettings) }
                         .labelStyle(.iconOnly)
-                        .buttonStyle(CircleGhostStyle(side: 32, fontSize: 14))
+                        .buttonStyle(CircleGhostStyle(side: 28, fontSize: 15))
                         .foregroundStyle(Palette.muted)
                         .iconTip(Tip.settings(), label: "Ajustes")
                 }
-                .padding(.horizontal, 8)
+                // The picture on the Orbs' avatars (16 pt from the edge, its 32 pt ring 2 pt outside it) and the gear's
+                // center under the titles' "+" (20 pt from the edge), so the foot hangs on the same two lines as the list.
+                .padding(.leading, 14)
+                .padding(.trailing, 6)
             }
-            .padding(.vertical, 8)
+            // A little more air under the picture than above the titles: at 8 pt it sat on the window's edge.
+            .padding(.top, 8)
+            .padding(.bottom, 12)
             .background(Palette.chrome)
         }
     }
@@ -165,7 +170,8 @@ struct SectionTitle<Trailing: View>: View {
             Spacer(minLength: 4)
             trailing
         }
-        .padding(.leading, 10)
+        // The text starts on the rows' content edge (the Orbs' avatars), 8 pt inside the list's own 8 pt.
+        .padding(.leading, 8)
         .padding(.trailing, 2)
         .padding(.bottom, 4)
     }
@@ -232,7 +238,7 @@ private struct FooterPageButton: View {
         Button { model.selection = item } label: {
             VStack(spacing: 2) {
                 // A fixed height, so the captions line up whatever the symbols' own heights are.
-                Image(systemName: symbol).font(.system(size: 14)).frame(height: 16)
+                Image(systemName: symbol).font(.system(size: 15, weight: .medium)).frame(height: 18)
                 Text(name).font(Typography.small).lineLimit(1)
             }
             .foregroundStyle(isSelected ? Palette.ink : Palette.muted)

@@ -52,7 +52,7 @@ struct SidebarGroupsSection: View {
                 Text("Nenhum grupo ainda")
                     .font(Typography.small)
                     .foregroundStyle(Palette.faint)
-                    .padding(.leading, 10)
+                    .padding(.leading, 8)
                     .padding(.vertical, 4)
             }
         }
