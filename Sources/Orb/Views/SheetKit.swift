@@ -160,12 +160,41 @@ struct SheetFooter: View {
 
     var body: some View {
         SheetFooterBar {
-            if let destructiveTitle, let destructive {
-                Button(destructiveTitle, role: leadingIsDestructive ? .destructive : nil, action: destructive)
-                    .buttonStyle(GhostStyle(tint: leadingIsDestructive ? Palette.danger : nil))
-                    .help(destructiveHelp)
-                    .hangsOnLeadingEdge()
+            // One row when it fits; otherwise the leading action takes a row of its own above the others (the buttons keep
+            // their labels whole on one line, so a long pair like "Apagar tudo, inclusive a memória" and "Apagar, guardando
+            // a memória" would run past the sheet).
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: Spacing.controlGap) {
+                    leadingButton
+                    trailingRow
+                }
+                VStack(alignment: .leading, spacing: Spacing.controlGap) {
+                    leadingButton
+                    trailingRow
+                }
             }
+        }
+        .background {
+            if !showsCancel {
+                Button("", action: cancel).keyboardShortcut(.cancelAction).opacity(0).accessibilityHidden(true)
+            }
+        }
+        // The validation note comes, goes and changes by fading (§2.13); the buttons are on the other side and stay put.
+        .motion(Motion.content, value: message)
+    }
+
+    @ViewBuilder private var leadingButton: some View {
+        if let destructiveTitle, let destructive {
+            Button(destructiveTitle, role: leadingIsDestructive ? .destructive : nil, action: destructive)
+                .buttonStyle(GhostStyle(tint: leadingIsDestructive ? Palette.danger : nil))
+                .help(destructiveHelp)
+                .hangsOnLeadingEdge()
+        }
+    }
+
+    /// The message, then Cancel and the primary action at the trailing edge.
+    private var trailingRow: some View {
+        HStack(spacing: Spacing.controlGap) {
             if let message {
                 Text(message)
                     .font(Typography.label)
@@ -187,13 +216,6 @@ struct SheetFooter: View {
                 .help(primaryHelp)
                 .disabled(isPrimaryDisabled)
         }
-        .background {
-            if !showsCancel {
-                Button("", action: cancel).keyboardShortcut(.cancelAction).opacity(0).accessibilityHidden(true)
-            }
-        }
-        // The validation note comes, goes and changes by fading (§2.13); the buttons are on the other side and stay put.
-        .motion(Motion.content, value: message)
     }
 }
 

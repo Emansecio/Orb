@@ -442,6 +442,7 @@ struct PrimaryPillStyle: ButtonStyle {
         let pressed = configuration.isPressed
         let hovering = isHovering && isEnabled
         configuration.label
+            .pillLabel()
             .font(metrics.font)
             .foregroundStyle(isDestructive ? Color.white : Palette.onInk)
             .padding(.horizontal, metrics.horizontal)
@@ -495,6 +496,7 @@ struct SecondaryPillStyle: ButtonStyle {
         let metrics = PillMetrics.of(controlSize)
         let pressed = configuration.isPressed
         configuration.label
+            .pillLabel()
             .font(metrics.font)
             // A destructive one ("Remover todas") says it in red, on the same gray.
             .foregroundStyle(configuration.role == .destructive ? Palette.danger : Palette.ink)
@@ -551,6 +553,7 @@ struct GhostStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         let metrics = PillMetrics.of(controlSize)
         configuration.label
+            .pillLabel()
             .font(metrics.font)
             .foregroundStyle(tint ?? (configuration.role == .destructive ? Palette.danger : Palette.secondary))
             .padding(.horizontal, Spacing.ghostInset)
@@ -563,6 +566,10 @@ struct GhostStyle: ButtonStyle {
 }
 
 extension View {
+    /// A pill's label is one line at its whole width: squeezed by its row, it broke a word letter by letter ("Rod / ar /
+    /// ago / ra") instead of the row giving way. A row too narrow for its buttons picks a shorter form (`ViewThatFits`).
+    fileprivate func pillLabel() -> some View { lineLimit(1).fixedSize(horizontal: true, vertical: false) }
+
     /// A ghost button that starts a row (the destructive one of a footer, the "Não permitir" of a card) hangs
     /// `Spacing.ghostInset` to the left of the row's edge, so its label, not its invisible hover shape, lines up with the
     /// content above. The mirror of it for one that ends a row is `hangsOnTrailingEdge()`.

@@ -364,7 +364,7 @@ struct LiveScreenTab: View {
                         }
                         Text(chip).font(.system(size: 11, weight: .semibold))
                     }
-                    // The state and the button keep their words whole at 244 pt ("Conectan / do"); the host is what gets cut.
+                    // The state keeps its word whole at 244 pt ("Conectan / do"), as the pills do; the host is what gets cut.
                     .fixedSize()
                     .foregroundStyle(state == .needsYou ? Palette.warn : state.pulses ? Palette.ok : Palette.faint)
                 }
@@ -372,10 +372,10 @@ struct LiveScreenTab: View {
                 Spacer(minLength: 0)
                 if state == .live || state == .connecting {
                     Button("Ocultar tela") { store.isPrivate = true }
-                        .buttonStyle(GhostStyle()).controlSize(.small).fixedSize().hangsOnTrailingEdge().help(Tip.hideScreen)
+                        .buttonStyle(GhostStyle()).controlSize(.small).hangsOnTrailingEdge().help(Tip.hideScreen)
                 } else if state == .privateView {
                     Button("Mostrar tela") { store.isPrivate = false }
-                        .buttonStyle(SecondaryPillStyle()).controlSize(.small).fixedSize().help(Tip.revealScreen)
+                        .buttonStyle(SecondaryPillStyle()).controlSize(.small).help(Tip.revealScreen)
                 }
             }
             .motion(Motion.content, value: state)

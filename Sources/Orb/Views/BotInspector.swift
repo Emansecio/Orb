@@ -795,19 +795,27 @@ struct BotInspector: View {
             }
         }
         Section {
-            HStack(spacing: 8) {
-                Button("Nova rotina…", systemImage: "plus") {
-                    editingRoutine = Routine(name: "", botID: bot.id, prompt: "", schedule: .daily(hour: 9, minute: 0))
-                }
-                .buttonStyle(SecondaryPillStyle())
+            let newRoutine = Button("Nova rotina…", systemImage: "plus") {
+                editingRoutine = Routine(name: "", botID: bot.id, prompt: "", schedule: .daily(hour: 9, minute: 0))
+            }
+            .buttonStyle(SecondaryPillStyle())
+            .controlSize(.small)
+            .help(Tip.newRoutine)
+            let allRoutines = Button("Ver todas", systemImage: "arrow.up.right") { model.selection = .routines }
+                .buttonStyle(GhostStyle(tint: Palette.accentText))
                 .controlSize(.small)
-                .help(Tip.newRoutine)
-                Spacer(minLength: 4)
-                Button("Ver todas", systemImage: "arrow.up.right") { model.selection = .routines }
-                    .buttonStyle(GhostStyle(tint: Palette.accentText))
-                    .controlSize(.small)
-                    .hangsOnTrailingEdge()
-                    .help(Tip.allRoutines)
+                .help(Tip.allRoutines)
+            // Side by side when both fit; at 244 pt "Ver todas" goes under, hanging on the leading edge instead.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    newRoutine
+                    Spacer(minLength: 4)
+                    allRoutines.hangsOnTrailingEdge()
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    newRoutine
+                    allRoutines.hangsOnLeadingEdge()
+                }
             }
         } footer: { FormFootnote {
             if !routines.isEmpty {
@@ -1213,8 +1221,6 @@ private struct RoutineRow: View {
                     } else {
                         Button("Rodar agora", systemImage: "play.fill") { model.runRoutine(routine.id) }
                             .buttonStyle(SecondaryPillStyle())
-                            // Whole at 244 pt: squeezed, it broke into "Rod / ar / ago / ra". "Editar" gives way instead.
-                            .fixedSize()
                             .help(Tip.runRoutineNow)
                             .transition(.opacity)
                     }
@@ -1228,7 +1234,6 @@ private struct RoutineRow: View {
                 ViewThatFits(in: .horizontal) {
                     editButton
                         .buttonStyle(GhostStyle())
-                        .fixedSize()
                         .help(Tip.editRoutine)
                     editButton
                         .labelStyle(.iconOnly)
