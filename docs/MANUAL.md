@@ -66,7 +66,7 @@ clique nela traz a tela de volta (e "Novo Orb" no pé da barra lateral só apare
 
 ## A janela
 
-A **barra lateral** tem os seus Orbs, o **Espaço de trabalho** (Rotinas, Conectores, Skills), **Novo Orb** (só com Orbs na lista) e **Ajustes**. Uma
+A **barra lateral** tem os seus Orbs, o **Espaço de trabalho** (Rotinas, Conectores, Skills), **Novo Orb** (só com Orbs na lista) e, embaixo, a sua foto com o seu nome (abre o perfil) e **Ajustes**. Uma
 linha mostra o que o Orb está fazendo ("Pensando…"), "Precisa de você" quando ele espera uma permissão e um ponto quando há
 mensagens não lidas; um anel em volta do rosto diz o mesmo de relance (azul trabalhando, âmbar esperando você). O título da
 janela traz, sob o nome do Orb, o que ele está fazendo, ou o modelo quando está livre. O botão direito abre o menu do Orb (abrir pasta, personalizar, ver
