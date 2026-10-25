@@ -15,7 +15,7 @@ enum GroupSnapshots {
         let sample = SampleGroups(model: model, mode: screen)
         switch screen {
         case "groups-sidebar":
-            return AnyView(SidebarView().frame(width: 280))
+            return AnyView(SidebarView().frame(width: Snapshot.paneWidth(280)))
         case "group-new", "group-new-readonly":
             return AnyView(NewGroupSheet(startingWith: sample.atlas.id).frame(width: 560))
         case "group-panel", "group-panel-readonly":

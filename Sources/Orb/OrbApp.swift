@@ -303,6 +303,12 @@ enum OrbSheet {
 /// Offscreen render of one screen with real data, for visual review without touching the user's screen.
 @MainActor
 enum Snapshot {
+    /// The sidebar's or the Orb panel's width in a scene, or `ORB_SNAPSHOT_PANE_WIDTH` to see it at its minimum
+    /// (240 pt for the sidebar, 244 pt for the panel).
+    static func paneWidth(_ standard: CGFloat) -> CGFloat {
+        ProcessInfo.processInfo.environment["ORB_SNAPSHOT_PANE_WIDTH"].flatMap(Double.init).map { CGFloat($0) } ?? standard
+    }
+
     static func render(_ requested: String, to url: URL) {
         // The Keychain stays untouched: a seed with token-looking values would leave orphan items there.
         let model = AppModel(secretVault: MemoryVault())
@@ -329,7 +335,7 @@ enum Snapshot {
             AnyView(model.bots.first.map { bot in
                 if screen == "inspector-screen" { LiveScreenSnapshots.tab(model: model, botID: bot.id) }
                 return BotInspector(botID: bot.id, tab: InspectorTab.allCases.first { screen == "inspector-" + $0.rawValue } ?? .general)
-                    .frame(width: 360)
+                    .frame(width: Snapshot.paneWidth(360))
             })
         case "memory-sheet": AnyView(model.bots.first.map { MemorySheet(botID: $0.id, name: $0.name) })
         case "approvals": AnyView(model.bots.first.map { ApprovalCardsSample(bot: $0) })
@@ -339,7 +345,7 @@ enum Snapshot {
         case "new-orb-marketplace": NewBotSnapshots.marketplaceSheet(height: height.map { CGFloat($0) })
         case "new-orb-imported": NewBotSnapshots.importSheet(height: height.map { CGFloat($0) }, confirmed: true)
         case "new-orb-kept": NewBotSnapshots.keptSheet(height: height.map { CGFloat($0) })
-        case "sidebar", "sidebar-profile": AnyView(SidebarView().frame(width: 280))
+        case "sidebar", "sidebar-profile": AnyView(SidebarView().frame(width: Snapshot.paneWidth(280)))
         case "quickask": AnyView(SystemSnapshots.quickAsk(model, approvals: false))
         case "quickask-approvals": AnyView(SystemSnapshots.quickAsk(model, approvals: true))
         case "quickask-reply": AnyView(SystemSnapshots.quickAsk(model, approvals: false, reply: true))

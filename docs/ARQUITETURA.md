@@ -691,6 +691,7 @@ verificação do Claude Code (`AppModel(devRun:)`); `ORB_SEND` continua funciona
 | `ORB_CLAUDE_PATH=/caminho/claude` | outro executável como Claude Code (um falso, nos testes) |
 | `ORB_DEBUG_USAGE=1` | uma linha por chamada ao modelo no stderr: tokens, cache lido/escrito |
 | `ORB_SNAPSHOT_WIDTH` / `ORB_SNAPSHOT_HEIGHT` / `ORB_SNAPSHOT_WAIT` | tamanho (1100×760) e espera em segundos (8) de `--snapshot` |
+| `ORB_SNAPSHOT_PANE_WIDTH` | largura da lateral (280) e do painel do Orb (360) em `sidebar`, `sidebar-profile`, `sidebar-categories*`, `groups-sidebar` e `inspector*`; use 240 e 244 para ver o mínimo |
 | `ORB_LIVE_TESTS=1` | liga as suítes que usam a rede (catálogos reais) |
 | `ORB_SIGN_IDENTITY="Nome"` | (em `scripts/bundle.sh`) assina com outra identidade |
 

@@ -27,7 +27,7 @@ enum SidebarCategorySnapshots {
             model.categoryNaming = .new(moving: nil)
         }
         if screen == "sidebar-categories-dragging" { model.draggedBotID = campaign.id }
-        return AnyView(SidebarView(previewDropY: screen == "sidebar-categories-dragging" ? 140 : nil).frame(width: 280))
+        return AnyView(SidebarView(previewDropY: screen == "sidebar-categories-dragging" ? 140 : nil).frame(width: Snapshot.paneWidth(280)))
     }
 }
 #endif
