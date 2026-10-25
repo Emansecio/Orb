@@ -46,7 +46,7 @@ struct MemoryTab: View {
                     .foregroundStyle(Palette.muted)
             }
         } header: {
-            Text("Memória")
+            Text("O que \(name) guardou")
         } footer: { FormFootnote {
             if !memory.items.isEmpty { Text(MemoryGroups.summary(memory.items)) }
         } }
@@ -82,7 +82,7 @@ struct MemoryTab: View {
                 VStack(alignment: .leading, spacing: 8) { memoryButtons(isEmpty: memory.items.isEmpty) }
             }
         } footer: { FormFootnote {
-            InlineLinkNote(text: "Só \(name) vê isso. São arquivos .md na sua pasta de dados.", link: "Como funciona",
+            InlineLinkNote(text: "Só \(name) vê isso.", link: "Como funciona",
                            hint: "Mostra como a memória funciona", tip: Tip.memoryHow) {
                 MemoryHelp(name: name)
             }
@@ -129,19 +129,19 @@ private struct IdentityBlock: View {
             }
             if memory.identity.count > MemoryBank.identityShare {
                 Text("Longa: em cada conversa vão cerca de \(MemoryBank.identityShare) caracteres; as notas mais antigas saem primeiro.")
-                    .font(.caption)
+                    .font(Typography.small)
                     .foregroundStyle(.secondary)
             }
             if memory.preferencesOverflow > 0 {
                 Text("\(memory.preferencesOverflow) \(memory.preferencesOverflow == 1 ? "preferência não cabe" : "preferências não cabem") inteira\(memory.preferencesOverflow == 1 ? "" : "s") no que \(name) sempre vê; "
                      + (canSummarize && memory.preferencesConsolidate
                         ? "\(name) vai juntar as mais curtas sozinho." : "o resto é encontrado só quando \(name) busca."))
-                    .font(.caption)
+                    .font(Typography.small)
                     .foregroundStyle(.secondary)
             }
             if memory.interviewPending {
                 Label("Vai fazer perguntas a você nas primeiras mensagens", systemImage: "questionmark.bubble")
-                    .font(.caption)
+                    .font(Typography.small)
                     .foregroundStyle(.secondary)
             }
             HStack {
@@ -228,13 +228,14 @@ private struct MemoryHelp: View {
     }
 }
 
-/// One remembered thing: its text, when it came, and a "Esquecer" that shows on hover (and to VoiceOver and the menu).
+/// One remembered thing: its text, when it came, and a "Esquecer" that shows on hover or keyboard focus (and to VoiceOver and the menu).
 struct MemoryRow: View {
     let item: MemorySnapshot.Item
     var lineLimit = 3
     let forget: () -> Void
     @State private var isHovering = false
     @State private var isExpanded = false
+    @FocusState private var forgetFocused: Bool
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -256,7 +257,7 @@ struct MemoryRow: View {
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                         }
-                        .font(.caption)
+                        .font(Typography.small)
                         .foregroundStyle(Palette.secondary)
                         .padding(.vertical, 2)
                         .transition(.quiet)
@@ -268,16 +269,22 @@ struct MemoryRow: View {
                     .padding(.top, 1)
             }
             Spacer(minLength: 4)
-            Button("Esquecer", systemImage: "trash", action: forget)
-                .labelStyle(.iconOnly)
-                .buttonStyle(.borderless)
-                .foregroundStyle(Palette.muted)
-                .font(Typography.small)
-                // Only under the pointer: a list of lembranças, not of trash cans. VoiceOver and the menu always have it.
-                .opacity(isHovering ? 1 : 0)
-                .animation(Motion.hover(isHovering), value: isHovering)
-                .help(Tip.forget)
-                .accessibilityLabel("Esquecer: \(item.title)")
+            // The 11 pt icon sits in a 20 pt square that is all clickable (the plain icon would be a target of its own size).
+            // Only under the pointer or with the keyboard on it (it takes Tab, so it must be seen there): a list of
+            // lembranças, not of trash cans. VoiceOver and the menu always have it.
+            Button(action: forget) {
+                Image(systemName: "trash")
+                    .frame(width: 20, height: 20)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(Palette.muted)
+            .font(Typography.small)
+            .focused($forgetFocused)
+            .opacity(isHovering || forgetFocused ? 1 : 0)
+            .animation(Motion.hover(isHovering || forgetFocused), value: isHovering || forgetFocused)
+            .help(Tip.forget)
+            .accessibilityLabel("Esquecer: \(item.title)")
         }
         .contentShape(Rectangle())
         .onTapGesture { isExpanded.toggle() }

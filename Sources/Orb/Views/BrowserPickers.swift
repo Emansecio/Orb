@@ -31,6 +31,8 @@ enum BrowserPickerCopy {
         var text: String
         var tone: Tone
         var action: Action?
+        /// What happens meanwhile, said a step quieter than the problem itself (nil when there is none to name).
+        var consequence: String?
 
         var symbol: String {
             switch tone {
@@ -53,13 +55,14 @@ enum BrowserPickerCopy {
         return browserFailed || searchFailed
     }
 
-    /// What the Orb's browser has on this Mac. `status` is nil while it is being looked for.
-    static func browserLine(status: BrowserStatus?) -> Line {
+    /// What the Orb's browser has on this Mac. `status` is nil while it is being looked for. `orbName` is who only reads simple
+    /// pages meanwhile ("Até lá, Atlas só lê páginas simples").
+    static func browserLine(status: BrowserStatus?, orbName: String = "o Orb") -> Line {
         guard let status else { return Line(text: "Conferindo o que está instalado…", tone: .neutral) }
         guard !status.isReady else { return Line(text: status.program.map { "Pronto · usa o \($0.label)" } ?? "Pronto", tone: .ready) }
         let missing = status.missing.map(\.name).joined(separator: " e ")
-        return Line(text: "Não instalado: falta \(missing). Até lá, o Orb só lê e pesquisa em páginas simples.", tone: .warning,
-                    action: .installBrowser)
+        return Line(text: "Falta instalar \(missing)", tone: .warning, action: .installBrowser,
+                    consequence: "Até lá, \(orbName) só lê páginas simples.")
     }
 
     /// One line on what the provider is.
@@ -79,12 +82,14 @@ enum BrowserPickerCopy {
             return nil
         case .google:
             guard browserIsReady == false else { return nil }
-            return Line(text: "Sem navegador pronto, a busca vai para o DuckDuckGo.", tone: .warning, action: .installBrowser)
+            return Line(text: "Sem navegador pronto", tone: .warning, action: .installBrowser,
+                        consequence: "A busca vai para o DuckDuckGo.")
         case .tinyfish:
             switch hasKey {
             case nil: return nil
             case true?: return Line(text: "Chave guardada", tone: .ready)
-            case false?: return Line(text: "Sem chave. Até lá, a busca vai para o DuckDuckGo.", tone: .warning, action: .addSearchKey)
+            case false?: return Line(text: "Sem chave", tone: .warning, action: .addSearchKey,
+                                       consequence: "Até lá, a busca vai para o DuckDuckGo.")
             }
         }
     }
@@ -139,7 +144,7 @@ struct BrowserPickerRows: View {
                 .help(Tip.browserMode)
                 .padding(.leading, Self.indent)
                 .foldContent()
-                if let line = problemLine(BrowserPickerCopy.browserLine(status: status)) {
+                if let line = problemLine(BrowserPickerCopy.browserLine(status: status, orbName: bot.name)) {
                     statusLine(line)
                         .padding(.leading, Self.indent)
                         .foldContent()
@@ -205,17 +210,26 @@ struct BrowserPickerRows: View {
             } icon: {
                 Image(systemName: Capability.browser.symbol).frame(width: 20)
             }
-            .lineLimit(1)
+            // Two lines before an ellipsis: in the narrowest panel the chevron and the switch leave "Navegar na web" no room.
+            .lineLimit(2)
             .layoutPriority(1)
+            // The summary is a bonus: it shows whole or not at all, never squeezing the title.
             if showsSummary {
-                Text("· \(summaryText(bot))")
-                    .font(.caption)
-                    .foregroundStyle(Palette.faint)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .transition(.opacity)
+                ViewThatFits(in: .horizontal) {
+                    summary(bot)
+                    Color.clear.frame(width: 0, height: 0)
+                }
+                .transition(.opacity)
             }
         }
+    }
+
+    private func summary(_ bot: Bot) -> some View {
+        Text("· \(summaryText(bot))")
+            .font(Typography.small)
+            .foregroundStyle(Palette.faint)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
     }
 
     private func summaryText(_ bot: Bot) -> String {
@@ -234,12 +248,12 @@ struct BrowserPickerRows: View {
     private func proxyRow(_ proxy: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Label("Proxy: \(BrowserProxy.display(proxy))", systemImage: "network")
-                .font(.caption)
+                .font(Typography.small)
                 .foregroundStyle(.secondary)
                 .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
             Button("Remover") { model.removeBrowserProxy(for: botID) }
                 .buttonStyle(.link)
-                .font(.caption)
+                .font(Typography.small)
                 .help(Tip.removeBrowserProxy)
         }
         .padding(.leading, Self.indent)
@@ -269,14 +283,21 @@ struct BrowserPickerRows: View {
                     Image(systemName: line.symbol)
                 }
             }
-            .font(.caption)
+            .font(Typography.small)
             .foregroundStyle(line.tone == .warning ? Palette.warn : line.tone == .ready ? Palette.ok : Color.secondary)
             .fixedSize(horizontal: false, vertical: true)
             .textSwap(line.text)
+            if let consequence = line.consequence {
+                Text(consequence)
+                    .font(Typography.small)
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let action = line.action {
-                Button(action.title, systemImage: "arrow.up.right") { SettingsRouter.openBrowser(using: openSettings) }
+                // No arrow: the link says where it goes ("Ajustes"), and the line above already carries the icon.
+                Button(action.title) { SettingsRouter.openBrowser(using: openSettings) }
                     .buttonStyle(.link)
-                    .font(.caption)
+                    .font(Typography.small)
                     .help(action.tip)
                     .transition(.quiet)
             }

@@ -38,7 +38,11 @@ struct BrowserPickerCopyTests {
     @Test func aMissingBrowserSaysWhatIsMissingAndSendsToAjustes() {
         let line = BrowserPickerCopy.browserLine(status: missing("agent-browser", "Chrome"))
         #expect(line.tone == .warning && line.action == .installBrowser)
-        #expect(line.text.hasPrefix("Não instalado") && line.text.contains("agent-browser e Chrome") && line.text.contains("só lê"))
+        // The problem and its consequence are two lines: the first loud, the second quiet. The Orb's name is the one who reads.
+        #expect(line.text == "Falta instalar agent-browser e Chrome")
+        #expect(line.consequence == "Até lá, o Orb só lê páginas simples.")
+        let named = BrowserPickerCopy.browserLine(status: missing("agent-browser"), orbName: "Atlas")
+        #expect(named.consequence == "Até lá, Atlas só lê páginas simples.")
         #expect(BrowserPickerCopy.Action.installBrowser.title == "Instalar em Ajustes")
         #expect(line.symbol == "exclamationmark.triangle.fill")
         // While it is being looked for there is no verdict yet.
@@ -49,7 +53,7 @@ struct BrowserPickerCopyTests {
     @Test func tinyFishWithoutAKeySaysSoAndSendsToAjustes() {
         let none = BrowserPickerCopy.searchLine(.tinyfish, browserIsReady: true, hasKey: false)
         #expect(none?.tone == .warning && none?.action == .addSearchKey && none?.text.contains("Sem chave") == true)
-        #expect(none?.text.contains("DuckDuckGo") == true, "says where the search goes meanwhile")
+        #expect(none?.consequence?.contains("DuckDuckGo") == true, "says where the search goes meanwhile")
         #expect(BrowserPickerCopy.Action.addSearchKey.title == "Adicionar em Ajustes")
         #expect(BrowserPickerCopy.searchLine(.tinyfish, browserIsReady: true, hasKey: true)?.tone == .ready)
         #expect(BrowserPickerCopy.searchLine(.tinyfish, browserIsReady: true, hasKey: nil) == nil, "still being read")
@@ -60,7 +64,7 @@ struct BrowserPickerCopyTests {
         #expect(BrowserPickerCopy.searchLine(.google, browserIsReady: true, hasKey: nil) == nil)
         #expect(BrowserPickerCopy.searchLine(.google, browserIsReady: nil, hasKey: nil) == nil, "not known yet")
         let notInstalled = BrowserPickerCopy.searchLine(.google, browserIsReady: false, hasKey: nil)
-        #expect(notInstalled?.action == .installBrowser && notInstalled?.text.contains("DuckDuckGo") == true)
+        #expect(notInstalled?.action == .installBrowser && notInstalled?.consequence?.contains("DuckDuckGo") == true)
     }
 
     @Test func theLinkOpensTheNavegadorTabOfAjustes() {
