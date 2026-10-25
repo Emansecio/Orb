@@ -43,11 +43,14 @@ struct RunCommandTool: AgentTool {
         if let cwd = arguments.nonEmptyString("cwd") {
             let directory = context.url(for: cwd).standardizedFileURL
             if directory.path != context.workingDirectory.standardizedFileURL.path {
-                result.detail += "\n\nem \(Self.display(directory))"
+                result.detail += Self.folderNote + Self.display(directory)
             }
         }
         return result
     }
+
+    /// Between a command and the folder it runs in, on the approval card and the call's line (`ShownCommand` reads it back).
+    static let folderNote = "\n\nem "
 
     /// The path with the home folder written as "~".
     static func display(_ url: URL) -> String {
@@ -112,13 +115,13 @@ struct RunCommandTool: AgentTool {
                 + "; para servidores e watchers use background: true, que dá um id para job_output e job_stop]"
         }
         if result.timedOut {
-            return ToolResult(text: output + "\n[tempo esgotado após \(seconds) s; o processo foi encerrado. Para comandos longos use "
+            return ToolResult(text: output + CommandOutput.timedOutNote + "\(seconds) s; o processo foi encerrado. Para comandos longos use "
                 + "timeout_seconds (máx. \(Self.maxTimeout)) ou background: true com job_output]", failed: true)
         }
         if let signal = result.signal {
-            return ToolResult(text: "Código de saída: encerrado pelo sinal \(Signals.describe(signal))\n\(output)", failed: true)
+            return ToolResult(text: CommandOutput.exitLead + CommandOutput.signalLead + "\(Signals.describe(signal))\n\(output)", failed: true)
         }
-        return ToolResult(text: "Código de saída: \(result.status)\(Self.hint(forExitCode: result.status))\n\(output)",
+        return ToolResult(text: CommandOutput.exitLead + "\(result.status)\(Self.hint(forExitCode: result.status))\n\(output)",
                           failed: Self.failed(status: result.status, printed: !result.output.isEmpty))
     }
 
@@ -267,4 +270,74 @@ struct JobStopTool: AgentTool {
 
 extension ToolBox {
     static let shellTools: [any AgentTool] = [RunCommandTool(), JobOutputTool(), JobStopTool()]
+}
+
+/// A command's output as the chat shows it: how it ended, read off the line `RunCommandTool` writes first for the model
+/// ("Código de saída: 1"), and what it printed without that line and without the notes written for the model (the saved
+/// copy of a long output, the time running out). Pure, so the tests can read it.
+struct CommandOutput: Equatable {
+    enum End: Equatable {
+        case code(Int32)
+        /// The signal as `Signals.describe` writes it: "15 (SIGTERM)".
+        case signal(String)
+        case timedOut
+    }
+
+    static let exitLead = "Código de saída: "
+    static let signalLead = "encerrado pelo sinal "
+    static let timedOutNote = "\n[tempo esgotado após "
+    static let noOutput = "(sem saída)"
+
+    var end: End?
+    /// Empty when the command printed nothing.
+    var text: String
+
+    init(_ output: String) {
+        var rest = Substring(output)
+        if rest.hasPrefix(Self.exitLead) {
+            let lineEnd = rest.firstIndex(of: "\n") ?? rest.endIndex
+            let said = rest[rest.index(rest.startIndex, offsetBy: Self.exitLead.count)..<lineEnd]
+            if said.hasPrefix(Self.signalLead) {
+                end = .signal(String(said.dropFirst(Self.signalLead.count)))
+            } else if let code = Int32(said.prefix { $0.isNumber || $0 == "-" }) {
+                end = .code(code)
+            }
+            rest = lineEnd < rest.endIndex ? rest[rest.index(after: lineEnd)...] : ""
+        }
+        var text = String(rest)
+        if Self.removeNote(Self.timedOutNote, from: &text) { end = .timedOut }
+        Self.removeNote(ContextText.savedNoteOpen, from: &text)
+        while text.last?.isNewline == true { text.removeLast() }
+        self.text = text == Self.noOutput ? "" : text
+    }
+
+    /// Takes out the line that starts with `note` (a newline and its opening bracket), the last one.
+    @discardableResult private static func removeNote(_ note: String, from text: inout String) -> Bool {
+        guard let start = text.range(of: note, options: .backwards) else { return false }
+        let lineEnd = text[start.upperBound...].firstIndex(of: "\n") ?? text.endIndex
+        text.removeSubrange(start.lowerBound..<lineEnd)
+        return true
+    }
+
+    /// Beside the line of a command that ended badly: "código 1", "sinal 15 (SIGTERM)", "tempo esgotado"; nil when it
+    /// ended well (code 0) or how it ended is not known.
+    var lineNote: String? {
+        switch end {
+        case .code(let code) where code != 0: "código \(code)"
+        case .signal(let name): "sinal \(name)"
+        case .timedOut: "tempo esgotado"
+        case .code, nil: nil
+        }
+    }
+
+    /// The foot of the open command: "Concluído", "Saiu com código 1", "Encerrado pelo sinal 15 (SIGTERM)", "Tempo
+    /// esgotado", or "Falhou" when a failure says no more. Started in the background, it goes on after the call ends.
+    func endText(failed: Bool, background: Bool) -> String {
+        switch end {
+        case .code(let code) where code != 0: "Saiu com código \(code)"
+        case .signal(let name): "Encerrado pelo sinal \(name)"
+        case .timedOut: "Tempo esgotado"
+        case .code, nil: failed ? "Falhou" : background ? "Seguiu em segundo plano" : "Concluído"
+        }
+    }
 }

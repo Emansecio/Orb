@@ -125,7 +125,7 @@ enum ToolTally {
 
     /// `line`, from the fullest wording to the shortest (one when the actions have no descriptions): the row takes the first
     /// that fits its width, so a word is never cut in two. It names what the actions were for without "e mais N": how many
-    /// there were is on the row's hover (`countNote`), with the time.
+    /// there were is beside it (`countNote`), with the time.
     static func lineVariants(_ calls: [ToolCall]) -> [String] {
         if let said = intentVariants(calls) { return said }
         let opened = calls.last { $0.kind == .browser && ["Abrindo página", "Abrindo uma aba"].contains($0.title) }
@@ -140,7 +140,7 @@ enum ToolTally {
 
     /// The run by what its actions were for, from the fullest wording to the shortest, or nil when none has a description:
     /// each distinct description once, in the order it happened, in the preterite ("Leu o histórico dos três chats e
-    /// conferiu se a vaga do Marcus já saiu"). How many actions there were is beside the line, on hover (`countNote`).
+    /// conferiu se a vaga do Marcus já saiu"). How many actions there were is beside the line (`countNote`).
     static func intentVariants(_ calls: [ToolCall]) -> [String]? {
         var order: [String] = []
         var seen: Set<String> = []
@@ -160,7 +160,7 @@ enum ToolTally {
         return variants
     }
 
-    /// "12 ações", on the hover of a line that names what the actions were for; nil for one action or none with a
+    /// "12 ações", beside a line that names what the actions were for; nil for one action or none with a
     /// description (the line counts them itself: "Rodou 12 comandos").
     static func countNote(_ calls: [ToolCall]) -> String? {
         guard calls.count >= 2, calls.contains(where: { $0.intent != nil }) else { return nil }

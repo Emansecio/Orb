@@ -237,8 +237,12 @@ Se o navegador não estiver instalado, o Orb fica só com `web_fetch` e `web_sea
   conversa, quando o Orb tem mais de uma (o modelo está no seletor do campo de mensagem). As linhas de ferramenta
   acima dela são o histórico do turno: ações seguidas, sem nada dito entre elas (e os cartões de permissão já
   respondidos no meio delas), ficam numa linha só ("Rodou 7 comandos e leu 1 arquivo", ou o que elas foram fazer: "Listou
-  modelos e viu o uso do send.py", com "1 com erro" se algo falhou; o tempo e a contagem aparecem com o mouse sobre a linha)
-  que abre com um clique; os arquivos que elas fizeram continuam à vista. As respostas do Orb ficam sem balão, ao lado
+  modelos e viu o uso do send.py", com "1 com erro" se algo falhou, o tempo e a contagem)
+  que abre com um clique; os arquivos que elas fizeram continuam à vista. Aberta, cada ação tem a sua linha, ligada à de
+  cima por um traço: o verbo e o comando ou arquivo em fonte de código ("Rodou `swift build`", "Leu `SKILL.md`") e o tempo.
+  Enquanto roda, um indicador fica no lugar do ícone; se falhou, a linha fica vermelha com "Falhou" e o código de saída.
+  Um clique na ação mostra o comando como num terminal: a pasta, `$ comando`, as primeiras 8 linhas da saída ("Mostrar
+  tudo" para o resto), como terminou ("Concluído · 12 s", "Saiu com código 1 · 2,1 s") e o botão Copiar. As respostas do Orb ficam sem balão, ao lado
   do rosto dele, na mesma borda das linhas de trabalho; só as suas mensagens têm balão, à direita. O que o Orb diz entre uma
   ação e outra aparece menor e mais claro. Quando o pedido termina, o
   trabalho até a resposta (o que o Orb foi dizendo e as ações) vira uma linha só com o desfecho, o tempo e o volume

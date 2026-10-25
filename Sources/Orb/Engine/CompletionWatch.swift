@@ -13,7 +13,7 @@ struct CompletionWatch: Sendable {
     /// has no verdict yet and changes nothing; nor does one that never started (a folder that is not there).
     mutating func record(_ call: ToolCallRequest, result: String, failed: Bool) {
         guard call.name == "run_command", let command = JSONValue.parse(call.arguments)?["command"]?.string,
-              Self.isCheck(command), result.hasPrefix("Código de saída:") || result.contains("[tempo esgotado após")
+              Self.isCheck(command), result.hasPrefix(CommandOutput.exitLead) || result.contains(CommandOutput.timedOutNote.dropFirst())
         else { return }
         lastCheck = (command, !failed)
     }

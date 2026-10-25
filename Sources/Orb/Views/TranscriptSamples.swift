@@ -1,7 +1,7 @@
 #if DEBUG || ORB_DEV_TOOLS
 import SwiftUI
 
-/// `Orb --snapshot transcript[-approvals|-long-command|-question|-quote|-notices|-compacted|-failed|-attachments|-outputs|-screen-steps|-browser-live|-browser-need|-browser-done] out.png`:
+/// `Orb --snapshot transcript[-approvals|-long-command|-commands[-open]|-question|-quote|-notices|-compacted|-failed|-attachments|-outputs|-screen-steps|-browser-live|-browser-need|-browser-done] out.png`:
 /// a seeded conversation of the first Orb for visual review of the replies' Markdown, the approval cards and the notices
 /// with an action. Dev aid; nothing is saved.
 @MainActor
@@ -161,6 +161,40 @@ enum TranscriptSample {
                           TranscriptItem(.user(text: "valeu", attachments: [])),
                           TranscriptItem(.bot(text: "Por nada!", isStreaming: false))]
             }
+        case "transcript-commands", "transcript-commands-open":
+            // Single actions in each state, each opened in `-open`: a command that worked (run elsewhere), one that failed
+            // with a long traceback, a script, a file read, a background server and one still running.
+            // Seven actions in a row fold into one group: drawn open, so every line shows.
+            ToolGroupRow.opensInSnapshots = true
+            ToolCallLine.opensInSnapshots = screen.hasSuffix("-open")
+            func action(_ kind: ToolCall.Kind, _ title: String, _ detail: String, _ state: ToolCall.State = .done,
+                        output: String?, seconds: Double, intent: String? = nil) -> TranscriptItem {
+                let start = Date.now.addingTimeInterval(-120)
+                return TranscriptItem(.tool(ToolCall(kind: kind, title: title, detail: detail, state: state, output: output,
+                                                     startedAt: start, finishedAt: state == .running ? nil : start.addingTimeInterval(seconds),
+                                                     intent: intent)))
+            }
+            let traceback = (["Lendo 20 conversas…", "Traceback (most recent call last):",
+                              "  File \"historico.py\", line 88, in <module>", "    for msg in fetch(chat_id):",
+                              "  File \"historico.py\", line 41, in fetch", "    r.raise_for_status()"]
+                             + (1...30).map { "  [debug] tentativa \($0) de 30" }
+                             + ["requests.exceptions.HTTPError: 429 Too Many Requests", "Lote 3 interrompido."]).joined(separator: "\n")
+            items = [TranscriptItem(.user(text: "Compila o app e roda o lote 3 do histórico", attachments: [])),
+                     action(.shell, "Rodando no Terminal", "swift build\n\nem ~/Projetos/app",
+                            output: "Código de saída: 0\nBuilding for debugging...\n[412/418] Compiling Orb TranscriptViews.swift\n[416/418] Linking Orb\nBuild complete! (12,38s)",
+                            seconds: 12.4),
+                     action(.shell, "Rodando no Terminal", "python3.14 historico.py --lote 3", .failed,
+                            output: "Código de saída: 1\n" + traceback + "\n[full output saved at /tmp/orb-saidas/x.txt (44 lines, 2 KB); read it with read_file (offset/limit) or grep instead of running the command again]",
+                            seconds: 2.1),
+                     action(.shell, "Rodando no Terminal", "python3 - <<'EOF'\nimport json\nprint(json.dumps({'ok': True}))\nEOF",
+                            output: "Código de saída: 0\n{\"ok\": true}", seconds: 1.1),
+                     action(.shell, "Rodando no Terminal", "grep -n TODO README.md", output: "Código de saída: 1\n(sem saída)", seconds: 0.1,
+                            intent: "Procurar pendências no README"),
+                     action(.file, "Lendo arquivo", "/Users/voce/Projetos/AcessosFit-Brain/skills/whatsapp/SKILL.md",
+                            output: "# WhatsApp\n\nResponda os leads em até 1 hora.\nUse o modelo de mensagem do Brain.", seconds: 0.05),
+                     action(.shell, "Rodando em segundo plano", "npm run dev",
+                            output: "[O comando continua rodando em segundo plano como o processo j1.]", seconds: 0.4),
+                     action(.shell, "Rodando no Terminal", "swift test --filter ToolIntentTests", .running, output: nil, seconds: 0)]
         case "transcript-browser-live", "transcript-browser-need", "transcript-browser-done":
             items = LiveScreenSnapshots.items(screen, model: model, bot: bot)
         case "transcript-retry":

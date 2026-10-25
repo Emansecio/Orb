@@ -165,21 +165,107 @@ struct ToolIntentTests {
         #expect(call.hiddenDetail?.title == "Rodando no Terminal" && call.hiddenDetail?.detail == "python3 - <<'EOF'")
     }
 
-    @Test func aCommandWithNoDescriptionIsSaidByItsGist() {
-        #expect(shell("python3 - <<'EOF'\nprint(1)\nEOF", .running).lineWords.main == "Rodando um script Python")
-        #expect(shell("swift build --jobs 6").lineWords.main == "Rodou swift build")
-        #expect(shell("npm run dev", .running, title: "Rodando em segundo plano").lineWords.main == "Rodando npm run dev em segundo plano")
-        #expect(shell("swift build").lineWords.hidesDetail)
-        #expect(shell("").lineWords == ToolCall.LineWords(main: "Rodando no Terminal", rest: nil, hidesDetail: false))
+    @Test func aCommandWithNoDescriptionIsSaidByTheCommandItself() {
+        #expect(shell("swift build --jobs 6").lineWords == ToolCall.LineWords(main: "Rodou", code: "swift build --jobs 6", hidesDetail: true))
+        #expect(shell("swift build", .running).lineWords.main == "Rodando")
+        #expect(shell("python3.14 historico.py --lote 3", .failed).lineWords
+            == ToolCall.LineWords(main: "Falhou", code: "python3.14 historico.py --lote 3", hidesDetail: true))
+        // Two runs that differ only at the end read apart: the whole command is on the line.
+        #expect(shell("ls ~/Downloads").lineWords.code == "ls ~/Downloads")
+        let background = shell("npm run dev", .running, title: "Rodando em segundo plano").lineWords
+        #expect(background == ToolCall.LineWords(main: "Rodando", code: "npm run dev", rest: "em segundo plano", hidesDetail: true))
+        // The folder the tool noted is not part of the command.
+        #expect(shell("make\n\nem ~/Projetos/app").lineWords.code == "make")
+        #expect(shell("").lineWords == ToolCall.LineWords(main: "Rodou no Terminal", hidesDetail: false))
     }
 
-    @Test func otherToolsKeepTheirTitleAndDetail() {
+    @Test func aScriptSaysWhatItIsAndHowLongItIs() {
+        let script = shell("python3 - <<'EOF'\nimport json\nprint(1)\nEOF").lineWords
+        #expect(script.main == "Rodou um script Python")
+        #expect(script.code == "python3 - <<'EOF' … 4 linhas")
+        #expect(shell("python3 - <<'EOF'\nprint(1)\nEOF", .running).lineWords.main == "Rodando um script Python")
+        // A comment first: the line shows the first line that runs, and counts them all.
+        #expect(ShownCommand.line(of: "# limpa\n\nrm -rf build") == "rm -rf build … 2 linhas")
+        #expect(ShownCommand.line(of: "  \n ") == nil)
+    }
+
+    @Test func theFolderACommandRanInIsReadBackFromItsDetail() {
+        #expect(ShownCommand.split("swift build\n\nem ~/Projetos/app") == ("swift build", "~/Projetos/app"))
+        #expect(ShownCommand.split("swift build").folder == nil)
+        // Only the tool's own note, at the end and on one line: a script with a blank line and "em" is left whole.
+        let script = "echo a\n\nem breve\necho b"
+        #expect(ShownCommand.split(script) == (script, nil))
+    }
+
+    @Test func otherToolsSayTheirVerbInTheTenseOfTheirState() {
         let read = ToolCall(kind: .file, title: "Lendo arquivo", detail: "/Users/x/README.md", state: .done)
-        #expect(read.lineWords == ToolCall.LineWords(main: "Lendo arquivo", rest: "/Users/x/README.md", hidesDetail: false))
-        #expect(read.hiddenDetail == nil)
-        // A script of the Mac with no description is as it was.
+        #expect(read.lineWords == ToolCall.LineWords(main: "Leu", code: "README.md", hidesDetail: true))
+        // The whole path is kept for when the line opens.
+        #expect(read.hiddenDetail?.detail == "/Users/x/README.md")
+        var running = read
+        running.state = .running
+        #expect(running.lineWords.main == "Lendo")
+        var failed = read
+        failed.state = .failed
+        #expect(failed.lineWords.main == "Falhou ao ler")
+        let search = ToolCall(kind: .search, title: "Pesquisando na web", detail: "swiftui shimmer", state: .done)
+        #expect(search.lineWords == ToolCall.LineWords(main: "Pesquisou", rest: "“swiftui shimmer”", hidesDetail: false))
+        // A title `WorkPhrase` does not know is conjugated whole, with its detail after it.
         let script = ToolCall(kind: .computer, title: "Usando o AppleScript", detail: "tell application \"Mail\"", state: .done)
-        #expect(script.lineWords.main == "Usando o AppleScript" && script.lineWords.rest != nil)
+        #expect(script.lineWords == ToolCall.LineWords(main: "Usou o AppleScript", rest: "tell application \"Mail\"", hidesDetail: false))
+        let shot = ToolCall(kind: .computer, title: "Capturando a tela", detail: "", state: .failed)
+        #expect(shot.lineWords.main == "Falhou ao capturar a tela")
+    }
+
+    @Test func aTitleInTheGerundIsSaidInThePreterite() {
+        #expect(ToolIntent.pastOfGerund("Lendo arquivo") == "Leu arquivo")
+        #expect(ToolIntent.pastOfGerund("Abrindo a pasta") == "Abriu a pasta")
+        #expect(ToolIntent.pastOfGerund("Vendo as ferramentas") == "Viu as ferramentas")
+        #expect(ToolIntent.pastOfGerund("Fazendo um backup") == "Fez um backup")
+        #expect(ToolIntent.pastOfGerund("Propondo um Orb") == "Propôs um Orb")
+        #expect(ToolIntent.pastOfGerund("Falando com Pesquisador") == "Falou com Pesquisador")
+        #expect(ToolIntent.pastOfGerund("Planejamento") == "Planejamento", "not a gerund: as it came")
+        #expect(ToolIntent.pastOfGerund("Segundo plano") == "Segundo plano")
+        #expect(ToolIntent.failedGerund("Gravando arquivo") == "Falhou ao gravar arquivo")
+        #expect(ToolIntent.failedGerund("Pondo a mesa") == "Falhou ao pôr a mesa")
+        #expect(ToolIntent.failedGerund("Tela") == "Falhou: Tela")
+        #expect(PortugueseVerb.infinitive(ofGerund: "lendo") == "ler")
+        #expect(PortugueseVerb.infinitive(ofGerund: "indo") == nil, "too short to tell")
+        #expect(PortugueseVerb.infinitive(ofGerund: "mundo") == nil)
+    }
+
+    // MARK: How a command ended
+
+    @Test func theExitCodeLineAndTheNotesForTheModelLeaveTheOutput() {
+        let worked = CommandOutput("Código de saída: 0\nBuild complete!")
+        #expect(worked.end == .code(0) && worked.text == "Build complete!")
+        #expect(worked.lineNote == nil)
+        #expect(worked.endText(failed: false, background: false) == "Concluído")
+        let saved = CommandOutput("Código de saída: 1\nTraceback\nErro\n[full output saved at /tmp/x.txt (44 lines, 2 KB); read it with read_file]")
+        #expect(saved.text == "Traceback\nErro")
+        #expect(saved.lineNote == "código 1")
+        #expect(saved.endText(failed: true, background: false) == "Saiu com código 1")
+        // The shell's own hint stays out of the code.
+        #expect(CommandOutput("Código de saída: 127 (comando não encontrado: confira)\nzsh: x").end == .code(127))
+        let killed = CommandOutput("Código de saída: encerrado pelo sinal 15 (SIGTERM)\n(sem saída)")
+        #expect(killed.end == .signal("15 (SIGTERM)") && killed.text.isEmpty)
+        #expect(killed.endText(failed: true, background: false) == "Encerrado pelo sinal 15 (SIGTERM)")
+        let late = CommandOutput("rodando…\n[tempo esgotado após 120 s; o processo foi encerrado. Para comandos longos use x]")
+        #expect(late.end == .timedOut && late.text == "rodando…")
+        #expect(late.lineNote == "tempo esgotado")
+        // No code line (a background start, an older conversation): the text as it is.
+        let other = CommandOutput("[O comando continua rodando em segundo plano como o processo j1.]")
+        #expect(other.end == nil && other.text.hasPrefix("[O comando"))
+        #expect(other.endText(failed: false, background: true) == "Seguiu em segundo plano")
+        #expect(other.endText(failed: true, background: false) == "Falhou")
+        #expect(CommandOutput("Código de saída: 1\n(sem saída)").endText(failed: false, background: false) == "Saiu com código 1",
+                "grep finding nothing: not a failure, but not a plain success either")
+    }
+
+    @Test func theToolWritesWhatTheChatReadsBack() {
+        // The writer and the reader share the words (`RunCommandTool`, `CommandOutput`).
+        #expect(RunCommandTool.folderNote == "\n\nem ")
+        #expect(CommandOutput(CommandOutput.exitLead + "2\nx").end == .code(2))
     }
 
     // MARK: The working line

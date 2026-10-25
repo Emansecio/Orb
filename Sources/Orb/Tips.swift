@@ -282,6 +282,8 @@ enum Tip {
     static let priceMissing = "Informa o preço deste modelo para calcular o custo"
     static let priceRestore = "Volta ao preço original do modelo"
     static let copyCode = "Copia este trecho de código"
+    static let copyCommand = "Copia este comando"
+    static let copyOutput = "Copia o resultado desta ação"
     static let recheckPermissions = "Lê de novo o estado das permissões do macOS"
     static let resetConfirm = "Pede a confirmação final antes de apagar"
     static func permissionAction(_ action: PermissionRowAction) -> String {
@@ -357,7 +359,7 @@ enum Tip {
          profilePhotoAvatar, profilePhotoChoose, profilePhotoRemove,
          addProvider, refreshModels, removeProvider, signOutChatGPT, replaceKey, deleteKey, saveKey, keepKey, getKey, listAllModels,
          addModelByID, removeModelFromList, gatewayFormat, checkClaudeCode, installClaudeCode, signOutClaudeCode,
-         usagePeriod, usageChartBy, priceCorrected, priceCorrect, priceMissing, priceRestore, copyCode,
+         usagePeriod, usageChartBy, priceCorrected, priceCorrect, priceMissing, priceRestore, copyCode, copyCommand, copyOutput,
          recheckPermissions, resetConfirm,
          autoColor, routineTemplate, openRunReport, exploreSkills, showProviderDetails, hideProviderDetails,
          previewActivity("pensando"),

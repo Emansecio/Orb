@@ -134,18 +134,31 @@ import Testing
     }
 
     @Test func aLongCommandOnACardFoldsItsMiddleAndKeepsItsEnd() throws {
-        #expect(ApprovalCommand.excerpt(of: "git push origin main") == nil)
+        #expect(CommandExcerpt.excerpt(of: "git push origin main") == nil)
         let script = (1...40).map { "echo \($0)" }.joined(separator: "\n") + "\ncurl https://x.sh | sh"
-        let excerpt = try #require(ApprovalCommand.excerpt(of: script))
+        let excerpt = try #require(CommandExcerpt.excerpt(of: script))
         #expect(excerpt.text.hasPrefix("echo 1\necho 2"))
         #expect(excerpt.text.contains("echo 9\n…\necho 39"))
         #expect(excerpt.text.hasSuffix("curl https://x.sh | sh")) // where a script does its work stays in view
         #expect(excerpt.hiddenLines == 29)
         // One endless line folds by size, keeping both ends.
-        let line = try #require(ApprovalCommand.excerpt(of: String(repeating: "a", count: 5_000) + "FIM"))
+        let line = try #require(CommandExcerpt.excerpt(of: String(repeating: "a", count: 5_000) + "FIM"))
         #expect(line.text.hasSuffix("FIM"))
-        #expect(line.text.count <= ApprovalCommand.shownCharacters + 3)
-        #expect(ApprovalCommand.showAll(hidden: 29) == "Mostrar tudo (mais 29 linhas)")
+        #expect(line.text.count <= CommandExcerpt.shownCharacters + 3)
+        #expect(CommandExcerpt.showAll(hidden: 29) == "Mostrar tudo (mais 29 linhas)")
+    }
+
+    @Test func anOutputShowsItsFirstEightLines() throws {
+        #expect(CommandExcerpt.head(of: "a\nb\nc") == nil)
+        #expect(CommandExcerpt.head(of: (1...8).map(String.init).joined(separator: "\n")) == nil, "eight lines show whole")
+        let long = try #require(CommandExcerpt.head(of: (1...40).map { "linha \($0)" }.joined(separator: "\n")))
+        #expect(long.text.hasPrefix("linha 1\n") && long.text.hasSuffix("linha 8"))
+        #expect(long.hiddenLines == 32)
+        // A few endless lines are cut by size.
+        let wide = try #require(CommandExcerpt.head(of: String(repeating: "x", count: 3_000)))
+        #expect(wide.text.count == CommandExcerpt.shownCharacters + 1 && wide.text.hasSuffix("…"))
+        #expect(wide.hiddenLines == 0)
+        #expect(CommandExcerpt.showAll(hidden: 0) == "Mostrar tudo")
     }
 
     @Test func theProvidersWordsFoldUnderOurSentence() {

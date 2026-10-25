@@ -825,41 +825,73 @@ enum MarkdownCache {
 
 // MARK: - Tool lines
 
-/// Quiet one-line activity entry; expands to show output. While it runs it is still, in the quietest ink: the "now"
-/// is the working line at the end of the chat, which says the same with the Orb next to it, so the transcript does not
-/// shimmer a second time. When it ends the title comes back to its ink and the mark of the result comes in.
+/// One action on one line: what it did, in the tense of its state, with what it acted on written as code ("Rodou
+/// `swift build`", "Leu `SKILL.md`"), and how long it took. Running, a small spinner stands in for its symbol; failed, a
+/// red mark does, with "Falhou" and the exit code. A click opens what it ran and what came out (`CommandBlock`).
 struct ToolCallLine: View {
     let call: ToolCall
-    @State private var isExpanded = false
-    @State private var isHovering = false
+    @State private var isExpanded = Self.opensInSnapshots
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Found once per output, not on every render.
     @State private var permissionProblem: MacPermissionProblem?
 
+    /// Review snapshots cannot press the line: they draw every action open.
+    static var opensInSnapshots = false
+
     private struct PermissionKey: Equatable { var state: ToolCall.State; var output: String? }
 
     var body: some View {
-        // What the line says (see `ToolCall.lineWords`): what the action is for, or its title and detail as the tool wrote them.
+        // What the line says (see `ToolCall.lineWords`): what the action is for, or its verb and what it acted on.
         let words = call.lineWords
         let hidden = call.hiddenDetail
         let canOpen = call.output != nil || hidden != nil
+        // How a command ended, read off its output (`CommandOutput`): only once it ended, and only for a command.
+        let ended = call.isCommand && call.state != .running ? call.output.map(CommandOutput.init) : nil
+        let failed = call.state == .failed
+        let time = call.state == .running ? nil : call.duration.map(ElapsedFormat.duration)
+        let meta = [failed ? ended?.lineNote : nil, time].compactMap { $0 }.joined(separator: " · ")
         VStack(alignment: .leading, spacing: 6) {
             Button {
                 withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) { isExpanded.toggle() }
             } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: call.kind.symbol)
-                        .font(Typography.small)
-                        .foregroundStyle(Palette.faint)
-                        .frame(width: 14)
-                    (Text(words.main).foregroundColor(call.state == .running ? Palette.faint : Palette.muted)
-                        + Text(words.rest.map { "  \($0)" } ?? "").foregroundColor(Palette.faint))
-                        .font(Typography.label)
-                        .lineLimit(1)
-                        // Cut in the middle: the verb stays and so does the end of a command, where what tells two runs
-                        // apart usually is ("… --filter Suite26").
-                        .truncationMode(.middle)
                     stateMark
+                        .frame(width: 14)
+                    Text(words.main)
+                        .font(Typography.label)
+                        .foregroundStyle(failed ? Palette.danger : Palette.secondary)
+                        .lineLimit(1)
+                    if let code = words.code {
+                        Text(code)
+                            .font(.system(size: 11.5, design: .monospaced))
+                            .foregroundStyle(Palette.secondary)
+                            .lineLimit(1)
+                            // Cut in the middle: the program stays and so does the end of a command, where what tells two
+                            // runs apart usually is ("… --lote 3").
+                            .truncationMode(.middle)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1.5)
+                            .background(Palette.chipFill, in: .rect(cornerRadius: 4))
+                            // The code gives way before the verb and the time do.
+                            .layoutPriority(-1)
+                    }
+                    if let rest = words.rest {
+                        Text(rest)
+                            .font(Typography.label)
+                            .foregroundStyle(Palette.faint)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .layoutPriority(-1)
+                    }
+                    if !meta.isEmpty {
+                        Text(meta)
+                            .font(Typography.small)
+                            .monospacedDigit()
+                            .foregroundStyle(failed ? Palette.danger.opacity(0.85) : Palette.faint)
+                            .lineLimit(1)
+                            .fixedSize()
+                            .transition(.opacity)
+                    }
                     if canOpen {
                         Image(systemName: "chevron.right")
                             .font(.system(size: 9, weight: .semibold))
@@ -868,28 +900,17 @@ struct ToolCallLine: View {
                             // No turning under Reduce Motion: the arrow points the other way at once.
                             .animation(reduceMotion ? nil : Motion.content, value: isExpanded)
                     }
-                    // How long it took, on hover only (as on a folded line): after the chevron, so nothing before it moves.
-                    if isHovering, call.state == .done, let duration = call.duration {
-                        (Text(duration, format: .number.precision(.fractionLength(1))) + Text(" s"))
-                            .font(Typography.small)
-                            .monospacedDigit()
-                            .foregroundStyle(Palette.faint)
-                            .lineLimit(1)
-                            .fixedSize()
-                            .transition(.opacity)
-                    }
                     Spacer(minLength: 0)
                 }
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .onHover { isHovering = $0 }
-            .animation(Motion.hover(isHovering), value: isHovering)
             .disabled(!canOpen)
             .help(!canOpen ? "" : hidden == nil ? Tip.toggleOutput(isExpanded: isExpanded) : Tip.toggleCommand(isExpanded: isExpanded))
             // Running -> done or failed: the mark of the state comes in (see `stateMark`).
             .motion(Motion.enter, value: call.state)
-            .accessibilityLabel(TranscriptSpeech.tool(title: words.main, detail: words.rest ?? "", state: call.state))
+            .accessibilityLabel(TranscriptSpeech.tool(title: words.main, detail: [words.code, words.rest, meta.isEmpty ? nil : meta]
+                .compactMap { $0 }.joined(separator: " "), state: call.state))
             .accessibilityValue(!canOpen ? "" : (isExpanded ? "expandido" : "recolhido"))
             .accessibilityHint(!canOpen ? "" : hidden == nil ? "Mostra a saída" : "Mostra o comando e a saída")
 
@@ -901,36 +922,34 @@ struct ToolCallLine: View {
                 ProducedFilesView(files: files, captures: Set(call.capturedPictures.map(\.path))).padding(.leading, 22)
             }
 
-            if isExpanded, hidden != nil || call.output != nil {
-                VStack(alignment: .leading, spacing: 8) {
-                    // The words the line leaves out: what ran, and the command or script itself.
-                    if let hidden {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(hidden.title)
-                                .font(Typography.small)
-                                .foregroundStyle(Palette.faint)
-                            Text(hidden.detail)
-                                .font(.system(size: 12, design: .monospaced))
-                                .foregroundStyle(Palette.secondary)
-                                .textSelection(.enabled)
-                        }
-                    }
-                    if let output = call.output {
-                        Text(output)
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(Palette.secondary)
-                            .textSelection(.enabled)
-                    }
-                }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .card(radius: Radius.medium)
-                .transition(.adapted(.unfold, reduceMotion: reduceMotion))
+            if isExpanded, canOpen {
+                block(hidden: hidden, ended: ended, time: time)
+                    .padding(.leading, 22) // under the line's words, past its symbol
+                    .transition(.adapted(.unfold, reduceMotion: reduceMotion))
             }
         }
         .padding(.leading, gutter)
         .task(id: PermissionKey(state: call.state, output: call.state == .running ? nil : call.output)) {
             permissionProblem = call.permissionProblemToShow
+        }
+    }
+
+    /// What the line opens to: a command as a terminal shows it, with how it ended at its foot; any other action, what it
+    /// acted on (the whole path, the script) and what came out.
+    @ViewBuilder private func block(hidden: (title: String, detail: String)?, ended: CommandOutput?, time: String?) -> some View {
+        if call.isCommand {
+            let shown = ShownCommand.split(call.detail)
+            let end = call.state == .running ? nil : CommandBlock.End(
+                text: [ended?.endText(failed: call.state == .failed, background: call.title == "Rodando em segundo plano") ?? "Concluído",
+                       time].compactMap { $0 }.joined(separator: " · "),
+                outcome: call.state == .failed ? .failed : ended?.end == nil || ended?.end == .code(0) ? .succeeded : .neutral)
+            CommandBlock(command: shown.command, folder: shown.folder, output: ended?.text ?? call.output, end: end)
+        } else {
+            // A detail on one line (a path, an address) heads the block; a longer one (a script) is the block's text.
+            let detail = hidden?.detail
+            let oneLine = detail.map { !$0.contains("\n") } ?? false
+            CommandBlock(command: oneLine ? nil : detail, prompt: false, folder: nil,
+                         heading: oneLine ? detail.map { (call.kind.symbol, $0) } : nil, output: call.output)
         }
     }
 
@@ -940,12 +959,19 @@ struct ToolCallLine: View {
         .adapted(.mark, reduceMotion: reduceMotion)
     }
 
+    /// Where the action's symbol is: a spinner while it runs, a red mark when it failed.
     @ViewBuilder private var stateMark: some View {
         switch call.state {
-        case .running, .done: // the time of one that worked is on hover
-            EmptyView()
+        case .running:
+            ProgressView()
+                .controlSize(.mini)
+                .accessibilityHidden(true)
+        case .done:
+            Image(systemName: call.kind.symbol)
+                .font(Typography.small)
+                .foregroundStyle(Palette.muted)
         case .failed:
-            Image(systemName: "exclamationmark.circle")
+            Image(systemName: "xmark.circle.fill")
                 .font(Typography.small)
                 .foregroundStyle(Palette.danger)
                 .accessibilityLabel("Falhou")
@@ -954,11 +980,169 @@ struct ToolCallLine: View {
     }
 }
 
+/// A command as a terminal shows it, in one block at most the width of the cards: the folder it ran in (when it was not
+/// the Orb's), `$ command`, what it printed (its first lines, the rest one click away, `CommandExcerpt`) and how it ended.
+/// The approval card shows the command it asks about in the same block, without output or end; another action's open
+/// line, what it acted on and what came out.
+struct CommandBlock: View {
+    struct End: Equatable {
+        enum Outcome: Equatable { case succeeded, neutral, failed }
+        /// "Concluído · 12,4 s", "Saiu com código 1 · 2,1 s".
+        var text: String
+        var outcome: Outcome
+
+        var symbol: String {
+            switch outcome {
+            case .succeeded: "checkmark.circle.fill"
+            case .neutral: "minus.circle.fill"
+            case .failed: "xmark.circle.fill"
+            }
+        }
+    }
+
+    /// What ran; nil when the block only shows an output.
+    var command: String?
+    /// "$" before the command: a command of the Terminal, not a path or a script of another tool.
+    var prompt = true
+    /// Code, in the monospaced font; false for words (a hand-off's instructions).
+    var isCode = true
+    /// Long commands fold (`CommandExcerpt`) and open whole on request: what is approved is never hidden, only folded. A
+    /// risky one is always shown whole.
+    var foldsCommand = true
+    var folder: String?
+    /// A symbol and a line above it all when there is no folder (the file an action read).
+    var heading: (symbol: String, text: String)?
+    var output: String?
+    var end: End?
+    /// `Palette.raised` on a card, so the block stands apart from it.
+    var fill = Palette.surface
+    /// "Copiar" for the command, or for the output when there is no command; off on an approval card.
+    var copies = true
+    @State private var showsWholeCommand = false
+    @State private var showsWholeOutput = false
+
+    var body: some View {
+        let output = output.flatMap { $0.isEmpty ? nil : $0 }
+        let copied = command ?? output
+        let head = folder.map { ("folder", $0) } ?? heading
+        VStack(alignment: .leading, spacing: 0) {
+            if head != nil || command != nil {
+                VStack(alignment: .leading, spacing: 6) {
+                    if let head {
+                        HStack(spacing: 6) {
+                            Image(systemName: head.0)
+                                .font(.system(size: 10))
+                            Text(head.1)
+                                .font(.system(size: 11, design: .monospaced))
+                                .lineLimit(1)
+                                .truncationMode(.head)
+                            Spacer(minLength: 8)
+                            if copies, let copied { copyButton(copied) }
+                        }
+                        .foregroundStyle(Palette.faint)
+                    }
+                    if let command {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            commandText(command)
+                            if head == nil, copies {
+                                Spacer(minLength: 8)
+                                copyButton(command)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, head == nil ? 10 : 9)
+                .padding(.bottom, 10)
+            }
+            if let output {
+                if head != nil || command != nil { rule }
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    outputText(output)
+                    if head == nil, command == nil, copies {
+                        Spacer(minLength: 8)
+                        copyButton(output)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+            }
+            if let end {
+                rule
+                HStack(spacing: 6) {
+                    Image(systemName: end.symbol)
+                        .foregroundStyle(end.outcome == .succeeded ? Palette.ok : end.outcome == .failed ? Palette.danger : Palette.faint)
+                    Text(end.text)
+                        .foregroundStyle(end.outcome == .failed ? Palette.danger.opacity(0.9) : Palette.faint)
+                        .monospacedDigit()
+                }
+                .font(Typography.small)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .frame(maxWidth: cardWidth, alignment: .leading)
+        .card(radius: Radius.small, fill: fill, stroke: end?.outcome == .failed ? Palette.danger.opacity(0.35) : Palette.line)
+    }
+
+    private var rule: some View {
+        Rectangle().fill(Palette.line).frame(height: 1)
+    }
+
+    private func copyButton(_ text: String) -> some View {
+        CopyTextButton(text: text, help: command == nil ? Tip.copyOutput : Tip.copyCommand,
+                       label: command == nil ? "Copiar resultado" : "Copiar comando",
+                       copiedLabel: command == nil ? "Resultado copiado" : "Comando copiado")
+    }
+
+    @ViewBuilder private func commandText(_ command: String) -> some View {
+        let excerpt = foldsCommand ? CommandExcerpt.excerpt(of: command) : nil
+        VStack(alignment: .leading, spacing: 6) {
+            (Text(prompt ? "$ " : "").foregroundColor(Palette.faint)
+                + Text(showsWholeCommand ? command : excerpt?.text ?? command).foregroundColor(isCode ? Palette.ink : Palette.secondary))
+                .font(.system(size: 12, design: isCode ? .monospaced : .default))
+                .lineSpacing(2)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if let excerpt {
+                showAllButton(isShowing: $showsWholeCommand, hidden: excerpt.hiddenLines)
+            }
+        }
+    }
+
+    @ViewBuilder private func outputText(_ output: String) -> some View {
+        let head = CommandExcerpt.head(of: output)
+        VStack(alignment: .leading, spacing: 6) {
+            Text(showsWholeOutput ? output : head?.text ?? output)
+                .font(.system(size: 11.5, design: .monospaced))
+                .foregroundStyle(Palette.secondary)
+                .lineSpacing(2)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if let head {
+                showAllButton(isShowing: $showsWholeOutput, hidden: head.hiddenLines)
+            }
+        }
+    }
+
+    private func showAllButton(isShowing: Binding<Bool>, hidden: Int) -> some View {
+        Button(isShowing.wrappedValue ? "Mostrar menos" : CommandExcerpt.showAll(hidden: hidden)) {
+            isShowing.wrappedValue.toggle()
+        }
+        .buttonStyle(.plain)
+        .font(.system(size: 11.5, weight: .medium))
+        .foregroundStyle(Palette.muted)
+        .clickablePointer()
+    }
+}
+
 /// The Orb's actions one after another, folded into one quiet line in the place of their lines: what they did ("Rodou
 /// 7 comandos e leu 1 arquivo"), how many failed, and how long they took. A click opens it into the lines themselves
-/// (each still opens into its output), set in under the line's words. What must not hide stays below the folded line:
-/// the files the actions made and the button to a macOS permission one of them was refused. While the actions run the
-/// line is in the quietest ink and only counts: the "now" is the working line at the end of the chat.
+/// (each still opens into its output), set in under the line's words on a rail. What must not hide stays below the
+/// folded line: the files the actions made and the button to a macOS permission one of them was refused. While the
+/// actions run, a small spinner stands in for the line's symbol and the line only counts: the "now" is the working line
+/// at the end of the chat.
 struct ToolGroupRow: View, Equatable {
     let items: [TranscriptItem]
     let botID: UUID
@@ -969,10 +1153,11 @@ struct ToolGroupRow: View, Equatable {
     let toggle: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var permissionProblem: MacPermissionProblem?
-    @State private var isHovering = false
 
     /// Review snapshots cannot press the line: they draw every run open.
     static var opensInSnapshots = false
+
+    private static let actionSpacing: CGFloat = 6
 
     nonisolated static func == (lhs: ToolGroupRow, rhs: ToolGroupRow) -> Bool {
         lhs.items == rhs.items && lhs.botID == rhs.botID && lhs.orb == rhs.orb && lhs.isOpen == rhs.isOpen && lhs.find == rhs.find
@@ -987,8 +1172,8 @@ struct ToolGroupRow: View, Equatable {
         let isRunning = calls.contains { $0.state == .running }
         let variants = ToolTally.lineVariants(calls)
         let failures = ToolTally.failures(calls)
-        // 4 pt between the actions of one group (one list, read down), 12 between the group and what is around it.
-        VStack(alignment: .leading, spacing: 4) {
+        // 6 pt between the actions of one group (one list, read down), 12 between the group and what is around it.
+        VStack(alignment: .leading, spacing: Self.actionSpacing) {
             VStack(alignment: .leading, spacing: 6) {
                 header(variants: variants, failures: failures, span: ToolTally.span(calls), count: ToolTally.countNote(calls),
                        isRunning: isRunning, symbol: ToolTally.symbol(calls))
@@ -1000,6 +1185,15 @@ struct ToolGroupRow: View, Equatable {
                     TranscriptRow(item: item, botID: botID, orb: orb, find: item.id == find?.itemID ? find : nil)
                         .equatable()
                         .padding(.leading, 22) // under the line's words, past its symbol
+                        // A rail under the line's symbol ties the actions to it, one piece per action that reaches down
+                        // over the gap to the next (so it comes in with each one).
+                        .background(alignment: .topLeading) {
+                            Rectangle()
+                                .fill(Palette.line)
+                                .frame(width: 1)
+                                .padding(.bottom, index == items.count - 1 ? 0 : -Self.actionSpacing)
+                                .padding(.leading, gutter + 6.5)
+                        }
                         // The find bar scrolls to an action by its id; the first one's is the row's own.
                         .id(index == 0 ? AnyHashable("\(item.id)-first") : AnyHashable(item.id))
                         .transition(reduceMotion ? .quiet : AnyTransition.unfold.animation(Motion.enter.delay(Motion.staggerDelay(index))))
@@ -1018,13 +1212,21 @@ struct ToolGroupRow: View, Equatable {
         Button(action: toggle) {
             FittingWords(variants: variants) { summary in
                 HStack(spacing: 8) {
-                    Image(systemName: symbol)
-                        .font(Typography.small)
-                        .foregroundStyle(Palette.faint)
-                        .frame(width: 14)
+                    Group {
+                        if isRunning {
+                            ProgressView()
+                                .controlSize(.mini)
+                                .accessibilityHidden(true)
+                        } else {
+                            Image(systemName: symbol)
+                                .font(Typography.small)
+                                .foregroundStyle(Palette.muted)
+                        }
+                    }
+                    .frame(width: 14)
                     Text(summary)
                         .font(Typography.label)
-                        .foregroundStyle(isRunning ? Palette.faint : Palette.muted)
+                        .foregroundStyle(Palette.secondary)
                         .lineLimit(1)
                         // The words give way before the marks do, when even the shortest wording is too long.
                         .layoutPriority(-1)
@@ -1035,34 +1237,27 @@ struct ToolGroupRow: View, Equatable {
                         ErrorMark(failures: failures)
                             .transition(.adapted(.mark, reduceMotion: reduceMotion))
                     }
+                    // How long it took and how many actions, when the words do not count them: in view, as on each line.
+                    if let marks = marks(span: span, count: count) {
+                        Text(marks)
+                            .font(Typography.small)
+                            .monospacedDigit()
+                            .foregroundStyle(Palette.faint)
+                            .lineLimit(1)
+                            .fixedSize()
+                            .transition(.opacity)
+                    }
                     Image(systemName: "chevron.right")
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(Palette.faint)
                         .rotationEffect(.degrees(isOpen ? 90 : 0))
                         .animation(reduceMotion ? nil : Motion.content, value: isOpen)
-                        // How long it took and how many actions, on hover only: the line keeps to what was done (and
-                        // what failed). Laid over the space after the chevron, so the words never change to fit them.
-                        .overlay(alignment: .trailing) {
-                            if isHovering, let marks = marks(span: span, count: count) {
-                                marks
-                                    .font(Typography.small)
-                                    .monospacedDigit()
-                                    .foregroundStyle(Palette.faint)
-                                    .lineLimit(1)
-                                    .fixedSize()
-                                    .alignmentGuide(.trailing) { $0[.leading] - 8 }
-                                    .transition(.opacity)
-                                    .allowsHitTesting(false)
-                            }
-                        }
                     Spacer(minLength: 0)
                 }
             }
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .onHover { isHovering = $0 }
-        .animation(Motion.hover(isHovering), value: isHovering)
         .help(Tip.toggleActions(isOpen: isOpen))
         // The last action ending: the marks of the result come in (see `ToolCallLine`).
         .motion(Motion.enter, value: isRunning)
@@ -1072,15 +1267,10 @@ struct ToolGroupRow: View, Equatable {
         .accessibilityHint(isOpen ? "Recolhe as ações" : "Mostra cada ação")
     }
 
-    /// "12,3 s · 6 ações": the time once every action ended, and the count when the words do not say it.
-    private func marks(span: TimeInterval?, count: String?) -> Text? {
-        let time = span.map { Text($0, format: .number.precision(.fractionLength(1))) + Text(" s") }
-        switch (time, count) {
-        case let (time?, count?): return time + Text(" · \(count)")
-        case let (time?, nil): return time
-        case let (nil, count?): return Text(count)
-        case (nil, nil): return nil
-        }
+    /// "12 s · 6 ações": the time once every action ended, and the count when the words do not say it.
+    private func marks(span: TimeInterval?, count: String?) -> String? {
+        let parts = [span.map(ElapsedFormat.duration), count].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     /// Under the folded line, what one of its actions would have shown under its own: the files they made, and the way
@@ -1229,7 +1419,7 @@ extension WorkOutcome {
     /// The symbol before the work's line: a request that did not end in an answer says so before its words are read.
     var symbol: String {
         switch self {
-        case .answered, .running: "checklist"
+        case .answered, .running: "stopwatch"
         case .stopped: "stop.circle"
         case .appClosed, .paused: "exclamationmark.triangle"
         case .failed: "exclamationmark.circle"
@@ -1475,13 +1665,26 @@ private struct NoticeActionStyle: ButtonStyle {
 
 // MARK: - Approvals
 
-/// A long command on an approval card: its first lines and its last, with the middle one click away (a script of 200
-/// lines would push the buttons off the window). The end stays in view because that is where a script does its work
-/// (`… | sh`), and a risky command is never folded.
-enum ApprovalCommand {
+/// A long command in a `CommandBlock` (an approval card, an action of the chat): its first lines and its last, with the
+/// middle one click away (a script of 200 lines would push the buttons off the window). The end stays in view because
+/// that is where a script does its work (`… | sh`), and a risky command is never folded. Its output shows its first
+/// lines (`head`).
+enum CommandExcerpt {
     static let headLines = 9
     static let tailLines = 3
     static let shownCharacters = 1_200
+    static let outputLines = 8
+
+    /// The first `outputLines` lines of an output (at most `shownCharacters` characters of them) and how many lines are
+    /// left out; nil when it is short enough to show whole.
+    static func head(of output: String) -> (text: String, hiddenLines: Int)? {
+        let lines = output.split(separator: "\n", omittingEmptySubsequences: false)
+        let hidden = lines.count - outputLines
+        guard hidden > 0 || output.count > shownCharacters else { return nil }
+        var text = lines.prefix(outputLines).joined(separator: "\n")
+        if text.count > shownCharacters { text = String(text.prefix(shownCharacters)) + "…" }
+        return (text, max(hidden, 0))
+    }
 
     /// The start and end of `command` and how many lines are left out between them; nil when it is short enough to
     /// show whole.
@@ -1564,8 +1767,6 @@ struct ApprovalCard: View {
     @State private var isOpen = false
     /// A group's actions past the first `visibleItems`, shown once asked for.
     @State private var showsAllItems = false
-    /// A long command opens whole on request: what is approved is never hidden, only folded.
-    @State private var showsWholeCommand = false
     /// Changes once to play the pulse.
     @State private var pulse = 0
     /// The button a keyboard shortcut is pressing (shown for `ApprovalShortcut.pressDuration` before it answers).
@@ -1698,25 +1899,12 @@ struct ApprovalCard: View {
         if request.isBatch {
             batchList
         } else if !request.command.isEmpty {
-            let excerpt = request.isDangerous ? nil : ApprovalCommand.excerpt(of: request.command)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(showsWholeCommand ? request.command : excerpt?.text ?? request.command)
-                    .font(.system(size: 12, design: request.isHandoff ? .default : .monospaced))
-                    .foregroundStyle(Palette.secondary)
-                    .textSelection(.enabled)
-                if let excerpt {
-                    Button(showsWholeCommand ? "Mostrar menos" : ApprovalCommand.showAll(hidden: excerpt.hiddenLines)) {
-                        showsWholeCommand.toggle()
-                    }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Palette.accentText)
-                    .clickablePointer()
-                }
-            }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Palette.raised, in: .rect(cornerRadius: Radius.small))
+            // The command as the chat shows it once it ran (`ToolCallLine`), on the card's own fill.
+            let isCommand = request.toolName == "run_command"
+            let shown = isCommand ? ShownCommand.split(request.command) : (command: request.command, folder: nil)
+            CommandBlock(command: shown.command, prompt: isCommand, isCode: !request.isHandoff, foldsCommand: !request.isDangerous,
+                         folder: shown.folder, fill: Palette.raised, copies: false)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         if let note = request.note {
             Text("Você disse: \(note)")

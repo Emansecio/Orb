@@ -46,6 +46,27 @@ enum ToolIntent {
         conjugate(text) { PortugueseVerb.past(of: $0) }
     }
 
+    /// A tool's title, in the gerund, said as done ("Lendo arquivo" → "Leu arquivo", "Abrindo a pasta" → "Abriu a pasta");
+    /// as it came when its first word is not a gerund.
+    static func pastOfGerund(_ text: String) -> String {
+        fromGerund(text) { PortugueseVerb.past(of: $0) } ?? text
+    }
+
+    /// A tool's title, in the gerund, said as what did not work ("Lendo arquivo" → "Falhou ao ler arquivo").
+    static func failedGerund(_ text: String) -> String {
+        guard let said = fromGerund(text, { $0 }) else { return "Falhou: \(text)" }
+        return "Falhou ao " + said.prefix(1).lowercased() + said.dropFirst()
+    }
+
+    /// `text` with its first word, a gerund, in the form `form` makes of its infinitive; nil when it is not a gerund.
+    private static func fromGerund(_ text: String, _ form: (String) -> String?) -> String? {
+        let space = text.firstIndex(where: \.isWhitespace) ?? text.endIndex
+        let word = String(text[..<space])
+        guard let infinitive = PortugueseVerb.infinitive(ofGerund: word.lowercased()), let said = form(infinitive) else { return nil }
+        let capital = word.first?.isUppercase == true
+        return (capital ? said.prefix(1).uppercased() + said.dropFirst() : said) + text[space...]
+    }
+
     /// `past`, to open a sentence: "Conferiu se a vaga".
     static func pastOpening(_ text: String) -> String {
         let said = past(text)
@@ -102,6 +123,21 @@ enum PortugueseVerb {
         if let stem = putStem(infinitive) { return stem + "ondo" }
         guard let (stem, ending) = split(infinitive) else { return nil }
         return stem + ending + "ndo"
+    }
+
+    /// The infinitive of a gerund: -ando → -ar, -endo → -er, -indo → -ir, and -pondo → -por for pôr and its family.
+    static func infinitive(ofGerund word: String) -> String? {
+        guard word.count >= 5, word.hasSuffix("ndo"), word.allSatisfy(\.isLetter) else { return nil }
+        let stem = String(word.dropLast(4))
+        switch word.dropLast(3).last {
+        case "a": return stem + "ar"
+        case "e": return stem + "er"
+        case "i": return stem + "ir"
+        case "o":
+            let verb = stem + "or"
+            return verb == "por" ? "pôr" : pôrFamily.contains(verb) ? verb : nil
+        default: return nil
+        }
     }
 
     /// The preterite, third person singular: -ar → -ou, -er → -eu, -ir → -iu, the irregular ones from `irregularPast`.
@@ -377,39 +413,83 @@ enum CommandGist {
 // MARK: - The words of a tool's line
 
 extension ToolCall {
-    /// What the line of the call says. With a description of its own (`intent`) the line is that, in the gerund while it
-    /// runs and in the preterite after; a command with none is said by its `CommandGist`. Anything else is its title and its
-    /// detail, as the tools wrote them. `hidesDetail`: the detail (the command, the script) is not on the line and shows when
-    /// the line opens.
+    /// What the line of the call says, in up to three parts: the words (`main`), what they were done to, written as code
+    /// (`code`: the command, the file), and plain words after it (`rest`: a site, a searched phrase, "em segundo plano").
+    /// With a description of its own (`intent`) the line is that, in the gerund while it runs and in the preterite after. A
+    /// command is "Rodou" and the command itself; any other tool says its verb in the tense of its state and what it acted
+    /// on (`WorkPhrase`), or its title and detail when it is not one `WorkPhrase` knows. `hidesDetail`: the detail is not
+    /// all on the line and shows when the line opens.
     struct LineWords: Equatable {
         var main: String
-        var rest: String?
+        var code: String? = nil
+        var rest: String? = nil
         var hidesDetail: Bool
     }
 
     var lineWords: LineWords {
         if let intent {
-            return LineWords(main: state == .running ? ToolIntent.gerund(intent) : ToolIntent.past(intent), rest: nil, hidesDetail: true)
+            return LineWords(main: state == .running ? ToolIntent.gerund(intent) : ToolIntent.past(intent), hidesDetail: true)
         }
-        if let said = commandPhrase {
-            return LineWords(main: said, rest: nil, hidesDetail: true)
+        if let background = Self.commandTitles[title], let line = ShownCommand.line(of: detail) {
+            // A script reads as what it is ("Rodou um script Python") before its first line.
+            let script = CommandGist.gist(of: detail).flatMap { $0.isScript ? $0.text : nil }
+            let main = switch state {
+            case .running: script.map { "Rodando \($0)" } ?? "Rodando"
+            case .done: script.map { "Rodou \($0)" } ?? "Rodou"
+            case .failed: "Falhou"
+            }
+            return LineWords(main: main, code: line, rest: background ? "em segundo plano" : nil, hidesDetail: true)
         }
-        return LineWords(main: title, rest: detail.isEmpty ? nil : detail, hidesDetail: false)
+        let phrase = WorkPhrase.line(for: self)
+        if let target = phrase.target, phrase.verb != title {
+            let main = said(phrase.verb)
+            let hides = target != detail
+            return phrase.style == .code ? LineWords(main: main, code: target, hidesDetail: hides)
+                : LineWords(main: main, rest: phrase.shownTarget, hidesDetail: hides)
+        }
+        return LineWords(main: said(title), rest: detail.isEmpty ? nil : detail, hidesDetail: false)
     }
 
-    /// "Rodando um script Python" / "Rodou swift build em segundo plano": the line of a command that came with no description.
-    var commandPhrase: String? {
-        guard kind == .shell, let background = Self.commandTitles[title], let gist = CommandGist.gist(of: detail) else { return nil }
-        let verb = state == .running ? "Rodando" : "Rodou"
-        return "\(verb) \(gist.text)" + (background ? " em segundo plano" : "")
+    /// A verb in the gerund in the tense of the call's state: "Lendo", "Leu", "Falhou ao ler".
+    private func said(_ gerund: String) -> String {
+        switch state {
+        case .running: gerund
+        case .done: ToolIntent.pastOfGerund(gerund)
+        case .failed: ToolIntent.failedGerund(gerund)
+        }
     }
 
     /// The titles of `run_command`'s calls: true for the background one.
     static let commandTitles = ["Rodando no Terminal": false, "Rodando em segundo plano": true]
 
-    /// The title and the command or script the line leaves out, for when it opens (nil: the line says it all).
+    /// Whether the call is a command run in the Terminal (its detail is the command, its output `ShellTool`'s).
+    var isCommand: Bool { Self.commandTitles[title] != nil }
+
+    /// The title and the detail the line leaves out, for when it opens (nil: the line says it all).
     var hiddenDetail: (title: String, detail: String)? {
         guard lineWords.hidesDetail, !detail.isEmpty else { return nil }
         return (title, detail)
+    }
+}
+
+/// A command as the chat shows it: apart from the note the tool adds about where it ran (`RunCommandTool.folderNote`) and, on
+/// the line of the call, its first line and how many lines it has.
+enum ShownCommand {
+    /// The command and the folder it ran in, when the tool noted one.
+    static func split(_ detail: String) -> (command: String, folder: String?) {
+        guard let note = detail.range(of: RunCommandTool.folderNote, options: .backwards) else { return (detail, nil) }
+        let folder = detail[note.upperBound...]
+        guard !folder.isEmpty, !folder.contains("\n") else { return (detail, nil) }
+        return (String(detail[..<note.lowerBound]), String(folder))
+    }
+
+    /// "swift build", or "python3 - <<'EOF' … 18 linhas": the first line that holds a command, whole (the view cuts it in
+    /// the middle), and how many lines the command has when it has more than one. nil when there is no command.
+    static func line(of detail: String) -> String? {
+        let lines = split(detail).command.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard let first = lines.first(where: { !$0.hasPrefix("#") }) ?? lines.first else { return nil }
+        return lines.count > 1 ? "\(first) … \(lines.count) linhas" : first
     }
 }

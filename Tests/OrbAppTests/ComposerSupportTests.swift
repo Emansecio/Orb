@@ -313,6 +313,16 @@ struct ComposerSupportTests {
         #expect(ElapsedFormat.text(seconds: -4) == "0 s")
     }
 
+    @Test func anActionsTimeHasATenthUnderTenSecondsAndNeverReadsZero() {
+        #expect(ElapsedFormat.duration(0.34) == "0,3 s")
+        #expect(ElapsedFormat.duration(0.01) == "0,1 s", "a quick action is never \"0,0 s\"")
+        #expect(ElapsedFormat.duration(-2) == "0,1 s")
+        #expect(ElapsedFormat.duration(9.94) == "9,9 s")
+        #expect(ElapsedFormat.duration(12.4) == "12 s")
+        #expect(ElapsedFormat.duration(59.6) == "1 min 00 s")
+        #expect(ElapsedFormat.duration(65) == "1 min 05 s")
+    }
+
     @Test func theWorkingClockStaysEmptyDuringTheFirstSecond() {
         let start = Date(timeIntervalSince1970: 1000)
         #expect(ElapsedFormat.working(since: start, now: start.addingTimeInterval(0.4)).isEmpty)

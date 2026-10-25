@@ -39,6 +39,8 @@ Protótipo dos comandos (não commitado, em `build/`):
 | 8 | **Um bloco de código de comando só.** A aprovação usa `raised`, raio 8 e padding 10; a saída usa `surface` com borda, raio 10 e padding 12. Os dois passam a ser o mesmo componente do item 4. | `TV:1700-1722` contra `TV:925` | M | P |
 | 9 | **Ícone do pedido.** "Trabalhou por… · N ações" usa `checklist`, o mesmo símbolo do plano da tarefa. Ele passa a ter um símbolo próprio, ou nenhum. | `TV:1228-1246`; `Models.swift:389-401` | B | P |
 
+**Andamento (25/10/2026):** itens 1 a 9 feitos, no desenho do protótipo. O ícone do pedido virou `stopwatch`. O bloco aberto tem um modo de captura próprio (`transcript-commands` e `transcript-commands-open`). A aprovação usa o mesmo bloco, sobre `raised`. A saída mostra as 8 primeiras linhas. O "Mostrar tudo" saiu do azul e foi para `muted`, como no protótipo.
+
 ## 2. Mensagens surgindo
 
 | # | O quê | Onde | Imp. | Esf. |

@@ -165,8 +165,6 @@ struct CodeBlockView: View, Equatable {
     /// The code is still being written (this is the last block of a reply that streams).
     var streaming = false
     var highlight: String?
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var flash = CopiedFlash()
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.language == rhs.language && lhs.code == rhs.code && lhs.streaming == rhs.streaming && lhs.highlight == rhs.highlight
@@ -182,24 +180,7 @@ struct CodeBlockView: View, Equatable {
                     .font(Typography.small)
                     .foregroundStyle(Palette.muted)
                 Spacer(minLength: 8)
-                Button(action: copy) {
-                    HStack(spacing: 5) {
-                        Image(systemName: flash.isOn ? "checkmark" : "doc.on.doc")
-                            .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
-                        // No width is reserved for "Copiado": at rest the button sits on the 10 pt margin like the language
-                        // does. The button is anchored to the right by the spacer, so only the symbol slides a few points,
-                        // inside the same animation.
-                        Text(flash.isOn ? "Copiado" : "Copiar")
-                            .contentTransition(.opacity)
-                    }
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(flash.isOn ? Palette.ink : Palette.muted)
-                    // On the view that changes, not `withAnimation`: the reply sets "never animate" on everything it draws.
-                    .animation(flash.isOn ? Motion.press : Motion.content, value: flash.isOn)
-                }
-                .buttonStyle(.plain)
-                .help(Tip.copyCode)
-                .accessibilityLabel(flash.isOn ? "Código copiado" : "Copiar código")
+                CopyTextButton(text: code, help: Tip.copyCode, label: "Copiar código", copiedLabel: "Código copiado")
             }
             .padding(.horizontal, 10)
             .padding(.top, 7)
@@ -244,9 +225,40 @@ struct CodeBlockView: View, Equatable {
         return (closed, lines[(closedCount * pieceLines)...].joined(separator: "\n"))
     }
 
-    private func copy() {
-        Clipboard.copy(code)
-        flash.trigger()
+}
+
+/// "Copiar" with its symbol, and "Copiado" with a check for a moment after a click: the button of a block of code in a
+/// reply and of a command (`CommandBlock`).
+struct CopyTextButton: View {
+    let text: String
+    let help: String
+    /// What VoiceOver says, before and after the click.
+    let label: String
+    let copiedLabel: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var flash = CopiedFlash()
+
+    var body: some View {
+        Button {
+            Clipboard.copy(text)
+            flash.trigger()
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: flash.isOn ? "checkmark" : "doc.on.doc")
+                    .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
+                // No width is reserved for "Copiado": at rest the button sits on the block's margin. It is anchored to the
+                // right by the spacer before it, so only the symbol slides a few points, inside the same animation.
+                Text(flash.isOn ? "Copiado" : "Copiar")
+                    .contentTransition(.opacity)
+            }
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(flash.isOn ? Palette.ink : Palette.muted)
+            // On the view that changes, not `withAnimation`: a reply sets "never animate" on everything it draws.
+            .animation(flash.isOn ? Motion.press : Motion.content, value: flash.isOn)
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(flash.isOn ? copiedLabel : label)
     }
 }
 

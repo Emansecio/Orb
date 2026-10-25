@@ -90,6 +90,14 @@ enum ElapsedFormat {
         return "\(seconds / 3600) h " + String(format: "%02d", seconds % 3600 / 60) + " min"
     }
 
+    /// How long an action took: "0,3 s" under ten seconds (never "0,0 s": a quick one is "0,1 s"), then as `text` ("12 s",
+    /// "1 min 05 s").
+    static func duration(_ seconds: TimeInterval) -> String {
+        let seconds = max(0.1, seconds)
+        guard seconds < 9.95 else { return text(seconds: Int(seconds.rounded())) }
+        return seconds.formatted(.number.precision(.fractionLength(1)).locale(Locale(identifier: "pt_BR"))) + " s"
+    }
+
     /// The working line's clock: empty during the first second, so a quick answer never flashes "0 s".
     static func working(since start: Date, now: Date) -> String {
         let seconds = Int(now.timeIntervalSince(start))
