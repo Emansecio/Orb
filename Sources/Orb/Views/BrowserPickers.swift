@@ -123,7 +123,7 @@ struct BrowserPickerRows: View {
     let hasKey: Bool?
 
     /// The pickers start under the title, past the icon column.
-    private static let indent: CGFloat = 28
+    static let indent: CGFloat = 28
 
     var body: some View {
         if let live = model.liveBot(botID) {
@@ -171,15 +171,17 @@ struct BrowserPickerRows: View {
                                                         @ViewBuilder options: @escaping () -> Options) -> some View {
         // Title and picker apart in both: a Form's own picker row asks for more than it needs, so `ViewThatFits` stacked it
         // even at 360 pt. The title is hidden from VoiceOver, the picker keeps it as its label.
-        ViewThatFits(in: .horizontal) {
+        let label = Text(title).accessibilityHidden(true)
+        let field = Picker(title, selection: selection, content: options).labelsHidden()
+        return ViewThatFits(in: .horizontal) {
             HStack(spacing: 8) {
-                Text(title).accessibilityHidden(true)
+                label
                 Spacer(minLength: 8)
-                Picker(title, selection: selection, content: options).labelsHidden().fixedSize()
+                field.fixedSize()
             }
             VStack(alignment: .leading, spacing: 4) {
-                Text(title).accessibilityHidden(true)
-                Picker(title, selection: selection, content: options).labelsHidden()
+                label
+                field
             }
         }
     }

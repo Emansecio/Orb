@@ -14,6 +14,8 @@ struct SidebarChatList: View {
 
     /// How many of the newest show before "N conversas mais antigas".
     nonisolated static let shownAtRest = 3
+    /// A conversation's row, and its rename field, at least: a click target (the text alone made it about 23 pt).
+    static let rowHeight: CGFloat = 28
     /// Where the Orb's name starts in its row, and a conversation's text in its own.
     static let nameInset: CGFloat = 46
     static let rowInset: CGFloat = 8
@@ -128,8 +130,7 @@ private struct SidebarChatRow: View {
             .foregroundStyle(isShown || isUnread ? Palette.ink : Palette.muted)
             .padding(.horizontal, SidebarChatList.rowInset)
             .padding(.vertical, 4)
-            // A click target of at least 28 pt (the text alone made it about 23).
-            .frame(minHeight: 28)
+            .frame(minHeight: SidebarChatList.rowHeight)
             // On the card's own fill: a second, lighter one marks the conversation on show.
             .background(isShown ? Palette.ghostSelected : .clear, in: .rect(cornerRadius: 7))
             .hoverFill(isHovering && !isShown, in: .rect(cornerRadius: 7))
@@ -199,7 +200,7 @@ private struct ChatTitleField: View {
             .padding(.horizontal, SidebarChatList.rowInset)
             .padding(.vertical, 4)
             // Same height as SidebarChatRow, so the list does not jump when a title is renamed.
-            .frame(minHeight: 28)
+            .frame(minHeight: SidebarChatList.rowHeight)
             .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: 7))
             .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Palette.lineStrong))
             .onAppear { isFocused = true }

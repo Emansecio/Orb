@@ -142,11 +142,10 @@ struct SidebarCategoryDeletingTests {
         #expect(model.sidebarBotIDs == Array(world.ids.prefix(3)))
     }
 
-    @Test func theHeadingCountsItsOrbsOnlyWhileFolded() {
-        #expect(CategoryHeaderText.orbCount(1, collapsed: true) == "1 Orb")
-        #expect(CategoryHeaderText.orbCount(3, collapsed: true) == "3 Orbs")
-        #expect(CategoryHeaderText.orbCount(0, collapsed: true) == "0 Orbs")
-        #expect(CategoryHeaderText.orbCount(3, collapsed: false) == nil)
+    @Test func theHeadingCountsItsOrbsInWords() {
+        #expect(CategoryText.orbs(1) == "1 Orb")
+        #expect(CategoryText.orbs(3) == "3 Orbs")
+        #expect(CategoryText.orbs(0) == "0 Orbs")
     }
 
     @Test func theConfirmationSaysTheOrbsStay() {

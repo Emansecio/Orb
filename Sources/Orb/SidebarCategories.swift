@@ -224,9 +224,14 @@ enum CategoryText {
         return "\(orbs) para a lista, com conversa, memória e rotinas. Nenhum Orb é apagado."
     }
 
+    /// "1 Orb", "3 Orbs": the folded heading's number in words, and part of what VoiceOver reads.
+    static func orbs(_ count: Int) -> String {
+        count == 1 ? "1 Orb" : "\(count) Orbs"
+    }
+
     /// What VoiceOver reads for the heading: "Pesquisa, categoria, 3 Orbs, recolhida, precisa de você".
     static func accessibilityLabel(name: String, orbCount: Int, collapsed: Bool, waiting: Bool, unread: Bool) -> String {
-        var parts = [name, "categoria", orbCount == 1 ? "1 Orb" : "\(orbCount) Orbs", collapsed ? "recolhida" : "expandida"]
+        var parts = [name, "categoria", orbs(orbCount), collapsed ? "recolhida" : "expandida"]
         if collapsed && waiting { parts.append("precisa de você") }
         if collapsed && unread { parts.append("não lido") }
         return parts.joined(separator: ", ")

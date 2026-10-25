@@ -194,12 +194,12 @@ private struct SidebarCategoryHeader: View {
                 }
                 .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: collapsed && (waiting || unread))
                 // The number only stands in for the hidden Orbs: unfolded, the Orbs themselves are there to count.
-                if let count = CategoryHeaderText.orbCount(ids.count, collapsed: collapsed) {
+                if collapsed {
                     Text("\(ids.count)")
                         .font(Typography.small)
                         .foregroundStyle(Palette.faint)
                         .monospacedDigit()
-                        .help(count)
+                        .help(CategoryText.orbs(ids.count))
                 }
             }
             .frame(minHeight: SidebarCategoryLayout.headerContentHeight)
@@ -306,15 +306,6 @@ private struct CategoryNameField: View {
         isDone = true
         if keeping, let name = SidebarOrder.name(text), name != initial { save(name) }
         model.categoryNaming = nil
-    }
-}
-
-/// What the heading says about its Orbs, as plain values the tests read.
-enum CategoryHeaderText {
-    /// "3 Orbs" for the number at the heading's edge, shown only while the category is folded; nil when unfolded.
-    static func orbCount(_ count: Int, collapsed: Bool) -> String? {
-        guard collapsed else { return nil }
-        return count == 1 ? "1 Orb" : "\(count) Orbs"
     }
 }
 

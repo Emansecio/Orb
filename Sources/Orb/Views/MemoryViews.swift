@@ -237,6 +237,9 @@ struct MemoryRow: View {
     @State private var isExpanded = false
     @FocusState private var forgetFocused: Bool
 
+    /// One flag for the trash can's opacity and its animation, as in `RoutineRow`.
+    private var showsForget: Bool { isHovering || forgetFocused }
+
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
@@ -281,8 +284,8 @@ struct MemoryRow: View {
             .foregroundStyle(Palette.muted)
             .font(Typography.small)
             .focused($forgetFocused)
-            .opacity(isHovering || forgetFocused ? 1 : 0)
-            .animation(Motion.hover(isHovering || forgetFocused), value: isHovering || forgetFocused)
+            .opacity(showsForget ? 1 : 0)
+            .animation(Motion.hover(showsForget), value: showsForget)
             .help(Tip.forget)
             .accessibilityLabel("Esquecer: \(item.title)")
         }

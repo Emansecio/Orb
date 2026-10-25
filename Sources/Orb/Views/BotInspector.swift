@@ -332,9 +332,7 @@ struct BotInspector: View {
 
     // MARK: Modelo e permissões
 
-    /// Folded: one line with the model's name and, when something needs a look, a mark. Open: the model, its effort (when
-    /// the model has levels) and the permission mode. The mode's description is the picker's hover text; only the mode that
-    /// never asks keeps a line, and a model that cannot answer says why.
+    /// The model's name on the folded card's line.
     private func modelSummary(_ name: String) -> some View {
         Text(name)
             .foregroundStyle(Palette.faint)
@@ -343,6 +341,9 @@ struct BotInspector: View {
             .help(name) // cut in a narrow panel: the hover text has it whole
     }
 
+    /// Folded: one line with the model's name and, when something needs a look, a mark. Open: the model, its effort (when
+    /// the model has levels) and the permission mode. The mode's description is the picker's hover text; only the mode that
+    /// never asks keeps a line, and a model that cannot answer says why.
     private func modelCard(_ bot: Bot, info: ProviderModel?, unavailable: String?, isOpen: Bool) -> some View {
         let warning = ModelCardSummary.warning(mode: bot.permissionMode, unavailableNote: unavailable)
         let modelName = ModelCardSummary.modelText(selection: bot.model, defaultModel: model.defaultModel,
@@ -494,8 +495,8 @@ struct BotInspector: View {
                     VStack(alignment: .leading, spacing: 1) {
                         // Two lines before an ellipsis, as "Navegar na web" ("Controlar apps d…" at 244 pt).
                         capabilityTitle(capability).lineLimit(2)
-                        // Under the title text, past the icon's frame (the browser's pickers use the same 28).
-                        if isOn { inlineLink(capability, leadingDot: false).padding(.leading, 28) }
+                        // Under the title text, past the icon's frame, as the browser's pickers.
+                        if isOn { inlineLink(capability, leadingDot: false).padding(.leading, BrowserPickerRows.indent) }
                     }
                 }
                 .lineLimit(1)
@@ -914,7 +915,7 @@ private struct InspectorTabBar: View {
                             // One weight for every state: the semibold of the chosen tab widened it and moved its neighbors.
                             // `fixedSize` so the bar measures the whole name and `ViewThatFits` can tell when it does not fit.
                             Text(tab.shortTitle)
-                                .font(.system(size: 11, weight: .medium))
+                                .font(Typography.small.weight(.medium))
                                 .lineLimit(1)
                                 .fixedSize(horizontal: true, vertical: false)
                         }
@@ -1223,12 +1224,13 @@ private struct RoutineRow: View {
                 Spacer(minLength: 4)
                 // A ghost with its word, as on the Rotinas page: the pill on the left is not left facing a lone pencil.
                 // In the narrowest panel only the pencil fits; it keeps "Editar" as its tip and VoiceOver label.
+                let editButton = Button("Editar", systemImage: "pencil", action: edit)
                 ViewThatFits(in: .horizontal) {
-                    Button("Editar", systemImage: "pencil", action: edit)
+                    editButton
                         .buttonStyle(GhostStyle())
                         .fixedSize()
                         .help(Tip.editRoutine)
-                    Button("Editar", systemImage: "pencil", action: edit)
+                    editButton
                         .labelStyle(.iconOnly)
                         .buttonStyle(CircleGhostStyle(side: 26, fontSize: 12))
                         .foregroundStyle(Palette.secondary)
