@@ -1,9 +1,9 @@
 import SwiftUI
 
 /// The conversations of the open Orb, inside its card in the sidebar (the selection wraps both), once it has more than one
-/// (`OrbChats`): the newest three, the one on show and any with something unread, "N mais…" for the rest, and "Nova
-/// conversa". Their text lines up with the Orb's name. The one on show is lit, the one the Orb works on breathes, one where
-/// something landed unseen has a dot. A conversation's menu renames it (in the row itself, as a category) or deletes it.
+/// (`OrbChats`): the newest three, the one on show and any with something unread, "N conversas mais antigas" for the rest,
+/// and "Nova conversa". Their text lines up with the Orb's name. The one on show is lit, the one the Orb works on has a
+/// ring, one where something landed unseen has a dot. A conversation's menu renames it (in the row itself, as a category) or deletes it.
 struct SidebarChatList: View {
     @Environment(AppModel.self) private var model
     let botID: UUID
@@ -12,7 +12,7 @@ struct SidebarChatList: View {
     @State private var renaming: UUID?
     @State private var deleting: OrbChats.Entry?
 
-    /// How many of the newest show before "N mais…".
+    /// How many of the newest show before "N conversas mais antigas".
     nonisolated static let shownAtRest = 3
     /// Where the Orb's name starts in its row, and a conversation's text in its own.
     static let nameInset: CGFloat = 46
@@ -39,7 +39,7 @@ struct SidebarChatList: View {
                 }
             }
             if chats.list.count > Self.shownAtRest + 1 {
-                SidebarChatAction(title: showsAll ? "Mostrar menos" : "\(chats.list.count - visible.count) mais…") {
+                SidebarChatAction(title: showsAll ? "Mostrar menos" : Self.olderLabel(chats.list.count - visible.count)) {
                     showsAll.toggle()
                 }
             }
@@ -66,6 +66,11 @@ struct SidebarChatList: View {
         return model.live(botID).isWorking && session.routineID == nil ? chats.active : nil
     }
 
+    /// What the button that unfolds the rest says: it names what is hidden.
+    nonisolated static func olderLabel(_ hidden: Int) -> String {
+        hidden == 1 ? "1 conversa mais antiga" : "\(hidden) conversas mais antigas"
+    }
+
     /// The newest `shownAtRest`, the one on show and the unread ones, in the list's order; all of them when `showsAll`, or
     /// when only one more would be left out.
     nonisolated static func visible(_ chats: OrbChats, showsAll: Bool) -> [OrbChats.Entry] {
@@ -77,10 +82,20 @@ struct SidebarChatList: View {
     }
 }
 
-/// One conversation in the list: its title and when you last wrote in it; a breathing dot while the Orb works on it, a
-/// still one when something landed in it unseen.
+/// The one mark a row carries at its right edge. A ring is "at work", a filled dot is "unseen": two shapes, so they
+/// differ without color or motion (Reduce Motion stills the ring's breath, it stays a ring).
+enum SidebarMarker: Equatable {
+    case working, unread
+
+    /// A conversation: while the Orb works on it, that is what matters; an unseen reply is shown once it stops.
+    static func forChat(isWorking: Bool, isUnread: Bool) -> SidebarMarker? {
+        isWorking ? .working : isUnread ? .unread : nil
+    }
+}
+
+/// One conversation in the list: its title and when you last wrote in it; a ring while the Orb works on it, a dot when
+/// something landed in it unseen.
 private struct SidebarChatRow: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let entry: OrbChats.Entry
     let isShown: Bool
     let isWorking: Bool
@@ -94,25 +109,27 @@ private struct SidebarChatRow: View {
                 Text(entry.title)
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                if isWorking {
-                    BreathingDot(color: Palette.accentText, breathes: !reduceMotion)
-                        .frame(width: 5, height: 5)
+                switch SidebarMarker.forChat(isWorking: isWorking, isUnread: isUnread) {
+                case .working:
+                    WorkingRing()
                         .frame(width: 10)
-                } else if isUnread {
+                case .unread:
                     Circle()
                         .fill(Palette.accentText)
                         .frame(width: 6, height: 6)
                         .frame(width: 10)
-                } else {
+                case nil:
                     Text(ReplyTime.label(entry.updated))
-                        .font(.system(size: 10.5).monospacedDigit())
+                        .font(Typography.small.monospacedDigit())
                         .foregroundStyle(Palette.faint)
                 }
             }
-            .font(.system(size: 12, weight: isShown || isUnread ? .medium : .regular))
+            .font(Typography.label.weight(isShown || isUnread ? .medium : .regular))
             .foregroundStyle(isShown || isUnread ? Palette.ink : Palette.muted)
             .padding(.horizontal, SidebarChatList.rowInset)
             .padding(.vertical, 4)
+            // A click target of at least 28 pt (the text alone made it about 23).
+            .frame(minHeight: 28)
             // On the card's own fill: a second, lighter one marks the conversation on show.
             .background(isShown ? Palette.ghostSelected : .clear, in: .rect(cornerRadius: 7))
             .hoverFill(isHovering && !isShown, in: .rect(cornerRadius: 7))
@@ -127,7 +144,7 @@ private struct SidebarChatRow: View {
     }
 }
 
-/// "N mais…" and "Nova conversa" at the foot of the list, quieter than the conversations.
+/// "N conversas mais antigas" and "Nova conversa" at the foot of the list, quieter than the conversations.
 private struct SidebarChatAction: View {
     let title: String
     var symbol: String?
@@ -140,7 +157,7 @@ private struct SidebarChatAction: View {
                 if let symbol { Image(systemName: symbol).font(.system(size: 10, weight: .semibold)) }
                 Text(title)
             }
-            .font(.system(size: 11.5))
+            .font(Typography.small)
             .foregroundStyle(isHovering ? Palette.muted : Palette.faint)
             .padding(.horizontal, SidebarChatList.rowInset)
             .padding(.vertical, 4)

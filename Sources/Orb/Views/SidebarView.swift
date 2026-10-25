@@ -159,7 +159,7 @@ struct SectionTitle<Trailing: View>: View {
     var body: some View {
         HStack(spacing: 4) {
             Text(title)
-                .font(.system(size: 11, weight: .medium))
+                .font(Typography.label.weight(.medium))
                 .foregroundStyle(Palette.faint)
                 .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 4)
@@ -181,7 +181,8 @@ struct SectionPlus: View {
     var body: some View {
         Image(systemName: "plus")
             .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(isHovering ? Palette.secondary : Palette.hint)
+            // `hint` is decorative only (about 3:1); the "+" is a control, so it rests at `faint`.
+            .foregroundStyle(isHovering ? Palette.secondary : Palette.faint)
             .frame(width: size, height: size)
             .hoverFill(isHovering, in: .rect(cornerRadius: 6))
             .contentShape(.rect)
@@ -203,7 +204,10 @@ private struct NewOrbMenu: View {
         } label: {
             SectionPlus()
         }
-        .menuStyle(.borderlessButton)
+        // `.button` with a plain style keeps the label a SwiftUI view, so the "+" keeps its own color and matches the
+        // groups' `Button`; `.borderlessButton` draws the label through AppKit, which showed it lighter.
+        .menuStyle(.button)
+        .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
         .help(Tip.newOrbOrCategory)
@@ -227,8 +231,9 @@ private struct FooterPageButton: View {
         let isSelected = model.selection == item
         Button { model.selection = item } label: {
             VStack(spacing: 2) {
-                Image(systemName: symbol).font(.system(size: 14))
-                Text(name).font(.system(size: 10)).lineLimit(1)
+                // A fixed height, so the captions line up whatever the symbols' own heights are.
+                Image(systemName: symbol).font(.system(size: 14)).frame(height: 16)
+                Text(name).font(Typography.small).lineLimit(1)
             }
             .foregroundStyle(isSelected ? Palette.ink : Palette.muted)
             .frame(maxWidth: .infinity)
@@ -263,7 +268,6 @@ struct SidebarRow<Content: View>: View {
     @ViewBuilder let content: (Bool) -> Content
     /// Runs as the drag starts, before the row is over anything.
     var dragBegan: () -> Void = {}
-    @Environment(\.sidebarListChanged) private var listChanged
     @State private var isHovering = false
 
     var body: some View {
@@ -576,7 +580,7 @@ private struct BotRowContent: View, Equatable {
                             .accessibilityHidden(true)
                     } else if let reply = row.reply {
                         Text(ReplyTime.label(reply.date))
-                            .font(.system(size: 11).monospacedDigit())
+                            .font(Typography.small.monospacedDigit())
                             .foregroundStyle(Palette.faint)
                     }
                     // A new conversation, under the pointer only; the chevron folds the open Orb's list. Both 16 pt high,
@@ -622,13 +626,9 @@ private struct BotRowContent: View, Equatable {
                     .lineLimit(1)
                     Spacer(minLength: 4)
                     ZStack {
-                        if needsYou {
-                            Image(systemName: "exclamationmark.bubble.fill")
-                                .font(Typography.label)
-                                .foregroundStyle(Palette.warn)
-                                .transition(.scale.combined(with: .opacity))
-                                .accessibilityLabel("Precisa da sua permissão")
-                        } else if row.unread > 0 {
+                        // While it waits for you, the amber ring and the amber "Precisa de você" already say so (VoiceOver
+                        // reads that text, the row is one element): no third sign here, and no count over it.
+                        if !needsYou, row.unread > 0 {
                             // One unread is a dot; from two on the count is worth its width.
                             Group {
                                 if row.unread >= 2 {

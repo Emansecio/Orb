@@ -172,6 +172,13 @@ struct GroupTextsTests {
             == "Revisão, grupo, 2 Orbs, precisa de você")
     }
 
+    @Test func theSidebarRowShowsOneMarkAtMost() {
+        #expect(GroupRowText.marker(needsYou: true, unread: 2, working: true) == nil, "waiting turns the second line amber instead")
+        #expect(GroupRowText.marker(needsYou: false, unread: 1, working: true) == .unread, "never a dot and a ring together")
+        #expect(GroupRowText.marker(needsYou: false, unread: 0, working: true) == .working)
+        #expect(GroupRowText.marker(needsYou: false, unread: 0, working: false) == nil)
+    }
+
     @Test func theSecondLineSaysWhatTheGroupDoes() {
         #expect(GroupRowText.secondLine(presence: nil, orbCount: 3) == "3 Orbs")
         #expect(GroupRowText.secondLine(presence: "Revisor está trabalhando…", orbCount: 3) == "Revisor está trabalhando…")

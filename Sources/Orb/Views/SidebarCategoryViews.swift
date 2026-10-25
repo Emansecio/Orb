@@ -145,7 +145,7 @@ struct SidebarDropGap: View {
     }
 }
 
-/// The heading: an arrow that turns, the name, and the number of Orbs. Folded, it also says what its hidden Orbs say
+/// The heading: an arrow that turns and the name. Folded, it also shows the number of Orbs it hides and says what its hidden Orbs say
 /// (one waiting for you, unread messages), and it carries the selection while the open Orb is hidden in it.
 private struct SidebarCategoryHeader: View {
     @Environment(AppModel.self) private var model
@@ -193,11 +193,17 @@ private struct SidebarCategoryHeader: View {
                     }
                 }
                 .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: collapsed && (waiting || unread))
-                Text("\(ids.count)")
-                    .font(Typography.small)
-                    .foregroundStyle(Palette.faint)
-                    .monospacedDigit()
+                // The number only stands in for the hidden Orbs: unfolded, the Orbs themselves are there to count.
+                if let count = CategoryHeaderText.orbCount(ids.count, collapsed: collapsed) {
+                    Text("\(ids.count)")
+                        .font(Typography.small)
+                        .foregroundStyle(Palette.faint)
+                        .monospacedDigit()
+                        .help(count)
+                        .accessibilityLabel(count)
+                }
             }
+            .frame(minHeight: SidebarCategoryLayout.headerContentHeight)
             .hoverFill(isTargeted, in: .rect(cornerRadius: Radius.medium))
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(CategoryText.accessibilityLabel(name: category.name, orbCount: ids.count, collapsed: collapsed,
@@ -285,6 +291,7 @@ private struct CategoryNameField: View {
                 }
                 .accessibilityLabel("Nome da categoria")
         }
+        .frame(minHeight: SidebarCategoryLayout.headerContentHeight)
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -303,8 +310,19 @@ private struct CategoryNameField: View {
     }
 }
 
+/// What the heading says about its Orbs, as plain values the tests read.
+enum CategoryHeaderText {
+    /// "3 Orbs" for the number at the heading's edge, shown only while the category is folded; nil when unfolded.
+    static func orbCount(_ count: Int, collapsed: Bool) -> String? {
+        guard collapsed else { return nil }
+        return count == 1 ? "1 Orb" : "\(count) Orbs"
+    }
+}
+
 /// Where the rows of a category stand, as plain values.
 enum SidebarCategoryLayout {
+    /// A heading is 32 pt tall at least (a click target): its content takes what is left of the row's 6 pt above and below.
+    static let headerContentHeight: CGFloat = 32 - 2 * 6
     /// How far a category's Orbs stand in from its heading.
     static let indent: CGFloat = 14
     /// Where the heading's name starts: the row's padding, the icon column and the space after it.

@@ -8,6 +8,15 @@ enum GroupRowText {
         return orbCount == 1 ? "1 Orb" : "\(orbCount) Orbs"
     }
 
+    /// The one mark at the right of the row. Waiting for you shows none: the second line turns amber (and VoiceOver says
+    /// it). Unseen beats working because the second line already says what the group does ("X está escrevendo…") while
+    /// nothing else says there is something new; so the row never shows a dot and a ring side by side.
+    static func marker(needsYou: Bool, unread: Int, working: Bool) -> SidebarMarker? {
+        if needsYou { return nil }
+        if unread > 0 { return .unread }
+        return working ? .working : nil
+    }
+
     /// What VoiceOver reads for the row: "Lançamento, grupo, 3 Orbs, não lido, trabalhando".
     static func accessibilityLabel(name: String, orbCount: Int, unread: Int, working: Bool, waiting: Bool) -> String {
         var parts = [name, "grupo", orbCount == 1 ? "1 Orb" : "\(orbCount) Orbs"]
@@ -37,12 +46,21 @@ struct SidebarGroupsSection: View {
             ForEach(model.groups) { group in
                 SidebarGroupRow(group: group, selectionSpace: selectionSpace)
             }
+            if model.groups.isEmpty {
+                // The section shows with two Orbs and no group yet: a quiet line instead of a title alone (as "Arraste um
+                // Orb para cá" in an empty category), under the title's own left edge.
+                Text("Nenhum grupo ainda")
+                    .font(Typography.small)
+                    .foregroundStyle(Palette.faint)
+                    .padding(.leading, 10)
+                    .padding(.vertical, 4)
+            }
         }
     }
 }
 
-/// One group's row: its Orbs stacked (24 pt, −9 pt overlap, "+N" past three), the name, what it does, and on the right a
-/// badge when it waits for you, an unread dot, and a ring while a request runs. Its selection is the sidebar's own.
+/// One group's row: its Orbs stacked (24 pt, −9 pt overlap, "+N" past three), the name, what it does (amber while it waits
+/// for you), and on the right one mark: an unread dot, or a ring while a request runs (`GroupRowText.marker`). Its selection is the sidebar's own.
 struct SidebarGroupRow: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -79,21 +97,22 @@ struct SidebarGroupRow: View {
                 // The same height with or without a second line, so the rows keep one rhythm.
                 .frame(minHeight: 32, alignment: .leading)
                 Spacer(minLength: 4)
-                HStack(spacing: 6) {
-                    if working { WorkingRing() }
-                    if live.needsYou {
-                        Image(systemName: "exclamationmark.bubble.fill")
-                            .font(Typography.label)
-                            .foregroundStyle(Palette.warn)
+                let marker = GroupRowText.marker(needsYou: live.needsYou, unread: live.unread, working: working)
+                ZStack {
+                    switch marker {
+                    case .working:
+                        WorkingRing()
                             .transition(.adapted(.mark, reduceMotion: reduceMotion))
-                    } else if live.unread > 0 {
+                    case .unread:
                         Circle()
                             .fill(Palette.accentText)
                             .frame(width: 7, height: 7)
                             .transition(.adapted(.mark, reduceMotion: reduceMotion))
+                    case nil:
+                        EmptyView()
                     }
                 }
-                .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: live.needsYou || live.unread > 0)
+                .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: marker)
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
@@ -126,15 +145,16 @@ struct SidebarGroupRow: View {
     }
 }
 
-/// A small dot that breathes while the group works (a repeating opacity change; still under Reduce Motion). The breath
-/// is a Core Animation opacity animation (no SwiftUI re-evaluation per frame) that stops when the window is covered, the
-/// app is inactive or the dot is scrolled out of view, like the shimmer and the Orbs.
-private struct WorkingRing: View {
+/// A small ring that breathes while the group or a conversation works (a repeating opacity change; still under Reduce
+/// Motion, and still a ring, so "working" never looks like the unread dot). The breath is a Core Animation opacity
+/// animation (no SwiftUI re-evaluation per frame) that stops when the window is covered, the app is inactive or the ring
+/// is scrolled out of view, like the shimmer and the Orbs.
+struct WorkingRing: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        BreathingDot(color: Palette.accentText, breathes: !reduceMotion)
-            .frame(width: 7, height: 7)
+        BreathingDot(color: Palette.accentText, breathes: !reduceMotion, isRing: true)
+            .frame(width: 8, height: 8)
             .accessibilityHidden(true)
     }
 }
@@ -142,10 +162,13 @@ private struct WorkingRing: View {
 struct BreathingDot: NSViewRepresentable {
     let color: Color
     let breathes: Bool
+    /// An outline instead of a filled dot.
+    var isRing = false
 
     func makeNSView(context: Context) -> BreathingDotView { BreathingDotView() }
 
     func updateNSView(_ view: BreathingDotView, context: Context) {
+        view.isRing = isRing
         view.color = NSColor(color)
         view.breathes = breathes
     }
@@ -154,7 +177,8 @@ struct BreathingDot: NSViewRepresentable {
 final class BreathingDotView: NSView {
     private static let key = "breath"
     private weak var clipView: NSClipView?
-    var color = NSColor.systemBlue { didSet { layer?.backgroundColor = color.cgColor } }
+    var color = NSColor.systemBlue { didSet { paint() } }
+    var isRing = false { didSet { paint() } }
     var breathes = true { didSet { if breathes != oldValue { update() } } }
     /// For tests: whether the dot is breathing.
     var isBreathing: Bool { layer?.animation(forKey: Self.key) != nil }
@@ -218,8 +242,14 @@ final class BreathingDotView: NSView {
         center.addObserver(self, selector: #selector(update), name: NSView.boundsDidChangeNotification, object: clip)
     }
 
+    private func paint() {
+        layer?.backgroundColor = isRing ? nil : color.cgColor
+        layer?.borderColor = color.cgColor
+        layer?.borderWidth = isRing ? 1.5 : 0
+    }
+
     @objc private func update() {
-        layer?.backgroundColor = color.cgColor
+        paint()
         let visible = window.map { !isHiddenOrHasHiddenAncestor && (OrbView.animateInactive || $0.occlusionState.contains(.visible)) } ?? false
         let inView = clipView.map { OrbVisibility.isVisible(orb: convert(bounds, to: $0), in: $0.bounds, margin: 20) } ?? true
         guard breathes, visible, NSApp.isActive || OrbView.animateInactive, inView else {

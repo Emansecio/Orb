@@ -83,8 +83,20 @@ struct OrbChatsListTests {
         #expect(SidebarChatList.visible(chats, showsAll: true).count == 7)
         chats.markUnread(ids[1])
         #expect(SidebarChatList.visible(chats, showsAll: false).map(\.id) == [ids[5], ids[4], ids[3], ids[1], orb])
-        chats.remove(ids[0]) // "1 mais…" would hide a single one: all show
+        chats.remove(ids[0]) // "1 conversa mais antiga" would hide a single one: all show
         #expect(SidebarChatList.visible(chats, showsAll: false).count == 6)
+    }
+
+    @Test func theButtonThatUnfoldsTheRestNamesWhatIsHidden() {
+        #expect(SidebarChatList.olderLabel(1) == "1 conversa mais antiga")
+        #expect(SidebarChatList.olderLabel(3) == "3 conversas mais antigas")
+    }
+
+    @Test func aConversationShowsOneMarkAndWorkingWins() {
+        #expect(SidebarMarker.forChat(isWorking: true, isUnread: true) == .working)
+        #expect(SidebarMarker.forChat(isWorking: true, isUnread: false) == .working)
+        #expect(SidebarMarker.forChat(isWorking: false, isUnread: true) == .unread)
+        #expect(SidebarMarker.forChat(isWorking: false, isUnread: false) == nil)
     }
 
     @Test func somethingThatLandsUnseenMarksAConversationUntilItIsOpened() {
