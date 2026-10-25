@@ -35,7 +35,7 @@ struct WizardChatView: View {
                     }
                     if runner.offersSuggestions {
                         suggestions
-                            .padding(.leading, 40)
+                            .padding(.leading, gutter)
                             .transition(.opacity)
                     }
                     if runner.isSpeaking {
@@ -171,17 +171,18 @@ private struct WizardBotRow<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        // The text 44 pt in (30 + 14), on the same edge as an Orb's chat.
+        HStack(alignment: .top, spacing: 14) {
             BotAvatar(orb: orb, size: 30, animated: false)
-                .padding(.top, ReplyBubble.avatarDrop)
+                .offset(y: ReplyText.avatarDrop)
                 .accessibilityHidden(true)
-            // The reply's bubble, as in an Orb's chat.
+            // The reply's words, as in an Orb's chat.
             content
-                .font(.system(size: 14))
+                .font(Palette.conversationFont)
                 .foregroundStyle(Palette.ink)
-                .lineSpacing(4)
+                .lineSpacing(Palette.conversationLineSpacing)
                 .textSelection(.enabled)
-                .replyBubble()
+                .replyText()
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.trailing, 24)
@@ -213,12 +214,9 @@ private struct WizardUserBubble: View {
         HStack {
             Spacer(minLength: 56)
             Text(text)
-                .font(.system(size: 14))
                 .foregroundStyle(Palette.ink)
-                .textSelection(.enabled)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(Palette.userBubble, in: .rect(cornerRadius: 16))
+                .lineSpacing(Palette.conversationLineSpacing)
+                .userBubble()
                 .accessibilityLabel("Você: \(text)")
         }
     }

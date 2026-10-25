@@ -1459,20 +1459,6 @@ struct PanelEmptyNote: View {
     }
 }
 
-/// A small text button that stays gray until the pointer is on it ("Personalizar…" under the Orb's name): the header
-/// keeps its one color, the blue left to what leads elsewhere.
-private struct QuietTextStyle: ButtonStyle {
-    @State private var isHovering = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(configuration.isPressed ? Palette.secondary : isHovering ? Palette.ink : Palette.muted)
-            .contentShape(Rectangle())
-            .onHover { isHovering = $0 }
-            .animation(Motion.hover(isHovering), value: isHovering)
-    }
-}
-
 /// "Apagar" at the end of the General tab: small and gray (as readable as the quiet links, it is the only way out), red only
 /// with the pointer over it.
 private struct QuietDeleteStyle: ButtonStyle {

@@ -24,7 +24,7 @@ struct EventLineView: View {
                         .lineLimit(2)
                         .multilineTextAlignment(centered ? .center : .leading)
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(Palette.faint)
                 }
                 .frame(maxWidth: .infinity, alignment: centered ? .center : .leading)
@@ -97,7 +97,7 @@ struct EventLineView: View {
                 .contentTransition(.opacity)
             if opens {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(Palette.faint)
                     .accessibilityHidden(true)
             }
@@ -162,7 +162,7 @@ struct EventsSummary: View {
                 .contentTransition(.opacity)
             // The chevron turns its sign rather than turning: nothing rotates in a row that folds under Reduce Motion.
             Image(systemName: unfolded ? "chevron.down" : "chevron.right")
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(Palette.faint)
         }
         .accessibilityElement(children: .combine)
@@ -193,7 +193,7 @@ struct RoutineRunLine: View {
                     Text(title ?? event.headline).foregroundStyle(Palette.muted)
                     if let chevron {
                         Image(systemName: chevron)
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(.system(size: 9, weight: .semibold))
                             .foregroundStyle(Palette.faint)
                     }
                 }
@@ -212,7 +212,7 @@ struct RoutineRunLine: View {
         }
         .font(Typography.label)
         .multilineTextAlignment(.leading)
-        .frame(maxWidth: 560, alignment: .leading)
+        .frame(maxWidth: cardWidth, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("event-line")

@@ -139,7 +139,7 @@ struct FileCard: View {
                 .background(Palette.surface, in: .rect(cornerRadius: Radius.small))
             VStack(alignment: .leading, spacing: 1) {
                 Text(info.name)
-                    .font(.system(size: 12.5, weight: .medium))
+                    .font(Typography.label.weight(.medium))
                     .foregroundStyle(Palette.ink)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -307,7 +307,7 @@ struct ScreenStepsStrip: View {
                         VStack(alignment: .leading, spacing: 3) {
                             ImageTile(path: step.path, size: Self.tile, all: all, label: "Passo \(index + 1): \(step.caption)")
                             Text("\(index + 1) · \(step.caption)")
-                                .font(.system(size: 10))
+                                .font(Typography.small)
                                 .foregroundStyle(Palette.muted)
                                 .lineLimit(1)
                                 .truncationMode(.middle)

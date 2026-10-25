@@ -173,6 +173,16 @@ import Testing
 
     // MARK: What "Tentar de novo" does
 
+    @Test func aMessageOfYoursOpensATurnWithMoreRoomAboveIt() {
+        let first = user("oi"), reply = TranscriptItem(.bot(text: "olá", isStreaming: false)), next = user("e agora?")
+        // The first row has the list's own padding; a reply or a notice never opens a turn.
+        #expect(!TurnGap.opens(first, first: first.id))
+        #expect(TurnGap.opens(next, first: first.id))
+        #expect(!TurnGap.opens(reply, first: first.id) && !TurnGap.opens(notice("x"), first: first.id))
+        // Folded rows: only a lone message of yours opens a turn.
+        #expect(TurnGap.opens(.single(next), first: first.id) && !TurnGap.opens(.tools([reply]), first: first.id))
+    }
+
     private func user(_ text: String, _ files: [String] = []) -> TranscriptItem { TranscriptItem(.user(text: text, attachments: files)) }
     private func notice(_ text: String) -> TranscriptItem { TranscriptItem(.notice(text)) }
 

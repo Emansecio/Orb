@@ -61,11 +61,13 @@ struct MarkdownBlockView: View, Equatable {
         }
     }
 
+    /// On the app's type scale: 17 and 15 over the 14 pt body; from the third level on, the body's size in semibold (a
+    /// size between 14 and 15 only blurred the steps).
     static func headingSize(_ level: Int) -> CGFloat {
         switch level {
         case 1: 17
-        case 2: 15.5
-        default: 14.5
+        case 2: 15
+        default: 14
         }
     }
 }
@@ -155,7 +157,8 @@ enum FindMarking {
     }
 }
 
-/// Code on `Palette.raised`, monospaced, with its language and a button that copies it.
+/// Code on `Palette.raised`, monospaced, with its language and a button that copies it. No hairline: on the canvas the fill
+/// alone sets it apart, and it is the reply's only frame.
 struct CodeBlockView: View, Equatable {
     let language: String?
     let code: String
@@ -208,7 +211,6 @@ struct CodeBlockView: View, Equatable {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(Palette.raised, in: .rect(cornerRadius: Radius.small))
-        .overlay(RoundedRectangle(cornerRadius: Radius.small).strokeBorder(Palette.line, lineWidth: 1))
         .accessibilityElement(children: .contain)
         .accessibilityLabel(language.map { "Código em \($0)" } ?? "Código")
     }
@@ -309,35 +311,41 @@ struct TableBlockView: View, Equatable {
         }
         .font(Typography.text)
         .padding(Self.inset)
-        .background(Palette.raised.opacity(0.7), in: .rect(cornerRadius: Radius.small))
-        .overlay(RoundedRectangle(cornerRadius: Radius.small).strokeBorder(Palette.line, lineWidth: 1))
+        // The whole `raised`, without a hairline, as the code: on the canvas a lighter fill was too close to tell apart.
+        .background(Palette.raised, in: .rect(cornerRadius: Radius.small))
     }
 
-    /// The narrowest each column may get: its longest word (header in semibold), up to `maxFloor` so a long link or
-    /// path still wraps. Only the longest word of each column is measured.
+    /// The narrowest each column may get: its widest word (header in semibold), up to `maxFloor` so a long link or
+    /// path still wraps.
     nonisolated static func columnFloors(of table: MarkdownTable) -> [CGFloat] {
         let columns = max(table.header.count, table.rows.map(\.count).max() ?? 0)
         let regular = NSFont.systemFont(ofSize: 13)
         let semibold = NSFont.systemFont(ofSize: 13, weight: .semibold)
         return (0..<columns).map { column in
-            let header = longestWord(table.header.indices.contains(column) ? [table.header[column]] : [])
-            let body = longestWord(table.rows.compactMap { $0.indices.contains(column) ? $0[column] : nil })
-            let headerWidth = (header as NSString).size(withAttributes: [.font: semibold]).width
-            let bodyWidth = (body as NSString).size(withAttributes: [.font: regular]).width
-            return min(ceil(max(headerWidth, bodyWidth)) + 2, maxFloor)
+            let header = widestWord(table.header.indices.contains(column) ? [table.header[column]] : [], font: semibold)
+            let body = widestWord(table.rows.compactMap { $0.indices.contains(column) ? $0[column] : nil }, font: regular)
+            return min(ceil(max(header, body)) + 2, maxFloor)
         }
     }
 
-    /// The longest word of some cells, without the `**` and backticks of their Markdown.
-    private nonisolated static func longestWord(_ cells: [String]) -> String {
-        var longest: Substring = ""
+    /// The width of the widest word of some cells, without the `**` and backticks around it. Measured, not
+    /// counted: "Documentos" is wider than "Instaladores", and a column set by letters broke it letter by letter. A word
+    /// is measured only if it could be wider than the widest so far (no character is wider than 1.2 times the type's
+    /// size; an emoji counts as two UTF-16 units) and was not measured yet, which skips most of a long table while it streams.
+    private nonisolated static func widestWord(_ cells: [String], font: NSFont) -> CGFloat {
+        let widestCharacter = font.pointSize * 1.2
+        var widest: CGFloat = 0
+        var measured = Set<Substring>()
         for cell in cells {
-            let plain = cell.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "`", with: "")
-            for word in plain.split(whereSeparator: \.isWhitespace) where word.count > longest.count {
-                longest = word
+            for marked in cell.split(whereSeparator: \.isWhitespace) {
+                var word = marked.drop { $0 == "*" || $0 == "`" }
+                while word.last == "*" || word.last == "`" { word = word.dropLast() }
+                guard CGFloat(word.utf16.count) * widestCharacter > widest, measured.insert(word).inserted else { continue }
+                widest = max(widest, (String(word) as NSString).size(withAttributes: [.font: font]).width)
+                if widest >= maxFloor { return widest }
             }
         }
-        return String(longest)
+        return widest
     }
 
     nonisolated static let maxFloor: CGFloat = 160

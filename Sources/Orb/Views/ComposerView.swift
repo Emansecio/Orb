@@ -71,8 +71,9 @@ struct ComposerView: View {
                 .animation(Motion.fade, value: hintText)
                 .accessibilityHidden(true)
         }
-        .frame(maxWidth: 760)
+        // Padded first, then capped: the card is as wide as the transcript's text (704 pt), not 56 pt wider.
         .padding(.horizontal, 28)
+        .frame(maxWidth: 760)
         .padding(.top, 6)
         .padding(.bottom, 8)
         .frame(maxWidth: .infinity)
@@ -154,13 +155,14 @@ struct ComposerView: View {
             // the trackpad scroll the message (not the chat behind it) and its scroller shows. The field's own limit
             // would keep the caret in view but take no scrolling, so the caret is followed here (`ComposerCaretFollower`).
             ScrollView(.vertical) {
-                TextField(placeholder, text: draft, axis: .vertical)
+                // The prompt in `faint`, the placeholder gray the palette names (the system's own is fainter).
+                TextField(text: draft, prompt: Text(placeholder).foregroundStyle(Palette.faint), axis: .vertical) { Text(placeholder) }
                     .textFieldStyle(.plain)
                     .font(Palette.conversationFont)
                     .foregroundStyle(Palette.ink)
                     .focused($isFocused)
                     // The line under the card is hidden from VoiceOver (it would be read twice); the keys it names are said here.
-                    .accessibilityHint(ComposerHint.spoken(hintText))
+                    .accessibilityHint(ComposerHint.spoken(hintText.isEmpty && showsIdleKeys(lane) ? ComposerHint.idleKeys : hintText))
                     .onSubmit { send() }
                     .onKeyPress(.upArrow) { moveSlash(-1) }
                     .onKeyPress(.downArrow) { moveSlash(1) }
@@ -207,13 +209,13 @@ struct ComposerView: View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             VStack(alignment: .leading, spacing: 4) {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
+                    .font(Typography.small)
                     .foregroundStyle(Palette.danger)
                     .fixedSize(horizontal: false, vertical: true)
                 if error == Dictation.deniedMessage, let url = Dictation.microphoneSettingsURL {
                     Button("Abrir Ajustes do Sistema") { NSWorkspace.shared.open(url) }
                         .buttonStyle(.plain)
-                        .font(.caption.weight(.medium))
+                        .font(Typography.small.weight(.medium))
                         .foregroundStyle(Palette.accentText)
                 }
             }
@@ -268,8 +270,14 @@ struct ComposerView: View {
         }
         // "Esc cancela" is said once, in the banner above the field, with its button.
         if isEditing { return "↩ envia a edição" }
-        if isFocused, !hasContent, !lane.hasAttachments { return "↩ envia · \(CommandName.newLineKeys) nova linha" }
+        // How ↩ and ⇧↩ work in an empty field is every chat's convention: not under the card all the time (VoiceOver
+        // still says it, `showsIdleKeys`).
         return ""
+    }
+
+    /// An empty, free field with the focus: VoiceOver says how the keys work, which the line under the card no longer does.
+    private func showsIdleKeys(_ lane: ComposerLane) -> Bool {
+        isFocused && !isWorking && !isEditing && !hasContent && !lane.hasAttachments
     }
 
     // MARK: Attachments
@@ -833,6 +841,9 @@ enum ComposerAction: Equatable {
 
 /// The line under the composer while a message can be sent to a working Orb. Pure, so the tests can read it.
 enum ComposerHint {
+    /// How ↩ and ⇧↩ work in a free field: said to VoiceOver only (`ComposerView.showsIdleKeys`).
+    static let idleKeys = "↩ envia · \(CommandName.newLineKeys) nova linha"
+
     /// ↩ steers the task, ⇥ waits for its end, ⌘↩ stops and sends. With a permission request open, ⌘↩ typed in the
     /// composer does nothing (`ComposerAction.stopAndSendEnabled`): the line asks for the request first. From anywhere
     /// else ⌘↩ allows the request (see `ApprovalShortcut`), and the line says so.
@@ -908,7 +919,7 @@ struct ComposerSurface: View {
     }
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 20)
+        let shape = RoundedRectangle(cornerRadius: Radius.composer)
         let shadow = Self.shadow(isDropTargeted: isDropTargeted)
         shape.fill(Self.fill(isFocused: isFocused))
             .shadow(color: shadow.color, radius: 18, y: shadow.y)

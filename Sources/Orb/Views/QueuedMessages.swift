@@ -13,9 +13,11 @@ struct QueuedMessages: View {
         let lane = model.composerLane(botID)
         // Its own identity, not the message's: once delivered, the message's id names its row of the transcript, and two
         // children of the same lazy stack with one id make SwiftUI reuse this bubble for that row.
-        ForEach(lane.queued, id: \.queuedRowID) { message in
-            // Each bubble says where it goes; "Parar e enviar" speaks for the whole queue and shows once, under the last one.
-            QueuedBubble(message: message, whenText: whenText(message.delivery), canInterrupt: QueuedMessages.canInterrupt(canSteer: model.canSteer(botID), pendingPictures: lane.pendingPictures), needsYou: needsYou,
+        ForEach(Array(lane.queued.enumerated()), id: \.element.queuedRowID) { index, message in
+            // Where it goes is said when it changes along the queue; "Parar e enviar" speaks for the whole queue and shows once,
+            // on the last bubble.
+            QueuedBubble(message: message, whenText: whenText(message.delivery), showsState: QueuedMessages.showsState(message.delivery, after: index > 0 ? lane.queued[index - 1].delivery : nil),
+                         canInterrupt: QueuedMessages.canInterrupt(canSteer: model.canSteer(botID), pendingPictures: lane.pendingPictures), needsYou: needsYou,
                          isLast: message.id == lane.queued.last?.id, canSwitch: model.canSteer(botID),
                          edit: { model.unqueue(message.id, botID: botID) },
                          switchMode: { model.switchDelivery(message.id, botID: botID) },
@@ -46,6 +48,12 @@ struct QueuedMessages: View {
         return needsYou ? "Entra depois que você responder ao pedido" : "Entra no próximo passo"
     }
 
+    /// Whether a bubble carries the state line: the first, and each one that goes somewhere other than the bubble above it.
+    /// Three messages that all enter at the next step say it once, not three times.
+    nonisolated static func showsState(_ delivery: SteeringDelivery, after previous: SteeringDelivery?) -> Bool {
+        delivery != previous
+    }
+
     /// The icon of that line: a steered message is on its way into the task; the others wait.
     nonisolated static func whenSymbol(delivery: SteeringDelivery) -> String {
         delivery == .steer ? "arrow.turn.down.right" : "clock"
@@ -62,6 +70,8 @@ extension SteeredMessage {
 private struct QueuedBubble: View {
     let message: SteeredMessage
     let whenText: String
+    /// Only the first bubble and the ones that change where the queue goes say it (`QueuedMessages.showsState`).
+    let showsState: Bool
     let canInterrupt: Bool
     let needsYou: Bool
     let isLast: Bool
@@ -71,40 +81,53 @@ private struct QueuedBubble: View {
     let switchMode: () -> Void
     let interrupt: () -> Void
 
+    @State private var isHovering = false
+    @FocusState private var focused: Action?
+
     private var symbol: String { QueuedMessages.whenSymbol(delivery: message.delivery) }
+    private var showsButtons: Bool { isHovering || focused != nil }
+    private var showsInterrupt: Bool { isLast && canInterrupt }
 
     var body: some View {
         HStack {
             Spacer(minLength: 120)
-            VStack(alignment: .trailing, spacing: 6) {
-                if !message.attachmentPaths.isEmpty { AttachmentStack(paths: message.attachmentPaths, dimmed: true) }
-                if !message.text.isEmpty {
-                    Text(message.text)
-                        .font(Palette.conversationFont)
-                        .foregroundStyle(Palette.secondary)
-                        .multilineTextAlignment(.leading)
-                        .textSelection(.enabled)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        // The same shape as the bubble it becomes (`UserBubble`: radius 16).
-                        .background(Palette.userBubble.opacity(0.5), in: .rect(cornerRadius: 16))
-                        .overlay { RoundedRectangle(cornerRadius: 16).strokeBorder(Palette.lineStrong, style: StrokeStyle(lineWidth: 1, dash: [4, 3])) }
-                }
-                // One row when it fits; the line above the buttons when the chat is narrow.
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 10) {
-                        stateLine
-                        buttons
-                    }
-                    VStack(alignment: .trailing, spacing: 2) {
-                        stateLine
-                        buttons
+            VStack(alignment: .trailing, spacing: 2) {
+                VStack(alignment: .trailing, spacing: 6) {
+                    if !message.attachmentPaths.isEmpty { AttachmentStack(paths: message.attachmentPaths, dimmed: true) }
+                    if !message.text.isEmpty {
+                        Text(message.text)
+                            // Same line spacing as the sent bubble, so the message does not change height when it leaves the queue.
+                            .lineSpacing(Palette.conversationLineSpacing)
+                            .foregroundStyle(Palette.secondary)
+                            .multilineTextAlignment(.leading)
+                            // The bubble it becomes, paler.
+                            .userBubble(fill: Palette.userBubble.opacity(0.5))
+                            .overlay { RoundedRectangle(cornerRadius: Radius.bubble).strokeBorder(Palette.lineStrong, style: StrokeStyle(lineWidth: 1, dash: [4, 3])) }
                     }
                 }
+                .overlay(alignment: .leading) {
+                    // To the left of the bubble, in the space the row leaves, like the edit pencil of a sent message. Dimmed, not
+                    // removed: Tab still reaches the buttons, and the focus brings them up. `alignmentGuide` puts the whole
+                    // group outside the bubble whatever the number of buttons.
+                    buttons
+                        .fixedSize()
+                        .alignmentGuide(.leading) { $0.width + 6 }
+                        .opacity(showsButtons ? 1 : 0)
+                        .animation(Motion.hover(showsButtons), value: showsButtons)
+                }
+                if showsState { stateLine }
             }
         }
+        // The row's hover, not the bubble's: it keeps the buttons up while the pointer travels to them.
+        .contentShape(.rect)
+        .onHover { isHovering = $0 }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Mensagem pendente (\(whenText)): \(message.text)")
+        .accessibilityActions {
+            Button("Editar") { edit() }
+            if canSwitch { Button(message.delivery == .steer ? "Pôr na fila" : "Direcionar") { switchMode() } }
+            if showsInterrupt { Button("Parar e enviar") { interrupt() } }
+        }
     }
 
     /// Where the message goes; while the pointer is on one of the buttons, what that button does (at once, where a tooltip
@@ -118,7 +141,7 @@ private struct QueuedBubble: View {
             .contentTransition(.identity)
     }
 
-    private enum Action { case edit, switchMode, interrupt }
+    private enum Action: Hashable { case edit, switchMode, interrupt }
 
     @State private var hovered: Action?
 
@@ -149,7 +172,7 @@ private struct QueuedBubble: View {
             if canSwitch {
                 iconButton(.switchMode, symbol: switchSymbol, help: QueuedMessages.switchHelp(from: message.delivery), action: switchMode)
             }
-            if isLast, canInterrupt {
+            if showsInterrupt {
                 iconButton(.interrupt, symbol: "arrow.up.circle.fill", tint: Palette.accentText,
                            help: needsYou
                                ? "Parar e enviar: interrompe o que o Orb está fazendo, recusa o pedido aberto e envia agora"
@@ -168,6 +191,7 @@ private struct QueuedBubble: View {
         .buttonStyle(CircleGhostStyle(side: 24, fontSize: 12))
         .help(help)
         .accessibilityLabel(hintText(kind))
+        .focused($focused, equals: kind)
         .onHover { inside in
             if inside { hovered = kind } else if hovered == kind { hovered = nil }
         }

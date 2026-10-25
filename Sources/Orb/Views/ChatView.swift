@@ -138,7 +138,7 @@ struct CompactedFoldLine: View {
             .lineLimit(1)
             .padding(.horizontal, 14)
             .padding(.vertical, 7)
-            .background(Color.primary.opacity(isHovered ? 0.08 : 0.05), in: .capsule)
+            .background(isHovered ? Palette.ghostSelected : Palette.ghostHover, in: .capsule)
             .contentShape(.capsule)
         }
         .buttonStyle(.plain)
@@ -287,28 +287,28 @@ private struct TranscriptList: View {
                     if let rows = transcript.rows {
                         if showsFolded {
                             ForEach(rows[..<transcript.foldedRows]) { row in
-                                timed(row.id, breaks) {
+                                timed(row.id, breaks, opensTurn: TurnGap.opens(row, first: rows.first?.id)) {
                                     foldedRow(row, avatars: avatars, redoID: redoID, dropping: dropping, found: found)
                                 }
                             }
                         }
                         if fold.count > 0 { foldLine(fold, proxy) }
                         ForEach(rows[transcript.foldedRows...]) { row in
-                            timed(row.id, breaks) {
+                            timed(row.id, breaks, opensTurn: TurnGap.opens(row, first: rows.first?.id)) {
                                 foldedRow(row, avatars: avatars, redoID: redoID, dropping: dropping, found: found)
                             }
                         }
                     } else {
                         if showsFolded {
                             ForEach(items[..<fold.count]) { item in
-                                timed(item.id, breaks) {
+                                timed(item.id, breaks, opensTurn: TurnGap.opens(item, first: items.first?.id)) {
                                     itemRow(item, avatars: avatars, redoID: redoID, dropping: dropping, found: found)
                                 }
                             }
                         }
                         if fold.count > 0 { foldLine(fold, proxy) }
                         ForEach(items[fold.count...]) { item in
-                            timed(item.id, breaks) {
+                            timed(item.id, breaks, opensTurn: TurnGap.opens(item, first: items.first?.id)) {
                                 itemRow(item, avatars: avatars, redoID: redoID, dropping: dropping, found: found)
                             }
                         }
@@ -415,14 +415,17 @@ private struct TranscriptList: View {
         }
     }
 
-    /// A row with the time above it when it begins a new moment of the conversation (`TimeSeparators`).
-    @ViewBuilder
+    /// A row with the time above it when it begins a new moment of the conversation (`TimeSeparators`), and more room
+    /// above a message of yours (`TurnGap`) where no separator already sets the moment apart.
     /// One stack either way, so a row whose separator comes or goes keeps its identity (and what is typed in a card).
-    private func timed(_ rowID: UUID, _ breaks: [UUID: Date], @ViewBuilder row: () -> some View) -> some View {
+    @ViewBuilder
+    private func timed(_ rowID: UUID, _ breaks: [UUID: Date], opensTurn: Bool, @ViewBuilder row: () -> some View) -> some View {
+        let date = breaks[rowID]
         VStack(alignment: .leading, spacing: 12) {
-            if let date = breaks[rowID] { TimeSeparatorLine(date: date) }
+            if let date { TimeSeparatorLine(date: date) }
             row()
         }
+        .padding(.top, opensTurn && date == nil ? TurnGap.extra : 0)
     }
 
     /// One item of the chat as a row, entering by itself when it is new.
@@ -964,7 +967,8 @@ private struct WorkingLine: View {
         let live = model.live(look.id)
         let work = live.shownWork ?? lastWork
         HStack(spacing: 10) {
-            HStack(spacing: 10) {
+            // 30 + 14: the words start on the chat's left edge (`gutter`), with the replies' and the tool lines'.
+            HStack(spacing: gutter - 30) {
                 LiveBotAvatar(botID: look.id, orb: look.orb, size: 30, paused: avatarHidden)
                     // Only opacity, so it is the same under Reduce Motion.
                     .opacity(avatarHidden ? 0 : 1)
@@ -1146,5 +1150,22 @@ private struct WorkMeterView: View {
         if case .retrying(let until) = work.tone { return WorkMeter.countdown(until: until, now: now) }
         let elapsed = since.map { ElapsedFormat.working(since: $0, now: now) } ?? ""
         return expanded ? WorkMeter.text(elapsed: elapsed, actions: work.actions, spend: spend) : elapsed
+    }
+}
+
+/// The room between turns: a message of yours starts a new exchange, so it gets twice the list's 12 pt above it, and the
+/// eye finds where each exchange begins; within the Orb's answer the rows keep 12.
+enum TurnGap {
+    static let extra: CGFloat = 12
+
+    /// Whether the row is a message of yours below another row (the first row has the list's own top padding).
+    static func opens(_ item: TranscriptItem, first: UUID?) -> Bool {
+        guard item.id != first, case .user = item.kind else { return false }
+        return true
+    }
+
+    static func opens(_ row: TranscriptRowModel, first: UUID?) -> Bool {
+        guard case .single(let item) = row else { return false }
+        return opens(item, first: first)
     }
 }

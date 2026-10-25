@@ -28,9 +28,7 @@ enum Palette {
     static let surface = Color(hex: 0x181818)       // cards, composer
     static let surfaceFocused = Color(hex: 0x1D1D1D) // surface 2 % lighter: the composer while it has the focus
     static let raised = Color(hex: 0x222222)        // code blocks, chips
-    /// An Orb's reply: a step above `canvas` (it reads as a surface, so the reply has depth) and below `userBubble`, so
-    /// whose words are whose shows in the fill too. Code and tables inside it keep `raised` and their hairline.
-    static let agentBubble = Color(hex: 0x141414)
+    /// The person's message. An Orb's reply has no bubble: its words sit on `canvas`, beside its avatar.
     static let userBubble = Color(hex: 0x323232)
     /// A `raised` fill under the pointer (an attachment's card).
     static let raisedHover = Color(hex: 0x262626)
@@ -148,14 +146,18 @@ extension View {
     }
 }
 
-/// The corner radii shared by cards, fields and hover shapes. Other values (1-7, 9, 16, 18, 20) are one-off shapes
-/// and stay literal where they are drawn.
+/// The corner radii shared by cards, fields and hover shapes. Other values (1-7, 9, 18) are one-off shapes and stay
+/// literal where they are drawn.
 enum Radius {
     static let small: CGFloat = 8
     static let medium: CGFloat = 10
     /// The default of `card(radius:)`.
     static let card: CGFloat = 12
     static let large: CGFloat = 14
+    /// The person's message, sent or waiting in the queue, in every chat.
+    static let bubble: CGFloat = 16
+    /// The composer's card.
+    static let composer: CGFloat = 20
 }
 
 /// Heights of the buttons, so a primary, a secondary and a ghost button in one row are the same height.
@@ -540,6 +542,20 @@ extension View {
     /// view goes away under the pointer (macOS 15 and later; earlier systems keep the arrow).
     @ViewBuilder func clickablePointer(_ isOn: Bool = true) -> some View {
         if #available(macOS 15, *) { pointerStyle(isOn ? .link : nil) } else { self }
+    }
+}
+
+/// A small text button that stays gray until the pointer is on it ("Personalizar…" under the Orb's name, "Dizer o que
+/// fazer…" beside "Não permitir"): the row keeps its one color, the blue left to what leads elsewhere.
+struct QuietTextStyle: ButtonStyle {
+    @State private var isHovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(configuration.isPressed ? Palette.secondary : isHovering ? Palette.ink : Palette.muted)
+            .contentShape(Rectangle())
+            .onHover { isHovering = $0 }
+            .animation(Motion.hover(isHovering), value: isHovering)
     }
 }
 

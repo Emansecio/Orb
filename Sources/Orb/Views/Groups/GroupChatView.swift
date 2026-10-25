@@ -311,8 +311,9 @@ private struct GroupRow: View, Equatable {
                 GroupMessageBubble(message: message, look: look,
                                    isOrchestrator: message.from.id == orchestratorID, isLastSpeaker: isLastSpeaker,
                                    showsHeader: !continuesPrevious)
-                // Words of the same Orb that follow each other sit under the first, 6 pt apart (the list gives 14).
-                .padding(.top, continuesPrevious ? -8 : 0)
+                // Words of the same Orb that follow each other sit under the first, 10 pt apart (the list gives 14): a
+                // paragraph's gap and a little more, without bubbles to tell them apart.
+                .padding(.top, continuesPrevious ? -4 : 0)
             } else {
                 GroupAssignmentLine(message: message, from: look, to: toLook)
             }

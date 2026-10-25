@@ -68,7 +68,18 @@ Os caminhos são relativos a `Sources/Orb/Views/`: `TV` = `TranscriptViews.swift
 3. **Etapa 2:** alinhamento e escala, que dependem do item 1 para fechar a borda em 44.
 4. **Etapa 3.**
 
-## 6. Não verificado
+## 6. Andamento
+
+Revisados linha a linha antes de implementar:
+- **Entraram:** 1 a 9, 11 a 15 e 17.
+- **10, reduzido ao que muda na tela:** H2 em 15 e H3 em diante em 14, nome de arquivo em 12, legenda dos passos em 11 e chevrons do chat em 9. Literais que já têm o valor de um token ficam como estão.
+- **16, recusado:** a segunda frase dos avisos costuma ser a instrução ("feche e reabra…"), e o aviso de cache passaria de uma linha mesmo cortado.
+- **17:** o quadro das instruções em Skills passou de `raised` para `canvas`, para o código de dentro continuar visível sem a borda.
+- **4:** são 12 pt a mais antes de cada mensagem sua, menos na primeira. A mensagem que sai da fila não ganha esse vão enquanto está na fila.
+- **Defeito anterior, achado na conferência:** sem o balão, a tabela passou a caber sem rolagem em 760 pt, e "Documentos" quebrava em "Documento / s". A coluna era medida pela palavra com mais letras ("Instaladores"), não pela mais larga. Agora mede a largura; antes o mesmo erro aparecia como "Document…" dentro da rolagem.
+- **Revisão com `/simplify`:** o balão do usuário e o cartão do chat viraram modificadores (`userBubble(fill:)` e `chatCard()`), `TurnGap` perdeu uma função, e o chevron de 10 pt que tinha ficado no grupo foi para 9. Fica para depois: um token de chevron, um contêiner para a coluna de 704 pt e um `ReplyRow` que derive a posição do avatar da fonte.
+
+## 7. Não verificado
 
 - A conversa em andamento com texto chegando (streaming) só foi vista parada (`chat-working-streaming`).
 - QuickAsk e a janela estreita abaixo de 760 pt não foram revisados item por item.

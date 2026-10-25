@@ -141,6 +141,15 @@ import Testing
         #expect(floors[1] == TableBlockView.maxFloor)
     }
 
+    @Test func aTableColumnFitsItsWidestWordNotTheOneWithMostLetters() {
+        // "Instaladores" has more letters, "Documentos" is wider: a column set by letters broke it in two.
+        let table = MarkdownTable(header: ["Pasta"], rows: [["Documentos"], ["Instaladores"]], alignments: [.leading])
+        let regular = NSFont.systemFont(ofSize: 13)
+        let documentos = ("Documentos" as NSString).size(withAttributes: [.font: regular]).width
+        #expect(documentos > ("Instaladores" as NSString).size(withAttributes: [.font: regular]).width)
+        #expect(TableBlockView.columnFloors(of: table)[0] >= documentos)
+    }
+
     @Test func aWholeReplyIsThePiecesItHadWhileStreaming() {
         let reply = """
             Olá **mundo**.

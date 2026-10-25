@@ -127,8 +127,7 @@ struct OrbProposalCard: View {
                 answeredCard.transition(.opacity)
             }
         }
-        .padding(.leading, gutter)
-        .frame(maxWidth: 560, alignment: .leading)
+        .chatCard()
         .motion(Motion.content, value: request.decision)
         .motion(Motion.content, value: isEditing)
         .background { if isPending { ApprovalKeyMonitor(handler: handleKey) } }
@@ -159,10 +158,11 @@ struct OrbProposalCard: View {
             }
             buttons
         }
-        .padding(16)
-        .card(radius: Radius.large, stroke: Palette.lineStrong)
+        // The padding and the corner of the other cards that ask (a request, a question).
+        .padding(14)
+        .card(radius: Radius.card, stroke: Palette.lineStrong)
         .overlay {
-            if ApprovalPulse.pulses(isNew: pulses, reduceMotion: reduceMotion) { ApprovalPulseBorder(radius: Radius.large, trigger: pulse) }
+            if ApprovalPulse.pulses(isNew: pulses, reduceMotion: reduceMotion) { ApprovalPulseBorder(radius: Radius.card, trigger: pulse) }
         }
         .scaleEffect(reduceMotion || entered ? 1 : 0.97, anchor: .topLeading)
         .opacity(entered ? 1 : 0)
@@ -556,9 +556,9 @@ struct OrbProposalCard: View {
                     chips
                     facts
                 }
-                .padding(14)
+                .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .card(radius: Radius.large, stroke: Palette.line)
+                .card(radius: Radius.card, stroke: Palette.line)
                 .transition(.adapted(.unfold, reduceMotion: reduceMotion))
             }
         }

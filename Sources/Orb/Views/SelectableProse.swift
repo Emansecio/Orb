@@ -474,7 +474,7 @@ struct ProseSelectionAction: Equatable {
 extension EnvironmentValues {
     /// Set by a finished reply: its selected words can be quoted.
     @Entry var proseSelection: ProseSelectionAction?
-    /// The text takes the width of its longest line instead of all it is given (inside a bubble, `replyBubble()`).
+    /// The text takes the width of its longest line instead of all it is given (an Orb's words, `replyText()`).
     @Entry var proseHugsText = false
     /// Words the Orb said along its work, not an answer (`BotMessage.isNarration`): `ProseText.quieter`.
     @Entry var proseIsQuiet = false

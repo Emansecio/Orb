@@ -50,7 +50,7 @@ struct OrbMessageRow: View {
                     .layoutPriority(-1)
                     ExchangeStateMark(state: message.state, showsWord: !isNarrow)
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(Palette.faint)
                         .rotationEffect(.degrees(unfolded ? 90 : 0))
                         .animation(Motion.panel(reduceMotion: reduceMotion), value: unfolded)
@@ -83,7 +83,7 @@ struct OrbMessageRow: View {
             }
         }
         .card(radius: Radius.card, stroke: awaits ? Palette.accentText.opacity(0.3) : Palette.line)
-        .frame(maxWidth: 560, alignment: .leading)
+        .frame(maxWidth: cardWidth, alignment: .leading)
         .onGeometryChange(for: Bool.self) { $0.size.width < Self.narrowBelow } action: { isNarrow = $0 }
         .frame(maxWidth: .infinity, alignment: .leading)
         .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: unfolded)
@@ -253,7 +253,7 @@ struct ExchangeSummary: View {
                 .lineLimit(1)
             // The chevron turns its sign rather than turning: nothing rotates in a row that folds under Reduce Motion.
             Image(systemName: unfolded ? "chevron.down" : "chevron.right")
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(Palette.faint)
         }
         .accessibilityElement(children: .combine)

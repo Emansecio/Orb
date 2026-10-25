@@ -75,7 +75,8 @@ struct TranscriptRow: View, Equatable {
         case .event(let event):
             EventLineView(event: event).alignedWithReplyText()
         case .orbMessage(let message):
-            OrbMessageRow(message: message, botID: botID).alignedWithReplyText()
+            // A card: from the gutter, as wide as the others (`cardWidth`), not narrowed by the text's right margin.
+            OrbMessageRow(message: message, botID: botID).padding(.leading, gutter)
         case .groupPause(let pause):
             GroupPauseCard(pause: pause)
         case .browserView(let view):
@@ -103,6 +104,9 @@ private struct FindWash: View {
 
 /// Left gutter width shared by bot messages, tool lines, cards and notices: the replies' text starts here (44 pt), so every row has one left edge.
 let gutter: CGFloat = 44
+/// The widest a card of the chat gets (a request, a question, a proposal, the live screen, an exchange), from the gutter:
+/// one right edge for all of them.
+let cardWidth: CGFloat = 560
 
 extension View {
     /// A line of the chat that is not a message (a notice, an event, a delegation) starts where the replies' text starts, so
@@ -111,26 +115,40 @@ extension View {
         padding(.leading, gutter).padding(.trailing, 90)
     }
 
-    /// The bubble of an Orb's words (a reply, a member's words in a group, an exchange, the wizard): `Palette.agentBubble`,
-    /// darker than the person's bubble, as wide as its longest line (`proseHugsText`) up to the width it is given. Code,
-    /// tables and rules take the whole width, and the bubble with them.
-    func replyBubble(filled: Bool = true) -> some View {
+    /// A card in the chat that asks or shows something (a permission, a question, a proposal, the live screen): one width
+    /// from the replies' left edge. The width before the inset, so the inset does not eat into it.
+    func chatCard() -> some View {
+        frame(maxWidth: cardWidth, alignment: .leading).padding(.leading, gutter)
+    }
+
+    /// An Orb's words (a reply, a member's words in a group, an exchange, the wizard), straight on the canvas: no bubble,
+    /// so a code block or a table inside is one frame and not a frame in a frame, and the text starts on the chat's one
+    /// left edge. As wide as its longest line (`proseHugsText`) up to the width it is given, so the buttons beside it
+    /// stay near a short reply.
+    func replyText(narration: Bool = false) -> some View {
         environment(\.proseHugsText, true)
-            .padding(.horizontal, ReplyBubble.horizontalPadding)
-            .padding(.vertical, filled ? ReplyBubble.verticalPadding : ReplyBubble.narrationPadding)
-            .background(filled ? Palette.agentBubble : .clear, in: .rect(cornerRadius: ReplyBubble.radius))
+            .padding(.vertical, narration ? ReplyText.narrationPadding : 0)
+    }
+
+    /// The person's words in a bubble (a chat, a group, the wizard, the queue): one type, inset and shape everywhere, so a
+    /// message keeps its size as it moves from the queue to the transcript. The line spacing stays with the text, because a
+    /// quote above it keeps its tighter lines.
+    func userBubble(fill: Color = Palette.userBubble) -> some View {
+        font(Palette.conversationFont)
+            .textSelection(.enabled)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(fill, in: .rect(cornerRadius: Radius.bubble))
     }
 }
 
-/// The measures of `replyBubble()`, so the avatar beside it can be set against its first line.
-enum ReplyBubble {
-    static let horizontalPadding: CGFloat = 14
-    static let verticalPadding: CGFloat = 9
-    static let radius: CGFloat = 16
-    /// Above and below words said along the work, without a bubble: close to the action lines around them.
+/// The measures of `replyText()`, so the avatar beside it can be set against its first line.
+enum ReplyText {
+    /// Above and below words said along the work: close to the action lines around them.
     static let narrationPadding: CGFloat = 3
-    /// How far down a 30 pt avatar goes, from the bubble's top, for its middle to be level with the first line.
-    static let avatarDrop: CGFloat = 3
+    /// How far a 30 pt avatar goes from the text's top for its middle to be level with the first line (a 14 pt line is
+    /// about 17 pt tall): up, into the gap above.
+    static let avatarDrop: CGFloat = -6
 }
 
 // MARK: - Spoken labels
@@ -186,12 +204,8 @@ private struct UserBubble: View {
     var body: some View {
         HStack {
             Spacer(minLength: 120)
+            // No "Você" over it: the bubble on the right says whose it is, and its label for VoiceOver starts with "Você".
             VStack(alignment: .trailing, spacing: 6) {
-                Text("Você")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Palette.muted)
-                    .padding(.trailing, 4)
-                    .accessibilityHidden(true) // the message's own label starts with "Você"
                 if !attachments.isEmpty { AttachmentStack(paths: attachments) }
                 if !text.isEmpty {
                     let parts = MessageQuote.split(text)
@@ -199,12 +213,8 @@ private struct UserBubble: View {
                         if let quote = parts.quote { QuotedPassage(quote: quote, itemID: itemID) }
                         if !parts.body.isEmpty { userText(parts.body) }
                     }
-                    .font(Palette.conversationFont)
                     .foregroundStyle(Palette.ink)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(Palette.userBubble, in: .rect(cornerRadius: 16))
+                    .userBubble()
                     .contextMenu {
                         Button("Copiar") { Clipboard.copy(text) }
                         // Without the mouse too; when it cannot be edited now, the reason is said instead.
@@ -243,8 +253,13 @@ private struct UserBubble: View {
         .animation(Motion.hover(hovering), value: hovering)
     }
 
+    /// The reply's line spacing, so a message of two lines reads as loosely as the answer under it. Here and not on the
+    /// bubble's stack: the quote above it keeps its own tighter lines.
     @ViewBuilder private func userText(_ text: String) -> some View {
-        if highlight != nil { Text(FindMarking.marked(text, query: highlight)) } else { Text(text) }
+        Group {
+            if highlight != nil { Text(FindMarking.marked(text, query: highlight)) } else { Text(text) }
+        }
+        .lineSpacing(Palette.conversationLineSpacing)
     }
 }
 
@@ -387,10 +402,10 @@ private struct BotMessage: View {
     /// Which avatar the margin holds (none, the still one, the living one); the fade is tied to this.
     private var avatarPhase: Int { showsAvatar ? (isLastReply ? 2 : 1) : 0 }
 
-    // The bubble is padded and given the row's width instead of sharing an HStack with the avatar and a Spacer:
-    // the text then gets one definite width to wrap to (an HStack asks for several sizes, and each one lays the
-    // whole text out), and the bubble is as wide as its longest line within it. The avatar floats over the left
-    // padding; the right one leaves room for the buttons beside the bubble.
+    // The text is padded and given the row's width instead of sharing an HStack with the avatar and a Spacer: it then
+    // gets one definite width to wrap to (an HStack asks for several sizes, and each one lays the whole text out), and
+    // it is as wide as its longest line within it. The avatar floats over the left padding; the right one leaves room
+    // for the buttons beside the text.
     var body: some View {
         content
             // The reply's text never animates: not as it streams, and not when the last flush swaps the paragraphs for
@@ -401,13 +416,12 @@ private struct BotMessage: View {
             .foregroundStyle(isNarration ? Palette.secondary : Palette.ink)
             .lineSpacing(isNarration ? Palette.narrationLineSpacing : Palette.conversationLineSpacing)
             .textSelection(.enabled)
-            // In its bubble, beside its Orb: the bubble's edge is the chat's left edge (the tool lines' text, the cards'
-            // edge), the first line level with the avatar's middle. Narration keeps the bubble's left inset without the
-            // bubble, so its text starts where the answer's does.
-            .replyBubble(filled: !isNarration)
+            // Beside its Orb, on the chat's left edge (the tool lines, the notices, the cards'), the first line level with
+            // the avatar's middle. Narration starts there too, set apart by its quieter type.
+            .replyText(narration: isNarration)
             .overlay(alignment: .bottomTrailing) {
-                // Beside the bubble, in the space the right padding leaves; the row's hover keeps it up while the
-                // pointer travels to it.
+                // Beside the text, in the space the right padding leaves; the row's hover keeps it up while the pointer
+                // travels to it.
                 // Shown while something is selected too: "Citar" is for the selection.
                 // Not mounted at all otherwise: a long chat does not carry a hidden set of buttons on every reply.
                 if live == nil, hovering || selection != nil {
@@ -419,8 +433,7 @@ private struct BotMessage: View {
             }
             .environment(\.proseSelection, live == nil ? ProseSelectionAction(
                 changed: { selection = $0 }, quote: { [model, botID] in model.quote($0, for: botID) }) : nil)
-            .padding(.leading, 44)
-            .padding(.trailing, 90)
+            .alignedWithReplyText()
             .frame(maxWidth: .infinity, alignment: .leading)
             .overlay(alignment: .topLeading) {
                 // The last reply of the chat has the one living Orb in view (it works, celebrates, watches you type, and
@@ -440,9 +453,11 @@ private struct BotMessage: View {
                 }
                 // A reply that a newer one of the run takes the avatar from fades it out the same way, the margin kept.
                 .animation(Motion.fade, value: avatarPhase)
-                .offset(y: ReplyBubble.avatarDrop)
+                .offset(y: ReplyText.avatarDrop)
                 .accessibilityHidden(true)
             }
+            // Without a bubble the margins are empty: the whole row still keeps the buttons up under the pointer.
+            .contentShape(.rect)
             .onHover { if live == nil { hovering = $0 } }
             // Responds fast and lets go slowly (§2.7).
             .animation(Motion.hover(hovering), value: hovering)
@@ -526,7 +541,7 @@ private struct GreetingReplies: View {
             }
         }
         .frame(maxWidth: 360)
-        .padding(.leading, gutter) // under the bubble's edge
+        .padding(.leading, gutter) // under the reply's text
         .motion(Motion.exit, value: isTyping)
     }
 }
@@ -972,7 +987,8 @@ struct ToolGroupRow: View, Equatable {
         let isRunning = calls.contains { $0.state == .running }
         let variants = ToolTally.lineVariants(calls)
         let failures = ToolTally.failures(calls)
-        VStack(alignment: .leading, spacing: 12) {
+        // 4 pt between the actions of one group (one list, read down), 12 between the group and what is around it.
+        VStack(alignment: .leading, spacing: 4) {
             VStack(alignment: .leading, spacing: 6) {
                 header(variants: variants, failures: failures, span: ToolTally.span(calls), count: ToolTally.countNote(calls),
                        isRunning: isRunning, symbol: ToolTally.symbol(calls))
@@ -1357,7 +1373,7 @@ private struct NoticeLine: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color.primary.opacity(0.05), in: .rect(cornerRadius: Radius.card))
+        .background(Palette.ghostHover, in: .rect(cornerRadius: Radius.card))
     }
 
     private func buttons(_ actions: [NoticeAction], otherModels: [(ref: String, name: String, provider: String)]) -> some View {
@@ -1396,7 +1412,7 @@ private struct NoticeLine: View {
                 HStack(spacing: 3) {
                     Text("Detalhes")
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 8, weight: .semibold))
+                        .font(.system(size: 9, weight: .semibold))
                         .rotationEffect(.degrees(showsProviderDetail ? 90 : 0))
                 }
                 .font(Typography.small)
@@ -1588,8 +1604,7 @@ struct ApprovalCard: View {
                 answeredCard.transition(.opacity)
             }
         }
-        .padding(.leading, gutter)
-        .frame(maxWidth: 560, alignment: .leading)
+        .chatCard()
         .motion(Motion.content, value: request.decision)
         .motion(Motion.content, value: request.items.count)
         .onChange(of: noteFocused) { isEditingNote = noteFocused }
@@ -1628,27 +1643,17 @@ struct ApprovalCard: View {
                     .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: Radius.small))
                     .accessibilityLabel("Instrução ao negar")
                     .transition(.adapted(.unfold, reduceMotion: reduceMotion))
-            } else {
-                Button { showsNote = true } label: {
-                    Label("Dizer o que fazer em vez disso", systemImage: "text.bubble")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Palette.accentText)
-                        .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .help(Tip.denyWithNote)
-                .transition(.opacity)
             }
             ViewThatFits(in: .horizontal) {
-                ActionRow { denyButton.hangsOnLeadingEdge() } trailing: { allowControl }
+                ActionRow { refusal.hangsOnLeadingEdge() } trailing: { allowControl }
                 VStack(alignment: .trailing, spacing: Spacing.controlGap) {
-                    ActionRow { denyButton.hangsOnLeadingEdge() } trailing: { EmptyView() }
+                    ActionRow { refusal.hangsOnLeadingEdge() } trailing: { EmptyView() }
                     ActionRow { EmptyView() } trailing: { allowControl }
                 }
             }
         }
-        // The field opens under the text (4 pt down) and the link gives way by fading; the card grows in `Motion.content`
-        // (§2.13). Focus goes to the field at once.
+        // The field opens under the text (4 pt down) and the link beside "Não permitir" gives way by fading; the card
+        // grows in `Motion.content` (§2.13). Focus goes to the field at once.
         .motion(Motion.content, value: showsNote)
         .padding(14)
         .card(radius: Radius.card, stroke: Palette.lineStrong)
@@ -1764,6 +1769,23 @@ struct ApprovalCard: View {
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Palette.raised, in: .rect(cornerRadius: Radius.small))
+    }
+
+    /// "Não permitir" and, beside it, the quiet way to say what to do instead: a refusal with a note belongs with the
+    /// refusal, in gray, not in blue above the buttons of every card.
+    private var refusal: some View {
+        HStack(spacing: Spacing.controlGap) {
+            denyButton
+            if !request.isHandoff, !showsNote {
+                Button("Dizer o que fazer…") { showsNote = true }
+                    .buttonStyle(QuietTextStyle())
+                    .font(Typography.label)
+                    .fixedSize()
+                    .help(Tip.denyWithNote)
+                    .accessibilityHint("Recusa o pedido e deixa você dizer o que fazer em vez disso")
+                    .transition(.opacity)
+            }
+        }
     }
 
     private var denyButton: some View {
@@ -1893,8 +1915,9 @@ struct ApprovalCard: View {
             .accessibilityHint("Mostra o pedido")
 
             if isOpen {
+                // A card read, not answered: 12 pt in, as the other cards to read (14 is for the ones that ask).
                 VStack(alignment: .leading, spacing: 10) { details }
-                    .padding(14)
+                    .padding(12)
                     .card(radius: Radius.card, stroke: Palette.line)
                     .transition(.adapted(.unfold, reduceMotion: reduceMotion))
             }

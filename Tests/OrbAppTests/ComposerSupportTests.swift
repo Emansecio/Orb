@@ -162,6 +162,13 @@ struct ComposerSupportTests {
         #expect(QueuedMessages.switchHelp(from: .steer) == Tip.queueAfterTask && QueuedMessages.switchHelp(from: .afterTask) == Tip.steerNow)
     }
 
+    @Test func theStateLineShowsOnlyWhereTheDeliveryChanges() {
+        let list: [SteeringDelivery] = [.steer, .steer, .afterTask, .afterTask, .steer]
+        let previous: [SteeringDelivery?] = [nil] + list.dropLast()
+        #expect(zip(list, previous).map { QueuedMessages.showsState($0, after: $1) } == [true, false, true, false, true])
+        #expect(QueuedMessages.showsState(.afterTask, after: nil)) // the first, or a lone message, says where it goes
+    }
+
     @Test func aWaitingBubbleDoesNotShareItsIdentityWithTheRowItBecomes() {
         // Both are children of the chat's lazy stack: with one id, SwiftUI showed the delivered message as still waiting.
         let message = SteeredMessage(text: "oi", prompt: "oi")

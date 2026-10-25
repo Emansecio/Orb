@@ -69,8 +69,7 @@ private struct LiveScreenCard: View {
                     .allowsHitTesting(false)
             }
         }
-        .frame(maxWidth: 560, alignment: .leading)
-        .padding(.leading, gutter)
+        .chatCard()
         .background { if state == .needsYou, let handoff { ApprovalKeyMonitor { event, window in handleKey(event, window, handoff) } } }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(LiveScreenText.spoken(caption: caption))

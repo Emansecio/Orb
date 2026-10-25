@@ -75,12 +75,13 @@ struct GroupMessageBubble: View {
     private var name: String { look?.name ?? message.from.name }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        // 6 pt from the name to the words: without a bubble's padding, 4 pt glued them.
+        VStack(alignment: .leading, spacing: 6) {
             if showsHeader { header }
             text
-                .replyBubble()
+                .replyText()
                 .overlay(alignment: .bottomTrailing) {
-                    // Beside the bubble, in the space the right padding leaves (as a reply's buttons in the single chat).
+                    // Beside the text, in the space the right padding leaves (as a reply's buttons in the single chat).
                     CopyButton(symbol: "doc.on.doc", help: "Copiar", copiedHelp: "Copiado") {
                         Clipboard.copy(MarkdownBlocks.plainText(of: message.text))
                     }
@@ -162,7 +163,8 @@ struct GroupMessageBubble: View {
     }
 }
 
-/// The person's message in a group's thread: the same bubble as everywhere in the app (the one that belongs to "Você").
+/// The person's message in a group's thread: the same bubble as everywhere in the app, on the right, without a name (the
+/// side and the fill say whose it is; VoiceOver reads "Você").
 struct GroupUserBubble: View {
     let text: String
     /// The paths of the pictures that went with the message (as in an Orb's chat; empty for older threads).
@@ -172,21 +174,13 @@ struct GroupUserBubble: View {
         HStack {
             Spacer(minLength: 120)
             VStack(alignment: .trailing, spacing: 6) {
-                Text("Você")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Palette.muted)
-                    .padding(.trailing, 4)
-                    .accessibilityHidden(true)
                 if !attachments.isEmpty { AttachmentStack(paths: attachments) }
                 // Pictures alone make a message with no text bubble.
                 if !text.isEmpty {
                     Text(text)
-                        .font(Palette.conversationFont)
                         .foregroundStyle(Palette.ink)
-                        .textSelection(.enabled)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .background(Palette.userBubble, in: .rect(cornerRadius: 16))
+                        .lineSpacing(Palette.conversationLineSpacing)
+                        .userBubble()
                         .accessibilityLabel(TranscriptSpeech.user(text: text, attachmentCount: attachments.count))
                         // Editing does not fit a group, which cannot go back; copying does.
                         .contextMenu { Button("Copiar") { Clipboard.copy(text) } }
@@ -225,7 +219,7 @@ struct GroupAssignmentLine: View {
                     Spacer(minLength: 4)
                     ExchangeStateMark(state: message.state, showsWord: false)
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(Palette.faint)
                         .rotationEffect(.degrees(expanded ? 90 : 0))
                         .animation(Motion.panel(reduceMotion: reduceMotion), value: expanded)

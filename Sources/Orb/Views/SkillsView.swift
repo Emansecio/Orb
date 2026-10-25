@@ -585,10 +585,12 @@ struct SkillPreview: View {
                                 .font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(Palette.ink)
                             // Read as the Markdown it is (headings, lists, code), not as raw source.
+                            // On the canvas, as in a chat: code and tables are `raised` with no hairline, and would vanish on
+                            // a `raised` frame.
                             MarkdownChunk(source: document.instructions).equatable()
                                 .padding(12)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(Palette.raised, in: .rect(cornerRadius: Radius.medium))
+                                .background(Palette.canvas, in: .rect(cornerRadius: Radius.medium))
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .transition(.opacity)

@@ -186,8 +186,9 @@ Se o navegador não estiver instalado, o Orb fica só com `web_fetch` e `web_sea
   tarefa terminar e segue como o próximo pedido; várias juntas, na ordem em que você enviou) e **⌘↩ para e envia agora** (leva
   as duas); com um pedido de permissão aberto, isso recusa o pedido (parar sempre recusa) e envia. O ⇥ só vale com o Orb
   trabalhando e algo no campo; com as sugestões de skill abertas ele completa a skill, como antes. O botão de enviar também
-  tem as duas entregas no botão direito ("Direcionar agora" e "Depois da tarefa") e nas ações do VoiceOver. Cada mensagem pendente
-  diz para onde vai ("Entra no próximo passo", "Depois da tarefa"), e o balão tem ícones para editar, trocar o modo depois
+  tem as duas entregas no botão direito ("Direcionar agora" e "Depois da tarefa") e nas ações do VoiceOver. As mensagens pendentes
+  dizem para onde vão ("Entra no próximo passo", "Depois da tarefa"), uma vez para cada grupo que vai para o mesmo lugar.
+  Com o mouse sobre um balão (ou o foco do teclado), aparecem à esquerda dele os ícones para editar, trocar o modo depois
   de enviada (relógio: pôr na fila; seta: direcionar) e parar e enviar; passar o mouse sobre um ícone diz o que ele faz na
   linha do balão. Parar e enviar também leva a mensagem que acabou de entrar na tarefa e ainda não teve resposta (ela sai
   da tarefa parada e vai como o novo pedido, sem repetir). Uma mensagem que entrou no meio da tarefa aparece no chat onde o Orb a recebeu, com a
@@ -237,8 +238,9 @@ Se o navegador não estiver instalado, o Orb fica só com `web_fetch` e `web_sea
   acima dela são o histórico do turno: ações seguidas, sem nada dito entre elas (e os cartões de permissão já
   respondidos no meio delas), ficam numa linha só ("Rodou 7 comandos e leu 1 arquivo", ou o que elas foram fazer: "Listou
   modelos e viu o uso do send.py", com "1 com erro" se algo falhou; o tempo e a contagem aparecem com o mouse sobre a linha)
-  que abre com um clique; os arquivos que elas fizeram continuam à vista. O que o Orb diz entre uma ação e outra aparece
-  sem balão, menor e mais claro, junto das linhas de trabalho; só a resposta do fim tem balão. Quando o pedido termina, o
+  que abre com um clique; os arquivos que elas fizeram continuam à vista. As respostas do Orb ficam sem balão, ao lado
+  do rosto dele, na mesma borda das linhas de trabalho; só as suas mensagens têm balão, à direita. O que o Orb diz entre uma
+  ação e outra aparece menor e mais claro. Quando o pedido termina, o
   trabalho até a resposta (o que o Orb foi dizendo e as ações) vira uma linha só com o desfecho, o tempo e o volume
   ("Trabalhou por 1 min 05 s · 12 ações", ou "rodou 11 comandos" quando todas foram do mesmo tipo) e a resposta fica à
   vista logo abaixo; avisos do meio do trabalho também. Um pedido que acabou sem resposta recolhe do mesmo jeito, e a linha diz
@@ -288,7 +290,7 @@ Quando o Orb precisa de você, aparece um cartão na conversa e o Orb espera ("E
 - **Permitir** (**⌘↩**) libera só aquela ação. **Não permitir** (**Esc**) nega e o Orb não tenta de novo. Os atalhos valem para o
   cartão mais novo do Orb aberto; o Esc não vale enquanto você digita. Um comando longo mostra o começo e as últimas
   linhas, com **Mostrar tudo (mais N linhas)** para o meio; um comando arriscado aparece sempre inteiro.
-- **Dizer o que fazer em vez disso** nega e manda a sua instrução ao Orb ("use a lixeira").
+- **Dizer o que fazer…**, ao lado de Não permitir, nega e manda a sua instrução ao Orb ("use a lixeira").
 - O menu ao lado de Permitir: **Só nesta tarefa** (até o Orb terminar) e **Sempre permitir…**, com até três regras de
   tamanhos diferentes (por exemplo "comandos `git push`", "comandos `git`", "gravar em `~/Projetos/app`", "acessar
   `exemplo.com`"). A regra fica salva no Orb.

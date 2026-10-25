@@ -43,8 +43,7 @@ struct QuestionCard: View {
                 answeredCard.transition(.opacity)
             }
         }
-        .padding(.leading, gutter)
-        .frame(maxWidth: 560, alignment: .leading)
+        .chatCard()
         .motion(Motion.content, value: request.decision)
         .onChange(of: replyFocused) { isTyping = replyFocused }
         .background { if isPending { ApprovalKeyMonitor(handler: handleKey) } }

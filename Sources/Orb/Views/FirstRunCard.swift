@@ -771,8 +771,9 @@ struct FirstRunBanner: View {
         .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: isPulsing)
         // The phrases and the buttons that change as the connection goes (waiting, failed, ready) swap in place.
         .animateChanges(of: BannerPhase(connectedName: steps.connectedName, working: steps.working, failure: steps.failure?.message))
-        .frame(maxWidth: 760)
+        // Padded, then capped: as wide as the composer under it and the transcript's text.
         .padding(.horizontal, 28)
+        .frame(maxWidth: 760)
         .task {
             steps.attach(model)
             await steps.detect()
