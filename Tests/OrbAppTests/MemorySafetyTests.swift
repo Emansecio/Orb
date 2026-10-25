@@ -244,7 +244,10 @@ import Testing
         let start = Date(timeIntervalSince1970: 1_800_000_000)
         await bank.remember("O link do checkout especial é https://loja.example/checkout-especial", title: "URL do checkout especial",
                             now: start - day)
-        await bank.remember("Desconto no checkout para famílias com 3 pessoas ou mais", title: "Condições comerciais", now: start - day)
+        // Two of the message's words, not just "checkout": where the Mac has no Portuguese tagging (the GitHub runner) every
+        // word counts as a subject and a page needs two of them (`related(to:)`).
+        await bank.remember("Desconto no checkout para famílias com 3 pessoas ou mais, pelo mesmo link", title: "Condições comerciais",
+                            now: start - day)
         let names = ["Ana", "Bruno", "Carla", "Davi", "Elisa"]
         for (hour, name) in names.enumerated() {
             await bank.remember("Rodada: mandei o link do checkout para \(name) e esperei o pagamento", kind: .fato,
