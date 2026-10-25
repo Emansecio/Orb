@@ -43,10 +43,13 @@ enum PermissionMode: String, CaseIterable, Identifiable, Codable, Sendable {
     }
 
     /// Under "Liberações" (the Orb's panel and the composer's popover): the standing grants only count where the Orb
-    /// asks, and risky actions ask everywhere except in "Sem pedir permissão".
-    static let grantsNote = "Estas liberações valem em “\(PermissionMode.ask.label)”. "
-        + "Comandos arriscados sempre perguntam (em “\(PermissionMode.readOnly.label)” são recusados), "
-        + "exceto em “\(PermissionMode.bypass.label)”."
+    /// asks, and never clear a risky command (true in every mode: it asks, is refused or, in "Sem pedir permissão",
+    /// runs without any grant).
+    static let grantsNote = "Valem só em “\(PermissionMode.ask.label)”; comandos arriscados nunca são liberados por elas."
+
+    /// The rest of the note, for a hover text: what happens to a risky command in the other modes.
+    static let grantsNoteDetail = "Comandos arriscados sempre perguntam, exceto em “\(PermissionMode.readOnly.label)” (são recusados) "
+        + "e em “\(PermissionMode.bypass.label)” (rodam sem perguntar)."
 
     var symbol: String {
         switch self {

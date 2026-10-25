@@ -224,7 +224,7 @@ struct FormFootnote<Content: View>: View {
 
     var body: some View {
         content()
-            .font(.caption)
+            .font(Typography.small)
             .foregroundStyle(Palette.muted)
             .multilineTextAlignment(.leading)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -253,7 +253,7 @@ extension View {
 
     /// The gray line under a switch or a picker in the Orb's panel ("Rodar comandos e ler e escrever arquivos").
     func capabilityCaption() -> some View {
-        font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        font(Typography.small).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
     }
 }
 

@@ -402,12 +402,12 @@ struct BotInspector: View {
     private func bypassLine(_ summary: String) -> some View {
         HStack(spacing: 6) {
             Text(ModelCardSummary.bypassLine)
-                .font(.caption)
+                .font(Typography.small)
                 .foregroundStyle(Palette.warn)
             Button("Sobre este modo", systemImage: "info.circle") { isShowingBypassInfo.toggle() }
                 .labelStyle(.iconOnly)
                 .buttonStyle(.plain)
-                .font(.caption)
+                .font(Typography.small)
                 .foregroundStyle(Palette.warn)
                 .iconTip(summary, label: "Sobre este modo")
                 .popover(isPresented: $isShowingBypassInfo, arrowEdge: .bottom) {
@@ -474,15 +474,18 @@ struct BotInspector: View {
             BrowserPickerRows(botID: bot.id, isOn: capabilityBinding(capability, of: bot), status: browserStatus, hasKey: searchKey)
         } else {
             Toggle(isOn: capabilityBinding(capability, of: bot)) {
-                HStack(spacing: 4) {
-                    // The icons share one width, so the titles start on one x whatever the symbol (terminal, globe, window…).
-                    Label {
-                        Text(capability.label)
-                    } icon: {
-                        Image(systemName: capability.symbol).frame(width: 20)
+                // The link sits after the title when both fit; in the narrow panel it drops under it, whole (inline it
+                // broke letter by letter).
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 4) {
+                        capabilityTitle(capability)
+                        if isOn { inlineLink(capability) }
                     }
-                    .layoutPriority(1)
-                    if isOn { inlineLink(capability) }
+                    VStack(alignment: .leading, spacing: 1) {
+                        capabilityTitle(capability)
+                        // Under the title text, past the icon's frame.
+                        if isOn { inlineLink(capability, leadingDot: false).padding(.leading, 24) }
+                    }
                 }
                 .lineLimit(1)
             }
@@ -491,19 +494,29 @@ struct BotInspector: View {
         }
     }
 
+    /// The icons share one width, so the titles start on one x whatever the symbol (terminal, globe, window…).
+    private func capabilityTitle(_ capability: Capability) -> some View {
+        Label {
+            Text(capability.label)
+        } icon: {
+            Image(systemName: capability.symbol).frame(width: 20)
+        }
+        .layoutPriority(1)
+    }
+
     /// The way on from a row, in quiet text after its title: the macOS permissions that "Controlar apps do Mac" relies on
     /// (Automação, Acessibilidade, Gravação de Tela, which live in Ajustes), and the connectors' page with how many are on.
     @ViewBuilder
-    private func inlineLink(_ capability: Capability) -> some View {
+    private func inlineLink(_ capability: Capability, leadingDot: Bool = true) -> some View {
         switch capability {
         case .computerUse:
-            inlineLink(SettingsTab.permissions.title, tip: Tip.macPermissions) {
+            inlineLink(SettingsTab.permissions.title, tip: Tip.macPermissions, leadingDot: leadingDot) {
                 SettingsRouter.open(.permissions, using: openSettings)
             }
         case .connectors:
             let counts = model.connectorCounts(for: botID)
             inlineLink(CapabilityCopy.connectorsLine(enabled: counts.enabled, total: counts.total, anyInstalled: !model.connectors.isEmpty),
-                       tip: Tip.manageConnectors) { model.selection = .connectors }
+                       tip: Tip.manageConnectors, leadingDot: leadingDot) { model.selection = .connectors }
         case .terminal, .browser:
             EmptyView()
         }
@@ -525,18 +538,18 @@ struct BotInspector: View {
                 .help(tip)
                 .accessibilityLabel("Gerenciar \(title.lowercased())")
         }
-        .font(.caption)
+        .font(Typography.small)
         .foldContent()
     }
 
-    private func inlineLink(_ title: String, tip: String, action: @escaping () -> Void) -> some View {
+    private func inlineLink(_ title: String, tip: String, leadingDot: Bool, action: @escaping () -> Void) -> some View {
         HStack(spacing: 4) {
-            Text("·").foregroundStyle(Palette.faint).accessibilityHidden(true)
+            if leadingDot { Text("·").foregroundStyle(Palette.faint).accessibilityHidden(true) }
             Button(title, action: action)
                 .buttonStyle(.link)
                 .help(tip)
         }
-        .font(.caption)
+        .font(Typography.small)
         .lineLimit(1)
         .transition(.quiet)
     }
@@ -565,7 +578,8 @@ struct BotInspector: View {
             folderRow(bot)
             folderControls(bot)
         } header: {
-            Text("Pasta")
+            // Not "Pasta": that is the tab's own name, right above.
+            Text("Onde trabalha")
         } footer: { FormFootnote {
             if let folderProblem {
                 Text(folderProblem).foregroundStyle(Palette.warn)
@@ -575,12 +589,8 @@ struct BotInspector: View {
         if let file = instructionFile {
             Section {
                 Toggle(isOn: instructionsTrustBinding(file, of: bot)) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Label("Confiar nas instruções desta pasta", systemImage: "checkmark.shield")
-                        Text("Se ligado, \(bot.name) segue o que está em \(file.fileName) como ordens. Ligue só para pastas suas.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    // What it means is said once, in the section's footer below.
+                    Label("Confiar nas instruções desta pasta", systemImage: "checkmark.shield")
                 }
                 Button("Ver \(file.fileName) no Finder", systemImage: "doc.text.magnifyingglass") {
                     NSWorkspace.shared.activateFileViewerSelecting([bot.workingURL.appending(path: file.fileName)])
@@ -623,7 +633,7 @@ struct BotInspector: View {
         } header: {
             Text("Liberações")
         } footer: { FormFootnote {
-            Text(PermissionMode.grantsNote)
+            Text(PermissionMode.grantsNote).help(PermissionMode.grantsNoteDetail)
         } }
         // Bound to the rules themselves (a short list), so only a grant coming or going moves anything.
         .animateChanges(of: bot.permissionRules)
@@ -644,8 +654,8 @@ struct BotInspector: View {
                 Text(isHome ? "Pasta pessoal" : bot.workingURL.lastPathComponent)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Text(isHome ? bot.workingURL.path : OrbFolder.display(bot.workingURL))
-                    .font(.caption.monospaced())
+                Text(OrbFolder.display(bot.workingURL)) // "~" for the home folder too, as in Conectores
+                    .font(Typography.small.monospaced())
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.head)
@@ -678,12 +688,23 @@ struct BotInspector: View {
         .menuIndicator(.hidden)
         .chipButton()
         .fixedSize()
-        .help(Tip.changeFolder)
+        .help(changeFolderTip(bot, state: state))
         .accessibilityLabel("Mudar pasta")
     }
 
-    /// What goes with the folder's line: the warning when it is gone (and the way to bring it back), and what "Mudar…"
-    /// offers besides choosing another.
+    /// What "Mudar…" offers besides choosing another folder, in its hover text (it used to be gray lines under the row).
+    private func changeFolderTip(_ bot: Bot, state: OrbFolder.State?) -> String {
+        switch state {
+        case .ownFolder:
+            "\(Tip.changeFolder). Na pasta pessoal, \(bot.name) volta a trabalhar nela; a pasta atual e o que há nela ficam como estão."
+        case .noOwnFolder:
+            "\(Tip.changeFolder). Em uma pasta própria (\(OrbFolder.display(OrbFolder.availableURL(for: bot.name, in: OrbFolder.defaultBase)))), \(bot.name) escreve sem perguntar em “Perguntar antes”."
+        default:
+            Tip.changeFolder
+        }
+    }
+
+    /// What goes with the folder's line: the warning when it is gone, and the way to bring it back.
     @ViewBuilder
     private func folderControls(_ bot: Bot) -> some View {
         let state = listing?.folder
@@ -692,24 +713,12 @@ struct BotInspector: View {
                 .foregroundStyle(Palette.warn)
                 .transition(.quiet)
             Text("Ela foi apagada, renomeada ou está em um disco desconectado. \(bot.name) não consegue rodar comandos até você escolher outra pasta ou recriar esta.")
-                .font(.caption)
+                .font(Typography.small)
                 .foregroundStyle(.secondary)
                 .transition(.quiet)
             Button("Recriar", systemImage: "folder.badge.plus") { attempt { try model.recreateFolder(of: bot.id) } }
                 .chipButton()
                 .help(Tip.recreateFolder)
-                .transition(.quiet)
-        }
-        // A folder that is there opens from the Finder and Terminal buttons in the header.
-        if state == .ownFolder {
-            Text("Se usar a pasta pessoal, \(bot.name) volta a trabalhar nela. A pasta atual e o que há nela ficam como estão.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .transition(.quiet)
-        } else if state == .noOwnFolder {
-            Text("Em uma pasta própria (\(OrbFolder.display(OrbFolder.availableURL(for: bot.name, in: OrbFolder.defaultBase)))), \(bot.name) escreve sem perguntar em “Perguntar antes”.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
                 .transition(.quiet)
         }
     }
@@ -744,7 +753,7 @@ struct BotInspector: View {
                 }
             } footer: { FormFootnote {
                 if !listing.files.isEmpty {
-                    Text("Alterados no git primeiro, depois os mais recentes. Clique para mostrar no Finder, duas vezes para abrir.")
+                    Text("Alterados no git primeiro, depois os mais recentes.")
                 }
             } }
             // The list is read off the main thread and arrives later: it fades in, and its height (it may be long) is not
@@ -853,6 +862,30 @@ private struct InspectorTabBar: View {
     @Namespace private var highlight
 
     var body: some View {
+        // Every name when they all fit (244 pt, the panel's minimum, does with the 20 pt sides: about 195 pt of 204);
+        // narrower than that, only the chosen tab keeps its name (the rest keep their tip and their VoiceOver label)
+        // instead of each one cut ("Memó…") or squeezed.
+        ViewThatFits(in: .horizontal) {
+            tabs(showsEveryName: true)
+            tabs(showsEveryName: false)
+        }
+        // Bound to the selection alone, as in the sidebar: the highlight slides and the lit title changes with it; it
+        // jumps under Reduce Motion.
+        .animation(Motion.selection(reduceMotion: reduceMotion), value: selection)
+        .padding(.horizontal, Spacing.xl)
+        .padding(.bottom, 8)
+        // A hairline under the bar: the tab's content scrolls under it, not into the buttons.
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Palette.line).frame(height: 1)
+        }
+        // For VoiceOver this is one named group of the tab buttons themselves (each says whether it is the selected one).
+        // Not a segmented picker standing in for them: its segments are laid out on their own and point beside the
+        // buttons, so a click by accessibility landed on the next tab.
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Seções do painel")
+    }
+
+    private func tabs(showsEveryName: Bool) -> some View {
         HStack(alignment: .top, spacing: 2) {
             ForEach(InspectorTab.allCases) { tab in
                 let isSelected = tab == selection
@@ -863,10 +896,14 @@ private struct InspectorTabBar: View {
                         Image(systemName: tab.symbol)
                             .frame(height: 16)
                             .font(Typography.text)
-                        Text(tab.shortTitle)
-                            .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.85)
+                        if showsEveryName || isSelected {
+                            // One weight for every state: the semibold of the chosen tab widened it and moved its neighbors.
+                            // `fixedSize` so the bar measures the whole name and `ViewThatFits` can tell when it does not fit.
+                            Text(tab.shortTitle)
+                                .font(.system(size: 11, weight: .medium))
+                                .lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
+                        }
                     }
                     .foregroundStyle(isSelected ? Palette.ink : Palette.muted)
                     .frame(maxWidth: .infinity, minHeight: 44, maxHeight: 44)
@@ -886,20 +923,6 @@ private struct InspectorTabBar: View {
                 .help(tab.title)
             }
         }
-        // Bound to the selection alone, as in the sidebar: the highlight slides and the lit title changes with it; it
-        // jumps under Reduce Motion.
-        .animation(Motion.selection(reduceMotion: reduceMotion), value: selection)
-        .padding(.horizontal, Spacing.xl)
-        .padding(.bottom, 8)
-        // A hairline under the bar: the tab's content scrolls under it, not into the buttons.
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(Palette.line).frame(height: 1)
-        }
-        // For VoiceOver this is one named group of the tab buttons themselves (each says whether it is the selected one).
-        // Not a segmented picker standing in for them: its segments are laid out on their own and point beside the
-        // buttons, so a click by accessibility landed on the next tab.
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Seções do painel")
     }
 }
 
@@ -939,7 +962,7 @@ private struct InspectorHeader: View {
                 }
             if let nameProblem {
                 Text(nameProblem)
-                    .font(.caption)
+                    .font(Typography.small)
                     .foregroundStyle(Palette.warn)
                     .transition(.quiet)
             }
@@ -1028,7 +1051,7 @@ private struct WorkspaceFileRow: View {
         HStack(spacing: 8) {
             if showsMarker {
                 Text(file.marker?.rawValue ?? "")
-                    .font(.caption2.monospaced().weight(.semibold))
+                    .font(Typography.small.monospaced().weight(.semibold))
                     .foregroundStyle(color)
                     .frame(width: 22)
                     .help(file.marker?.help ?? "")
@@ -1039,7 +1062,7 @@ private struct WorkspaceFileRow: View {
             Spacer(minLength: 4)
             if let modified = file.modified {
                 Text(RelativeTime.text(modified))
-                    .font(.caption)
+                    .font(Typography.small)
                     .foregroundStyle(Palette.faint)
                     .lineLimit(1)
             }
@@ -1086,6 +1109,7 @@ private struct RoutineRow: View {
     let edit: () -> Void
     @State private var isConfirmingDelete = false
     @State private var isHovering = false
+    @FocusState private var deleteIsFocused: Bool
 
     var body: some View {
         // The routine as it is now (the toggle and the runs change it in the model, not in this copy).
@@ -1189,9 +1213,11 @@ private struct RoutineRow: View {
                     .foregroundStyle(Palette.secondary)
                     .help(Tip.deleteRoutine)
                     .padding(.trailing, -4)
-                    // Only under the pointer, like the lembranças: a list of routines, not of trash cans.
-                    .opacity(isHovering ? 1 : 0)
-                    .animation(Motion.hover(isHovering), value: isHovering)
+                    .focused($deleteIsFocused)
+                    // Only under the pointer, like the lembranças: a list of routines, not of trash cans. It takes Tab
+                    // too, so it must also show while it has the keyboard focus.
+                    .opacity(isHovering || deleteIsFocused ? 1 : 0)
+                    .animation(Motion.hover(isHovering || deleteIsFocused), value: isHovering || deleteIsFocused)
             }
         }
         .frame(minHeight: 26)
@@ -1250,11 +1276,12 @@ private struct RoutineNextLine: View {
                 .foregroundStyle(Palette.secondary)
             }
         } else if RoutineText.isConcluded(routine) {
-            Label("Concluída: rodou no horário marcado", systemImage: "checkmark.circle")
+            // One mark per state: the glyph and the switch already say it is off, so the line is only the word.
+            Text("Concluída")
                 .font(Typography.label)
                 .foregroundStyle(Palette.muted)
         } else {
-            Label("Pausada: não roda até você ligar de novo", systemImage: "pause.circle")
+            Text("Pausada")
                 .font(Typography.label)
                 .foregroundStyle(Palette.muted)
         }

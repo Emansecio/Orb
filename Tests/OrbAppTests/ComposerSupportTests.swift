@@ -233,8 +233,10 @@ struct ComposerSupportTests {
     /// "Comandos arriscados sempre perguntam" is not true in "Sem pedir permissão": the note says so.
     @Test func theGrantsNoteIsTrueInEveryMode() {
         let note = PermissionMode.grantsNote
-        #expect(note.contains("“Perguntar antes”") && note.contains("exceto em “Sem pedir permissão”"))
-        #expect(note.contains("em “Só leitura” são recusados")) // read-only refuses them, it does not ask
+        #expect(note.contains("“Perguntar antes”") && note.contains("nunca são liberados"))
+        // The hover text keeps what the short note dropped: read-only refuses them, "Sem pedir permissão" does not ask.
+        let detail = PermissionMode.grantsNoteDetail
+        #expect(detail.contains("“Só leitura” (são recusados)") && detail.contains("“Sem pedir permissão” (rodam sem perguntar)"))
         for mode in PermissionMode.allCases where mode != .bypass {
             // In every other mode the dangerous call asks, whatever the standing grants.
             let call = PermissionCall(toolName: "run_command", family: .shell, risk: .sensitive, danger: "apaga arquivos")

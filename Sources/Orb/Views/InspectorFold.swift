@@ -52,7 +52,11 @@ struct FoldHeader<ClosedSummary: View>: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
+                // The title keeps its line at the narrowest panel ("Modelo e permissões" broke in two at 244 pt): the
+                // closed summary is what gives way, it truncates.
                 Text(title)
+                    .lineLimit(1)
+                    .layoutPriority(1)
                 Spacer(minLength: 8)
                 if !isOpen {
                     closedSummary()
