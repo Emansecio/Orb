@@ -138,7 +138,7 @@ struct BrowserPickerRows: View {
                     .transition(.quiet)
             }
             if isOpen {
-                Picker("Navegador", selection: modeBinding) {
+                picker("Navegador", selection: modeBinding) {
                     ForEach(BrowserMode.allCases) { Text($0.label).tag($0) }
                 }
                 .help(Tip.browserMode)
@@ -149,7 +149,7 @@ struct BrowserPickerRows: View {
                         .padding(.leading, Self.indent)
                         .foldContent()
                 }
-                Picker("Pesquisa", selection: providerBinding) {
+                picker("Pesquisa", selection: providerBinding) {
                     ForEach(SearchProvider.allCases) { Text($0.label).tag($0) }
                 }
                 .help(BrowserPickerCopy.searchSummary(bot.searchProvider))
@@ -161,6 +161,25 @@ struct BrowserPickerRows: View {
                         .padding(.leading, Self.indent)
                         .foldContent()
                 }
+            }
+        }
+    }
+
+    /// A picker with its title beside it when both fit, and above it in the narrowest panel: beside, the value was cut to
+    /// "Segu…" and "DuckD…".
+    private func picker<Value: Hashable, Options: View>(_ title: String, selection: Binding<Value>,
+                                                        @ViewBuilder options: @escaping () -> Options) -> some View {
+        // Title and picker apart in both: a Form's own picker row asks for more than it needs, so `ViewThatFits` stacked it
+        // even at 360 pt. The title is hidden from VoiceOver, the picker keeps it as its label.
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                Text(title).accessibilityHidden(true)
+                Spacer(minLength: 8)
+                Picker(title, selection: selection, content: options).labelsHidden().fixedSize()
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).accessibilityHidden(true)
+                Picker(title, selection: selection, content: options).labelsHidden()
             }
         }
     }

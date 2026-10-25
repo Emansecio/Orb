@@ -118,6 +118,7 @@ struct PermissionPopover: View {
                             .font(Typography.label)
                     }
                     Text(PermissionMode.grantsNote)
+                        .help(PermissionMode.grantsNoteDetail)
                         .font(Typography.small)
                         .foregroundStyle(Palette.muted)
                         .fixedSize(horizontal: false, vertical: true)

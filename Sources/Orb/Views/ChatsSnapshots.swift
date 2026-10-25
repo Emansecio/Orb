@@ -2,7 +2,7 @@
 import SwiftUI
 
 /// `--snapshot` modes of an Orb's conversations (`OrbChats`), with made-up data in the snapshot's own folder:
-/// - `chats-sidebar`: the open Orb with five conversations (the newest three, the one on show among them, "2 mais…",
+/// - `chats-sidebar`: the open Orb with five conversations (the newest three, the one on show among them, "2 conversas mais antigas",
 ///   "Nova conversa"); the Orb ends a turn in "Ajustar texto do anúncio Wellhub", left for "Análise da campanha 21/10",
 ///   and something landed unseen in "Orçamento de novembro".
 /// - `chats-collapsed`: the same sidebar with the conversations folded under the Orb's row (the chevron beside its name).

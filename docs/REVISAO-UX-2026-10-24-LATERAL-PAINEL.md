@@ -91,8 +91,25 @@ Critérios, tirados das regras de tela de app da skill `design-taste-frontend` e
 5. **Teclado (M):** foco nas linhas de Orb e lixeiras visíveis no foco.
 6. **Depois:** as sete da seção 4.
 
+**Andamento (24/10).** As etapas 1, 2 e 3 estão feitas. As lixeiras visíveis no foco, da etapa 5, entraram junto. Conferido
+em 240/244 pt e 280/360 pt. Diferenças em relação ao proposto:
+- **Abas:** com peso fixo, as cinco cabem em 244 pt. A troca para "só a ativa" (`ViewThatFits`) fica de reserva.
+- **Grupo:** "não lido" ganha de "trabalhando", porque a segunda linha já diz quem trabalha. "Precisa de você" fica sem
+  marcador, porque a segunda linha fica âmbar.
+- **Aviso da pasta própria:** "escreve sem perguntar" continua visível, porque muda a permissão. Só o da pasta pessoal foi
+  para o `help`.
+- **Detalhe das liberações:** o que cada modo faz com comando arriscado foi para o `help` (`grantsNoteDetail`), no painel e
+  no compositor.
+- **Outros cortes em 244 pt, que a captura mostrou:**
+  - "Rod/ar/ago/ra" e "Edit/ar" nas rotinas: "Editar" vira só o lápis.
+  - "Pas…soal" na Pasta.
+  - "Conectan/do" e "Oculta/r tela" na aba Tela.
+  - Pickers do navegador: o título sobe para cima do valor.
+  - Resumo de "Modelo e permissões": some quando só caberia "…".
+
 ## 6. Não verificado
 
-- Larguras mínimas: os modos de captura desenham a lateral com 280 pt e o painel com 360 pt.
+- Larguras mínimas: `ORB_SNAPSHOT_PANE_WIDTH` cobre isso desde `81bf0ee`. Não tem captura o "Na fila" e o "Rodando…" da
+  rotina em 244 pt.
 - VoiceOver e Acesso Total por Teclado não foram testados de fato.
 - O estado "trabalhando" do painel não tem modo de captura.

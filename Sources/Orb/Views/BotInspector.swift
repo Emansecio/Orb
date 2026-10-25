@@ -335,6 +335,14 @@ struct BotInspector: View {
     /// Folded: one line with the model's name and, when something needs a look, a mark. Open: the model, its effort (when
     /// the model has levels) and the permission mode. The mode's description is the picker's hover text; only the mode that
     /// never asks keeps a line, and a model that cannot answer says why.
+    private func modelSummary(_ name: String) -> some View {
+        Text(name)
+            .foregroundStyle(Palette.faint)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .help(name) // cut in a narrow panel: the hover text has it whole
+    }
+
     private func modelCard(_ bot: Bot, info: ProviderModel?, unavailable: String?, isOpen: Bool) -> some View {
         let warning = ModelCardSummary.warning(mode: bot.permissionMode, unavailableNote: unavailable)
         let modelName = ModelCardSummary.modelText(selection: bot.model, defaultModel: model.defaultModel,
@@ -344,11 +352,13 @@ struct BotInspector: View {
                        spokenSummary: [modelName, warning].compactMap { $0 }.joined(separator: ", "),
                        action: { toggleFold($modelFoldOpen, isOpen: isOpen, hasProblem: unavailable != nil) }) {
                 HStack(spacing: 6) {
-                    Text(modelName)
-                        .foregroundStyle(Palette.faint)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .help(modelName) // cut in a narrow panel: the hover text has it whole
+                    // Whole; cut, when at least 80 pt are left; or left out, when only "…" would show (244 pt). The
+                    // warning stays in every case, and VoiceOver hears the name in the row's value.
+                    ViewThatFits(in: .horizontal) {
+                        modelSummary(modelName).fixedSize(horizontal: true, vertical: false)
+                        modelSummary(modelName).frame(maxWidth: 80, alignment: .trailing)
+                        Color.clear.frame(width: 0, height: 0)
+                    }
                     if let warning {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .font(Typography.small)
@@ -482,9 +492,10 @@ struct BotInspector: View {
                         if isOn { inlineLink(capability) }
                     }
                     VStack(alignment: .leading, spacing: 1) {
-                        capabilityTitle(capability)
-                        // Under the title text, past the icon's frame.
-                        if isOn { inlineLink(capability, leadingDot: false).padding(.leading, 24) }
+                        // Two lines before an ellipsis, as "Navegar na web" ("Controlar apps d…" at 244 pt).
+                        capabilityTitle(capability).lineLimit(2)
+                        // Under the title text, past the icon's frame (the browser's pickers use the same 28).
+                        if isOn { inlineLink(capability, leadingDot: false).padding(.leading, 28) }
                     }
                 }
                 .lineLimit(1)
@@ -651,8 +662,9 @@ struct BotInspector: View {
                 .frame(width: 20)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
+                // Two lines before a cut: beside "Mudar…" at 244 pt, one line made "Pasta pessoal" into "Pas…soal".
                 Text(isHome ? "Pasta pessoal" : bot.workingURL.lastPathComponent)
-                    .lineLimit(1)
+                    .lineLimit(2)
                     .truncationMode(.middle)
                 Text(OrbFolder.display(bot.workingURL)) // "~" for the home folder too, as in Conectores
                     .font(Typography.small.monospaced())
@@ -692,22 +704,24 @@ struct BotInspector: View {
         .accessibilityLabel("Mudar pasta")
     }
 
-    /// What "Mudar…" offers besides choosing another folder, in its hover text (it used to be gray lines under the row).
+    /// What "Mudar…" offers besides choosing another folder, in its hover text (it used to be a gray line under the row).
     private func changeFolderTip(_ bot: Bot, state: OrbFolder.State?) -> String {
-        switch state {
-        case .ownFolder:
-            "\(Tip.changeFolder). Na pasta pessoal, \(bot.name) volta a trabalhar nela; a pasta atual e o que há nela ficam como estão."
-        case .noOwnFolder:
-            "\(Tip.changeFolder). Em uma pasta própria (\(OrbFolder.display(OrbFolder.availableURL(for: bot.name, in: OrbFolder.defaultBase)))), \(bot.name) escreve sem perguntar em “Perguntar antes”."
-        default:
-            Tip.changeFolder
-        }
+        guard state == .ownFolder else { return Tip.changeFolder }
+        return "\(Tip.changeFolder). Na pasta pessoal, \(bot.name) volta a trabalhar nela; a pasta atual e o que há nela ficam como estão."
     }
 
-    /// What goes with the folder's line: the warning when it is gone, and the way to bring it back.
+    /// What goes with the folder's line: the warning when it is gone (and the way to bring it back), and what an own
+    /// folder would loosen.
     @ViewBuilder
     private func folderControls(_ bot: Bot) -> some View {
         let state = listing?.folder
+        // Stays in sight, not in a hover text: "Criar pasta própria" changes what the Orb may do without asking.
+        if state == .noOwnFolder {
+            Text("Em uma pasta própria (\(OrbFolder.display(OrbFolder.availableURL(for: bot.name, in: OrbFolder.defaultBase)))), \(bot.name) escreve sem perguntar em “Perguntar antes”.")
+                .font(Typography.small)
+                .foregroundStyle(.secondary)
+                .transition(.quiet)
+        }
         if state == .missing {
             Label("Pasta não encontrada", systemImage: "exclamationmark.triangle.fill")
                 .foregroundStyle(Palette.warn)
@@ -1198,6 +1212,8 @@ private struct RoutineRow: View {
                     } else {
                         Button("Rodar agora", systemImage: "play.fill") { model.runRoutine(routine.id) }
                             .buttonStyle(SecondaryPillStyle())
+                            // Whole at 244 pt: squeezed, it broke into "Rod / ar / ago / ra". "Editar" gives way instead.
+                            .fixedSize()
                             .help(Tip.runRoutineNow)
                             .transition(.opacity)
                     }
@@ -1206,10 +1222,19 @@ private struct RoutineRow: View {
                 .animateChanges(of: RoutineRunState(isRunning: model.isRoutineRunning(routine.id), isQueued: model.isRoutineQueued(routine.id)))
                 Spacer(minLength: 4)
                 // A ghost with its word, as on the Rotinas page: the pill on the left is not left facing a lone pencil.
-                Button("Editar", systemImage: "pencil", action: edit)
-                    .buttonStyle(GhostStyle())
-                    .controlSize(.small)
-                    .help(Tip.editRoutine)
+                // In the narrowest panel only the pencil fits; it keeps "Editar" as its tip and VoiceOver label.
+                ViewThatFits(in: .horizontal) {
+                    Button("Editar", systemImage: "pencil", action: edit)
+                        .buttonStyle(GhostStyle())
+                        .fixedSize()
+                        .help(Tip.editRoutine)
+                    Button("Editar", systemImage: "pencil", action: edit)
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(CircleGhostStyle(side: 26, fontSize: 12))
+                        .foregroundStyle(Palette.secondary)
+                        .help(Tip.editRoutine)
+                }
+                .controlSize(.small)
                 Button("Apagar “\(current.name)”", systemImage: "trash") { isConfirmingDelete = true }
                     .labelStyle(.iconOnly)
                     .buttonStyle(CircleGhostStyle(side: 26, fontSize: 12))

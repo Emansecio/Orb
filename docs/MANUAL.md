@@ -490,12 +490,12 @@ no chat para você ler e buscar (⌘F).
 **Nova conversa** (⇧⌘N, o botão de lápis na barra do chat, o menu do Orb na lateral ou ⌘K) abre outra, vazia. Cada conversa
 tem o próprio histórico, e o modelo não vê o das outras; a memória, a pasta e as ferramentas são do Orb e valem para todas. O
 que uma conversa disse vai para a memória quando você sai dela, e aí as outras encontram. Com mais de uma, a lateral lista as
-conversas do Orb aberto embaixo dele: as três mais recentes, a que está na tela e as que têm algo não lido ("mais…" mostra o
-resto), com o título tirado da primeira mensagem. O menu de cada uma renomeia ou apaga; o que ela guardou na memória fica.
+conversas do Orb aberto embaixo dele: as três mais recentes, a que está na tela e as que têm algo não lido ("N conversas mais antigas" mostra
+o resto), com o título tirado da primeira mensagem. O menu de cada uma renomeia ou apaga; o que ela guardou na memória fica.
 A seta ao lado do nome do Orb (ou **Recolher conversas** no menu dele) esconde a lista embaixo da linha e fica assim até você
 abrir de novo. Passar o mouse sobre qualquer Orb mostra um **+** ao lado do nome, que abre uma conversa nova nele.
 
-Trocar de conversa com o Orb trabalhando não interrompe nada: a tarefa termina na conversa em que começou (um ponto pulsa ao
+Trocar de conversa com o Orb trabalhando não interrompe nada: a tarefa termina na conversa em que começou (um anel pulsa ao
 lado dela na lateral), a faixa acima da caixa de mensagem diz qual é, com **Voltar** (ou **Responder**, quando o Orb precisa de você) para ir até ela, e o que você escrever na outra
 espera ela acabar.
 
