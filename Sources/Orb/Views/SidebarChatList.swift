@@ -198,6 +198,8 @@ private struct ChatTitleField: View {
             .onExitCommand { finish(keeping: false) }
             .padding(.horizontal, SidebarChatList.rowInset)
             .padding(.vertical, 4)
+            // Same height as SidebarChatRow, so the list does not jump when a title is renamed.
+            .frame(minHeight: 28)
             .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: 7))
             .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Palette.lineStrong))
             .onAppear { isFocused = true }

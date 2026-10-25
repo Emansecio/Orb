@@ -200,7 +200,6 @@ private struct SidebarCategoryHeader: View {
                         .foregroundStyle(Palette.faint)
                         .monospacedDigit()
                         .help(count)
-                        .accessibilityLabel(count)
                 }
             }
             .frame(minHeight: SidebarCategoryLayout.headerContentHeight)
