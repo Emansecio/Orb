@@ -374,7 +374,10 @@ extension AgentEngineTests {
         let script = CallScript([[described], [.text("Pronto.")]], whenExhausted: .fim)
         let events = await run(AgentEngine(), request(script, mode: .auto, runs: Counter(), tools: [DescribedTool()]))
         let started = events.compactMap { event -> ToolCall? in if case .toolStarted(let call) = event { call } else { nil } }
-        #expect(started.map(\.intent) == ["Conferir se a vaga do Marcus já saiu", nil])
+        // The two calls may start in either order (they can run side by side): what matters is that only the described
+        // one carries an intent, trimmed to one line without the full stop.
+        #expect(started.count == 2)
+        #expect(started.compactMap(\.intent) == ["Conferir se a vaga do Marcus já saiu"])
     }
 
     // MARK: Retries
