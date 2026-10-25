@@ -25,6 +25,9 @@ struct UserProfile: Codable, Equatable, Sendable {
     /// What the Orbs call the user: the nickname, else the name.
     var callName: String? { [nickname, name].lazy.map { MemoryText.flatten($0) }.first { !$0.isEmpty } }
 
+    /// The name beside the avatar at the foot of the sidebar: the user's own name, else the nickname.
+    var shownName: String? { [name, nickname].lazy.map { MemoryText.flatten($0) }.first { !$0.isEmpty } }
+
     /// What the avatar shows when there is no photo: the first letter of `callName`.
     var initial: String? { callName?.first.map { String($0).uppercased() } }
 

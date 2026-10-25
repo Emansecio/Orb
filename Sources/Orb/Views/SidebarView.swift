@@ -131,17 +131,16 @@ struct SidebarView: View {
                 }
                 .padding(.horizontal, 8)
                 HStack(spacing: 6) {
-                    ProfileAvatarButton()
-                    Spacer(minLength: 0)
+                    ProfileRowButton()
                     Button("Ajustes", systemImage: "gearshape") { SettingsRouter.show(using: openSettings) }
                         .labelStyle(.iconOnly)
                         .buttonStyle(CircleGhostStyle(side: 28, fontSize: 15))
                         .foregroundStyle(Palette.muted)
                         .iconTip(Tip.settings(), label: "Ajustes")
                 }
-                // The picture on the Orbs' avatars (16 pt from the edge, its 32 pt ring 2 pt outside it) and the gear's
-                // center under the titles' "+" (20 pt from the edge), so the foot hangs on the same two lines as the list.
-                .padding(.leading, 14)
+                // The profile's highlight on the rows' 8 pt (its picture on the Orbs' avatars, 16 pt from the edge) and
+                // the gear's center under the titles' "+" (20 pt from the edge), so the foot hangs on the list's lines.
+                .padding(.leading, 8)
                 .padding(.trailing, 6)
             }
             // A little more air under the picture than above the titles: at 8 pt it sat on the window's edge.
@@ -342,20 +341,36 @@ enum SidebarSelection {
     static let id = "selecao"
 }
 
-/// The user's round picture at the foot of the sidebar: it opens "Você" in Ajustes (an invitation to fill it in while
-/// it is empty). A small view of its own, so typing in the profile redraws only it.
-private struct ProfileAvatarButton: View {
+/// The user's picture and name at the foot of the sidebar, highlighted like a row: it opens "Você" in Ajustes (with
+/// "Seu perfil" in place of the name, an invitation to fill it in while it is empty). A small view of its own, so
+/// typing in the profile redraws only it.
+private struct ProfileRowButton: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openSettings) private var openSettings
+    @State private var isHovering = false
 
     var body: some View {
         let profile = model.profile
+        let name = profile.shownName
         Button { SettingsRouter.open(.general, using: openSettings) } label: {
-            ProfileAvatar(photoPath: model.profilePhotoPath, initial: profile.initial, size: 28)
+            // The Orbs' rows' geometry (a 30 pt picture, 8 pt to the text), so the name starts on the Orbs' names.
+            HStack(spacing: 8) {
+                ProfileAvatar(photoPath: model.profilePhotoPath, initial: profile.initial, size: 30)
+                Text(name ?? "Seu perfil")
+                    .font(Typography.text.weight(.medium))
+                    .foregroundStyle(name == nil ? Palette.muted : Palette.secondary)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .hoverFill(isHovering, in: .rect(cornerRadius: Radius.medium))
+            .contentShape(.rect)
         }
-        .buttonStyle(CircleGhostStyle(side: 32, fontSize: 14))
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
         .help(Tip.profile(callName: profile.callName))
-        .accessibilityLabel("Seu perfil")
+        .accessibilityLabel(name.map { "Seu perfil, \($0)" } ?? "Seu perfil")
         .accessibilityHint("Abre os Ajustes")
     }
 }

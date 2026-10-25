@@ -75,6 +75,12 @@ struct UserProfilePromptTests {
         #expect(UserProfile().callName == nil && UserProfile(about: "x").initial == nil)
     }
 
+    @Test func theShownNameIsTheNameThenTheNickname() {
+        #expect(full.shownName == "Marina Costa")
+        #expect(UserProfile(nickname: " Mari ").shownName == "Mari")
+        #expect(UserProfile(name: "  ", about: "x").shownName == nil && UserProfile().shownName == nil)
+    }
+
     @Test func theProfileIsNeverPartOfTheBaseSystemPrompt() {
         // The base prompt is at its ceiling (SystemPromptTests): the profile can only come through the memory.
         let system = SystemPrompt.make(bot: Bot(name: "Atlas", role: "x", orb: OrbConfig()), skills: [], memory: "", environment: mac)
