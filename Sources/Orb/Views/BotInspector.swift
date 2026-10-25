@@ -1111,6 +1111,9 @@ private struct RoutineRow: View {
     @State private var isHovering = false
     @FocusState private var deleteIsFocused: Bool
 
+    /// One flag for the trash can's opacity and its animation, so the two cannot drift apart.
+    private var showsDelete: Bool { isHovering || deleteIsFocused }
+
     var body: some View {
         // The routine as it is now (the toggle and the runs change it in the model, not in this copy).
         let current = model.routines.first { $0.id == routine.id } ?? routine
@@ -1216,8 +1219,8 @@ private struct RoutineRow: View {
                     .focused($deleteIsFocused)
                     // Only under the pointer, like the lembranças: a list of routines, not of trash cans. It takes Tab
                     // too, so it must also show while it has the keyboard focus.
-                    .opacity(isHovering || deleteIsFocused ? 1 : 0)
-                    .animation(Motion.hover(isHovering || deleteIsFocused), value: isHovering || deleteIsFocused)
+                    .opacity(showsDelete ? 1 : 0)
+                    .animation(Motion.hover(showsDelete), value: showsDelete)
             }
         }
         .frame(minHeight: 26)
@@ -1352,7 +1355,7 @@ enum InstructionsText {
         if trustedHash != nil {
             return "\(file.fileName) mudou desde que você confiou nele: \(name) o lê só como referência, até você confiar de novo."
         }
-        return "\(file.fileName) é lido por \(name) como material de referência, não como ordens. Confie para valer como instruções."
+        return "\(file.fileName) é lido por \(name) como material de referência, não como ordens. Confie para valer como instruções, só em pastas suas."
     }
 }
 
