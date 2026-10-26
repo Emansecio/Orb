@@ -1,8 +1,8 @@
 import SwiftUI
 
 // The context meter: a small ring in the composer's bar (how much of the model's window the conversation takes), the
-// popover it opens ("Contexto desta conversa", with "Compactar agora"), and the one-line card above the composer that
-// appears when the conversation is getting long. The numbers come from `ContextGauge`; nothing here measures.
+// popover it opens ("Contexto desta conversa", with "Compactar agora"). The numbers come from `ContextGauge`; nothing
+// here measures.
 
 extension ContextTone {
     var color: Color {
@@ -147,7 +147,7 @@ struct ContextMeterChip: View {
         Group {
             if let reading = gauge.reading, reading.botID == botID { chip(reading) }
         }
-        .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: gauge.reading?.botID == botID)
+        .motion(value: gauge.reading?.botID == botID)
     }
 
     private func chip(_ reading: ContextReading) -> some View {
@@ -157,7 +157,7 @@ struct ContextMeterChip: View {
                 if showsPercent {
                     Text("\(reading.percent)%")
                         .monospacedDigit()
-                        .foregroundStyle(reading.tone == .calm ? Palette.muted : reading.tone.color)
+                        .foregroundStyle(reading.tone.color) // calm is `Palette.muted` already
                         // The number rolls to the next one once per turn (never per token); it fades under Reduce Motion.
                         .contentTransition(reduceMotion ? .identity : .numericText())
                         .animation(Motion.content, value: reading.percent)
@@ -166,7 +166,7 @@ struct ContextMeterChip: View {
                 ContextRing(fraction: reading.fraction, tone: reading.tone)
             }
             // The number comes and goes with the chip widening or narrowing under it; under Reduce Motion it only fades.
-            .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: showsPercent)
+            .motion(value: showsPercent)
         }
         .onHover { isHovering = $0 }
         .buttonStyle(ComposerChipStyle())

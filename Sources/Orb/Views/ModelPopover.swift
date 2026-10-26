@@ -99,9 +99,8 @@ struct ModelPopover: View {
 
     /// The row that follows the app's default model: its name, with what makes it special in gray.
     private var defaultName: (name: String, detail: String) {
-        guard let ref = ModelRef(model.defaultModel) else { return ("Padrão do app", "") }
-        let name = model.account(ref.provider)?.models.first { $0.id == ref.model }?.name ?? ref.model
-        return (name, "padrão do app")
+        guard ModelRef(model.defaultModel) != nil else { return ("Padrão do app", "") }
+        return (model.modelName(model.defaultModel), "padrão do app")
     }
 
     private func choose(_ ref: String) {

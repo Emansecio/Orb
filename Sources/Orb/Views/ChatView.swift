@@ -42,7 +42,7 @@ struct ChatView: View {
         // Over the conversation, above the composer (whose card lights up too): the whole chat takes the drop.
         .overlay {
             ZStack { if isDropTargeted { ChatDropOverlay() } }
-                .animation(reduceMotion ? nil : Motion.hover(isDropTargeted), value: isDropTargeted)
+                .motion(Motion.hover(isDropTargeted), value: isDropTargeted) // a fade under Reduce Motion, not a cut
         }
         .onAppear { bindFind(); takeFindRequest() }
         .onChange(of: botID) {
@@ -77,12 +77,22 @@ struct ChatView: View {
                 Button("Buscar na conversa", systemImage: "magnifyingglass") { find.open() }
                     .keyboardShortcut(AppShortcut.find)
                     .help(Tip.findInConversation())
-                Button("Painel do Orb", systemImage: "sidebar.right") {
-                    model.toggleInspector()
-                }
-                .help(Tip.inspector(isShowing: model.showInspector))
+                InspectorToolbarButton()
             }
         }
+    }
+}
+
+/// The panel button, a view of its own: only its tip depends on whether the panel is open, and that must not make the
+/// whole chat read `showInspector` and redraw when the panel opens.
+private struct InspectorToolbarButton: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        Button("Painel do Orb", systemImage: "sidebar.right") {
+            model.toggleInspector()
+        }
+        .help(Tip.inspector(isShowing: model.showInspector))
     }
 }
 
@@ -140,7 +150,7 @@ struct CompactedFoldLine: View {
             .lineLimit(1)
             .padding(.horizontal, 14)
             .padding(.vertical, 7)
-            .background(isHovered ? Palette.ghostSelected : Palette.ghostHover, in: .capsule)
+            .hoverFill(isHovered, in: .capsule, color: Palette.ghostSelected, resting: Palette.ghostHover)
             .contentShape(.capsule)
         }
         .buttonStyle(.plain)
@@ -1006,7 +1016,7 @@ private struct WorkingLine: View {
                     }
                     // The phrase gives way (it is cut with "…") before the clock and the button do.
                     .layoutPriority(-1)
-                    .animation(Motion.adapted(Motion.enter, reduceMotion: reduceMotion), value: work.phraseKey)
+                    .motion(Motion.enter, value: work.phraseKey)
                     // The phrase leaving follows its parent when the line is pushed down by a row coming in above it,
                     // instead of staying drawn where the line used to be.
                     .geometryGroup()
@@ -1028,7 +1038,7 @@ private struct WorkingLine: View {
                     }
                 }
                 // The meter slides along with the width of the phrase.
-                .animation(reduceMotion ? nil : Motion.content, value: work.phraseKey)
+                .animateChanges(of: work.phraseKey)
             }
             .onHover { isHovering = $0 }
             .onChange(of: live.shownWork, initial: true) { _, new in if let new { lastWork = new } }
@@ -1165,7 +1175,7 @@ private struct WorkMeterView: View {
                     // Plain text on every tick: a clock that ticks every second must not be a recurring animation outside
                     // Core Animation (MOVIMENTO.md, principle 7). Rolling digits are for the count, which changes once.
                     .contentTransition(reduceMotion ? .identity : .numericText())
-                    .animation(reduceMotion ? nil : Motion.content, value: work.actions)
+                    .animateChanges(of: work.actions)
             }
             .accessibilityHidden(true)
         }

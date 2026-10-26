@@ -2006,7 +2006,9 @@ struct ApprovalCard: View {
         }
     }
 
-    private var denyButton: some View {
+    @ViewBuilder private var denyButton: some View {
+        // Read once: each read walks the conversation to find the Orb's newest open card.
+        let showsKeys = self.showsKeys
         Button(action: deny) {
             HStack(spacing: 6) {
                 Text(denyTitle)
@@ -2028,7 +2030,8 @@ struct ApprovalCard: View {
     }
 
     /// "Permitir ⌘↩" with, when there is more to choose, a chevron in the same capsule that opens the rest.
-    private var allowControl: some View {
+    @ViewBuilder private var allowControl: some View {
+        let showsKeys = self.showsKeys // once per render, see `denyButton`
         HStack(spacing: 0) {
             Button {
                 model.decide(.once, approvalID: request.id, botID: botID)

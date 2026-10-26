@@ -233,20 +233,8 @@ private struct AllModelsSheet: View {
             .frame(minHeight: 260, idealHeight: 330, maxHeight: .infinity)
         }
         .orbSheet("Modelos do gateway", subtitle: "\(models.count) modelos · remova os que não usa", size: .small) {
-            SheetFooterBar {
-                Spacer()
-                // Esc closes; Return does too, as the old "OK" did.
-                Button("Fechar") { dismiss() }
-                    .buttonStyle(PrimaryPillStyle())
-                    .keyboardShortcut(.cancelAction)
-                    .background {
-                        Button("Fechar") { dismiss() }
-                            .keyboardShortcut(.defaultAction)
-                            .frame(width: 0, height: 0)
-                            .opacity(0)
-                            .accessibilityHidden(true)
-                    }
-            }
+            // Esc and Return both close it, as the old "OK" did.
+            SheetFooter(cancel: { dismiss() }, primaryTitle: "Fechar", showsCancel: false, primary: { dismiss() })
         }
     }
 }

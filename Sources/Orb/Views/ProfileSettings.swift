@@ -58,10 +58,10 @@ struct ProfileSettings: View {
                 LimitedTextField(title: "Sobre você", prompt: "Ex.: trabalho com design, prefiro respostas curtas e moro em Recife.",
                                  limit: UserProfile.aboutLimit, axis: .vertical, value: binding(\.about))
                     .lineLimit(3...6)
-                if model.profile.about.count >= 320 {
-                    Text("\(model.profile.about.count)/\(UserProfile.aboutLimit)")
+                if let counter = Self.aboutCounter(count: model.profile.about.count) {
+                    Text(counter.text)
                         .font(.caption)
-                        .foregroundStyle(model.profile.about.count >= UserProfile.aboutLimit ? Palette.warn : Palette.faint)
+                        .foregroundStyle(counter.atLimit ? Palette.warn : Palette.faint)
                         .frame(maxWidth: .infinity, alignment: .trailing)
                 }
             }
@@ -73,6 +73,13 @@ struct ProfileSettings: View {
         .fileImporter(isPresented: $isImporting, allowedContentTypes: [.image]) { result in
             if case .success(let url) = result { setPhoto(url) }
         }
+    }
+
+    /// The "n/limit" counter under "Sobre você": it shows from 80% of the limit on, in the warning color at the limit.
+    /// The count is taken once by the caller (it walks the string).
+    static func aboutCounter(count: Int) -> (text: String, atLimit: Bool)? {
+        guard count >= UserProfile.aboutLimit * 4 / 5 else { return nil }
+        return ("\(count)/\(UserProfile.aboutLimit)", count >= UserProfile.aboutLimit)
     }
 
     private func field(_ title: String, prompt: String, _ keyPath: WritableKeyPath<UserProfile, String>, limit: Int) -> some View {
@@ -117,7 +124,9 @@ private struct LimitedTextField: View {
             .onChange(of: text) {
                 let cut = String(text.prefix(limit))
                 if cut != text { text = cut }
-                value.wrappedValue = cut
+                // Cutting sets `text` again and fires this once more with the same value: store only a change, since
+                // every store reaches `model.profile` (its didSet, a state write and the invalidation of its readers).
+                if value.wrappedValue != cut { value.wrappedValue = cut }
             }
     }
 }

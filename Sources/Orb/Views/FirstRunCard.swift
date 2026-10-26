@@ -672,9 +672,9 @@ private struct FirstRunRow: View {
 
         Button(action: action) {
             if framed {
-                content.card(radius: Radius.card, fill: isHovering && isEnabled ? Palette.raised : Palette.surface)
+                content.hoverCard(isHovering && isEnabled, radius: Radius.card)
             } else {
-                content.background(isHovering && isEnabled ? Palette.ghostHover : .clear, in: .rect(cornerRadius: Radius.card))
+                content.hoverFill(isHovering && isEnabled, in: .rect(cornerRadius: Radius.card))
             }
         }
         .buttonStyle(.plain)
@@ -786,10 +786,7 @@ struct FirstRunBanner: View {
                         .help(steps.claude?.isLoggedIn == true ? Tip.useClaudeCode : Tip.signInClaudeCode)
                         .disabled(steps.working == .claudeCode)
                     }
-                    Button("Entrar com ChatGPT") { steps.connectChatGPT(model: model) }
-                        .buttonStyle(steps.claude?.isInstalled == true ? AnyButtonStyle(SecondaryPillStyle()) : AnyButtonStyle(PrimaryPillStyle()))
-                        .help(Tip.signInChatGPT)
-                        .disabled(steps.working == .chatgpt)
+                    chatGPTButton(isPrimary: steps.claude?.isInstalled != true)
                     ForEach(steps.localServers) { kind in
                         Button("Usar \(kind.shortName)") { steps.connectLocal(kind, model: model) }
                             .buttonStyle(SecondaryPillStyle())
@@ -819,7 +816,7 @@ struct FirstRunBanner: View {
             }
         }
         .padding(isCompact ? 10 : 14)
-        .animation(reduceMotion ? nil : Motion.content, value: isCompact)
+        .animateChanges(of: isCompact)
         .modifier(NudgePulsingCard(radius: Radius.large, nudge: model.setupNudge))
         // The phrases and the buttons that change as the connection goes (waiting, failed, ready) swap in place.
         .animateChanges(of: BannerPhase(connectedName: steps.connectedName, working: steps.working, failure: steps.failure?.message))
@@ -837,6 +834,14 @@ struct FirstRunBanner: View {
         SetupPrompt.shows(connectionsChecked: model.hasCheckedConnections, orbHasModel: model.hasModelSetup(for: botID),
                           connectedName: steps.connectedName, hasItems: !model.orbTranscript(botID).items.isEmpty,
                           alwaysShown: alwaysShown)
+    }
+
+    /// The pill of the ChatGPT sign-in: white when it is the first choice, quiet beside "Claude Code".
+    @ViewBuilder private func chatGPTButton(isPrimary: Bool) -> some View {
+        let button = Button("Entrar com ChatGPT") { steps.connectChatGPT(model: model) }
+            .help(Tip.signInChatGPT)
+            .disabled(steps.working == .chatgpt)
+        if isPrimary { button.buttonStyle(PrimaryPillStyle()) } else { button.buttonStyle(SecondaryPillStyle()) }
     }
 
     private var subtitle: String {
@@ -888,11 +893,4 @@ private struct BannerPhase: Equatable {
     var connectedName: String?
     var working: FirstRunModel.Choice?
     var failure: String?
-}
-
-/// Lets two different button styles be chosen at run time.
-private struct AnyButtonStyle: ButtonStyle {
-    private let make: (Configuration) -> AnyView
-    init<S: ButtonStyle>(_ style: S) { make = { AnyView(style.makeBody(configuration: $0)) } }
-    func makeBody(configuration: Configuration) -> some View { make(configuration) }
 }

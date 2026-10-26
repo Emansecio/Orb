@@ -21,8 +21,8 @@ final class MacPermissionsModel {
     private let readNotifications: @MainActor () async -> NotificationPermission
 
     /// The rows read again while the tab is open: each a quick yes/no. Automation (one question per app) waits for the
-    /// app to come back to the front.
-    static let watched: [MacPermissionKind] = [.accessibility, .screenRecording, .fullDiskAccess]
+    /// app to come back to the front. They are also the essential ones the tab's header counts as missing.
+    nonisolated static let watched: [MacPermissionKind] = [.accessibility, .screenRecording, .fullDiskAccess]
 
     init(checker: MacPermissionChecker = .live, tester: MacPermissionTester = .live,
          notifications: @escaping @MainActor () async -> NotificationPermission = { await NotificationPermission.current() }) {
@@ -188,9 +188,8 @@ struct MacPermissionsSummary: Equatable {
     var automationTotal: Int
 
     static func make(statuses: [MacPermissionKind: MacPermissionStatus], notifications: NotificationPermission?) -> MacPermissionsSummary {
-        let essentials: [MacPermissionKind] = [.accessibility, .screenRecording, .fullDiskAccess]
         let notGranted: Set<MacPermissionStatus> = [.denied, .notGranted, .notDetermined]
-        var missing = essentials.filter { statuses[$0].map(notGranted.contains) ?? false }.map(\.title)
+        var missing = MacPermissionsModel.watched.filter { statuses[$0].map(notGranted.contains) ?? false }.map(\.title)
         if let notifications, notGranted.contains(notifications.status) { missing.append("Notificações") }
         let automation = AutomationTarget.known.map { statuses[.automation($0)] }
         return MacPermissionsSummary(isLoaded: !statuses.isEmpty && notifications != nil, missing: missing,

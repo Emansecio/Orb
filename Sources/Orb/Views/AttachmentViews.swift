@@ -178,9 +178,7 @@ struct ProducedFilesView: View {
     static let limit = 3
 
     var body: some View {
-        let pictures = files.filter(Self.isPicture)
-        let others = files.filter { !Self.isPicture($0) }
-        let shown = Array(pictures.prefix(Self.limit))
+        let (shown, others) = Self.split(files)
         let all = shown.map(\.path)
         VStack(alignment: .leading, spacing: 4) {
             if !others.isEmpty {
@@ -191,6 +189,16 @@ struct ProducedFilesView: View {
                 ImageTile(path: file.path, size: CGSize(width: 112, height: 72), all: all, label: captures.contains(file.path) ? "Captura" : "Imagem criada")
             }
         }
+    }
+
+    /// The pictures shown (at most `limit`) and the other files, in one pass: `isPicture` checks each file's type, so it
+    /// is asked once per file instead of once per filter.
+    private static func split(_ files: [ProducedFile]) -> (pictures: [ProducedFile], others: [ProducedFile]) {
+        var pictures: [ProducedFile] = [], others: [ProducedFile] = []
+        for file in files {
+            if !isPicture(file) { others.append(file) } else if pictures.count < limit { pictures.append(file) }
+        }
+        return (pictures, others)
     }
 
     private static func isPicture(_ file: ProducedFile) -> Bool {

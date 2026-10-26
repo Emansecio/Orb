@@ -16,8 +16,17 @@ extension AppModel {
         }
     }
 
+    /// The Orb's newest open card. Walks the conversation from the end and stops at the first hit: an open card is
+    /// almost always near the tail, so this does not touch the whole history (the views ask it on every render).
+    func newestPendingApproval(of botID: UUID) -> ApprovalRequest? {
+        for item in (sessions[botID]?.conversation?.items ?? transcript(botID)).reversed() {
+            if case .approval(let request) = item.kind, request.decision == nil { return request }
+        }
+        return nil
+    }
+
     /// The card the keyboard answers: the Orb's newest open one.
-    func newestPendingApprovalID(of botID: UUID) -> UUID? { pendingApprovals(of: botID).last?.id }
+    func newestPendingApprovalID(of botID: UUID) -> UUID? { newestPendingApproval(of: botID)?.id }
 
     /// Whether a card shows the keys (⌘↩, esc): only the one they answer, so two open cards never both claim them. A card
     /// the conversation does not hold (a sample) shows them.
@@ -28,7 +37,7 @@ extension AppModel {
 
     /// The Orb's open question (`ask_user`), when its newest open card is one: the message box answers it.
     func openQuestion(of botID: UUID) -> UUID? {
-        guard let newest = pendingApprovals(of: botID).last, newest.isQuestion else { return nil }
+        guard let newest = newestPendingApproval(of: botID), newest.isQuestion else { return nil }
         return newest.id
     }
 

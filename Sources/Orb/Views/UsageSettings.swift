@@ -173,7 +173,7 @@ struct UsageSettings: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 4)
             .accessibilityElement(children: .combine)
-            .animation(animation, value: report.totalCost)
+            .animateChanges(of: report.totalCost)
         }
     }
 
@@ -220,7 +220,7 @@ struct UsageSettings: View {
                 }
             }
             .frame(height: 150)
-            .animation(animation, value: points)
+            .animateChanges(of: points)
             .accessibilityLabel("Gráfico do uso por \(unit == .hour ? "hora" : "dia")")
             .accessibilityValue(chartSummary(report))
             legend(series, colors: colors)
@@ -266,7 +266,7 @@ struct UsageSettings: View {
         } header: {
             Text(title)
         }
-        .animation(animation, value: rows)
+        .animateChanges(of: rows)
     }
 
     private func hourSection(_ report: UsageReport) -> some View {
@@ -285,7 +285,7 @@ struct UsageSettings: View {
                     }
                 }
                 .frame(height: 44, alignment: .bottom)
-                .animation(animation, value: report.hourly)
+                .animateChanges(of: report.hourly)
                 HStack {
                     ForEach([0, 6, 12, 18], id: \.self) { hour in
                         Text(UsageFormat.hour(hour)).frame(maxWidth: .infinity, alignment: .leading)

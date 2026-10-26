@@ -48,7 +48,7 @@ enum ChatsSnapshots {
                 model.setDraft("E o orçamento de novembro?", for: id)
                 return AnyView(ChatView(botID: id))
             }
-            return AnyView(SidebarView().frame(width: 280))
+            return AnyView(SidebarView().frame(width: Snapshot.paneWidth(280)))
         }
     }
 

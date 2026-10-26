@@ -245,7 +245,7 @@ struct NewBotSheet: View {
                     whoTab.transition(.opacity)
                 }
             }
-            .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: tab)
+            .motion(value: tab)
             Group {
                 if isAssistant {
                     WizardFooter(canCreate: wizard.draft.canCreate, isReady: wizard.draft.ready, hitLimit: wizard.hitLimit, toForm: passDraftToForm,
@@ -297,8 +297,8 @@ struct NewBotSheet: View {
                         }
                     }
                 }
-                .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: isImporting)
-                .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: creation)
+                .motion(value: isImporting)
+                .motion(value: creation)
                 .frame(width: Layout.leftColumn)
                 .background(Palette.chrome)
                 // The left column comes in just after the tabs, the footer last (MOVIMENTO.md §2.6).
@@ -310,7 +310,7 @@ struct NewBotSheet: View {
                     .padding(.top, isImporting ? Spacing.xxl : 0)
                     .id(creation)
                     .transition(.opacity)
-                    .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: creation)
+                    .motion(value: creation)
                     .frame(width: Layout.preview)
             }
     }

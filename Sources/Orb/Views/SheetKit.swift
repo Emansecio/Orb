@@ -295,7 +295,13 @@ struct PlaceholderTextEditor: View {
     var minHeight: CGFloat = 80
 
     /// One line of a sentence or so: even the shortest of these fields holds it without scrolling.
-    private var fitsWithoutScrolling: Bool { text.count < 90 && !text.contains("\n") }
+    private var fitsWithoutScrolling: Bool { Self.fitsWithoutScrolling(text) }
+
+    /// Fewer than 90 characters and one line. `count` walks the whole string on every keystroke; looking at the
+    /// 90th character costs at most 90 steps, and a long text never reaches the `contains`.
+    static func fitsWithoutScrolling(_ text: String) -> Bool {
+        text.dropFirst(89).isEmpty && !text.contains("\n")
+    }
 
     var body: some View {
         TextEditor(text: $text)

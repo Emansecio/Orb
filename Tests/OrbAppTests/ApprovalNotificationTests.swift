@@ -284,6 +284,21 @@ private extension ApprovalRequest {
         #expect(model.needsYou(botID))
     }
 
+    @Test @MainActor func theNewestOpenCardSkipsAnsweredOnesAndIsNilWithoutAny() async {
+        let model = model()
+        let botID = model.bots[0].id
+        let older = card("ls"), newer = card("pwd")
+        #expect(model.newestPendingApproval(of: botID) == nil && model.newestPendingApprovalID(of: botID) == nil)
+        await open(model, older, for: botID)
+        await open(model, newer, for: botID)
+        #expect(model.newestPendingApproval(of: botID)?.id == newer.id)
+        // An answered card at the tail does not count: the walk goes back to the older open one.
+        model.decide(.deny, approvalID: newer.id, botID: botID)
+        #expect(model.newestPendingApproval(of: botID)?.id == older.id)
+        model.decide(.deny, approvalID: older.id, botID: botID)
+        #expect(model.newestPendingApproval(of: botID) == nil && model.openQuestion(of: botID) == nil)
+    }
+
     @Test @MainActor func onlyTheCardTheKeysAnswerNamesThem() async {
         let model = model()
         let botID = model.bots[0].id

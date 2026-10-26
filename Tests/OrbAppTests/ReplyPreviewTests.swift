@@ -45,6 +45,29 @@ import Testing
         #expect(ReplyTime.label(date(19, 8, 0), now: date(20, 18, 0), calendar: calendar) == "Ontem")
     }
 
+    /// The sidebar skips a row whose `BotRow` did not change, so the time has to be part of the value compared.
+    private func row(replyAt reply: Date, now: Date) -> BotRow {
+        let preview = ReplyPreview(text: "Feito.", date: reply)
+        return BotRow(look: BotLook(Bot(id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!, name: "Atlas", role: "", orb: OrbConfig())),
+                      workText: nil, shimmers: false, activity: .idle, isSelected: false, celebration: .normal, ack: 0,
+                      cue: OrbCueSignal(), glance: 0, needsYou: false, unread: 0, reply: preview,
+                      replyTime: BotRow.time(of: preview, now: now, calendar: calendar),
+                      botID: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!)
+    }
+
+    @Test func aRowShowingTheHourChangesWhenMidnightPasses() {
+        let reply = date(19, 14, 30)
+        let before = row(replyAt: reply, now: date(19, 23, 59))
+        let after = row(replyAt: reply, now: date(20, 0, 1))
+        #expect(before.replyTime == "14:30")
+        #expect(after.replyTime == "Ontem")
+        // Same reply, same Orb: only the day moved, and that alone makes the row render again.
+        #expect(before != after)
+        // Later the same day nothing changes, so the row is still skipped.
+        #expect(before == row(replyAt: reply, now: date(19, 23, 0)))
+        #expect(BotRow.time(of: nil) == nil)
+    }
+
     @Test func untilSixDaysAgoItIsTheWeekday() {
         let now = date(20)
         #expect(ReplyTime.label(date(18), now: now, calendar: calendar) == "dom.")

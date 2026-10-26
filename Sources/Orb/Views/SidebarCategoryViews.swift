@@ -192,7 +192,7 @@ private struct SidebarCategoryHeader: View {
                             .transition(.adapted(.mark, reduceMotion: reduceMotion))
                     }
                 }
-                .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: collapsed && (waiting || unread))
+                .motion(value: collapsed && (waiting || unread))
                 // The number only stands in for the hidden Orbs: unfolded, the Orbs themselves are there to count.
                 if collapsed {
                     Text("\(ids.count)")

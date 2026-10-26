@@ -1,8 +1,9 @@
 #if DEBUG || ORB_DEV_TOOLS
 import SwiftUI
 
-/// `Orb --snapshot transcript[-approvals|-long-command|-commands[-open]|-question|-quote|-notices|-compacted|-failed|-attachments|-outputs|-screen-steps|-browser-live|-browser-need|-browser-done] out.png`:
-/// a seeded conversation of the first Orb for visual review of the replies' Markdown, the approval cards and the notices
+/// `Orb --snapshot transcript[-approvals|-long-command|-commands[-open]|-question|-quote|-notices|-compacted|-failed|-retry|-skill-proposal|-tools[-open]|-work[-open]|-interrupted|-attachments|-outputs|-screen-steps|-browser-live|-browser-need|-browser-done|-find|-edit] out.png`
+/// (the last two, like the plain `transcript`, show the default conversation and then open the find bar or take the first
+/// message back into the field): a seeded conversation of the first Orb for visual review of the replies' Markdown, the approval cards and the notices
 /// with an action. Dev aid; nothing is saved.
 @MainActor
 enum TranscriptSample {

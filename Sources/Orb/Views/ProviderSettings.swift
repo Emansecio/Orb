@@ -69,12 +69,12 @@ struct ProviderSettings: View {
                         ModelPicker(selection: $model.defaultModel, title: "Modelo padrão", allowsDefault: false)
                     }
                 } footer: { FormFootnote {
-                    Text(noModels
-                         ? "Conecte um provedor abaixo: os modelos dele aparecem aqui."
-                         : model.isProviderReady || !model.hasCheckedConnections
-                         ? "Usado por Orbs sem modelo próprio."
+                    // 0: nothing to pick yet, 1: fine, 2: the default model is gone.
+                    let note = noModels ? 0 : model.isProviderReady || !model.hasCheckedConnections ? 1 : 2
+                    Text(note == 0 ? "Conecte um provedor abaixo: os modelos dele aparecem aqui."
+                         : note == 1 ? "Usado por Orbs sem modelo próprio."
                          : "O modelo padrão não está disponível. Escolha outro.")
-                        .textSwap(noModels ? 0 : model.isProviderReady || !model.hasCheckedConnections ? 1 : 2)
+                        .textSwap(note)
                 } }
             }
             ForEach(ProviderGroup.allCases) { group in
@@ -136,6 +136,10 @@ private struct ProviderRow: View {
     /// The browser sign-in under way, so it can be cancelled when the tab was closed or the login went wrong.
     @State private var signInTask: Task<Void, Never>?
     @AppStorage(ProviderExpansion.storageKey) private var expansion = ""
+    /// The "URL base" while it is being typed (nil: showing the stored one). Every store to `model.providers` invalidates
+    /// all the rows, so the text reaches it on Return, on losing focus and when the field goes away, not on each key.
+    @State private var urlDraft: String?
+    @FocusState private var isURLFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var account: ProviderAccount? { model.account(kind) }
@@ -183,6 +187,7 @@ private struct ProviderRow: View {
     // MARK: Collapsed line
 
     private func statusLabel(_ status: ProviderStatus) -> some View {
+        let summary = status.summary()
         let symbol: String, tint: Color
         switch status {
         case .ready: (symbol, tint) = ("checkmark.circle.fill", Palette.ok)
@@ -193,13 +198,14 @@ private struct ProviderRow: View {
         }
         return HStack(spacing: 5) {
             Image(systemName: symbol).foregroundStyle(tint)
-            Text(status.summary()).foregroundStyle(Palette.muted)
+            Text(summary).foregroundStyle(Palette.muted)
         }
         .font(.caption)
         .lineLimit(1)
         // The label changes in place (checking, ready, failed…): the words cross-fade and the line changes at once.
         .contentTransition(.opacity)
-        .motion(Motion.content, value: status.summary())
+        // Keyed to the status, not to its text: "atualizado há 5 min" changes with the clock and is no change of state.
+        .motion(value: status)
         .accessibilityElement(children: .combine)
     }
 
@@ -268,6 +274,7 @@ private struct ProviderRow: View {
 
     /// A refresh the user asked for: when the default model cannot be used, the models just listed take its place.
     private func refreshByHand() {
+        commitURL()
         run(inStatus: true) {
             try await health.refresh(kind, model: model)
             model.adoptDefaultModel(from: kind, turningOn: false)
@@ -275,22 +282,31 @@ private struct ProviderRow: View {
     }
 
     private func canRefresh(_ account: ProviderAccount) -> Bool {
-        if kind == .custom { return GatewayForm.urlState(account.baseURL) == .valid }
+        if kind == .custom { return GatewayForm.urlState(urlDraft ?? account.baseURL) == .valid }
         return isConnected
     }
 
     private func urlField(_ account: ProviderAccount) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            TextField("URL base", text: Binding(get: { account.baseURL },
-                                                set: { url in model.updateProvider(kind) { $0.baseURL = url } }),
+            TextField("URL base", text: Binding(get: { urlDraft ?? account.baseURL }, set: { urlDraft = $0 }),
                       prompt: Text(kind == .custom ? "https://meu-gateway.exemplo/v1" : kind.defaultBaseURL))
+                .focused($isURLFocused)
                 .onSubmit(refreshByHand)
-            if GatewayForm.urlState(account.baseURL) == .invalid {
+                .onChange(of: isURLFocused) { if !isURLFocused { commitURL() } }
+            if GatewayForm.urlState(urlDraft ?? account.baseURL) == .invalid {
                 Label("Use um endereço que comece com http:// ou https://", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
                     .foregroundStyle(Palette.warn)
             }
         }
+        .onDisappear(perform: commitURL)
+    }
+
+    /// Stores what was typed in "URL base" (only if it differs from the stored one).
+    private func commitURL() {
+        guard let draft = urlDraft else { return }
+        urlDraft = nil
+        if draft != account?.baseURL { model.updateProvider(kind) { $0.baseURL = draft } }
     }
 
     @ViewBuilder private var signInRow: some View {
@@ -360,6 +376,7 @@ private struct ProviderRow: View {
         let value = key
         guard !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         key = ""
+        commitURL()
         run(inStatus: true) {
             try await KeyEntry.save(value, for: kind, model: model) { isReplacingKey = false }
         }

@@ -217,10 +217,9 @@ struct ComposerSupportTests {
 
     @Test func theChipSaysTheModeAndCountsGrantsOnlyWhereTheOrbAsks() {
         let rules = [PermissionRule.shell("git"), .shell("brew")]
-        #expect(PermissionChipText.label(PermissionState(mode: .ask, rules: rules)) == "Perguntar antes · 2")
-        #expect(PermissionChipText.label(PermissionState(mode: .ask, rules: [])) == "Perguntar antes")
-        #expect(PermissionChipText.label(PermissionState(mode: .auto, rules: rules)) == "Automático")
-        #expect(PermissionChipText.label(PermissionState(mode: .bypass, rules: [])) == "Sem pedir permissão")
+        #expect(PermissionChipText.spoken(PermissionState(mode: .ask, rules: [])) == "Perguntar antes")
+        #expect(PermissionChipText.spoken(PermissionState(mode: .auto, rules: rules)) == "Automático")
+        #expect(PermissionChipText.spoken(PermissionState(mode: .bypass, rules: [])) == "Sem pedir permissão")
         #expect(PermissionChipText.spoken(PermissionState(mode: .ask, rules: [rules[0]])) == "Perguntar antes, 1 liberação")
         #expect(PermissionChipText.spoken(PermissionState(mode: .ask, rules: rules)) == "Perguntar antes, 2 liberações")
         #expect(PermissionChipText.grantsTitle(PermissionState(mode: .readOnly, rules: rules)) == "Liberações permanentes: 2")

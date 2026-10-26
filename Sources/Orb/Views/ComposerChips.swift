@@ -1,7 +1,8 @@
 import SwiftUI
 
 // The small controls under the message field: the "+" (attach, skills), what the Orb may do (permissions) and the
-// model. The permission chip is its mode's icon alone, the name in its tooltip.
+// model. The permission chip is its mode's icon alone, the name in its tooltip, except for the two unusual modes
+// (`showsName`), which say their name too.
 
 /// A pill-shaped button for the composer's bar: icon and text, a soft fill on hover, a filled one when `filled`.
 struct ComposerChipStyle: ButtonStyle {
@@ -22,8 +23,9 @@ struct ComposerChipStyle: ButtonStyle {
 
 // MARK: Permissions
 
-/// The Orb's permission mode as an icon chip (its name and the grants' count in the tooltip) that opens a short list of the four modes, each with
-/// what it means. The standing grants are counted on the chip and managed in the Orb's panel.
+/// The Orb's permission mode as an icon chip (its name in the tooltip; the two unusual modes show it on the chip too) that
+/// opens a short list of the four modes, each with what it means. The standing grants are listed in the tooltip and in
+/// the list's footer, and managed in the Orb's panel.
 struct PermissionChip: View {
     @Environment(AppModel.self) private var model
     let botID: UUID

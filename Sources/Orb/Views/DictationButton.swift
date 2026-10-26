@@ -4,7 +4,6 @@ import SwiftUI
 /// click closes it, ↩ closes it and sends. While it listens it turns red, with a halo that breathes with your voice.
 struct DictationButton: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let botID: UUID
 
     var body: some View {
@@ -21,20 +20,12 @@ struct DictationButton: View {
                 .symbolEffect(.pulse, options: .repeating, isActive: [.starting, .downloading, .finishing, .reviewing].contains(phase))
                 .frame(width: 28, height: 28)
                 .background { Circle().fill(isOn ? Palette.danger : .clear) }
-                .background {
-                    // The halo: grows with how loud the microphone is (not under Reduce Motion, where it holds still).
-                    Circle()
-                        .fill(Palette.danger.opacity(0.28))
-                        .scaleEffect(phase == .listening && !reduceMotion ? 1 + CGFloat(dictation.level) * 0.4 : 1)
-                        .opacity(phase == .listening ? 1 : 0)
-                        // Glides between the readings (about ten a second) instead of stepping.
-                        .animation(reduceMotion ? nil : .smooth(duration: 0.15), value: dictation.level)
-                }
+                .background { DictationHalo(listening: phase == .listening) }
                 .contentShape(.circle)
         }
         .buttonStyle(MicStyle(isOn: isOn))
         .padding(.horizontal, 3) // room for the halo before Send
-        .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: isOn)
+        .motion(value: isOn)
         .animation(Motion.fade, value: phase)
         .help(Self.help(phase))
         .accessibilityLabel(isOn ? "Parar de ditar" : "Ditar")
@@ -69,6 +60,26 @@ struct DictationButton: View {
     /// The line under the composer while `botID` dictates.
     @MainActor static func hint(_ dictation: Dictation, botID: UUID) -> String? {
         dictation.isActive(for: botID) ? hintText(dictation.phase) : nil
+    }
+}
+
+/// The halo behind the microphone: grows with how loud the microphone is (not under Reduce Motion, where it holds still).
+/// A view of its own because it is the only one that reads the level, which changes ten to twelve times a second while
+/// dictating: read in the button's body, every reading would redraw the whole button.
+private struct DictationHalo: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let listening: Bool
+
+    var body: some View {
+        // Only read while listening, so the readings after it do not redraw a halo that is not shown.
+        let level = listening ? model.dictation.level : 0
+        Circle()
+            .fill(Palette.danger.opacity(0.28))
+            .scaleEffect(listening && !reduceMotion ? 1 + CGFloat(level) * 0.4 : 1)
+            .opacity(listening ? 1 : 0)
+            // Glides between the readings instead of stepping.
+            .animation(reduceMotion ? nil : .smooth(duration: 0.15), value: level)
     }
 }
 

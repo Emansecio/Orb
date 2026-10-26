@@ -162,8 +162,8 @@ struct ImportPanel: View {
                 .padding(20)
             }
             .scrollIndicators(.automatic)
-            .animation(Motion.adapted(Motion.enter, reduceMotion: reduceMotion), value: draft != nil)
-            .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: source)
+            .motion(Motion.enter, value: draft != nil)
+            .motion(value: source)
             // A short window shows the prompt and the answer first: the preview must come into view when it is ready.
             .onChange(of: draft != nil) {
                 guard draft != nil else { return }
@@ -188,7 +188,7 @@ struct ImportPanel: View {
                     .transition(.opacity)
             }
         }
-        .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: isTargeted)
+        .motion(value: isTargeted)
         .dropDestination(for: URL.self) { urls, _ in
             guard let url = urls.first else { return false }
             if source == .assistant {
@@ -288,7 +288,7 @@ struct ImportPanel: View {
                     .transition(.adapted(.rise, reduceMotion: reduceMotion))
             }
         }
-        .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: error)
+        .motion(value: error)
     }
 
     private var promptStep: some View {
@@ -369,7 +369,7 @@ struct ImportPanel: View {
                 .padding(.top, 4)
             }
         }
-        .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: error)
+        .motion(value: error)
     }
 
     // MARK: Reading
@@ -673,7 +673,7 @@ private struct ImportSkillRow: View {
                     .transition(.opacity)
             }
         }
-        .animation(Motion.content, value: isShowing)
+        .motion(value: isShowing)
     }
 }
 

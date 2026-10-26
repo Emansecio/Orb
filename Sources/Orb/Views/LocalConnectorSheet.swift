@@ -6,7 +6,6 @@ import SwiftUI
 struct LocalConnectorSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let kind: LocalConnectorKind
     /// Snapshots draw one phase of the sheet.
     var initialPhase: Phase = .intro
@@ -32,7 +31,7 @@ struct LocalConnectorSheet: View {
             .orbSheet(installed == nil ? "Conectar \(kind.title)" : kind.title, subtitle: kind.summary, size: .medium,
                       icon: ConnectorGallery.services.first { $0.localKind == kind }?.mark) { footer }
             .onAppear(perform: load)
-            .animation(reduceMotion ? nil : Motion.content, value: phase)
+            .animateChanges(of: phase)
             .onChange(of: phase) { announce(phase) }
     }
 
@@ -51,12 +50,10 @@ struct LocalConnectorSheet: View {
                 } footer: { FormFootnote {
                     Text(privacyNote)
                 } }
-                if phase == .intro || phase == .working {
-                    Section {
-                        OrbScopePicker(orbIDs: $orbIDs, allNote: "Cada Orb precisa estar com “Conectores” ligado no painel dele.")
-                    } header: {
-                        Text("Usar com")
-                    }
+                Section {
+                    OrbScopePicker(orbIDs: $orbIDs, allNote: "Cada Orb precisa estar com “Conectores” ligado no painel dele.")
+                } header: {
+                    Text("Usar com")
                 }
             }
             .formStyle(.grouped)
@@ -155,13 +152,9 @@ struct LocalConnectorSheet: View {
         return URL(string: "x-apple.systempreferences:com.apple.preference.security?\(name)") ?? MacPrivacyPane.automation.url
     }
 
-    private func result(symbol: String?, tint: Color, title: String, detail: String) -> some View {
+    private func result(symbol: String, tint: Color, title: String, detail: String) -> some View {
         VStack(spacing: 12) {
-            if let symbol {
-                Image(systemName: symbol).font(.system(size: 34)).foregroundStyle(tint)
-            } else {
-                ProgressView().controlSize(.large)
-            }
+            Image(systemName: symbol).font(.system(size: 34)).foregroundStyle(tint)
             Text(title).font(.system(size: 15, weight: .semibold))
             Text(detail)
                 .font(Typography.label)

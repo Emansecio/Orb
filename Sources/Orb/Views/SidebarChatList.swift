@@ -148,7 +148,6 @@ private struct SidebarChatRow: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
-        .animation(Motion.fade, value: isHovering)
         .help(entry.title)
         .accessibilityAddTraits(isShown ? .isSelected : [])
         .accessibilityValue(isWorking ? "o Orb está trabalhando nela" : isUnread ? "não lida" : "")

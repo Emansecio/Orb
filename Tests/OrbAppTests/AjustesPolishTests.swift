@@ -87,10 +87,6 @@ struct ProviderPresentationTests {
         #expect(Set(all) == Set(ProviderKind.allCases))
         #expect(all.count == ProviderKind.allCases.count)
         #expect(ProviderGroup.allCases.map(\.title) == ["Assinatura (sem chave)", "Chave de API", "No seu Mac", "Avançado"])
-        #expect(ProviderKind.claudeCode.group == .subscription)
-        #expect(ProviderKind.xai.group == .apiKey)
-        #expect(ProviderKind.ollama.group == .local)
-        #expect(ProviderKind.custom.group == .advanced)
     }
 
     @Test func aMissingKeyOrSignInIsSaidBeforeAnythingElse() {
@@ -683,5 +679,50 @@ struct FirstRunDetectionTests {
         await later.detect()
         #expect(await counter.count == 2)
         #expect(later.localServers.isEmpty)
+    }
+}
+
+// MARK: Profile counter and placeholder editor
+
+struct ProfileAboutCounterTests {
+    @Test func theCounterAppearsAtEightyPercentOfTheLimit() {
+        let threshold = UserProfile.aboutLimit * 4 / 5
+        #expect(threshold == 320, "the old literal, now derived from the limit")
+        #expect(ProfileSettings.aboutCounter(count: 0) == nil)
+        #expect(ProfileSettings.aboutCounter(count: threshold - 1) == nil)
+        let shown = ProfileSettings.aboutCounter(count: threshold)
+        #expect(shown?.text == "320/\(UserProfile.aboutLimit)")
+        #expect(shown?.atLimit == false)
+    }
+
+    @Test func theCounterWarnsOnlyAtTheLimit() {
+        #expect(ProfileSettings.aboutCounter(count: UserProfile.aboutLimit - 1)?.atLimit == false)
+        #expect(ProfileSettings.aboutCounter(count: UserProfile.aboutLimit)?.atLimit == true)
+    }
+}
+
+struct PlaceholderTextEditorTests {
+    @Test func aShortSingleLineHidesTheScrollBar() {
+        #expect(PlaceholderTextEditor.fitsWithoutScrolling(""))
+        #expect(PlaceholderTextEditor.fitsWithoutScrolling(String(repeating: "a", count: 89)))
+    }
+
+    @Test func ninetyCharactersOrANewlineShowIt() {
+        #expect(!PlaceholderTextEditor.fitsWithoutScrolling(String(repeating: "a", count: 90)))
+        #expect(!PlaceholderTextEditor.fitsWithoutScrolling("one\ntwo"))
+        #expect(!PlaceholderTextEditor.fitsWithoutScrolling("\n"))
+    }
+
+    @Test func theLimitCountsCharactersNotBytes() {
+        // 89 accented letters are 178 bytes, 89 emoji are 356: still one short line by characters.
+        #expect(PlaceholderTextEditor.fitsWithoutScrolling(String(repeating: "é", count: 89)))
+        #expect(PlaceholderTextEditor.fitsWithoutScrolling(String(repeating: "😀", count: 89)))
+        #expect(!PlaceholderTextEditor.fitsWithoutScrolling(String(repeating: "é", count: 90)))
+        // A letter with a combining accent is one character.
+        #expect(PlaceholderTextEditor.fitsWithoutScrolling(String(repeating: "e\u{301}", count: 89)))
+    }
+
+    @Test func aLongTextAnswersWithoutWalkingItAll() {
+        #expect(!PlaceholderTextEditor.fitsWithoutScrolling(String(repeating: "word ", count: 100_000)))
     }
 }

@@ -38,8 +38,9 @@ struct ColumnSizing: NSViewRepresentable {
 
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-        /// Joining the window and updating happen while SwiftUI updates its views, and the panel's column may only exist after
-        /// the first opening: it waits a turn of the main loop, and looks again when the window is done with its next layout.
+        /// Joining the window and updating happen while SwiftUI updates its views, so it waits one turn of the main loop for
+        /// the hosting views to exist. The panel's column may only exist after the first opening: `updateNSView` calls this
+        /// again when `panelIsOpen` changes, which is the only other time it looks.
         func trimSoon() {
             DispatchQueue.main.async { [weak self] in self?.trim() }
         }

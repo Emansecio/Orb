@@ -235,7 +235,7 @@ struct WelcomeView: View {
             .background(Palette.canvas)
         }
         .onAppear(perform: begin)
-        .onDisappear { model.welcomeReason = nil }
+        .onDisappear { if model.welcomeReason != nil { model.welcomeReason = nil } }
         .task {
             // Looks as soon as the screen is up, in step with the first look at the connections.
             firstRun.attach(model)
@@ -373,23 +373,20 @@ struct WelcomeView: View {
 
     private func actions(stage: WelcomeStage, copy: WelcomeCopy) -> some View {
         VStack(spacing: 14) {
-            VStack(spacing: 14) {
-                Button { model.startNewOrb(from: nil) } label: {
-                    HStack(spacing: 10) {
-                        Text(copy.createTitle)
-                        Text(AppShortcut.newBot.label)
-                            .font(Typography.label.weight(.medium))
-                            .foregroundStyle(Palette.onInk.opacity(0.5))
-                            .accessibilityHidden(true)
-                    }
+            Button { model.startNewOrb(from: nil) } label: {
+                HStack(spacing: 10) {
+                    Text(copy.createTitle)
+                    Text(AppShortcut.newBot.label)
+                        .font(Typography.label.weight(.medium))
+                        .foregroundStyle(Palette.onInk.opacity(0.5))
+                        .accessibilityHidden(true)
                 }
-                .buttonStyle(HeroPillStyle())
-                .keyboardShortcut(.defaultAction)
-                .help(Tip.createOrbSheet())
-                .accessibilityHint("Abre a folha Novo Orb")
-                .accessibilityFocused($createFocused)
-
             }
+            .buttonStyle(HeroPillStyle())
+            .keyboardShortcut(.defaultAction)
+            .help(Tip.createOrbSheet())
+            .accessibilityHint("Abre a folha Novo Orb")
+            .accessibilityFocused($createFocused)
             if stage == .createWithKept {
                 KeptStartCard(memories: kept, onContinue: { model.startNewOrb(from: $0) }, onShowAll: { model.startNewOrb(from: nil) })
                     .padding(.top, 6)

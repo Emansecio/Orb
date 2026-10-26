@@ -72,7 +72,7 @@ private struct BrowserComponentRowView: View {
             }
         }
         .padding(.vertical, 2)
-        .animation(.default, value: row.phase.kind)
+        .animateChanges(of: row.phase.kind)
         .confirmationDialog("Remover \(row.title)?", isPresented: $isConfirmingRemoval) {
             Button("Remover", role: .destructive) { setup.remove(row.component) }
         } message: {

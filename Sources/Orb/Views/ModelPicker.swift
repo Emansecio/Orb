@@ -4,19 +4,16 @@ import SwiftUI
 ///
 /// A `Picker` builds a row for every model before it shows anything, which a gateway that lists hundreds of them
 /// turns into half a second or more every time the panel opens. Past `ModelSearch.longListAbove` models the field is a button
-/// that opens a searchable list instead, which builds only the rows on screen. In a menu (`inMenu`) the list is
-/// already built lazily, so it stays as it was.
+/// that opens a searchable list instead, which builds only the rows on screen.
 struct ModelPicker: View {
     @Environment(AppModel.self) private var model
     @Binding var selection: String
     var title = "Modelo"
     var allowsDefault = true
-    var inMenu = false
 
     private var defaultLabel: String {
-        guard let ref = ModelRef(model.defaultModel) else { return "Padrão" }
         // Without the default model's account connected there is no name to show, and the raw id would read as noise.
-        guard let name = model.account(ref.provider)?.models.first(where: { $0.id == ref.model })?.name else { return "Padrão" }
+        guard let name = model.modelInfo(forModel: "")?.name else { return "Padrão" }
         return "Padrão (\(name))"
     }
 
@@ -28,7 +25,7 @@ struct ModelPicker: View {
 
     var body: some View {
         let choices = model.modelChoices
-        if !inMenu, ModelSearch.isLongList(choices) {
+        if ModelSearch.isLongList(choices) {
             SearchableModelField(selection: $selection, title: title, allowsDefault: allowsDefault,
                                  defaultLabel: defaultLabel, choices: choices)
         } else {
@@ -151,8 +148,11 @@ private struct ModelChooser: View {
 
     var body: some View {
         let words = ModelSearch.words(query)
-        let shown = choices.map { (account: $0.account, models: $0.models.filter { ModelSearch.matches($0, words: words) }) }
-            .filter { !$0.models.isEmpty }
+        // Nothing typed lists every model as it is: no per-body copy of a gateway's hundreds of them.
+        let shown = words.isEmpty ? choices : choices.compactMap { choice in
+            let models = choice.models.filter { ModelSearch.matches($0, words: words) }
+            return models.isEmpty ? nil : (account: choice.account, models: models)
+        }
         VStack(spacing: 0) {
             ModelSearchField(query: $query) {
                 if let tag = ModelSearch.submitted(shown, query: query, allowsDefault: allowsDefault) {

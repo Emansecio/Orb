@@ -29,10 +29,6 @@ enum ProviderGroup: CaseIterable, Identifiable, Sendable {
 }
 
 extension ProviderKind {
-    var group: ProviderGroup {
-        ProviderGroup.allCases.first { $0.kinds.contains(self) } ?? .advanced
-    }
-
     /// The name inside a group, where "(sua assinatura)" or "(chave de API)" would only repeat the group's title.
     var shortName: String {
         switch self {

@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// The message field of one Orb's chat. Takes the Orb's id: it shows nothing of the `Bot` itself (its chips read
-/// their own parts), so changes to the Orb's settings do not re-render it.
+/// The message field of one Orb's chat. Takes the Orb's id, not the `Bot`: it reads only what it shows from the Orb's
+/// `BotLive` (its name in the placeholder, whether it works or waits for you, its jobs), and its chips read their own
+/// parts (permission, model), so changes to the other settings do not re-render it.
 ///
 /// It stays usable while the Orb works: a message sent then steers the task (↩, handed to the model at its next step)
 /// or waits for its end (⇥), see `AppModel+Steering`; ⌘↩ stops and sends. Stop (⌘.) is always one key away. Attachments live in the Orb's `ComposerLane`, so
@@ -16,7 +17,7 @@ struct ComposerView: View {
     @FocusState private var isFocused: Bool
     @State private var isImporting = false
     @State private var isModelOpen = false
-    /// What the context meter and the "conversa longa" card show (measured by `ContextGaugeDriver`).
+    /// What the context meter shows (measured by `ContextGaugeDriver`).
     @State private var gauge = ContextGauge()
     /// The composer is too narrow for words on its chips: only their icons show.
     @State private var isCompact = false
@@ -193,10 +194,9 @@ struct ComposerView: View {
         .padding(.bottom, 8)
         // The card grows or shrinks once when the suggestions, the strip or an error come or go (never by their item
         // count or by a key): one discrete value, so the field's own height keeps following the typing (§2.5).
-        .animation(reduceMotion ? Motion.fade : Motion.content,
-                   value: CardParts(suggestions: !matches.isEmpty, strip: lane.hasAttachments || lane.pendingPictures > 0,
-                                    error: lane.error != nil, banner: lane.editing != nil, jobs: jobs.count,
-                                    routine: situation.holdsRoutine || situation.workingChat != nil))
+        .motion(value: CardParts(suggestions: !matches.isEmpty, strip: lane.hasAttachments || lane.pendingPictures > 0,
+                                 error: lane.error != nil, banner: lane.editing != nil, jobs: jobs.count,
+                                 routine: situation.holdsRoutine || situation.workingChat != nil))
         // The shadow belongs to the background alone: on the whole card every key in the field re-rendered the text,
         // chips and buttons into an offscreen pass to cast it.
         // Reads the dictation's phase, never its level: the card does not re-render with the voice.
@@ -308,7 +308,7 @@ struct ComposerView: View {
             // A chip joining or leaving fades while the others slide over; keyed by what is in the strip, so nothing
             // else in the card animates with it. Under Reduce Motion the others do not slide (that is movement):
             // the chip alone fades, by its own transition.
-            .animation(reduceMotion ? nil : Motion.content, value: ComposerView.stripIDs(lane))
+            .animateChanges(of: ComposerView.stripIDs(lane))
         }
         .scrollIndicators(.never)
         .padding(.top, -4) // the strip's own top margin grew by 4 pt for the remove buttons' targets: the picture stays put
@@ -342,7 +342,7 @@ struct ComposerView: View {
         .foregroundStyle(Palette.muted)
         // Stop stepping in or out moves the whole row: the model and meter chips slide with it (34-38 pt, 0.25 s)
         // instead of jumping. Tied to this one value, so neither the chips' texts nor `isCompact` animate with it.
-        .animation(reduceMotion ? nil : Motion.content, value: secondaryStop)
+        .animateChanges(of: secondaryStop)
     }
 
     /// One round button that is Send or Stop: its symbol is swapped (not the button), so the change reads as the same
@@ -363,7 +363,7 @@ struct ComposerView: View {
             mainButton(action, routine: routine, elsewhere: elsewhere)
         }
         // Under Reduce Motion the row above does not animate: Stop alone fades in or out (opacity is not movement).
-        .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: secondaryStop)
+        .motion(value: secondaryStop)
     }
 
     private func mainButton(_ action: ComposerAction, routine: String?, elsewhere: Bool) -> some View {
@@ -374,7 +374,7 @@ struct ComposerView: View {
                 .contentTransition(.symbolEffect(.replace))
                 .animation(Motion.availability(reduceMotion: reduceMotion), value: action.symbol)
         }
-        .buttonStyle(RoundActionStyle(isEnabled: action == .stop || canSend))
+        .buttonStyle(RoundActionStyle())
         .disabled(action != .stop && !canSend)
         .accessibilityLabel(action.title(isRoutine: routine != nil, elsewhere: elsewhere))
         .help(action.help(isRoutine: routine != nil, elsewhere: elsewhere))
@@ -698,7 +698,8 @@ struct PreparingChip: View {
 /// White circular send/stop button. Enabling fades the fill (`Motion.content`); pressing scales it to 0.92
 /// (`Motion.press`). Reduce Motion: the state changes at once and a press dims instead of shrinking.
 private struct RoundActionStyle: ButtonStyle {
-    let isEnabled: Bool
+    // From the button's own `.disabled`, so the rule that enables it is written once.
+    @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func makeBody(configuration: Configuration) -> some View {
@@ -895,12 +896,14 @@ enum ComposerHint {
         return compact ? keys : "\(keys) · \(command) para a tarefa e envia"
     }
 
+    /// Built once: `spoken` runs for every redraw of the field, i.e. on every key typed.
+    private static let keyNames: [Character: String] = ["↩": "Return", "⇥": "Tab", "⇧": "Shift", "⌘": "Command", "⌥": "Option", "⌃": "Control"]
+
     /// The same line for the field's VoiceOver hint: the key symbols are not read as words, so they become the keys' names.
     static func spoken(_ hint: String) -> String {
-        let names: [Character: String] = ["↩": "Return", "⇥": "Tab", "⇧": "Shift", "⌘": "Command", "⌥": "Option", "⌃": "Control"]
         var words = ""
         for character in hint {
-            if let name = names[character] { words += " \(name) " } else { words.append(character == "·" ? "," : character) }
+            if let name = Self.keyNames[character] { words += " \(name) " } else { words.append(character == "·" ? "," : character) }
         }
         // Spaces from the substitution and from " · " collapse, and a comma never follows a space.
         return words.split(separator: " ").joined(separator: " ").replacingOccurrences(of: " ,", with: ",")

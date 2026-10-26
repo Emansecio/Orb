@@ -83,7 +83,11 @@ struct BotInspector: View {
                 .sensoryFeedback(.levelChange, trigger: model.freshRoutine) { _, new in new != nil }
             }
             .overlay(alignment: .bottom) { MemoryUndoToast(undo: model.memoryUndo).padding(.bottom, 14) }
-            .onChange(of: tab) { _, new in InspectorTabMemory.remember(new, for: botID) }
+            .onChange(of: tab) { _, new in
+                InspectorTabMemory.remember(new, for: botID)
+                // Changes made while another tab was open are read on coming back to the folder one.
+                if new == .folder { filesRefresh += 1 }
+            }
             .onChange(of: botID) { _, new in orbChanged(to: new) }
             .task(id: bot.workingDirectory) {
                 instructionFile = await FolderInstructions.loadInBackground(from: bot.workingURL)
@@ -104,13 +108,10 @@ struct BotInspector: View {
                 guard tab == .folder else { return }
                 for await _ in FolderWatcher.changes(in: bot.workingURL) { filesRefresh += 1 }
             }
-            // The turn may have created or changed files.
+            // The turn may have created or changed files. The watcher above already follows them, but it gives up on a
+            // folder it cannot watch (the home folder, some network volumes), so the end of the turn still reads once.
             .onChange(of: live.isWorking) { wasWorking, isWorking in
                 if wasWorking && !isWorking && tab == .folder { filesRefresh += 1 }
-            }
-            // Changes made while another tab was open are read on coming back to this one.
-            .onChange(of: tab) { _, new in
-                if new == .folder { filesRefresh += 1 }
             }
             // Only the General tab, and only for an Orb that browses, needs to know what the browser has on this Mac.
             .task(id: BrowserCheck(provider: bot.searchProvider, comingBack: browserRecheck,
@@ -848,7 +849,8 @@ struct BotInspector: View {
             memorySheetKind = kind
             isShowingMemory = true
         })
-        .id(bot.id) // its search belongs to one Orb's memory (the panel itself stays across Orbs)
+        // No `.id(bot.id)` here: the Form around the tabs is already keyed by tab and Orb (`contentKey`), so its search
+        // state is rebuilt per Orb.
     }
 
     /// Falls back to the last rendered value, so a sheet closing after deletion never reads a missing bot.
@@ -1149,20 +1151,18 @@ private struct RoutineRow: View {
     private var showsDelete: Bool { isHovering || deleteIsFocused }
 
     var body: some View {
-        // The routine as it is now (the toggle and the runs change it in the model, not in this copy).
-        let current = model.routines.first { $0.id == routine.id } ?? routine
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(current.name)
+                    Text(routine.name)
                         .font(Typography.text.weight(.medium))
                         .foregroundStyle(Palette.ink)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text(current.schedule.label)
+                    Text(routine.schedule.label)
                         .font(Typography.label)
                         .foregroundStyle(Palette.muted)
-                    if let mismatch = RoutineText.nameMismatch(of: current) {
+                    if let mismatch = RoutineText.nameMismatch(of: routine) {
                         Label(mismatch, systemImage: "exclamationmark.triangle.fill")
                             .font(Typography.small)
                             .foregroundStyle(Palette.warn)
@@ -1170,20 +1170,20 @@ private struct RoutineRow: View {
                     }
                 }
                 Spacer(minLength: 6)
-                Toggle("Ativa", isOn: Binding(get: { current.isEnabled }, set: { model.setRoutineEnabled(routine.id, $0) }))
+                Toggle("Ativa", isOn: Binding(get: { routine.isEnabled }, set: { model.setRoutineEnabled(routine.id, $0) }))
                     .toggleStyle(.switch)
                     .labelsHidden()
                     .controlSize(.mini)
-                    .accessibilityLabel("Ativar \(current.name)")
-                    .disabled(!current.canBeEnabled())
-                    .help(current.canBeEnabled() ? Tip.routineToggle(isOn: current.isEnabled) : Tip.routineDatePassed)
+                    .accessibilityLabel("Ativar \(routine.name)")
+                    .disabled(!routine.canBeEnabled())
+                    .help(routine.canBeEnabled() ? Tip.routineToggle(isOn: routine.isEnabled) : Tip.routineDatePassed)
             }
-            if let goal = current.goal { GoalProgressView(goal: goal, font: Typography.label, showsNote: false) }
+            if let goal = routine.goal { GoalProgressView(goal: goal, font: Typography.label, showsNote: false) }
             VStack(alignment: .leading, spacing: 6) {
-                RoutineNextLine(routine: current)
-                RoutineLastLine(routine: current)
+                RoutineNextLine(routine: routine)
+                RoutineLastLine(routine: routine)
             }
-            footer(current)
+            footer
         }
         .padding(.vertical, 4)
         // The task the Orb just scheduled is marked for a moment (`AppModel.freshRoutine`).
@@ -1192,11 +1192,11 @@ private struct RoutineRow: View {
                 .fill(Palette.accent.opacity(model.freshRoutine == routine.id ? 0.12 : 0))
                 .padding(.horizontal, -8).padding(.vertical, -4)
         }
-        .animateChanges(of: current.isEnabled)
+        .animateChanges(of: routine.isEnabled)
         .animateChanges(of: model.freshRoutine)
         .animateChanges(of: isConfirmingDelete)
         .onHover { isHovering = $0 }
-        .sensoryFeedback(.alignment, trigger: current.isEnabled)
+        .sensoryFeedback(.alignment, trigger: routine.isEnabled)
         .transition(.adapted(.arrive, reduceMotion: reduceMotion))
     }
 
@@ -1207,7 +1207,7 @@ private struct RoutineRow: View {
     }
 
     @ViewBuilder
-    private func footer(_ current: Routine) -> some View {
+    private var footer: some View {
         HStack(spacing: 4) {
             if isConfirmingDelete {
                 Text("Apagar esta rotina?")
@@ -1241,7 +1241,7 @@ private struct RoutineRow: View {
                 }
                 .controlSize(.small)
                 Spacer(minLength: 4)
-                Button("Apagar “\(current.name)”", systemImage: "trash") { isConfirmingDelete = true }
+                Button("Apagar “\(routine.name)”", systemImage: "trash") { isConfirmingDelete = true }
                     .panelTrashButton()
                     .help(Tip.deleteRoutine)
                     .padding(.trailing, -4)

@@ -9,6 +9,7 @@ struct TaskPlanRing: View {
     /// Whether the steps are open; the working line holds it, so VoiceOver can open them from the line's actions.
     @Binding var showsSteps: Bool
     @State private var isHovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         if let plan = transcript.plan {
@@ -19,20 +20,20 @@ struct TaskPlanRing: View {
                     Text(tended ? "\(plan.doneCount)/\(plan.steps.count)" : "Plano")
                         .font(Typography.small.monospacedDigit())
                         .foregroundStyle(tended ? Palette.muted : Palette.faint)
-                        .contentTransition(.numericText())
+                        .contentTransition(reduceMotion ? .opacity : .numericText()) // digits do not roll under Reduce Motion
                 }
                 .padding(.leading, 4)
                 .padding(.trailing, 7)
                 .padding(.vertical, 2)
-                .background(isHovering ? Palette.ghostSelected : Palette.ghostHover, in: .capsule)
+                // The fill alone fades with the pointer: the number and the ring do not animate with it.
+                .hoverFill(isHovering, in: .capsule, color: Palette.ghostSelected, resting: Palette.ghostHover)
                 .opacity(tended ? 1 : 0.7)
                 .contentShape(.capsule)
             }
             .buttonStyle(.plain)
             .fixedSize()
             .onHover { isHovering = $0 }
-            .animation(Motion.hover(isHovering), value: isHovering)
-            .animation(Motion.content, value: plan.doneCount)
+            .motion(value: plan.doneCount)
             .clickablePointer()
             .help("Plano: " + Self.summary(plan))
             .popover(isPresented: $showsSteps, arrowEdge: .bottom) {

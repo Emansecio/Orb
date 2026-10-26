@@ -31,6 +31,11 @@ struct SidebarView: View {
 
     var body: some View {
         let order = model.sidebarBotIDs
+        // Worked out once per body: each of these is a computed property or a set comparison, and the drop delegate,
+        // the preference callback and the two modifiers below all need them.
+        let looseIDs = model.looseBotIDs
+        let sections = SidebarDrop.sections(loose: looseIDs, categories: model.categories, botIDs: model.botIDs)
+        let listChanged = settledBotIDs.map { Set($0) != Set(model.botIDs) } ?? false
         let isNamingNewCategory = if case .new = model.categoryNaming { true } else { false }
         ScrollView {
             VStack(alignment: .leading, spacing: 1) {
@@ -53,7 +58,7 @@ struct SidebarView: View {
                         }
                         .transition(.opacity)
                     }
-                    ForEach(model.looseBotIDs, id: \.self) { id in
+                    ForEach(looseIDs, id: \.self) { id in
                         SidebarBotRow(botID: id, index: order.firstIndex(of: id) ?? order.count, selectionSpace: selectionSpace, rowSpace: rowSpace)
                             .sidebarDropItem(.row(id), drag)
                             .transition(.adapted(.arrive, reduceMotion: reduceMotion))
@@ -68,12 +73,11 @@ struct SidebarView: View {
                 .onPreferenceChange(SidebarDropFrames.self) { frames in
                     dropFrames.frames = frames
                     if let previewDropY, let held = model.draggedBotID {
-                        drag = SidebarDrop.preview(dragging: held, at: previewDropY, in: SidebarDrop.sections(loose: model.looseBotIDs, categories: model.categories,
-                                                                                                             botIDs: model.botIDs), frames: frames)
+                        drag = SidebarDrop.preview(dragging: held, at: previewDropY, in: sections, frames: frames)
                     }
                 }
                 .onDrop(of: [.plainText], delegate: SidebarDropDelegate(
-                    model: model, sections: SidebarDrop.sections(loose: model.looseBotIDs, categories: model.categories, botIDs: model.botIDs),
+                    model: model, sections: sections,
                     frames: dropFrames, drag: $drag, reduceMotion: reduceMotion))
                 .background(alignment: .topLeading) { SidebarDropGap(gap: drag?.gap) }
 
@@ -102,12 +106,12 @@ struct SidebarView: View {
             .animateChanges(of: model.botIDs)
             // A category made, folded, unfolded or deleted, an Orb moved into one: the rows below slide in the content curve.
             .animateChanges(of: model.categories)
-            .environment(\.sidebarListChanged, settledBotIDs.map { Set($0) != Set(model.botIDs) } ?? false)
+            .environment(\.sidebarListChanged, listChanged)
             // Bound to the selection alone: the background slides to the new row and the title changes color with it,
             // while a status or an unread count that changes in a row does not animate along (no animation per Orb).
             // Not when the list itself changed in the same update (a new or a deleted Orb): then only the rows' own
             // transitions apply and the ones below do not slide.
-            .animation(Motion.selection(reduceMotion: reduceMotion, listChanged: settledBotIDs.map { Set($0) != Set(model.botIDs) } ?? false),
+            .animation(Motion.selection(reduceMotion: reduceMotion, listChanged: listChanged),
                        value: model.selection)
             .onChange(of: model.botIDs, initial: true) { settledBotIDs = model.botIDs }
         }
@@ -426,7 +430,7 @@ struct SidebarBotRow: View {
                 model.selection = .bot(botID)
             } content: { isHovering in
                 BotRowContent(row: BotRow(look: live.look, workText: live.shownWork?.headline, shimmers: live.shownWork?.shimmers ?? false, activity: live.activity, isSelected: isSelected,
-                                          celebration: live.celebration, ack: live.poke, cue: live.cue, glance: live.glance, needsYou: live.needsYou, unread: live.unread, reply: live.lastReply,
+                                          celebration: live.celebration, ack: live.poke, cue: live.cue, glance: live.glance, needsYou: live.needsYou, unread: live.unread, reply: live.lastReply, replyTime: BotRow.time(of: live.lastReply),
                                           // MARK: MultiOrb (WP2): the ring of the Orb it is exchanging messages with
                                           partner: live.partner,
                                           hint: isHovering && index < 9 ? AppShortcut.bot(at: index).label : nil,
@@ -534,7 +538,7 @@ private struct FirstOrbInvitation: View {
 }
 
 /// What a row shows, as one small value: a row whose value did not change is not rendered again.
-private struct BotRow: Equatable {
+struct BotRow: Equatable {
     let look: BotLook
     /// What the Orb is doing ("Rodando swift build", "Pensando…"); nil when no turn runs.
     let workText: String?
@@ -555,6 +559,9 @@ private struct BotRow: Equatable {
     let unread: Int
     /// Its latest reply and when it ended: the second line while it rests, and the time beside its name.
     let reply: ReplyPreview?
+    /// The time beside its name, as the row writes it. In the compared value because the label depends on the day, not only
+    /// on the reply: "14:30" has to become "Ontem" at midnight, and a row whose value did not change is not rendered again.
+    let replyTime: String?
     /// The Orb it is exchanging messages with now: its avatar gets a ring in that Orb's color.
     var partner: PartnerTint?
     /// The shortcut shown while the pointer is on the row.
@@ -567,6 +574,10 @@ private struct BotRow: Equatable {
     var chatsFolded: Bool?
     /// The pointer is on the row: the "+" that opens a new conversation shows beside the shortcut.
     var showsNewChat = false
+
+    static func time(of reply: ReplyPreview?, now: Date = .now, calendar: Calendar = .current) -> String? {
+        reply.map { ReplyTime.label($0.date, now: now, calendar: calendar) }
+    }
 }
 
 private struct SelectionRest: Hashable {
@@ -629,8 +640,8 @@ private struct BotRowContent: View, Equatable {
                             .font(Typography.small)
                             .foregroundStyle(Palette.muted)
                             .accessibilityHidden(true)
-                    } else if let reply = row.reply {
-                        Text(ReplyTime.label(reply.date))
+                    } else if let replyTime = row.replyTime {
+                        Text(replyTime)
                             .font(Typography.small.monospacedDigit())
                             .foregroundStyle(Palette.faint)
                     }

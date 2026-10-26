@@ -443,10 +443,10 @@ private struct ReplyExcerpt: View {
             return QuickAskReplyText.excerpt(closed: live.closed, tail: live.tail)
         }()
         if !shown.text.isEmpty {
-            let plain = Text(shown.isCut ? "… " + shown.text : shown.text)
-            let styled = (try? AttributedString(markdown: shown.isCut ? "… " + shown.text : shown.text,
-                                                options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-                .map { Text($0) } ?? plain
+            // The line is joined once; the plain Text is only built if the markdown does not parse (`??` is lazy).
+            let line = shown.isCut ? "… " + shown.text : shown.text
+            let styled = (try? AttributedString(markdown: line, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+                .map { Text($0) } ?? Text(line)
             styled
                 .font(Typography.label)
                 .foregroundStyle(Palette.secondary)

@@ -38,8 +38,34 @@ struct ConnectorService: Identifiable, Sendable {
     let summary: String
     let mark: ServiceMark
     let source: Source
+    let access: Access
+
     /// How it connects, in two or three words: "Pelo Mac", "Chave de acesso", "Não precisa de chave".
-    let how: String
+    var how: String { access.label }
+
+    enum Access: Sendable, Equatable {
+        case onThisMac, loginWithApp, loginWithAccount, key, noKey
+
+        var label: String {
+            switch self {
+            case .onThisMac: "Pelo Mac"
+            case .loginWithApp: "Login com seu app"
+            case .loginWithAccount: "Login com a conta"
+            case .key: "Chave de acesso"
+            case .noKey: "Não precisa de chave"
+            }
+        }
+
+        /// The badge's symbol, kept here so the card does not guess it from `label`; nil where nothing is asked of the person.
+        var symbol: String? {
+            switch self {
+            case .onThisMac: "desktopcomputer"
+            case .loginWithApp, .loginWithAccount: "person.crop.circle"
+            case .key: "key"
+            case .noKey: nil
+            }
+        }
+    }
 
     /// The ready-made server behind the card.
     var template: ConnectorTemplate? {
@@ -64,34 +90,34 @@ enum ConnectorGallery {
     /// The gallery, in the order the page shows it: the services people ask for first.
     static let services: [ConnectorService] = [
         ConnectorService(id: "gmail", name: "Gmail", summary: LocalConnectorKind.gmail.summary,
-                         mark: ServiceMark(symbol: "envelope.fill", monogram: "G", color: 0xEA4335, brand: "gmail"), source: .local(.gmail), how: "Pelo Mac"),
+                         mark: ServiceMark(symbol: "envelope.fill", monogram: "G", color: 0xEA4335, brand: "gmail"), source: .local(.gmail), access: .onThisMac),
         ConnectorService(id: "agenda", name: "Google Agenda", summary: LocalConnectorKind.agenda.summary,
-                         mark: ServiceMark(symbol: "calendar", monogram: "A", color: 0x4285F4, brand: "googlecalendar"), source: .local(.agenda), how: "Pelo Mac"),
+                         mark: ServiceMark(symbol: "calendar", monogram: "A", color: 0x4285F4, brand: "googlecalendar"), source: .local(.agenda), access: .onThisMac),
         ConnectorService(id: "slack", name: "Slack", summary: "Buscar e ler mensagens e canais e, se você liberar, enviar. Servidor oficial do Slack.",
-                         mark: ServiceMark(symbol: "number", monogram: "S", color: 0x611F69, brand: "slack"), source: .template("slack-oficial"), how: "Login com seu app"),
+                         mark: ServiceMark(symbol: "number", monogram: "S", color: 0x611F69, brand: "slack"), source: .template("slack-oficial"), access: .loginWithApp),
         ConnectorService(id: "notion", name: "Notion", summary: "Buscar e editar páginas e bancos de dados. Você entra com a sua conta.",
-                         mark: ServiceMark(symbol: nil, monogram: "N", color: 0x2F3437, brand: "notion"), source: .template("notion-oficial"), how: "Login com a conta"),
+                         mark: ServiceMark(symbol: nil, monogram: "N", color: 0x2F3437, brand: "notion"), source: .template("notion-oficial"), access: .loginWithAccount),
         ConnectorService(id: "github", name: "GitHub", summary: "Ler repositórios, issues e pull requests do GitHub.",
                          mark: ServiceMark(symbol: "chevron.left.forwardslash.chevron.right", monogram: "G", color: 0x30363D, brand: "github"),
-                         source: .template("github"), how: "Chave de acesso"),
+                         source: .template("github"), access: .key),
         ConnectorService(id: "supabase", name: "Supabase", summary: "Consultar os projetos e as tabelas do seu Supabase, em leitura.",
-                         mark: ServiceMark(symbol: "bolt.fill", monogram: "S", color: 0x1E9E6A, brand: "supabase"), source: .template("supabase"), how: "Chave de acesso"),
+                         mark: ServiceMark(symbol: "bolt.fill", monogram: "S", color: 0x1E9E6A, brand: "supabase"), source: .template("supabase"), access: .key),
         ConnectorService(id: "linear", name: "Linear", summary: "Ver e atualizar issues e projetos. Você entra com a sua conta.",
-                         mark: ServiceMark(symbol: nil, monogram: "L", color: 0x5E6AD2, brand: "linear"), source: .template("linear"), how: "Login com a conta"),
+                         mark: ServiceMark(symbol: nil, monogram: "L", color: 0x5E6AD2, brand: "linear"), source: .template("linear"), access: .loginWithAccount),
         ConnectorService(id: "atlassian", name: "Atlassian", summary: "Buscar e editar issues do Jira e páginas do Confluence. Você entra com a sua conta.",
-                         mark: ServiceMark(symbol: nil, monogram: "A", color: 0x0052CC, brand: "atlassian"), source: .template("atlassian"), how: "Login com a conta"),
+                         mark: ServiceMark(symbol: nil, monogram: "A", color: 0x0052CC, brand: "atlassian"), source: .template("atlassian"), access: .loginWithAccount),
         ConnectorService(id: "sentry", name: "Sentry", summary: "Ver erros, issues e projetos do Sentry. Você entra com a sua conta.",
-                         mark: ServiceMark(symbol: nil, monogram: "S", color: 0x362D59, brand: "sentry"), source: .template("sentry"), how: "Login com a conta"),
+                         mark: ServiceMark(symbol: nil, monogram: "S", color: 0x362D59, brand: "sentry"), source: .template("sentry"), access: .loginWithAccount),
         ConnectorService(id: "lembretes", name: "Lembretes", summary: LocalConnectorKind.lembretes.summary,
-                         mark: ServiceMark(symbol: "checklist", monogram: "L", color: 0xFF9500), source: .local(.lembretes), how: "Pelo Mac"),
+                         mark: ServiceMark(symbol: "checklist", monogram: "L", color: 0xFF9500), source: .local(.lembretes), access: .onThisMac),
         ConnectorService(id: "arquivos", name: "Arquivos", summary: "Ler e organizar arquivos de uma pasta do Mac. Você escolhe qual pasta fica liberada.",
-                         mark: ServiceMark(symbol: "folder.fill", monogram: "A", color: 0x636366), source: .template("arquivos"), how: "Não precisa de chave"),
+                         mark: ServiceMark(symbol: "folder.fill", monogram: "A", color: 0x636366), source: .template("arquivos"), access: .noKey),
         ConnectorService(id: "memoria", name: "Memória (grafo)", summary: "Guarda fatos e as relações entre eles para os Orbs consultarem depois.",
-                         mark: ServiceMark(symbol: "brain", monogram: "M", color: 0x7D5BE6), source: .template("memoria"), how: "Não precisa de chave"),
+                         mark: ServiceMark(symbol: "brain", monogram: "M", color: 0x7D5BE6), source: .template("memoria"), access: .noKey),
         ConnectorService(id: "pensamento", name: "Pensamento em etapas", summary: "Ajuda o Orb a pensar passo a passo em problemas difíceis.",
-                         mark: ServiceMark(symbol: "lightbulb.fill", monogram: "P", color: 0xC98A00), source: .template("pensamento"), how: "Não precisa de chave"),
+                         mark: ServiceMark(symbol: "lightbulb.fill", monogram: "P", color: 0xC98A00), source: .template("pensamento"), access: .noKey),
         ConnectorService(id: "fetch", name: "Busca na web (Fetch)", summary: "Baixa uma página da web e converte em texto. O Orb já lê páginas sozinho.",
-                         mark: ServiceMark(symbol: "globe", monogram: "F", color: 0x0A84FF), source: .template("fetch"), how: "Não precisa de chave"),
+                         mark: ServiceMark(symbol: "globe", monogram: "F", color: 0x0A84FF), source: .template("fetch"), access: .noKey),
     ]
 
     /// The installed connector a service stands for, if any.

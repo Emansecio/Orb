@@ -8,14 +8,8 @@ import UniformTypeIdentifiers
 // MARK: Permission
 
 enum PermissionChipText {
-    /// What the chip says: the mode, and how many standing grants apply (they only count where the Orb asks).
-    static func label(_ permission: PermissionState) -> String {
-        let count = permission.rules.count
-        guard permission.mode == .ask, count > 0 else { return permission.mode.label }
-        return "\(permission.mode.label) · \(count)"
-    }
-
-    /// The same for a screen reader and the tooltip: "Perguntar antes, 4 liberações".
+    /// What a screen reader and the tooltip say: the mode, and how many standing grants apply (they only count where the
+    /// Orb asks): "Perguntar antes, 4 liberações".
     static func spoken(_ permission: PermissionState) -> String {
         let count = permission.rules.count
         guard permission.mode == .ask, count > 0 else { return permission.mode.label }

@@ -136,7 +136,6 @@ private struct ServiceCard: View {
     let reservesNote: Bool
     let action: () -> Void
     @State private var isHovering = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Button(action: action) {
@@ -160,7 +159,7 @@ private struct ServiceCard: View {
                     note(" ").hidden().accessibilityHidden(true)
                 }
                 HStack(spacing: 6) {
-                    CatalogBadge(text: service.how, symbol: service.localKind != nil ? "desktopcomputer" : service.how.hasPrefix("Login") ? "person.crop.circle" : service.how == "Não precisa de chave" ? nil : "key")
+                    CatalogBadge(text: service.how, symbol: service.access.symbol)
                     Spacer(minLength: 0)
                     label
                 }
@@ -168,8 +167,7 @@ private struct ServiceCard: View {
                 .frame(minHeight: 26)
             }
             .padding(14)
-            .card(radius: Radius.large, fill: isHovering && status != .soon ? Palette.raised : Palette.surface,
-                  stroke: isHovering && status != .soon ? Palette.lineStrong : Palette.line)
+            .hoverCard(isHovering && status != .soon, radius: Radius.large, strongOutline: true)
             .opacity(status == .soon || status == .off ? 0.7 : 1)
             .contentShape(.rect)
         }
@@ -177,7 +175,6 @@ private struct ServiceCard: View {
         .help(help)
         .disabled(status == .soon)
         .onHover { isHovering = $0 }
-        .animation(reduceMotion ? nil : Motion.hover(isHovering), value: isHovering)
         .animateChanges(of: status)
         .accessibilityLabel("\(service.name). \(service.summary) \(spoken)")
         .accessibilityHint(hint)

@@ -25,6 +25,18 @@ struct ConnectorGalleryTests {
         #expect(Set(ConnectorTemplate.all.map(\.id)) == Set(services.compactMap { $0.template?.id }))
     }
 
+    @Test func theBadgeSymbolComesFromHowTheServiceConnects() {
+        func symbol(_ id: String) -> String?? { ConnectorGallery.services.first { $0.id == id }.map(\.access.symbol) }
+        #expect(symbol("gmail") == "desktopcomputer")
+        #expect(symbol("slack") == "person.crop.circle" && symbol("notion") == "person.crop.circle")
+        #expect(symbol("github") == "key")
+        #expect(symbol("fetch") == .some(nil))
+        // The words on the card stay what they were.
+        #expect(ConnectorGallery.services.first { $0.id == "notion" }?.how == "Login com a conta")
+        // Every local connector is "Pelo Mac"; none is asked for a key.
+        for service in ConnectorGallery.services where service.localKind != nil { #expect(service.access == .onThisMac, Comment(rawValue: service.id)) }
+    }
+
     @Test func aCardSaysWhereTheServiceStands() throws {
         func service(_ id: String) -> ConnectorService { ConnectorGallery.services.first { $0.id == id }! }
         let github = ConnectorTemplate.all.first { $0.id == "github" }!.config.withNewID()

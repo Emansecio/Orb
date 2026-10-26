@@ -113,6 +113,7 @@ extension ConnectorDraft {
 
 private struct InstalledConnectors: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Binding var editing: ConnectorDraft?
     @Binding var settingUp: LocalConnectorKind?
     @Binding var highlighted: UUID?
@@ -157,7 +158,7 @@ private struct InstalledConnectors: View {
             }
             .task(id: highlighted) {
                 guard let id = highlighted else { return }
-                withAnimation(Motion.content) { proxy.scrollTo(id, anchor: .center) }
+                withAnimation(ScrollMotion.animation(reduceMotion: reduceMotion)) { proxy.scrollTo(id, anchor: .center) }
                 try? await Task.sleep(for: .seconds(1.8))
                 if !Task.isCancelled, highlighted == id { highlighted = nil }
             }
@@ -784,6 +785,14 @@ struct ConnectorEditor: View {
     let draft: ConnectorDraft
     /// Snapshots draw one phase of the sheet.
     var initialPhase: Phase = .form
+    /// The draft's inputs by name, built once: the rows ask for it per key, and the draft does not change under the sheet.
+    private let inputsByName: [String: RegistryServer.Input]
+
+    init(draft: ConnectorDraft, initialPhase: Phase = .form) {
+        self.draft = draft
+        self.initialPhase = initialPhase
+        inputsByName = Dictionary(draft.inputs.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
+    }
 
     enum Phase: Equatable {
         /// `signingIn`: the browser is open and the Orb waits for the way back.
@@ -807,12 +816,11 @@ struct ConnectorEditor: View {
     @State private var didLoad = false
     /// Whether it was new when the sheet opened: saving adds it to `connectors`, but the sheet keeps saying "Instalar".
     @State private var openedAsNew: Bool?
+    /// The folder picker of the filesystem connector is open.
+    @State private var isChoosingFolder = false
 
     private var isNew: Bool { openedAsNew ?? !model.connectors.contains { $0.id == draft.config.id } }
     private var isGuided: Bool { draft.isGuided }
-    private var inputsByName: [String: RegistryServer.Input] {
-        Dictionary(draft.inputs.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
-    }
     private var missingRequired: [String] {
         guard !signsInWithApp else { return [] }
         return draft.inputs.filter(\.isRequired).map(\.name).filter { name in
@@ -1183,7 +1191,7 @@ struct ConnectorEditor: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: 8)
-                Button("Escolher pasta…") { chooseFolder(index: index, current: path) }
+                Button("Escolher pasta…") { isChoosingFolder = true }
                     .help("Escolhe a pasta que este conector pode abrir")
             }
         } header: {
@@ -1196,18 +1204,15 @@ struct ConnectorEditor: View {
                 Text("Os Orbs com este conector podem ler e gravar arquivos nesta pasta e dentro dela.")
             }
         } }
-    }
-
-    private func chooseFolder(index: Int, current: String) {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.prompt = "Liberar pasta"
-        panel.message = "Escolha a pasta que este conector pode abrir."
-        panel.directoryURL = URL(fileURLWithPath: current.isEmpty ? NSHomeDirectory() : current)
-        if panel.runModal() == .OK, let url = panel.url {
-            arguments = ConnectorArguments.replacing(line: index, with: url.path, in: arguments)
+        .fileImporter(isPresented: $isChoosingFolder, allowedContentTypes: [.folder]) { result in
+            if case .success(let url) = result {
+                arguments = ConnectorArguments.replacing(line: index, with: url.path, in: arguments)
+            }
         }
+        // What the old panel said and where it opened.
+        .fileDialogMessage("Escolha a pasta que este conector pode abrir.")
+        .fileDialogConfirmationLabel("Liberar pasta")
+        .fileDialogDefaultDirectory(URL(fileURLWithPath: path.isEmpty ? NSHomeDirectory() : path))
     }
 
     // MARK: Result

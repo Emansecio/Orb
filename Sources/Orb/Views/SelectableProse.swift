@@ -54,6 +54,14 @@ enum ProseText {
     /// Ends the text being written.
     static let cursor = " ●"
 
+    // Palette colors are fixed values (no appearance variants), so their AppKit twins and the checkbox pictures are made
+    // once: `make` runs on every flush of a streaming reply and used to rebuild them each time.
+    private static let inkColor = NSColor(Palette.ink)
+    private static let secondaryColor = NSColor(Palette.secondary)
+    private static let mutedColor = NSColor(Palette.muted)
+    private static let checkboxDone = checkboxImage(done: true)
+    private static let checkboxTodo = checkboxImage(done: false)
+
     /// The space a heading has above it past the blocks' own, after another block (the first line of a text takes none).
     static func headingLead(_ level: Int) -> CGFloat { level <= 2 ? 4 : 2 }
 
@@ -78,7 +86,7 @@ enum ProseText {
                 style.headIndent = quoteIndent
                 style.firstLineHeadIndent = quoteIndent
                 let quote = NSMutableAttributedString(attributedString: inline(source, cached: cached, highlight: highlight,
-                                                                              style: style, color: NSColor(Palette.secondary)))
+                                                                              style: style, color: secondaryColor))
                 quote.addAttribute(quoteKey, value: true, range: NSRange(location: 0, length: quote.length))
                 text.append(quote)
             case .list(let items):
@@ -100,7 +108,7 @@ enum ProseText {
         }
         if cursor {
             text.append(NSAttributedString(string: Self.cursor, attributes: [.font: NSFont.systemFont(ofSize: size),
-                                                                          .foregroundColor: NSColor(Palette.muted)]))
+                                                                          .foregroundColor: mutedColor]))
         }
         return text
     }
@@ -137,7 +145,7 @@ enum ProseText {
                           NSTextTab(textAlignment: .left, location: indent + markerWidth + markerGap)]
         style.headIndent = indent + markerWidth + markerGap
         style.paragraphSpacing = spacing
-        let muted = NSColor(Palette.muted)
+        let muted = mutedColor
         let line = NSMutableAttributedString()
         let plain: String
         let markerAttributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: size), .foregroundColor: muted]
@@ -163,11 +171,16 @@ enum ProseText {
         return line
     }
 
-    private static func checkbox(_ done: Bool) -> NSAttributedString {
+    private static func checkboxImage(done: Bool) -> NSImage? {
         let configuration = NSImage.SymbolConfiguration(pointSize: 12, weight: .regular)
             .applying(NSImage.SymbolConfiguration(paletteColors: [NSColor(done ? Palette.accentText : Palette.muted)]))
-        guard let image = NSImage(systemSymbolName: done ? "checkmark.square.fill" : "square", accessibilityDescription: done ? "feito" : "a fazer")?
-            .withSymbolConfiguration(configuration) else { return NSAttributedString(string: done ? "☑" : "☐") }
+        return NSImage(systemSymbolName: done ? "checkmark.square.fill" : "square", accessibilityDescription: done ? "feito" : "a fazer")?
+            .withSymbolConfiguration(configuration)
+    }
+
+    private static func checkbox(_ done: Bool) -> NSAttributedString {
+        // The picture is shared, the attachment is not: each text gets its own.
+        guard let image = done ? checkboxDone : checkboxTodo else { return NSAttributedString(string: done ? "☑" : "☐") }
         let attachment = NSTextAttachment()
         attachment.image = image
         attachment.bounds = CGRect(x: 0, y: -2, width: image.size.width, height: image.size.height)
@@ -178,7 +191,7 @@ enum ProseText {
     /// breaks stay breaks inside the paragraph, so the paragraph's spacing comes only after it.
     private static func inline(_ source: String, cached: Bool, highlight: String?, style: NSParagraphStyle,
                                size: CGFloat = size, weight: NSFont.Weight = .regular,
-                               color: NSColor = NSColor(Palette.ink)) -> NSAttributedString {
+                               color: NSColor = inkColor) -> NSAttributedString {
         let parsed = markdownText(source, cached: cached, highlight: highlight)
         let output = NSMutableAttributedString()
         for run in parsed.runs {
@@ -340,7 +353,8 @@ final class ProseTextView: NSTextView, @preconcurrency NSLayoutManagerDelegate {
     /// `Palette.conversationLineSpacing` between the lines of a paragraph (breaks inside it included), none after its last.
     func layoutManager(_ layoutManager: NSLayoutManager, lineSpacingAfterGlyphAt glyphIndex: Int,
                        withProposedLineFragmentRect rect: NSRect) -> CGFloat {
-        guard let text = textStorage?.string as NSString? else { return 0 }
+        // `mutableString` is the storage's own string: `string` would copy the whole text for every line fragment.
+        guard let text = textStorage?.mutableString else { return 0 }
         let next = layoutManager.characterIndexForGlyph(at: glyphIndex) + 1
         guard next < text.length else { return 0 }
         return text.character(at: next) == 0x0A || text.character(at: next - 1) == 0x0A ? 0 : Palette.conversationLineSpacing

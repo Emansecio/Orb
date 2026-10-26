@@ -25,7 +25,6 @@ struct RoutinesView: View {
     @State private var sheet: RoutinesSheet?
 
     var body: some View {
-        @Bindable var model = model
         ScrollView {
             // Empty and full cross-fade in a ZStack (§2.13), never side by side. A card that is born or goes away comes and
             // leaves like a routine in the Orb's panel (`arrive`: rises 6 pt, leaves by fading), the others slide, bound to
@@ -38,8 +37,8 @@ struct RoutinesView: View {
                         .transition(.opacity)
                 } else {
                     // One header per Orb, in the order of the sidebar, with that Orb's cards under it. Not sorted by next run:
-                    // a run would make the cards jump. Each group walks the bound list again (a handful of routines) so every
-                    // card keeps a binding by id. With a single Orb the header would only repeat what every card shows.
+                    // a run would make the cards jump. Each card gets its routine by value, plus a callback for the switch.
+                    // With a single Orb the header would only repeat what every card shows.
                     let owners = model.bots.filter { bot in model.routines.contains { $0.botID == bot.id } }
                     VStack(alignment: .leading, spacing: Spacing.section) {
                         ForEach(owners) { bot in
@@ -55,21 +54,21 @@ struct RoutinesView: View {
                                 }
                                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 340), spacing: Spacing.cardSpacing, alignment: .top)],
                                           alignment: .leading, spacing: Spacing.cardSpacing) {
-                                    ForEach($model.routines) { $routine in
-                                        if routine.botID == bot.id {
-                                            RoutineCard(routine: $routine, bot: bot, isRunning: model.isRoutineRunning(routine.id),
-                                                        isQueued: model.isRoutineQueued(routine.id),
-                                                        onRun: { model.runRoutine(routine.id) },
-                                                        onEdit: { sheet = .edit(routine) },
-                                                        onOpen: { sheet = .conversation(routine.id) },
-                                                        onOpenRun: { sheet = .run(routine: routine.id, run: $0) },
-                                                        onOpenOrb: {
-                                                            model.setInspector(true)
-                                                            model.request(.showTab(.routines), of: bot.id)
-                                                        },
-                                                        onDelete: { model.deleteRoutine(routine.id) })
-                                                .transition(.adapted(.arrive, reduceMotion: reduceMotion))
-                                        }
+                                    ForEach(model.routines(for: bot.id)) { routine in
+                                        RoutineCard(routine: routine, botName: bot.name, orb: bot.orb,
+                                                    isRunning: model.isRoutineRunning(routine.id),
+                                                    isQueued: model.isRoutineQueued(routine.id),
+                                                    onToggle: { model.setRoutineEnabled(routine.id, $0) },
+                                                    onRun: { model.runRoutine(routine.id) },
+                                                    onEdit: { sheet = .edit(routine) },
+                                                    onOpen: { sheet = .conversation(routine.id) },
+                                                    onOpenRun: { sheet = .run(routine: routine.id, run: $0) },
+                                                    onOpenOrb: {
+                                                        model.setInspector(true)
+                                                        model.request(.showTab(.routines), of: bot.id)
+                                                    },
+                                                    onDelete: { model.deleteRoutine(routine.id) })
+                                            .transition(.adapted(.arrive, reduceMotion: reduceMotion))
                                     }
                                 }
                             }
@@ -235,11 +234,15 @@ private struct TemplateCard: View {
 // MARK: Card
 
 private struct RoutineCard: View {
-    @Binding var routine: Routine
-    let bot: Bot
+    let routine: Routine
+    /// The Orb that owns it: its name and avatar, not the whole `Bot`.
+    let botName: String
+    let orb: OrbConfig
     /// This routine is running now / is waiting for its Orb to be free.
     let isRunning: Bool
     let isQueued: Bool
+    /// The switch (the model refuses to turn on a routine whose date has passed).
+    let onToggle: (Bool) -> Void
     let onRun: () -> Void
     let onEdit: () -> Void
     let onOpen: () -> Void
@@ -259,8 +262,8 @@ private struct RoutineCard: View {
             HStack(spacing: 8) {
                 Button(action: onOpenOrb) {
                     HStack(spacing: 8) {
-                        BotAvatar(bot: bot, size: 30, activity: routine.isEnabled ? .idle : .sleepy, animated: false)
-                        Text(bot.name)
+                        BotAvatar(orb: orb, size: 30, activity: routine.isEnabled ? .idle : .sleepy, animated: false)
+                        Text(botName)
                             .font(Typography.text.weight(.semibold))
                             .foregroundStyle(Palette.secondary)
                             .lineLimit(1)
@@ -269,7 +272,7 @@ private struct RoutineCard: View {
                     .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
-                .help("Abrir \(bot.name) e suas rotinas")
+                .help("Abrir \(botName) e suas rotinas")
                 if let mode = routine.permissionMode {
                     CatalogBadge(text: mode.label, symbol: mode.symbol)
                         .help("Esta rotina roda em “\(mode.label)”, mesmo que o Orb use outro modo")
@@ -277,7 +280,7 @@ private struct RoutineCard: View {
                 Spacer()
                 let datePassed = !routine.canBeEnabled()
                 // The label is hidden but read by VoiceOver: it names the routine, since every card has the same switch.
-                Toggle("Ativar \(routine.name)", isOn: Binding(get: { routine.isEnabled }, set: { if !$0 || routine.canBeEnabled() { routine.setEnabled($0) } }))
+                Toggle("Ativar \(routine.name)", isOn: Binding(get: { routine.isEnabled }, set: onToggle))
                     .toggleStyle(.switch)
                     .labelsHidden()
                     .controlSize(.small)
@@ -587,18 +590,11 @@ private struct RoutineRunSheet: View {
     let runID: UUID
     let onConversation: () -> Void
 
-    @State private var blocks: [ReportBlock]
+    @State private var blocks: [ReportBlock] = []
     /// The saved report file, when it is still there (looked for off `body`).
     @State private var fileURL: URL?
     /// The report's height, so the sheet is as tall as the text (up to a limit, then it scrolls).
     @State private var contentHeight: CGFloat = 120
-
-    init(routineID: UUID, runID: UUID, onConversation: @escaping () -> Void) {
-        self.routineID = routineID
-        self.runID = runID
-        self.onConversation = onConversation
-        _blocks = State(initialValue: [])
-    }
 
     private var routine: Routine? { model.routines.first { $0.id == routineID } }
     private var run: RoutineRun? { routine?.runs.first { $0.id == runID } }
@@ -614,9 +610,8 @@ private struct RoutineRunSheet: View {
             let how = run.succeeded ? "Deu certo" : "Não deu certo"
             ScrollView {
                 reportContent(run)
-                    .background(GeometryReader { Color.clear.preference(key: ContentHeightKey.self, value: $0.size.height) })
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
             }
-            .onPreferenceChange(ContentHeightKey.self) { contentHeight = $0 }
             .frame(height: max(80, min(contentHeight, 340)))
             .orbSheet(title, subtitle: [how, RoutineText.duration(of: run), run.check?.label].compactMap { $0 }.joined(separator: " · "),
                       size: .medium) {
@@ -695,11 +690,6 @@ private struct RoutineRunSheet: View {
         let url = bot.workingURL.appendingPathComponent(path)
         return await Task.detached { FileManager.default.fileExists(atPath: url.path) ? url : nil }.value
     }
-}
-
-private struct ContentHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
 private struct ReportBlockView: View {
