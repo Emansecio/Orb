@@ -9,6 +9,8 @@ struct SidebarView: View {
     @Namespace private var selectionSpace
     /// An Orb's row slides from where it was to where it went (into a category, out of one) through this one.
     @Namespace private var rowSpace
+    /// The selection's background at the foot (Rotinas, Conectores, Skills) slides between the three through this one.
+    @Namespace private var footerSelectionSpace
     /// The Orbs the rows were last laid out for (nil until the first appearance): an update that adds or removes one
     /// together with the selection is a row coming or going, and its layout must not animate (an Orb that only moved in
     /// the list is neither).
@@ -122,12 +124,14 @@ struct SidebarView: View {
                     SectionTitle("Espaço de trabalho") { EmptyView() }
                     HStack(spacing: 4) {
                         FooterPageButton(item: .routines, name: "Rotinas", symbol: "clock.arrow.circlepath",
-                                         tip: Tip.allRoutines, shortcut: AppShortcut.routines.label)
+                                         tip: Tip.allRoutines, shortcut: AppShortcut.routines.label, selectionSpace: footerSelectionSpace)
                         FooterPageButton(item: .connectors, name: "Conectores", symbol: "point.3.filled.connected.trianglepath.dotted",
-                                         tip: Tip.manageConnectors, shortcut: AppShortcut.connectors.label)
+                                         tip: Tip.manageConnectors, shortcut: AppShortcut.connectors.label, selectionSpace: footerSelectionSpace)
                         FooterPageButton(item: .skills, name: "Skills", symbol: "wand.and.stars",
-                                         tip: Tip.skillsPage, shortcut: AppShortcut.skills.label)
+                                         tip: Tip.skillsPage, shortcut: AppShortcut.skills.label, selectionSpace: footerSelectionSpace)
                     }
+                    // The highlight slides between the pages (a fade under Reduce Motion), as the Orbs' does.
+                    .motion(Motion.content, value: model.selection)
                 }
                 .padding(.horizontal, 8)
                 HStack(spacing: 6) {
@@ -162,10 +166,7 @@ struct SectionTitle<Trailing: View>: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            Text(title)
-                .font(Typography.label.weight(.medium))
-                .foregroundStyle(Palette.faint)
-                .accessibilityAddTraits(.isHeader)
+            Text(title).sectionTitleStyle()
             Spacer(minLength: 4)
             trailing
         }
@@ -181,15 +182,17 @@ struct SectionTitle<Trailing: View>: View {
 struct SectionPlus: View {
     /// The target's side: 20 pt beside a title, 16 pt in an Orb's row (its name's line height).
     var size: CGFloat = 20
+    /// The one "+" the sidebar draws, in a button or as a decoration (an invitation, a name field, "Nova conversa").
+    static let glyph = Font.system(size: 11, weight: .medium)
     @State private var isHovering = false
 
     var body: some View {
         Image(systemName: "plus")
-            .font(.system(size: 11, weight: .medium))
+            .font(Self.glyph)
             // `hint` is decorative only (about 3:1); the "+" is a control, so it rests at `faint`.
             .foregroundStyle(isHovering ? Palette.secondary : Palette.faint)
             .frame(width: size, height: size)
-            .hoverFill(isHovering, in: .rect(cornerRadius: 6))
+            .hoverFill(isHovering, in: .rect(cornerRadius: Radius.small))
             .contentShape(.rect)
             .onHover { isHovering = $0 }
             .animation(Motion.fade, value: isHovering)
@@ -230,6 +233,7 @@ private struct FooterPageButton: View {
     let symbol: String
     let tip: String
     let shortcut: String
+    let selectionSpace: Namespace.ID
     @State private var isHovering = false
 
     var body: some View {
@@ -244,7 +248,9 @@ private struct FooterPageButton: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 6)
             .hoverFill(isHovering && !isSelected, in: .rect(cornerRadius: Radius.medium))
-            .background(RoundedRectangle(cornerRadius: Radius.medium).fill(isSelected ? Palette.ghostSelected : .clear))
+            .background {
+                if isSelected { SlidingSelectionFill(space: selectionSpace, radius: Radius.medium) }
+            }
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -321,12 +327,28 @@ private struct SidebarSelectionFill: View {
     @Environment(\.sidebarListChanged) private var listChanged
 
     var body: some View {
-        RoundedRectangle(cornerRadius: Radius.medium)
-            .fill(Palette.ghostSelected)
-            .matchedGeometryEffect(id: SidebarSelection.id, in: selectionSpace)
+        SlidingSelectionFill(space: selectionSpace, radius: Radius.medium)
             // The list changed in this update (a new Orb that is chosen, a deleted one): the rows come and go, and the
             // highlight does not slide to a row that is still arriving.
             .transaction { if listChanged { $0.animation = nil } }
+    }
+}
+
+/// A selection's background in the sidebar (rows, footer pages, conversations, each set in its own namespace): it slides
+/// to the one chosen (the same view in every place, `matchedGeometryEffect`), and under Reduce Motion fades out of one and
+/// into the other instead.
+struct SlidingSelectionFill: View {
+    let space: Namespace.ID
+    let radius: CGFloat
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: radius).fill(Palette.ghostSelected)
+        if reduceMotion {
+            shape.transition(.opacity)
+        } else {
+            shape.matchedGeometryEffect(id: SidebarSelection.id, in: space)
+        }
     }
 }
 
@@ -415,14 +437,14 @@ struct SidebarBotRow: View {
             .accessibilityActions {
                 Button(CommandName.newChat) { model.newChat(for: botID) }
                 if chats != nil {
-                    Button(folded ? SidebarText.unfoldChats : SidebarText.foldChats) { model.setChatsCollapsed(!folded, for: botID) }
+                    Button(folded ? SidebarText.unfoldChats : SidebarText.foldChats) { setFolded(!folded) }
                 }
             }
             .contextMenu {
                 Button(CommandName.newChat, systemImage: "square.and.pencil") { model.newChat(for: botID) }
                 if chats != nil {
                     Button(folded ? SidebarText.unfoldChats : SidebarText.foldChats, systemImage: folded ? "chevron.down" : "chevron.right") {
-                        model.setChatsCollapsed(!folded, for: botID)
+                        setFolded(!folded)
                     }
                 }
                 Button(CommandName.openFolder, systemImage: "folder") { model.openFolder(of: botID) }
@@ -435,7 +457,7 @@ struct SidebarBotRow: View {
                     model.showNewGroup = true
                 }
                 .disabled(model.botIDs.count < 2)
-                Button("Ver todas as rotinas", systemImage: "clock") { model.selection = .routines }
+                Button("Ver todas as rotinas", systemImage: "clock.arrow.circlepath") { model.selection = .routines }
                 Divider()
                 Button("Apagar \(live.look.name)…", systemImage: "trash", role: .destructive) { model.askToDelete(botID) }
             }
@@ -447,6 +469,11 @@ struct SidebarBotRow: View {
         }
         .background { if chats != nil, !folded { SidebarSelectionFill(selectionSpace: selectionSpace) } }
         .matchedGeometryEffect(id: botID, in: rowSpace)
+    }
+
+    /// Folds or unfolds the conversations under the row: the list unfolds (a fade under Reduce Motion) and the rows below follow.
+    private func setFolded(_ folded: Bool) {
+        withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) { model.setChatsCollapsed(folded, for: botID) }
     }
 }
 
@@ -483,13 +510,13 @@ private struct FirstOrbInvitation: View {
             ZStack {
                 Circle().strokeBorder(Palette.lineStrong, style: StrokeStyle(lineWidth: 1.2, dash: [3, 3]))
                 Image(systemName: "plus")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(SectionPlus.glyph)
                     .foregroundStyle(Palette.muted)
             }
             .frame(width: 30, height: 30)
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(Typography.text.weight(.medium))
                     .foregroundStyle(isSelected ? Palette.ink : Palette.secondary)
                 Text("Seus Orbs aparecem aqui")
                     .font(Typography.small)
@@ -589,7 +616,7 @@ private struct BotRowContent: View, Equatable {
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
                     Text(look.name)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(Typography.text.weight(.medium))
                         .foregroundStyle(Palette.ink)
                         .lineLimit(1)
                     Spacer(minLength: 4)
@@ -604,27 +631,35 @@ private struct BotRowContent: View, Equatable {
                             .font(Typography.small.monospacedDigit())
                             .foregroundStyle(Palette.faint)
                     }
-                    // A new conversation, under the pointer only; the chevron folds the open Orb's list. Both 16 pt high,
-                    // the name's line, so the row keeps its height.
-                    if row.showsNewChat {
+                    // A strip of fixed width at the right: the "+" that opens a new conversation (under the pointer only) and the
+                    // chevron that folds the open Orb's list. Both 16 pt high, the name's line. The "+" is always in the layout and
+                    // only fades, so the pointer passing over the row never shortens a long name.
+                    HStack(spacing: 0) {
                         Button { model.newChat(for: row.botID) } label: { SectionPlus(size: 16) }
                             .buttonStyle(.plain)
                             .help("\(CommandName.newChat) (\(AppShortcut.newChat.label))")
+                            .opacity(row.showsNewChat ? 1 : 0)
+                            .allowsHitTesting(row.showsNewChat)
+                            // Nor a stop for the keyboard while it is not seen.
+                            .disabled(!row.showsNewChat)
+                            .animation(Motion.fade, value: row.showsNewChat)
                             .accessibilityHidden(true)
-                    }
-                    if let folded = row.chatsFolded {
-                        Button { model.setChatsCollapsed(!folded, for: row.botID) } label: {
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 10, weight: .semibold))
-                                .rotationEffect(.degrees(folded ? 0 : 90))
-                                .animation(Motion.panel(reduceMotion: reduceMotion), value: folded)
-                                .foregroundStyle(Palette.muted)
-                                .frame(width: 16, height: 16)
-                                .contentShape(.rect)
+                        if let folded = row.chatsFolded {
+                            Button {
+                                withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) { model.setChatsCollapsed(!folded, for: row.botID) }
+                            } label: {
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .rotationEffect(.degrees(folded ? 0 : 90))
+                                    .animation(Motion.panel(reduceMotion: reduceMotion), value: folded)
+                                    .foregroundStyle(Palette.faint)
+                                    .frame(width: 16, height: 16)
+                                    .contentShape(.rect)
+                            }
+                            .buttonStyle(.plain)
+                            .help(folded ? "Mostra as conversas deste Orb" : "Recolhe as conversas deste Orb")
+                            .accessibilityHidden(true)
                         }
-                        .buttonStyle(.plain)
-                        .help(folded ? "Mostra as conversas deste Orb" : "Recolhe as conversas deste Orb")
-                        .accessibilityHidden(true)
                     }
                 }
                 HStack(spacing: 4) {
@@ -654,7 +689,7 @@ private struct BotRowContent: View, Equatable {
                             Group {
                                 if row.unread >= 2 {
                                     Text(row.unread > 99 ? "99+" : "\(row.unread)")
-                                        .font(.system(size: 10, weight: .semibold).monospacedDigit())
+                                        .font(Typography.small.weight(.semibold).monospacedDigit())
                                         .foregroundStyle(Palette.onInk)
                                         .padding(.horizontal, 5)
                                         .frame(minWidth: 16, minHeight: 16)
@@ -665,7 +700,7 @@ private struct BotRowContent: View, Equatable {
                                         .frame(width: 7, height: 7)
                                 }
                             }
-                            .transition(.scale.combined(with: .opacity))
+                            .transition(.adapted(.mark, reduceMotion: reduceMotion))
                             .accessibilityLabel(SidebarText.unread(row.unread))
                         }
                     }

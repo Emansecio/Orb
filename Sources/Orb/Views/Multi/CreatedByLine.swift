@@ -19,7 +19,7 @@ struct CreatedByLine: View {
                     .foregroundStyle(Palette.faint)
                 if let creator {
                     Button(name) { model.selection = .bot(creator.id) }
-                        .buttonStyle(.link)
+                        .buttonStyle(QuietTextStyle())
                         .help("Abrir a conversa com \(name)")
                 } else {
                     Text(name).foregroundStyle(Palette.faint)

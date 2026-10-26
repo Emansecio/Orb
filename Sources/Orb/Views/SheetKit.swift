@@ -275,7 +275,15 @@ extension View {
 
     /// The gray line under a switch or a picker in the Orb's panel ("Rodar comandos e ler e escrever arquivos").
     func capabilityCaption() -> some View {
-        font(Typography.small).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        font(Typography.small).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// The trash can of a row in the Orb's panel (a routine, a lembrança): one round ghost in muted gray, so the two lists
+    /// delete with the same control.
+    func panelTrashButton(side: CGFloat = 26) -> some View {
+        labelStyle(.iconOnly)
+            .buttonStyle(CircleGhostStyle(side: side, fontSize: 12))
+            .foregroundStyle(Palette.muted)
     }
 }
 

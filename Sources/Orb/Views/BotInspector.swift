@@ -54,12 +54,14 @@ struct BotInspector: View {
         // This Orb's own state: what happens in another Orb does not touch the panel.
         if let live = model.liveBot(botID) {
             let bot = live.bot
+            let contentKey = ContentKey(tab: tab, bot: botID)
             VStack(spacing: 0) {
                 header(bot)
                 InspectorTabBar(selection: $tab)
-                // The tab's content swaps in a ZStack, cross-fading (§2.13): a grouped Form's own diff is unpredictable, so
-                // each tab is a Form of its own. The scroll returns to the top with every tab, and the tasks below live on
-                // the outer stack, so they do not run again.
+                // The content swaps in a ZStack, cross-fading (§2.13): a grouped Form's own diff is unpredictable, so each
+                // tab is a Form of its own. The key is the tab and the Orb: changing Orbs fades the content too, while the
+                // panel itself (header, tab bar, tasks) stays. The scroll returns to the top with every swap, and the tasks
+                // below live on the outer stack, so they do not run again.
                 ZStack {
                     Form {
                         switch tab {
@@ -72,10 +74,10 @@ struct BotInspector: View {
                     }
                     .formStyle(.grouped)
                     .scrollContentBackground(.hidden)
-                    .id(tab)
+                    .id(contentKey)
                     .transition(.pageSwap)
                 }
-                .motion(Motion.crossFade, value: tab)
+                .motion(Motion.crossFade, value: contentKey)
                 // The task the Orb just scheduled from the chat (`AppModel.freshRoutine`, only set with this panel on screen)
                 // arrives with a tap you can feel.
                 .sensoryFeedback(.levelChange, trigger: model.freshRoutine) { _, new in new != nil }
@@ -213,6 +215,12 @@ struct BotInspector: View {
         if let requested = model.takeTabRequest(of: botID) { tab = requested }
     }
 
+    /// What the content below the tab bar is: one tab of one Orb. A change of either cross-fades it.
+    private struct ContentKey: Hashable {
+        var tab: InspectorTab
+        var bot: UUID
+    }
+
     private struct FolderWatch: Hashable {
         var folder: String
         var isShown: Bool
@@ -233,27 +241,28 @@ struct BotInspector: View {
     // MARK: Top of the panel
 
     /// Who the Orb is, always visible: avatar, name and role (editable, the role in one line), and one quiet line under
-    /// them with the way to change its look (the look itself is said in the tip) and the folder buttons. Who made an Orb
-    /// another made is at the end of the General tab.
+    /// them with the way to change its look (the look itself is said in the tip). The folder's actions are on the Pasta
+    /// tab. Who made an Orb another made is at the end of the General tab.
     private func header(_ bot: Bot) -> some View {
         let summary = AppearanceSummary.text(for: bot.orb)
         return HStack(alignment: .center, spacing: 12) {
             LiveBotAvatar(botID: bot.id, orb: bot.orb, size: 46, interactive: true, restsWhenIdle: true) // the only part that follows the activity
             VStack(alignment: .leading, spacing: 3) {
-                InspectorHeader(bot: bot, focusName: $isFocusingName)
-                    .id(bot.id)
-                HStack(alignment: .center, spacing: 6) {
-                    Button("Personalizar…") {
-                        editorHeight = NewBotSheetLayout.height(preferred: 720)
-                        isEditingOrb = true
-                    }
-                    .buttonStyle(QuietTextStyle())
-                    .font(Typography.small)
-                    .fixedSize()
-                    .help("\(Tip.customizeOrb) (\(summary))")
-                    Spacer(minLength: 4)
-                    quickActions(bot)
+                // The name and role fade into the other Orb's, as the content below does.
+                ZStack(alignment: .leading) {
+                    InspectorHeader(bot: bot, focusName: $isFocusingName)
+                        .id(bot.id)
+                        .transition(.pageSwap)
                 }
+                .motion(Motion.crossFade, value: bot.id)
+                Button("Personalizar…") {
+                    editorHeight = NewBotSheetLayout.height(preferred: 720)
+                    isEditingOrb = true
+                }
+                .buttonStyle(QuietTextStyle())
+                .font(Typography.small)
+                .fixedSize()
+                .help("\(Tip.customizeOrb) (\(summary))")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -261,30 +270,6 @@ struct BotInspector: View {
         .padding(.horizontal, Spacing.xl)
         .padding(.top, 18)
         .padding(.bottom, 14)
-    }
-
-    /// What people do most with an Orb's folder, one click each from any tab: two round icon buttons at the end of the
-    /// "Personalizar…" line, so they take no row of their own.
-    private func quickActions(_ bot: Bot) -> some View {
-        let folderIsMissing = listing?.folder == .missing
-        return HStack(spacing: 4) {
-            quickAction("Abrir no Finder", "folder", help: Tip.openFolderInFinder(bot.name)) {
-                OrbFolder.showInFinder(bot.workingURL)
-            }
-            quickAction("Abrir no Terminal", "terminal", help: Tip.openFolderInTerminal(bot.name)) {
-                OrbFolder.openInTerminal(bot.workingURL)
-            }
-        }
-        .foregroundStyle(folderIsMissing ? Palette.hint : Palette.secondary)
-        .disabled(folderIsMissing)
-        .padding(.trailing, -3) // the circles' hover fill hangs past the edge the cards below share
-    }
-
-    private func quickAction(_ title: String, _ symbol: String, help: String, action: @escaping () -> Void) -> some View {
-        Button(title, systemImage: symbol, action: action)
-            .labelStyle(.iconOnly)
-            .buttonStyle(CircleGhostStyle(side: 22, fontSize: 12))
-            .help(help)
     }
 
     /// The folder was replaced: what the panel knew about the old one no longer applies.
@@ -423,7 +408,7 @@ struct BotInspector: View {
                 .iconTip(summary, label: "Sobre este modo")
                 .popover(isPresented: $isShowingBypassInfo, arrowEdge: .bottom) {
                     Text(summary)
-                        .font(.callout)
+                        .font(Typography.label)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(12)
                         .frame(width: 280, alignment: .leading)
@@ -545,7 +530,7 @@ struct BotInspector: View {
                 .help(names.joined(separator: ", "))
             Text("·").foregroundStyle(Palette.faint).accessibilityHidden(true)
             Button("Gerenciar", action: action)
-                .buttonStyle(.link)
+                .buttonStyle(QuietTextStyle())
                 .fixedSize()
                 .help(tip)
                 .accessibilityLabel("Gerenciar \(title.lowercased())")
@@ -558,7 +543,7 @@ struct BotInspector: View {
         HStack(spacing: 4) {
             if leadingDot { Text("·").foregroundStyle(Palette.faint).accessibilityHidden(true) }
             Button(title, action: action)
-                .buttonStyle(.link)
+                .buttonStyle(QuietTextStyle())
                 .help(tip)
         }
         .font(Typography.small)
@@ -588,10 +573,11 @@ struct BotInspector: View {
     private func folderTab(_ bot: Bot) -> some View {
         Section {
             folderRow(bot)
+            folderActions(bot)
             folderControls(bot)
         } header: {
             // Not "Pasta": that is the tab's own name, right above.
-            Text("Onde trabalha")
+            Text("Onde trabalha").sectionTitleStyle()
         } footer: { FormFootnote {
             if let folderProblem {
                 Text(folderProblem).foregroundStyle(Palette.warn)
@@ -610,7 +596,7 @@ struct BotInspector: View {
                 .help(Tip.showInstructions)
                 .chipButton()
             } header: {
-                Text("Instruções da pasta")
+                Text("Instruções da pasta").sectionTitleStyle()
             } footer: { FormFootnote {
                 Text(InstructionsText.footer(for: file, name: bot.name, trustedHash: bot.trustedInstructionsHash))
             } }
@@ -643,7 +629,7 @@ struct BotInspector: View {
                     .transition(.quiet)
             }
         } header: {
-            Text("Liberações")
+            Text("Liberações").sectionTitleStyle()
         } footer: { FormFootnote {
             Text(PermissionMode.grantsNote).help(PermissionMode.grantsNoteDetail)
         } }
@@ -669,7 +655,7 @@ struct BotInspector: View {
                     .truncationMode(.middle)
                 Text(OrbFolder.display(bot.workingURL)) // "~" for the home folder too, as in Conectores
                     .font(Typography.small.monospaced())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Palette.muted)
                     .lineLimit(1)
                     .truncationMode(.head)
                     .textSelection(.enabled)
@@ -677,6 +663,27 @@ struct BotInspector: View {
             .help(bot.workingURL.path)
             Spacer(minLength: 4)
             changeFolderMenu(bot)
+        }
+    }
+
+    /// Open the folder where the Orb works, in the Finder or in the Terminal: the two things people do most with it. Chips
+    /// like the ones of the rows around (one line when they fit, one under the other in a narrow panel); off while the
+    /// folder is gone, which "Recriar" below brings back.
+    private func folderActions(_ bot: Bot) -> some View {
+        let chips = Group {
+            Button("Abrir no Finder", systemImage: "folder") { OrbFolder.showInFinder(bot.workingURL) }
+                .help(Tip.openFolderInFinder(bot.name))
+            Button("Abrir no Terminal", systemImage: "terminal") { OrbFolder.openInTerminal(bot.workingURL) }
+                .help(Tip.openFolderInTerminal(bot.name))
+        }
+        .chipButton()
+        .disabled(listing?.folder == .missing)
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                chips
+                Spacer(minLength: 0)
+            }
+            VStack(alignment: .leading, spacing: 8) { chips }
         }
     }
 
@@ -720,7 +727,7 @@ struct BotInspector: View {
         if state == .noOwnFolder {
             Text("Em uma pasta própria (\(OrbFolder.display(OrbFolder.availableURL(for: bot.name, in: OrbFolder.defaultBase)))), \(bot.name) escreve sem perguntar em “Perguntar antes”.")
                 .font(Typography.small)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Palette.muted)
                 .transition(.quiet)
         }
         if state == .missing {
@@ -729,7 +736,7 @@ struct BotInspector: View {
                 .transition(.quiet)
             Text("Ela foi apagada, renomeada ou está em um disco desconectado. \(bot.name) não consegue rodar comandos até você escolher outra pasta ou recriar esta.")
                 .font(Typography.small)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Palette.muted)
                 .transition(.quiet)
             Button("Recriar", systemImage: "folder.badge.plus") { attempt { try model.recreateFolder(of: bot.id) } }
                 .chipButton()
@@ -759,7 +766,7 @@ struct BotInspector: View {
                 }
             } header: {
                 HStack {
-                    Text("Arquivos")
+                    Text("Arquivos").sectionTitleStyle()
                     Spacer()
                     Button("Atualizar", systemImage: "arrow.clockwise") { filesRefresh += 1 }
                         .labelStyle(.iconOnly)
@@ -994,8 +1001,8 @@ private struct InspectorHeader: View {
             if isEditingRole {
                 TextField("Papel", text: $role, prompt: Text("Papel"), axis: .vertical)
                     .lineLimit(1...4)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .font(Typography.label)
+                    .foregroundStyle(Palette.muted)
                     .focused($focus, equals: .role)
                     .onSubmit { focus = nil }
                     // Return ends the edit (the role is one line that wraps), as in the name above.
@@ -1006,7 +1013,7 @@ private struct InspectorHeader: View {
                     .onAppear { focus = .role }
             } else {
                 Text(role.isEmpty ? "Papel" : role)
-                    .font(.callout)
+                    .font(Typography.label)
                     .foregroundStyle(role.isEmpty ? Palette.faint : Palette.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -1108,7 +1115,7 @@ private struct WorkspaceFileRow: View {
         switch file.marker {
         case .added, .untracked: Palette.ok
         case .deleted, .conflict: Palette.warn
-        default: .secondary
+        default: Palette.muted
         }
     }
 
@@ -1142,10 +1149,9 @@ private struct RoutineRow: View {
         let current = model.routines.first { $0.id == routine.id } ?? routine
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 10) {
-                RoutineGlyph(schedule: current.schedule, isOn: current.isEnabled)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(current.name)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(Typography.text.weight(.medium))
                         .foregroundStyle(Palette.ink)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1167,7 +1173,7 @@ private struct RoutineRow: View {
                     .disabled(!current.canBeEnabled())
                     .help(current.canBeEnabled() ? Tip.routineToggle(isOn: current.isEnabled) : Tip.routineDatePassed)
             }
-            if let goal = current.goal { GoalProgressView(goal: goal, font: .system(size: 12), showsNote: false) }
+            if let goal = current.goal { GoalProgressView(goal: goal, font: Typography.label, showsNote: false) }
             VStack(alignment: .leading, spacing: 6) {
                 RoutineNextLine(routine: current)
                 RoutineLastLine(routine: current)
@@ -1189,6 +1195,12 @@ private struct RoutineRow: View {
         .transition(.adapted(.arrive, reduceMotion: reduceMotion))
     }
 
+    /// Like the Rotinas page: with the Orb busy the run waits for it (`runRoutine` queues it). The three swap in place,
+    /// cross-fading, so the row does not shift.
+    private func runControl(_ state: RoutineRunState) -> some View {
+        RoutineRunControl(state: state) { model.runRoutine(routine.id) }
+    }
+
     @ViewBuilder
     private func footer(_ current: Routine) -> some View {
         HStack(spacing: 4) {
@@ -1204,48 +1216,28 @@ private struct RoutineRow: View {
                     .buttonStyle(GhostStyle(tint: Palette.danger))
                     .hangsOnTrailingEdge()
             } else {
-                // Like the Rotinas page: with the Orb busy the run waits for it (`runRoutine` queues it). The three swap
-                // in place, cross-fading, so the row does not shift.
-                ZStack(alignment: .leading) {
-                    if model.isRoutineRunning(routine.id) {
-                        Label("Rodando…", systemImage: "hourglass")
-                            .font(Typography.label)
-                            .foregroundStyle(Palette.muted)
-                            .transition(.opacity)
-                    } else if model.isRoutineQueued(routine.id) {
-                        Label("Na fila", systemImage: "clock")
-                            .font(Typography.label)
-                            .foregroundStyle(Palette.muted)
-                            .help(Tip.queuedRoutine)
-                            .transition(.opacity)
-                    } else {
-                        Button("Rodar agora", systemImage: "play.fill") { model.runRoutine(routine.id) }
-                            .buttonStyle(SecondaryPillStyle())
-                            .help(Tip.runRoutineNow)
-                            .transition(.opacity)
+                // "Rodar agora" and "Editar" together at the start, the same pill; the trash can at the end. At the narrowest
+                // panel only the pencil fits; it keeps "Editar" as its tip and VoiceOver label.
+                let editButton = Button("Editar", systemImage: "pencil", action: edit)
+                    .buttonStyle(SecondaryPillStyle())
+                    .help(Tip.editRoutine)
+                // Read once: both layouts below are made.
+                let runState = RoutineRunState(isRunning: model.isRoutineRunning(routine.id),
+                                               isQueued: model.isRoutineQueued(routine.id))
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 6) {
+                        runControl(runState)
+                        editButton
+                    }
+                    HStack(spacing: 6) {
+                        runControl(runState)
+                        editButton.labelStyle(.iconOnly)
                     }
                 }
                 .controlSize(.small)
-                .animateChanges(of: RoutineRunState(isRunning: model.isRoutineRunning(routine.id), isQueued: model.isRoutineQueued(routine.id)))
                 Spacer(minLength: 4)
-                // A ghost with its word, as on the Rotinas page: the pill on the left is not left facing a lone pencil.
-                // In the narrowest panel only the pencil fits; it keeps "Editar" as its tip and VoiceOver label.
-                let editButton = Button("Editar", systemImage: "pencil", action: edit)
-                ViewThatFits(in: .horizontal) {
-                    editButton
-                        .buttonStyle(GhostStyle())
-                        .help(Tip.editRoutine)
-                    editButton
-                        .labelStyle(.iconOnly)
-                        .buttonStyle(CircleGhostStyle(side: 26, fontSize: 12))
-                        .foregroundStyle(Palette.secondary)
-                        .help(Tip.editRoutine)
-                }
-                .controlSize(.small)
                 Button("Apagar “\(current.name)”", systemImage: "trash") { isConfirmingDelete = true }
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(CircleGhostStyle(side: 26, fontSize: 12))
-                    .foregroundStyle(Palette.secondary)
+                    .panelTrashButton()
                     .help(Tip.deleteRoutine)
                     .padding(.trailing, -4)
                     .focused($deleteIsFocused)
@@ -1257,33 +1249,6 @@ private struct RoutineRow: View {
         }
         .frame(minHeight: 26)
         .transition(.opacity)
-    }
-}
-
-/// The routine's kind at a glance: a clock that turns for an interval, a calendar for a weekday or a cron line, a clock
-/// for a time of day, a "1" for a single run; tinted while it is on, gray while it is paused.
-private struct RoutineGlyph: View {
-    static let side: CGFloat = 30
-    let schedule: Schedule
-    let isOn: Bool
-
-    private var symbol: String {
-        switch schedule {
-        case .everyHours, .everyMinutes: "arrow.triangle.2.circlepath"
-        case .weekly, .cron: "calendar"
-        case .daily: "clock"
-        case .once: "1.circle"
-        }
-    }
-
-    var body: some View {
-        Image(systemName: isOn ? symbol : "pause.fill")
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(isOn ? Palette.accentText : Palette.muted)
-            .frame(width: Self.side, height: Self.side)
-            .background((isOn ? Palette.accent.opacity(0.16) : Palette.raised), in: .rect(cornerRadius: Radius.small))
-            .contentTransition(.symbolEffect(.replace))
-            .accessibilityHidden(true)
     }
 }
 
@@ -1335,7 +1300,7 @@ private struct RoutineLastLine: View {
                     .lineLimit(isExpanded ? nil : 2)
                     .fixedSize(horizontal: false, vertical: true)
             } icon: {
-                Image(systemName: run.succeeded ? "checkmark.circle.fill" : "xmark.circle.fill")
+                Image(systemName: run.succeeded ? "checkmark.circle" : "xmark.circle")
                     .foregroundStyle(run.succeeded ? Palette.ok : Palette.danger)
             }
             .font(Typography.label)
@@ -1447,7 +1412,7 @@ struct PanelEmptyNote: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Label(title, systemImage: symbol)
-                .font(.system(size: 13, weight: .semibold))
+                .font(Typography.text.weight(.medium))
                 .foregroundStyle(Palette.ink)
             Text(detail)
                 .font(Typography.label)

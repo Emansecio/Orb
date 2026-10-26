@@ -69,6 +69,28 @@ struct SelectableProseTests {
         #expect(narrow > wide * 4)
     }
 
+    /// While a reply streams each paragraph is a view of its own, one under the other `markdownBlockSpacing` apart; the
+    /// finished reply is one text. The two are as tall, so the reply does not move when the stream ends.
+    @Test func theFinishedReplyIsAsTallAsItsParagraphsWereWhileStreaming() {
+        let paragraphs: [MarkdownBlock] = [.paragraph(String(repeating: "palavra ", count: 30)), .heading(level: 2, text: "Por tipo"),
+                                           .list([MarkdownListItem(depth: 0, marker: .bullet, text: "PDFs: 12"),
+                                                  MarkdownListItem(depth: 0, marker: .bullet, text: "Imagens: 20")]),
+                                           .paragraph(String(repeating: "outra ", count: 25))]
+        func height(_ blocks: [MarkdownBlock]) -> CGFloat {
+            let view = ProseTextView()
+            view.show(ProseText.make(blocks, cursor: false, cached: false, highlight: nil), cursor: false, fades: false)
+            return view.size(forWidth: 320).height
+        }
+        // While streaming each paragraph is a text of its own, stacked with the blocks' spacing, and a heading after
+        // another paragraph takes its lead on top (`MarkdownChunk.first`).
+        let leads = paragraphs.dropFirst().map { block -> CGFloat in
+            if case .heading(let level, _) = block { ProseText.headingLead(level) } else { 0 }
+        }
+        let apart = paragraphs.map { height([$0]) }.reduce(0, +) + leads.reduce(0, +)
+            + markdownBlockSpacing * CGFloat(paragraphs.count - 1)
+        #expect(abs(height(paragraphs) - apart) < 0.5)
+    }
+
     /// Inside a bubble the text is as wide as its longest line, and laid out again at that width it keeps its lines.
     @Test func theLongestLineIsTheWidthAndKeepsTheLinesWhereTheyBreak() {
         // Already laid out in a frame as wide as the chat (the container's own used rect then spans all of it).

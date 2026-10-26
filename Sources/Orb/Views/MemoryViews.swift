@@ -29,7 +29,7 @@ struct MemoryTab: View {
             IdentityBlock(memory: memory, name: name, canSummarize: model.bot(botID)?.permissionMode != .readOnly, edit: editIdentity,
                           restartInterview: { model.restartInterview(of: botID) })
         } header: {
-            Text("Como \(name) funciona")
+            Text("Como \(name) funciona").sectionTitleStyle()
         }
 
         Section {
@@ -46,7 +46,7 @@ struct MemoryTab: View {
                     .foregroundStyle(Palette.muted)
             }
         } header: {
-            Text("O que \(name) guardou")
+            Text("O que \(name) guardou").sectionTitleStyle()
         } footer: { FormFootnote {
             if !memory.items.isEmpty { Text(MemoryGroups.summary(memory.items)) }
         } }
@@ -60,7 +60,7 @@ struct MemoryTab: View {
                 }
                 if shown.count < group.items.count {
                     Button("Ver todos (\(group.items.count))…") { showAll(group.kind) }
-                        .buttonStyle(.link)
+                        .buttonStyle(QuietTextStyle())
                         .help(Tip.memoryShowKind)
                 }
             } header: {
@@ -72,37 +72,26 @@ struct MemoryTab: View {
         .animateChanges(of: memory.items.map(\.id))
 
         Section {
-            // One line of chips when they fit (one under the other in a narrow panel); "Ver tudo…" only once there is
-            // something to see.
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) {
-                    memoryButtons(isEmpty: memory.items.isEmpty)
-                    Spacer(minLength: 0)
-                }
-                VStack(alignment: .leading, spacing: 8) { memoryButtons(isEmpty: memory.items.isEmpty) }
+            // "Ver tudo…" only once there is something to see. "Abrir pasta" is not a card of its own: it is text in the
+            // note below.
+            if !memory.items.isEmpty {
+                Button("Ver tudo…", systemImage: "list.bullet.rectangle") { showAll(nil) }
+                    .chipButton()
+                    .help(Tip.memoryShowAll)
             }
         } footer: { FormFootnote {
-            InlineLinkNote(text: "Só \(name) vê isso.", link: "Como funciona",
-                           hint: "Mostra como a memória funciona", tip: Tip.memoryHow) {
-                MemoryHelp(name: name)
+            HStack(spacing: 4) {
+                InlineLinkNote(text: "Só \(name) vê isso.", link: "Como funciona",
+                               hint: "Mostra como a memória funciona", tip: Tip.memoryHow, linkColor: Palette.muted) {
+                    MemoryHelp(name: name)
+                }
+                Text("·").foregroundStyle(Palette.faint).accessibilityHidden(true)
+                Button("Abrir pasta") { NSWorkspace.shared.open(model.memory.directory(for: botID)) }
+                    .buttonStyle(QuietTextStyle())
+                    .help(Tip.memoryFolder)
+                    .accessibilityLabel("Abrir pasta da memória")
             }
         } }
-    }
-}
-
-extension MemoryTab {
-    @ViewBuilder
-    fileprivate func memoryButtons(isEmpty: Bool) -> some View {
-        if !isEmpty {
-            Button("Ver tudo…", systemImage: "list.bullet.rectangle") { showAll(nil) }
-                .chipButton()
-                .help(Tip.memoryShowAll)
-        }
-        Button("Abrir pasta da memória", systemImage: "folder") {
-            NSWorkspace.shared.open(model.memory.directory(for: botID))
-        }
-        .chipButton()
-        .help(Tip.memoryFolder)
     }
 }
 
@@ -121,7 +110,7 @@ private struct IdentityBlock: View {
                                detail: "Diga como \(name) deve trabalhar com você: o tom, o que evitar, o que lembrar sempre.")
             } else {
                 Text(memory.identity.replacingOccurrences(of: "## ", with: ""))
-                    .font(.callout)
+                    .font(Typography.label)
                     .foregroundStyle(Palette.secondary)
                     .lineLimit(5)
                     .truncationMode(.middle)
@@ -130,19 +119,19 @@ private struct IdentityBlock: View {
             if memory.identity.count > MemoryBank.identityShare {
                 Text("Longa: em cada conversa vão cerca de \(MemoryBank.identityShare) caracteres; as notas mais antigas saem primeiro.")
                     .font(Typography.small)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Palette.muted)
             }
             if memory.preferencesOverflow > 0 {
                 Text("\(memory.preferencesOverflow) \(memory.preferencesOverflow == 1 ? "preferência não cabe" : "preferências não cabem") inteira\(memory.preferencesOverflow == 1 ? "" : "s") no que \(name) sempre vê; "
                      + (canSummarize && memory.preferencesConsolidate
                         ? "\(name) vai juntar as mais curtas sozinho." : "o resto é encontrado só quando \(name) busca."))
                     .font(Typography.small)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Palette.muted)
             }
             if memory.interviewPending {
                 Label("Vai fazer perguntas a você nas primeiras mensagens", systemImage: "questionmark.bubble")
                     .font(Typography.small)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Palette.muted)
             }
             HStack {
                 Button("Editar…", systemImage: "pencil", action: edit)
@@ -175,8 +164,9 @@ private struct MemoryGroupHeader: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Text(group.title)
+            Text(group.title).sectionTitleStyle()
             Text("\(group.items.count)")
+                .font(Typography.label)
                 .foregroundStyle(Palette.faint)
                 .monospacedDigit()
         }
@@ -191,7 +181,7 @@ struct MemorySearchField: View {
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Palette.muted)
                 .accessibilityHidden(true)
             // The hint inside the field: in a Form a field's title would become a label column beside it.
             TextField("Buscar na memória", text: $query, prompt: Text("Buscar na memória"))
@@ -202,7 +192,7 @@ struct MemorySearchField: View {
                 Button("Limpar busca", systemImage: "xmark.circle.fill") { query = "" }
                     .labelStyle(.iconOnly)
                     .buttonStyle(.borderless)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Palette.muted)
                     .help(Tip.clearSearch)
             }
         }
@@ -216,12 +206,12 @@ private struct MemoryHelp: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Como a memória funciona")
-                .font(.headline)
+                .font(Typography.text.weight(.semibold))
             Text("\(name) guarda preferências, fatos e procedimentos que aprende com você, e um resumo de cada conversa (salvo depois de 30 minutos sem mensagens ou ao começar outra).")
             Text("Conversas antigas são compactadas, nunca apagadas sem você. Tudo fica em arquivos .md na pasta da memória, um por lembrança.")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Palette.muted)
         }
-        .font(.callout)
+        .font(Typography.label)
         .fixedSize(horizontal: false, vertical: true)
         .padding(16)
         .frame(width: 300)
@@ -244,7 +234,7 @@ struct MemoryRow: View {
         HStack(alignment: .top, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(Self.text(of: item))
-                    .font(.callout)
+                    .font(Typography.label)
                     .foregroundStyle(Palette.ink.opacity(0.9))
                     .lineSpacing(1.5)
                     .lineLimit(isExpanded ? nil : (item.kind == .sessao ? 1 : lineLimit))
@@ -272,17 +262,11 @@ struct MemoryRow: View {
                     .padding(.top, 1)
             }
             Spacer(minLength: 4)
-            // The 11 pt icon sits in a 20 pt square that is all clickable (the plain icon would be a target of its own size).
-            // Only under the pointer or with the keyboard on it (it takes Tab, so it must be seen there): a list of
-            // lembranças, not of trash cans. VoiceOver and the menu always have it.
-            Button(action: forget) {
-                Image(systemName: "trash")
-                    .frame(width: 20, height: 20)
-                    .contentShape(.rect)
-            }
-            .buttonStyle(.borderless)
-            .foregroundStyle(Palette.muted)
-            .font(Typography.small)
+            // The same round trash can as a routine's (`panelTrashButton`). Only under the pointer or with the keyboard on it
+            // (it takes Tab, so it must be seen there): a list of lembranças, not of trash cans. VoiceOver and the menu
+            // always have it.
+            Button("Esquecer", systemImage: "trash", action: forget)
+                .panelTrashButton(side: 20) // smaller: a one-line row must not grow for it
             .focused($forgetFocused)
             .opacity(showsForget ? 1 : 0)
             .animation(Motion.hover(showsForget), value: showsForget)
@@ -372,7 +356,7 @@ struct MemorySheet: View {
                 }
                 if groups.isEmpty {
                     Text(query.isEmpty ? "Nada neste tipo de memória." : "Nada na memória com “\(query)”.")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Palette.muted)
                         // Only a different message fades; the query typed into it is not an animation.
                         .textSwap(query.isEmpty ? 1 : 2)
                 }
@@ -451,8 +435,8 @@ struct MemoryUndoToast: View {
                         .font(Typography.label)
                         .foregroundStyle(Palette.ink)
                     Button("Desfazer") { undo.undo(in: model) }
-                        .buttonStyle(.link)
-                        .font(.system(size: 12, weight: .semibold))
+                        .buttonStyle(QuietTextStyle())
+                        .font(Typography.label.weight(.semibold))
                         .focused($isFocused)
                         .help("Desfazer (\(AppShortcut.undoForget.label))")
                 }

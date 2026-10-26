@@ -106,8 +106,7 @@ O **painel do Orb** (⌥⌘B mostra ou esconde) tem quatro abas:
 | Pasta e acessos | a pasta (abrir no Finder ou no Terminal, mudar, recriar se sumiu), "Confiar nas instruções desta pasta", as **Liberações** e os arquivos alterados e recentes |
 | Rotinas | as rotinas deste Orb: ativar e pausar, editar, apagar, rodar agora (veja [Rotinas](#rotinas)) |
 
-No alto do painel: nome e papel de uma linha (clique para editar; o papel inteiro aparece ao parar o ponteiro; mudar o nome não renomeia a pasta; um nome vazio ou acima de 60 caracteres avisa o motivo sob o campo; "Renomear…" no menu do Orb na lateral leva o cursor até ele), "Personalizar…" (aparência; a folha tem "Desfazer mudanças", que volta ao visual de quando ela abriu), "Pasta"
-e "Terminal". O painel se recolhe sozinho em janelas estreitas (menos de 1180 pt) e volta quando há espaço.
+No alto do painel: nome e papel de uma linha (clique para editar; o papel inteiro aparece ao parar o ponteiro; mudar o nome não renomeia a pasta; um nome vazio ou acima de 60 caracteres avisa o motivo sob o campo; "Renomear…" no menu do Orb na lateral leva o cursor até ele), "Personalizar…" (aparência; a folha tem "Desfazer mudanças", que volta ao visual de quando ela abriu). Abrir a pasta no Finder ou no Terminal fica na aba Pasta. Ao trocar de Orb, o painel faz um fade cruzado. O painel se recolhe sozinho em janelas estreitas (menos de 1180 pt) e volta quando há espaço.
 
 As chaves de "Pode usar" desligam grupos inteiros de ferramentas para aquele Orb: sem **Terminal e arquivos** ele não roda
 comandos nem lê, escreve, procura ou apaga arquivos; sem **Navegar na web** não lê nem pesquisa páginas, não usa o navegador do Orb (nem baixa arquivos com `save_to`, que também precisa de **Terminal e arquivos**); sem **Controlar apps do Mac** não usa
@@ -250,8 +249,7 @@ Se o navegador não estiver instalado, o Orb fica só com `web_fetch` e `web_sea
   vista logo abaixo; avisos do meio do trabalho também. Um pedido que acabou sem resposta recolhe do mesmo jeito, e a linha diz
   como acabou: "Interrompido após 40 s (app fechado)", "Você interrompeu após…", "Não deu certo após…" ou "Pausou após…"; o
   aviso vai para dentro dela, a não ser que seja a última coisa da conversa, onde ficam os botões ("Continuar", "Tentar de
-  novo"). Enquanto ele trabalha, o que já fez até a última ação recolhe numa linha "Trabalhando · 7 ações"; o que ele diz
-  depois dela e um cartão que espera por você ficam à vista. A busca (⌘F) abre essas linhas quando o resultado está dentro. Cada frase fica ao menos 0,7 s na tela, e com o VoiceOver ligado ela é anunciada
+  novo"). Enquanto ele trabalha, nada recolhe: as ações e o que ele vai dizendo ficam à vista até o pedido terminar. A busca (⌘F) abre essas linhas quando o resultado está dentro. Cada frase fica ao menos 0,7 s na tela, e com o VoiceOver ligado ela é anunciada
   com educação (no máximo uma vez a cada 8 s). Com "Reduzir movimento" as frases só trocam de opacidade.
 - **Quando algo dá errado**, a mensagem vem com a ação: "Tentar de novo" (reenvia, se nada tinha sido feito; se já tinha
   respondido, pede para continuar), "Continuar", "Abrir Ajustes" (chave inválida, sem modelo) ou, numa conversa grande demais, "Compactar
@@ -427,7 +425,7 @@ Cada Orb tem a **sua** memória, que nasce com ele e cresce a cada conversa: nad
   menu "Mais opções" tem "Fazer a entrevista de novo".
 - **A aba Memória** do painel mostra as páginas por tipo (com busca, quando há muitas). **Editar…** muda a identidade.
   **Esquecer** apaga uma página; um aviso "`<Orb>` esqueceu isso" com **Desfazer** (ou **⌘Z**) fica por cerca de 10 segundos.
-  **Abrir pasta da memória** mostra os arquivos.
+  **Abrir pasta**, na linha sob a lista, mostra os arquivos.
 - **O que ele usa.** Identidade e preferências vão em toda conversa. O resto ele busca quando precisa (ferramenta `recall`) e
   lembranças ligadas à sua mensagem chegam sozinhas. Na primeira conversa e nas rotinas, ele sabe "onde vocês pararam"; uma
   conversa aberta com **Nova conversa** começa limpa, só com a memória.

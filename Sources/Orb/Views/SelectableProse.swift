@@ -54,6 +54,9 @@ enum ProseText {
     /// Ends the text being written.
     static let cursor = " ●"
 
+    /// The space a heading has above it past the blocks' own, after another block (the first line of a text takes none).
+    static func headingLead(_ level: Int) -> CGFloat { level <= 2 ? 4 : 2 }
+
     static func make(_ blocks: [MarkdownBlock], cursor: Bool, cached: Bool, highlight: String?) -> NSAttributedString {
         let text = NSMutableAttributedString()
         for (index, block) in blocks.enumerated() {
@@ -67,7 +70,7 @@ enum ProseText {
                 text.append(inline(source, cached: cached, highlight: highlight, style: paragraphStyle()))
             case .heading(let level, let source):
                 let style = paragraphStyle()
-                style.paragraphSpacingBefore = level <= 2 ? 4 : 2
+                style.paragraphSpacingBefore = headingLead(level)
                 text.append(inline(source, cached: cached, highlight: highlight, style: style,
                                    size: MarkdownBlockView.headingSize(level), weight: .semibold))
             case .quote(let source):

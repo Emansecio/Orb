@@ -21,6 +21,14 @@ import Testing
         #expect(motion.animation == Motion.enter)
     }
 
+    @Test func aReplyOnlyFadesInTheTimeTheWorkingAvatarLeaves() {
+        // The working line's avatar leaves with `Motion.fade`; the reply comes in with it, without moving.
+        let motion = EntranceStyle.reply.resolved(reduceMotion: false)
+        #expect(motion.distance == 0 && motion.scale == 1)
+        #expect(motion.animation == Motion.fade)
+        #expect(EntranceStyle.reply.resolved(reduceMotion: true) == motion)
+    }
+
     @Test func anApprovalCardComesInWithEmphasis() {
         let motion = EntranceStyle.emphasis.resolved(reduceMotion: false)
         #expect(motion.distance == 10)
@@ -28,7 +36,7 @@ import Testing
         #expect(motion.animation == Motion.emphasis)
         #expect(TranscriptItem.Kind.approval(ApprovalRequest(toolName: "run_command", title: "t", command: "c", reason: "")).entrance == .emphasis)
         #expect(TranscriptItem.Kind.user(text: "a", attachments: []).entrance == .rise)
-        #expect(TranscriptItem.Kind.bot(text: "a", isStreaming: true).entrance == .rise)
+        #expect(TranscriptItem.Kind.bot(text: "a", isStreaming: true).entrance == .reply)
         #expect(TranscriptItem.Kind.tool(ToolCall(kind: .shell, title: "t", detail: "d")).entrance == .rise)
         #expect(TranscriptItem.Kind.notice("a").entrance == .rise)
     }

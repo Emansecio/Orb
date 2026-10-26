@@ -21,8 +21,8 @@ vive em `BotSession`/`BotLive` (veja [ORBS.md](ORBS.md)). Alvo: macOS 14+, Swift
 6. **Reduzir movimento.** Sem translação, escala, giro, pulso ou rebote; vira troca de opacidade de 0,15 s (ou
    nada, quando a mudança já é óbvia). Ler `@Environment(\.accessibilityReduceMotion)` uma vez por componente e
    escolher a animação/transição (padrão: `Motion.content` já faz isso).
-7. **Desempenho.** Só opacidade e transformações (o compositor faz sozinho). Nunca animar por token durante o
-   streaming, nem layout de listas inteiras, nem `blur` em superfícies grandes. Laços contínuos ficam em Core
+7. **Desempenho.** Só opacidade e transformações (o compositor faz sozinho). Nunca animar layout por token durante o
+   streaming (o fade por palavra do `TextFade` é só opacidade, num display link próprio), nem layout de listas inteiras, nem `blur` em superfícies grandes. Laços contínuos ficam em Core
    Animation (como o brilho de status em `Theme.swift`, `ShimmerBandView`), nunca em `TimelineView`/`phaseAnimator` sem fim.
 
 ## 1. Tokens
@@ -93,11 +93,18 @@ extension AnyTransition {
 ### 2.2 Mensagens aparecendo
 
 - **Sua mensagem (ao enviar):** a bolha entra com `.rise` e `Motion.enter` (sobe 6 pt e aparece em ~0,3 s),
-  ancorada no fim da lista; a lista rola junto com `.smooth(duration: 0.3)` só se você já estava no fim.
-- **Resposta do Orb:** o **bloco** da mensagem aparece com `.rise` quando o primeiro texto chega (uma vez por
-  mensagem). O texto que vai chegando **não** anima (sem transição por token): o streaming tem custo constante e
-  deve continuar assim (`Transaction(animation: nil)` nas atualizações de texto).
-- **Fim da resposta:** nada na mensagem; quem comemora é o Orb (`happy`, em três níveis conforme o turno: leve, normal ou grande;
+  ancorada no fim da lista; a lista rola junto com `.smooth(duration: 0.3)` só se você já estava no fim. O lugar da
+  linha de trabalho (30 pt, a altura do avatar) fica no fim da conversa mesmo com o Orb parado: o turno começar ou
+  terminar troca o que está ali, não a altura da lista, então ela não anda de novo depois da bolha nem desce no fim.
+- **Resposta do Orb:** o **bloco** da mensagem aparece só com opacidade (`EntranceStyle.reply`, `Motion.fade`, 0,15 s),
+  no mesmo tempo em que o avatar da linha de trabalho some, para o rosto não saltar de um lugar para o outro. As
+  palavras que vão chegando fazem fade de 0,4 s cada uma, escalonadas em 0,1 s (`TextFade`, só opacidade, num display
+  link que roda só enquanto uma palavra aparece; mais de 160 de uma vez aparecem juntas; nada com Reduzir movimento).
+  O layout não anima por token (`Transaction(animation: nil)` nas atualizações de texto). Cada parágrafo fechado vira
+  uma view própria, empilhada com o espaço dos blocos, e um título depois de outro parágrafo leva por cima o mesmo
+  respiro que tem no texto final (`ProseText.headingLead`): a resposta pronta tem a altura que tinha em streaming. O "●"
+  sozinho só aparece no começo da resposta, nunca numa linha própria entre dois parágrafos.
+- **Fim da resposta:** nada na mensagem (não há marca de sucesso); quem comemora é o Orb (`happy`, em três níveis conforme o turno: leve, normal ou grande;
   parar a resposta não é erro, é uma piscada; tarefa que parou no meio, um suspiro).
 - **Um Orb vivo por vez.** A resposta que é o último item do chat leva o avatar vivo (`LiveBotAvatar` com
   `restsWhenIdle`: vive no turno, no `happy` e na atenção à digitação, e descansa na pose de repouso, sem gerar
@@ -108,7 +115,8 @@ extension AnyTransition {
   30 pt fica, e a frase não se move) e o pausa. `TranscriptRow.isLastReply` entra no `==`: só duas linhas redesenham
   quando um item entra.
 - **Mensagem pendente** (direcionada ou para depois da tarefa; antes "na fila"). Entra como as outras (`.entrance(.rise)`, 6 pt em `Motion.enter`, fade de 0,15 s com Reduzir
-  movimento), sem animar a lista, e sai na hora (a bolha real sobe no mesmo lugar). Tem a forma da bolha final (raio 18)
+  movimento), sem animar a lista, e sai na hora: a bolha real nasce já visível no mesmo lugar (o id dela está em
+  `presentedQueued`, então não refaz a entrada), e a pendente tem o mesmo vão de turno (`TurnGap.extra`), sem pulo de 12 pt. Tem a forma da bolha final (raio 18)
   e mostra imagens como miniaturas esmaecidas (0,75), como o `UserBubble`. Só entra na primeira vez que é feita: os ids
   já mostrados ficam numa referência barata (`PresentedOrbs`, ambiente `presentedQueued`), então reabrir o chat ou a lista
   recriar a linha não repete a entrada.
@@ -129,7 +137,7 @@ extension AnyTransition {
   em `Motion.enter`. Falha: a marca vermelha entra igual, sem tremer (o Orb já mostra o erro).
 - **Contadores** ("3 ações", tempos): `.contentTransition(.numericText())` com `Motion.content`.
 - **Reduzir movimento:** marca troca por opacidade; expandir sem deslocamento.
-- **Trabalho de um pedido** (`WorkGroupRow`): ao terminar o pedido, a linha toma o lugar do trabalho sem animar a lista; aberta, o conteúdo entra com `.unfold` e a divisa gira como nas outras.
+- **Trabalho de um pedido** (`WorkGroupRow`): enquanto o pedido roda, nada dele dobra (o que o Orb diz e as ações ficam abertos, para o texto que você lê não sumir); ao terminar, a linha toma o lugar do trabalho sem animar a lista; aberta, o conteúdo entra com `.unfold` e a divisa gira como nas outras.
 - **Ações seguidas** (`ToolGroupRow`): uma linha no lugar delas, com a mesma divisa que gira 90°; aberta, as linhas entram com `.unfold` escalonado (`Motion.stagger`, ≤ 6), recuadas sob as palavras da linha. A contagem rola (`.numericText()`) uma vez por ação; "1 falhou" e o tempo entram como a marca de estado. Reduzir movimento: opacidade.
 - **Anexos** (cartões de arquivo, grade de imagens, arquivos que o Orb fez): só opacidade. O cartão tem hover com `Motion.hoverIn`/`hoverOut` (`hoverFill`) e não encolhe ao pressionar (o clique é um gesto de toque, não um `Button`, para o arrastar para fora funcionar), e o tamanho ou o "ausente" que chegam do disco entram com `Motion.fade`. A miniatura entra por fade sobre o fundo. A entrada é só a da linha (`RowEntrance`).
 

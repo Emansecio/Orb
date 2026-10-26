@@ -217,6 +217,7 @@ struct ChatDropOverlay: View {
 private struct TranscriptList: View {
     @Environment(AppModel.self) private var model
     @Environment(\.presentedEmptyChats) private var presentedEmptyChats
+    @Environment(\.presentedQueued) private var presentedQueued
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let look: BotLook
     /// The find bar's state: the list scrolls to the result it chooses and gives its row the marks.
@@ -243,7 +244,7 @@ private struct TranscriptList: View {
         let isWorking = live.isWorking && model.sessions[look.id]?.workingChatID == nil
         let isLoading = model.isLoadingConversation(look.id)
         // Looked at before the rows are made, as many times as this is evaluated: the same items say the same thing.
-        let generation = entrances.observe(items, isLoading: isLoading, swaps: transcript.swaps)
+        let generation = entrances.observe(items, isLoading: isLoading, swaps: transcript.swaps, shown: presentedQueued)
         // The Orb's reply at the end of the chat carries its living avatar; the working line below gives up its own
         // then, so there is one Orb in view at a time. In a run of replies with no message of yours between them only the
         // last keeps an avatar. Only the rows whose answer changed are drawn again (a new reply changes the one before it).
@@ -315,13 +316,21 @@ private struct TranscriptList: View {
                     }
                     // end MultiOrb (WP2)
                     QueuedMessages(botID: look.id)
-                    // A chain of requests the Orb waits on (`chainWork`) keeps its line too.
-                    if isWorking || live.chainWork != nil {
-                        WorkingLine(look: look, avatarHidden: avatars.lastID != nil, transcript: transcript)
-                            .transition(.adapted(.arrive, reduceMotion: reduceMotion))
-                    } else if transcript.plan != nil {
-                        // A plan left open when the turn ended: its ring alone, where the working line was.
-                        IdlePlanRing(transcript: transcript)
+                    // A chain of requests the Orb waits on (`chainWork`) keeps its line too. Its place stays while the
+                    // chat has messages: a turn starting or ending changes what is in it, not the height of the list,
+                    // so the conversation does not move again after the message sent goes in, nor down when it ends.
+                    let showsLine = isWorking || live.chainWork != nil
+                    if showsLine || !items.isEmpty {
+                        ZStack(alignment: .leading) {
+                            if showsLine {
+                                WorkingLine(look: look, avatarHidden: avatars.lastID != nil, transcript: transcript)
+                                    .transition(.adapted(.arrive, reduceMotion: reduceMotion))
+                            } else if transcript.plan != nil {
+                                // A plan left open when the turn ended: its ring alone, where the working line was.
+                                IdlePlanRing(transcript: transcript)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, minHeight: WorkingLine.height, alignment: .leading)
                     }
                     Color.clear.frame(height: 1).id(BottomAnchor.id)
                 }
@@ -431,6 +440,8 @@ private struct TranscriptList: View {
     /// One item of the chat as a row, entering by itself when it is new.
     @ViewBuilder
     private func itemRow(_ item: TranscriptItem, avatars: ReplyAvatars, redoID: UUID?, dropping: Set<UUID>, found: FindFocus?) -> some View {
+        // A message that waited in the queue was already on show there: its row takes the bubble's place in view, instead
+        // of coming in transparent where the bubble just left (which blinks).
         let isNew = entrances.isNew(item.id)
         TranscriptRow(item: item, botID: look.id, orb: look.orb, entering: isNew,
                       isLastReply: item.id == avatars.lastID, showsAvatar: !avatars.quiet.contains(item.id),
@@ -958,6 +969,9 @@ private struct WorkingLine: View {
     @State private var isHovering = false
     @State private var showsPlan = false
 
+    /// Its avatar's: the place kept for it at the end of the chat (`conversation`).
+    static let height: CGFloat = 30
+
     private func sendToBackground() {
         releasing = true
         model.sendCommandToBackground(of: look.id)
@@ -967,9 +981,10 @@ private struct WorkingLine: View {
         let live = model.live(look.id)
         let work = live.shownWork ?? lastWork
         HStack(spacing: 10) {
-            // 30 + 14: the words start on the chat's left edge (`gutter`), with the replies' and the tool lines'.
-            HStack(spacing: gutter - 30) {
-                LiveBotAvatar(botID: look.id, orb: look.orb, size: 30, paused: avatarHidden)
+            // The avatar and the space after it: the words start on the chat's left edge (`gutter`), with the replies' and
+            // the tool lines'.
+            HStack(spacing: gutter - Self.height) {
+                LiveBotAvatar(botID: look.id, orb: look.orb, size: Self.height, paused: avatarHidden)
                     // Only opacity, so it is the same under Reduce Motion.
                     .opacity(avatarHidden ? 0 : 1)
                     .animation(Motion.fade, value: avatarHidden)

@@ -557,7 +557,7 @@ struct LearnMoreNote: View {
     }
 }
 
-/// A sentence that ends in an accent-colored link, opening a popover. The link is a stretch of the same `Text` (so it
+/// A sentence that ends in a link (accent-colored unless told otherwise), opening a popover. The link is a stretch of the same `Text` (so it
 /// wraps with the sentence in a narrow window), which a `Button(.link)` could not be; so the whole note takes the keyboard
 /// focus, and Return or Space open it, as a button would.
 struct InlineLinkNote<Detail: View>: View {
@@ -567,11 +567,13 @@ struct InlineLinkNote<Detail: View>: View {
     let hint: String
     var tip: String?
     var edge: Edge = .top
+    /// The Orb's panel has no blue links: there the link is as quiet as the actions beside it (`QuietTextStyle`).
+    var linkColor: Color = .accentColor
     @ViewBuilder let detail: () -> Detail
     @State private var isOpen = false
 
     var body: some View {
-        (Text(text + " ") + Text(link).foregroundColor(.accentColor))
+        (Text(text + " ") + Text(link).foregroundColor(linkColor))
             .fixedSize(horizontal: false, vertical: true)
             .contentShape(.rect)
             .onTapGesture { isOpen = true }

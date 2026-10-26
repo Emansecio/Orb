@@ -55,6 +55,14 @@ Protótipo dos comandos (não commitado, em `build/`):
 | 17 | **Contador que rola sem respeitar Reduzir movimento** nos cartões de aprovação (`numericText` sem a guarda que o resto usa). | `TV:1683, 1759, 1819` | B | P |
 | 18 | **`docs/MOVIMENTO.md` desatualizado.** Ele diz que o texto que chega não anima, mas o `TextFade` faz fade por palavra. Também não descreve a dobra ao vivo e fala de uma marca de sucesso que não existe. Atualizar o doc, mantendo o fade por palavra. | `docs/MOVIMENTO.md:26, 97-100, 111-112` | B | P |
 
+**Andamento (25/10/2026):** itens 10 a 18 feitos.
+- 10: nada dobra enquanto o pedido roda. A linha "Trabalhando" saiu.
+- 11: a resposta pronta tem a altura que tinha em streaming. Um título depois de outro parágrafo leva o mesmo respiro (`ProseText.headingLead`), e um teste mede as duas formas. A troca das views no fim continua; o fade das últimas palavras pode encurtar.
+- 12: o lugar da linha de trabalho (30 pt) fica no fim da conversa, então o turno começar ou terminar não muda a altura da lista.
+- 13 a 16: feitos como propostos; no grupo, as mensagens entram como no chat.
+- 17: os números do cartão de aprovação só fazem fade com Reduzir movimento.
+- 18: `MOVIMENTO.md` e `MANUAL.md` atualizados.
+
 ## 3. Lateral esquerda
 
 | # | O quê | Onde | Imp. | Esf. |
@@ -71,6 +79,16 @@ Protótipo dos comandos (não commitado, em `build/`):
 | 24 | **Fontes por token.** O nome de linha aparece como literal 13 medium em cinco lugares e como token só no perfil. O contador está em 10 semibold. O grupo começa o texto em 70 pt e o Orb em 46. | `SV:492, 592, 657`; `Views/SidebarCategoryViews.swift:178, 283`; `Views/Groups/SidebarGroupRow.swift:87`; `Views/Groups/StackedAvatars.swift:30, 36` | B | P |
 | 25 | **Contador sem a transição da casa.** Ele usa `.scale` crua, e não o `.mark` com fade em Reduzir movimento. | `SV:668` | B | P |
 
+**Andamento (25/10/2026):** itens 19 a 25 feitos.
+- 19: o "+" da linha fica sempre no layout, só com opacidade, então o nome não encurta no hover.
+- 20: as conversas dobram com `FoldMotion`.
+- 21: um destaque deslizante só (`SlidingSelectionFill`) para linhas, rodapé e conversas, com fade em Reduzir movimento.
+- 22: os grupos entram e saem com `.arrive`.
+- 23: um "+" (`SectionPlus.glyph`), seta `faint` e raios por token.
+- 24: o texto do grupo começa em 46 pt, como o do Orb, e a pilha da lateral tem 18 pt.
+- 25: o contador de não lidas usa `.mark`.
+- A seção "Grupos" vazia mostra só o título e o "+".
+
 ## 4. Painel do Orb (lateral direita)
 
 | # | O quê | Onde | Imp. | Esf. |
@@ -84,6 +102,13 @@ Protótipo dos comandos (não commitado, em `build/`):
 | | - **Rotinas, botões:** "Rodar agora" é pílula e "Editar" é texto, na mesma fileira. | | | |
 | | - **Lixeira:** é um círculo na rotina e um ícone solto na memória. | `BI:1247`; `Views/MemoryViews.swift:279-285` | | |
 | 30 | **Links azuis do sistema.** São seis `.buttonStyle(.link)`, que a revisão de 24/10 já pedia trocar pelo `QuietTextStyle`. Os resumos dos folds têm `.transition(.opacity)` sem animação que a dispare, e o cabeçalho do fold não tem hover. | `BI:548, 561`; `Views/MemoryViews.swift:63, 454`; `Views/BrowserPickers.swift:243, 276, 320`; `Views/InspectorFold.swift:37, 63` | B | P |
+
+**Andamento (25/10/2026):** itens 26 a 30 feitos.
+- 26: a troca de Orb faz fade cruzado no conteúdo e no nome.
+- 27: um título de seção nas duas laterais (`sectionTitleStyle`).
+- 28: tokens no lugar de `.secondary`, `.callout` e `.headline`.
+- 29: "Abrir no Finder" e "Abrir no Terminal" foram para a aba Pasta, e o cabeçalho ficou só com "Personalizar…". As rotinas usam ícones de traço, "Rodar agora" e "Editar" ficam juntos, e a lixeira é uma só (`panelTrashButton`).
+- 30: o painel não tem mais link azul (`QuietTextStyle`). O cartão "Abrir pasta da memória" virou texto no rodapé.
 
 ## 5. O que fica como está
 

@@ -173,9 +173,9 @@ private struct SidebarCategoryHeader: View {
                     // The arrow turns in the content curve; under Reduce Motion it just takes its new direction.
                     .animation(Motion.panel(reduceMotion: reduceMotion), value: collapsed)
                     .frame(width: 26)
-                    .foregroundStyle(Palette.muted)
+                    .foregroundStyle(Palette.faint)
                 Text(category.name)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(Typography.text.weight(.medium))
                     .foregroundStyle(collapsed && holdsSelection ? Palette.ink : Palette.secondary)
                     .lineLimit(1)
                 Spacer(minLength: 4)
@@ -272,15 +272,16 @@ private struct CategoryNameField: View {
     }
 
     var body: some View {
+        let isPlus = symbol == "plus"
         HStack(spacing: 10) {
             Image(systemName: symbol)
-                .font(.system(size: symbol == "plus" ? 13 : 10, weight: symbol == "plus" ? .regular : .semibold))
+                .font(isPlus ? SectionPlus.glyph : .system(size: 10, weight: .semibold))
                 .rotationEffect(.degrees(turned ? 90 : 0))
                 .frame(width: 26)
-                .foregroundStyle(Palette.muted)
+                .foregroundStyle(isPlus ? Palette.muted : Palette.faint)
             TextField("Nome da categoria", text: $text, prompt: Text("Nome da categoria"))
                 .textFieldStyle(.plain)
-                .font(.system(size: 13, weight: .medium))
+                .font(Typography.text.weight(.medium))
                 .foregroundStyle(Palette.ink)
                 .focused($isFocused)
                 .onSubmit { finish(keeping: true) }

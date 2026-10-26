@@ -152,11 +152,18 @@ struct GroupMessageBubble: View {
 
     @ViewBuilder private var avatar: some View {
         if let look {
-            if isLastSpeaker {
-                LiveBotAvatar(botID: look.id, orb: look.orb, size: 30, restsWhenIdle: true)
-            } else {
-                BotAvatar(orb: look.orb, size: 30, animated: false)
+            // The living avatar passes to the newest answer with a fade, as in an Orb's chat (only opacity, so it is the
+            // same under Reduce Motion).
+            ZStack {
+                if isLastSpeaker {
+                    LiveBotAvatar(botID: look.id, orb: look.orb, size: 30, restsWhenIdle: true)
+                        .transition(.opacity)
+                } else {
+                    BotAvatar(orb: look.orb, size: 30, animated: false)
+                        .transition(.opacity)
+                }
             }
+            .animation(Motion.fade, value: isLastSpeaker)
         } else {
             Circle().fill(Palette.raised)
         }

@@ -22,8 +22,11 @@ struct QueuedMessages: View {
                          edit: { model.unqueue(message.id, botID: botID) },
                          switchMode: { model.switchDelivery(message.id, botID: botID) },
                          interrupt: { model.stopAndSend(botID) })
+                // The room a message of yours has above it in the transcript (`TurnGap`): the same here, so it does not move
+                // down when it leaves the queue for its row.
+                .padding(.top, TurnGap.extra)
                 // Comes in like the others (rises 6 pt, fades under Reduce Motion) without animating the list; it leaves at
-                // once, because the real bubble rises in the same place right after.
+                // once, because the real bubble takes its place in the same frame, already in view (`TranscriptList`).
                 // Only the first time it is made: one that was already on show (chat reopened, row made again) is just there.
                 .entrance(.rise, enters: !(presented?.contains(message.id) ?? false))
                 .onAppear { presented?.insert(message.id) }

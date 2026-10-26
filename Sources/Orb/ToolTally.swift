@@ -100,7 +100,6 @@ enum ToolTally {
         let time = seconds.map { ElapsedFormat.text(seconds: $0) }
         let lead = switch outcome {
         case .answered: time.map { "Trabalhou por \($0)" } ?? "Trabalhou"
-        case .running: "Trabalhando"
         case .stopped: time.map { "Você interrompeu após \($0)" } ?? "Você interrompeu"
         case .appClosed: time.map { "Interrompido após \($0) (app fechado)" } ?? "Interrompido (app fechado)"
         case .failed: time.map { "Não deu certo após \($0)" } ?? "Não deu certo"

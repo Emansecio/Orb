@@ -240,7 +240,7 @@ struct BrowserPickerRows: View {
                     summary(bot)
                     Color.clear.frame(width: 0, height: 0)
                 }
-                .transition(.opacity)
+                .transition(.quiet)
             }
         }
     }
@@ -270,10 +270,10 @@ struct BrowserPickerRows: View {
         VStack(alignment: .leading, spacing: 3) {
             Label("Proxy: \(BrowserProxy.display(proxy))", systemImage: "network")
                 .font(Typography.small)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Palette.muted)
                 .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
             Button("Remover") { model.removeBrowserProxy(for: botID) }
-                .buttonStyle(.link)
+                .buttonStyle(QuietTextStyle())
                 .font(Typography.small)
                 .help(Tip.removeBrowserProxy)
         }
@@ -305,7 +305,7 @@ struct BrowserPickerRows: View {
                 }
             }
             .font(Typography.small)
-            .foregroundStyle(line.tone == .warning ? Palette.warn : line.tone == .ready ? Palette.ok : Color.secondary)
+            .foregroundStyle(line.tone == .warning ? Palette.warn : line.tone == .ready ? Palette.ok : Palette.muted)
             .fixedSize(horizontal: false, vertical: true)
             .textSwap(line.text)
             if let consequence = line.consequence {
@@ -317,7 +317,7 @@ struct BrowserPickerRows: View {
             if let action = line.action {
                 // No arrow: the link says where it goes ("Ajustes"), and the line above already carries the icon.
                 Button(action.title) { SettingsRouter.openBrowser(using: openSettings) }
-                    .buttonStyle(.link)
+                    .buttonStyle(QuietTextStyle())
                     .font(Typography.small)
                     .help(action.tip)
                     .transition(.quiet)

@@ -6,8 +6,11 @@ import SwiftUI
 /// ring, one where something landed unseen has a dot. A conversation's menu renames it (in the row itself, as a category) or deletes it.
 struct SidebarChatList: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let botID: UUID
     let chats: OrbChats
+    /// The highlight of the conversation on show slides to the one opened through this namespace.
+    @Namespace private var chatSelectionSpace
     @State private var showsAll = false
     @State private var renaming: UUID?
     @State private var deleting: OrbChats.Entry?
@@ -29,9 +32,11 @@ struct SidebarChatList: View {
                     ChatTitleField(initial: entry.title) { model.renameChat(entry.id, of: botID, to: $0) } done: { renaming = nil }
                 } else {
                     SidebarChatRow(entry: entry, isShown: entry.id == chats.active, isWorking: entry.id == working,
-                                   isUnread: entry.unread == true) {
+                                   isUnread: entry.unread == true, selectionSpace: chatSelectionSpace) {
                         model.openChat(entry.id, of: botID)
                     }
+                    // "Mostrar menos" and "N mais antigas" add and take rows: they unfold, or fade under Reduce Motion.
+                    .transition(.adapted(.unfold, reduceMotion: reduceMotion))
                     .contextMenu {
                         Button("Renomear…", systemImage: "pencil") { renaming = entry.id }
                         Divider()
@@ -42,12 +47,14 @@ struct SidebarChatList: View {
             }
             if chats.list.count > Self.shownAtRest + 1 {
                 SidebarChatAction(title: showsAll ? "Mostrar menos" : Self.olderLabel(chats.list.count - visible.count)) {
-                    showsAll.toggle()
+                    withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) { showsAll.toggle() }
                 }
             }
             SidebarChatAction(title: OrbChats.newTitle, symbol: "plus") { model.newChat(for: botID) }
                 .help("\(OrbChats.newTitle) (\(AppShortcut.newChat.label))")
         }
+        // Bound to the conversation on show: the highlight slides (fades under Reduce Motion) and the titles change weight with it.
+        .motion(Motion.content, value: chats.active)
         // The rows' text starts where the Orb's name does (the row's 8 pt, the 30 pt avatar, 8 pt between them).
         .padding(.leading, Self.nameInset - Self.rowInset)
         .padding(.trailing, 6)
@@ -102,6 +109,7 @@ private struct SidebarChatRow: View {
     let isShown: Bool
     let isWorking: Bool
     let isUnread: Bool
+    let selectionSpace: Namespace.ID
     let action: () -> Void
     @State private var isHovering = false
 
@@ -132,8 +140,10 @@ private struct SidebarChatRow: View {
             .padding(.vertical, 4)
             .frame(minHeight: SidebarChatList.rowHeight)
             // On the card's own fill: a second, lighter one marks the conversation on show.
-            .background(isShown ? Palette.ghostSelected : .clear, in: .rect(cornerRadius: 7))
-            .hoverFill(isHovering && !isShown, in: .rect(cornerRadius: 7))
+            .background {
+                if isShown { SlidingSelectionFill(space: selectionSpace, radius: Radius.small) }
+            }
+            .hoverFill(isHovering && !isShown, in: .rect(cornerRadius: Radius.small))
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -155,7 +165,7 @@ private struct SidebarChatAction: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 5) {
-                if let symbol { Image(systemName: symbol).font(.system(size: 10, weight: .semibold)) }
+                if let symbol { Image(systemName: symbol).font(SectionPlus.glyph) }
                 Text(title)
             }
             .font(Typography.small)
@@ -163,7 +173,7 @@ private struct SidebarChatAction: View {
             .padding(.horizontal, SidebarChatList.rowInset)
             .padding(.vertical, 4)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .hoverFill(isHovering, in: .rect(cornerRadius: 7))
+            .hoverFill(isHovering, in: .rect(cornerRadius: Radius.small))
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -201,8 +211,8 @@ private struct ChatTitleField: View {
             .padding(.vertical, 4)
             // Same height as SidebarChatRow, so the list does not jump when a title is renamed.
             .frame(minHeight: SidebarChatList.rowHeight)
-            .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: 7))
-            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Palette.lineStrong))
+            .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: Radius.small))
+            .overlay(RoundedRectangle(cornerRadius: Radius.small).strokeBorder(Palette.lineStrong))
             .onAppear { isFocused = true }
             .onChange(of: isFocused) { if !isFocused { finish(keeping: true) } }
             .accessibilityLabel("Nome da conversa")

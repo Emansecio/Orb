@@ -43,9 +43,10 @@ struct ToolRunFoldingTests {
         let answer = say("Respondi os 12 leads pendentes.")
         let items = [request] + work + [answer]
         #expect(TranscriptFolding.rows(for: items) == [.single(request), .work(work, seconds: nil), .single(answer)])
-        // While it runs, what it did up to its last action folds; the words after it stay in view.
+        // While it runs it stays open, read as it happens (its runs of actions are still one line each); it folds when
+        // it ends.
         #expect(TranscriptFolding.rows(for: items, liveTail: true)
-                == [.single(request), .work(work, seconds: nil, outcome: .running), .single(answer)])
+                == [.single(request), .tools([work[0], work[1]]), .single(work[2]), .tools([work[3], work[4]]), .single(answer)])
         // Only the last request is the running one.
         let next = ask("E os de ontem?")
         #expect(TranscriptFolding.rows(for: items + [next, tool()], liveTail: true)[1] == .work(work, seconds: nil))
@@ -95,7 +96,6 @@ struct ToolRunFoldingTests {
 
     @Test func theWorkSaysHowTheRequestEnded() {
         let calls = [call("Rodando no Terminal"), call("Lendo arquivo", .file)]
-        #expect(ToolTally.work(calls, seconds: nil, outcome: .running) == "Trabalhando · 2 ações")
         #expect(ToolTally.work(calls, seconds: 40, outcome: .appClosed) == "Interrompido após 40 s (app fechado) · 2 ações")
         #expect(ToolTally.work(calls, seconds: nil, outcome: .appClosed) == "Interrompido (app fechado) · 2 ações")
         #expect(ToolTally.work(calls, seconds: 40, outcome: .stopped) == "Você interrompeu após 40 s · 2 ações")
@@ -104,14 +104,14 @@ struct ToolRunFoldingTests {
         #expect(ToolTally.work([], seconds: 40, outcome: .failed) == "Não deu certo após 40 s")
     }
 
-    @Test func whileItRunsACardThatWaitsAndWhatFollowsStayInView() {
+    @Test func whileItRunsNothingOfTheRequestFoldsIntoWork() {
         let request = ask()
         let work = [tool(), say("Preciso de permissão."), tool()]
         let waiting = card(nil)
         let rows = TranscriptFolding.rows(for: [request] + work + [waiting, tool()], liveTail: true)
         #expect(rows.first == .single(request))
-        #expect(rows.dropFirst().first == .work(work, seconds: nil, outcome: .running))
-        #expect(rows.contains(.single(waiting)))
+        #expect(!rows.contains { if case .work = $0 { true } else { false } }, "the words being read stay in view")
+        #expect(rows.contains(.single(work[1])) && rows.contains(.single(waiting)))
         // A lone run so far is one line already.
         let run = [tool(), tool()]
         #expect(TranscriptFolding.rows(for: [request] + run, liveTail: true) == [.single(request), .tools(run)])

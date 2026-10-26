@@ -15,11 +15,15 @@ struct MarkdownChunk: View, Equatable {
     var cached = true
     /// What a search in the conversation found in this reply: marked wherever it appears (nil: nothing).
     var highlight: String?
+    /// Whether it starts its reply. A piece after another one gives a heading it starts with the space the whole text
+    /// gives it there (`ProseText.headingLead`), so nothing moves when the pieces become one text; and the cursor shows
+    /// on its own only at the start of a reply, never on a line of its own between two paragraphs.
+    var first = true
 
     var body: some View {
         let blocks = MarkdownCache.blocks(source, cached: cached)
         if blocks.isEmpty {
-            if streaming { Text("●").foregroundColor(Palette.muted) }
+            if streaming, first { Text("●").foregroundColor(Palette.muted) }
         } else {
             // Paragraphs, headings, lists and quotes in a row are one text, so a drag selects across them; code, tables
             // and rules are drawn by themselves between those runs.
@@ -35,7 +39,12 @@ struct MarkdownChunk: View, Equatable {
                     }
                 }
             }
+            .padding(.top, first ? 0 : Self.lead(blocks))
         }
+    }
+
+    private static func lead(_ blocks: [MarkdownBlock]) -> CGFloat {
+        if case .heading(let level, _) = blocks.first { ProseText.headingLead(level) } else { 0 }
     }
 }
 

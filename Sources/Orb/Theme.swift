@@ -91,6 +91,16 @@ enum Typography {
     static let text = Font.system(size: 13)
 }
 
+extension View {
+    /// A section's title, the same in both side bars: the sidebar's ("Orbs", "Grupos") and the Orb's panel ("Onde trabalha",
+    /// "Liberações"). Quiet: it names the group without competing with the rows under it.
+    func sectionTitleStyle() -> some View {
+        font(Typography.label.weight(.medium))
+            .foregroundStyle(Palette.faint)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
 
 /// Shadows under floating cards.
 enum Shadow {

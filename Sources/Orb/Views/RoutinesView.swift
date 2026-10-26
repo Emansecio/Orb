@@ -345,25 +345,8 @@ private struct RoutineCard: View {
                 .fixedSize()
                 .iconTip("Edita ou apaga a rotina", label: Tip.moreOptions(of: routine.name))
                 Spacer()
-                // "Rodar agora", "Rodando…" and "Na fila" swap in place: one over the other, cross-fading, for the
-                // card not to shift while they trade places.
-                ZStack(alignment: .trailing) {
-                    if isRunning {
-                        Label("Rodando…", systemImage: "hourglass").foregroundStyle(Palette.muted)
-                            .transition(.opacity)
-                    } else if isQueued {
-                        Label("Na fila", systemImage: "clock").foregroundStyle(Palette.muted)
-                            .help(Tip.queuedRoutine)
-                            .transition(.opacity)
-                    } else {
-                        Button("Rodar agora", systemImage: "play.fill", action: onRun)
-                            .buttonStyle(SecondaryPillStyle())
-                            .help(Tip.runRoutineNow)
-                            .transition(.opacity)
-                    }
-                }
-                .font(Typography.label)
-                .animateChanges(of: RoutineRunState(isRunning: isRunning, isQueued: isQueued))
+                RoutineRunControl(state: RoutineRunState(isRunning: isRunning, isQueued: isQueued), alignment: .trailing,
+                                  run: onRun)
             }
             .controlSize(.small)
         }
@@ -386,6 +369,34 @@ private struct RoutineCard: View {
 struct RoutineRunState: Equatable {
     let isRunning: Bool
     let isQueued: Bool
+}
+
+/// "Rodar agora", "Rodando…" and "Na fila", on the Rotinas page and in the Orb's panel. They swap in place, one over the
+/// other, cross-fading, for the card not to shift while they trade places.
+struct RoutineRunControl: View {
+    let state: RoutineRunState
+    var alignment: Alignment = .leading
+    let run: () -> Void
+
+    var body: some View {
+        ZStack(alignment: alignment) {
+            if state.isRunning {
+                Label("Rodando…", systemImage: "hourglass").foregroundStyle(Palette.muted)
+                    .transition(.opacity)
+            } else if state.isQueued {
+                Label("Na fila", systemImage: "clock").foregroundStyle(Palette.muted)
+                    .help(Tip.queuedRoutine)
+                    .transition(.opacity)
+            } else {
+                Button("Rodar agora", systemImage: "play", action: run)
+                    .buttonStyle(SecondaryPillStyle())
+                    .help(Tip.runRoutineNow)
+                    .transition(.opacity)
+            }
+        }
+        .font(Typography.label)
+        .animateChanges(of: state)
+    }
 }
 
 /// "Próxima: hoje às 09:00 · em 3 h", kept right as the minutes pass; "Concluída" once a one-time routine ran; "Pausada" when it is switched off.

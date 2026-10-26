@@ -46,8 +46,6 @@ enum TranscriptRowModel: Identifiable, Equatable {
 enum WorkOutcome: Equatable, Sendable {
     /// It ended with the Orb's answer.
     case answered
-    /// It still runs: the line folds what it did so far.
-    case running
     /// You stopped it ("Parar").
     case stopped
     /// The app closed in the middle of it.
@@ -198,7 +196,7 @@ enum TranscriptFolding {
     }
 
     /// The work of one request, from the item after your message to the one before its answer (or before the notice it
-    /// ended on, `ending`; or, while it runs, to its last action).
+    /// ended on, `ending`).
     struct WorkStretch: Equatable {
         var range: Range<Int>
         var seconds: Int?
@@ -210,8 +208,8 @@ enum TranscriptFolding {
     /// The stretches that fold into a work row, by their first index. A request (what follows a message of yours, to
     /// the next one) folds its work when:
     /// - it ended with the Orb's answer (its last words, with no action after them); or with no answer, on a notice that
-    ///   says how it ended (`WorkOutcome.init(ending:)`); or it is `liveTail`'s, which folds what it did up to its last
-    ///   action (the words it says after that, and a card that waits, stay in view);
+    ///   says how it ended (`WorkOutcome.init(ending:)`). The request that still runs (`liveTail`'s) stays open: folding
+    ///   it as it goes took away the words being read, so it folds once, when it ends;
     /// - its work holds only words of the Orb, actions, answered cards and notices (an exchange with other Orbs, a card
     ///   that waits, a message of yours stay in view, and a message you sent during the task splits the request);
     /// - it would otherwise take two rows or more (a single run of actions is one line already);
@@ -222,19 +220,19 @@ enum TranscriptFolding {
         while start < items.count {
             let end = items[start...].firstIndex { if case .user = $0.kind { true } else { false } } ?? items.count
             defer { start = end + 1 }
-            guard var stretch = stretch(in: items, start: start, end: end, live: end == items.count && liveTail),
+            // The running request is read as it happens; it folds when it ends.
+            if end == items.count && liveTail { continue }
+            guard var stretch = stretch(in: items, start: start, end: end),
                   !(start < boundary && boundary < stretch.range.upperBound) else { continue }
             let work = items[stretch.range]
             guard work.contains(where: isToolLine), work.allSatisfy(foldsIntoWork),
                   rows(for: work.filter { !isNotice($0) }, foldsWork: false).count >= 2 else { continue }
-            if stretch.outcome != .running {
-                // Up to the answer; without one, up to the last thing done (a notice that the app closed comes at the next
-                // launch, hours later).
-                let began = start > 0 ? items[start - 1].date : items[start].date
-                let ended = stretch.ending == nil ? items[stretch.range.upperBound].date : lastMoment(of: work)
-                let seconds = Int(ended.timeIntervalSince(began).rounded())
-                stretch.seconds = seconds > 0 ? seconds : nil
-            }
+            // Up to the answer; without one, up to the last thing done (a notice that the app closed comes at the next
+            // launch, hours later).
+            let began = start > 0 ? items[start - 1].date : items[start].date
+            let ended = stretch.ending == nil ? items[stretch.range.upperBound].date : lastMoment(of: work)
+            let seconds = Int(ended.timeIntervalSince(began).rounded())
+            stretch.seconds = seconds > 0 ? seconds : nil
             stretches[start] = stretch
         }
         return stretches
@@ -242,13 +240,8 @@ enum TranscriptFolding {
 
     /// Where the work of the request `start..<end` ends and how, before the checks every stretch passes; nil when it does not
     /// fold.
-    private static func stretch(in items: [TranscriptItem], start: Int, end: Int, live: Bool) -> WorkStretch? {
+    private static func stretch(in items: [TranscriptItem], start: Int, end: Int) -> WorkStretch? {
         let request = items[start..<end]
-        if live {
-            let foldable = request.firstIndex { !foldsIntoWork($0) } ?? end
-            guard let last = items[start..<foldable].lastIndex(where: isToolLine) else { return nil }
-            return WorkStretch(range: start..<(last + 1), outcome: .running)
-        }
         if let answer = request.lastIndex(where: { if case .bot = $0.kind { true } else { false } }), answer > start,
            !items[(answer + 1)..<end].contains(where: isToolLine) {
             return WorkStretch(range: start..<answer)

@@ -214,9 +214,15 @@ private struct GroupThreadView: View {
     private let bottomID = "group-bottom"
     /// Whether new words take the thread to its end: not while you read further up (see `BottomFollowing`).
     @State private var followsBottom = true
+    /// Which rows are new, so they come in as an Orb's chat's do (`RowEntrance`).
+    @State private var entrances = TranscriptEntrances()
+    /// How many items the thread had at its last change: more means a message came in.
+    @State private var followedCount = 0
 
     var body: some View {
         let items = transcript.items
+        // Looked at before the rows are made; the same items say the same thing however often this runs.
+        let _ = entrances.observe(items, isLoading: false)
         let lastSpeaker = items.last { Self.answerer($0) != nil }?.id
         let continuing = Self.continuingAnswers(items)
         let lastSentID = items.last { if case .user = $0.kind { true } else { false } }?.id
@@ -232,6 +238,10 @@ private struct GroupThreadView: View {
                                  continuesPrevious: continuing.contains(item.id), look: look(of: item),
                                  toLook: toLook(of: item))
                             .equatable()
+                            // Each row comes in by itself, as in an Orb's chat; the list does not animate.
+                            .modifier(RowEntrance(id: item.id, style: item.kind.entrance, isNew: entrances.isNew(item.id),
+                                                  entrances: entrances))
+                            .transition(.identity)
                     }
                     Color.clear.frame(height: 1).id(bottomID)
                 }
@@ -246,12 +256,21 @@ private struct GroupThreadView: View {
             .modifier(BottomFollowing(isFollowing: $followsBottom, resumed: { proxy.scrollTo(bottomID, anchor: .bottom) }))
             .onAppear { proxy.scrollTo(bottomID, anchor: .bottom) } // macOS 14 has no scroll anchor to open at the end
             .onChange(of: transcript.revision) {
-                if followsBottom { proxy.scrollTo(bottomID, anchor: .bottom) }
+                // One scroll per change: a new message glides into view, as in an Orb's chat; the words of one being
+                // written follow at once.
+                let arrived = items.count != followedCount
+                followedCount = items.count
+                guard followsBottom else { return }
+                withAnimation(arrived ? ScrollMotion.animation(reduceMotion: reduceMotion) : nil) {
+                    proxy.scrollTo(bottomID, anchor: .bottom)
+                }
             }
             .onChange(of: lastSentID) {
-                // What you just sent always shows, and brings the thread back to following its end.
+                // What you just sent always shows, and brings the thread back to following its end (when it was
+                // following, the change of the thread above already scrolls).
+                guard !followsBottom else { return }
                 followsBottom = true
-                proxy.scrollTo(bottomID, anchor: .bottom)
+                withAnimation(ScrollMotion.animation(reduceMotion: reduceMotion)) { proxy.scrollTo(bottomID, anchor: .bottom) }
             }
         }
     }

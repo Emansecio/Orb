@@ -677,8 +677,8 @@ private struct ClosedParagraphs: View {
     let live: LiveText
 
     var body: some View {
-        ForEach(Array(live.closed.enumerated()), id: \.offset) { _, paragraph in
-            MarkdownChunk(source: paragraph, cached: false).equatable()
+        ForEach(Array(live.closed.enumerated()), id: \.offset) { index, paragraph in
+            MarkdownChunk(source: paragraph, cached: false, first: index == 0).equatable()
         }
     }
 }
@@ -691,7 +691,7 @@ private struct LastParagraph: View {
     var body: some View {
         // Each paragraph is a view of its own, so its first words fade in as the rest do (`TextFade`) instead of
         // replacing the last one's text at once.
-        MarkdownChunk(source: live.tail, streaming: true, cached: false)
+        MarkdownChunk(source: live.tail, streaming: true, cached: false, first: live.closed.isEmpty)
             .id(live.closed.count)
             .onChange(of: live.tail.utf8.count) { replyGrew?() }
     }
@@ -1381,12 +1381,9 @@ struct WorkGroupRow<Content: View>: View, Equatable {
                         .frame(width: 14)
                     Text(line)
                         .font(Typography.label)
-                        .foregroundStyle(outcome == .running ? Palette.faint : Palette.muted)
+                        .foregroundStyle(Palette.muted)
                         .lineLimit(1)
                         .layoutPriority(-1)
-                        // A new action changes the count while the request runs, once per action: the number rolls.
-                        .contentTransition(reduceMotion ? .opacity : .numericText())
-                        .animation(Motion.content, value: line)
                     if let failures {
                         ErrorMark(failures: failures)
                     }
@@ -1419,7 +1416,7 @@ extension WorkOutcome {
     /// The symbol before the work's line: a request that did not end in an answer says so before its words are read.
     var symbol: String {
         switch self {
-        case .answered, .running: "stopwatch"
+        case .answered: "stopwatch"
         case .stopped: "stop.circle"
         case .appClosed, .paused: "exclamationmark.triangle"
         case .failed: "exclamationmark.circle"
@@ -1428,7 +1425,7 @@ extension WorkOutcome {
 
     var tint: Color {
         switch self {
-        case .answered, .running, .stopped: Palette.faint
+        case .answered, .stopped: Palette.faint
         case .appClosed, .paused: Palette.warn
         case .failed: Palette.danger
         }
@@ -1881,7 +1878,7 @@ struct ApprovalCard: View {
             Text(request.title)
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(Palette.ink)
-                .contentTransition(.numericText())
+                .contentTransition(reduceMotion ? .opacity : .numericText())
             Spacer()
             // At the end of the line, so the title starts where every other card's title does.
             if request.isHandoff {
@@ -1944,7 +1941,7 @@ struct ApprovalCard: View {
                     Text("e mais \(request.items.count - Self.visibleItems)")
                         .font(Typography.label)
                         .foregroundStyle(Palette.muted)
-                        .contentTransition(.numericText())
+                        .contentTransition(reduceMotion ? .opacity : .numericText())
                         .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
@@ -2004,7 +2001,7 @@ struct ApprovalCard: View {
             } label: {
                 HStack(spacing: 7) {
                     Text(allowTitle)
-                        .contentTransition(.numericText())
+                        .contentTransition(reduceMotion ? .opacity : .numericText())
                     if showsKeys {
                         Text(AppShortcut.commandReturn.label)
                             .font(Typography.small)

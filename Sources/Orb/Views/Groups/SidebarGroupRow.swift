@@ -28,9 +28,11 @@ enum GroupRowText {
 }
 
 /// The groups of the sidebar, below the Orbs (the "+" of its title makes a new one). A group is also
-/// made from the palette, ⌥⌘G, the Orbs menu or an Orb's "Criar grupo com…".
+/// made from the palette, ⌥⌘G, the Orbs menu or an Orb's "Criar grupo com…". With two Orbs and no group the section is
+/// its title and "+" alone, which keeps the feature in sight.
 struct SidebarGroupsSection: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let selectionSpace: Namespace.ID
 
     var body: some View {
@@ -45,21 +47,15 @@ struct SidebarGroupsSection: View {
             }
             ForEach(model.groups) { group in
                 SidebarGroupRow(group: group, selectionSpace: selectionSpace)
-            }
-            if model.groups.isEmpty {
-                // The section shows with two Orbs and no group yet: a quiet line instead of a title alone (as "Arraste um
-                // Orb para cá" in an empty category), under the title's own left edge.
-                Text("Nenhum grupo ainda")
-                    .font(Typography.small)
-                    .foregroundStyle(Palette.faint)
-                    .padding(.leading, 8)
-                    .padding(.vertical, 4)
+                    .transition(.adapted(.arrive, reduceMotion: reduceMotion))
             }
         }
+        // A group made or deleted comes and goes like an Orb's row, and the ones below slide.
+        .animateChanges(of: model.groups.map(\.id))
     }
 }
 
-/// One group's row: its Orbs stacked (24 pt, −9 pt overlap, "+N" past three), the name, what it does (amber while it waits
+/// One group's row: its Orbs stacked (`stackSize`, "+N" past three), the name, what it does (amber while it waits
 /// for you), and on the right one mark: an unread dot, or a ring while a request runs (`GroupRowText.marker`). Its selection is the sidebar's own.
 struct SidebarGroupRow: View {
     @Environment(AppModel.self) private var model
@@ -68,6 +64,12 @@ struct SidebarGroupRow: View {
     let selectionSpace: Namespace.ID
     @State private var isHovering = false
     @State private var isConfirmingDelete = false
+
+    /// The stack takes the Orb avatar's 30 pt column and the 8 pt to the text (the Orbs' names start 46 pt from the row's edge):
+    /// three 18 pt avatars overlapped by 10 pt are 34 wide, 4 pt of air after them.
+    static let stackSize: CGFloat = 18
+    static let stackOverlap: CGFloat = 10
+    static let stackGap: CGFloat = 4
 
     var body: some View {
         let live = model.groupLive(group.id)
@@ -79,12 +81,12 @@ struct SidebarGroupRow: View {
         Button {
             model.selection = .group(group.id)
         } label: {
-            HStack(spacing: 8) {
+            HStack(spacing: Self.stackGap) {
                 StackedAvatars(members: looks.map { StackedAvatars.Member(id: $0.id, orb: $0.orb, activity: model.live($0.id).activity) },
-                               size: 24)
+                               size: Self.stackSize, overlap: Self.stackOverlap)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(group.name)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(Typography.text.weight(.medium))
                         .foregroundStyle(Palette.ink)
                         .lineLimit(1)
                     Text(GroupRowText.secondLine(presence: presence, orbCount: looks.count))
@@ -119,11 +121,7 @@ struct SidebarGroupRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .hoverFill(isHovering && !isSelected, in: .rect(cornerRadius: Radius.medium))
             .background {
-                if isSelected {
-                    RoundedRectangle(cornerRadius: Radius.medium)
-                        .fill(Palette.ghostSelected)
-                        .matchedGeometryEffect(id: SidebarSelection.id, in: selectionSpace)
-                }
+                if isSelected { SlidingSelectionFill(space: selectionSpace, radius: Radius.medium) }
             }
             .contentShape(.rect)
         }

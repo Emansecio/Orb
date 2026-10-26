@@ -438,12 +438,12 @@ struct LiveScreenFoldingTests {
         #expect(rows.count == 4)
     }
 
-    @Test func whileTheTurnRunsItsWorkFoldsAndTheCardStaysInView() {
+    @Test func whileTheTurnRunsItsWorkStaysOpenAndTheCardInView() {
         let items = [user, say("vou ver"), tool(), tool(), card, tool()]
         let rows = TranscriptFolding.rows(for: items, liveTail: true)
-        #expect(rows.count == 3)
-        guard case .work(_, _, .running) = rows[1] else { Issue.record("o trabalho não dobrou: \(rows)"); return }
-        guard case .single(let after) = rows[2], case .browserView = after.kind else { Issue.record("o cartão sumiu"); return }
+        #expect(rows.count == 5)
+        #expect(!rows.contains { if case .work = $0 { true } else { false } })
+        guard case .single(let view) = rows[3], case .browserView = view.kind else { Issue.record("o cartão sumiu: \(rows)"); return }
     }
 
     @Test func theItemIsNotAMessageForTheModelsContext() {

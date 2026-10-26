@@ -29,12 +29,21 @@ struct FoldChevron: View {
     }
 }
 
-/// A folding row's button: the whole row answers the click, and dims a little while pressed.
+/// A folding row's button: the whole row answers the click, shows the hover fill of the app's other rows (it hangs a
+/// little past the row's text, as the sidebar's rows do) and dims a little while pressed.
 struct FoldRowStyle: ButtonStyle {
+    @State private var isHovering = false
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
+            .hoverFill(isHovering, pressed: configuration.isPressed, in: .rect(cornerRadius: Radius.small))
+            .padding(.horizontal, -6)
+            .padding(.vertical, -4)
             .contentShape(.rect)
             .opacity(configuration.isPressed ? 0.7 : 1)
+            .onHover { isHovering = $0 }
     }
 }
 
@@ -59,8 +68,10 @@ struct FoldHeader<ClosedSummary: View>: View {
                     .layoutPriority(1)
                 Spacer(minLength: 8)
                 if !isOpen {
+                    // `.quiet` carries its own fade (and it is the 0.15 s one under Reduce Motion): the part's height
+                    // changes at once, so a bare `.opacity` here had no animation to run in.
                     closedSummary()
-                        .transition(.opacity)
+                        .transition(.quiet)
                 }
                 FoldChevron(isOpen: isOpen)
             }

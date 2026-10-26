@@ -23,6 +23,9 @@ struct EntranceStyle: Equatable, Sendable {
 
     /// A message, a row: rises 6 pt while it appears.
     static let rise = EntranceStyle(distance: 6, animation: Motion.enter)
+    /// What the Orb says: only a fade, in the time the working line's avatar takes to leave, so the face does not seem to
+    /// jump from that line to the reply; its words fade in as they arrive (`TextFade`), with nothing else moving.
+    static let reply = EntranceStyle(distance: 0, animation: Motion.fade)
     /// What needs you (an approval card): a little more distance, and a little scale.
     static let emphasis = EntranceStyle(distance: 10, scale: 0.98, animation: Motion.emphasis)
     /// The Orb of an empty chat, dropping in to land on the floor.
@@ -156,8 +159,11 @@ final class TranscriptEntrances {
 
     init() {}
 
+    /// `shown`: items already on screen in another form (a queued message becoming the real one), which arrive without
+    /// coming in again.
     @discardableResult
-    func observe(_ items: [TranscriptItem], isLoading: Bool, swaps: Int = 0, now: Date = .now) -> Int {
+    func observe(_ items: [TranscriptItem], isLoading: Bool, swaps: Int = 0, shown: PresentedOrbs? = nil,
+                 now: Date = .now) -> Int {
         defer { wasLoading = isLoading }
         let swapped = swaps != lastSwaps
         lastSwaps = swaps
@@ -196,7 +202,7 @@ final class TranscriptEntrances {
         if lastCount == 0, arrived.count > Self.largestArrival {
             replace(with: items)
         } else {
-            for id in arrived.prefix(Self.largestArrival) { arrivals[id] = now }
+            for id in arrived.prefix(Self.largestArrival) where !(shown?.contains(id) ?? false) { arrivals[id] = now }
             known.formUnion(arrived)
             lastCount = items.count
             lastID = last.id
@@ -238,8 +244,11 @@ final class TranscriptEntrances {
 /// The entrance a transcript row has: an approval card comes in with emphasis, everything else rises.
 extension TranscriptItem.Kind {
     var entrance: EntranceStyle {
-        if case .approval = self { return .emphasis }
-        return .rise
+        switch self {
+        case .approval: .emphasis
+        case .bot: .reply
+        default: .rise
+        }
     }
 
     /// What the Orb said (its reply, its greeting): the last of these at the end of the chat carries the living avatar.
