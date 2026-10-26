@@ -407,6 +407,8 @@ private struct ExploreSkills: View {
             .pageColumn()
         }
         .task(id: query) {
+            // Loading from the first key, not "no result" while the search waits to start.
+            isLoading = isSearching
             try? await Task.sleep(for: .milliseconds(350))
             guard !Task.isCancelled else { return }
             await search()
@@ -439,21 +441,14 @@ private struct ExploreSkills: View {
         error = nil
         // "Tentar de novo" runs this outside `.task(id:)`, so nothing cancels it when the person types on: what it brings
         // counts only while its term is still the one in the field.
-        defer { if ExploreSearch.accepts(term: term, currentQuery: query) { isLoading = false } }
+        defer { if Task.isCancelled || RegistryQuery.isCurrent(term, query: query) { isLoading = false } }
         do {
             let found = try await SkillCatalog.shared.search(term)
-            if !Task.isCancelled, ExploreSearch.accepts(term: term, currentQuery: query) { results = found }
+            if !Task.isCancelled, RegistryQuery.isCurrent(term, query: query) { results = found }
         } catch {
             // A newer search cancels this one; only real failures are shown.
-            if !Task.isCancelled, ExploreSearch.accepts(term: term, currentQuery: query) { self.error = error.localizedDescription }
+            if !Task.isCancelled, RegistryQuery.isCurrent(term, query: query) { self.error = error.localizedDescription }
         }
-    }
-}
-
-enum ExploreSearch {
-    /// Whether the answer to a search for `term` still belongs on the page: the field still holds that term (spaces aside).
-    static func accepts(term: String, currentQuery: String) -> Bool {
-        term == currentQuery.trimmingCharacters(in: .whitespaces)
     }
 }
 

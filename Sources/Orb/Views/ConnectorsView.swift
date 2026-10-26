@@ -235,6 +235,7 @@ private struct ConnectorCard: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 12) {
                 ConnectorIcon(connector: connector)
+                    .opacity(connector.isEnabled ? 1 : 0.55)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(connector.name)
                         .font(.system(size: 14, weight: .semibold))
@@ -247,6 +248,8 @@ private struct ConnectorCard: View {
                         .truncationMode(.middle)
                         .help(connector.source ?? "")
                 }
+                // Off, the name dims; the switch that turns it back on keeps its full contrast (as a routine's card).
+                .opacity(connector.isEnabled ? 1 : 0.55)
                 Spacer(minLength: 8)
                 Toggle("Ativo", isOn: $connector.isEnabled)
                     .toggleStyle(.switch)
@@ -309,7 +312,6 @@ private struct ConnectorCard: View {
         .overlay {
             if isHighlighted { RoundedRectangle(cornerRadius: Radius.large).strokeBorder(Palette.accent, lineWidth: 2).transition(.opacity) }
         }
-        .opacity(connector.isEnabled ? 1 : 0.55)
         .animateChanges(of: connector.isEnabled)
         .animateChanges(of: status)
         .animateChanges(of: test)
@@ -702,6 +704,8 @@ private struct ExploreConnectors: View {
             .pageColumn()
         }
         .task(id: query) {
+            // Loading from the first key, not "no result" while the search waits to start.
+            isLoading = isSearching
             try? await Task.sleep(for: .milliseconds(450))
             guard !Task.isCancelled else { return }
             await search()

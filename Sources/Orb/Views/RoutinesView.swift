@@ -765,6 +765,8 @@ private struct RoutineConversationSheet: View {
                     }
                     .padding(20)
                 }
+                // A run going on keeps its end in view, as the chat does.
+                .modifier(KeepsBottom(follows: true))
                 // The conversation fades in when it arrives; until then (after the 150 ms) a spinner, and if it never ran, the
                 // empty message (§2.13).
                 .motion(Motion.content, value: items.isEmpty)
@@ -780,6 +782,9 @@ private struct RoutineConversationSheet: View {
                     }
                     .motion(Motion.content, value: isLoading)
                 }
+            } else {
+                // The Orb deleted it from the chat while this was open.
+                ContentUnavailableView("Esta rotina não está mais aqui", systemImage: "clock.arrow.circlepath")
             }
         }
         .frame(height: 400)

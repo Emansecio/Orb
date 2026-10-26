@@ -335,6 +335,8 @@ private struct ProviderRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            // Closing Ajustes gives the sign-in up: otherwise it waits on its port for minutes.
+            .onDisappear { signInTask?.cancel() }
         }
     }
 
@@ -385,7 +387,7 @@ private struct ProviderRow: View {
 
     private func saveKey() {
         let value = key
-        guard !value.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        guard !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         key = ""
         run(inStatus: true) {
             try await KeyEntry.save(value, for: kind, model: model) { isReplacingKey = false }
@@ -402,8 +404,8 @@ private struct ProviderRow: View {
             do {
                 try await work()
                 if inStatus { health.record(nil, for: kind) }
-            } catch where error is CancellationError || Task.isCancelled {
-                // Cancelled by the person (the browser sign-in): nothing to report.
+            } catch where ProviderHealth.isCancellation(error) {
+                // Cancelled (the browser sign-in stopped, the tab closed, a request dropped): nothing to report.
             } catch {
                 if inStatus { health.record(error, for: kind) } else { self.error = error.localizedDescription }
             }

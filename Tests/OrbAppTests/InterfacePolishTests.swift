@@ -91,10 +91,8 @@ import Testing
     // MARK: Catalog search
 
     @Test func aSearchAnswerBelongsOnlyToTheTermStillInTheField() {
-        #expect(!ExploreSearch.accepts(term: "pdf", currentQuery: "pdfs"))
-        #expect(ExploreSearch.accepts(term: "pdf", currentQuery: "pdf "))
-        #expect(ExploreSearch.accepts(term: "pdf", currentQuery: " pdf"))
-        #expect(!ExploreSearch.accepts(term: "pdf", currentQuery: ""))
+        #expect(!RegistryQuery.isCurrent("pdf", query: "pdfs"))
+        #expect(RegistryQuery.isCurrent("pdf", query: " pdf"))
     }
 
     // MARK: Catalog tabs

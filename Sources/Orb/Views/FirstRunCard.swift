@@ -526,7 +526,7 @@ struct FirstRunCard: View {
                             .accessibilityLabel("Chave de API de \(keyKind.shortName)")
                         Button(steps.working == .key ? "Conectando…" : "Conectar", action: connectKey)
                             .buttonStyle(PrimaryPillStyle())
-                            .disabled(key.trimmingCharacters(in: .whitespaces).isEmpty || steps.working == .key)
+                            .disabled(key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || steps.working == .key)
                     }
                     HStack {
                         if let page = keyKind.keyPage {
@@ -624,6 +624,9 @@ private struct FirstRunRow: View {
             }
         }
         .buttonStyle(.plain)
+        // The row's own words for VoiceOver, on the button alone: the link and "Cancelar" beside it stay elements of
+        // their own (VoiceOver can stop a sign-in that waits on the browser).
+        .accessibilityLabel("\(title). \(phaseText)")
         .disabled(!isEnabled)
         .opacity(isEnabled || phase == .working ? 1 : 0.6)
         .onHover { isHovering = $0 }
@@ -642,9 +645,6 @@ private struct FirstRunRow: View {
                     .padding(.trailing, 40)
             }
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(title). \(phaseText)")
-        .accessibilityAddTraits(.isButton)
     }
 
     private var phaseText: String {
@@ -817,7 +817,7 @@ struct FirstRunBanner: View {
                 Spacer()
                 Button("Conectar", action: connect)
                     .buttonStyle(PrimaryPillStyle())
-                    .disabled(key.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(14)
