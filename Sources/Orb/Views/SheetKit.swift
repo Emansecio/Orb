@@ -58,7 +58,7 @@ private struct OrbSheetFrame<Footer: View>: ViewModifier {
                 if let icon { ServiceTile(mark: icon) }
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(Typography.title)
                         .foregroundStyle(Palette.ink)
                         .accessibilityAddTraits(.isHeader)
                     if let subtitle {

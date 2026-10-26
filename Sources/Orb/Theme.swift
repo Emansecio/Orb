@@ -89,6 +89,18 @@ enum Typography {
     static let label = Font.system(size: 12)
     /// Running text in cards and rows.
     static let text = Font.system(size: 13)
+    /// A sheet's or a panel's title (the welcome, an import, a routine's sheet).
+    static let title = Font.system(size: 17, weight: .semibold)
+    /// Code and commands in the conversation: a block, a command line, a path.
+    static let code = Font.system(size: 12, design: .monospaced)
+    /// Code inside a smaller line (a tool's detail, a caption).
+    static let codeSmall = Font.system(size: 11, design: .monospaced)
+}
+
+/// Sizes the popovers of one bar share, so opening one after another does not change the width under the pointer.
+enum PopoverMetrics {
+    /// The composer bar's popovers: model, permissions, skills, context.
+    static let width: CGFloat = 340
 }
 
 extension View {
