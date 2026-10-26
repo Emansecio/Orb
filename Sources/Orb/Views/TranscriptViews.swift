@@ -176,9 +176,11 @@ enum TranscriptSpeech {
 
     static func notice(_ text: String) -> String { "Aviso: \(text)" }
 
-    /// A tool's line: what it did, and that it failed (the label of the button replaces the mark's own "Falhou").
+    /// A tool's line: what it did, and that it failed (the label of the button replaces the mark's own "Falhou"). A failed
+    /// title already says so ("Falhou", "Falhou ao ler"), so the suffix is only for the ones that do not.
     static func tool(title: String, detail: String, state: ToolCall.State) -> String {
-        "\(title) \(detail)" + (state == .failed ? ", falhou" : "")
+        let saysFailed = title.lowercased().hasPrefix("falhou")
+        return "\(title) \(detail)" + (state == .failed && !saysFailed ? ", falhou" : "")
     }
 
     static func approval(botName: String, title: String) -> String { "\(botName) pede permissão: \(title)" }
@@ -1741,6 +1743,42 @@ enum ApprovalSummary {
     }
 }
 
+/// One half of the split "Permitir" capsule (the label, the chevron's menu). The capsule's fill is drawn behind both, so each
+/// half answers the pointer with a wash of the text colour over its own area: lighter under the pointer, a little more
+/// pressed, the same two steps as `PrimaryPillStyle`'s fill (0.9 and 0.8 toward the canvas).
+private struct SplitPillSegmentStyle: ButtonStyle {
+    let tint: Color
+    @State private var isHovering = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        let pressed = configuration.isPressed
+        let hovering = isHovering && isEnabled
+        configuration.label
+            .overlay {
+                Rectangle()
+                    .fill(tint.opacity(pressed ? 0.2 : (hovering ? 0.1 : 0)))
+                    .animation(Motion.fill(visible: pressed || hovering, pressed: pressed), value: pressed || hovering)
+                    .allowsHitTesting(false)
+            }
+            .onHover { isHovering = $0 }
+            .clickablePointer(isEnabled)
+    }
+}
+
+/// The shortcut hints of an approval card, said only where the key answers that card (`showsKeys`: the Orb's newest open
+/// card), so VoiceOver and the tooltip never promise a key another card owns.
+enum ApprovalHints {
+    /// "Atalho: Esc" for VoiceOver; empty (no hint) when the key is not this card's.
+    static func accessibilityHint(_ key: String, showsKeys: Bool) -> String { showsKeys ? "Atalho: \(key)" : "" }
+
+    /// A tooltip with the key in parentheses, or the bare text when the key is not this card's.
+    static func help(_ text: String, key: String, showsKeys: Bool) -> String { showsKeys ? "\(text) (\(key))" : text }
+
+    /// What the record of an answered card does when clicked: the hint follows the state the value already speaks.
+    static func toggleRequest(isOpen: Bool) -> String { isOpen ? "Esconde o pedido" : "Mostra o pedido" }
+}
+
 /// Approval prompt. Pending: the action, why, and one primary button ("Permitir", ⌘↩) with a menu for the rest
 /// ("Só nesta tarefa", "Sempre permitir…", and "Revisar uma a uma" on a group), next to "Não permitir" (esc); a link
 /// opens a line to tell the Orb what to do instead. Destructive commands and changes to the Orb's instructions offer
@@ -1983,9 +2021,10 @@ struct ApprovalCard: View {
         .background(pressed == .deny ? Palette.ghostSelected : .clear, in: .capsule)
         .scaleEffect(pressed == .deny ? ApprovalShortcut.pressScale : 1)
         .animation(Motion.press, value: pressed)
-        .help("\(request.isHandoff ? Tip.handoffCancel : Tip.deny) (\(ShortcutCatalog.keys(for: .denyApproval)))")
+        .help(ApprovalHints.help(request.isHandoff ? Tip.handoffCancel : Tip.deny, key: ShortcutCatalog.keys(for: .denyApproval),
+                                 showsKeys: showsKeys))
         .accessibilityLabel(denyTitle)
-        .accessibilityHint("Atalho: Esc")
+        .accessibilityHint(ApprovalHints.accessibilityHint("Esc", showsKeys: showsKeys))
     }
 
     /// "Permitir ⌘↩" with, when there is more to choose, a chevron in the same capsule that opens the rest.
@@ -2010,10 +2049,11 @@ struct ApprovalCard: View {
                 .frame(minHeight: ControlHeight.regular)
                 .contentShape(.rect)
             }
-            .buttonStyle(.plain)
-            .help("\(request.isHandoff ? Tip.handoffDone : allowTitle) (\(AppShortcut.commandReturn.label))")
+            .buttonStyle(SplitPillSegmentStyle(tint: allowText))
+            .help(ApprovalHints.help(request.isHandoff ? Tip.handoffDone : allowTitle, key: AppShortcut.commandReturn.label,
+                                     showsKeys: showsKeys))
             .accessibilityLabel(allowTitle)
-            .accessibilityHint("Atalho: ⌘↩")
+            .accessibilityHint(ApprovalHints.accessibilityHint(AppShortcut.commandReturn.label, showsKeys: showsKeys))
             if hasMoreOptions {
                 Rectangle().fill(allowText.opacity(0.25)).frame(width: 1, height: 16)
                     .accessibilityHidden(true)
@@ -2046,13 +2086,15 @@ struct ApprovalCard: View {
                         .contentShape(.rect)
                 }
                 .menuStyle(.button)
-                .buttonStyle(.plain)
+                .buttonStyle(SplitPillSegmentStyle(tint: allowText))
                 .menuIndicator(.hidden)
                 .fixedSize()
                 .help(Tip.allowOptions)
                 .accessibilityLabel("Sempre permitir e outras opções")
             }
         }
+        // The segments wash their own half on hover and press, so the capsule clips them to its shape.
+        .clipShape(.capsule)
         .background(allowFill, in: .capsule)
         .opacity(pressed == .allow ? 0.85 : 1)
         .scaleEffect(pressed == .allow ? ApprovalShortcut.pressScale : 1)
@@ -2088,7 +2130,7 @@ struct ApprovalCard: View {
             .help(Tip.toggleRequest(isOpen: isOpen))
             .accessibilityLabel("\(ApprovalSummary.label(request)): \(ApprovalSummary.title(request)). \(ApprovalSummary.detail(request))")
             .accessibilityValue(isOpen ? "expandido" : "recolhido")
-            .accessibilityHint("Mostra o pedido")
+            .accessibilityHint(ApprovalHints.toggleRequest(isOpen: isOpen))
 
             if isOpen {
                 // A card read, not answered: 12 pt in, as the other cards to read (14 is for the ones that ask).

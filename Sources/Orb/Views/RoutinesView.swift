@@ -276,7 +276,8 @@ private struct RoutineCard: View {
                 }
                 Spacer()
                 let datePassed = !routine.canBeEnabled()
-                Toggle("Ativa", isOn: Binding(get: { routine.isEnabled }, set: { if !$0 || routine.canBeEnabled() { routine.setEnabled($0) } }))
+                // The label is hidden but read by VoiceOver: it names the routine, since every card has the same switch.
+                Toggle("Ativar \(routine.name)", isOn: Binding(get: { routine.isEnabled }, set: { if !$0 || routine.canBeEnabled() { routine.setEnabled($0) } }))
                     .toggleStyle(.switch)
                     .labelsHidden()
                     .controlSize(.small)

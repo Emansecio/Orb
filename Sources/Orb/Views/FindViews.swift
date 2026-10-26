@@ -98,10 +98,8 @@ struct FindBar: View {
             Image(systemName: symbol)
                 .font(Typography.small.weight(.medium))
                 .foregroundStyle(enabled ? Palette.secondary : Palette.hint)
-                .frame(width: 24, height: 24)
-                .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CircleGhostStyle(side: 24, fontSize: 11)) // hover, press and the 24 pt hit area of the other round buttons
         .disabled(!enabled)
         .iconTip(help, label: label)
     }

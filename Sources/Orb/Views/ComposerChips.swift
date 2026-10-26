@@ -394,7 +394,7 @@ struct ElsewhereStrip: View {
                 if let working = model.sessions[botID]?.workingChatID { model.openChat(working, of: botID) }
             }
             .buttonStyle(ComposerChipStyle())
-            .help("Voltar para “\(chatTitle)”")
+            .help(ComposerAction.elsewhereHelp(chatTitle: chatTitle, needsYou: needsYou))
             .accessibilityLabel(needsYou ? "Responder em “\(chatTitle)”" : "Voltar para a conversa “\(chatTitle)”")
         }
         .font(Typography.small)

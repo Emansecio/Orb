@@ -72,6 +72,11 @@ struct ComposerSupportTests {
         #expect(ComposerAction.elsewhereButton(needsYou: true) == "Responder")
     }
 
+    @Test func theTooltipOfThatStripFollowsTheStateOfItsButton() {
+        #expect(ComposerAction.elsewhereHelp(chatTitle: "Bug", needsYou: true) == "Responder em “Bug”")
+        #expect(ComposerAction.elsewhereHelp(chatTitle: "Bug", needsYou: false) == "Voltar para “Bug”")
+    }
+
     @Test @MainActor func thePermissionChipSaysItsNameOnlyForTheUnusualModesAndOnlyWhenThereIsRoom() {
         for mode in PermissionMode.allCases {
             #expect(!PermissionChip.showsName(mode, compact: true))

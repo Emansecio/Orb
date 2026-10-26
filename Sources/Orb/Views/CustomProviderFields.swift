@@ -130,14 +130,15 @@ private struct ModelChips: View {
                     Text(item.id).font(Typography.codeSmall)
                     Button("Remover \(item.id)", systemImage: "xmark", action: { remove(item) })
                         .labelStyle(.iconOnly)
-                        .font(.system(size: 9, weight: .bold))
-                        .buttonStyle(.plain)
+                        // 18 pt target (the 9 pt glyph alone was ~10 pt); the chip's vertical padding shrinks to keep its height.
+                        .buttonStyle(CircleGhostStyle(side: 18, fontSize: 9))
+                        .fontWeight(.bold)
                         .foregroundStyle(Palette.muted)
                         .help(Tip.removeModelFromList)
                 }
                 .padding(.leading, 8)
-                .padding(.trailing, 6)
-                .padding(.vertical, 3)
+                .padding(.trailing, 4)
+                .padding(.vertical, 1)
                 .background(Palette.raised, in: .capsule)
             }
         }

@@ -245,4 +245,11 @@ import Testing
         // Blanks around the name do not count against the limit (`clippedName` trims first).
         #expect(NameCheck.problem("  " + String(repeating: "a", count: AppModel.nameLimit) + "  ") == nil)
     }
+
+    @Test func theNoteOnAnOwnFolderSaysWhatItLoosensAndWorksBeforeTheFolderIsLooked() {
+        #expect(FolderNoteText.ownFolder(name: "Atlas", path: "~/Orbs/Atlas")
+                == "Em uma pasta própria (~/Orbs/Atlas), Atlas grava e edita arquivos sem pedir, mesmo em “Perguntar antes”.")
+        #expect(FolderNoteText.ownFolder(name: "Atlas", path: nil)
+                == "Em uma pasta própria, Atlas grava e edita arquivos sem pedir, mesmo em “Perguntar antes”.")
+    }
 }

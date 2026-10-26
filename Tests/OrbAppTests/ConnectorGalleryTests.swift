@@ -247,6 +247,12 @@ struct LocalConnectorInstallTests {
 // The variable/header rows of the connector sheet.
 
 struct KeyValueRowTests {
+    @Test func theValueFieldIsReadAsTheNameOnScreen() {
+        #expect(KeyValueRow.valueLabel(key: "Authorization", isAuthorizationHeader: true) == "Chave de acesso")
+        #expect(KeyValueRow.valueLabel(key: "API_KEY", isAuthorizationHeader: false) == "Valor de API_KEY")
+        #expect(KeyValueRow.valueLabel(key: "", isAuthorizationHeader: false) == "Valor")
+    }
+
     @Test func theEditorStoresTheNameCommandAndAddressWithoutTheSpacesAroundThem() {
         let local = ConnectorEditing.normalized(MCPServerConfig(name: " Meu servidor ", command: " npx\n"))
         #expect(local.name == "Meu servidor" && local.command == "npx")

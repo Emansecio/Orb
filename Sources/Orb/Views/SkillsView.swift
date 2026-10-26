@@ -273,8 +273,8 @@ private struct InstalledSkillRow: View {
                             .lineLimit(1)
                         Button(copied.isOn ? "Copiado" : "Copiar /\(skill.slug)", systemImage: copied.isOn ? "checkmark" : "doc.on.doc", action: copy)
                             .labelStyle(.iconOnly)
-                            .buttonStyle(.plain)
-                            .font(Typography.small)
+                            // 22 pt target (the bare glyph was ~12 pt), with the hover circle of the other small buttons.
+                            .buttonStyle(CircleGhostStyle(side: 22, fontSize: 11))
                             .foregroundStyle(copied.isOn ? Palette.ok : Palette.faint)
                             // The symbol is replaced by the check, as in the chat (a plain change under Reduce Motion); in on the
                             // press curve, back on the content one.
@@ -317,7 +317,8 @@ private struct InstalledSkillRow: View {
             .help("Abre a skill para ler e editar")
             Spacer(minLength: 12)
             UseSkillButton(skill: skill)
-            Toggle("Ativa", isOn: $skill.isEnabled)
+            // Hidden label, read by VoiceOver: names the skill, since every row has the same switch.
+            Toggle("Ativar \(skill.name)", isOn: $skill.isEnabled)
                 .toggleStyle(.switch)
                 .labelsHidden()
                 .controlSize(.small)

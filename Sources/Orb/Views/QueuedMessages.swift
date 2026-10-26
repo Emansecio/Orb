@@ -117,7 +117,12 @@ private struct QueuedBubble: View {
                         .alignmentGuide(.leading) { $0.width + 6 }
                         .opacity(showsButtons ? 1 : 0)
                         .animation(Motion.hover(showsButtons), value: showsButtons)
+                        // The row already offers the same three actions to VoiceOver (`accessibilityActions`): the buttons
+                        // are for the pointer and the keyboard, and would be read a second time.
+                        .accessibilityHidden(true)
                 }
+                // Only the bubbles that carry the state: showing the line under the pointer too made the queue grow and
+                // jump while hovering, and each button's tooltip already says what it does.
                 if showsState { stateLine }
             }
         }

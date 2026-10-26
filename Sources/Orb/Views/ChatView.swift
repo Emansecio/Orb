@@ -52,8 +52,10 @@ struct ChatView: View {
         .onChange(of: model.sessions[botID]?.chatID) { find.close() } // another of the Orb's conversations
         .onChange(of: model.pendingChatRequest) { takeFindRequest() }
         // MARK: MultiOrb (WP2): a banner for an approval raised while the Orb works on another Orb's request opens that work.
-        .sheet(item: Bindable(model).sideWorkToShow) { target in
-            if target.botID == botID { SideWorkSheet(botID: target.botID, requestID: target.requestID) }
+        // Filtered by Orb: a target of another Orb is not ours to present (the sheet would open empty) and not ours to clear.
+        .sheet(item: Binding(get: { SideWorkTarget.shown(model.sideWorkToShow, for: botID) },
+                             set: { if $0 == nil, SideWorkTarget.shown(model.sideWorkToShow, for: botID) != nil { model.sideWorkToShow = nil } })) { target in
+            SideWorkSheet(botID: target.botID, requestID: target.requestID)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
@@ -899,6 +901,13 @@ private struct OrbContextLine: View {
     }
 }
 
+extension SideWorkTarget {
+    /// The target to present in the chat of `botID`: only one that belongs to that Orb.
+    static func shown(_ target: SideWorkTarget?, for botID: UUID) -> SideWorkTarget? {
+        target?.botID == botID ? target : nil
+    }
+}
+
 struct SuggestionButton: View {
     let symbol: String
     let text: String
@@ -913,6 +922,7 @@ struct SuggestionButton: View {
                 Image(systemName: symbol)
                     .foregroundStyle(caption == nil ? Palette.faint : Palette.accentText)
                     .frame(width: 18)
+                    .accessibilityHidden(true) // decoration: VoiceOver would read the symbol's name before the text
                 Text(text)
                     .foregroundStyle(Palette.secondary)
                     .multilineTextAlignment(.leading)

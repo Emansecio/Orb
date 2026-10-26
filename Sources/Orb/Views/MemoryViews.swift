@@ -294,6 +294,8 @@ struct MemoryRow: View {
             Button("Esquecer", systemImage: "trash", action: forget)
         }
         .accessibilityElement(children: .contain)
+        // The click is the only other way to open the lembrança: VoiceOver gets it as an action.
+        .accessibilityAction(named: isExpanded ? "Recolher lembrança" : "Abrir lembrança") { isExpanded.toggle() }
     }
 
     static func text(of item: MemorySnapshot.Item) -> String {

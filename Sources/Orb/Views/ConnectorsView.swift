@@ -254,7 +254,8 @@ private struct ConnectorCard: View {
                 // Off, the name dims; the switch that turns it back on keeps its full contrast (as a routine's card).
                 .opacity(connector.isEnabled ? 1 : 0.55)
                 Spacer(minLength: 8)
-                Toggle("Ativo", isOn: $connector.isEnabled)
+                // Hidden label, read by VoiceOver: names the connector, since every card has the same switch.
+                Toggle("Ativar \(connector.name)", isOn: $connector.isEnabled)
                     .toggleStyle(.switch)
                     .labelsHidden()
                     .controlSize(.small)
@@ -1384,6 +1385,12 @@ struct KeyValueRow: Identifiable {
     var key: String
     var value: String
 
+    /// What VoiceOver reads for the value field: the same name the screen shows ("Chave de acesso" for the plumbing header).
+    static func valueLabel(key: String, isAuthorizationHeader: Bool) -> String {
+        if isAuthorizationHeader { return "Chave de acesso" }
+        return key.isEmpty ? "Valor" : "Valor de \(key)"
+    }
+
     /// A binding to the row with this id that looks it up on every access: a field that still pushes its text after
     /// the row was removed finds nothing (reads `fallback`, writes nowhere) instead of indexing a stale position.
     static func binding(in rows: Binding<[KeyValueRow]>, id: UUID, fallback: KeyValueRow) -> Binding<KeyValueRow> {
@@ -1421,7 +1428,7 @@ private struct KeyValueField: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                 } else {
-                    TextField("NOME", text: $row.key)
+                    TextField("Nome", text: $row.key)
                         .font(.system(size: 12).monospaced())
                         .frame(width: 170)
                 }
@@ -1439,7 +1446,7 @@ private struct KeyValueField: View {
                 }
                 .textFieldStyle(.roundedBorder)
                 .labelsHidden()
-                .accessibilityLabel(row.key.isEmpty ? "Valor" : "Valor de \(row.key)")
+                .accessibilityLabel(KeyValueRow.valueLabel(key: row.key, isAuthorizationHeader: isAuthorizationHeader))
                 if input == nil {
                     Button("Remover", systemImage: "minus.circle", action: onRemove)
                         .labelStyle(.iconOnly)

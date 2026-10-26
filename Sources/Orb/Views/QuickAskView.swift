@@ -409,9 +409,8 @@ struct QuickAskReply: View {
                 Spacer(minLength: 4)
                 Button("Fechar resposta", systemImage: "xmark", action: dismiss)
                     .labelStyle(.iconOnly)
-                    .buttonStyle(.plain)
+                    .buttonStyle(CircleGhostStyle(side: 20, fontSize: 10)) // 20 pt target with hover around the small glyph
                     .help(Tip.closeReply)
-                    .font(SectionPlus.chevron)
                     .foregroundStyle(Palette.muted)
             }
             if let reply {

@@ -169,9 +169,10 @@ struct KeptMemoryBanner: View {
                     Spacer(minLength: 4)
                     Button("Fechar", systemImage: "xmark") { model.dismissKeptMemoryNotice() }
                         .labelStyle(.iconOnly)
-                        .buttonStyle(.plain)
+                        // 20 pt target (the 10 pt glyph alone was ~10 pt).
+                        .buttonStyle(CircleGhostStyle(side: 20, fontSize: 10))
+                        .fontWeight(.semibold)
                         .help(Tip.dismissNotice)
-                        .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(Palette.muted)
                 }
                 .padding(10)

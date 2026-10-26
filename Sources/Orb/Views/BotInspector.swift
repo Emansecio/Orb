@@ -405,8 +405,7 @@ struct BotInspector: View {
                 .foregroundStyle(Palette.warn)
             Button("Sobre este modo", systemImage: "info.circle") { isShowingBypassInfo.toggle() }
                 .labelStyle(.iconOnly)
-                .buttonStyle(.plain)
-                .font(Typography.small)
+                .buttonStyle(CircleGhostStyle(side: 20, fontSize: 11)) // 20 pt target with hover around the ⓘ
                 .foregroundStyle(Palette.warn)
                 .iconTip(summary, label: "Sobre este modo")
                 .popover(isPresented: $isShowingBypassInfo, arrowEdge: .bottom) {
@@ -728,9 +727,7 @@ struct BotInspector: View {
         let state = listing?.folder
         // Stays in sight, not in a hover text: "Criar pasta própria" changes what the Orb may do without asking.
         if state == .noOwnFolder {
-            Text("Em uma pasta própria (\(OrbFolder.display(OrbFolder.availableURL(for: bot.name, in: OrbFolder.defaultBase)))), \(bot.name) escreve sem perguntar em “Perguntar antes”.")
-                .font(Typography.small)
-                .foregroundStyle(Palette.muted)
+            OwnFolderNote(name: bot.name)
                 .transition(.quiet)
         }
         if state == .missing {
@@ -1015,19 +1012,20 @@ private struct InspectorHeader: View {
                     }
                     .onAppear { focus = .role }
             } else {
-                Text(role.isEmpty ? "Papel" : role)
-                    .font(Typography.label)
-                    .foregroundStyle(role.isEmpty ? Palette.faint : Palette.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .onTapGesture { isEditingRole = true }
-                    // The whole role is one hover away when the line cuts it.
-                    .help(role.isEmpty ? "Clique para escrever o papel" : role)
-                    .accessibilityAddTraits(.isButton)
-                    .accessibilityLabel("Papel: \(role)")
-                    .accessibilityAction { isEditingRole = true }
+                // A plain button with the same look, so the keyboard reaches it (Space/Return open the field).
+                Button { isEditingRole = true } label: {
+                    Text(role.isEmpty ? "Papel" : role)
+                        .font(Typography.label)
+                        .foregroundStyle(role.isEmpty ? Palette.faint : Palette.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                // The whole role is one hover away when the line cuts it.
+                .help(role.isEmpty ? "Clique para escrever o papel" : role)
+                .accessibilityLabel("Papel: \(role)")
             }
         }
         .textFieldStyle(.plain)
@@ -1081,6 +1079,21 @@ private struct WorkspaceFileRow: View {
     var showsMarker = true
 
     var body: some View {
+        // A button, so the row takes keyboard focus and hovers like the panel's other rows. A click reveals at once (no
+        // waiting for a double click that may not come); the double click also opens, through the simultaneous gesture.
+        Button(action: reveal) { content }
+            .buttonStyle(FoldRowStyle())
+            .simultaneousGesture(TapGesture(count: 2).onEnded(open))
+            .contextMenu {
+                Button("Mostrar no Finder", action: reveal)
+                Button("Abrir", action: open)
+            }
+            .help("Clique para mostrar no Finder; duas vezes para abrir")
+            .accessibilityElement(children: .combine)
+            .accessibilityAction(named: "Abrir", open)
+    }
+
+    private var content: some View {
         HStack(spacing: 8) {
             if showsMarker {
                 Text(file.marker?.rawValue ?? "")
@@ -1100,18 +1113,6 @@ private struct WorkspaceFileRow: View {
                     .lineLimit(1)
             }
         }
-        .contentShape(Rectangle())
-        .onTapGesture(count: 2, perform: open)
-        .onTapGesture(perform: reveal)
-        .contextMenu {
-            Button("Mostrar no Finder", action: reveal)
-            Button("Abrir", action: open)
-        }
-        .help("Clique para mostrar no Finder; duas vezes para abrir")
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityAction(named: "Mostrar no Finder", reveal)
-        .accessibilityAction(named: "Abrir", open)
     }
 
     private var color: Color {
@@ -1173,6 +1174,7 @@ private struct RoutineRow: View {
                     .toggleStyle(.switch)
                     .labelsHidden()
                     .controlSize(.mini)
+                    .accessibilityLabel("Ativar \(current.name)")
                     .disabled(!current.canBeEnabled())
                     .help(current.canBeEnabled() ? Tip.routineToggle(isOn: current.isEnabled) : Tip.routineDatePassed)
             }
@@ -1313,6 +1315,8 @@ private struct RoutineLastLine: View {
             // A click shows the whole report (as the lembranças do), another folds it back.
             .contentShape(Rectangle())
             .onTapGesture { isExpanded.toggle() }
+            // Without a pointer the report is reached by this action (VoiceOver's actions rotor).
+            .accessibilityAction(named: isExpanded ? "Recolher relatório" : "Ver relatório inteiro") { isExpanded.toggle() }
             .help(isExpanded ? "Clique para recolher" : "Clique para ver o relatório inteiro")
             .motion(Motion.content, value: isExpanded)
         } else {
@@ -1346,6 +1350,33 @@ enum RelativeTime {
         if days < 30 { return days / 7 == 1 ? "1 semana" : "\(days / 7) semanas" }
         if days < 365 { return days / 30 == 1 ? "1 mês" : "\(days / 30) meses" }
         return days / 365 == 1 ? "1 ano" : "\(days / 365) anos"
+    }
+}
+
+/// What "Criar pasta própria" would loosen, with the folder it would make. The folder is looked up off the main actor
+/// (`availableURL` hits the disk, up to a thousand times when names are taken), once per name, not on every render.
+private struct OwnFolderNote: View {
+    let name: String
+    @State private var path: String?
+
+    var body: some View {
+        Text(FolderNoteText.ownFolder(name: name, path: path))
+            .font(Typography.small)
+            .foregroundStyle(Palette.muted)
+            .task(id: name) {
+                let orbName = name
+                path = await Task.detached {
+                    OrbFolder.display(OrbFolder.availableURL(for: orbName, in: OrbFolder.defaultBase))
+                }.value
+            }
+    }
+}
+
+enum FolderNoteText {
+    /// The sentence under the folder's row when the Orb has none of its own. `path` is nil until the folder is looked up.
+    static func ownFolder(name: String, path: String?) -> String {
+        let place = path.map { "uma pasta própria (\($0))" } ?? "uma pasta própria"
+        return "Em \(place), \(name) grava e edita arquivos sem pedir, mesmo em “Perguntar antes”."
     }
 }
 

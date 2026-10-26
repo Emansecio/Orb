@@ -33,6 +33,9 @@ struct QuestionCard: View {
     private var isPending: Bool { request.decision == nil }
     /// Whether this is the card esc answers, so "Pular" names the key.
     private var showsKeys: Bool { showsKeyHints && model.showsApprovalKeys(request.id, of: botID) }
+    /// Whether ⌘↩ answers this card right now: it is the card the keys reach and something is written to send
+    /// (the same rule as `accepts` in `body`).
+    private var answerKeyApplies: Bool { showsKeys && OrbQuestion.clean(reply) != nil }
     private var orbName: String { model.live(botID).look.name }
 
     var body: some View {
@@ -80,14 +83,25 @@ struct QuestionCard: View {
                 .background(pressed == .deny ? Palette.ghostSelected : .clear, in: .capsule)
                 .scaleEffect(pressed == .deny ? ApprovalShortcut.pressScale : 1)
                 .animation(Motion.press, value: pressed)
-                .help(Tip.skipQuestion)
-                .accessibilityHint("Atalho: Esc")
+                .help(ApprovalHints.help(Tip.skipQuestion, key: "Esc", showsKeys: showsKeys))
+                // The visible "esc" is a hint for the eye; VoiceOver gets the key as a hint, not in the name.
+                .accessibilityLabel("Pular")
+                .accessibilityHint(ApprovalHints.accessibilityHint("Esc", showsKeys: showsKeys))
                 .hangsOnLeadingEdge()
             } trailing: {
-                Button("Responder") { answer(reply) }
-                    .buttonStyle(PrimaryPillStyle())
-                    .disabled(OrbQuestion.clean(reply) == nil)
-                    .help(Tip.answerQuestion)
+                Button(action: { answer(reply) }) {
+                    HStack(spacing: 7) {
+                        Text("Responder")
+                        if answerKeyApplies {
+                            Text(AppShortcut.commandReturn.label).font(Typography.small).opacity(0.55)
+                        }
+                    }
+                }
+                .buttonStyle(PrimaryPillStyle())
+                .disabled(OrbQuestion.clean(reply) == nil)
+                .help(ApprovalHints.help(Tip.answerQuestion, key: AppShortcut.commandReturn.label, showsKeys: answerKeyApplies))
+                .accessibilityLabel("Responder")
+                .accessibilityHint(ApprovalHints.accessibilityHint(AppShortcut.commandReturn.label, showsKeys: answerKeyApplies))
             }
         }
         .padding(14)

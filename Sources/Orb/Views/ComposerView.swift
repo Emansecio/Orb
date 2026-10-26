@@ -228,8 +228,7 @@ struct ComposerView: View {
             Spacer(minLength: 8)
             Button("Fechar aviso", systemImage: "xmark") { lane.error = nil }
                 .labelStyle(.iconOnly)
-                .buttonStyle(.plain)
-                .font(.system(size: 11, weight: .semibold))
+                .buttonStyle(CircleGhostStyle(side: 24, fontSize: 11)) // 24 pt target with hover, not the bare 11 pt glyph
                 .foregroundStyle(Palette.muted)
                 .iconTip(Tip.dismissNotice)
         }
@@ -248,8 +247,7 @@ struct ComposerView: View {
             Spacer(minLength: 8)
             Button("Cancelar", systemImage: "xmark") { model.cancelEditing(botID) }
                 .labelStyle(.iconOnly)
-                .buttonStyle(.plain)
-                .font(.system(size: 11, weight: .semibold))
+                .buttonStyle(CircleGhostStyle(side: 24, fontSize: 11))
                 .help(Tip.cancelEdit)
         }
         .foregroundStyle(Palette.accentText)
@@ -810,6 +808,11 @@ enum ComposerAction: Equatable {
 
     /// The button of that strip: back to the conversation, or straight to the question it is waiting on.
     static func elsewhereButton(needsYou: Bool) -> String { needsYou ? "Responder" : "Voltar" }
+
+    /// The tooltip of that button: it says what the button says ("Responder" must not hover as "Voltar para").
+    static func elsewhereHelp(chatTitle: String, needsYou: Bool) -> String {
+        needsYou ? "Responder em “\(chatTitle)”" : "Voltar para “\(chatTitle)”"
+    }
 
     /// The field's placeholder when the Orb is free (or runs a routine): short, with the Orb's name.
     static func placeholder(orbName: String) -> String {

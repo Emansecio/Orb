@@ -342,7 +342,7 @@ private struct UsageRowView: View {
                     Button(action: editPrice) {
                         Image(systemName: "pencil")
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(CircleGhostStyle(side: 24, fontSize: 12)) // 24 pt target with hover (the borderless glyph was ~14 pt)
                     .foregroundStyle(row.isCorrected ? Palette.accentText : Palette.muted)
                     .help(row.isCorrected ? Tip.priceCorrected : Tip.priceCorrect)
                     .accessibilityLabel("Corrigir o preço de \(row.name)")
