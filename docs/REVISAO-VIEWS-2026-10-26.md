@@ -72,6 +72,35 @@ Corrigir primeiro: são poucos e pequenos.
 
 Os blocos de código e tabelas em streaming (L2-1, L2-2) ficam como estão até haver uma medição: o custo cresce com o tamanho, mas só pesa em respostas longas. Vale um benchmark antes.
 
+## Andamento (2026-10-26)
+
+As seis ondas foram implementadas, uma por commit, com testes filtrados, build em debug e release e conferência por `--snapshot`. A suíte completa não rodou em nenhuma delas.
+
+| Onda | Commit | Achados |
+|---|---|---|
+| 1 | 8281cac | Os 8 bugs. |
+| 2 | 742903f | L1-1, L3-1, L3-2, L4-1, L4-2, L6-1, L7-3, L7-4, L7-14, L10-2, L10-3, L10-4. |
+| 3 | 2f0ef91 | L1-2 a L1-5, L3-11, L4-9, L5-3, L5-4, L6-9, L6-10, L7-5, L9-3, L10-7, L10-13. |
+| 4 | 177340a, 938e125 | Tokens (`Typography.title/code/codeSmall`, `PopoverMetrics.width`) e os achados de fonte, largura, espaço e texto. |
+| 5 | a1ce0c5 | Acessibilidade, alvos de clique e dicas por estado. |
+| 6 | 71669d5 | Movimento, hover, comentários, código morto, polimento e desempenho menor. |
+
+O que ficou de fora, e por quê:
+
+- **L2-1, L2-2:** esperam uma medição, como dito acima.
+- **L2-4:** mostrar a linha de dica no hover fazia a fila crescer e pular; cada botão já tem tooltip.
+- **L6-9, no GroupPresenceStrip:** o "…" ali é o indicador de trabalho, não um menu.
+- **L6-13:** já estava coberto pela onda 1.
+- **L4-14, em parte:** a releitura do fim do turno fica, porque o `FolderWatcher` não vigia a pasta pessoal nem volumes de rede.
+- **L7-11, em parte:** a URL de privacidade continua montada à mão, porque `MacPrivacyPane` não tem Calendários e Lembretes.
+- **L8-14:** começar o avatar sem a foto faria a inicial piscar.
+
+Para conferir à mão no app:
+
+- **Linha de arquivo do painel Pasta (L4-5):** o clique mostra no Finder sem esperar. O duplo clique pode não abrir, porque o Finder vem para a frente; o menu e o VoiceOver abrem.
+- **URL base do gateway (L9-8):** é gravada no Return, ao perder o foco e ao fechar.
+- **VoiceOver:** as ações novas não foram testadas com o leitor ligado.
+
 ## Achados por lote
 
 Cada lote traz até 15 achados, do mais ao menos valioso. As referências da ordem sugerida (L3-1 etc.) são "lote-número".
