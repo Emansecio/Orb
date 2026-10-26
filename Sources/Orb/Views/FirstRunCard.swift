@@ -11,14 +11,18 @@ enum LocalServerProbe {
         (.lmstudio, URL(string: "http://localhost:1234/v1/models")!),
     ]
 
+    /// One session for every look: a session made per call is never invalidated, so each one would keep its delegate
+    /// queue and connection pool alive for the life of the app.
+    private static let sharedSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 1
+        configuration.timeoutIntervalForResource = 2
+        return URLSession(configuration: configuration)
+    }()
+
     static func running(candidates: [(kind: ProviderKind, url: URL)] = candidates,
                         session: URLSession? = nil) async -> [ProviderKind] {
-        let session = session ?? {
-            let configuration = URLSessionConfiguration.ephemeral
-            configuration.timeoutIntervalForRequest = 1
-            configuration.timeoutIntervalForResource = 2
-            return URLSession(configuration: configuration)
-        }()
+        let session = session ?? sharedSession
         return await withTaskGroup(of: ProviderKind?.self) { group in
             for candidate in candidates {
                 group.addTask {
@@ -120,6 +124,23 @@ final class FirstRunModel {
     /// The browser login of ChatGPT; stands in for the real one in tests.
     var signInChatGPT: (AppModel) async throws -> Void = { try await $0.signIn(.chatgpt) }
 
+    /// What `detect` looks at: Claude Code and the local servers. Tests replace it.
+    var lookup: () async -> (claude: ClaudeCodeStatus, servers: [ProviderKind]) = {
+        async let status = ClaudeCode.shared.status()
+        async let servers = LocalServerProbe.running()
+        return await (status, servers)
+    }
+    /// A look is under way: a second `detect` (the welcome screen and its card both ask on appear) would only repeat
+    /// `claude auth status` and the port probes, so it returns at once.
+    private(set) var isDetecting = false
+    /// The last look, shared by every model: the banner is a new view (and a new model) for each Orb's chat, and
+    /// switching Orbs must not run `claude auth status` again every time.
+    private static var recent: (at: ContinuousClock.Instant, claude: ClaudeCodeStatus, servers: [ProviderKind])?
+    static let recentWindow: Duration = .seconds(30)
+
+    /// For tests: forget the shared last look.
+    static func forgetRecentDetection() { recent = nil }
+
     private var task: Task<Bool, Never>?
     private var generation = 0
     /// The last browser login of ChatGPT worked and only the model list failed: one retry reuses that login.
@@ -151,10 +172,18 @@ final class FirstRunModel {
             hasDetected = true
             return
         }
-        async let status = ClaudeCode.shared.status()
-        async let servers = LocalServerProbe.running()
-        claude = await status
-        localServers = await servers
+        guard !isDetecting else { return }
+        isDetecting = true
+        defer { isDetecting = false }
+        if let recent = Self.recent, recent.at.duration(to: .now) < Self.recentWindow {
+            claude = recent.claude
+            localServers = recent.servers
+        } else {
+            let found = await lookup()
+            Self.recent = (.now, found.claude, found.servers)
+            claude = found.claude
+            localServers = found.servers
+        }
         readyPath = FirstRunOffer.resolve(claude: claude) != nil
         hasDetected = true
     }

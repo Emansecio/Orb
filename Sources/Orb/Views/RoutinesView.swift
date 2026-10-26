@@ -861,9 +861,35 @@ struct RoutineEditor: View {
         }
     }
 
+    /// What the schedule has to say about itself: its problem and the line with the next runs. `problem()` and `preview(of:)`
+    /// walk the calendar (a cron line can scan up to 8 years of days), so they are worked out when the schedule changes
+    /// (`.task(id: draftSchedule)`), not on every render, which a keystroke in the cron field repeats several times.
+    private struct ScheduleCheck {
+        var problem: String?
+        var preview: String
+        init(_ schedule: Schedule) {
+            problem = schedule.problem()
+            preview = RoutineText.preview(of: schedule)
+        }
+    }
+
+    /// nil until the first pass; the getters below compute directly then, so the first frame is never empty.
+    @State private var scheduleCheck: ScheduleCheck?
+
     /// Why the schedule cannot be saved; a routine saved earlier with a moment now past is not this editor's to block.
     private var scheduleProblem: String? {
-        !isNew && draftSchedule == routine.schedule ? nil : draftSchedule.problem()
+        if !isNew && draftSchedule == routine.schedule { return nil }
+        return (scheduleCheck ?? ScheduleCheck(draftSchedule)).problem
+    }
+
+    /// Refreshes `scheduleCheck` after the schedule changes. A cron line is typed key by key, so it waits for a pause.
+    private func refreshScheduleCheck() async {
+        let schedule = draftSchedule
+        if case .cron = schedule {
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+        }
+        scheduleCheck = ScheduleCheck(schedule)
     }
 
     /// The cron line in words, when it parses and is one of the common ones.
@@ -991,6 +1017,7 @@ struct RoutineEditor: View {
             Text("A rotina e o histórico dela serão apagados. Não dá para desfazer.")
         }
         .onAppear(perform: load)
+        .task(id: draftSchedule) { await refreshScheduleCheck() }
     }
 
     /// What the footer says: what is missing. The "will wait for approval" case lives only in the warning above.
@@ -1006,7 +1033,7 @@ struct RoutineEditor: View {
         if !isNew, draftSchedule == routine.schedule {
             return RoutineText.preview(nextRun: routine.nextRun)
         }
-        return RoutineText.preview(of: draftSchedule)
+        return (scheduleCheck ?? ScheduleCheck(draftSchedule)).preview
     }
 
     private var advancedExplanation: String {
@@ -1092,8 +1119,9 @@ struct RoutineEditor: View {
     }
 
     private func save() {
-        guard hasPrompt, !lacksGoal, scheduleProblem == nil else { return }
         let schedule = draftSchedule
+        // Checked again here, not from `scheduleCheck`, which may still wait for the pause after a keystroke.
+        guard hasPrompt, !lacksGoal, (!isNew && schedule == routine.schedule) || schedule.problem() == nil else { return }
         routine.name = RoutineText.resolvedName(routine.name, prompt: routine.prompt)
         routine.goal = tracksGoal ? RoutineGoal(target: String(trimmedGoal.prefix(RoutineGoal.targetLimit))) : nil
         if schedule != routine.schedule {

@@ -13,7 +13,10 @@ struct ModelPopover: View {
     /// Providers the user folded (or that start folded because the list is long).
     @State private var folded: Set<ProviderKind> = []
     @State private var didSetFolds = false
-    @State private var listHeight: CGFloat = 320
+    /// The list's measured height, already capped: a long list re-measures as rows come and go, and only a change under the
+    /// cap needs to redraw the popover.
+    @State private var listHeight = ModelPopover.maxListHeight
+    private nonisolated static let maxListHeight: CGFloat = 320
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -62,10 +65,10 @@ struct ModelPopover: View {
                     }
                 }
                 .padding(.bottom, 4)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { listHeight = $0 }
+                .onGeometryChange(for: CGFloat.self) { min($0.size.height, Self.maxListHeight) } action: { listHeight = $0 }
             }
             // A short list ends where it ends; only a long one fills the popover and scrolls.
-            .frame(height: min(listHeight, 320))
+            .frame(height: listHeight)
             Divider()
             Button {
                 done()

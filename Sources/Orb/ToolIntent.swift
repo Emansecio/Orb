@@ -466,8 +466,11 @@ extension ToolCall {
     var isCommand: Bool { Self.commandTitles[title] != nil }
 
     /// The title and the detail the line leaves out, for when it opens (nil: the line says it all).
-    var hiddenDetail: (title: String, detail: String)? {
-        guard lineWords.hidesDetail, !detail.isEmpty else { return nil }
+    var hiddenDetail: (title: String, detail: String)? { hiddenDetail(given: lineWords) }
+
+    /// The same, for a caller that already has the line's words (`lineWords` is built from the detail each time it is read).
+    func hiddenDetail(given words: LineWords) -> (title: String, detail: String)? {
+        guard words.hidesDetail, !detail.isEmpty else { return nil }
         return (title, detail)
     }
 }

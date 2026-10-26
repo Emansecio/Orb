@@ -36,6 +36,9 @@ struct ConnectorsView: View {
             }
         }
         .background(Palette.canvas)
+        // Once per visit to the page, not per tab: checking Gmail sends an Apple Event to Mail. Both the gallery and the
+        // installed list show these states.
+        .task { await model.refreshLocalStates() }
         .navigationTitle("Conectores")
         .navigationSubtitle("Dão novas ferramentas aos Orbs, como Gmail, Agenda, Slack e GitHub")
         .toolbar {

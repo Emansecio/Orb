@@ -237,6 +237,23 @@ struct GrokMarketplaceTests {
         #expect(GrokMarketplace.categoryLabel("Astrology") == "Astrology")
     }
 
+    @Test func theGalleryIndexAnswersAsTheFilterDoes() {
+        let bots = [
+            MarketplaceBot(id: "a", name: "Researchy", creatorName: "Farzad", summary: "A research desk.", categories: ["Engineering"]),
+            MarketplaceBot(id: "b", name: "SEO Desk", creatorName: "Mia", summary: "Pesquisa de palavras e páginas.", categories: ["Marketing", "From Grok Bot Team"]),
+            MarketplaceBot(id: "c", name: "Outbound", creatorName: "Leo", summary: "Writes the first research-backed message.", categories: ["Marketing"]),
+            MarketplaceBot(id: "d", name: "Écran", creatorName: "Ana", description: "Sem resumo, só descrição.", categories: []),
+        ]
+        let index = MarketplaceIndex(bots)
+        #expect(index.categories == GrokMarketplace.categories(in: bots))
+        for query in ["", "  ", "RESEARCH", "pesquisa paginas", "mia", "research", "ecran", "descricao", "nada disso"] {
+            for category in [nil, "Marketing", "Engineering", "Sales"] {
+                #expect(index.filter(query: query, category: category).map(\.id)
+                        == GrokMarketplace.filter(bots, query: query, category: category).map(\.id), "\(query) / \(category ?? "-")")
+            }
+        }
+    }
+
     @Test func theListIsReadOnceForAWhile() async throws {
         let html = try page([researchy, listed.merging(["id": "other", "name": "Other", "categories": ["Sales"], "color": "violet"]) { $1 }])
         let fetches = Fetches()

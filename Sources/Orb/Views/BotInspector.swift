@@ -89,6 +89,9 @@ struct BotInspector: View {
                 instructionFile = await FolderInstructions.loadInBackground(from: bot.workingURL)
             }
             .task(id: FilesKey(bot: bot.id, folder: bot.workingDirectory, refresh: filesRefresh)) {
+                // Only the Pasta tab uses the listing (state, chips and files), and the read is a scan plus `git status`:
+                // the other tabs skip it. Coming back to the tab bumps `filesRefresh`, which runs this again.
+                guard tab == .folder else { return }
                 // Always read the folder again: the cached snapshot (up to a minute old) may not show what changed
                 // outside the app while the panel was closed.
                 let result = await WorkspaceFiles.load(botID: bot.id, folder: bot.workingURL, refresh: true)

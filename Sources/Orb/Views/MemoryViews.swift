@@ -26,7 +26,9 @@ struct MemoryTab: View {
         let truncates = query.isEmpty && memory.items.count > MemoryGroups.searchableAbove
 
         Section {
-            IdentityBlock(memory: memory, name: name, canSummarize: model.bot(botID)?.permissionMode != .readOnly, edit: editIdentity,
+            // From this Orb's own `permission` (assigned only when it changes), not `model.bot(_:)`: that reads the list of
+            // all Orbs and would redo this body whenever any of them changes.
+            IdentityBlock(memory: memory, name: name, canSummarize: model.live(botID).permission.mode != .readOnly, edit: editIdentity,
                           restartInterview: { model.restartInterview(of: botID) })
         } header: {
             Text("Como \(name) funciona").sectionTitleStyle()

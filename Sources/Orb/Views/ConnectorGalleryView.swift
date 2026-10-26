@@ -33,7 +33,6 @@ struct ConnectorGalleryView: View {
             }
             .pageColumn()
         }
-        .task { await model.refreshLocalStates() }
     }
 
     private func status(of service: ConnectorService) -> ServiceStatus {

@@ -154,6 +154,7 @@ struct ImportPanel: View {
                     if let draft, source.made(draft) {
                         ImportPreview(imported: Binding(get: { draft }, set: { self.draft = $0 }), step: source == .assistant ? 3 : 2,
                                       onKind: { read(text: draft.freeText, asInstructions: $0) })
+                            .equatable()
                             .id(Self.previewID)
                             .transition(.adapted(.rise, reduceMotion: reduceMotion))
                     }
@@ -508,10 +509,17 @@ private struct StepLabel: View {
 // MARK: - Preview
 
 /// What would be imported, each item with a checkbox. Items that look like orders to the Orb start unchecked.
-private struct ImportPreview: View {
+///
+/// Equatable on what it draws: the panel's body runs on every key typed in the answer field, and its `Binding` and
+/// closure are new values each time, so without this the preview would redo `plan()` and every row's `shown` per key.
+private struct ImportPreview: View, Equatable {
     @Binding var imported: OrbImport
     let step: Int
     let onKind: @MainActor @Sendable (Bool) -> Void
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        MainActor.assumeIsolated { lhs.step == rhs.step && lhs.imported == rhs.imported }
+    }
 
     var body: some View {
         let plan = imported.plan()

@@ -631,3 +631,57 @@ struct ModelSearchTests {
         #expect(ModelSearch.submitted(choices("zzz"), query: "zzz", allowsDefault: true) == nil)
     }
 }
+
+/// `detect` is shared by the welcome screen, its card and the banner of every chat: it must not run twice at once, and a
+/// new model (a new Orb's banner) must reuse a recent look instead of running `claude auth status` again.
+@MainActor
+@Suite(.serialized)
+struct FirstRunDetectionTests {
+    private actor Counter {
+        private(set) var count = 0
+        func add() { count += 1 }
+    }
+
+    private func steps(counter: Counter, gate: TestGate? = nil, servers: [ProviderKind] = [.ollama]) -> FirstRunModel {
+        let steps = FirstRunModel()
+        steps.lookup = {
+            await counter.add()
+            await gate?.wait()
+            return (ClaudeCodeStatus(isInstalled: true), servers)
+        }
+        return steps
+    }
+
+    @Test func aSecondDetectWhileOneIsUnderWayDoesNotLookAgain() async {
+        FirstRunModel.forgetRecentDetection()
+        defer { FirstRunModel.forgetRecentDetection() }
+        let counter = Counter(), gate = TestGate()
+        let model = steps(counter: counter, gate: gate)
+        let first = Task { await model.detect() }
+        await waitUntil("the look to start") { model.isDetecting }
+        await model.detect()
+        #expect(!model.hasDetected, "the second call returns at once; the first one is still looking")
+        await gate.open()
+        await first.value
+        #expect(model.hasDetected && !model.isDetecting)
+        #expect(model.localServers == [.ollama])
+        #expect(await counter.count == 1)
+    }
+
+    @Test func aNewModelReusesARecentLookAndAnOldOneLooksAgain() async {
+        FirstRunModel.forgetRecentDetection()
+        defer { FirstRunModel.forgetRecentDetection() }
+        let counter = Counter()
+        await steps(counter: counter).detect()
+        let next = steps(counter: counter, servers: [])
+        await next.detect()
+        #expect(await counter.count == 1)
+        #expect(next.hasDetected && next.claude?.isInstalled == true)
+        #expect(next.localServers == [.ollama], "the recent result, not what this model's own lookup would say")
+        FirstRunModel.forgetRecentDetection()
+        let later = steps(counter: counter, servers: [])
+        await later.detect()
+        #expect(await counter.count == 2)
+        #expect(later.localServers.isEmpty)
+    }
+}

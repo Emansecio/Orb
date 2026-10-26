@@ -165,6 +165,17 @@ struct ToolIntentTests {
         #expect(call.hiddenDetail?.title == "Rodando no Terminal" && call.hiddenDetail?.detail == "python3 - <<'EOF'")
     }
 
+    @Test func theHiddenDetailGivenTheLineWordsIsTheSameAsReadingThemAgain() {
+        let call = shell("python3 - <<'EOF'", intent: "Ler o histórico")
+        let given = call.hiddenDetail(given: call.lineWords)
+        #expect(given?.title == call.hiddenDetail?.title && given?.detail == call.hiddenDetail?.detail)
+        // Nothing hidden: a line that says it all, or a call with no detail.
+        let search = ToolCall(kind: .shell, title: "Pesquisando", detail: "swiftui shimmer", state: .done)
+        #expect(search.hiddenDetail(given: search.lineWords) == nil)
+        let bare = shell("")
+        #expect(bare.hiddenDetail(given: bare.lineWords) == nil)
+    }
+
     @Test func aCommandWithNoDescriptionIsSaidByTheCommandItself() {
         #expect(shell("swift build --jobs 6").lineWords == ToolCall.LineWords(main: "Rodou", code: "swift build --jobs 6", hidesDetail: true))
         #expect(shell("swift build", .running).lineWords.main == "Rodando")

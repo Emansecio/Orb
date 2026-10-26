@@ -4,6 +4,40 @@ import SwiftUI
 // "Importar de outro assistente → Marketplace do Grok Bot": the marketplace's bots to pick from, with a search and the
 // marketplace's categories. Picking one reads its page into the same preview a pasted link gets (`ImportPanel`).
 
+/// The catalog with what the gallery needs from it worked out once, when the list loads: the folded text each search
+/// looks through and the category chips. Folding every bot's text and counting categories on each keystroke is work
+/// the list does not change.
+struct MarketplaceIndex: Equatable {
+    let bots: [MarketplaceBot]
+    let categories: [String]
+    /// Parallel to `bots`.
+    private let searchable: [String]
+    private let foldedNames: [String]
+
+    init(_ bots: [MarketplaceBot]) {
+        self.bots = bots
+        categories = GrokMarketplace.categories(in: bots)
+        searchable = bots.map { MemoryText.fold([$0.name, $0.summary, $0.description, $0.creatorName].joined(separator: " ")) }
+        foldedNames = bots.map { MemoryText.fold($0.name) }
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.bots == rhs.bots }
+
+    /// Same answer as `GrokMarketplace.filter`, over the folded text kept at load.
+    func filter(query: String, category: String?) -> [MarketplaceBot] {
+        let words = MemoryText.fold(query).split(whereSeparator: \.isWhitespace).map(String.init)
+        var starts: [MarketplaceBot] = [], others: [MarketplaceBot] = []
+        for index in bots.indices {
+            let bot = bots[index]
+            if let category, !bot.categories.contains(category) { continue }
+            if words.isEmpty { others.append(bot); continue }
+            guard words.allSatisfy({ searchable[index].contains($0) }) else { continue }
+            if foldedNames[index].hasPrefix(words[0]) { starts.append(bot) } else { others.append(bot) }
+        }
+        return starts + others
+    }
+}
+
 struct MarketplaceGallery: View {
     /// The page of the bot in the preview, and of the one being read (links, as `OrbImport.link`).
     let chosen: String?
@@ -16,10 +50,10 @@ struct MarketplaceGallery: View {
     private enum Load: Equatable {
         case loading
         case failed(String)
-        case loaded([MarketplaceBot])
+        case loaded(MarketplaceIndex)
     }
 
-    @State private var load: Load = MarketplaceGallery.preloaded.map { .loaded($0) } ?? .loading
+    @State private var load: Load = MarketplaceGallery.preloaded.map { .loaded(MarketplaceIndex($0)) } ?? .loading
     @State private var query = ""
     @State private var category: String?
     @State private var attempt = 0
@@ -47,18 +81,19 @@ struct MarketplaceGallery: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(14)
                 .card(radius: Radius.card)
-            case .loaded(let bots):
-                gallery(bots)
+            case .loaded(let index):
+                gallery(index)
             }
         }
         .task(id: attempt) { await fetch() }
     }
 
-    private func gallery(_ bots: [MarketplaceBot]) -> some View {
-        let shown = GrokMarketplace.filter(bots, query: query, category: category)
+    private func gallery(_ index: MarketplaceIndex) -> some View {
+        let bots = index.bots
+        let shown = index.filter(query: query, category: category)
         return VStack(alignment: .leading, spacing: 10) {
             searchField
-            categoryChips(GrokMarketplace.categories(in: bots))
+            categoryChips(index.categories)
             ScrollView {
                 LazyVStack(spacing: 2) {
                     ForEach(shown, id: \.id) { bot in
@@ -128,14 +163,14 @@ struct MarketplaceGallery: View {
     private func fetch() async {
         if case .loaded = load { return }
         load = .loading
-        let outcome = await Task.detached(priority: .userInitiated) { () -> Result<[MarketplaceBot], MarketplaceFailure> in
-            do { return .success(try await GrokMarketplace.catalog()) } catch {
+        let outcome = await Task.detached(priority: .userInitiated) { () -> Result<MarketplaceIndex, MarketplaceFailure> in
+            do { return .success(MarketplaceIndex(try await GrokMarketplace.catalog())) } catch {
                 return .failure(error as? MarketplaceFailure ?? .unreadable)
             }
         }.value
         guard !Task.isCancelled else { return }
         switch outcome {
-        case .success(let bots): load = .loaded(bots)
+        case .success(let index): load = .loaded(index)
         case .failure(let failure): load = .failed(failure.errorDescription ?? "")
         }
     }

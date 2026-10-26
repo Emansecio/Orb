@@ -838,16 +838,19 @@ struct ToolCallLine: View {
     /// Review snapshots cannot press the line: they draw every action open.
     static var opensInSnapshots = false
 
-    private struct PermissionKey: Equatable { var state: ToolCall.State; var output: String? }
+    /// The output's length, not the output: it is set once when the call ends, and comparing a 20,000-character string on
+    /// every render would cost more than the search it guards.
+    private struct PermissionKey: Equatable { var state: ToolCall.State; var outputLength: Int? }
 
     var body: some View {
         // What the line says (see `ToolCall.lineWords`): what the action is for, or its verb and what it acted on.
         let words = call.lineWords
-        let hidden = call.hiddenDetail
+        let hidden = call.hiddenDetail(given: words)
         let canOpen = call.output != nil || hidden != nil
-        // How a command ended, read off its output (`CommandOutput`): only once it ended, and only for a command.
-        let ended = call.isCommand && call.state != .running ? call.output.map(CommandOutput.init) : nil
         let failed = call.state == .failed
+        // How a command ended, read off its output (`CommandOutput`, which copies up to 20,000 characters): only once it
+        // ended and only for a command, and only where it is used: the open block, or the code beside a failed line.
+        let ended = call.isCommand && call.state != .running && (isExpanded || failed) ? call.output.map(CommandOutput.init) : nil
         let time = call.state == .running ? nil : call.duration.map(ElapsedFormat.duration)
         let meta = [failed ? ended?.lineNote : nil, time].compactMap { $0 }.joined(separator: " · ")
         VStack(alignment: .leading, spacing: 6) {
@@ -929,7 +932,7 @@ struct ToolCallLine: View {
             }
         }
         .padding(.leading, gutter)
-        .task(id: PermissionKey(state: call.state, output: call.state == .running ? nil : call.output)) {
+        .task(id: PermissionKey(state: call.state, outputLength: call.state == .running ? nil : call.output?.utf8.count)) {
             permissionProblem = call.permissionProblemToShow
         }
     }

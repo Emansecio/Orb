@@ -55,9 +55,11 @@ struct ComposerView: View {
 
     var body: some View {
         let lane = lane
-        let hintText = hint(lane)
+        let situation = Situation(live: model.live(botID), workingChat: model.workingChatTitle(botID),
+                                  routineName: model.runningRoutineName(botID), holdsRoutine: model.holdsRoutine(botID))
+        let hintText = hint(lane, situation)
         VStack(spacing: 0) {
-            card(lane, hint: hintText)
+            card(lane, hint: hintText, situation)
             Text(hintText)
                 .font(Typography.small)
                 .foregroundStyle(Palette.muted)
@@ -80,7 +82,11 @@ struct ComposerView: View {
         .background {
             LinearGradient(colors: [Palette.canvas.opacity(0), Palette.canvas], startPoint: .top, endPoint: .init(x: 0.5, y: 0.35))
         }
-        .background { shortcuts }
+        .background {
+            // Its own view: it reads the transcript (the steered messages), which this body must not observe.
+            ComposerShortcuts(botID: botID, isQueueing: isQueueing, canSend: canSend, queuedCount: lane.queued.count,
+                              pendingPictures: lane.pendingPictures, isEditing: isEditing, isModelOpen: $isModelOpen)
+        }
         .background { ApprovalKeyMonitor(handler: handleKey) }
         .background { ContextGaugeDriver(botID: botID, gauge: gauge) }
         .confirmationDialog(RewindWords.editTitle, isPresented: $isConfirmingEdit, titleVisibility: .visible) {
@@ -125,14 +131,14 @@ struct ComposerView: View {
 
     // MARK: Card
 
-    private func card(_ lane: ComposerLane, hint hintText: String) -> some View {
+    private func card(_ lane: ComposerLane, hint hintText: String, _ situation: Situation) -> some View {
         let matches = slashMatches
-        let jobs = model.live(botID).jobs
+        let jobs = situation.live.jobs
         return VStack(alignment: .leading, spacing: 10) {
-            if model.holdsRoutine(botID) {
-                RoutineStrip(botID: botID, routineName: model.runningRoutineName(botID))
+            if situation.holdsRoutine {
+                RoutineStrip(botID: botID, routineName: situation.routineName)
                     .transition(.adapted(.unfold, reduceMotion: reduceMotion))
-            } else if let working = model.workingChatTitle(botID) {
+            } else if let working = situation.workingChat {
                 ElsewhereStrip(botID: botID, chatTitle: working)
                     .transition(.adapted(.unfold, reduceMotion: reduceMotion))
             }
@@ -156,13 +162,13 @@ struct ComposerView: View {
             // would keep the caret in view but take no scrolling, so the caret is followed here (`ComposerCaretFollower`).
             ScrollView(.vertical) {
                 // The prompt in `faint`, the placeholder gray the palette names (the system's own is fainter).
-                TextField(text: draft, prompt: Text(placeholder).foregroundStyle(Palette.faint), axis: .vertical) { Text(placeholder) }
+                TextField(text: draft, prompt: Text(placeholder(situation.live)).foregroundStyle(Palette.faint), axis: .vertical) { Text(placeholder(situation.live)) }
                     .textFieldStyle(.plain)
                     .font(Palette.conversationFont)
                     .foregroundStyle(Palette.ink)
                     .focused($isFocused)
                     // The line under the card is hidden from VoiceOver (it would be read twice); the keys it names are said here.
-                    .accessibilityHint(ComposerHint.spoken(hintText.isEmpty && showsIdleKeys(lane) ? ComposerHint.idleKeys : hintText))
+                    .accessibilityHint(ComposerHint.spoken(hintText.isEmpty && showsIdleKeys(lane, isWorking: situation.live.isWorking) ? ComposerHint.idleKeys : hintText))
                     .onSubmit { send() }
                     .onKeyPress(.upArrow) { moveSlash(-1) }
                     .onKeyPress(.downArrow) { moveSlash(1) }
@@ -180,7 +186,7 @@ struct ComposerView: View {
             .frame(height: min(max(fieldHeight, ComposerField.lineHeight), ComposerField.maxHeight))
             .background { ComposerCaretFollower() }
 
-            bar
+            bar(situation)
         }
         .padding(.horizontal, 12)
         .padding(.top, 12)
@@ -190,7 +196,7 @@ struct ComposerView: View {
         .animation(reduceMotion ? Motion.fade : Motion.content,
                    value: CardParts(suggestions: !matches.isEmpty, strip: lane.hasAttachments || lane.pendingPictures > 0,
                                     error: lane.error != nil, banner: lane.editing != nil, jobs: jobs.count,
-                                    routine: model.holdsRoutine(botID) || model.workingChatTitle(botID) != nil))
+                                    routine: situation.holdsRoutine || situation.workingChat != nil))
         // The shadow belongs to the background alone: on the whole card every key in the field re-rendered the text,
         // chips and buttons into an offscreen pass to cast it.
         // Reads the dictation's phase, never its level: the card does not re-render with the voice.
@@ -251,22 +257,22 @@ struct ComposerView: View {
         .accessibilityElement(children: .contain)
     }
 
-    private var placeholder: LocalizedStringKey {
+    private func placeholder(_ live: BotLive) -> LocalizedStringKey {
         if isQueueing { return "Escreva para orientar o Orb enquanto ele trabalha" }
         // Free or running a routine (the strip above the field says so): the same short line, naming the Orb.
-        return LocalizedStringKey(ComposerAction.placeholder(orbName: model.live(botID).look.name))
+        return LocalizedStringKey(ComposerAction.placeholder(orbName: live.look.name))
     }
 
     /// The line under the card: how the keys work, shown only when it helps and nothing else is being said.
-    private func hint(_ lane: ComposerLane) -> String {
+    private func hint(_ lane: ComposerLane, _ situation: Situation) -> String {
         if let dictating = DictationButton.hint(model.dictation, botID: botID) { return dictating }
         if isQueueing, hasContent {
-            return ComposerHint.queueing(needsYou: model.live(botID).needsYou,
+            return ComposerHint.queueing(needsYou: situation.live.needsYou,
                                          typesInComposer: isFocused && hasText, compact: isCompact)
         }
-        if isWorking {
+        if situation.live.isWorking {
             guard hasContent, model.canQueue(botID) else { return "" }
-            return model.workingChatTitle(botID) == nil ? "↩ envia quando a rotina terminar" : "↩ envia quando a outra conversa terminar"
+            return situation.workingChat == nil ? "↩ envia quando a rotina terminar" : "↩ envia quando a outra conversa terminar"
         }
         // "Esc cancela" is said once, in the banner above the field, with its button.
         if isEditing { return "↩ envia a edição" }
@@ -276,7 +282,7 @@ struct ComposerView: View {
     }
 
     /// An empty, free field with the focus: VoiceOver says how the keys work, which the line under the card no longer does.
-    private func showsIdleKeys(_ lane: ComposerLane) -> Bool {
+    private func showsIdleKeys(_ lane: ComposerLane, isWorking: Bool) -> Bool {
         isFocused && !isWorking && !isEditing && !hasContent && !lane.hasAttachments
     }
 
@@ -322,9 +328,9 @@ struct ComposerView: View {
 
     // MARK: Bar
 
-    private var bar: some View {
-        let waitsOnChain = model.live(botID).chainWork != nil
-        let action = ComposerAction.current(isWorking: isWorking, canSend: canSend, waitsOnChain: waitsOnChain)
+    private func bar(_ situation: Situation) -> some View {
+        let waitsOnChain = situation.live.chainWork != nil
+        let action = ComposerAction.current(isWorking: situation.live.isWorking, canSend: canSend, waitsOnChain: waitsOnChain)
         let secondaryStop = action.showsSecondaryStop(waitsOnChain: waitsOnChain)
         return HStack(spacing: 2) {
             ComposerPlusMenu(botID: botID, attach: { isImporting = true }) { insert("/\($0) ") }
@@ -333,7 +339,7 @@ struct ComposerView: View {
             ContextMeterChip(botID: botID, gauge: gauge, compact: isCompact)
             ModelChip(botID: botID, isOpen: $isModelOpen)
             if Dictation.isSupported { DictationButton(botID: botID) }
-            actionButtons(action, secondaryStop: secondaryStop)
+            actionButtons(action, secondaryStop: secondaryStop, situation)
         }
         .foregroundStyle(Palette.muted)
         // Stop stepping in or out moves the whole row: the model and meter chips slide with it (34-38 pt, 0.25 s)
@@ -344,9 +350,9 @@ struct ComposerView: View {
     /// One round button that is Send or Stop: its symbol is swapped (not the button), so the change reads as the same
     /// control changing meaning. While the Orb works and a message is typed, Stop steps back beside it as a plain round
     /// icon (like "+" and the microphone), so the white button is the one thing the eye finds, and it queues the message.
-    @ViewBuilder private func actionButtons(_ action: ComposerAction, secondaryStop: Bool) -> some View {
-        let routine = model.runningRoutineName(botID)
-        let elsewhere = model.workingChatTitle(botID) != nil
+    @ViewBuilder private func actionButtons(_ action: ComposerAction, secondaryStop: Bool, _ situation: Situation) -> some View {
+        let routine = situation.routineName
+        let elsewhere = situation.workingChat != nil
         HStack(spacing: 6) {
             if secondaryStop {
                 Button("Parar", systemImage: "stop.fill") { model.stopTurn(botID) }
@@ -388,33 +394,6 @@ struct ComposerView: View {
         .accessibilityActions {
             if action == .queue, model.canSteer(botID) { Button("Enviar para depois da tarefa") { send(delivery: .afterTask) } }
         }
-    }
-
-    /// Shortcuts that belong to the composer without a visible button: ⌘↩ to stop and send, ⇧⌘M for the model list.
-    private var shortcuts: some View {
-        ZStack {
-            Button("Parar e enviar") {
-                guard model.dictation.isActive(for: botID) else { return model.stopAndSend(botID, draft: draft.wrappedValue) }
-                Task {
-                    await model.dictation.finish()
-                    model.stopAndSend(botID, draft: draft.wrappedValue)
-                }
-            }
-                .keyboardShortcut(AppShortcut.commandReturn)
-                // What waits counts the messages that reached the task unanswered too: their bubble left the queue already.
-                .disabled(!ComposerAction.stopAndSendEnabled(isQueueing: isQueueing, canSend: canSend,
-                                                             queuedCount: lane.queued.count + model.unansweredSteered(of: botID).count,
-                                                             pendingPictures: lane.pendingPictures, isEditing: isEditing,
-                                                             needsYou: model.live(botID).needsYou))
-            Button("Escolher modelo") { isModelOpen.toggle() }
-                .keyboardShortcut(AppShortcut.chooseModel)
-            // No button takes Esc for the edit (as `.cancelAction`): a key equivalent runs before the field that has the
-            // focus sees the key, so it would also have taken the Esc of the skill list, of the search bar and of the
-            // permission card's note. The field's own handler (`handleEscape`) and the banner's button give the edit up.
-        }
-        .opacity(0)
-        .frame(width: 0, height: 0)
-        .accessibilityHidden(true)
     }
 
     // MARK: Slash suggestions
@@ -578,6 +557,56 @@ struct ComposerView: View {
     }
 }
 
+/// What the body asks of the model about the Orb, once per render instead of once per place that shows it.
+private struct Situation {
+    let live: BotLive
+    /// The title of the conversation a turn still works on after another was opened.
+    let workingChat: String?
+    let routineName: String?
+    let holdsRoutine: Bool
+}
+
+/// Shortcuts that belong to the composer without a visible button: ⌘↩ to stop and send, ⇧⌘M for the model list. A view of
+/// its own because the steered messages come from the transcript: read in the composer's body, every step of a turn would
+/// render the whole composer; here it renders two hidden buttons.
+private struct ComposerShortcuts: View {
+    @Environment(AppModel.self) private var model
+    let botID: UUID
+    let isQueueing: Bool
+    let canSend: Bool
+    let queuedCount: Int
+    let pendingPictures: Int
+    let isEditing: Bool
+    @Binding var isModelOpen: Bool
+
+    var body: some View {
+        ZStack {
+            Button("Parar e enviar") {
+                // The draft is read when the key is pressed, not on every render.
+                guard model.dictation.isActive(for: botID) else { return model.stopAndSend(botID, draft: model.draftText(botID)) }
+                Task {
+                    await model.dictation.finish()
+                    model.stopAndSend(botID, draft: model.draftText(botID))
+                }
+            }
+                .keyboardShortcut(AppShortcut.commandReturn)
+                // What waits counts the messages that reached the task unanswered too: their bubble left the queue already.
+                .disabled(!ComposerAction.stopAndSendEnabled(isQueueing: isQueueing, canSend: canSend,
+                                                             queuedCount: queuedCount + model.unansweredSteered(of: botID).count,
+                                                             pendingPictures: pendingPictures, isEditing: isEditing,
+                                                             needsYou: model.live(botID).needsYou))
+            Button("Escolher modelo") { isModelOpen.toggle() }
+                .keyboardShortcut(AppShortcut.chooseModel)
+            // No button takes Esc for the edit (as `.cancelAction`): a key equivalent runs before the field that has the
+            // focus sees the key, so it would also have taken the Esc of the skill list, of the search bar and of the
+            // permission card's note. The field's own handler (`handleEscape`) and the banner's button give the edit up.
+        }
+        .opacity(0)
+        .frame(width: 0, height: 0)
+        .accessibilityHidden(true)
+    }
+}
+
 /// What the composer's card holds besides the field: the things whose coming and going changes its height.
 private struct CardParts: Equatable {
     var suggestions: Bool
@@ -671,15 +700,16 @@ private struct RoundActionStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
+        let press = ComposerAction.pressVisual(pressed: configuration.isPressed, reduceMotion: reduceMotion)
+        return configuration.label
             .labelStyle(.iconOnly)
             .font(.system(size: 13, weight: .bold))
             .foregroundStyle(Palette.onInk)
             .frame(width: 28, height: 28)
             .background(Palette.ink.opacity(isEnabled ? 1 : 0.25), in: .circle)
             .animation(Motion.availability(reduceMotion: reduceMotion), value: isEnabled)
-            .scaleEffect(ComposerAction.pressVisual(pressed: configuration.isPressed, reduceMotion: reduceMotion).scale)
-            .opacity(ComposerAction.pressVisual(pressed: configuration.isPressed, reduceMotion: reduceMotion).opacity)
+            .scaleEffect(press.scale)
+            .opacity(press.opacity)
             .animation(reduceMotion ? nil : Motion.press, value: configuration.isPressed)
     }
 }

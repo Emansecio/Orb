@@ -37,6 +37,6 @@ extension AppModel {
             guard let installed = installedLocalConnector(kind) else { continue }
             states[kind] = await setup.state(of: kind, anyAccount: installed.anyAccount)
         }
-        localStates = states
+        if states != localStates { localStates = states } // same states: no write, so no view redraws
     }
 }
