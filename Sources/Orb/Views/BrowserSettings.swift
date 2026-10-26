@@ -157,48 +157,20 @@ private struct SearchKeySection: View {
     @State private var hasKey: Bool?
     @State private var isReplacing = false
     @State private var failure: String?
-    @FocusState private var focused: Bool
 
     private var keys: SearchKeys { SearchKeys(vault: model.secretVault) }
 
     var body: some View {
         Section {
-            LabeledContent("Chave do TinyFish") {
-                if hasKey == true && !isReplacing {
-                    HStack(spacing: 10) {
-                        Label("Chave salva", systemImage: "checkmark.circle.fill").foregroundStyle(Palette.ok)
-                        Button("Trocar") {
-                            isReplacing = true
-                            focused = true
-                        }
-                        .help(Tip.replaceKey)
-                        Button("Apagar") { store("") }
-                            .help(Tip.deleteKey)
-                    }
-                    .buttonStyle(GhostStyle())
-                    .controlSize(.small)
-                } else {
-                    HStack {
-                        SecureField("Chave", text: $key, prompt: Text("Cole a chave"))
-                            .labelsHidden()
-                            .focused($focused)
-                            .onSubmit { save(key) }
-                        if !key.isEmpty {
-                            Button("Salvar") { save(key) }
-                                .help(Tip.saveKey)
-                                .chipButton()
-                        } else if isReplacing {
-                            Button("Cancelar") { isReplacing = false }
-                                .help(Tip.keepKey)
-                                .buttonStyle(GhostStyle())
-                                .controlSize(.small)
-                        } else if let page = SearchKeyCopy.keyPage {
-                            Link("Obter chave", destination: page)
-                                .help(Tip.getKey)
-                        }
-                    }
-                }
-            }
+            SavedKeyField(
+                title: "Chave do TinyFish",
+                hasKey: hasKey == true,
+                key: $key,
+                isReplacing: $isReplacing,
+                keyPage: SearchKeyCopy.keyPage,
+                onDelete: { store("") },
+                onSave: { save(key) }
+            )
             if let failure {
                 Label(failure, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)

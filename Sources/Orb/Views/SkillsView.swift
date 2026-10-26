@@ -177,25 +177,8 @@ private struct InstalledSkills: View {
 
     /// The same field as the catalog's search (without its ⌘F button: the tab bar owns the shortcut).
     private var filterField: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(Palette.faint)
-            TextField("Filtrar skills instaladas", text: $query)
-                .textFieldStyle(.plain)
-                .font(.system(size: 14))
-                .focused(filterFocused)
-            if !query.isEmpty {
-                Button("Limpar", systemImage: "xmark.circle.fill") { query = "" }
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.plain)
-                    .foregroundStyle(Palette.faint)
-                    .help(Tip.clearSearch)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .card(radius: Radius.card, stroke: filterFocused.wrappedValue ? Palette.lineStrong : Palette.line)
-        .padding(.bottom, 4)
+        SearchBox(label: "Filtrar skills instaladas", text: $query, isFocused: filterFocused)
+            .padding(.bottom, 4)
     }
 
     /// The skills the Orbs learned and proposed, from every Orb: nothing is saved until you read it and say so.
@@ -339,23 +322,14 @@ private struct InstalledSkillRow: View {
                 .labelsHidden()
                 .controlSize(.small)
                 .help(Tip.skillToggle(isOn: skill.isEnabled))
-            Menu {
+            MoreMenu(name: skill.name) {
                 Button("Editar…", action: onEdit)
                 if let folder = skill.folderURL {
                     Link("Ver no GitHub", destination: folder)
                 }
                 Divider()
                 Button("Apagar…", role: .destructive, action: onDelete)
-            } label: {
-                Image(systemName: "ellipsis")
-                    .frame(width: 26, height: 26)
-                    .contentShape(.rect)
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help(Tip.moreOptions(of: skill.name))
-            .accessibilityLabel("Mais opções de \(skill.name)")
         }
         .padding(Spacing.cardPadding)
         .card(radius: Radius.large)

@@ -136,15 +136,7 @@ struct WizardChatView: View {
                 .disabled(runner.isFinished || runner.hitLimit)
                 .onSubmit(submit)
                 .accessibilityLabel("Mensagem para o assistente de criação")
-            Button(action: submit) {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 24))
-                    .foregroundStyle(canSendNow ? Palette.ink : Palette.hint)
-            }
-            .buttonStyle(.plain)
-            .disabled(!canSendNow)
-            .help("Enviar (↩)")
-            .accessibilityLabel("Enviar")
+            SendArrowButton(canSend: canSendNow, help: "Enviar (↩)", action: submit)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)

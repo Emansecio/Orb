@@ -627,11 +627,7 @@ struct PictureChip: View {
     var body: some View {
         let name = URL(fileURLWithPath: image.path).lastPathComponent
         ImageThumbnail(path: image.path)
-            .overlay(alignment: .topTrailing) {
-                RemoveButton(label: "Remover " + name, symbol: "xmark.circle.fill", action: onRemove)
-                    .foregroundStyle(Palette.ink, Palette.canvas)
-                    .offset(x: 10, y: -10) // the 24 pt target is centered where the 14 pt symbol used to be
-            }
+            .removable(label: "Remover " + name, action: onRemove)
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Imagem anexada: " + name)
             .help(name)
@@ -662,6 +658,18 @@ struct RemoveButton: View {
     }
 }
 
+extension View {
+    /// The chip's remove button at its top trailing corner. The offset centers the 24 pt target where the 14 pt symbol
+    /// used to sit; every attachment chip shares it so they cannot drift apart.
+    func removable(label: String, action: @escaping () -> Void) -> some View {
+        overlay(alignment: .topTrailing) {
+            RemoveButton(label: label, symbol: "xmark.circle.fill", action: action)
+                .foregroundStyle(Palette.ink, Palette.canvas)
+                .offset(x: 10, y: -10)
+        }
+    }
+}
+
 /// A file waiting to be sent: the same card the chat shows once it is sent, with a remove button.
 private struct AttachmentChip: View {
     let file: AttachedFile
@@ -670,11 +678,7 @@ private struct AttachmentChip: View {
     var body: some View {
         FileCard(path: file.url.path, all: [file.url.path], style: .compact, minHeight: 56)
             .frame(width: 220)
-            .overlay(alignment: .topTrailing) {
-                RemoveButton(label: "Remover " + file.name, symbol: "xmark.circle.fill", action: onRemove)
-                    .foregroundStyle(Palette.ink, Palette.canvas)
-                    .offset(x: 10, y: -10)
-            }
+            .removable(label: "Remover " + file.name, action: onRemove)
     }
 }
 

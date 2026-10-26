@@ -122,7 +122,7 @@ struct OrbProposalCard: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             if isPending {
-                pendingCard.transition(.adapted(Self.leaving, reduceMotion: reduceMotion))
+                pendingCard.transition(.adapted(.cardLeaving, reduceMotion: reduceMotion))
             } else {
                 answeredCard.transition(.opacity)
             }
@@ -130,14 +130,11 @@ struct OrbProposalCard: View {
         .chatCard()
         .motion(Motion.content, value: request.decision)
         .motion(Motion.content, value: isEditing)
-        .background { if isPending { ApprovalKeyMonitor(handler: handleKey) } }
-        .task(id: pressed) { await answerPressed() }
+        .approvalKeys(botID: botID, approvalID: request.id, isActive: isPending, noteFocused: isTyping, pressed: $pressed,
+                      answer: answer)
         .accessibilityIdentifier("orb-proposal-card")
     }
 
-    private static var leaving: AnyTransition {
-        .asymmetric(insertion: .opacity, removal: .opacity.animation(Motion.exit))
-    }
 
     // MARK: Pending
 
@@ -575,36 +572,6 @@ struct OrbProposalCard: View {
 
     private func decline() {
         model.decide(.deny, approvalID: request.id, botID: botID)
-    }
-
-    /// ⌘↩ and Esc answer this card when it is the newest open one of the Orb being shown.
-    private func handleKey(_ event: NSEvent, in window: NSWindow) -> Bool {
-        guard model.selectedBot?.id == botID, model.newestPendingApprovalID(of: botID) == request.id,
-              !model.findFieldHasFocus else { return false }
-        let field = window.firstResponder as? NSTextView
-        let editing = ApprovalShortcut.isEditing(responderIsText: field != nil, hasText: field.map { !$0.string.isEmpty } ?? false,
-                                                 hasMarkedText: field?.hasMarkedText() ?? false, noteFocused: isTyping)
-        let typingInComposer = ApprovalShortcut.isTypingInComposer(isEditing: editing, noteFocused: isTyping)
-        guard let shortcut = ApprovalShortcut.resolve(keyCode: event.keyCode, modifiers: event.modifierFlags,
-                                                      isEditingText: editing, isTypingInComposer: typingInComposer) else { return false }
-        press(shortcut)
-        return true
-    }
-
-    private func press(_ shortcut: ApprovalShortcut) {
-        guard pressed == nil else { return }
-        if ApprovalShortcut.pressDelay(reduceMotion: reduceMotion) == .zero {
-            answer(shortcut)
-        } else {
-            pressed = shortcut
-        }
-    }
-
-    private func answerPressed() async {
-        guard let shortcut = pressed else { return }
-        try? await Task.sleep(for: ApprovalShortcut.pressDelay(reduceMotion: reduceMotion))
-        answer(shortcut)
-        pressed = nil
     }
 
     private func answer(_ shortcut: ApprovalShortcut) {

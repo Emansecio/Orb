@@ -24,11 +24,7 @@ struct WelcomeOfferView: View {
     var body: some View {
         VStack(spacing: 14) {
             if let name = run.connectedName {
-                Label("Pronto: \(name) conectado.", systemImage: "checkmark.circle.fill")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Palette.ok)
-                    .padding(.vertical, 6)
-                    .transition(.opacity)
+                FirstRunReadyLabel(name: name)
             } else {
                 mainAction
                 othersToggle

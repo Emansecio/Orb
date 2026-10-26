@@ -15,16 +15,18 @@ enum FoldMotion {
 /// The turning chevron at the end of a folding row. Under Reduce Motion it swaps its sign instead of turning.
 struct FoldChevron: View {
     let isOpen: Bool
+    /// The glyph's point size: 10 in the General tab's rows, 9 in the chat's lines.
+    var size: CGFloat = 10
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Image(systemName: reduceMotion && isOpen ? "chevron.down" : "chevron.right")
-            .font(.system(size: 10, weight: .semibold))
+            .font(.system(size: size, weight: .semibold))
             .foregroundStyle(Palette.faint)
             .rotationEffect(.degrees(!reduceMotion && isOpen ? 90 : 0))
             // It turns by itself: the row's part opens without an animation (`foldContent`).
-            .animation(reduceMotion ? nil : Motion.content, value: isOpen)
-            .frame(width: 12)
+            .animation(FoldMotion.animation(reduceMotion: reduceMotion), value: isOpen)
+            .frame(width: size + 2)
             .accessibilityHidden(true)
     }
 }

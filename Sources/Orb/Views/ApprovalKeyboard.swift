@@ -28,6 +28,16 @@ enum ApprovalShortcut: Equatable {
         }
     }
 
+    /// `resolve` for a key pressed with `responderIsText` &c. describing the window's first responder: the reading every card
+    /// repeated (is a field being edited, is it the composer, then what the key means).
+    static func resolve(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, responderIsText: Bool, hasText: Bool,
+                        hasMarkedText: Bool, noteFocused: Bool) -> ApprovalShortcut? {
+        let editing = isEditing(responderIsText: responderIsText, hasText: hasText, hasMarkedText: hasMarkedText,
+                                noteFocused: noteFocused)
+        return resolve(keyCode: keyCode, modifiers: modifiers, isEditingText: editing,
+                       isTypingInComposer: isTypingInComposer(isEditing: editing, noteFocused: noteFocused))
+    }
+
     // MARK: Feedback
 
     /// How long the button a shortcut stands for shows pressed before the card is answered: the beat of `Motion.press`,
@@ -49,6 +59,85 @@ enum ApprovalShortcut: Equatable {
 
     /// Whether the editing is in the main composer: a text field is being edited and it is not the card's note.
     static func isTypingInComposer(isEditing: Bool, noteFocused: Bool) -> Bool { isEditing && !noteFocused }
+}
+
+// MARK: The cards' shared wiring
+
+extension AnyTransition {
+    /// What an open approval card does when it is answered: fades out at the exit pace, whatever the animation of the change
+    /// (its record fades in at the content pace, so the two overlap).
+    static var cardLeaving: AnyTransition {
+        .asymmetric(insertion: .opacity, removal: .opacity.animation(Motion.exit))
+    }
+}
+
+/// The keyboard side of an approval card (permission, question, Orb proposal, hand-off): while `isActive` it listens for ⌘↩ and
+/// Esc and, when the card is the newest open one of the Orb being shown, answers through `answer`.
+private struct ApprovalKeys: ViewModifier {
+    @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    let botID: UUID
+    let approvalID: UUID?
+    let isActive: Bool
+    /// A text field of the card has the focus (Esc then belongs to it, and ⌘↩ answers from it).
+    let noteFocused: Bool
+    /// The button the key is pressing, which the card draws pressed; nil answers at once (a card with no buttons to press).
+    let pressed: Binding<ApprovalShortcut?>?
+    /// Whether the card can take this answer right now: a key that cannot be used is left to whoever else wants it.
+    let accepts: (ApprovalShortcut) -> Bool
+    let answer: @MainActor (ApprovalShortcut) -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .background { if isActive, approvalID != nil { ApprovalKeyMonitor(handler: handleKey) } }
+            .task(id: pressed?.wrappedValue) { await answerPressed() }
+    }
+
+    private func handleKey(_ event: NSEvent, in window: NSWindow) -> Bool {
+        // Esc in the find field closes the find bar, so the card stays out of it.
+        guard let approvalID, model.selectedBot?.id == botID, model.newestPendingApprovalID(of: botID) == approvalID,
+              !model.findFieldHasFocus else { return false }
+        let field = window.firstResponder as? NSTextView
+        guard let shortcut = ApprovalShortcut.resolve(keyCode: event.keyCode, modifiers: event.modifierFlags,
+                                                      responderIsText: field != nil, hasText: field.map { !$0.string.isEmpty } ?? false,
+                                                      hasMarkedText: field?.hasMarkedText() ?? false, noteFocused: noteFocused),
+              accepts(shortcut) else { return false }
+        press(shortcut)
+        return true
+    }
+
+    /// A shortcut shows its button pressed for a beat so the person sees what the key did, then answers. (Under Reduce Motion
+    /// nothing is pressed and the answer is immediate; a second press during the beat is ignored.)
+    private func press(_ shortcut: ApprovalShortcut) {
+        guard let pressed else { return answer(shortcut) }
+        guard pressed.wrappedValue == nil else { return }
+        if ApprovalShortcut.pressDelay(reduceMotion: reduceMotion) == .zero {
+            answer(shortcut)
+        } else {
+            pressed.wrappedValue = shortcut
+        }
+    }
+
+    /// The beat of a pressed button, then its answer. Runs also if the card goes away during the beat: the key was pressed.
+    private func answerPressed() async {
+        guard let pressed, let shortcut = pressed.wrappedValue else { return }
+        try? await Task.sleep(for: ApprovalShortcut.pressDelay(reduceMotion: reduceMotion))
+        answer(shortcut)
+        pressed.wrappedValue = nil
+    }
+}
+
+extension View {
+    /// ⌘↩ and Esc answer this card while it is the newest open one of `botID` (the Orb being shown). `approvalID` nil, or
+    /// `isActive` false, turns the keys off.
+    func approvalKeys(botID: UUID, approvalID: UUID?, isActive: Bool = true, noteFocused: Bool = false,
+                      pressed: Binding<ApprovalShortcut?>? = nil,
+                      accepts: @escaping (ApprovalShortcut) -> Bool = { _ in true },
+                      answer: @escaping @MainActor (ApprovalShortcut) -> Void) -> some View {
+        modifier(ApprovalKeys(botID: botID, approvalID: approvalID, isActive: isActive, noteFocused: noteFocused,
+                              pressed: pressed, accepts: accepts, answer: answer))
+    }
 }
 
 /// Listens for keys in its window while it is on screen. `handler` returns true when it used the key.

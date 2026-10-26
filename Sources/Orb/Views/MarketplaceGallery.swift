@@ -126,23 +126,7 @@ struct MarketplaceGallery: View {
     }
 
     private var searchField: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass").foregroundStyle(Palette.faint)
-            TextField("Buscar bot", text: $query, prompt: Text("Buscar por nome, assunto ou autor"))
-                .textFieldStyle(.plain)
-                .font(Typography.text)
-                .focused($isSearching)
-            if !query.isEmpty {
-                Button("Limpar", systemImage: "xmark.circle.fill") { query = "" }
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.plain)
-                    .foregroundStyle(Palette.faint)
-                    .help(Tip.clearSearch)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .card(radius: Radius.medium, stroke: isSearching ? Palette.lineStrong : Palette.line)
+        SearchBox(label: "Buscar bot", prompt: "Buscar por nome, assunto ou autor", text: $query, isFocused: $isSearching)
     }
 
     private func categoryChips(_ categories: [String]) -> some View {

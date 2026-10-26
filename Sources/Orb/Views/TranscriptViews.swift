@@ -565,13 +565,8 @@ private struct MessageActions: View {
                     Label("Citar", systemImage: "text.quote")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(Palette.ink)
-                        .padding(.horizontal, 10)
-                        .frame(height: 26)
-                        .background(Palette.surface, in: .capsule)
-                        .overlay(Capsule().strokeBorder(Palette.line, lineWidth: 1))
-                        .contentShape(.capsule)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(MessageActionStyle(shape: .capsule))
                 .help(Tip.quoteSelection)
                 .transition(.opacity)
             }
@@ -613,16 +608,40 @@ private struct ActionCircleButton: View {
             Image(systemName: symbol)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Palette.muted)
-                .frame(width: 26, height: 26)
-                .background(Palette.surface, in: .circle)
-                .overlay(Circle().strokeBorder(Palette.line, lineWidth: 1))
-                .contentShape(.circle)
                 .opacity(isEnabled ? 1 : 0.45)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(MessageActionStyle(shape: .circle))
         .disabled(!isEnabled)
         .help(help)
         .accessibilityLabel(help)
+    }
+}
+
+/// The look of the small buttons beside a message (copy, redo, quote): a 26 pt chip with a hairline border that takes the
+/// hover fill of the app's other buttons and shows the pointing hand. The label brings its own font and color.
+struct MessageActionStyle: ButtonStyle {
+    enum Shape { case circle, capsule }
+    let shape: Shape
+    @State private var isHovering = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    @ViewBuilder
+    func makeBody(configuration: Configuration) -> some View {
+        switch shape {
+        case .circle: chip(configuration, in: .circle, label: configuration.label.frame(width: 26, height: 26))
+        case .capsule: chip(configuration, in: .capsule, label: configuration.label.padding(.horizontal, 10).frame(height: 26))
+        }
+    }
+
+    private func chip<S: InsettableShape>(_ configuration: Configuration, in outline: S, label: some View) -> some View {
+        let pressed = configuration.isPressed
+        return label
+            .hoverFill(pressed || (isHovering && isEnabled), pressed: pressed, in: outline)
+            .background(Palette.surface, in: outline)
+            .overlay(outline.strokeBorder(Palette.line, lineWidth: 1))
+            .contentShape(outline)
+            .clickablePointer(isEnabled)
+            .onHover { isHovering = $0 }
     }
 }
 
@@ -644,17 +663,14 @@ struct CopyButton: View {
                 .foregroundStyle(flash.isOn ? Palette.ink : Palette.muted)
                 // The symbol is swapped for the check (a plain fade under Reduce Motion), inside a frame that does not move.
                 .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
-                .frame(width: 26, height: 26)
-                .background(Palette.surface, in: .circle)
-                .overlay(Circle().strokeBorder(Palette.line, lineWidth: 1))
-                .contentShape(.circle)
                 // Set on the view that changes (the code block's button does the same, where it must: the reply says
                 // "never animate" to everything it draws).
                 .animation(flash.isOn ? Motion.press : Motion.content, value: flash.isOn)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(MessageActionStyle(shape: .circle))
         .help(flash.isOn ? copiedHelp : help)
-        .accessibilityLabel(help)
+        // VoiceOver hears the result too, as the tooltip shows it.
+        .accessibilityLabel(flash.isOn ? copiedHelp : help)
     }
 }
 
@@ -896,12 +912,7 @@ struct ToolCallLine: View {
                             .transition(.opacity)
                     }
                     if canOpen {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(Palette.faint)
-                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                            // No turning under Reduce Motion: the arrow points the other way at once.
-                            .animation(reduceMotion ? nil : Motion.content, value: isExpanded)
+                        FoldChevron(isOpen: isExpanded, size: 9)
                     }
                     Spacer(minLength: 0)
                 }
@@ -1250,11 +1261,7 @@ struct ToolGroupRow: View, Equatable {
                             .fixedSize()
                             .transition(.opacity)
                     }
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(Palette.faint)
-                        .rotationEffect(.degrees(isOpen ? 90 : 0))
-                        .animation(reduceMotion ? nil : Motion.content, value: isOpen)
+                    FoldChevron(isOpen: isOpen, size: 9)
                     Spacer(minLength: 0)
                 }
             }
@@ -1390,11 +1397,7 @@ struct WorkGroupRow<Content: View>: View, Equatable {
                     if let failures {
                         ErrorMark(failures: failures)
                     }
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(Palette.faint)
-                        .rotationEffect(.degrees(isOpen ? 90 : 0))
-                        .animation(reduceMotion ? nil : Motion.content, value: isOpen)
+                    FoldChevron(isOpen: isOpen, size: 9)
                     Spacer(minLength: 0)
                 }
                 .contentShape(.rect)
@@ -1579,18 +1582,30 @@ private struct NoticeLine: View {
                     }
                     .menuStyle(.button)
                     .menuIndicator(.hidden)
-                    .buttonStyle(NoticeActionStyle(prominent: false))
+                    .buttonStyle(SecondaryPillStyle())
                     .fixedSize()
                     .help(action.help)
                 } else {
-                    Button { perform(action) } label: {
-                        Label(action.title, systemImage: action.symbol)
+                    // The first action is the one to take: the white pill; the others the gray one.
+                    if action == actions.first {
+                        Button { perform(action) } label: {
+                            Label(action.title, systemImage: action.symbol)
+                        }
+                        .buttonStyle(PrimaryPillStyle())
+                        .help(action.help)
+                    } else {
+                        Button { perform(action) } label: {
+                            Label(action.title, systemImage: action.symbol)
+                        }
+                        .buttonStyle(SecondaryPillStyle())
+                        .help(action.help)
                     }
-                    .buttonStyle(NoticeActionStyle(prominent: action == actions.first))
-                    .help(action.help)
                 }
             }
         }
+        // The chat's small pill (12 pt, 24 pt tall), as the pills of the other cards.
+        .controlSize(.small)
+        .labelStyle(.titleAndIcon)
     }
 
     /// The provider's own words about a failure, folded under "Detalhes": the sentence above says what to do.
@@ -1601,9 +1616,7 @@ private struct NoticeLine: View {
             } label: {
                 HStack(spacing: 3) {
                     Text("Detalhes")
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .rotationEffect(.degrees(showsProviderDetail ? 90 : 0))
+                    FoldChevron(isOpen: showsProviderDetail, size: 9)
                 }
                 .font(Typography.small)
                 .foregroundStyle(Palette.faint)
@@ -1645,21 +1658,6 @@ private struct NoticeLine: View {
             hasProposal = false
             Task { await model.applyMemoryMerge(botID) }
         }
-    }
-}
-
-private struct NoticeActionStyle: ButtonStyle {
-    let prominent: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .labelStyle(.titleAndIcon)
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(prominent ? Palette.onInk : Palette.ink)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(prominent ? Palette.ink.opacity(configuration.isPressed ? 0.8 : 1)
-                        : Color.white.opacity(configuration.isPressed ? 0.16 : 0.1), in: .capsule)
     }
 }
 
@@ -1800,7 +1798,7 @@ struct ApprovalCard: View {
         // the card never disappears, it leaves its record.
         ZStack(alignment: .topLeading) {
             if isPending {
-                pendingCard.transition(.adapted(Self.leaving, reduceMotion: reduceMotion))
+                pendingCard.transition(.adapted(.cardLeaving, reduceMotion: reduceMotion))
             } else {
                 answeredCard.transition(.opacity)
             }
@@ -1809,15 +1807,8 @@ struct ApprovalCard: View {
         .motion(Motion.content, value: request.decision)
         .motion(Motion.content, value: request.items.count)
         .onChange(of: noteFocused) { isEditingNote = noteFocused }
-        .background {
-            if isPending { ApprovalKeyMonitor(handler: handleKey) }
-        }
-        .task(id: pressed) { await answerPressed() }
-    }
-
-    /// Fades out at the exit pace, whatever the animation of the change.
-    private static var leaving: AnyTransition {
-        .asymmetric(insertion: .opacity, removal: .opacity.animation(Motion.exit))
+        .approvalKeys(botID: botID, approvalID: request.id, isActive: isPending, noteFocused: isEditingNote,
+                      pressed: $pressed, answer: answer)
     }
 
     // MARK: Pending
@@ -2087,11 +2078,7 @@ struct ApprovalCard: View {
                         .lineLimit(1)
                         .truncationMode(.middle) // a long command keeps its start and its end
                         .contentTransition(.opacity)
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(Palette.faint)
-                        .rotationEffect(.degrees(isOpen ? 90 : 0))
-                        .animation(reduceMotion ? nil : Motion.content, value: isOpen)
+                    FoldChevron(isOpen: isOpen, size: 9)
                     Spacer(minLength: 0)
                 }
                 .contentShape(.rect)
@@ -2118,39 +2105,7 @@ struct ApprovalCard: View {
         model.decide(.deny, note: note, approvalID: request.id, botID: botID)
     }
 
-    /// ⌘↩ and Esc answer this card when it is the newest open one of the Orb being shown.
-    private func handleKey(_ event: NSEvent, in window: NSWindow) -> Bool {
-        guard model.selectedBot?.id == botID, model.newestPendingApprovalID(of: botID) == request.id,
-              !model.findFieldHasFocus else { return false } // Esc in the find field closes the find bar
-        let field = window.firstResponder as? NSTextView
-        let editing = ApprovalShortcut.isEditing(responderIsText: field != nil, hasText: field.map { !$0.string.isEmpty } ?? false,
-                                                 hasMarkedText: field?.hasMarkedText() ?? false, noteFocused: isEditingNote)
-        let typingInComposer = ApprovalShortcut.isTypingInComposer(isEditing: editing, noteFocused: isEditingNote)
-        guard let shortcut = ApprovalShortcut.resolve(keyCode: event.keyCode, modifiers: event.modifierFlags,
-                                                      isEditingText: editing, isTypingInComposer: typingInComposer) else { return false }
-        press(shortcut)
-        return true
-    }
-
-    /// A shortcut shows its button pressed for a beat so the person sees what the key did, then answers. (Under
-    /// Reduce Motion nothing is pressed and the answer is immediate; a second press during the beat is ignored.)
-    private func press(_ shortcut: ApprovalShortcut) {
-        guard pressed == nil else { return }
-        if ApprovalShortcut.pressDelay(reduceMotion: reduceMotion) == .zero {
-            answer(shortcut)
-        } else {
-            pressed = shortcut
-        }
-    }
-
-    /// The beat of a pressed button, then its answer. Runs also if the card goes away during the beat: the key was pressed.
-    private func answerPressed() async {
-        guard let shortcut = pressed else { return }
-        try? await Task.sleep(for: ApprovalShortcut.pressDelay(reduceMotion: reduceMotion))
-        answer(shortcut)
-        pressed = nil
-    }
-
+    /// What ⌘↩ and Esc do on this card (`approvalKeys`).
     private func answer(_ shortcut: ApprovalShortcut) {
         switch shortcut {
         case .allow: model.decide(.once, approvalID: request.id, botID: botID)

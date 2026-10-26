@@ -163,6 +163,26 @@ struct ApprovalNotificationTests {
         #expect(!ApprovalShortcut.isTypingInComposer(isEditing: false, noteFocused: false))
     }
 
+    /// The reading of the window's first responder every card shares (`approvalKeys`): the three cases that decide the keys.
+    @Test func theResponderReadingDecidesWhichKeysAreTheCards() {
+        func key(_ code: UInt16, _ mods: NSEvent.ModifierFlags, text: Bool = false, isText: Bool = true, note: Bool = false) -> ApprovalShortcut? {
+            ApprovalShortcut.resolve(keyCode: code, modifiers: mods, responderIsText: isText, hasText: text,
+                                     hasMarkedText: false, noteFocused: note)
+        }
+        let enter = ApprovalShortcut.returnKey, esc = ApprovalShortcut.escapeKey
+        // An empty composer (or no text field at all) is not typing: both keys are the card's.
+        #expect(key(enter, .command) == .allow)
+        #expect(key(esc, []) == .deny)
+        // Text typed in the composer: ⌘↩ is "stop and send" and Esc belongs to the field.
+        #expect(key(enter, .command, text: true) == nil)
+        #expect(key(esc, [], text: true) == nil)
+        // The card's own note field: ⌘↩ answers from it, Esc still belongs to the field.
+        #expect(key(enter, .command, text: true, note: true) == .allow)
+        #expect(key(esc, [], text: true, note: true) == nil)
+        // A responder that is no text view with the note focused (the focus state ran ahead of the responder).
+        #expect(key(esc, [], isText: false, note: true) == nil)
+    }
+
     @Test func anEmptyFocusedComposerIsNotEditingButTextOrCompositionIs() {
         func editing(text: Bool = false, marked: Bool = false, isText: Bool = true, note: Bool = false) -> Bool {
             ApprovalShortcut.isEditing(responderIsText: isText, hasText: text, hasMarkedText: marked, noteFocused: note)

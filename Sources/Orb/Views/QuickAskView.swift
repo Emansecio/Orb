@@ -196,14 +196,7 @@ struct QuickAskView: View {
                     .onChange(of: selectedID) { note = nil }
                 // The same button as the creation chat's: ↩ alone is no target for the pointer or for VoiceOver.
                 let canSend = selectedID != nil && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                Button(action: send) {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 22))
-                        .foregroundStyle(canSend ? Palette.ink : Palette.hint)
-                }
-                .buttonStyle(.plain)
-                .disabled(!canSend)
-                .iconTip("Enviar (↩)", label: "Enviar")
+                SendArrowButton(canSend: canSend, help: "Enviar (↩)", action: send)
             }
             .padding(10)
             .card(radius: Radius.medium)

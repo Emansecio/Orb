@@ -271,12 +271,7 @@ private struct RoutineCard: View {
                 .buttonStyle(.plain)
                 .help("Abrir \(bot.name) e suas rotinas")
                 if let mode = routine.permissionMode {
-                    Label(mode.label, systemImage: mode.symbol)
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(Palette.muted)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 2)
-                        .background(Palette.raised, in: .capsule)
+                    CatalogBadge(text: mode.label, symbol: mode.symbol)
                         .help("Esta rotina roda em “\(mode.label)”, mesmo que o Orb use outro modo")
                 }
                 Spacer()
@@ -329,21 +324,13 @@ private struct RoutineCard: View {
                 Button("Ver conversa", systemImage: "text.bubble", action: onOpen)
                     .buttonStyle(GhostStyle())
                     .help(Tip.routineConversation)
-                Menu {
+                MoreMenu(name: routine.name, tip: "Edita ou apaga a rotina") {
                     Button("Editar…", action: onEdit)
                         .help(Tip.editRoutine)
                     Divider()
                     Button("Apagar…", role: .destructive) { isConfirmingDelete = true }
                         .help(Tip.deleteRoutine)
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .frame(width: 26, height: 22)
-                        .contentShape(.rect)
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .iconTip("Edita ou apaga a rotina", label: Tip.moreOptions(of: routine.name))
                 Spacer()
                 RoutineRunControl(state: RoutineRunState(isRunning: isRunning, isQueued: isQueued), alignment: .trailing,
                                   run: onRun)

@@ -174,20 +174,7 @@ struct CatalogSearchHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(Palette.faint)
-                TextField(prompt, text: $query)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 14))
-                    .focused($isFocused)
-                if !query.isEmpty {
-                    Button("Limpar", systemImage: "xmark.circle.fill") { query = "" }
-                        .labelStyle(.iconOnly)
-                        .buttonStyle(.plain)
-                        .foregroundStyle(Palette.faint)
-                        .help(Tip.clearSearch)
-                }
+            SearchBox(label: prompt, text: $query, isFocused: $isFocused) {
                 if let info {
                     Button("Sobre a busca", systemImage: "info.circle") { isShowingInfo.toggle() }
                         .labelStyle(.iconOnly)
@@ -203,9 +190,6 @@ struct CatalogSearchHeader: View {
                         }
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .card(radius: Radius.card, stroke: isFocused ? Palette.lineStrong : Palette.line)
             .background {
                 // ⌘F, like the search of the other pages.
                 Button("Buscar") { isFocused = true }
@@ -232,6 +216,68 @@ struct CatalogSearchHeader: View {
     }
 }
 
+/// The search field of the catalog pages, the installed-skills filter and the marketplace sheet: one look (padding, radius,
+/// font), the clear button when there is text, and room after it for an extra control. The caller owns the focus state, so
+/// it can focus the field from a shortcut or from outside.
+struct SearchBox<Accessory: View>: View {
+    /// The field's accessibility label, and its placeholder when there is no `prompt`.
+    let label: String
+    var prompt: String?
+    @Binding var text: String
+    var isFocused: FocusState<Bool>.Binding
+    @ViewBuilder var accessory: Accessory
+
+    var body: some View {
+        HStack(spacing: Spacing.s) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(Palette.faint)
+            TextField(label, text: $text, prompt: prompt.map { Text($0) })
+                .textFieldStyle(.plain)
+                .font(Typography.text)
+                .focused(isFocused)
+            if !text.isEmpty {
+                Button("Limpar", systemImage: "xmark.circle.fill") { text = "" }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Palette.faint)
+                    .help(Tip.clearSearch)
+            }
+            accessory
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .card(radius: Radius.card, stroke: isFocused.wrappedValue ? Palette.lineStrong : Palette.line)
+    }
+}
+
+extension SearchBox where Accessory == EmptyView {
+    init(label: String, prompt: String? = nil, text: Binding<String>, isFocused: FocusState<Bool>.Binding) {
+        self.init(label: label, prompt: prompt, text: text, isFocused: isFocused) { EmptyView() }
+    }
+}
+
+/// The "…" menu at the end of a card or row: one hit target (28×28, the size of the neighbouring icon buttons) and the
+/// VoiceOver label "Mais opções de <name>". `tip` is the hover text when it says more than the label.
+struct MoreMenu<Content: View>: View {
+    let name: String
+    var tip: String?
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        Menu {
+            content
+        } label: {
+            Image(systemName: "ellipsis")
+                .frame(width: 28, height: 28)
+                .contentShape(.rect)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .iconTip(tip ?? Tip.moreOptions(of: name), label: Tip.moreOptions(of: name))
+    }
+}
+
 struct ChipStyle: ButtonStyle {
     var isSelected = false
 
@@ -250,9 +296,12 @@ struct CatalogBadge: View {
     let text: String
     var symbol: String?
     var tint: Color = Palette.muted
+    /// A small dot in the tint instead of a symbol ("Em uso").
+    var showsDot = false
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: showsDot ? 5 : 4) {
+            if showsDot { Circle().fill(tint).frame(width: 6, height: 6) }
             if let symbol { Image(systemName: symbol) }
             Text(text).lineLimit(1).contentTransition(.opacity)
         }

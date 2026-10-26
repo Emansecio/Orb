@@ -182,46 +182,20 @@ private struct SidebarChatAction: View {
     }
 }
 
-/// The title typed in the row itself, as a category's name: ↩ keeps it, esc gives up, clicking elsewhere keeps what was
-/// typed. A blank one keeps the old title (`OrbChats.rename`).
+/// The row of a conversation being renamed: `InlineNameField` in the row's own height and inset. A blank title is saved
+/// as typed and `OrbChats.rename` keeps the old one.
 private struct ChatTitleField: View {
     let initial: String
     let save: (String) -> Void
     let done: () -> Void
-    @State private var text: String
-    @State private var isDone = false
-    @FocusState private var isFocused: Bool
-
-    init(initial: String, save: @escaping (String) -> Void, done: @escaping () -> Void) {
-        self.initial = initial
-        self.save = save
-        self.done = done
-        _text = State(initialValue: initial)
-    }
 
     var body: some View {
-        TextField("Nome da conversa", text: $text, prompt: Text("Nome da conversa"))
-            .textFieldStyle(.plain)
-            .font(Typography.label)
-            .foregroundStyle(Palette.ink)
-            .focused($isFocused)
-            .onSubmit { finish(keeping: true) }
-            .onExitCommand { finish(keeping: false) }
+        InlineNameField(initial: initial, label: "Nome da conversa", font: Typography.label, save: save, finish: done)
             .padding(.horizontal, SidebarChatList.rowInset)
             .padding(.vertical, 4)
             // Same height as SidebarChatRow, so the list does not jump when a title is renamed.
             .frame(minHeight: SidebarChatList.rowHeight)
             .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: Radius.small))
             .overlay(RoundedRectangle(cornerRadius: Radius.small).strokeBorder(Palette.lineStrong))
-            .onAppear { isFocused = true }
-            .onChange(of: isFocused) { if !isFocused { finish(keeping: true) } }
-            .accessibilityLabel("Nome da conversa")
-    }
-
-    private func finish(keeping: Bool) {
-        guard !isDone else { return }
-        isDone = true
-        if keeping, text != initial { save(text) }
-        done()
     }
 }

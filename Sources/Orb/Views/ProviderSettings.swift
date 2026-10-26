@@ -135,7 +135,6 @@ private struct ProviderRow: View {
     @State private var isConfirmingSignOut = false
     /// The browser sign-in under way, so it can be cancelled when the tab was closed or the login went wrong.
     @State private var signInTask: Task<Void, Never>?
-    @FocusState private var keyFocused: Bool
     @AppStorage(ProviderExpansion.storageKey) private var expansion = ""
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -341,48 +340,20 @@ private struct ProviderRow: View {
     }
 
     private var keyRow: some View {
-        LabeledContent(kind == .custom ? "Chave (opcional)" : "Chave de API") {
-            if hasKey && !isReplacingKey {
-                HStack(spacing: 10) {
-                    if case .rejected = health.failure(of: kind) {
-                        Label("Chave recusada", systemImage: "exclamationmark.circle").foregroundStyle(Palette.warn)
-                    } else {
-                        Label("Chave salva", systemImage: "checkmark.circle.fill").foregroundStyle(Palette.ok)
-                    }
-                    Button("Trocar") {
-                        isReplacingKey = true
-                        keyFocused = true
-                    }
-                    .help(Tip.replaceKey)
-                    if kind == .custom { // the gateway's key is optional: it can go without removing the provider
-                        Button("Apagar") { run(inStatus: true) { try await model.setKey("", for: kind) } }
-                            .help(Tip.deleteKey)
-                    }
-                }
-                .buttonStyle(GhostStyle())
-                .controlSize(.small)
-            } else {
-                HStack {
-                    SecureField("Chave", text: $key, prompt: Text("Cole a chave"))
-                        .labelsHidden()
-                        .focused($keyFocused)
-                        .onSubmit(saveKey)
-                    if !key.isEmpty {
-                        Button("Salvar", action: saveKey).disabled(isWorking)
-                            .help(Tip.saveKey)
-                            .chipButton()
-                    } else if isReplacingKey {
-                        Button("Cancelar") { isReplacingKey = false }
-                            .help(Tip.keepKey)
-                            .buttonStyle(GhostStyle())
-                            .controlSize(.small)
-                    } else if let page = kind.keyPage {
-                        Link("Obter chave", destination: page)
-                            .help(Tip.getKey)
-                    }
-                }
-            }
-        }
+        let isRejected: Bool
+        if case .rejected = health.failure(of: kind) { isRejected = true } else { isRejected = false }
+        return SavedKeyField(
+            title: kind == .custom ? "Chave (opcional)" : "Chave de API",
+            hasKey: hasKey,
+            isRejected: isRejected,
+            key: $key,
+            isReplacing: $isReplacingKey,
+            isWorking: isWorking,
+            keyPage: kind.keyPage,
+            // The gateway's key is optional: it can go without removing the provider.
+            onDelete: kind == .custom ? { run(inStatus: true) { try await model.setKey("", for: kind) } } : nil,
+            onSave: saveKey
+        )
     }
 
     private func saveKey() {

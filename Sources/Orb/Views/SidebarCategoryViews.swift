@@ -259,17 +259,6 @@ private struct CategoryNameField: View {
     /// The arrow of an unfolded category points down, as on its heading.
     var turned = false
     let save: (String) -> Void
-    @State private var text: String
-    @State private var isDone = false
-    @FocusState private var isFocused: Bool
-
-    init(initial: String, symbol: String, turned: Bool = false, save: @escaping (String) -> Void) {
-        self.initial = initial
-        self.symbol = symbol
-        self.turned = turned
-        self.save = save
-        _text = State(initialValue: initial)
-    }
 
     var body: some View {
         let isPlus = symbol == "plus"
@@ -279,17 +268,10 @@ private struct CategoryNameField: View {
                 .rotationEffect(.degrees(turned ? 90 : 0))
                 .frame(width: 26)
                 .foregroundStyle(isPlus ? Palette.muted : Palette.faint)
-            TextField("Nome da categoria", text: $text, prompt: Text("Nome da categoria"))
-                .textFieldStyle(.plain)
-                .font(Typography.text.weight(.medium))
-                .foregroundStyle(Palette.ink)
-                .focused($isFocused)
-                .onSubmit { finish(keeping: true) }
-                .onExitCommand { finish(keeping: false) }
-                .onChange(of: text) {
-                    if text.count > SidebarCategory.nameLimit { text = String(text.prefix(SidebarCategory.nameLimit)) }
-                }
-                .accessibilityLabel("Nome da categoria")
+            InlineNameField(initial: initial, label: "Nome da categoria", font: Typography.text.weight(.medium),
+                            limit: SidebarCategory.nameLimit, normalize: SidebarOrder.name, save: save) {
+                model.categoryNaming = nil
+            }
         }
         .frame(minHeight: SidebarCategoryLayout.headerContentHeight)
         .padding(.horizontal, 8)
@@ -298,15 +280,6 @@ private struct CategoryNameField: View {
         .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: Radius.medium))
         // A hairline, so the field does not read as the selected row.
         .overlay(RoundedRectangle(cornerRadius: Radius.medium).strokeBorder(Palette.lineStrong))
-        .onAppear { isFocused = true }
-        .onChange(of: isFocused) { if !isFocused { finish(keeping: true) } }
-    }
-
-    private func finish(keeping: Bool) {
-        guard !isDone else { return }
-        isDone = true
-        if keeping, let name = SidebarOrder.name(text), name != initial { save(name) }
-        model.categoryNaming = nil
     }
 }
 

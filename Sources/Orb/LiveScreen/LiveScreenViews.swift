@@ -70,7 +70,15 @@ private struct LiveScreenCard: View {
             }
         }
         .chatCard()
-        .background { if state == .needsYou, let handoff { ApprovalKeyMonitor { event, window in handleKey(event, window, handoff) } } }
+        // ⌘↩ finishes the hand-off and Esc cancels it, as on the permission card this one stands for. No button is drawn
+        // pressed here, so the answer is immediate.
+        .approvalKeys(botID: botID, approvalID: handoff?.id, isActive: state == .needsYou) { shortcut in
+            guard let handoff else { return }
+            switch shortcut {
+            case .allow: model.decide(.once, approvalID: handoff.id, botID: botID)
+            case .deny: model.decide(.deny, approvalID: handoff.id, botID: botID)
+            }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(LiveScreenText.spoken(caption: caption))
         .onChange(of: state) { _, new in
@@ -206,23 +214,6 @@ private struct LiveScreenCard: View {
         LiveScreenFocus.shared.clear(of: botID)
         model.setInspector(true)
         model.request(.showTab(.screen), of: botID)
-    }
-
-    /// ⌘↩ finishes the hand-off and Esc cancels it, as on the permission card this one stands for.
-    private func handleKey(_ event: NSEvent, _ window: NSWindow, _ request: ApprovalRequest) -> Bool {
-        guard model.selectedBot?.id == botID, model.newestPendingApprovalID(of: botID) == request.id,
-              !model.findFieldHasFocus else { return false }
-        let field = window.firstResponder as? NSTextView
-        let editing = ApprovalShortcut.isEditing(responderIsText: field != nil, hasText: field.map { !$0.string.isEmpty } ?? false,
-                                                 hasMarkedText: field?.hasMarkedText() ?? false, noteFocused: false)
-        let typingInComposer = ApprovalShortcut.isTypingInComposer(isEditing: editing, noteFocused: false)
-        guard let shortcut = ApprovalShortcut.resolve(keyCode: event.keyCode, modifiers: event.modifierFlags,
-                                                      isEditingText: editing, isTypingInComposer: typingInComposer) else { return false }
-        switch shortcut {
-        case .allow: model.decide(.once, approvalID: request.id, botID: botID)
-        case .deny: model.decide(.deny, approvalID: request.id, botID: botID)
-        }
-        return true
     }
 }
 

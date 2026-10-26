@@ -85,15 +85,7 @@ struct GroupComposer: View {
                             if lane.error != nil { lane.error = nil } // it was about what was there before
                         }
                         .accessibilityLabel("Mensagem para o grupo")
-                    Button(action: send) {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 22))
-                            .foregroundStyle(canSend ? Palette.ink : Palette.faint)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!canSend)
-                    .help("Enviar para o grupo (↩)")
-                    .accessibilityLabel("Enviar")
+                    SendArrowButton(canSend: canSend, help: "Enviar para o grupo (↩)", action: send)
                 }
             }
             .padding(.horizontal, 12)

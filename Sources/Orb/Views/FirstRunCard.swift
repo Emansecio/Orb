@@ -389,10 +389,50 @@ enum FirstRunStyle {
     }
 }
 
+/// The card's stroke, which thickens and turns to the accent for a moment each time `AppModel.setupNudge` changes (the
+/// person tried to do something that needs a model). One owner for the card and the banner: the pulse is a task tied to
+/// the view, so it is cancelled when the view goes away or when a newer nudge restarts it, and it follows Reduce Motion
+/// through `animateChanges`.
+private struct NudgePulsingCard: ViewModifier {
+    let radius: CGFloat
+    let nudge: Int
+    @State private var isPulsing = false
+    /// Counts the nudges seen; the task below runs once per count, not on appear, so a view born after a nudge stays calm.
+    @State private var pulses = 0
+
+    func body(content: Content) -> some View {
+        content
+            .card(radius: radius, stroke: isPulsing ? Palette.accent : Palette.line, lineWidth: isPulsing ? 2 : 1)
+            .animateChanges(of: isPulsing)
+            .onChange(of: nudge) {
+                pulses += 1
+                isPulsing = true
+            }
+            .task(id: pulses) {
+                guard pulses > 0 else { return }
+                try? await Task.sleep(for: .milliseconds(900))
+                if !Task.isCancelled { isPulsing = false }
+            }
+    }
+}
+
+/// The ready line of the connection, shared by the card and the welcome offer.
+struct FirstRunReadyLabel: View {
+    let name: String
+
+    var body: some View {
+        Label("Pronto: \(name) conectado.", systemImage: "checkmark.circle.fill")
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(Palette.ok)
+            .padding(.vertical, 6)
+            .transition(.opacity)
+    }
+}
+
 /// The card's own frame in the chat; in Ajustes it sits in the form's section, which already is one.
 private struct FirstRunFrame: ViewModifier {
     let style: FirstRunStyle
-    let isPulsing: Bool
+    let nudge: Int
 
     func body(content: Content) -> some View {
         switch style {
@@ -400,7 +440,7 @@ private struct FirstRunFrame: ViewModifier {
             content
                 .padding(18)
                 .frame(maxWidth: 460, alignment: .leading)
-                .card(radius: 16, stroke: isPulsing ? Palette.accent : Palette.line, lineWidth: isPulsing ? 2 : 1)
+                .modifier(NudgePulsingCard(radius: 16, nudge: nudge))
         case .settings:
             content
                 .padding(.vertical, 6)
@@ -426,7 +466,6 @@ struct FirstRunCard: View {
     @State private var isKeyOpen = false
     @State private var keyKind = ProviderKind.openai
     @State private var key = ""
-    @State private var isPulsing = false
     @FocusState private var keyFocused: Bool
 
     private var steps: FirstRunModel { run ?? ownRun }
@@ -447,11 +486,7 @@ struct FirstRunCard: View {
                 }
             }
             if let name = steps.connectedName {
-                Label("Pronto: \(name) conectado.", systemImage: "checkmark.circle.fill")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Palette.ok)
-                    .padding(.vertical, 6)
-                    .transition(.opacity)
+                FirstRunReadyLabel(name: name)
             } else {
                 VStack(spacing: 8) {
                     if !asAlternatives { claudeCodeRow(steps) }
@@ -481,23 +516,13 @@ struct FirstRunCard: View {
                 }
             }
         }
-        .modifier(FirstRunFrame(style: style, isPulsing: isPulsing))
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: isPulsing)
+        .modifier(FirstRunFrame(style: style, nudge: model.setupNudge))
         .animateChanges(of: steps.connectedName)
         .task {
             steps.attach(model)
             if detectsOnAppear { await steps.detect() }
         }
-        .onChange(of: model.setupNudge) { pulse() }
         .accessibilityElement(children: .contain)
-    }
-
-    private func pulse() {
-        isPulsing = true
-        Task {
-            try? await Task.sleep(for: .milliseconds(900))
-            isPulsing = false
-        }
     }
 
     private func phase(_ choice: FirstRunModel.Choice, _ steps: FirstRunModel) -> FirstRunRow.Phase {
@@ -716,7 +741,6 @@ struct FirstRunBanner: View {
     @State private var isAskingKey = false
     @State private var keyKind = ProviderKind.openai
     @State private var key = ""
-    @State private var isPulsing = false
 
     /// While a message of the chat is being edited the card above the field steps back: one line less and tighter, so the
     /// editing banner, the field and this one fit together without crowding the conversation.
@@ -796,8 +820,7 @@ struct FirstRunBanner: View {
         }
         .padding(isCompact ? 10 : 14)
         .animation(reduceMotion ? nil : Motion.content, value: isCompact)
-        .card(radius: Radius.large, stroke: isPulsing ? Palette.accent : Palette.line, lineWidth: isPulsing ? 2 : 1)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: isPulsing)
+        .modifier(NudgePulsingCard(radius: Radius.large, nudge: model.setupNudge))
         // The phrases and the buttons that change as the connection goes (waiting, failed, ready) swap in place.
         .animateChanges(of: BannerPhase(connectedName: steps.connectedName, working: steps.working, failure: steps.failure?.message))
         // Padded, then capped: as wide as the composer under it and the transcript's text.
@@ -806,13 +829,6 @@ struct FirstRunBanner: View {
         .task {
             steps.attach(model)
             await steps.detect()
-        }
-        .onChange(of: model.setupNudge) {
-            isPulsing = true
-            Task {
-                try? await Task.sleep(for: .milliseconds(900))
-                isPulsing = false
-            }
         }
     }
 

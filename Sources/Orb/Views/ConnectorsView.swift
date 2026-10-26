@@ -286,7 +286,7 @@ private struct ConnectorCard: View {
                     .controlSize(.small)
                     .disabled(!connector.isEnabled || test == .running)
                     .help(connector.isEnabled ? "Liga o servidor e lista as ferramentas, para ver se funciona" : "Só dá para testar com o conector ativado")
-                Menu {
+                MoreMenu(name: connector.name, tip: "Mostra as ferramentas, edita ou apaga \(connector.name)") {
                     Button("Ver ferramentas…", action: onViewTools)
                         .help("Mostra o que este conector oferece aos Orbs")
                     Divider()
@@ -299,15 +299,7 @@ private struct ConnectorCard: View {
                     Divider()
                     Button("Apagar…", role: .destructive, action: onDelete)
                         .help("Pede a confirmação; apaga também as chaves deste conector")
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .frame(width: 26, height: 22)
-                        .contentShape(.rect)
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .iconTip("Mostra as ferramentas, edita ou apaga \(connector.name)", label: Tip.moreOptions(of: connector.name))
             }
         }
         .padding(Spacing.cardPadding)
@@ -514,7 +506,8 @@ private struct ConnectorCard: View {
         } else {
             switch status {
             case .ready:
-                InUseBadge()
+                CatalogBadge(text: "Em uso", tint: Palette.ok, showsDot: true)
+                    .help("Conectado agora; desliga sozinho depois de um tempo sem uso")
             case .idle(let count):
                 CatalogBadge(text: count.map { "Pronto · \(ConnectorStatusText.toolCount($0))" } ?? "Pronto", symbol: "checkmark.circle")
                     .help("Liga sozinho quando um Orb precisar")
@@ -540,22 +533,6 @@ private struct ConnectorCard: View {
 private struct StatusBadgeKey: Equatable {
     var isEnabled: Bool
     var status: MCPStatus?
-}
-
-/// The connector is connected right now: a small green dot, nothing louder.
-private struct InUseBadge: View {
-    var body: some View {
-        HStack(spacing: 5) {
-            Circle().fill(Palette.ok).frame(width: 6, height: 6)
-            Text("Em uso").lineLimit(1)
-        }
-        .font(.system(size: 11, weight: .medium))
-        .foregroundStyle(Palette.ok)
-        .padding(.horizontal, 7)
-        .padding(.vertical, 3)
-        .background(Palette.ok.opacity(0.12), in: .capsule)
-        .help("Conectado agora; desliga sozinho depois de um tempo sem uso")
-    }
 }
 
 // MARK: Tools
