@@ -19,12 +19,12 @@ struct ResetOrbSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: Spacing.m) {
                 SummaryLine(.goes, summary.goes)
                 SummaryLine(.stays, summary.stays)
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 4)
+            .padding(.horizontal, Spacing.sheetEdge)
+            .padding(.bottom, Spacing.xs)
             Form {
                 Section {
                     RadioChoiceRow(title: "Guardar as memórias",
@@ -36,13 +36,8 @@ struct ResetOrbSheet: View {
                 }
                 Section {
                     Toggle(isOn: $leavesProviders) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Também sair dos provedores")
-                            Text("Apaga as chaves e os logins guardados no Orb. O login do Claude Code no Terminal não muda.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
+                        toggleLabel("Também sair dos provedores",
+                                    "Apaga as chaves e os logins guardados no Orb. O login do Claude Code no Terminal não muda.")
                     }
                 }
             }
@@ -112,10 +107,10 @@ private struct ResetShield: ViewModifier {
                             VStack(spacing: 10) {
                                 ProgressView().controlSize(.small)
                                 Text("Redefinindo o Orb…")
-                                    .font(.callout)
+                                    .font(Typography.text)
                                     .foregroundStyle(Palette.secondary)
                             }
-                            .padding(20)
+                            .padding(Spacing.xl)
                             .background(Palette.raised, in: RoundedRectangle(cornerRadius: Radius.card))
                         }
                         .accessibilityElement(children: .ignore)

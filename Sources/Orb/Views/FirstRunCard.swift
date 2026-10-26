@@ -422,7 +422,7 @@ struct FirstRunReadyLabel: View {
 
     var body: some View {
         Label("Pronto: \(name) conectado.", systemImage: "checkmark.circle.fill")
-            .font(.system(size: 13, weight: .medium))
+            .font(Typography.text.weight(.medium))
             .foregroundStyle(Palette.ok)
             .padding(.vertical, 6)
             .transition(.opacity)
@@ -476,7 +476,7 @@ struct FirstRunCard: View {
             if !asAlternatives {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(style.title)
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(Typography.title)
                         .foregroundStyle(Palette.ink)
                         .accessibilityAddTraits(.isHeader)
                     Text(style.subtitle)
@@ -642,7 +642,7 @@ private struct FirstRunRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(title)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(Typography.text.weight(.semibold))
                         .foregroundStyle(Palette.ink)
                     if let badge { CatalogBadge(text: badge, tint: Palette.accentText) }
                 }
@@ -691,10 +691,10 @@ private struct FirstRunRow: View {
                     .font(Typography.label)
                     .padding(.trailing, 12)
             } else if phase == .working, let onCancel {
+                // Same button as the welcome offer's (`QuietTextStyle`): gray, ink under the pointer.
                 Button("Cancelar", action: onCancel)
-                    .buttonStyle(.plain)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Palette.accentText)
+                    .buttonStyle(QuietTextStyle())
+                    .font(Typography.label.weight(.medium))
                     .help(Tip.stopConnecting)
                     .padding(.trailing, 40)
             }
@@ -714,12 +714,12 @@ private struct FirstRunRow: View {
             ProgressView().controlSize(.small)
         } else if case .failed = phase {
             Text("Tentar de novo")
-                .font(.system(size: 12, weight: .medium))
+                .font(Typography.label.weight(.medium))
                 .foregroundStyle(Palette.accentText)
         } else if trailingLink == nil {
             // One column for the right/down/up chevrons, so the rows line up whichever one they show.
             Image(systemName: trailingSymbol)
-                .font(.system(size: 11, weight: .semibold))
+                .font(Typography.small.weight(.semibold))
                 .foregroundStyle(Palette.hint)
                 .frame(width: Spacing.iconColumn)
         }
@@ -764,7 +764,7 @@ struct FirstRunBanner: View {
                     .contentTransition(.opacity)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(steps.connectedName.map { "Pronto: \($0) conectado." } ?? "Conecte um modelo para começar")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(Typography.text.weight(.semibold))
                         .contentTransition(.opacity)
                     if !(isCompact && steps.failure == nil && steps.working == nil && steps.connectedName == nil) {
                         Text(subtitle)

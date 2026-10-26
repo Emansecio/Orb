@@ -84,7 +84,7 @@ struct ModelPopover: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
         }
-        .frame(width: 320)
+        .frame(width: PopoverMetrics.width)
         .onAppear {
             recents = RecentModels()
             guard !didSetFolds else { return }
@@ -112,7 +112,7 @@ struct ModelPopover: View {
 
     private func header(_ title: String) -> some View {
         Text(title)
-            .font(.system(size: 11, weight: .semibold))
+            .font(Typography.small.weight(.semibold))
             .foregroundStyle(Palette.muted)
             .padding(.horizontal, 12)
             .padding(.top, 10)
@@ -140,7 +140,7 @@ struct ModelPopover: View {
                 Text("\(group.models.count)").foregroundStyle(Palette.faint)
                 Spacer()
             }
-            .font(.system(size: 11, weight: .semibold))
+            .font(Typography.small.weight(.semibold))
             .foregroundStyle(Palette.muted)
             .padding(.horizontal, 12)
             .padding(.top, 10)

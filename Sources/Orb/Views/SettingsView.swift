@@ -144,7 +144,7 @@ struct GeneralSettings: View {
                     .help(Tip.launchAtLogin)
                 if let loginError {
                     Label(loginError, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
+                        .font(Typography.small)
                         .foregroundStyle(Palette.danger)
                         .transition(.quiet)
                 }
@@ -155,7 +155,7 @@ struct GeneralSettings: View {
                             .chipButton()
                     } label: {
                         Label(loginApproval, systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption)
+                            .font(Typography.small)
                             .foregroundStyle(Palette.warn)
                     }
                     .transition(.quiet)
@@ -165,12 +165,8 @@ struct GeneralSettings: View {
                 notificationState
                 if Dictation.isSupported {
                     Toggle(isOn: $reviewDictation) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Ajustar o ditado com o modelo do Orb")
-                            Text("Ao parar de ditar, o modelo corrige pontuação e palavras mal entendidas. O áudio nunca sai do Mac.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+                        toggleLabel("Ajustar o ditado com o modelo do Orb",
+                                    "Ao parar de ditar, o modelo corrige pontuação e palavras mal entendidas. O áudio nunca sai do Mac.")
                     }
                     .help(Tip.reviewDictation)
                 }
@@ -207,15 +203,13 @@ struct GeneralSettings: View {
                 DisclosureGroup("Atalhos do teclado") {
                     ForEach(ShortcutCatalog.groups) { group in
                         Text(group.title)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(Palette.muted)
-                            .padding(.top, 6)
-                            .accessibilityAddTraits(.isHeader)
+                            .sectionTitleStyle()
+                            .padding(.top, Spacing.s)
                         ForEach(group.items) { item in
                             let lines = ShortcutItem.lines(item.titleInGeneral ?? item.title)
                             LabeledContent {
                                 Text(item.keys)
-                                    .font(.system(size: 12, design: .monospaced))
+                                    .font(Typography.code)
                                     .foregroundStyle(Palette.muted)
                             } label: {
                                 Text(lines.main)
@@ -247,7 +241,7 @@ struct GeneralSettings: View {
                     .chipButton()
             } label: {
                 Label("O macOS está bloqueando as notificações do Orb.", systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
+                    .font(Typography.small)
                     .foregroundStyle(Palette.warn)
             }
             .transition(.quiet)
@@ -257,9 +251,7 @@ struct GeneralSettings: View {
                     .help(Tip.askNotifications)
                     .chipButton()
             } label: {
-                Text("O macOS ainda não deixou o Orb avisar.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text("O macOS ainda não deixou o Orb avisar.").capabilityCaption()
             }
             .transition(.quiet)
         default:
@@ -283,10 +275,7 @@ struct GeneralSettings: View {
             .disabled(!isEnabled)
             .chipButton()
         } label: {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                Text(detail).font(.caption).foregroundStyle(.secondary)
-            }
+            toggleLabel(title, detail)
         }
     }
 
@@ -380,12 +369,8 @@ struct OrbsSettings: View {
         Form {
             Section("Orbs") {
                 Toggle(isOn: Binding(get: { orbsCanTalk }, set: { setOrbsCanTalk($0) })) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Orbs podem conversar entre si")
-                        Text("Os Orbs pedem ajuda uns aos outros sem cartão por mensagem, cada um com as próprias permissões. Não afeta grupos.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    toggleLabel("Orbs podem conversar entre si",
+                                "Os Orbs pedem ajuda uns aos outros sem cartão por mensagem, cada um com as próprias permissões. Não afeta grupos.")
                 }
                 .help(Tip.orbsCanTalk)
                 .onAppear { orbsCanTalk = model.orbsCanTalk }
@@ -396,31 +381,19 @@ struct OrbsSettings: View {
                     Text("Há Orbs conversando agora. Desligar interrompe essas conversas.")
                 }
                 Toggle(isOn: Binding(get: { orbsCanStartGroups }, set: { orbsCanStartGroups = $0; model.orbsCanStartGroups = $0 })) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Orbs podem acionar grupos")
-                        Text("Quando você pede no chat, o Orb cria um grupo ou manda um pedido a um grupo de que faz parte; a resposta final do grupo volta para o chat. Nunca por conta própria.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    toggleLabel("Orbs podem acionar grupos",
+                                "Quando você pede no chat, o Orb cria um grupo ou manda um pedido a um grupo de que faz parte; a resposta final do grupo volta para o chat. Nunca por conta própria.")
                 }
                 .help(Tip.orbsCanStartGroups)
                 .onAppear { orbsCanStartGroups = model.orbsCanStartGroups }
                 Toggle(isOn: $proposeSkills) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Propor skills com o que os Orbs aprendem")
-                        Text("Depois de tarefas longas, o Orb pode propor uma skill. Nada é salvo sem você aprovar.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    toggleLabel("Propor skills com o que os Orbs aprendem",
+                                "Depois de tarefas longas, o Orb pode propor uma skill. Nada é salvo sem você aprovar.")
                 }
                 .help(Tip.proposeSkills)
                 Toggle(isOn: $summarizeSessions) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Resumir com o modelo as conversas longas que vão para a memória")
-                        Text("Um resumo curto, escrito pelo modelo, de cada conversa longa guardada. Conversas com conectores, modelos locais ou o Claude Code ficam de fora.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    toggleLabel("Resumir com o modelo as conversas longas que vão para a memória",
+                                "Um resumo curto, escrito pelo modelo, de cada conversa longa guardada. Conversas com conectores, modelos locais ou o Claude Code ficam de fora.")
                 }
                 .help(Tip.summarizeSessions)
             }
@@ -539,6 +512,15 @@ enum SettingsSnapshots {
 }
 #endif
 
+/// The label of a switch (or a row) in a settings Form: the title, and under it a gray line saying what it does.
+/// One helper so every switch of Ajustes has the same two lines, the same gap and the same caption.
+@MainActor func toggleLabel(_ title: String, _ detail: String) -> some View {
+    VStack(alignment: .leading, spacing: Spacing.hairline) {
+        Text(title)
+        Text(detail).capabilityCaption()
+    }
+}
+
 /// One short sentence under a setting, with the rest behind "Saiba mais": for notes whose extra detail matters to
 /// few people, so the page is not a wall of gray text.
 struct LearnMoreNote: View {
@@ -551,9 +533,9 @@ struct LearnMoreNote: View {
                 .font(Typography.label)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(width: 300, alignment: .leading)
-                .padding(12)
+                .padding(Spacing.m)
         }
-        .font(.caption)
+        .font(Typography.small)
     }
 }
 
@@ -568,7 +550,7 @@ struct InlineLinkNote<Detail: View>: View {
     var tip: String?
     var edge: Edge = .top
     /// The Orb's panel has no blue links: there the link is as quiet as the actions beside it (`QuietTextStyle`).
-    var linkColor: Color = .accentColor
+    var linkColor: Color = Palette.accentText
     @ViewBuilder let detail: () -> Detail
     @State private var isOpen = false
 

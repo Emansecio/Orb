@@ -280,14 +280,22 @@ struct MoreMenu<Content: View>: View {
 
 struct ChipStyle: ButtonStyle {
     var isSelected = false
+    @State private var isHovering = false
 
     func makeBody(configuration: Configuration) -> some View {
+        let lit = !isSelected && (configuration.isPressed || isHovering)
         configuration.label
-            .font(.system(size: 12, weight: .medium))
+            .font(Typography.label.weight(.medium))
             .padding(.horizontal, 11)
             .padding(.vertical, 5)
             .foregroundStyle(isSelected ? Palette.onInk : Palette.secondary)
-            .background(isSelected ? Palette.ink : Color.white.opacity(configuration.isPressed ? 0.12 : 0.07), in: .capsule)
+            .background { if isSelected { Capsule().fill(Palette.ink) } }
+            // Resting `chipFill`, lighter under the pointer and again pressed (the selected chip is solid and stays so).
+            .hoverFill(lit, pressed: configuration.isPressed, in: .capsule,
+                       color: configuration.isPressed ? Palette.ghostCircleHover : Palette.ghostSelected,
+                       resting: isSelected ? nil : Palette.chipFill)
+            .contentShape(.capsule)
+            .onHover { isHovering = $0 }
     }
 }
 

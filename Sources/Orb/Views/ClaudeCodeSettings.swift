@@ -5,6 +5,7 @@ import SwiftUI
 /// The row says which of three things is true, in one sentence with its action: not installed, not signed in, signed in.
 struct ClaudeCodeAccountRow: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.openURL) private var openURL
     @State private var hasChecked = false
     @State private var isWorking = false
     @State private var error: String?
@@ -19,7 +20,10 @@ struct ClaudeCodeAccountRow: View {
                     Button("Verificar de novo") { run { await model.refreshConnections() } }.disabled(isWorking)
                         .help(Tip.checkClaudeCode)
                         .chipButton()
-                    if let page = ClaudeCode.setupPage { Link("Como instalar", destination: page).help(Tip.installClaudeCode) }
+                    // A chip like "Verificar de novo" beside it: a system-blue Link next to a gray chip looked like two apps.
+                    if let page = ClaudeCode.setupPage {
+                        Button("Como instalar") { openURL(page) }.help(Tip.installClaudeCode).chipButton()
+                    }
                 }
             } else if model.claudeCode.isLoggedIn {
                 line("checkmark.circle.fill", Palette.ok, "Conectado como \(model.claudeCode.accountLabel)\(modelCount)") {
@@ -38,13 +42,11 @@ struct ClaudeCodeAccountRow: View {
                     .disabled(isWorking)
                     .chipButton()
                 }
-                Text("O próprio Claude Code abre o navegador para você entrar.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text("O próprio Claude Code abre o navegador para você entrar.").capabilityCaption()
             }
             if let error {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
+                    .font(Typography.small)
                     .foregroundStyle(Palette.danger)
             }
         }
@@ -71,7 +73,7 @@ struct ClaudeCodeAccountRow: View {
     private func line<Actions: View>(_ symbol: String, _ tint: Color, _ text: String,
                                      @ViewBuilder actions: () -> Actions) -> some View {
         LabeledContent {
-            HStack { actions() }
+            HStack(spacing: Spacing.controlGap) { actions() }
         } label: {
             Label { Text(text) } icon: { Image(systemName: symbol).foregroundStyle(tint) }
         }

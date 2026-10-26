@@ -4,6 +4,18 @@ import SwiftUI
 // Both read the Orb's own `BotLive.memory`, group and search with `MemoryGroups`, and forget with a way back
 // (`MemoryUndo`): "Esquecer" removes the page at once and offers "Desfazer" for a few seconds.
 
+/// Sentences of the memory panel that depend on counts, kept out of the views so they can be tested.
+enum MemoryWords {
+    /// The note under the identity when preferences do not fit whole in what the Orb always sees: how many, and what
+    /// happens to the rest (the consolidation joins the shortest, or the Orb finds them only by searching).
+    static func preferencesOverflow(_ count: Int, name: String, summarizes: Bool) -> String {
+        guard count > 0 else { return "" }
+        let head = count == 1 ? "1 preferência não cabe" : "\(count) preferências não cabem"
+        let tail = summarizes ? "\(name) vai juntar as mais curtas." : "As outras só aparecem quando \(name) busca."
+        return "\(head) no que \(name) sempre vê. \(tail)"
+    }
+}
+
 /// The panel's Memória tab, as sections of the panel's form.
 struct MemoryTab: View {
     @Environment(AppModel.self) private var model
@@ -124,9 +136,8 @@ private struct IdentityBlock: View {
                     .foregroundStyle(Palette.muted)
             }
             if memory.preferencesOverflow > 0 {
-                Text("\(memory.preferencesOverflow) \(memory.preferencesOverflow == 1 ? "preferência não cabe" : "preferências não cabem") inteira\(memory.preferencesOverflow == 1 ? "" : "s") no que \(name) sempre vê; "
-                     + (canSummarize && memory.preferencesConsolidate
-                        ? "\(name) vai juntar as mais curtas sozinho." : "o resto é encontrado só quando \(name) busca."))
+                Text(MemoryWords.preferencesOverflow(memory.preferencesOverflow, name: name,
+                                                     summarizes: canSummarize && memory.preferencesConsolidate))
                     .font(Typography.small)
                     .foregroundStyle(Palette.muted)
             }

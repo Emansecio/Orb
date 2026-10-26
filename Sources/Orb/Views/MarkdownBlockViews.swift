@@ -23,7 +23,7 @@ struct MarkdownChunk: View, Equatable {
     var body: some View {
         let blocks = MarkdownCache.blocks(source, cached: cached)
         if blocks.isEmpty {
-            if streaming, first { Text("●").foregroundColor(Palette.muted) }
+            if streaming, first { Text("●").foregroundStyle(Palette.muted) }
         } else {
             // Paragraphs, headings, lists and quotes in a row are one text, so a drag selects across them; code, tables
             // and rules are drawn by themselves between those runs.
@@ -260,7 +260,7 @@ struct CopyTextButton: View {
                 Text(flash.isOn ? "Copiado" : "Copiar")
                     .contentTransition(.opacity)
             }
-            .font(.system(size: 11, weight: .medium))
+            .font(Typography.small.weight(.medium))
             .foregroundStyle(flash.isOn ? Palette.ink : Palette.muted)
             // On the view that changes, not `withAnimation`: a reply sets "never animate" on everything it draws.
             .animation(flash.isOn ? Motion.press : Motion.content, value: flash.isOn)
@@ -278,7 +278,7 @@ private struct CodeLines: View, Equatable {
 
     var body: some View {
         line
-            .font(.system(size: 12, design: .monospaced))
+            .font(Typography.code)
             .foregroundStyle(Palette.ink.opacity(0.9))
             .lineSpacing(2)
             .frame(maxWidth: .infinity, alignment: .leading)

@@ -223,12 +223,10 @@ struct CommandPalette: View {
                             ForEach(Array(results.enumerated()), id: \.element.id) { index, entry in
                                 if showsHeader(at: index, in: results) {
                                     Text(entry.section.title)
-                                        .font(.system(size: 11, weight: .medium))
-                                        .foregroundStyle(Palette.faint)
+                                        .sectionTitleStyle()
                                         .padding(.horizontal, 10)
                                         .padding(.top, index == 0 ? 2 : 10)
                                         .padding(.bottom, 3)
-                                        .accessibilityAddTraits(.isHeader)
                                 }
                                 // A real button: VoiceOver can activate the row, not only read it.
                                 Button { selected = index; run(results) } label: {
@@ -266,7 +264,7 @@ struct CommandPalette: View {
 
     private func hint(_ keys: String, _ text: String) -> some View {
         HStack(spacing: 5) {
-            Text(keys).font(.system(size: 11, weight: .medium, design: .rounded)).foregroundStyle(Palette.secondary)
+            Text(keys).font(.keyCap).foregroundStyle(Palette.secondary)
             Text(text).font(Typography.small).foregroundStyle(Palette.muted)
         }
     }
@@ -344,7 +342,7 @@ private struct PaletteRow: View {
             .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 Text(entry.title)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(Typography.text.weight(.medium))
                     .foregroundStyle(Palette.ink)
                     .lineLimit(1)
                 if let subtitle = entry.subtitle {
@@ -357,7 +355,7 @@ private struct PaletteRow: View {
             Spacer(minLength: 8)
             if let shortcut = entry.shortcut {
                 Text(shortcut)
-                    .font(.system(size: 11, design: .rounded))
+                    .font(.keyCap)
                     .foregroundStyle(Palette.muted)
             }
         }
@@ -373,6 +371,12 @@ private struct PaletteRow: View {
 
 // MARK: Shortcuts
 
+extension Font {
+    /// A key or a key combination ("⌘K", "⇧↩"): the palette's footer, its rows' shortcuts and the shortcuts sheet all
+    /// draw them in this one face (the color is each place's own).
+    static let keyCap = Font.system(size: 11, weight: .medium, design: .rounded)
+}
+
 struct ShortcutsSheet: View {
     @Environment(AppModel.self) private var model
 
@@ -382,14 +386,12 @@ struct ShortcutsSheet: View {
                 ForEach(ShortcutCatalog.groups) { group in
                     VStack(alignment: .leading, spacing: 6) {
                         Text(group.title)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(Palette.faint)
-                            .accessibilityAddTraits(.isHeader)
+                            .sectionTitleStyle()
                         ForEach(group.items) { item in
                             let lines = ShortcutItem.lines(item.title)
                             HStack(alignment: .firstTextBaseline, spacing: 12) {
                                 Text(item.keys)
-                                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                                    .font(.keyCap)
                                     .foregroundStyle(Palette.ink)
                                     .padding(.horizontal, 7)
                                     .padding(.vertical, 2)

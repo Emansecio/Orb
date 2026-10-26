@@ -122,7 +122,7 @@ struct CompactedFoldLine: View {
         Button(action: toggle) {
             HStack(spacing: 8) {
                 Image(systemName: "rectangle.compress.vertical")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(Typography.small.weight(.medium))
                     .foregroundStyle(Palette.faint)
                 Text(fold.title)
                     .foregroundStyle(Palette.muted)
@@ -160,7 +160,7 @@ struct TimeSeparatorLine: View {
     var body: some View {
         TimelineView(Midnights()) { context in
             Text(TimeSeparators.label(date, now: context.date))
-                .font(.system(size: 11, weight: .medium))
+                .font(Typography.small.weight(.medium))
                 .foregroundStyle(Palette.faint)
                 .monospacedDigit()
                 .frame(maxWidth: .infinity)
@@ -919,7 +919,7 @@ struct SuggestionButton: View {
                 Spacer()
                 if let caption {
                     Text(caption)
-                        .font(.system(size: 11, weight: .medium))
+                        .font(Typography.small.weight(.medium))
                         .foregroundStyle(Palette.faint)
                         .fixedSize()
                 }
@@ -1148,7 +1148,7 @@ private struct WorkMeterView: View {
         if since != nil || work.tone != .working {
             TimelineView(.periodic(from: since ?? anchor, by: 1)) { context in
                 Text(text(at: context.date))
-                    .font(.system(size: 12).monospacedDigit())
+                    .font(Typography.label.monospacedDigit())
                     .foregroundStyle(Palette.faint)
                     .lineLimit(1)
                     .fixedSize()

@@ -427,3 +427,11 @@ struct SidebarCategoryPersistenceTests {
         #expect(state.categories.first?.botIDs == [id])
     }
 }
+
+struct SidebarCategoryLayoutTests {
+    @Test func headingNameStartsWhereAnOrbsNameStarts() {
+        // An Orb row: 8 pt padding, the 30 pt avatar, an 8 pt gap. The heading name must land on the same edge.
+        let orbNameEdge: CGFloat = 8 + 30 + 8
+        #expect(SidebarCategoryLayout.titleInset == orbNameEdge)
+    }
+}

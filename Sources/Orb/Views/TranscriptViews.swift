@@ -319,12 +319,12 @@ private struct SendNowButton: View {
 
     var body: some View {
         if model.unansweredSteered(of: botID).contains(itemID) {
-            Button("Parar e enviar", systemImage: "arrow.up.circle.fill") {
+            Button("Parar e enviar", systemImage: "arrow.up.circle") {
                 // A click while the button fades out, after the Orb answered: nothing to send any more.
                 guard model.unansweredSteered(of: botID).contains(itemID) else { return }
                 model.stopAndSend(botID)
             }
-                .buttonStyle(GhostStyle(tint: Palette.accentText))
+                .buttonStyle(GhostStyle())
                 .controlSize(.small)
                 .clickablePointer()
                 .help("Interrompe o que o Orb está fazendo e envia esta mensagem agora (\(AppShortcut.commandReturn.label))")
@@ -563,7 +563,7 @@ private struct MessageActions: View {
             if let selection {
                 Button { model.quote(selection, for: botID) } label: {
                     Label("Citar", systemImage: "text.quote")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(Typography.small.weight(.medium))
                         .foregroundStyle(Palette.ink)
                 }
                 .buttonStyle(MessageActionStyle(shape: .capsule))
@@ -606,7 +606,7 @@ private struct ActionCircleButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 11, weight: .medium))
+                .font(Typography.small.weight(.medium))
                 .foregroundStyle(Palette.muted)
                 .opacity(isEnabled ? 1 : 0.45)
         }
@@ -659,7 +659,7 @@ struct CopyButton: View {
             flash.trigger()
         } label: {
             Image(systemName: flash.isOn ? "checkmark" : symbol)
-                .font(.system(size: 11, weight: .medium))
+                .font(Typography.small.weight(.medium))
                 .foregroundStyle(flash.isOn ? Palette.ink : Palette.muted)
                 // The symbol is swapped for the check (a plain fade under Reduce Motion), inside a frame that does not move.
                 .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
@@ -882,7 +882,7 @@ struct ToolCallLine: View {
                         .lineLimit(1)
                     if let code = words.code {
                         Text(code)
-                            .font(.system(size: 11.5, design: .monospaced))
+                            .font(Typography.codeSmall)
                             .foregroundStyle(Palette.secondary)
                             .lineLimit(1)
                             // Cut in the middle: the program stays and so does the end of a command, where what tells two
@@ -890,7 +890,8 @@ struct ToolCallLine: View {
                             .truncationMode(.middle)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1.5)
-                            .background(Palette.chipFill, in: .rect(cornerRadius: 4))
+                            // The fill of the inline code in the replies, so the same kind of text reads the same in both.
+                            .background(Palette.ghostSelected, in: .rect(cornerRadius: 4))
                             // The code gives way before the verb and the time do.
                             .layoutPriority(-1)
                     }
@@ -1047,7 +1048,7 @@ struct CommandBlock: View {
                             Image(systemName: head.0)
                                 .font(.system(size: 10))
                             Text(head.1)
-                                .font(.system(size: 11, design: .monospaced))
+                                .font(Typography.codeSmall)
                                 .lineLimit(1)
                                 .truncationMode(.head)
                             Spacer(minLength: 8)
@@ -1113,9 +1114,9 @@ struct CommandBlock: View {
     @ViewBuilder private func commandText(_ command: String) -> some View {
         let excerpt = foldsCommand ? CommandExcerpt.excerpt(of: command) : nil
         VStack(alignment: .leading, spacing: 6) {
-            (Text(prompt ? "$ " : "").foregroundColor(Palette.faint)
-                + Text(showsWholeCommand ? command : excerpt?.text ?? command).foregroundColor(isCode ? Palette.ink : Palette.secondary))
-                .font(.system(size: 12, design: isCode ? .monospaced : .default))
+            (Text(prompt ? "$ " : "").foregroundStyle(Palette.faint)
+                + Text(showsWholeCommand ? command : excerpt?.text ?? command).foregroundStyle(isCode ? Palette.ink : Palette.secondary))
+                .font(isCode ? Typography.code : Typography.label)
                 .lineSpacing(2)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1129,7 +1130,7 @@ struct CommandBlock: View {
         let head = CommandExcerpt.head(of: output)
         VStack(alignment: .leading, spacing: 6) {
             Text(showsWholeOutput ? output : head?.text ?? output)
-                .font(.system(size: 11.5, design: .monospaced))
+                .font(Typography.code)
                 .foregroundStyle(Palette.secondary)
                 .lineSpacing(2)
                 .textSelection(.enabled)
@@ -1145,7 +1146,7 @@ struct CommandBlock: View {
             isShowing.wrappedValue.toggle()
         }
         .buttonStyle(.plain)
-        .font(.system(size: 11.5, weight: .medium))
+        .font(Typography.small.weight(.medium))
         .foregroundStyle(Palette.muted)
         .clickablePointer()
     }
@@ -1627,7 +1628,7 @@ private struct NoticeLine: View {
             .help(showsProviderDetail ? "Esconde a mensagem do provedor" : "Mostra a mensagem do provedor")
             if showsProviderDetail {
                 Text(provider)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(Typography.codeSmall)
                     .foregroundStyle(Palette.faint)
                     .multilineTextAlignment(.leading)
                     .textSelection(.enabled)
@@ -1921,7 +1922,7 @@ struct ApprovalCard: View {
                         .foregroundStyle(Palette.secondary)
                     if !item.command.isEmpty {
                         Text(item.command)
-                            .font(.system(size: 12, design: .monospaced))
+                            .font(Typography.code)
                             .foregroundStyle(Palette.muted)
                             .lineLimit(2)
                     }
@@ -2071,9 +2072,9 @@ struct ApprovalCard: View {
                         .foregroundStyle(request.decision == .deny ? Palette.danger : Palette.faint)
                         .frame(width: 14)
                     (Text(ApprovalSummary.label(request))
-                        .foregroundColor(request.decision == .deny ? Palette.danger : Palette.muted)
-                        + Text(" · \(ApprovalSummary.title(request))").foregroundColor(Palette.muted)
-                        + Text("  \(ApprovalSummary.detail(request))").foregroundColor(Palette.faint))
+                        .foregroundStyle(request.decision == .deny ? Palette.danger : Palette.muted)
+                        + Text(" · \(ApprovalSummary.title(request))").foregroundStyle(Palette.muted)
+                        + Text("  \(ApprovalSummary.detail(request))").foregroundStyle(Palette.faint))
                         .font(Typography.label)
                         .lineLimit(1)
                         .truncationMode(.middle) // a long command keeps its start and its end

@@ -17,7 +17,7 @@ struct TaskPlanRing: View {
                 HStack(spacing: 5) {
                     ring(plan)
                     Text(tended ? "\(plan.doneCount)/\(plan.steps.count)" : "Plano")
-                        .font(.system(size: 11).monospacedDigit())
+                        .font(Typography.small.monospacedDigit())
                         .foregroundStyle(tended ? Palette.muted : Palette.faint)
                         .contentTransition(.numericText())
                 }
@@ -101,7 +101,7 @@ struct TaskPlanSteps: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(plan.goal)
-                .font(.system(size: 12, weight: .medium))
+                .font(Typography.label.weight(.medium))
                 .foregroundStyle(Palette.secondary)
             ForEach(plan.steps.indices, id: \.self) { index in
                 let step = plan.steps[index]

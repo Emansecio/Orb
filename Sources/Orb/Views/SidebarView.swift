@@ -184,6 +184,9 @@ struct SectionPlus: View {
     var size: CGFloat = 20
     /// The one "+" the sidebar draws, in a button or as a decoration (an invitation, a name field, "Nova conversa").
     static let glyph = Font.system(size: 11, weight: .medium)
+    /// The small arrow beside it (a folded list's chevron, a category's, a close mark): one step lighter than the "+" in
+    /// size, heavier in weight, so a 10 pt stroke reads as much as an 11 pt one.
+    static let chevron = Font.system(size: 10, weight: .semibold)
     @State private var isHovering = false
 
     var body: some View {
@@ -649,7 +652,7 @@ private struct BotRowContent: View, Equatable {
                                 withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) { model.setChatsCollapsed(!folded, for: row.botID) }
                             } label: {
                                 Image(systemName: "chevron.right")
-                                    .font(.system(size: 10, weight: .semibold))
+                                    .font(SectionPlus.chevron)
                                     .rotationEffect(.degrees(folded ? 0 : 90))
                                     .animation(Motion.panel(reduceMotion: reduceMotion), value: folded)
                                     .foregroundStyle(Palette.faint)

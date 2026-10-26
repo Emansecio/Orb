@@ -10,7 +10,7 @@ struct ComposerChipStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 12, weight: .medium))
+            .font(Typography.label.weight(.medium))
             .padding(.horizontal, 8)
             .frame(minWidth: 28, minHeight: 28)
             .hoverFill(configuration.isPressed || isHovering, pressed: configuration.isPressed, in: .capsule,
@@ -97,7 +97,7 @@ struct PermissionPopover: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Quando este Orb pede sua permissão")
-                .font(.system(size: 12, weight: .semibold))
+                .font(Typography.small.weight(.semibold))
                 .foregroundStyle(Palette.muted)
                 .padding(.horizontal, 14)
                 .padding(.top, 12)
@@ -110,7 +110,7 @@ struct PermissionPopover: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Text(grants)
-                            .font(.system(size: 12, weight: .medium))
+                            .font(Typography.label.weight(.medium))
                         Spacer()
                         Button("Gerenciar", action: manage)
                             .buttonStyle(.link)
@@ -128,7 +128,7 @@ struct PermissionPopover: View {
                 Spacer().frame(height: 8)
             }
         }
-        .frame(width: 330)
+        .frame(width: PopoverMetrics.width)
     }
 }
 
@@ -146,7 +146,7 @@ private struct PermissionRow: View {
                     .frame(width: 20)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(mode.label)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(Typography.text.weight(.medium))
                         .foregroundStyle(mode == .bypass ? Palette.warn : Palette.ink)
                     Text(mode.shortSummary)
                         .font(Typography.label)
@@ -247,7 +247,7 @@ struct SkillsPopover: View {
                 }
             }
         }
-        .frame(width: 340, height: Self.height(skillCount: skills.count, listHeight: listHeight))
+        .frame(width: PopoverMetrics.width, height: Self.height(skillCount: skills.count, listHeight: listHeight))
         .onAppear { isSearching = true }
     }
 
@@ -263,7 +263,7 @@ struct SkillsPopover: View {
 
     private func empty(_ title: String, _ detail: String) -> some View {
         VStack(spacing: 4) {
-            Text(title).font(.system(size: 13, weight: .medium))
+            Text(title).font(Typography.text.weight(.medium))
             Text(detail).font(Typography.label).foregroundStyle(Palette.muted).multilineTextAlignment(.center)
         }
         .padding(24)
@@ -281,8 +281,8 @@ struct SkillRow: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(skill.name).font(.system(size: 13, weight: .medium)).foregroundStyle(Palette.ink)
-                    Text("/" + skill.slug).font(.system(size: 11, design: .monospaced)).foregroundStyle(Palette.muted)
+                    Text(skill.name).font(Typography.text.weight(.medium)).foregroundStyle(Palette.ink)
+                    Text("/" + skill.slug).font(Typography.codeSmall).foregroundStyle(Palette.muted)
                 }
                 if !skill.summary.isEmpty {
                     Text(skill.summary)
@@ -429,7 +429,7 @@ struct JobsStrip: View {
                     Image(systemName: "terminal")
                         .foregroundStyle(Palette.faint)
                     Text(job.command)
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(Typography.code)
                         .foregroundStyle(Palette.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)

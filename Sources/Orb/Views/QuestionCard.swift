@@ -109,7 +109,7 @@ struct QuestionCard: View {
                 .foregroundStyle(Palette.accentText)
                 .accessibilityHidden(true)
             Text("\(orbName.isEmpty ? "O Orb" : orbName) \(asked ? "perguntou" : "pergunta")")
-                .font(.system(size: 12, weight: .medium))
+                .font(Typography.label.weight(.medium))
                 .foregroundStyle(Palette.muted)
         }
     }
@@ -141,11 +141,11 @@ struct QuestionCard: View {
             HStack(alignment: .firstTextBaseline, spacing: 7) {
                 if let answer = question.answer {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(Typography.small.weight(.semibold))
                         .foregroundStyle(Palette.accentText)
                         .accessibilityHidden(true)
                     Text(answer)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(Typography.text.weight(.medium))
                         .foregroundStyle(Palette.ink)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)

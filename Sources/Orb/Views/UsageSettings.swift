@@ -128,48 +128,46 @@ struct UsageSettings: View {
 
     private func emptyState(_ report: UsageReport) -> some View {
         Section {
-            VStack(spacing: 8) {
+            VStack(spacing: Spacing.s) {
                 Image(systemName: "chart.bar")
                     .font(.system(size: 26))
                     .foregroundStyle(Palette.hint)
                     .accessibilityHidden(true)
                 Text(report.period == .today ? "Nada gasto hoje" : "Nada gasto neste período")
-                    .font(.headline)
+                    .font(Typography.text.weight(.semibold))
+                    .foregroundStyle(Palette.ink)
                 Text("Cada resposta dos seus Orbs aparece aqui, com o que custou. Isso fica só neste Mac.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .font(Typography.text)
+                    .foregroundStyle(Palette.muted)
                     .multilineTextAlignment(.center)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 28)
+            .padding(.vertical, Spacing.xxl)
         }
     }
 
     private func totalSection(_ report: UsageReport) -> some View {
         Section {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text(UsageFormat.dollars(report.totalCost))
                     .font(.system(size: 34, weight: .semibold, design: .rounded))
                     .foregroundStyle(Palette.ink)
                     .contentTransition(.numericText())
                 Text("estimado · \(UsageFormat.tokens(new: report.totalTokens, cached: report.totalCached)) · \(UsageFormat.requests(report.totalRequests))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .capabilityCaption()
                     .contentTransition(.numericText())
                 if report.totalEquivalent > 0 {
                     Text("Mais ≈ \(UsageFormat.dollars(report.totalEquivalent)) no que os planos cobrem, pelo preço da API.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .capabilityCaption()
                 } else if report.totalCost == 0 && !report.hasUnpriced {
                     Text("Nada foi cobrado: só planos e modelos no seu Mac.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .capabilityCaption()
                 }
                 if report.hasUnpriced {
                     Label("Parte do uso é de modelos sem preço. Defina o preço em “Por modelo”.", systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
+                        .font(Typography.small)
                         .foregroundStyle(Palette.warn)
-                        .padding(.top, 2)
+                        .padding(.top, Spacing.hairline)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -236,7 +234,7 @@ struct UsageSettings: View {
             ForEach(Array(series.enumerated()), id: \.element.id) { index, item in
                 HStack(spacing: 6) {
                     Circle().fill(colors[index]).frame(width: 8, height: 8).accessibilityHidden(true)
-                    Text(item.name).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(item.name).font(Typography.small).foregroundStyle(Palette.muted).lineLimit(1)
                 }
             }
         }
@@ -294,7 +292,7 @@ struct UsageSettings: View {
                     }
                     Text("24h").frame(alignment: .trailing)
                 }
-                .font(.caption2)
+                .font(Typography.small)
                 .foregroundStyle(Palette.faint)
             }
             .padding(.vertical, 4)
@@ -334,10 +332,10 @@ private struct UsageRowView: View {
     var body: some View {
         LabeledContent {
             HStack(spacing: 10) {
-                VStack(alignment: .trailing, spacing: 2) {
+                VStack(alignment: .trailing, spacing: Spacing.hairline) {
                     amount
                     if let share = row.share, row.state == .billed || measure == .tokens {
-                        Text(UsageFormat.share(share)).font(.caption).foregroundStyle(.secondary)
+                        Text(UsageFormat.share(share)).font(Typography.small).foregroundStyle(Palette.muted)
                     }
                 }
                 if isModel && row.state != .free {
@@ -351,9 +349,9 @@ private struct UsageRowView: View {
                 }
             }
         } label: {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Spacing.hairline) {
                 Text(row.name).lineLimit(1)
-                Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(detail).font(Typography.small).foregroundStyle(Palette.muted).lineLimit(1)
             }
         }
         .accessibilityElement(children: .combine)
@@ -366,7 +364,7 @@ private struct UsageRowView: View {
         case .included:
             Text("Incluído no plano").foregroundStyle(Palette.secondary)
             if row.equivalent > 0 {
-                Text("≈ \(UsageFormat.dollars(row.equivalent)) pela API").font(.caption).foregroundStyle(.secondary)
+                Text("≈ \(UsageFormat.dollars(row.equivalent)) pela API").font(Typography.small).foregroundStyle(Palette.muted)
             }
         case .free:
             Text("Grátis").foregroundStyle(Palette.secondary)
@@ -379,7 +377,7 @@ private struct UsageRowView: View {
             }
         }
         if row.state == .billed && row.hasUnpriced {
-            Text("e uso sem preço").font(.caption).foregroundStyle(Palette.warn)
+            Text("e uso sem preço").font(Typography.small).foregroundStyle(Palette.warn)
         }
     }
 
@@ -434,14 +432,18 @@ private struct PriceEditor: View {
 
     private enum Field { case input, cacheRead, cacheWrite, output }
 
+    /// The popover's width: the four labels and their fields side by side.
+    private static let width: CGFloat = 320
+    private static let fieldWidth: CGFloat = 110
+
     private var current: (price: ModelPrice, source: PriceSource)? { PriceDraft.baseline(for: modelID, in: model.priceBook) }
     private var typed: ModelPrice? { draft.price(replacing: current?.price) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Preço de \(title)").font(.headline).lineLimit(1)
-                Text(sourceText).font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: Spacing.m) {
+            VStack(alignment: .leading, spacing: Spacing.hairline) {
+                Text("Preço de \(title)").font(Typography.text.weight(.semibold)).foregroundStyle(Palette.ink).lineLimit(1)
+                Text(sourceText).capabilityCaption()
             }
             Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 8) {
                 field("Entrada", text: $draft.input, focus: .input)
@@ -449,27 +451,30 @@ private struct PriceEditor: View {
                 field("Gravação no cache", text: $draft.cacheWrite, focus: .cacheWrite, placeholder: "igual à entrada")
                 field("Saída", text: $draft.output, focus: .output)
             }
-            Text("Em dólares por milhão de tokens. Vale também para o que já foi gasto.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack {
+            Text("Em dólares por milhão de tokens. Vale também para o que já foi gasto.").capabilityCaption()
+            // The buttons of every other card and sheet: quiet ghosts for the way out, the white pill for the save.
+            ActionRow {
                 if model.priceCorrections[modelID] != nil {
                     Button("Restaurar") { model.correctPrice(of: modelID, to: nil); close() }
+                        .buttonStyle(GhostStyle())
                         .help(Tip.priceRestore)
+                        .hangsOnLeadingEdge()
                 }
-                Spacer()
-                Button("Cancelar", action: close).keyboardShortcut(.cancelAction)
+            } trailing: {
+                Button("Cancelar", action: close)
+                    .buttonStyle(GhostStyle())
+                    .keyboardShortcut(.cancelAction)
                 Button("Salvar") {
                     if let typed, draft != opened { model.correctPrice(of: modelID, to: typed) }
                     close()
                 }
+                .buttonStyle(PrimaryPillStyle())
                 .keyboardShortcut(.defaultAction)
                 .disabled(typed == nil)
             }
         }
-        .padding(16)
-        .frame(width: 320)
+        .padding(Spacing.l)
+        .frame(width: Self.width)
         .onAppear {
             draft = PriceDraft(current?.price)
             opened = draft
@@ -479,13 +484,15 @@ private struct PriceEditor: View {
 
     private func field(_ label: String, text: Binding<String>, focus field: Field, placeholder: String = "0") -> some View {
         GridRow {
-            Text(label).font(.callout)
+            Text(label).font(Typography.text)
             TextField(label, text: text, prompt: Text(placeholder))
                 .labelsHidden()
                 .multilineTextAlignment(.trailing)
-                .textFieldStyle(.roundedBorder)
+                // The app's own input (plain text on the raised gray), as in the popovers' search fields.
+                .popoverSearchField()
+                .font(Typography.text)
                 .focused($focus, equals: field)
-                .frame(width: 110)
+                .frame(width: Self.fieldWidth)
         }
     }
 

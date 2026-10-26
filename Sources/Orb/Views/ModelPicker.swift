@@ -173,19 +173,22 @@ private struct ModelChooser: View {
                                     row(item.name, tag: ModelRef(provider: choice.account.kind, model: item.id).text, help: item.id)
                                 }
                             } header: {
+                                // The composer popover's header (`ModelPopover.header`), over a material because this one is pinned.
                                 Text(choice.account.kind.label)
-                                    .font(.caption.weight(.medium))
-                                    .foregroundStyle(.secondary)
+                                    .font(Typography.small.weight(.semibold))
+                                    .foregroundStyle(Palette.muted)
                                     .padding(.horizontal, 12)
-                                    .padding(.vertical, 5)
+                                    .padding(.top, 10)
+                                    .padding(.bottom, 3)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .background(.regularMaterial)
+                                    .accessibilityAddTraits(.isHeader)
                             }
                         }
                         if shown.isEmpty {
                             Text("Nenhum modelo encontrado.")
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
+                                .font(Typography.label)
+                                .foregroundStyle(Palette.muted)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 24)
                         }
@@ -200,7 +203,7 @@ private struct ModelChooser: View {
                 }
             }
         }
-        .frame(width: 340, height: 380)
+        .frame(width: PopoverMetrics.width, height: 380)
     }
 
     private func row(_ name: String, tag: String, help: String) -> some View {

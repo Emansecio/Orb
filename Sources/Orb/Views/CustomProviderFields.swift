@@ -36,43 +36,37 @@ struct CustomProviderFields<KeyRow: View>: View {
                 Text("Messages (Anthropic / Claude)").tag(APIFormat.messages)
             }
             .help(Tip.gatewayFormat)
-            Text(GatewayForm.formatSubtitle(account.format))
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Text(GatewayForm.formatSubtitle(account.format)).capabilityCaption()
         }
 
         if isClaudeGateway {
-            Label("Para usar sua assinatura (inclusive Max) no Orb, rode um gateway (um servidor intermediário) que faça o login da sua conta e aponte a URL acima para ele. O token fica nesse servidor, não no Orb.",
-                  systemImage: "info.circle")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            // One sentence, the rest behind "Saiba mais": three lines of gray text stayed on screen for everyone who picked Messages.
+            LearnMoreNote(short: "Para usar sua assinatura (inclusive Max) no Orb, rode um gateway com o seu login.",
+                          more: "Um gateway é um servidor intermediário que faz o login da sua conta. Aponte a URL acima para ele. O token fica nesse servidor, não no Orb.")
+                .foregroundStyle(Palette.muted)
         }
 
         keyRow
 
         VStack(alignment: .leading, spacing: 4) {
-            Text("Cabeçalhos (opcional)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Text("Cabeçalhos (opcional)").capabilityCaption()
             // Saved from what is typed, not from every change of the text: loading the saved headers into the field must
             // not write them back (an old header the stricter parser flags would be dropped just by opening the row).
             PlaceholderTextEditor(placeholder: "Um por linha, assim:  x-api-key: abc123",
                                   text: Binding(get: { headersText }, set: { headersText = $0; saveHeaders() }), minHeight: 56)
             if let warning = GatewayForm.headerWarning(parsedHeaders) {
                 Label(warning, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
+                    .font(Typography.small)
                     .foregroundStyle(Palette.warn)
             }
         }
 
         VStack(alignment: .leading, spacing: 8) {
-            Text("Modelos")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Text("Modelos").capabilityCaption()
             if account.models.isEmpty {
                 if GatewayForm.urlState(account.baseURL) == .valid {
                     Text("Nenhum modelo ainda. Use “Atualizar modelos” ou adicione os ids à mão.")
-                        .font(.caption)
+                        .font(Typography.small)
                         .foregroundStyle(Palette.faint)
                 }
             } else {
@@ -133,7 +127,7 @@ private struct ModelChips: View {
         WrappingLayout(spacing: 6) {
             ForEach(models) { item in
                 HStack(spacing: 4) {
-                    Text(item.id).font(.system(size: 11, design: .monospaced))
+                    Text(item.id).font(Typography.codeSmall)
                     Button("Remover \(item.id)", systemImage: "xmark", action: { remove(item) })
                         .labelStyle(.iconOnly)
                         .font(.system(size: 9, weight: .bold))
@@ -190,7 +184,7 @@ private struct ModelIDRow: View {
 
     var body: some View {
         HStack {
-            Text(item.id).font(.caption.monospaced())
+            Text(item.id).font(Typography.codeSmall)
             Spacer()
             Button("Remover", systemImage: "minus.circle", action: remove)
                 .labelStyle(.iconOnly)
@@ -213,20 +207,24 @@ private struct AllModelsSheet: View {
         let shown = models.filter { ModelSearch.matches($0, words: words) }
         VStack(spacing: 0) {
             HStack {
+                // The same field as the model popovers' search. The total is in the sheet's subtitle, so the row
+                // only says how many match while a search narrows the list.
                 TextField("Buscar modelo", text: $query)
-                    .textFieldStyle(.roundedBorder)
-                Text(shown.count == models.count ? "\(models.count) modelos" : "\(shown.count) de \(models.count)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .popoverSearchField()
+                if shown.count != models.count {
+                    Text("\(shown.count) de \(models.count)")
+                        .font(Typography.small)
+                        .foregroundStyle(Palette.muted)
+                }
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 12)
+            .padding(.horizontal, Spacing.sheetEdge)
+            .padding(.bottom, Spacing.m)
             Divider()
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(shown) { item in
                         ModelIDRow(item: item) { remove(item) }
-                            .padding(.horizontal, 20)
+                            .padding(.horizontal, Spacing.sheetEdge)
                             .padding(.vertical, 6)
                     }
                 }

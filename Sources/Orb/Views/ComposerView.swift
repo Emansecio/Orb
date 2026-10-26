@@ -244,7 +244,7 @@ struct ComposerView: View {
                 .font(.system(size: 11, weight: .medium))
                 .accessibilityHidden(true)
             Text(RewindWords.banner)
-                .font(.system(size: 12, weight: .medium))
+                .font(Typography.label.weight(.medium))
             Spacer(minLength: 8)
             Button("Cancelar", systemImage: "xmark") { model.cancelEditing(botID) }
                 .labelStyle(.iconOnly)

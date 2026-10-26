@@ -343,7 +343,7 @@ struct MacPermissionsView: View {
                         Text("Apps que o Orb controla")
                         Spacer()
                         Text(summary.isLoaded ? summary.automationText : "")
-                            .font(.caption)
+                            .font(Typography.small)
                             .foregroundStyle(Palette.muted)
                     }
                     .contentShape(.rect)
@@ -357,8 +357,7 @@ struct MacPermissionsView: View {
                     Text("As permissões valem para esta cópia do Orb. Se o app é recompilado com a assinatura temporária, o macOS "
                          + "trata a nova cópia como outro app e pede tudo de novo. Para manter, assine com o certificado local "
                          + "\"Orb Local\" (scripts/make-signing-identity.sh, descrito no README).")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .capabilityCaption()
                 }
             }
         }
@@ -387,11 +386,8 @@ private struct MacPermissionsHeader: View {
                 .foregroundStyle(summary.isComplete ? Palette.ok : (summary.isLoaded ? Palette.warn : Palette.muted))
                 .frame(width: 32)
             VStack(alignment: .leading, spacing: 2) {
-                Text(summary.title).font(.system(size: 14, weight: .semibold))
-                Text(summary.subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Text(summary.title).font(Typography.text.weight(.semibold))
+                Text(summary.subtitle).capabilityCaption()
             }
             Spacer()
             Button("Verificar de novo", action: recheck)
@@ -432,9 +428,7 @@ private struct MacPermissionRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(kind.title)
                     .foregroundStyle(model.status(of: kind) == .appNotRunning ? Palette.muted : Palette.ink)
-                Text(row.note ?? kind.detail)
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Text(row.note ?? kind.detail).capabilityCaption()
             }
         }
     }
@@ -478,9 +472,10 @@ private struct NotificationRow: View {
         } label: {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Notificações")
+                // `capabilityCaption` wraps at the column's width: at 460 pt the long line was cut short.
                 Text(state == .unavailable ? "Só funcionam no app instalado, não ao rodar pelo Xcode ou terminal."
                      : "Avisar quando um Orb terminar ou precisar de você")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .capabilityCaption()
             }
         }
     }
@@ -514,22 +509,22 @@ private struct StatusBadge: View {
             case .asking, .testing:
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.small)
-                    Text(badge == .asking ? "Aguardando você" : "Testando…").font(.caption).foregroundStyle(.secondary)
+                    Text(badge == .asking ? "Aguardando você" : "Testando…").font(Typography.small).foregroundStyle(Palette.muted)
                 }
                 .transition(.opacity)
             case .status(let status):
                 Label(status.label, systemImage: status.symbol)
-                    .font(.caption)
+                    .font(Typography.small)
                     .foregroundStyle(status.tint)
                     .transition(mark)
             case .working:
                 Label("Funcionando", systemImage: "checkmark.circle.fill")
-                    .font(.caption)
+                    .font(Typography.small)
                     .foregroundStyle(Palette.ok)
                     .transition(mark)
             case .broken:
                 Label("Não funciona", systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
+                    .font(Typography.small)
                     .foregroundStyle(Palette.danger)
                     .transition(mark)
             }
@@ -613,7 +608,7 @@ extension MacPermissionStatus {
         switch self {
         case .granted: Palette.ok
         case .denied, .notGranted: Palette.danger
-        case .notDetermined, .appNotRunning, .unknown: .secondary
+        case .notDetermined, .appNotRunning, .unknown: Palette.muted
         }
     }
 }

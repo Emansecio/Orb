@@ -63,10 +63,10 @@ struct WelcomeOfferView: View {
                     .font(Typography.label)
                     .foregroundStyle(Palette.secondary)
                 if run.working == .claudeCode {
+                    // Gray until the pointer is on it, like the other small text buttons: "Cancelar" is no call to action.
                     Button("Cancelar", action: run.cancel)
-                        .buttonStyle(.plain)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Palette.accentText)
+                        .buttonStyle(QuietTextStyle())
+                        .font(Typography.label.weight(.medium))
                         .help(Tip.stopConnecting)
                 }
             }
@@ -142,8 +142,7 @@ struct WelcomeReasonNote: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
         .frame(maxWidth: 460, alignment: .leading)
-        .background(Color.white.opacity(0.04), in: .rect(cornerRadius: Radius.medium))
-        .overlay(RoundedRectangle(cornerRadius: Radius.medium).strokeBorder(Palette.line))
+        .card(radius: Radius.medium)
         .accessibilityElement(children: .combine)
         .onAppear { AccessibilityNotification.Announcement(reason.message).post() }
     }

@@ -4,6 +4,15 @@ import AppKit
 // MARK: New bot
 
 struct NewBotSheet: View {
+    /// The sheet's layout: its width, the two columns of "Quem ele é", and the top of the pill switches (the mode switch
+    /// in the left column and the tab switch across the sheet share it, so their pills sit on one line).
+    private enum Layout {
+        static let sheetWidth: CGFloat = 820
+        static let leftColumn: CGFloat = 380
+        static let preview: CGFloat = 440
+        static let pickerTop: CGFloat = 14
+    }
+
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
 
@@ -124,9 +133,10 @@ struct NewBotSheet: View {
         .help(model.canCreateByConversing ? "Conversar com o assistente ou preencher o formulário" : OrbCreationMode.needsModel)
         .accessibilityLabel("Como criar o Orb")
         .accessibilityIdentifier("new-orb-mode")
-        .padding(.horizontal, 16)
-        .padding(.top, 14)
-        .padding(.bottom, 10)
+        // The same margins as the tab switch above it, so the two rows of pills start and end on one grid.
+        .padding(.horizontal, Spacing.sheetEdge)
+        .padding(.top, Layout.pickerTop)
+        .padding(.bottom, Spacing.m)
     }
 
     /// "Criar" in the assistant: the Orb the draft describes, and the sheet closes.
@@ -169,9 +179,9 @@ struct NewBotSheet: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Parte do Orb")
         .accessibilityIdentifier("new-orb-tab")
-        .padding(.horizontal, 20)
-        .padding(.top, 14)
-        .padding(.bottom, 12)
+        .padding(.horizontal, Spacing.sheetEdge)
+        .padding(.top, Layout.pickerTop)
+        .padding(.bottom, Spacing.m)
         .background(Palette.chrome)
         .sheetSection(0)
     }
@@ -250,7 +260,7 @@ struct NewBotSheet: View {
             .background(Palette.chrome)
             .sheetSection(2)
         }
-        .frame(width: 820, height: height)
+        .frame(width: Layout.sheetWidth, height: height)
         .background(Palette.chrome) // one ground under both tabs: the hairline between the columns sits on it, not on the window
         .task { wizard.attach(model) } // MultiOrb (WP4)
         .onDisappear { wizard.cancel() } // MultiOrb (WP4): the sheet closed: the assistant's turn stops, nothing is kept
@@ -289,7 +299,7 @@ struct NewBotSheet: View {
                 }
                 .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: isImporting)
                 .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: creation)
-                .frame(width: 380)
+                .frame(width: Layout.leftColumn)
                 .background(Palette.chrome)
                 // The left column comes in just after the tabs, the footer last (MOVIMENTO.md §2.6).
                 .sheetSection(1)
@@ -297,11 +307,11 @@ struct NewBotSheet: View {
                 // The preview, in the assistant and in the form: the Orb with the look the person chose.
                 previewPane
                     // Without the tabs over it (the import panel is open) the Orb would touch the sheet's top edge.
-                    .padding(.top, isImporting ? 24 : 0)
+                    .padding(.top, isImporting ? Spacing.xxl : 0)
                     .id(creation)
                     .transition(.opacity)
                     .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: creation)
-                    .frame(width: 440)
+                    .frame(width: Layout.preview)
             }
     }
 
@@ -315,8 +325,8 @@ struct NewBotSheet: View {
         .help(Tip.importFromAssistant)
         // Centered under the pills above it, as one header for the chat.
         .frame(maxWidth: .infinity, alignment: .center)
-        .padding(.horizontal, 16)
-        .padding(.bottom, 8)
+        .padding(.horizontal, Spacing.l)
+        .padding(.bottom, Spacing.s)
     }
 
     private var form: some View {
@@ -342,21 +352,19 @@ struct NewBotSheet: View {
                     }
                     .bypassConfirmation(isPresented: $isConfirmingBypass) { mode = .bypass }
                     Text(mode.summary)
-                        .font(.caption)
-                        .foregroundStyle(mode == .bypass ? Palette.warn : .secondary)
+                        .font(Typography.small)
+                        .foregroundStyle(mode == .bypass ? Palette.warn : Palette.muted)
                     TextField("Como funciona", text: $identity,
                               prompt: Text("Ex.: Seja direto e me lembre de fazer pausas"), axis: .vertical)
                         .lineLimit(3...6)
                     if let draftCapabilities { // MultiOrb (WP4)
                         Text("Do assistente: " + (draftCapabilities.isEmpty ? "sem ferramentas extras"
                                                   : OrbDraft.offeredCapabilities.filter(draftCapabilities.contains).map(\.label).joined(separator: ", ")))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .capabilityCaption()
                     }
                     Toggle("Na primeira conversa, me fazer perguntas", isOn: $interview)
                     Text("Isso fica na memória do Orb, que começa a crescer na primeira conversa. Dá para editar depois, no painel.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .capabilityCaption()
                 }
             }
         }
@@ -530,8 +538,8 @@ private struct NewBotFolderSection: View {
                         .truncationMode(.middle)
                         .textSwap(shownName)
                     Text(shownPath)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
+                        .font(Typography.codeSmall)
+                        .foregroundStyle(Palette.muted)
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .textSelection(.enabled)

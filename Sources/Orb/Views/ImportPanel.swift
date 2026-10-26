@@ -241,7 +241,7 @@ struct ImportPanel: View {
             .hangsOnLeadingEdge()
             .help(Tip.importBack)
             Text(ImportText.title)
-                .font(.system(size: 17, weight: .semibold))
+                .font(Typography.title)
                 .foregroundStyle(Palette.ink)
                 .accessibilityAddTraits(.isHeader)
         }
@@ -310,7 +310,7 @@ struct ImportPanel: View {
             DisclosureGroup("Ver o prompt") {
                 ScrollView {
                     Text(ImportPrompt.text)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(Typography.codeSmall)
                         .foregroundStyle(Palette.secondary)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -356,7 +356,7 @@ struct ImportPanel: View {
             }
             if !locals.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Neste Mac").font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.secondary)
+                    Text("Neste Mac").font(Typography.label.weight(.medium)).foregroundStyle(Palette.secondary)
                     ForEach(locals) { local in
                         HStack {
                             Text("\(local.name) · \(local.display)").font(Typography.label).foregroundStyle(Palette.muted)
@@ -500,7 +500,7 @@ private struct StepLabel: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 13, weight: .semibold))
+            .font(Typography.text.weight(.semibold))
             .foregroundStyle(Palette.ink)
             .accessibilityAddTraits(.isHeader)
     }
@@ -526,7 +526,7 @@ private struct ImportPreview: View, Equatable {
         VStack(alignment: .leading, spacing: 10) {
             StepLabel("\(step). Prévia")
             VStack(alignment: .leading, spacing: 2) {
-                Text("De: \(imported.source)").font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.secondary)
+                Text("De: \(imported.source)").font(Typography.label.weight(.medium)).foregroundStyle(Palette.secondary)
                 let who = [imported.name, imported.role].filter { !$0.isEmpty }.joined(separator: " · ")
                 if !who.isEmpty { Text(who).font(Typography.label).foregroundStyle(Palette.muted) }
                 Text(plan.isEmpty ? ImportText.nothingChecked : "Vai importar: \(plan.summary)")
@@ -597,7 +597,7 @@ private struct ImportGroup<Content: View>: View {
                 .padding(.top, 4)
         } label: {
             Text(count.map { "\(title) (\($0))" } ?? title)
-                .font(.system(size: 12, weight: .semibold))
+                .font(Typography.label.weight(.semibold))
                 .foregroundStyle(Palette.secondary)
         }
     }
@@ -611,7 +611,7 @@ private struct ImportRow: View {
     var body: some View {
         Toggle(isOn: $item.isOn) {
             VStack(alignment: .leading, spacing: 2) {
-                if !item.title.isEmpty { Text(item.title).font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.ink) }
+                if !item.title.isEmpty { Text(item.title).font(Typography.label.weight(.medium)).foregroundStyle(Palette.ink) }
                 Text(ImportRow.shown(item.text))
                     .font(Typography.label)
                     .foregroundStyle(Palette.secondary)
@@ -647,7 +647,7 @@ private struct ImportSkillRow: View {
             VStack(alignment: .leading, spacing: 0) {
                 Toggle(isOn: $skill.isOn) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("/\(skill.slug)").font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.ink)
+                        Text("/\(skill.slug)").font(Typography.label.weight(.medium)).foregroundStyle(Palette.ink)
                         Text(skill.summary).font(Typography.label).foregroundStyle(Palette.secondary).lineLimit(2)
                         if skill.isSuspicious {
                             Text(ImportText.suspicious).font(Typography.small).foregroundStyle(Palette.warn)
@@ -664,7 +664,7 @@ private struct ImportSkillRow: View {
             }
             if isShowing {
                 Text(skill.instructions)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(Typography.codeSmall)
                     .foregroundStyle(Palette.muted)
                     .textSelection(.enabled)
                     .padding(8)

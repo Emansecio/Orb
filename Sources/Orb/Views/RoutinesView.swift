@@ -149,7 +149,7 @@ private struct RoutinesEmptyState: View {
                     .foregroundStyle(Palette.faint)
                     .accessibilityHidden(true)
                 Text("Nenhuma rotina ainda")
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(Typography.title)
                     .accessibilityAddTraits(.isHeader)
                 Text("Uma rotina é uma tarefa que um Orb faz sozinho, no horário. O app precisa estar aberto.")
                     .font(Typography.text)
@@ -162,12 +162,12 @@ private struct RoutinesEmptyState: View {
                 .help(Tip.newRoutine(for: start))
             if let caption = start.caption {
                 Text(caption)
-                    .font(.caption)
+                    .font(Typography.small)
                     .foregroundStyle(Palette.muted)
             }
             VStack(spacing: 10) {
                 Text("Ou comece por um modelo")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(Typography.label.weight(.medium))
                     .foregroundStyle(Palette.muted)
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .top, spacing: 12) { templateCards(width: 176) }
@@ -211,10 +211,10 @@ private struct TemplateCard: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Palette.ink)
                 Text(template.goal == nil ? template.whenText : "\(template.whenText) · com meta")
-                    .font(.caption.weight(.medium))
+                    .font(Typography.small.weight(.medium))
                     .foregroundStyle(Palette.secondary)
                 Text(template.prompt)
-                    .font(.caption)
+                    .font(Typography.small)
                     .foregroundStyle(Palette.muted)
                     .lineLimit(5)
                     .multilineTextAlignment(.leading)
@@ -261,7 +261,7 @@ private struct RoutineCard: View {
                     HStack(spacing: 8) {
                         BotAvatar(bot: bot, size: 30, activity: routine.isEnabled ? .idle : .sleepy, animated: false)
                         Text(bot.name)
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(Typography.text.weight(.semibold))
                             .foregroundStyle(Palette.secondary)
                             .lineLimit(1)
                     }
@@ -295,10 +295,10 @@ private struct RoutineCard: View {
             }
             VStack(alignment: .leading, spacing: 4) {
                 Label(routine.schedule.plainLabel, systemImage: "clock")
-                    .font(.callout)
+                    .font(Typography.label)
                 if let mismatch = RoutineText.nameMismatch(of: routine) {
                     Label(mismatch, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
+                        .font(Typography.small)
                         .foregroundStyle(Palette.warn)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -308,7 +308,7 @@ private struct RoutineCard: View {
             Divider()
             if routine.runs.isEmpty {
                 Text(routine.lastResult ?? "Ainda não rodou.")
-                    .font(.caption)
+                    .font(Typography.small)
                     .foregroundStyle(Palette.muted)
                     .lineLimit(3)
             } else {
@@ -394,16 +394,16 @@ struct NextRunLine: View {
         if routine.isEnabled {
             TimelineView(.periodic(from: .now, by: 60)) { context in
                 Text(RoutineText.nextRun(of: routine, now: context.date) ?? "")
-                    .font(.caption)
+                    .font(Typography.small)
                     .foregroundStyle(Palette.muted)
             }
         } else if RoutineText.isConcluded(routine) {
             Label("Concluída", systemImage: "checkmark.circle")
-                .font(.caption)
+                .font(Typography.small)
                 .foregroundStyle(Palette.muted)
         } else {
             Label("Pausada", systemImage: "pause.circle")
-                .font(.caption)
+                .font(Typography.small)
                 .foregroundStyle(Palette.muted)
         }
     }
@@ -414,7 +414,7 @@ struct NextRunLine: View {
 /// without the note (the last run's line right under it says much the same).
 struct GoalProgressView: View {
     let goal: RoutineGoal
-    var font: Font = .caption
+    var font: Font = Typography.small
     var showsNote = true
 
     var body: some View {
@@ -507,7 +507,7 @@ private struct RunHistory: View {
                     }
                     .padding(.top, 4)
                 }
-                .font(.caption)
+                .font(Typography.small)
                 .foregroundStyle(Palette.muted)
             }
         }
@@ -524,14 +524,14 @@ private struct RunLine: View {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Image(systemName: run.succeeded ? "checkmark.circle.fill" : "xmark.circle.fill")
                     .foregroundStyle(run.succeeded ? Palette.ok : Palette.danger)
-                    .font(.caption)
+                    .font(Typography.small)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
                     Text([RoutineText.stamp(run.date), RoutineText.duration(of: run)].compactMap { $0 }.joined(separator: " · "))
-                        .font(.caption2)
+                        .font(Typography.small)
                         .foregroundStyle(Palette.faint)
                     Text(run.summary)
-                        .font(.caption)
+                        .font(Typography.small)
                         .foregroundStyle(Palette.muted)
                         .lineLimit(lineLimit)
                         .multilineTextAlignment(.leading)
@@ -543,7 +543,7 @@ private struct RunLine: View {
                         if check.status == .attention { Image(systemName: "flag.fill") }
                         Text("\(check.progress)%").monospacedDigit()
                     }
-                    .font(.caption2.weight(.medium))
+                    .font(Typography.small.weight(.medium))
                     .foregroundStyle(check.status == .onTrack ? Palette.secondary : check.status.tint)
                     .help(check.label)
                 }
@@ -931,12 +931,12 @@ struct RoutineEditor: View {
                         .transition(.quiet)
                 } else if kind == .cron {
                     TextField("Expressão", text: $cronExpression, prompt: Text("minuto hora dia mês dia-da-semana"))
-                        .font(.body.monospaced())
+                        .font(Typography.text.monospaced())
                         .help(Tip.cronExpression)
                         .transition(.quiet)
                     if let plain = cronPlainText {
                         Text(plain)
-                            .font(.caption)
+                            .font(Typography.small)
                             .foregroundStyle(Palette.muted)
                             .transition(.quiet)
                     }
@@ -945,7 +945,7 @@ struct RoutineEditor: View {
                     if let zoneProblem {
                         // Also in the footer, but there it is far from the field that is wrong.
                         Text(zoneProblem)
-                            .font(.caption)
+                            .font(Typography.small)
                             .foregroundStyle(Palette.warn)
                             .fixedSize(horizontal: false, vertical: true)
                             .transition(.quiet)
@@ -955,7 +955,7 @@ struct RoutineEditor: View {
                         .transition(.quiet)
                 }
                 Label(preview, systemImage: "clock")
-                    .font(.caption)
+                    .font(Typography.small)
                     .foregroundStyle(Palette.muted)
                     .textSwap(preview)
             }
@@ -977,7 +977,7 @@ struct RoutineEditor: View {
                     }
                     .help(Tip.routinePermissions)
                     Text(advancedExplanation)
-                        .font(.caption)
+                        .font(Typography.small)
                         .foregroundStyle(Palette.muted)
                 }
             }
@@ -1060,7 +1060,7 @@ struct RoutineEditor: View {
                                       text: $goalTarget, minHeight: 44)
                     .transition(.quiet)
                 Text("A cada execução o Orb confere o progresso, dá um pequeno passo quando é seguro e termina o relatório com uma linha como “Progresso: 35% · em dia”. Quando a meta é alcançada, a rotina pausa sozinha.")
-                    .font(.caption)
+                    .font(Typography.small)
                     .foregroundStyle(Palette.muted)
                     .fixedSize(horizontal: false, vertical: true)
                     .transition(.quiet)

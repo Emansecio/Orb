@@ -168,11 +168,11 @@ private struct SidebarCategoryHeader: View {
         } content: { _ in
             HStack(spacing: 10) {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(SectionPlus.chevron)
                     .rotationEffect(.degrees(collapsed ? 0 : 90))
                     // The arrow turns in the content curve; under Reduce Motion it just takes its new direction.
                     .animation(Motion.panel(reduceMotion: reduceMotion), value: collapsed)
-                    .frame(width: 26)
+                    .frame(width: SidebarCategoryLayout.iconColumn)
                     .foregroundStyle(Palette.faint)
                 Text(category.name)
                     .font(Typography.text.weight(.medium))
@@ -210,10 +210,10 @@ private struct SidebarCategoryHeader: View {
         }
         .accessibilityHint(collapsed ? "Mostra os Orbs" : "Recolhe os Orbs")
         .contextMenu {
-            Button(collapsed ? "Expandir" : "Recolher", systemImage: collapsed ? "chevron.down" : "chevron.right") {
+            Button(collapsed ? "Mostrar Orbs" : "Recolher Orbs", systemImage: collapsed ? "chevron.down" : "chevron.right") {
                 model.setCategory(category.id, collapsed: !collapsed)
             }
-            Button("Renomear", systemImage: "pencil") { model.categoryNaming = .rename(category.id) }
+            Button("Renomear…", systemImage: "pencil") { model.categoryNaming = .rename(category.id) }
             Button("Mover para cima", systemImage: "arrow.up") { model.moveCategory(category.id, by: -1) }
                 .disabled(!model.canMoveCategory(category.id, by: -1))
             Button("Mover para baixo", systemImage: "arrow.down") { model.moveCategory(category.id, by: 1) }
@@ -264,9 +264,9 @@ private struct CategoryNameField: View {
         let isPlus = symbol == "plus"
         HStack(spacing: 10) {
             Image(systemName: symbol)
-                .font(isPlus ? SectionPlus.glyph : .system(size: 10, weight: .semibold))
+                .font(isPlus ? SectionPlus.glyph : SectionPlus.chevron)
                 .rotationEffect(.degrees(turned ? 90 : 0))
-                .frame(width: 26)
+                .frame(width: SidebarCategoryLayout.iconColumn)
                 .foregroundStyle(isPlus ? Palette.muted : Palette.faint)
             InlineNameField(initial: initial, label: "Nome da categoria", font: Typography.text.weight(.medium),
                             limit: SidebarCategory.nameLimit, normalize: SidebarOrder.name, save: save) {
@@ -289,6 +289,9 @@ enum SidebarCategoryLayout {
     static let headerContentHeight: CGFloat = 32 - 2 * 6
     /// How far a category's Orbs stand in from its heading.
     static let indent: CGFloat = 14
+    /// The heading's arrow column. 28 pt makes the name start at 46 pt, where an Orb's name starts (8 pt padding, the 30 pt
+    /// avatar, an 8 pt gap), so a category and the Orbs outside it share one text edge.
+    static let iconColumn: CGFloat = 28
     /// Where the heading's name starts: the row's padding, the icon column and the space after it.
-    static let titleInset: CGFloat = 8 + 26 + 10
+    static let titleInset: CGFloat = 8 + iconColumn + 10
 }

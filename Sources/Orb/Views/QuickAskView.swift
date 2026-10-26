@@ -348,6 +348,22 @@ private struct QuickAskOrbButton: View {
     }
 }
 
+/// "Name: doing X", the one look both lines of the panel give it (the working row and the reply's header): dim text with
+/// the sweep while it works, amber and still while it waits for you.
+private struct QuickAskWorkText: View {
+    let name: String
+    let work: WorkLine
+
+    var body: some View {
+        Text("\(name): \(work.text)")
+            .shimmer(active: work.shimmers, pulses: work.runsCommand)
+            .font(Typography.label.weight(.medium))
+            .foregroundStyle(work.tone == .waiting ? Palette.warn : Palette.faint)
+            .lineLimit(1)
+            .truncationMode(.middle)
+    }
+}
+
 /// A working Orb's line in the menu bar panel: its avatar and what it is doing.
 private struct QuickAskWorkingRow: View {
     @Environment(AppModel.self) private var model
@@ -358,12 +374,10 @@ private struct QuickAskWorkingRow: View {
         HStack(spacing: 8) {
             BotAvatar(live: live, size: 18, paused: live.activity == .idle)
             let work = live.shownWork
-            Text("\(live.look.name): \(work?.text ?? "")")
-                .font(.caption)
-                .foregroundStyle(work?.tone == .waiting ? Palette.warn : work?.shimmers == false ? Palette.faint : Palette.secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .animateChanges(of: work?.text)
+            if let work {
+                QuickAskWorkText(name: live.look.name, work: work)
+                    .animateChanges(of: work.text)
+            }
         }
     }
 }
@@ -386,15 +400,10 @@ struct QuickAskReply: View {
                 // Rests when the Orb is idle (the finished reply stays on screen for a while).
                 BotAvatar(live: live, size: 18, paused: live.activity == .idle)
                 if let work = live.shownWork, QuickAskReplyText.showsWork(reply: reply, isWorking: live.isWorking) {
-                    Text("\(live.look.name): \(work.text)")
-                        .shimmer(active: work.shimmers, pulses: work.runsCommand)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(work.tone == .waiting ? Palette.warn : Palette.faint)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                    QuickAskWorkText(name: live.look.name, work: work)
                 } else {
                     Text(reply == nil ? "\(live.look.name) não respondeu" : "\(live.look.name) respondeu")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(Typography.label.weight(.medium))
                         .foregroundStyle(Palette.secondary)
                 }
                 Spacer(minLength: 4)
@@ -402,7 +411,7 @@ struct QuickAskReply: View {
                     .labelStyle(.iconOnly)
                     .buttonStyle(.plain)
                     .help(Tip.closeReply)
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(SectionPlus.chevron)
                     .foregroundStyle(Palette.muted)
             }
             if let reply {
@@ -495,13 +504,13 @@ struct QuickAskApprovalCard: View {
             HStack(spacing: 8) {
                 BotAvatar(live: model.live(entry.bot.id), size: 18, paused: model.live(entry.bot.id).activity == .idle)
                 Text(entry.bot.name)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(Typography.label.weight(.semibold))
                 Text("precisa de você")
-                    .font(.caption)
+                    .font(Typography.small)
                     .foregroundStyle(Palette.muted)
             }
             Text(request.title)
-                .font(.system(size: 13, weight: .medium))
+                .font(Typography.text.weight(.medium))
             if !request.reason.isEmpty, !request.isBatch {
                 Text(request.reason)
                     .font(Typography.label)
@@ -516,7 +525,7 @@ struct QuickAskApprovalCard: View {
                             .foregroundStyle(Palette.muted)
                     }
                     Text(row.command)
-                        .font(.system(size: 11, design: request.isQuestion ? .default : .monospaced))
+                        .font(request.isQuestion ? Typography.small : Typography.codeSmall)
                         .foregroundStyle(Palette.secondary)
                         .lineLimit(request.isBatch ? 1 : 4)
                         .truncationMode(.middle)

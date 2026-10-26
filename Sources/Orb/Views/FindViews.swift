@@ -86,7 +86,7 @@ struct FindBar: View {
     private var status: some View {
         let loading = model.isLoadingConversation(botID)
         return Text(loading ? "Carregando…" : find.statusText)
-            .font(.system(size: 12).monospacedDigit())
+            .font(Typography.label.monospacedDigit())
             .foregroundStyle(Palette.faint)
             .lineLimit(1)
             .fixedSize()
@@ -96,7 +96,7 @@ struct FindBar: View {
     private func step(_ symbol: String, help: String, label: String, enabled: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 11, weight: .medium))
+                .font(Typography.small.weight(.medium))
                 .foregroundStyle(enabled ? Palette.secondary : Palette.hint)
                 .frame(width: 24, height: 24)
                 .contentShape(.rect)
@@ -165,7 +165,7 @@ private struct FindResultRow: View {
         Button(action: choose) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(who)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(Typography.small.weight(.medium))
                     .foregroundStyle(Palette.muted)
                 Text(snippet)
                     .font(Typography.label)

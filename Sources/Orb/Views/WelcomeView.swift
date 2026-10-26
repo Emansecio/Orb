@@ -378,7 +378,7 @@ struct WelcomeView: View {
                     HStack(spacing: 10) {
                         Text(copy.createTitle)
                         Text(AppShortcut.newBot.label)
-                            .font(.system(size: 12, weight: .medium))
+                            .font(Typography.label.weight(.medium))
                             .foregroundStyle(Palette.onInk.opacity(0.5))
                             .accessibilityHidden(true)
                     }
@@ -488,7 +488,7 @@ private struct WelcomePointView: View {
 
     private var icon: some View {
         Image(systemName: point.symbol)
-            .font(.system(size: 13, weight: .medium))
+            .font(Typography.text.weight(.medium))
             .foregroundStyle(Palette.secondary)
             .frame(width: 30, height: 30)
             .background(Palette.chipFill, in: .circle)
@@ -498,7 +498,7 @@ private struct WelcomePointView: View {
     private var words: some View {
         VStack(alignment: isRow ? .leading : .center, spacing: 2) {
             Text(point.title)
-                .font(.system(size: 13, weight: .semibold))
+                .font(Typography.text.weight(.semibold))
                 .foregroundStyle(Palette.ink)
             Text(point.detail)
                 .font(Typography.label)
@@ -524,16 +524,15 @@ private struct WelcomeChoice: View {
         Button(action: action) {
             HStack(spacing: 7) {
                 Image(systemName: symbol)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(Typography.small.weight(.semibold))
                     .foregroundStyle(isHovering ? Palette.accentText : Palette.muted)
                 Text(title)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(Typography.text.weight(.medium))
                     .foregroundStyle(isHovering ? Palette.ink : Palette.secondary)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
-            .background(Color.white.opacity(isHovering ? 0.08 : 0.04), in: .rect(cornerRadius: Radius.card))
-            .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(isHovering ? Palette.lineStrong : Palette.line))
+            .hoverCard(isHovering, radius: Radius.card, strongOutline: true)
             .scaleEffect(isHovering && !reduceMotion ? 1.03 : 1)
             .animation(Motion.hover(isHovering), value: isHovering)
             .contentShape(.rect(cornerRadius: Radius.card))
@@ -562,7 +561,7 @@ struct KeptStartCard: View {
                 Image(systemName: "archivebox")
                     .foregroundStyle(Palette.muted)
                 Text("Começar de uma memória guardada")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(Typography.label.weight(.semibold))
                     .foregroundStyle(Palette.secondary)
             }
             .padding(.horizontal, 12)
@@ -608,7 +607,7 @@ private struct KeptStartRow: View {
                 OrbView(config: memory.profile?.orb ?? OrbConfig(color: "grafite"), size: 26, animated: false)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(memory.name)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(Typography.text.weight(.medium))
                         .foregroundStyle(Palette.ink)
                     Text(memory.shortDetail)
                         .font(Typography.small)
@@ -617,7 +616,7 @@ private struct KeptStartRow: View {
                 }
                 Spacer(minLength: 8)
                 Text("Continuar")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(Typography.label.weight(.medium))
                     .foregroundStyle(Palette.accentText)
             }
             .padding(.horizontal, 12)

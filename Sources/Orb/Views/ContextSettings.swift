@@ -36,13 +36,7 @@ struct RadioChoiceRow: View {
                 Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
                     .foregroundStyle(isSelected ? Palette.accentText : Palette.muted)
                     .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                    Text(summary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                toggleLabel(title, summary)
                 Spacer(minLength: 0)
             }
             .contentShape(.rect)
@@ -69,14 +63,10 @@ struct LearnedWindowsSettings: View {
                     LabeledContent {
                         Button("Esquecer") { forget(row) }
                             .help(Tip.forgetWindow)
+                            .chipButton()
                             .accessibilityLabel("Esquecer a janela de \(row.name)")
                     } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(row.name)
-                            Text("Janela de \(row.words) · \(row.age())")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+                        toggleLabel(row.name, "Janela de \(row.words) · \(row.age())")
                     }
                 }
             } header: {

@@ -221,7 +221,7 @@ struct ContextPopover: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Contexto desta conversa")
-                .font(.system(size: 13, weight: .semibold))
+                .font(Typography.text.weight(.semibold))
                 .accessibilityAddTraits(.isHeader)
                 .padding(.horizontal, 14)
                 .padding(.top, 14)
@@ -231,7 +231,7 @@ struct ContextPopover: View {
             Divider().padding(.top, 12)
             compactSection
         }
-        .frame(width: 340)
+        .frame(width: PopoverMetrics.width)
         .motion(Motion.content, value: shownResult)
     }
 
@@ -269,7 +269,7 @@ struct ContextPopover: View {
     private var kept: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("O que fica na conversa")
-                .font(.system(size: 11, weight: .semibold))
+                .font(Typography.small.weight(.semibold))
                 .foregroundStyle(Palette.muted)
                 .accessibilityAddTraits(.isHeader)
             row("text.quote", ContextWords.kept(totalRequests: reading.requestCount, foldedRequests: reading.foldedRequests))
@@ -316,13 +316,10 @@ struct ContextPopover: View {
                 .foregroundStyle(Palette.muted)
                 .fixedSize(horizontal: false, vertical: true)
             if reading.canCompact {
-                // Same field look as the app's multi-line inputs (PlaceholderTextEditor), not the system bezel.
+                // The popovers' own search field look, not the system bezel; the smaller text stays.
                 TextField("No que focar no resumo?", text: $focus)
-                    .textFieldStyle(.plain)
+                    .popoverSearchField()
                     .font(Typography.label)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-                    .background(Palette.raised, in: .rect(cornerRadius: Radius.small))
                     .disabled(isWorking)
                     .onSubmit(run)
                     .accessibilityLabel("Foco do resumo")
@@ -368,7 +365,7 @@ struct ContextPopover: View {
             VStack(alignment: .leading, spacing: 3) {
                 if result.didCompact {
                     Text(ContextWords.compaction(before: result.tokensBefore, after: result.tokensAfter))
-                        .font(.system(size: 12, weight: .medium))
+                        .font(Typography.label.weight(.medium))
                         .foregroundStyle(Palette.ink)
                     if result.savedToMemory {
                         Text("O essencial vai para a memória do Orb.")

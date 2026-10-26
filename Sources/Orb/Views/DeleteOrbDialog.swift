@@ -115,7 +115,7 @@ struct DeleteOrbSheet: View {
         if let bot = model.bot(botID) {
             let summary = DeleteOrbSummary(bot: bot, routineCount: model.routines(for: botID).count, groups: model.groups)
             VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: Spacing.m) {
                     SummaryLine(.goes, summary.goes)
                     if let undone = summary.undone { SummaryLine(.goes, undone) }
                     SummaryLine(.stays, summary.stays)
@@ -124,8 +124,8 @@ struct DeleteOrbSheet: View {
                         .foregroundStyle(Palette.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 16)
+                .padding(.horizontal, Spacing.sheetEdge)
+                .padding(.bottom, Spacing.l)
             }
             .orbSheet("Apagar \(bot.name)?", size: .medium) {
                 SheetFooter(destructiveTitle: "Apagar tudo, inclusive a memória",
@@ -157,7 +157,7 @@ struct KeptMemoryBanner: View {
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(notice.message)
-                            .font(.system(size: 12, weight: .medium))
+                            .font(Typography.label.weight(.medium))
                             .foregroundStyle(Palette.ink)
                         // Not before the memory has moved: the folder it goes to does not exist until then.
                         Button("Mostrar no Finder") { model.revealKeptMemory(notice) }
