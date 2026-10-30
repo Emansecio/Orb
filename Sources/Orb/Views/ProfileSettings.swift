@@ -173,7 +173,9 @@ struct ProfileAvatar: View {
         .task(id: photoPath) {
             guard let photoPath else { return set(nil) }
             if let image, image === Thumbnails.cached(path: photoPath, side: size) { return }
-            set(await Thumbnails.image(at: photoPath, side: size))
+            let decoded = await Thumbnails.image(at: photoPath, side: size)
+            guard !Task.isCancelled else { return }
+            set(decoded)
         }
     }
 

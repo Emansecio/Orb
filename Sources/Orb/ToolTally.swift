@@ -122,6 +122,25 @@ enum ToolTally {
         lineVariants(calls)[0]
     }
 
+    /// A step leads with its purpose, falling back to the Orb's own progress message. Never call a failed action done.
+    static func stepVariants(_ items: [TranscriptItem]) -> [String] {
+        let calls = items.compactMap { if case .tool(let call) = $0.kind { call } else { nil } }
+        if let running = calls.first(where: { $0.state == .running }) {
+            if let intent = running.intent { return [ToolIntent.gerund(intent)] }
+        } else if let last = calls.last, last.state == .failed {
+            return [ToolIntent.failedGerund(last.intent.map(ToolIntent.gerund) ?? last.title)]
+        } else if let intents = intentVariants(calls) {
+            return intents
+        }
+        if let message = items.compactMap({ item -> String? in
+            if case .bot(let text, _) = item.kind { return text }
+            return nil
+        }).last, let text = ToolIntent.normalize(message) {
+            return [text]
+        }
+        return [calls.contains { $0.state == .running } ? "Executando ações" : "Ações concluídas"]
+    }
+
     /// `line`, from the fullest wording to the shortest (one when the actions have no descriptions): the row takes the first
     /// that fits its width, so a word is never cut in two. It names what the actions were for without "e mais N": how many
     /// there were is beside it (`countNote`), with the time.

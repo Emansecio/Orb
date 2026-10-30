@@ -15,6 +15,10 @@ let package = Package(
             name: "OrbAXFixture",
             path: "Tests/OrbAXFixture"
         ),
+        .executableTarget(
+            name: "OrbKeychainHelper",
+            path: "Sources/OrbKeychainHelper"
+        ),
         .testTarget(
             name: "OrbAppTests",
             dependencies: ["Orb", "OrbAXFixture"],

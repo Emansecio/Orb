@@ -1,0 +1,15 @@
+{
+  "timestamp_utc": "2026-10-27T06:58:41.281658+00:00",
+  "command": "Python AST, stored evidence and report link assertions; git diff --check",
+  "exit_code": 0,
+  "stdout": "3 Python reproducers parse successfully\nreported counts reconcile with investigation JSON\nbrowser failures, first-match selector scope, delta shape and isolated-session cleanup verified\n7 synthetic cases reconcile, including existing analyzer divergences\nall report file links resolve\ngit diff --check passed\n",
+  "stderr": "",
+  "source_sha256": {
+    "Sources/Orb/Engine/Tools/BrowseTools.swift": "90c5da07b81c6e5cd4adfa45a60412bd5233f1db8daae08efde2be9c471c04b0",
+    "Sources/Orb/Engine/Browser/AgentBrowserDriver.swift": "165100a10b181dcc04003772d650ce5ec2e9be89b5e61977bbdc8886d82c5ea6",
+    "Sources/Orb/Engine/Browser/BrowserHub.swift": "8fd26c39639e8620a82402123785a43f7bdd78d3d017b85cd3af3f38d7039fa2",
+    "Sources/Orb/ConversationHistory.swift": "f0bfe04dbc560cde84eb4e34a1c8d63715bf64056fd46aef4b426cac8da66065",
+    "Sources/Orb/BotSession+Conversation.swift": "2c2ca28ba534549387928ca54ae0c2e0231dd732c52f255280f7eef2d070cace",
+    "Sources/Orb/AppModel.swift": "a5f807671895f176ecec622939ec63cfb5befd73407ef797ce1515448c026493"
+  }
+}

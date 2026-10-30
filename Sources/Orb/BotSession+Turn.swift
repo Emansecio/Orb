@@ -34,6 +34,7 @@ extension BotSession {
     func beginTurn() -> UUID {
         let turn = UUID()
         turnID = turn
+        inicioTurnStart = conversation?.items.count
         reviewBase = nil
         browserViewID = nil
         clearBeats()
@@ -408,6 +409,17 @@ extension BotSession {
         stopSpeaking()
         closeStreaming()
         closeBrowserView(succeeded ? .done : .failed)
+        if routineID == nil, let boundary = inicioTurnStart, let chat = conversationChat, let conversation {
+            inicioTurnStart = nil
+            let start = min(boundary, conversation.items.count)
+            if let item = conversation.items[start...].last(where: {
+                if case .bot(let text, _) = $0.kind { return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                return false
+            }), case .bot(let text, _) = item.kind {
+                model.recordInicioChat(bot: id, chat: chat, item: item.id, date: item.date, text: text,
+                                       succeeded: completed && !userStopped && !cutShort, source: conversation)
+            }
+        }
         // A routine's run, or another Orb's request, is a report and not a chat with you: no plan line there.
         if routineID == nil, let finished = TaskPlan.finishedInTurn(from: planAtTurnStart, to: conversation?.taskPlan) {
             appendPlanSummary(finished)

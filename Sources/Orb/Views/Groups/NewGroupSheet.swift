@@ -176,7 +176,9 @@ private struct OrbChoiceCard: View {
         ZStack(alignment: .topLeading) {
             Button(action: toggle) {
                 VStack(spacing: 5) {
-                    BotAvatar(orb: look.orb, size: 48)
+                    SettlingOrb(idle: true, wake: isChosen ? 1 : 0) { paused in
+                        BotAvatar(orb: look.orb, size: 48, paused: paused)
+                    }
                         .frame(width: 48, height: 48)
                     Text(look.name)
                         .font(.system(size: 12, weight: .semibold))

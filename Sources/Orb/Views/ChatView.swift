@@ -44,12 +44,19 @@ struct ChatView: View {
             ZStack { if isDropTargeted { ChatDropOverlay() } }
                 .motion(Motion.hover(isDropTargeted), value: isDropTargeted) // a fade under Reduce Motion, not a cut
         }
-        .onAppear { bindFind(); takeFindRequest() }
+        .onAppear { bindFind(); takeFindRequest(); takeInicioJump() }
         .onChange(of: botID) {
             find.close()
             bindFind()
         }
-        .onChange(of: model.sessions[botID]?.chatID) { find.close() } // another of the Orb's conversations
+        .onChange(of: model.sessions[botID]?.chatID) { find.close(); takeInicioJump() } // another of the Orb's conversations
+        .onChange(of: model.inicioJump) { takeInicioJump() }
+        .onChange(of: model.orbTranscript(botID).revision) { takeInicioJump() }
+        .onChange(of: model.sessions[botID]?.isLoading) { takeInicioJump() }
+        .alert("Resultado indisponível", isPresented: Binding(get: { model.inicioNavigationNotice != nil },
+                                                              set: { if !$0 { model.inicioNavigationNotice = nil } })) {
+            Button("OK") { model.inicioNavigationNotice = nil }
+        } message: { Text(model.inicioNavigationNotice ?? "") }
         .onChange(of: model.pendingChatRequest) { takeFindRequest() }
         // MARK: MultiOrb (WP2): a banner for an approval raised while the Orb works on another Orb's request opens that work.
         // Filtered by Orb: a target of another Orb is not ours to present (the sheet would open empty) and not ours to clear.
@@ -116,6 +123,20 @@ extension ChatView {
     /// ⌘F from the command palette or a menu: the bar opens (the chat may have just been created for it).
     private func takeFindRequest() {
         if model.takeChatRequest(.findInConversation, of: botID) { find.open() }
+    }
+
+    private func takeInicioJump() {
+        guard let target = model.inicioJump, target.bot == botID,
+              let session = model.sessions[botID], session.chatID == target.chat,
+              !session.isLoading, !session.isUnloaded else { return }
+        let items = model.orbTranscript(botID).items
+        guard items.contains(where: { $0.id == target.item }) else {
+            model.inicioJump = nil
+            model.inicioNavigationNotice = "A conversa foi aberta, mas este resultado não está mais nela."
+            return
+        }
+        model.inicioJump = nil
+        find.revealItem(target.item)
     }
 }
 
@@ -247,6 +268,8 @@ private struct TranscriptList: View {
     /// The runs of actions and the work of requests opened into their lines, by the id of their row (its first item's,
     /// which holds while the run grows).
     @State private var openRuns: Set<UUID> = []
+    /// Step disclosures have their own state: the first step and its outer work row share an item id.
+    @State private var openSteps: Set<UUID> = []
 
     var body: some View {
         let transcript = model.orbTranscript(look.id)
@@ -332,7 +355,8 @@ private struct TranscriptList: View {
                     // chat has messages: a turn starting or ending changes what is in it, not the height of the list,
                     // so the conversation does not move again after the message sent goes in, nor down when it ends.
                     let showsLine = isWorking || live.chainWork != nil
-                    if showsLine || !items.isEmpty {
+                    let hasActivity = transcript.rows?.contains { if case .activity = $0 { true } else { false } } == true
+                    if !hasActivity && (showsLine || !items.isEmpty) {
                         ZStack(alignment: .leading) {
                             if showsLine {
                                 WorkingLine(look: look, avatarHidden: avatars.lastID != nil, transcript: transcript)
@@ -383,7 +407,7 @@ private struct TranscriptList: View {
                 find.reveal(quoteOf: source, words: MessageQuote.probe(quote))
             })
             .onChange(of: follows) { follower.follows = follows }
-            .onChange(of: find.jump) {
+            .onChange(of: find.jump, initial: true) {
                 guard let jump = find.jump else { return }
                 // A hit among the folded messages, or in a run of actions on one line, opens them first; the scroll
                 // waits for their rows.
@@ -392,6 +416,7 @@ private struct TranscriptList: View {
                 if opensFold || !runs.isEmpty {
                     if opensFold { showsFolded = true }
                     openRuns.formUnion(runs)
+                    openSteps.formUnion(runs)
                     Task { @MainActor in
                         await Task.yield()
                         scrollToFound(jump, proxy)
@@ -495,32 +520,67 @@ private struct TranscriptList: View {
         case .work(let items, let seconds, let outcome):
             let isOpen = openRuns.contains(row.id) || ToolGroupRow.opensInSnapshots
             WorkGroupRow(items: items, seconds: seconds, outcome: outcome, isOpen: isOpen,
-                         inputs: isOpen ? .init(openRuns: openRuns, avatars: avatars, redoID: redoID, dropping: dropping,
+                         inputs: isOpen ? .init(openRuns: openRuns, openSteps: openSteps, avatars: avatars, redoID: redoID, dropping: dropping,
                                                 find: found, orb: look.orb) : nil) {
                 if openRuns.remove(row.id) == nil { openRuns.insert(row.id) }
             } content: {
-                // Opened: the request's work as it was while it ran (its runs of actions folded as usual).
-                ForEach(TranscriptFolding.rows(for: items, foldsWork: false)) { inner in
-                    AnyView(foldedRow(inner, avatars: avatars, redoID: redoID, dropping: dropping, found: found))
-                }
+                activitySteps(items, avatars: avatars, redoID: redoID, dropping: dropping, found: found)
             }
             .equatable()
             .transition(.identity)
+        case .activity(let items):
+            VStack(alignment: .leading, spacing: 14) {
+                WorkingLine(look: look, avatarHidden: true, transcript: model.orbTranscript(look.id), compact: true)
+                activitySteps(items, avatars: avatars, redoID: redoID, dropping: dropping, found: found)
+            }
+            .padding(.vertical, 14)
+            .padding(.trailing, 14)
+            .background {
+                RoundedRectangle(cornerRadius: Radius.card)
+                    .fill(Palette.surface)
+                    .padding(.leading, gutter - 12)
+            }
+            .transition(.identity)
+        }
+    }
+
+    @ViewBuilder
+    private func activitySteps(_ items: [TranscriptItem], avatars: ReplyAvatars, redoID: UUID?, dropping: Set<UUID>,
+                               found: FindFocus?) -> some View {
+        ForEach(TranscriptFolding.activityRows(for: items)) { step in
+            if case .tools(let actions) = step {
+                ToolGroupRow(items: actions, botID: look.id, orb: look.orb,
+                             isOpen: openSteps.contains(step.id) || ToolGroupRow.opensInSnapshots,
+                             find: actions.contains { $0.id == found?.itemID } ? found : nil, isStep: true) {
+                    if openSteps.remove(step.id) == nil {
+                        openSteps.insert(step.id)
+                        // Keep the outer disclosure open when this request ends while its details are being read.
+                        if let first = items.first { openRuns.insert(first.id) }
+                    }
+                }
+                .equatable()
+            } else {
+                AnyView(foldedRow(step, avatars: avatars, redoID: redoID, dropping: dropping, found: found))
+            }
         }
     }
 
     /// The folded rows that hide `itemID` (a request's work, and the run of actions in it), outermost first; empty when
     /// nothing folds it.
-    private func closedRuns(holding itemID: UUID, in rows: [TranscriptRowModel]?) -> [UUID] {
+    private func closedRuns(holding itemID: UUID, in rows: [TranscriptRowModel]?, insideActivity: Bool = false) -> [UUID] {
         guard let row = rows?.first(where: { row in
             switch row {
-            case .tools(let items), .work(let items, _, _): items.contains { $0.id == itemID }
+            case .tools(let items), .work(let items, _, _), .activity(let items): items.contains { $0.id == itemID }
             default: false
             }
         }) else { return [] }
-        let here = openRuns.contains(row.id) ? [] : [row.id]
-        guard case .work(let items, _, _) = row else { return here }
-        return here + closedRuns(holding: itemID, in: TranscriptFolding.rows(for: items, foldsWork: false))
+        switch row {
+        case .work(let items, _, _), .activity(let items):
+            let here = openRuns.contains(row.id) ? [] : [row.id]
+            return here + closedRuns(holding: itemID, in: TranscriptFolding.activityRows(for: items), insideActivity: true)
+        default:
+            return (insideActivity ? openSteps : openRuns).contains(row.id) ? [] : [row.id]
+        }
     }
 
     /// The line in place of what a compaction folded; opening it puts the messages back above it.
@@ -978,6 +1038,7 @@ private struct WorkingLine: View {
     let avatarHidden: Bool
     /// For the plan's ring (`TaskPlanRing`), which reads the plan from it.
     let transcript: OrbTranscript
+    var compact = false
     /// The last phrase there was: when the turn ends the line is still fading out for a moment, and must say the
     /// same words until it is gone instead of falling back to "Pensando".
     @State private var lastWork = WorkPhrase.line(status: "Pensando")
@@ -999,15 +1060,17 @@ private struct WorkingLine: View {
 
     var body: some View {
         let live = model.live(look.id)
-        let work = live.shownWork ?? lastWork
+        let work = activityWork(live.shownWork ?? lastWork)
         HStack(spacing: 10) {
             // The avatar and the space after it: the words start on the chat's left edge (`gutter`), with the replies' and
             // the tool lines'.
-            HStack(spacing: gutter - Self.height) {
-                LiveBotAvatar(botID: look.id, orb: look.orb, size: Self.height, paused: avatarHidden)
+            HStack(spacing: compact ? 0 : gutter - Self.height) {
+                if !compact {
+                    LiveBotAvatar(botID: look.id, orb: look.orb, size: Self.height, paused: avatarHidden)
                     // Only opacity, so it is the same under Reduce Motion.
                     .opacity(avatarHidden ? 0 : 1)
                     .animation(Motion.fade, value: avatarHidden)
+                }
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     ZStack(alignment: .leading) {
                         WorkPhraseView(work: work)
@@ -1089,6 +1152,17 @@ private struct WorkingLine: View {
                     .help(Tip.routineRequest)
             }
         }
+        .padding(.leading, compact ? gutter : 0)
+    }
+
+    private func activityWork(_ work: WorkLine) -> WorkLine {
+        guard compact, work.tone == .working else { return work }
+        var purpose = work
+        // The current action is named by its step below. The header carries the request's goal once.
+        purpose.verb = transcript.plan?.goal ?? "Em andamento"
+        purpose.target = nil
+        purpose.isSentence = true
+        return purpose
     }
 }
 
@@ -1116,7 +1190,6 @@ struct WorkPhraseView: View {
                     .layoutPriority(-1) // a long routine name is cut before the phrase
             }
             phrase
-                .shimmer(active: work.shimmers, pulses: work.runsCommand)
         }
     }
 
@@ -1140,9 +1213,7 @@ struct WorkPhraseView: View {
 
     private var tint: Color {
         switch work.tone {
-        // The shimmer paints the working phrase (its mask only reads the alpha); under Reduce Motion it paints it
-        // `Palette.muted`, and a color set inside would win over that, so the working tone sets the same one.
-        case .working: Palette.muted
+        case .working: Palette.secondary
         case .waiting: Palette.warn
         case .retrying: Palette.secondary
         }
@@ -1169,7 +1240,7 @@ private struct WorkMeterView: View {
             TimelineView(.periodic(from: since ?? anchor, by: 1)) { context in
                 Text(text(at: context.date))
                     .font(Typography.label.monospacedDigit())
-                    .foregroundStyle(Palette.faint)
+                    .foregroundStyle(Palette.muted)
                     .lineLimit(1)
                     .fixedSize()
                     // Plain text on every tick: a clock that ticks every second must not be a recurring animation outside

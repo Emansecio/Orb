@@ -1,0 +1,10 @@
+{
+  "timestamp_utc": "2026-10-27T06:55:52.784475+00:00",
+  "command": [
+    "python3",
+    "docs/evidencias/navegador-rotinas-2026-10-27/repro_routines.py"
+  ],
+  "exit_code": 0,
+  "stdout": "7 synthetic cases passed; stale success and old backlog reproduced; analyzer emitted two out-of-policy candidates and missed a crawler probe.\n",
+  "stderr": ""
+}

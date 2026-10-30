@@ -102,7 +102,11 @@ struct ImageTile: View {
             .opacity(info.state == .missing ? 0.55 : 1)
             .attachmentActions(path: path, all: all, info: info, label: label + (info.state == .missing ? ", arquivo ausente" : ""),
                                help: info.state == .ok ? Tip.previewImage : Tip.missingAttachment)
-            .task(id: path) { info = await AttachmentInfo.load(path: path) }
+            .task(id: path) {
+                let loaded = await AttachmentInfo.load(path: path)
+                guard !Task.isCancelled else { return }
+                info = loaded
+            }
     }
 }
 
@@ -163,7 +167,11 @@ struct FileCard: View {
         .onHover { isHovering = $0 }
         .attachmentActions(path: path, all: all, info: info, label: TranscriptSpeech.attachment(info),
                                help: info.state == .ok ? Tip.previewAttachment : Tip.missingAttachment)
-        .task(id: path) { info = await AttachmentInfo.load(path: path) }
+        .task(id: path) {
+            let loaded = await AttachmentInfo.load(path: path)
+            guard !Task.isCancelled else { return }
+            info = loaded
+        }
     }
 }
 
@@ -285,7 +293,11 @@ private struct FileNameLink: View {
             .clickablePointer(isOK)
             .attachmentActions(path: path, all: all, info: info, label: title ?? TranscriptSpeech.attachment(info),
                                help: isOK ? Tip.previewAttachment : Tip.missingAttachment)
-            .task(id: path) { info = await AttachmentInfo.load(path: path) }
+            .task(id: path) {
+                let loaded = await AttachmentInfo.load(path: path)
+                guard !Task.isCancelled else { return }
+                info = loaded
+            }
     }
 }
 

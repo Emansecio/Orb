@@ -358,8 +358,10 @@ struct LiveScreenOwner: ScreenOwner {
         // Whatever happened above (an error, the task cancelled, the time up), the screen goes back, and this part is not
         // cancellable: it runs in its own task that is awaited whatever happens to this one.
         let userTookOver = hand.userMovedMouse
+        let lostFront: Bool
+        if case .failure(let error) = outcome, case TakeoverFailure.lostFront = error { lostFront = true } else { lostFront = false }
         let restored = await Task.detached(priority: .userInitiated) { [self] in
-            let result = await restore(saved, target: app, keepCursor: userTookOver)
+            let result = await restore(saved, target: app, keepCursor: userTookOver, lostFront: lostFront)
             await indicator?.ended()
             lock.release()
             return result
@@ -456,10 +458,20 @@ struct LiveScreenOwner: ScreenOwner {
     /// Puts the person's app, window and cursor back. `app`: the app put back in front (nil when nothing needed it);
     /// `failed`: it needed it and neither `AXFrontmost` (twice) nor activating the app brought it back; `cursor`: the
     /// cursor is where it was (false when the person took the mouse, which is left where they put it).
-    private func restore(_ saved: Saved, target: AccessibilityApp, keepCursor: Bool) async -> (app: String?, failed: Bool, cursor: Bool) {
+    private func restore(_ saved: Saved, target: AccessibilityApp, keepCursor: Bool, lostFront: Bool) async -> (app: String?, failed: Bool, cursor: Bool) {
         let platform = platform
         var restoredApp: String?
         var failed = false
+        // A third app in front means the person (or the system) changed focus while we were working. Do not fight that
+        // choice, including when it happens between restoration attempts, or pull the cursor away from it.
+        func focusWasTaken() async -> Bool {
+            await TakeoverQueue.run {
+                guard let current = platform.frontmost() else { return true }
+                return current.pid != target.pid && current.pid != saved.front?.pid
+            }
+        }
+        var focusTaken = lostFront
+        if !focusTaken { focusTaken = await focusWasTaken() }
         if let front = saved.front {
             func putBack() async {
                 await TakeoverQueue.run {
@@ -475,25 +487,29 @@ struct LiveScreenOwner: ScreenOwner {
                     try? await Task.sleep(for: .milliseconds(15))
                 }
             }
-            await putBack()
-            var back = await isBack()
-            if !back {
+            if !focusTaken { await putBack() }
+            var back = false
+            if !focusTaken { back = await isBack() }
+            if !focusTaken { focusTaken = await focusWasTaken() }
+            if !back && !focusTaken {
                 await putBack()
                 back = await isBack()
             }
-            if !back, front.pid != target.pid {
+            if !focusTaken { focusTaken = await focusWasTaken() }
+            if !back, !focusTaken, front.pid != target.pid {
                 // The second way: the app asked to activate (cooperative, but it does not depend on the app's AX answer).
                 await TakeoverQueue.run { platform.activate(front.pid) }
                 back = await isBack()
             }
             if front.pid != target.pid {
-                if back { restoredApp = front.name } else { failed = true }
+                if back { restoredApp = front.name } else if !focusTaken { failed = true }
             }
         }
         // Where the cursor was. When the person grabbed the mouse to stop the takeover, it stays where they put it: then
         // it is not back, and the report says so.
         let cursor = saved.cursor
-        guard !keepCursor else {
+        if !focusTaken { focusTaken = await focusWasTaken() }
+        guard !keepCursor && !focusTaken else {
             await TakeoverQueue.run { platform.associateCursor() }
             return (restoredApp, failed, false)
         }

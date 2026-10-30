@@ -25,6 +25,13 @@ final class AppModel {
     var groups: [OrbGroup] { didSet { scheduleStateSave() } }
     /// The sidebar's categories of Orbs (see `SidebarCategory`): only how the list is laid out, nothing an Orb reads.
     var categories: [SidebarCategory] { didSet { scheduleStateSave() } }
+    var inicio: InicioHistory { didSet { if inicio != oldValue { scheduleStateSave() } } }
+    /// The preceding visit is frozen while this page is visible.
+    var inicioVisitBase: Int64?
+    var inicioVisitThrough: Int64?
+    var inicioJump: InicioJump?
+    var inicioNavigationNotice: String?
+    var inicioRoutineFocus: UUID?
     /// Orbs asking each other for work.
     @ObservationIgnored lazy var delegation: DelegationHub = DelegationHub(model: self)
     /// A group's thread and its live state, made when the group is first opened.
@@ -62,9 +69,16 @@ final class AppModel {
     @ObservationIgnored private(set) var sessions: [UUID: BotSession] = [:]
     /// Routines that came due while their Orb was busy; each runs when the Orb is free. One entry per routine.
     private(set) var queuedRoutines: [UUID] = []
+    /// Queued runs asked for explicitly (a manual "run now"): they keep skipping the precheck when they start.
+    private var queuedManualRoutines: Set<UUID> = []
+    /// The wake notes of queued runs (see `RoutineWake`): kept per routine so a run started later still says why it woke.
+    private var queuedWakeNotes: [UUID: String] = [:]
     /// The routine each Orb is reading its conversation for before starting it (at most one per Orb): a second
     /// request waits for that one.
     @ObservationIgnored private var startingRoutines: [UUID: UUID] = [:]
+    /// The `wake/` folder's file-system source: the doorbell outside processes ring (see `RoutineWake`). Started in
+    /// the real app only — a developer run or a test never watches the folder.
+    @ObservationIgnored var wakeWatch: DispatchSourceFileSystemObject?
     /// Gives freed memory back once the app has been in the background a while (see `MemoryRelief`).
     @ObservationIgnored private var backgroundRelief: Task<Void, Never>?
     var isStartingRoutine: Bool { !startingRoutines.isEmpty } // internal for tests (`startingRoutines` is private to this file)
@@ -182,6 +196,19 @@ final class AppModel {
     private(set) var lastSelectedBotID: UUID?
     var selection: SidebarItem? {
         didSet {
+            if let jump = inicioJump, selection != .bot(jump.bot), oldValue != selection {
+                sessions[jump.bot]?.opening = nil
+                inicioJump = nil
+            }
+            if oldValue != .inicio, selection == .inicio {
+                inicio.prune()
+                inicioVisitBase = inicio.lastVisit
+                inicioVisitThrough = nil
+            } else if oldValue == .inicio, selection != .inicio {
+                inicio.finishVisit(through: inicioVisitThrough)
+                inicioVisitBase = nil
+                inicioVisitThrough = nil
+            }
             if case .bot(let id) = selection { lastSelectedBotID = id }
             if case .bot(let old) = oldValue, let left = sessions[old], left.conversation != nil { left.lastUsed = .now } // leaving it: the clock starts now
             if case .bot(let id) = selection {
@@ -375,6 +402,24 @@ final class AppModel {
         groups = state.groups
         let readCategories = SidebarOrder.normalized(state.categories, botIDs: state.bots.map(\.id))
         categories = readCategories
+        let journalRead = store.readInicioJournal()
+        notices += journalRead.notice.map { [$0] } ?? []
+        var recoveredInicio = state.inicio
+        if let journal = journalRead.value {
+            let botIDs = Set(state.bots.map(\.id))
+            recoveredInicio.recover(from: journal) { entry in
+                switch entry.origin {
+                case .chat(let bot, let chat, let item):
+                    guard botIDs.contains(bot), entry.id == item else { return false }
+                    return state.chats[bot.uuidString].map { $0.title(of: chat) != nil } ?? (chat == bot)
+                case .routine(let bot, let routine, let run):
+                    return entry.id == run && botIDs.contains(bot) && state.routines.contains {
+                        $0.id == routine && $0.botID == bot && $0.runs.contains { $0.id == run }
+                    }
+                }
+            }
+        }
+        inicio = recoveredInicio
         // The Orb shown at launch is the one at the top of the sidebar (with categories, not always the first in `bots`).
         let firstShown = SidebarOrder.all(state.bots.map(\.id), categories: readCategories).first.flatMap { id in state.bots.first { $0.id == id } }
         outputsDirectory = ToolOutputCap.directory(inDataFolder: store.directory)
@@ -425,6 +470,17 @@ final class AppModel {
         usageLog.adoptCallbacks(of: self.store) // it holds its own copy of the store, made before these were set
 
         syncLives()
+        if inicio.lastVisit == nil, inicio.entries.isEmpty {
+            // Older versions kept only each routine's bounded history; those rows are a partial baseline, not a full log.
+            let recent = routines.flatMap { routine in routine.runs.map { (routine, $0) } }
+                .sorted { ($0.1.finishedAt ?? $0.1.date) < ($1.1.finishedAt ?? $1.1.date) }
+            for (routine, run) in recent {
+                let outcome: InicioEntry.Outcome = !run.succeeded ? .failed : run.check?.status == .attention ? .attention : .recorded
+                recordInicioRoutine(bot: routine.botID, routine: routine.id, run: run, outcome: outcome, journal: false)
+            }
+            if !recent.isEmpty { store.saveInicioJournal(inicio) }
+        }
+        if inicio != state.inicio { scheduleStateSave() }
         normalizeGroups() // groups of Orbs that no longer exist (the state was edited, or an older build lost an Orb)
         for (id, count) in state.unread {
             if let id = UUID(uuidString: id) { live(id).setUnread(count) }
@@ -465,6 +521,7 @@ final class AppModel {
             activity = SystemActivity()
             keepsAwakeForRoutines = true
             syncActivities()
+            startWakeWatch() // outside processes can ring a routine awake through `wake/`
             scheduler = Task { [weak self] in
                 await self?.refreshConnections()
                 while !Task.isCancelled {
@@ -1207,6 +1264,7 @@ final class AppModel {
         // First, so that stopping a running routine does not start the next one waiting for this Orb.
         let ownRoutines = routines.filter { $0.botID == botID }.map(\.id)
         queuedRoutines.removeAll { ownRoutines.contains($0) }
+        queuedManualRoutines.subtract(ownRoutines)
         for id in ownRoutines { unsavedRoutineConversations[id] = nil } // or `saveNow` writes the deleted Orb's folder back
         routines.removeAll { $0.botID == botID }
         delegation.orbDeleted(botID) // before the stop: whoever waited for this Orb is told, and what it asked is dropped
@@ -1301,6 +1359,7 @@ final class AppModel {
         modelRefresh?.cancel()
         modelRefresh = nil
         queuedRoutines = []
+        queuedManualRoutines = []
         routines = [] // the end of a running routine finds nothing to record
         delegation.cancelAll(by: .switchOff, includingGroups: true) // no request between Orbs outlives the reset
         for group in groups { groupHub.forget(group.id, writesEvent: false) } // a group's request goes with the rest
@@ -1653,6 +1712,9 @@ final class AppModel {
         // MARK: MultiOrb (WP1)
         if multi.orbs || multi.groupCreate { context.orbs = delegationHandler(for: botID) }
         let teammates = multi.orbs ? orbsSection(for: bot) : ""
+        if let routineID = session.routineID, session.sideKind == nil || session.sideKind == .routine {
+            context.followUps = followUpHandler(routineID: routineID, botID: botID)
+        }
         let baseContext = context
         // MARK: end MultiOrb (WP1)
         let lastWorkspaceHash = session.conversation?.workspaceHash
@@ -1737,6 +1799,7 @@ final class AppModel {
             }
             var tools = ToolBox.offered(for: bot.capabilities, accessibilityGranted: accessibilityGranted, browser: browserAvailability,
                                         multi: multi)
+            if context.followUps != nil { tools.append(RoutineFollowUpTool()) }
             // The connectors' own tools do not travel with the request: the model lists and calls them through two fixed ones.
             if bot.capabilities.contains(.connectors), !allowedConnectors.isEmpty {
                 await connectorSync?.value // one added a moment ago is known to `mcp` before the model may name it
@@ -1970,14 +2033,15 @@ final class AppModel {
 
     /// Runs the routine now, or, when its Orb is busy, as soon as the Orb is free (a routine waits at most once).
     /// A run has a conversation of its own (`conversations/<Orb>/routine-<routine>.json`): your chat gets one line
-    /// when it ends, nothing else.
-    func runRoutine(_ routineID: UUID) {
+    /// when it ends, nothing else. `manual` (the card's button, the tool's "run") skips the precheck: asking to
+    /// run now means running now.
+    func runRoutine(_ routineID: UUID, manual: Bool = false, wakeNote: String? = nil) {
         guard !isResetting, let routine = routines.first(where: { $0.id == routineID }), bot(routine.botID) != nil else { return }
         if sessions[routine.botID]?.isUnloaded == true { // its chat is read off the main thread first
             Task {
                 await loadedConversation(routine.botID)
                 ensureLoaded(routine.botID)
-                runRoutine(routineID)
+                runRoutine(routineID, manual: manual, wakeNote: wakeNote)
             }
             return
         }
@@ -1990,9 +2054,11 @@ final class AppModel {
         }
         guard !isWorking(routine.botID), startingRoutines[routine.botID] == nil else {
             queuedRoutines.append(routineID)
+            if manual { queuedManualRoutines.insert(routineID) }
+            if let wakeNote { queuedWakeNotes[routineID] = wakeNote }
             return
         }
-        startRoutine(routine)
+        startRoutine(routine, gated: !manual, wakeNote: wakeNote)
     }
 
     /// Reads the list of Orbs, then each one's session: a view that asks is told when any Orb starts or ends a run,
@@ -2020,32 +2086,57 @@ final class AppModel {
     func deleteRoutine(_ routineID: UUID) {
         guard let routine = routines.first(where: { $0.id == routineID }) else { return }
         queuedRoutines.removeAll { $0 == routineID }
+        queuedManualRoutines.remove(routineID)
         routines.removeAll { $0.id == routineID }
         unsavedRoutineConversations[routineID] = nil
+        queuedWakeNotes.removeValue(forKey: routineID)
         delegation.forgetWaitingRoutine(routineID)
         if sessions[routine.botID]?.routineID == routineID { stop(routine.botID) }
         store.deleteRoutineConversation(routine: routineID, for: routine.botID)
     }
 
     /// Starts the routine once its own conversation (the last runs) has been read, off the main thread. Until then the
-    /// Orb takes no other routine (`startingRoutines`); a message sent meanwhile gets the Orb first.
-    private func startRoutine(_ routine: Routine) {
+    /// Orb takes no other routine (`startingRoutines`); a message sent meanwhile gets the Orb first. `gated` runs the
+    /// routine's precheck first — scheduled runs are gated; explicit "run now" ones are not.
+    private func startRoutine(_ routine: Routine, gated: Bool = true, wakeNote: String? = nil) {
         let botID = routine.botID
         guard !isResetting, session(botID).turnTask == nil, startingRoutines[botID] == nil, bot(botID) != nil,
               routines.contains(where: { $0.id == routine.id }) else { return }
         ensureLoaded(botID)
         startingRoutines[botID] = routine.id
         Task {
+            // The deterministic check decides first: excusing a run costs a subprocess, never a model turn.
+            let folder = bot(botID)?.workingDirectory
+            let workingFolder = folder.flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
+            if gated, let precheck = routine.precheck,
+               case .skip(let reason) = await RoutinePrecheck.check(precheck, in: workingFolder) {
+                startingRoutines[botID] = nil
+                skippedRoutine(routine.id, reason: reason)
+                // The Orb was never taken: whatever else waits for it (queued routines, delegated work) goes on.
+                if !isResetting, bot(botID) != nil, sessions[botID]?.turnTask == nil { startNextQueuedWork(for: botID) }
+                return
+            }
             let read = await store.readRoutineConversationAsync(routine: routine.id, for: botID)
             startingRoutines[botID] = nil
-            beginRoutine(routine.id, of: botID, read: read)
+            beginRoutine(routine.id, of: botID, read: read, wakeNote: wakeNote)
             // It did not run (nothing to send, the routine or the Orb gone meanwhile): what waits for the Orb goes on now,
             // as after a turn, instead of waiting for the next message.
             if !isResetting, bot(botID) != nil, sessions[botID]?.turnTask == nil { startNextQueuedWork(for: botID) }
         }
     }
 
-    private func beginRoutine(_ routineID: UUID, of botID: UUID, read: StoreRead<Conversation>) {
+    /// The precheck excused this slot: it counts as the run (the schedule moves on from it) and goes into the
+    /// routine's history, but the routine conversation is never loaded and the model is never woken.
+    private func skippedRoutine(_ routineID: UUID, reason: String) {
+        guard let index = routines.firstIndex(where: { $0.id == routineID }) else { return }
+        let skipped = Date.now
+        routines[index].lastRun = skipped
+        let summary = "Dispensada pela pré-checagem: " + MemoryText.clip(reason, 300)
+        routines[index].lastResult = summary
+        recordRun(RoutineRun(date: skipped, finishedAt: skipped, succeeded: true, summary: summary), routineID: routineID, skipped: true)
+    }
+
+    private func beginRoutine(_ routineID: UUID, of botID: UUID, read: StoreRead<Conversation>, wakeNote: String? = nil) {
         // The Orb or the routine is gone, or the routine was moved to another Orb: its file here is not the one to run.
         guard !isResetting, bot(botID) != nil, let index = routines.firstIndex(where: { $0.id == routineID }) else { return }
         guard routines[index].botID == botID else {
@@ -2068,8 +2159,12 @@ final class AppModel {
         // The routine's own conversation takes the chat's place while it runs (the chat is written and parked).
         // The previous run's conversation, when it could not be written, is only in memory: the file is older.
         let previous = unsavedRoutineConversations[routine.id]?.conversation ?? read.value
-        session.startRoutineRun(routine.id, conversation: (previous?.closingInterruptedTurn(notice: BotSession.quitSideNotice) ?? Conversation()).startingRoutineRun(at: started),
-                                at: started)
+        var own = (previous?.closingInterruptedTurn(notice: BotSession.quitSideNotice) ?? Conversation()).startingRoutineRun(at: started)
+        // A wake file says why it ran off-schedule, in the run it woke (see `RoutineWake`).
+        if let wakeNote {
+            own.items.append(TranscriptItem(.notice(wakeNote.isEmpty ? "Acordada por sinal externo." : "Acordada por sinal externo: " + wakeNote)))
+        }
+        session.startRoutineRun(routine.id, conversation: own, at: started)
         let hasPrompt = !routine.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         if hasPrompt, send(routine.prompt, to: botID) {
             setStatus(routineStatus("Pensando", for: botID), of: botID)
@@ -2107,7 +2202,9 @@ final class AppModel {
         while sessions[botID]?.turnTask == nil, startingRoutines[botID] == nil,
               let next = queuedRoutines.first(where: { id in routines.first { $0.id == id }?.botID == botID }) {
             queuedRoutines.removeAll { $0 == next }
-            if let routine = routines.first(where: { $0.id == next }) { startRoutine(routine) }
+            let manual = queuedManualRoutines.remove(next) != nil
+            let note = queuedWakeNotes.removeValue(forKey: next)
+            if let routine = routines.first(where: { $0.id == next }) { startRoutine(routine, gated: !manual, wakeNote: note) }
         }
     }
 
@@ -2126,7 +2223,7 @@ final class AppModel {
         var moved = false
         for id in queuedRoutines {
             guard let before = old.first(where: { $0.id == id }), let now = routines.first(where: { $0.id == id }) else { continue }
-            if before.isEnabled && !now.isEnabled { queuedRoutines.removeAll { $0 == id } }
+            if before.isEnabled && !now.isEnabled { queuedRoutines.removeAll { $0 == id }; queuedManualRoutines.remove(id); queuedWakeNotes.removeValue(forKey: id) }
             else if before.botID != now.botID { moved = true }
         }
         if moved { Task { startIdleQueuedRoutines() } }
@@ -2187,6 +2284,7 @@ final class AppModel {
         guard let routine = routines.first(where: { $0.id == routineID }), let bot = bot(botID) else { return }
 
         var run = RoutineRun(date: started, finishedAt: finished, succeeded: succeeded, summary: "")
+        run.openFollowUps = routine.followUps.filter { !$0.resolved }.map(\.id)
         if succeeded {
             run.summary = RoutineRun.firstLine(of: reply) ?? "Terminou sem relatório."
             run.report = reply.map { Conversation.clipped($0, to: RoutineRun.reportLimit) }
@@ -2201,7 +2299,9 @@ final class AppModel {
             }.first
             run.summary = Conversation.clipped(why ?? "Não terminou.", to: RoutineRun.summaryLimit)
             // Nobody watched it fail: the banner says so, as one that worked brings its report (you stopped it yourself: none).
-            if !userStopped { notify(bot.name, RoutineRun.failureBanner(routine: routine.name, why: run.summary)) }
+            if !userStopped, RoutineRun.isNews(failure: run.summary, afterLast: routine.runs.first) {
+                notify(bot.name, RoutineRun.failureBanner(routine: routine.name, why: run.summary))
+            }
         }
         if let index = routines.firstIndex(where: { $0.id == routineID }) {
             // The report's progress line moves the goal, if the routine has one; a goal reached pauses the routine.
@@ -2234,10 +2334,12 @@ final class AppModel {
         }
     }
 
-    private func recordRun(_ run: RoutineRun, routineID: UUID) {
+    private func recordRun(_ run: RoutineRun, routineID: UUID, skipped: Bool = false) {
         guard let index = routines.firstIndex(where: { $0.id == routineID }) else { return }
         routines[index].runs.insert(run, at: 0)
         if routines[index].runs.count > Routine.keptRuns { routines[index].runs.removeLast(routines[index].runs.count - Routine.keptRuns) }
+        let outcome: InicioEntry.Outcome = skipped ? .skipped : !run.succeeded ? .failed : run.check?.status == .attention ? .attention : .completed
+        recordInicioRoutine(bot: routines[index].botID, routine: routineID, run: run, outcome: outcome)
     }
 
     private static func isFolder(_ url: URL) -> Bool {
@@ -2251,7 +2353,8 @@ final class AppModel {
         guard origin.isUser, let routineID = sessions[botID]?.routineID,
               let routine = routines.first(where: { $0.id == routineID }) else { return prompt }
         return RoutinePrompt.unattended(prompt, routine: routine.name, previous: routine.runs.first { $0.report != nil },
-                                        goal: routine.goal)
+                                        goal: routine.goal, recentRuns: routine.runs,
+                                        previousActivity: sessions[botID]?.conversation.flatMap { RoutineActivity.previous(in: $0) })
     }
 
     /// The status line says which routine the Orb is busy with.
@@ -2419,7 +2522,7 @@ final class AppModel {
         return AppState(bots: bots, routines: routines, skills: skills, connectors: connectorSecrets.redact(connectors),
                         providers: providers, defaultModel: defaultModel, unread: unread, replies: replies, contextMemory: contextMemory,
                         learnedContexts: learnedContexts, profile: profile, priceCorrections: priceCorrections, groups: groups,
-                        categories: categories, chats: chats)
+                        categories: categories, chats: chats, inicio: inicio)
     }
 
     /// Writes the drafts about 2 s after the last change in them (not on every key); the scheduler's round stays as the
@@ -2450,6 +2553,9 @@ final class AppModel {
     /// Writes everything that changed and waits for the disk (on quit).
     func saveNow() {
         guard !isResetting else { return } // quitting after a reset must not write the old state back
+        if selection == .inicio { inicio.finishVisit(through: inicioVisitThrough) }
+        stateSave?.cancel() // the snapshot below replaces any delayed write of this same state
+        stateSave = nil
         store.save(state)
         saveDraftsIfChanged() // after the turns stopped for quitting gave their queued messages back
         for session in sessions.values { session.saveNow() }

@@ -41,7 +41,7 @@ struct ImageThumbnail: View {
         .frame(width: size.width, height: size.height)
         .clipShape(.rect(cornerRadius: Radius.medium))
         .overlay { RoundedRectangle(cornerRadius: Radius.medium).strokeBorder(Palette.line) }
-        .task(id: path) {
+        .task(id: DecodeKey(path: path, side: decodeSide)) {
             // Born from the cache with this very picture: nothing to decode, and no second pass over the body.
             // (Compared with the cached copy of `path`, so a view reused for another path still loads it.)
             if let image, image === Thumbnails.cached(path: path, side: decodeSide) { return }
@@ -50,6 +50,11 @@ struct ImageThumbnail: View {
             image = decoded
             failed = decoded == nil
         }
+    }
+
+    private struct DecodeKey: Hashable {
+        let path: String
+        let side: CGFloat
     }
 }
 
@@ -76,11 +81,31 @@ enum Thumbnails {
     /// A reduced copy (the stored picture can be 1568 px wide), decoded once per path and size and off the main
     /// thread, so a long conversation full of pictures does not stall its first render.
     static func image(at path: String, side: CGFloat) async -> NSImage? {
-        let key = key(path, side)
-        if let cached = cache.object(forKey: key) { return cached }
-        let image = await Task.detached { decode(path: path, side: side) }.value
-        if let image { cache.setObject(image, forKey: key, cost: cost(of: image)) }
-        return image
+        if let cached = cached(path: path, side: side) { return cached }
+        return await loader.image(at: path, side: side)
+    }
+
+    private static let loader = Loader()
+
+    /// A picture can appear in the composer, transcript and output strip together. They share one decode, and a
+    /// photo-heavy conversation cannot start an unbounded number of ImageIO jobs at once.
+    private actor Loader {
+        private var pending: [String: Task<NSImage?, Never>] = [:]
+        private let gate = AsyncGate(limit: 2)
+
+        func image(at path: String, side: CGFloat) async -> NSImage? {
+            let key = Thumbnails.key(path, side)
+            if let image = cache.object(forKey: key) { return image }
+            if let task = pending[key as String] { return await task.value }
+            let task = Task.detached(priority: .userInitiated) { [gate] in
+                try? await gate.run { decode(path: path, side: side) }
+            }
+            pending[key as String] = task
+            let image = await task.value
+            if let image { cache.setObject(image, forKey: key, cost: cost(of: image)) }
+            pending[key as String] = nil
+            return image
+        }
     }
 
     /// The bytes of the decoded bitmap (4 per pixel).
@@ -92,6 +117,7 @@ enum Thumbnails {
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
             kCGImageSourceThumbnailMaxPixelSize: Int(side * 2),
         ]
         guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),

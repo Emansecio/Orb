@@ -430,7 +430,9 @@ struct WelcomeView: View {
     private func loadKept() async {
         guard forcedKept == nil, model.botIDs.isEmpty else { return }
         let root = model.memory.root
-        loadedKept = await Task.detached(priority: .userInitiated) { KeptMemories.list(in: root) }.value
+        let kept = await Task.detached(priority: .userInitiated) { KeptMemories.list(in: root) }.value
+        guard !Task.isCancelled else { return }
+        loadedKept = kept
     }
 
     /// The Atlas gives a little hop when the pointer is on "Começar com o Atlas": cause and effect, at most once

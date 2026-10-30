@@ -1,0 +1,55 @@
+[
+  {
+    "label": "version",
+    "timestamp_utc": "2026-10-27T06:48:43.345875+00:00",
+    "command": [
+      "/Users/thiagomacbookpro/Library/Application Support/Orb/navegador/bin/agent-browser",
+      "--session",
+      "token-investigation",
+      "--json",
+      "--config",
+      "/var/folders/sy/9z7gs69d7m9cq3w3gyqq8wyr0000gn/T/orb-token-browser-qh7dis6c/config.json",
+      "--version"
+    ],
+    "exit_code": 0,
+    "stdout": "agent-browser 0.39.1\n",
+    "stderr": ""
+  },
+  {
+    "label": "open isolated local fixture",
+    "timestamp_utc": "2026-10-27T06:48:43.361448+00:00",
+    "command": [
+      "/Users/thiagomacbookpro/Library/Application Support/Orb/navegador/bin/agent-browser",
+      "--session",
+      "token-investigation",
+      "--json",
+      "--config",
+      "/var/folders/sy/9z7gs69d7m9cq3w3gyqq8wyr0000gn/T/orb-token-browser-qh7dis6c/config.json",
+      "--executable-path",
+      "/Users/thiagomacbookpro/Library/Application Support/Orb/navegador/chrome/chrome-155.0.8059.39/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+      "--profile",
+      "/var/folders/sy/9z7gs69d7m9cq3w3gyqq8wyr0000gn/T/orb-token-browser-qh7dis6c/profile",
+      "open",
+      "file:///Users/thiagomacbookpro/Orb/docs/evidencias/navegador-rotinas-2026-10-27/snapshot-fixture.html"
+    ],
+    "exit_code": 1,
+    "stdout": "{\"error\":\"Session name 'token-investigation' is too long. Socket path would be 108 bytes (max 103).\\nUse a shorter session name or set AGENT_BROWSER_SOCKET_DIR to a shorter path.\",\"success\":false}\n",
+    "stderr": ""
+  },
+  {
+    "label": "close isolated session",
+    "timestamp_utc": "2026-10-27T06:48:43.370853+00:00",
+    "command": [
+      "/Users/thiagomacbookpro/Library/Application Support/Orb/navegador/bin/agent-browser",
+      "--session",
+      "token-investigation",
+      "--json",
+      "--config",
+      "/var/folders/sy/9z7gs69d7m9cq3w3gyqq8wyr0000gn/T/orb-token-browser-qh7dis6c/config.json",
+      "close"
+    ],
+    "exit_code": 1,
+    "stdout": "{\"error\":\"Session name 'token-investigation' is too long. Socket path would be 108 bytes (max 103).\\nUse a shorter session name or set AGENT_BROWSER_SOCKET_DIR to a shorter path.\",\"success\":false}\n",
+    "stderr": ""
+  }
+]

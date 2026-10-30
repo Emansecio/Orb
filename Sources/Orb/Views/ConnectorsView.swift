@@ -620,8 +620,10 @@ struct ConnectorToolsSheet: View {
                     .lineLimit(1)
                 if tool.annotations.destructive == true {
                     CatalogBadge(text: "Destrutiva", symbol: "exclamationmark.triangle.fill", tint: Palette.warn)
+                        .fixedSize()
                 } else if tool.annotations.readOnly == true {
                     CatalogBadge(text: "Só leitura", symbol: "eye", tint: Palette.ok)
+                        .fixedSize()
                 }
             }
             Text(tool.description.split(whereSeparator: \.isNewline).first.map(String.init) ?? "Sem descrição.")
@@ -631,6 +633,7 @@ struct ConnectorToolsSheet: View {
         }
         .padding(.vertical, 9)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .help(tool.name + "\n" + tool.description)
         .accessibilityElement(children: .combine)
     }
 }
@@ -706,7 +709,7 @@ private struct ExploreConnectors: View {
         error = nil
         let text = query.trimmingCharacters(in: .whitespaces)
         // A retry that comes back after the text changed leaves the newer search's state alone.
-        defer { if Task.isCancelled || RegistryQuery.isCurrent(text, query: query) { isLoading = false } }
+        defer { if RegistryQuery.isCurrent(text, query: query, cancelled: Task.isCancelled) { isLoading = false } }
         do {
             let found = try await MCPRegistry.shared.search(text)
             if !Task.isCancelled, RegistryQuery.isCurrent(text, query: query) { results = found }

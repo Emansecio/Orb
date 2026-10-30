@@ -34,7 +34,7 @@ private struct LiveScreenCard: View {
     let view: BrowserViewItem
     let botID: UUID
 
-    static let thumbnail = CGSize(width: 115, height: 72)
+    static let thumbnail = CGSize(width: 135, height: 72)
 
     var body: some View {
         let live = model.live(botID)
@@ -52,7 +52,7 @@ private struct LiveScreenCard: View {
             VStack(alignment: .leading, spacing: 0) {
                 chipLine(state, host: host)
                 Spacer(minLength: 2)
-                captionLine(caption, state: state, work: work)
+                captionLine(caption)
                 Spacer(minLength: 2)
                 buttons(state, handoff: handoff, store: store)
             }
@@ -136,17 +136,12 @@ private struct LiveScreenCard: View {
         }
     }
 
-    @ViewBuilder private func captionLine(_ caption: String, state: LiveCardState, work: WorkLine?) -> some View {
-        let text = Text(caption)
+    private func captionLine(_ caption: String) -> some View {
+        Text(caption)
             .font(Typography.label)
             .foregroundStyle(Palette.secondary)
             .lineLimit(1)
             .truncationMode(.tail)
-        if state.shimmers && (work?.shimmers ?? true) {
-            text.shimmer()
-        } else {
-            text
-        }
     }
 
     private func buttons(_ state: LiveCardState, handoff: ApprovalRequest?, store: LiveFrameStore) -> some View {
@@ -176,10 +171,10 @@ private struct LiveScreenCard: View {
             Button("Ampliar") { enlarge() }.buttonStyle(SecondaryPillStyle()).help(Tip.enlargeScreen)
         case .stop:
             // Stops the whole Orb (its chains with other Orbs too), not just the turn as the composer's Stop does.
-            Button(short ? "Parar" : "Parar Orb") { model.stop(botID) }.buttonStyle(GhostStyle()).help(Tip.stopBrowsing)
+            Button(short ? "Parar" : "Parar Orb") { model.stop(botID) }.buttonStyle(SecondaryPillStyle()).help(Tip.stopBrowsing)
                 .accessibilityLabel("Parar Orb")
         case .hide:
-            Button(short ? "Ocultar" : "Ocultar tela") { store.isPrivate = true }.buttonStyle(GhostStyle()).help(Tip.hideScreen)
+            Button(short ? "Ocultar" : "Ocultar tela") { store.isPrivate = true }.buttonStyle(SecondaryPillStyle()).help(Tip.hideScreen)
                 .accessibilityLabel("Ocultar tela")
         case .reveal:
             Button(short ? "Mostrar" : "Mostrar tela") { store.isPrivate = false }.buttonStyle(PrimaryPillStyle()).help(Tip.revealScreen)
@@ -331,7 +326,11 @@ struct LiveScreenTab: View {
             FormFootnote { Text("Só você vê esta tela. Nada é gravado nem vai para o modelo.") }
         }
         .task(id: focus?.itemID) {
-            lastImage = focus.flatMap { model.liveScreens.lastScreen(of: $0.itemID) }.flatMap { NSImage(data: $0) }
+            lastImage = nil
+            guard let jpeg = focus.flatMap({ model.liveScreens.lastScreen(of: $0.itemID) }) else { return }
+            let image = await Task.detached(priority: .userInitiated) { LiveJPEG.image(from: jpeg) }.value
+            guard !Task.isCancelled else { return }
+            lastImage = image.map { NSImage(cgImage: $0, size: .zero) }
         }
     }
 

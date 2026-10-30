@@ -363,7 +363,8 @@ enum Snapshot {
         case let name where name.hasPrefix("transcript"):
             AnyView(model.bots.first.map { TranscriptSample.view(name, model: model, bot: $0) })
         default:
-            RoutinesSnapshots.view(screen, model: model)
+            InicioSnapshots.view(screen, model: model)
+                ?? RoutinesSnapshots.view(screen, model: model)
                 ?? SidebarCategorySnapshots.view(screen, model: model)
                 ?? ContextSnapshots.view(screen, model: model)
                 ?? UsageSnapshots.view(screen, model: model)
@@ -375,12 +376,21 @@ enum Snapshot {
                 ?? AnyView(model.bots.first.map { ChatView(botID: $0.id) })
         }
         let size = NSSize(width: ProcessInfo.processInfo.environment["ORB_SNAPSHOT_WIDTH"].flatMap(Double.init) ?? 1100, height: height ?? 760)
+        let interactive = screen == "inicio-interactive"
         let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: -30_000, y: -30_000), size: size),
-                              styleMask: .borderless, backing: .buffered, defer: false)
+                              styleMask: interactive ? [.titled, .closable, .resizable] : .borderless, backing: .buffered, defer: false)
         window.contentView = NSHostingView(rootView: NavigationStack { content }
             .environment(model)
             .preferredColorScheme(.dark)
             .frame(width: size.width, height: size.height))
+        if interactive {
+            NSApp.setActivationPolicy(.regular)
+            window.title = "Prévia isolada de Início"
+            window.center()
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
         window.orderFrontRegardless()
         Task {
             // Give catalogs and images time to load.

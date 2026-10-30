@@ -66,11 +66,13 @@ clique nela traz a tela de volta (e "Novo Orb" no pé da barra lateral só apare
 
 ## A janela
 
-A **barra lateral** tem os seus Orbs, o **Espaço de trabalho** (Rotinas, Conectores, Skills), **Novo Orb** (só com Orbs na lista) e, embaixo, a sua foto com o seu nome (abre o perfil) e **Ajustes**. Uma
+A **barra lateral** tem **Início**, os seus Orbs, o **Espaço de trabalho** (Rotinas, Conectores, Skills), **Novo Orb** (só com Orbs na lista) e, embaixo, a sua foto com o seu nome (abre o perfil) e **Ajustes**. Uma
 linha mostra o que o Orb está fazendo ("Pensando…"), "Precisa de você" quando ele espera uma permissão e um ponto quando há
 mensagens não lidas; um anel em volta do rosto diz o mesmo de relance (azul trabalhando, âmbar esperando você). O título da
 janela traz, sob o nome do Orb, o que ele está fazendo, ou o modelo quando está livre. O botão direito abre o menu do Orb (abrir pasta, personalizar, ver
 rotinas, apagar). No meio fica o chat; à direita, o painel do Orb.
+
+**Início** reúne pedidos aguardando você, trabalhos em andamento, resultados recentes e acompanhamentos em aberto das rotinas. O avatar ou o nome abre a conversa atual do Orb; o conteúdo de um resultado abre a conversa ou execução de origem. Um acompanhamento abre seus detalhes e permite ir à rotina. Novidades são contadas desde a última visita a Início, sem alterar os indicadores de mensagens não lidas. Se chegar um resultado enquanto você lê mais abaixo, **Novos resultados** permite vê-lo sem deslocar a leitura. A página usa informações já registradas no Orb e não dispara consultas externas.
 
 No canto inferior esquerdo da barra lateral fica a **sua foto** (um círculo; sem foto, a inicial do seu nome ou uma silhueta):
 um clique abre **Ajustes → Geral → Você**, onde você diz **Nome**, **Como te chamar** e um texto **Sobre você** (até 400
@@ -534,7 +536,13 @@ aviso dizendo por quê.
   destaque suave; ali cada uma tem o interruptor Ativa/Pausada e o botão de apagar (com confirmação na própria linha).
 - **Conversa própria.** Cada rotina roda numa conversa só dela, nunca no seu chat: o chat ganha só uma linha no fim ("Rotina
   'Resumo da manhã' terminou: …"). Em **Ver conversa** você lê a execução. Fica o histórico das últimas 10 execuções, com
-  relatório, e a próxima execução sabe o que a anterior encontrou. Ela também sabe o que vocês acabaram de fazer no chat aberto:
+  relatório. A próxima recebe o último relatório disponível, até três outros registros recentes e um trecho das ações e respostas
+  da execução imediatamente anterior, inclusive se ela foi interrompida. O Orb é orientado a conferir acompanhamentos pendentes
+  nas fontes e a levá-los ao relatório seguinte até serem resolvidos; isso depende do registro e da verificação pelo modelo.
+  A rotina também pode manter acompanhamentos abertos em uma lista própria, que sobrevive ao limite do histórico de execuções.
+  O cartão da rotina mostra essa lista e permite concluir um item. Depois de duas execuções que registram a lista, o cartão
+  compara quantos acompanhamentos foram abertos ou concluídos desde a anterior.
+  Ela também sabe o que vocês acabaram de fazer no chat aberto:
   o trecho que a memória ainda não guardou (seus pedidos, as respostas e as ações do Orb, até ~3.000 caracteres, os mais
   recentes) vai junto, como contexto, para a rotina não refazer nem desfazer o que acabou de ser feito.
 - **Metas.** No editor, "Acompanhar uma meta" pede "como saber que deu certo". A cada execução o Orb confere onde a meta
@@ -548,6 +556,13 @@ aviso dizendo por quê.
   oferece "Usar Automático" e "Usar Só leitura"). Em Avançado: "Permissões da rotina" (Igual ao Orb, Automático ou Só leitura).
 - Se o Orb está ocupado, a rotina entra na fila ("Na fila") e roda quando ele terminar. "Rodar agora" e "Rodar uma vez
   agora, para testar" ao criar. O mesmo vale para "Rodar agora" no painel do Orb. Rotina desativada fica "Pausada". Na página, os cartões ficam agrupados por Orb; clicar no Orb do cartão abre o painel dele na aba Rotinas, o cartão mostra "Falhou" quando a última execução falhou, e o "…" tem "Editar…" e "Apagar…" (com confirmação). Em "Agenda avançada" (cron), as formas comuns aparecem em palavras ("De segunda a sexta às 9h30").
+- **Acordar por sinal.** Um processo seu fora do app acorda a rotina na hora gravando `<nome>.wake` na pasta `wake/` da
+  pasta de dados (`~/Library/Application Support/Orb/wake/`) — por exemplo, um script que vigia o canal e toca o arquivo
+  quando chega mensagem. O nome do arquivo é o da rotina (ou o seu id); o texto, se houver, fica na conversa da execução
+  como o motivo. O arquivo é consumido ao ser lido, a execução entra na fila como a agendada (a pré-checagem continua
+  valendo) e a rotina pausada não toca.
+- **Notificação sem repeteco.** Quando uma execução não termina, o motivo chega como banner; a mesma falha duas vezes
+  seguidas avisa uma só vez — um conector fora do ar numa cadência curta não vira um banner por horário.
 - **Pedir a outro Orb.** Uma rotina que pede algo a outro Orb (`orbs ask`) espera a resposta: a execução segue na conversa
   dela quando a resposta chega, e só então entra no histórico, com o relatório final (o banner também espera). Seu chat não ganha
   turno com isso. Enquanto ela espera, o próximo horário não dispara outra execução. Se você para a conversa entre Orbs, ou se o

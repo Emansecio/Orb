@@ -1167,6 +1167,8 @@ struct ToolGroupRow: View, Equatable {
     let isOpen: Bool
     /// The result of the find bar, when it is one of these actions.
     var find: FindFocus?
+    /// A task step names its purpose; its original progress message remains inside the disclosure.
+    var isStep = false
     let toggle: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var permissionProblem: MacPermissionProblem?
@@ -1178,6 +1180,7 @@ struct ToolGroupRow: View, Equatable {
 
     nonisolated static func == (lhs: ToolGroupRow, rhs: ToolGroupRow) -> Bool {
         lhs.items == rhs.items && lhs.botID == rhs.botID && lhs.orb == rhs.orb && lhs.isOpen == rhs.isOpen && lhs.find == rhs.find
+            && lhs.isStep == rhs.isStep
     }
 
     private var calls: [ToolCall] {
@@ -1187,19 +1190,21 @@ struct ToolGroupRow: View, Equatable {
     var body: some View {
         let calls = calls
         let isRunning = calls.contains { $0.state == .running }
-        let variants = ToolTally.lineVariants(calls)
+        let variants = isStep ? ToolTally.stepVariants(items) : ToolTally.lineVariants(calls)
         let failures = ToolTally.failures(calls)
         // 6 pt between the actions of one group (one list, read down), 12 between the group and what is around it.
         VStack(alignment: .leading, spacing: Self.actionSpacing) {
             VStack(alignment: .leading, spacing: 6) {
-                header(variants: variants, failures: failures, span: ToolTally.span(calls), count: ToolTally.countNote(calls),
+                header(variants: variants, failures: failures, span: ToolTally.span(calls),
+                       count: isStep ? "\(calls.count) \(calls.count == 1 ? "ação" : "ações")" : ToolTally.countNote(calls),
                        isRunning: isRunning, symbol: ToolTally.symbol(calls))
                 if !isOpen { keptInView(calls) }
             }
             .padding(.leading, gutter)
             if isOpen {
                 ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                    TranscriptRow(item: item, botID: botID, orb: orb, find: item.id == find?.itemID ? find : nil)
+                    TranscriptRow(item: item, botID: botID, orb: orb, showsAvatar: false, isNarration: true,
+                                  find: item.id == find?.itemID ? find : nil)
                         .equatable()
                         .padding(.leading, 22) // under the line's words, past its symbol
                         // A rail under the line's symbol ties the actions to it, one piece per action that reaches down
@@ -1235,27 +1240,36 @@ struct ToolGroupRow: View, Equatable {
                                 .controlSize(.mini)
                                 .accessibilityHidden(true)
                         } else {
-                            Image(systemName: symbol)
+                            Image(systemName: isStep && failures == nil ? "checkmark" : symbol)
                                 .font(Typography.small)
                                 .foregroundStyle(Palette.muted)
                         }
                     }
                     .frame(width: 14)
-                    Text(summary)
-                        .font(Typography.label)
-                        .foregroundStyle(Palette.secondary)
-                        .lineLimit(1)
-                        // The words give way before the marks do, when even the shortest wording is too long.
-                        .layoutPriority(-1)
-                        // A new action changes a count, once per action (never per token): the number rolls.
-                        .contentTransition(reduceMotion ? .opacity : .numericText())
-                        .animation(Motion.content, value: summary)
-                    if let failures {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(summary)
+                            .font(Typography.label)
+                            .foregroundStyle(isStep && isRunning ? Palette.ink : Palette.secondary)
+                            .lineLimit(isStep ? 2 : 1)
+                            .contentTransition(reduceMotion ? .opacity : .numericText())
+                            .animation(Motion.content, value: summary)
+                        if isStep {
+                            HStack(spacing: 8) {
+                                if let marks = marks(span: span, count: count) {
+                                    Text(marks).foregroundStyle(Palette.faint)
+                                }
+                                if let failures { ErrorMark(failures: failures) }
+                            }
+                            .font(Typography.small.monospacedDigit())
+                        }
+                    }
+                    .layoutPriority(-1)
+                    if !isStep, let failures {
                         ErrorMark(failures: failures)
                             .transition(.adapted(.mark, reduceMotion: reduceMotion))
                     }
                     // How long it took and how many actions, when the words do not count them: in view, as on each line.
-                    if let marks = marks(span: span, count: count) {
+                    if !isStep, let marks = marks(span: span, count: count) {
                         Text(marks)
                             .font(Typography.small)
                             .monospacedDigit()
@@ -1282,7 +1296,7 @@ struct ToolGroupRow: View, Equatable {
 
     /// "12 s · 6 ações": the time once every action ended, and the count when the words do not say it.
     private func marks(span: TimeInterval?, count: String?) -> String? {
-        let parts = [span.map(ElapsedFormat.duration), count].compactMap { $0 }
+        let parts = [span.flatMap { $0 >= 1 ? ElapsedFormat.duration($0) : nil }, count].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
@@ -1358,6 +1372,7 @@ struct WorkGroupRow<Content: View>: View, Equatable {
     /// the row is open, so a closed one is not drawn again for what only its hidden content would show.
     struct ContentInputs: Equatable {
         var openRuns: Set<UUID>
+        var openSteps: Set<UUID>
         var avatars: ReplyAvatars
         var redoID: UUID?
         var dropping: Set<UUID>
@@ -1458,6 +1473,7 @@ private struct NoticeLine: View {
     @State private var hasProposal = false
     @State private var reviewing: SkillDraft?
     @State private var showsProviderDetail = false
+    @State private var showsCompaction = false
 
     var body: some View {
         if NoticeAction.isMark(text) { mark } else { notice }
@@ -1467,18 +1483,20 @@ private struct NoticeLine: View {
     private var mark: some View {
         HStack(spacing: 10) {
             Rectangle().fill(Palette.line).frame(height: 1)
-            Text(text)
-                .font(Typography.small)
-                .foregroundStyle(Palette.faint)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: 480)
-                .layoutPriority(1)
+            Button { showsCompaction.toggle() } label: {
+                Label("Conversa compactada", systemImage: "info.circle")
+                    .font(Typography.small)
+                    .foregroundStyle(Palette.muted)
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $showsCompaction) {
+                Text(text).font(Typography.label).textSelection(.enabled).padding(14).frame(width: 320, alignment: .leading)
+            }
+            .accessibilityLabel(TranscriptSpeech.notice(text))
+            .accessibilityHint("Mostra os detalhes da compactação")
             Rectangle().fill(Palette.line).frame(height: 1)
         }
         .padding(.vertical, 4)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(TranscriptSpeech.notice(text))
     }
 
     @ViewBuilder private var notice: some View {

@@ -113,6 +113,101 @@ struct BrowseToolTests {
         #expect(text.contains("Nothing to list") && text.contains("browse_read"))
     }
 
+    // MARK: A selector that misses
+
+    @Test func aSelectorThatMatchesNothingWidensToTheWholePageInTheSameCall() async throws {
+        setup.driver.state.withLock {
+            $0.failingSelectors["#main"] = .failed("Error: Selector '#main' did not match any element")
+            $0.snapshot = BrowserSnapshot(url: "https://shop.test/", tree: "- button \"Comprar\" [ref=e7]",
+                                          refs: ["e7": BrowserRef(role: "button", name: "Comprar")])
+        }
+        let context = setup.context()
+        let text = try await BrowseSnapshotTool().run(.object(["selector": .string("#main")]), context: context)
+        #expect(text.contains("Selector '#main' did not match") && text.contains("[ref=e7]"))
+        #expect(setup.driver.calls == ["snapshot interactive=true selector=#main", "snapshot interactive=true selector=-"])
+        // The wide read is what stays remembered: its refs name the elements, and the next page keeps paging it.
+        #expect(setup.hub.label(ofRef: "e7", botID: setup.botID) == "Comprar")
+        let more = try await BrowseSnapshotTool().run(.object(["offset": .number(5)]), context: context)
+        #expect(more.contains("caracteres 6–") && setup.driver.calls.count == 2, "offset keeps paging the wide read: \(setup.driver.calls)")
+    }
+
+    @Test func aSelectorWithoutAnAccessibilityNodeWidensToo() async throws {
+        setup.driver.state.withLock {
+            $0.failingSelectors["[role=dialog]"] = .failed("Error: No accessibility node found for selector '[role=dialog]'")
+        }
+        let text = try await BrowseSnapshotTool().run(.object(["selector": .string("[role=dialog]")]), context: setup.context())
+        #expect(text.contains("No accessibility node") && text.contains("whole page"))
+        #expect(setup.driver.calls == ["snapshot interactive=true selector=[role=dialog]", "snapshot interactive=true selector=-"])
+    }
+
+    @Test func aSnapshotFailureThatIsNotAMissIsNotRetried() async {
+        setup.driver.state.withLock { $0.failingSelectors["#main"] = .failed("Error: the tab crashed") }
+        let text = await message(BrowseSnapshotTool(), ["selector": .string("#main")])
+        #expect(text.contains("the tab crashed"))
+        #expect(setup.driver.calls == ["snapshot interactive=true selector=#main"])
+    }
+
+    @Test func aWidenedReadThatAlsoFailsReportsBothFailures() async {
+        setup.driver.state.withLock {
+            $0.failingSelectors["#main"] = .failed("Error: Selector '#main' did not match any element")
+            $0.snapshotFailure = .failed("the page is gone")
+        }
+        let text = await message(BrowseSnapshotTool(), ["selector": .string("#main")])
+        #expect(text.contains("did not match") && text.contains("the page is gone"))
+        #expect(setup.driver.calls == ["snapshot interactive=true selector=#main", "snapshot interactive=true selector=-"])
+    }
+
+    // MARK: Searching the snapshot
+
+    private func listPage() {
+        setup.driver.state.withLock {
+            $0.snapshot = BrowserSnapshot(url: "https://shop.test/", tree: """
+                - banner "Topo"
+                - text "Ofertas de hoje"
+                - button "Comprar agora" [ref=e7]
+                - link "Ajuda" [ref=e8]
+                - separator
+                - text "Endereço"
+                - text "Horário"
+                - separator
+                - text "Pagamento"
+                - link "Comprar depois" [ref=e9]
+                - text "Fim"
+                """, refs: [:])
+        }
+    }
+
+    @Test func queryListsOnlyTheMatchingLinesWithNeighborsAndOffsets() async throws {
+        listPage()
+        let text = try await BrowseSnapshotTool().run(.object(["query": .string("comprar")]), context: setup.context())
+        #expect(text.contains("untrusted") && text.contains("2 lines match \"comprar\""))
+        #expect(text.contains("[ref=e7]") && text.contains("[ref=e9]") && text.contains("offset="))
+        // Each hit shows the elements around it; lines far from every hit stay out.
+        #expect(text.contains("Ajuda") && text.contains("banner"))
+        #expect(!text.contains("Endereço") && !text.contains("Horário"))
+        #expect(setup.driver.calls == ["snapshot interactive=true selector=-"])
+    }
+
+    @Test func queryIsLiteralNotAPattern() async throws {
+        listPage()
+        let text = try await BrowseSnapshotTool().run(.object(["query": .string("Comprar|Ajuda")]), context: setup.context())
+        #expect(text.contains("No line") && text.contains("browse_read"))
+    }
+
+    @Test func findIsAcceptedAsTheSearchWordToo() async throws {
+        listPage()
+        let text = try await BrowseSnapshotTool().run(.object(["find": .string("ajuda")]), context: setup.context())
+        #expect(text.contains("1 line match") && text.contains("[ref=e8]"))
+    }
+
+    @Test func querySearchesTheWideReadWhenTheSelectorMissed() async throws {
+        listPage()
+        setup.driver.state.withLock { $0.failingSelectors["main"] = .failed("Error: Selector 'main' did not match any element") }
+        let text = try await BrowseSnapshotTool().run(.object(["selector": .string("main"), "query": .string("comprar")]), context: setup.context())
+        #expect(text.contains("whole page") && text.contains("2 lines match") && text.contains("[ref=e7]"))
+        #expect(setup.driver.calls == ["snapshot interactive=true selector=main", "snapshot interactive=true selector=-"])
+    }
+
     @Test func aLoginFormInTheSnapshotIsAHandoff() async throws {
         setup.driver.state.withLock {
             $0.snapshot = BrowserSnapshot(url: "https://app.test/", tree: "- textbox \"E-mail\" [ref=e1]\n- textbox \"Senha\" [ref=e2]\n- button \"Entrar\" [ref=e3]", refs: [:])

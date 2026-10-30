@@ -128,12 +128,25 @@ struct ModelSearchField: View {
     @FocusState private var isFocused: Bool
 
     var body: some View {
-        TextField("Buscar modelo", text: $query)
-            .popoverSearchField()
-            .focused($isFocused)
-            .onSubmit(onSubmit)
-            .padding(10)
-            .onAppear { isFocused = true }
+        HStack(spacing: 6) {
+            TextField("Buscar modelo", text: $query)
+                .textFieldStyle(.plain)
+                .focused($isFocused)
+                .onSubmit(onSubmit)
+            if !query.isEmpty {
+                Button("Limpar busca", systemImage: "xmark.circle.fill") {
+                    query = ""
+                    isFocused = true
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.plain)
+                .foregroundStyle(Palette.muted)
+                .help(Tip.clearSearch)
+            }
+        }
+        .popoverSearchField()
+        .padding(10)
+        .onAppear { isFocused = true }
     }
 }
 
@@ -164,7 +177,7 @@ private struct ModelChooser: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                        if allowsDefault && query.isEmpty {
+                        if allowsDefault && words.isEmpty {
                             row(defaultLabel, tag: "", help: "")
                         }
                         ForEach(shown, id: \.account.kind) { choice in

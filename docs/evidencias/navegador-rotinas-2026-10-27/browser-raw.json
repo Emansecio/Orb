@@ -1,0 +1,336 @@
+[
+  {
+    "label": "version",
+    "timestamp_utc": "2026-10-27T06:53:18.794997+00:00",
+    "command": [
+      "/Users/thiagomacbookpro/Library/Application Support/Orb/navegador/bin/agent-browser",
+      "--session",
+      "tok",
+      "--json",
+      "--config",
+      "/tmp/orb-tok-u__15oyp/config.json",
+      "--version"
+    ],
+    "exit_code": 0,
+    "stdout": "agent-browser 0.39.1\n",
+    "stderr": ""
+  },
+  {
+    "label": "open isolated local fixture",
+    "timestamp_utc": "2026-10-27T06:53:18.809430+00:00",
+    "command": [
+      "/Users/thiagomacbookpro/Library/Application Support/Orb/navegador/bin/agent-browser",
+      "--session",
+      "tok",
+      "--json",
+      "--config",
+      "/tmp/orb-tok-u__15oyp/config.json",
+      "--executable-path",
+      "/Users/thiagomacbookpro/Library/Application Support/Orb/navegador/chrome/chrome-155.0.8059.39/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+      "--profile",
+      "/tmp/orb-tok-u__15oyp/profile",
+      "open",
+      "file:///Users/thiagomacbookpro/Orb/docs/evidencias/navegador-rotinas-2026-10-27/snapshot-fixture.html"
+    ],
+    "exit_code": 0,
+    "stdout": "{\"success\":true,\"data\":{\"lifecycle\":{\"effectiveLaunch\":{\"browserLaunched\":true,\"engine\":\"chrome\",\"launchHash\":4401669928658508221},\"launched\":false,\"relaunchedBrowser\":false,\"restartedBackground\":false,\"restoreStatus\":\"not_configured\",\"reused\":true,\"saveStatus\":\"not_attempted\"},\"targetId\":\"FBFC237BBCAAD49F9274AAD6C506F931\",\"title\":\"Orb token investigation\",\"url\":\"file:///Users/thiagomacbookpro/Orb/docs/evidencias/navegador-rotinas-2026-10-27/snapshot-fixture.html\"},\"error\":null}\n",
+    "stderr": ""
+  },
+  {
+    "label": "full interactive",
+    "timestamp_utc": "2026-10-27T06:53:23.018815+00:00",
+    "command": [
+      "/Users/thiagomacbookpro/Library/Application Support/Orb/navegador/bin/agent-browser",
+      "--session",
+      "tok",
+      "--json",
+      "--config",
+      "/tmp/orb-tok-u__15oyp/config.json",
+      "snapshot",
+      "--interactive",
+      "--urls",
+      "--compact"
+    ],
+    "exit_code": 0,
+    "stdout": "{\"success\":true,\"data\":{\"lifecycle\":{\"effectiveLaunch\":{\"browserLaunched\":true,\"engine\":\"chrome\",\"launchHash\":4401669928658508221},\"launched\":false,\"relaunchedBrowser\":false,\"restartedBackground\":false,\"restoreStatus\":\"not_configured\",\"reused\":true,\"saveStatus\":\"not_attempted\"},\"origin\":\"file:///Users/thiagomacbookpro/Orb/docs/evidencias/navegador-rotinas-2026-10-27/snapshot-fixture.html\",\"refs\":{\"e1\":{\"name\":\"Campaign metrics\",\"role\":\"heading\"},\"e2\":{\"name\":\"Daily report\",\"role\":\"link\"},\"e3\":{\"name\":\"Save campaign\",\"role\":\"button\"},\"e4\":{\"name\":\"Cancel campaign\",\"role\":\"button\"}},\"removedRefs\":[],\"snapshot\":\"- button \\\"Save campaign\\\" [ref=e3]\\n- button \\\"Cancel campaign\\\" [ref=e4]\\n- heading \\\"Campaign metrics\\\" [level=1, ref=e1]\\n- link \\\"Daily report\\\" [ref=e2, url=file:///Users/thiagomacbookpro/Orb/docs/evidencias/navegador-rotinas-2026-10-27/snapshot-fixture.html#report]\"},\"error\":null}\n",
+    "stderr": ""
+  },
+  {
+    "label": "missing HTML button",
+    "timestamp_utc": "2026-10-27T06:53:23.037192+00:00",
+    "command": [
+      "/Users/thiagomacbookpro/Library/Application Support/Orb/navegador/bin/agent-browser",
+      "--session",
+      "tok",
+      "--json",
+      "--config",
+      "/tmp/orb-tok-u__15oyp/config.json",
+      "snapshot",
+      "--interactive",
+      "--urls",
+      "--compact",
+      "--selector",
+      "button"
+    ],
+    "exit_code": 1,
+    "stdout": "{\"success\":false,\"data\":null,\"error\":\"No accessibility node found for selector 'button'\"}\n",
+    "stderr": ""
+  },
+  {
+    "label": "missing main",
+    "timestamp_utc": "2026-10-27T06:53:23.049240+00:00",
+    "command": [
+      "/Users/thiagomacbookpro/Library/Application Support/Orb/navegador/bin/agent-browser",
+      "--session",
+      "tok",
+      "--json",
+      "--config",
+      "/tmp/orb-tok-u__15oyp/config.json",
+      "snapshot",
+      "--interactive",
+      "--urls",
+      "--compact",
+      "--selector",
+      "main"
+    ],
+    "exit_code": 1,
+    "stdout": "{\"success\":false,\"data\":null,\"error\":\"Selector 'main' did not match any element\"}\n",
+    "stderr": ""
+  },
+  {
+    "label": "ARIA button selector",
+    "timestamp_utc": "2026-10-27T06:53:23.061066+00:00",
+    "command": [
+      "/Users/thiagomacbookpro/Library/Application Support/Orb/navegador/bin/agent-browser",
+      "--session",
+      "tok",
+      "--json",
+      "--config",
+      "/tmp/orb-tok-u__15oyp/config.json",
+      "snapshot",
+      "--interactive",
+      "--urls",
+      "--compact",
+      "--selector",
+      "[role=button]"
+    ],
+    "exit_code": 0,
+    "stdout": "{\"success\":true,\"data\":{\"lifecycle\":{\"effectiveLaunch\":{\"browserLaunched\":true,\"engine\":\"chrome\",\"launchHash\":4401669928658508221},\"launched\":false,\"relaunchedBrowser\":false,\"restartedBackground\":false,\"restoreStatus\":\"not_configured\",\"reused\":true,\"saveStatus\":\"not_attempted\"},\"origin\":\"file:///Users/thiagomacbookpro/Orb/docs/evidencias/navegador-rotinas-2026-10-27/snapshot-fixture.html\",\"refs\":{\"e1\":{\"name\":\"Campaign metrics\",\"role\":\"heading\"},\"e2\":{\"name\":\"Daily report\",\"role\":\"link\"},\"e3\":{\"name\":\"Save campaign\",\"role\":\"button\"},\"e4\":{\"name\":\"Cancel campaign\",\"role\":\"button\"}},\"removedRefs\":[],\"snapshot\":\"- button \\\"Save campaign\\\" [ref=e3]\"},\"error\":null}\n",
+    "stderr": ""
+  },
+  {
+    "label": "layout without AX node",
+    "timestamp_utc": "2026-10-27T06:53:23.073798+00:00",
+    "command": [
+      "/Users/thiagomacbookpro/Library/Application Support/Orb/navegador/bin/agent-browser",
+      "--session",
+      "tok",
+      "--json",
+      "--config",
+      "/tmp/orb-tok-u__15oyp/config.json",
+      "snapshot",
+      "--interactive",
+      "--urls",
+      "--compact",
+      "--selector",
+      "#layout"
+    ],
+    "exit_code": 0,
+    "stdout": "{\"success\":true,\"data\":{\"lifecycle\":{\"effectiveLaunch\":{\"browserLaunched\":true,\"engine\":\"chrome\",\"launchHash\":4401669928658508221},\"launched\":false,\"relaunchedBrowser\":false,\"restartedBackground\":false,\"restoreStatus\":\"not_configured\",\"reused\":true,\"saveStatus\":\"not_attempted\"},\"origin\":\"file:///Users/thiagomacbookpro/Orb/docs/evidencias/navegador-rotinas-2026-10-27/snapshot-fixture.html\",\"refs\":{\"e1\":{\"name\":\"Campaign metrics\",\"role\":\"heading\"},\"e2\":{\"name\":\"Daily report\",\"role\":\"link\"},\"e3\":{\"name\":\"Save campaign\",\"role\":\"button\"},\"e4\":{\"name\":\"Cancel campaign\",\"role\":\"button\"}},\"removedRefs\":[],\"snapshot\":\"- heading \\\"Campaign metrics\\\" [level=1, ref=e1]\\n- link \\\"Daily report\\\" [ref=e2, url=file:///Users/thiagomacbookpro/Orb/docs/evidencias/navegador-rotinas-2026-10-27/snapshot-fixture.html#report]\"},\"error\":null}\n",
+    "stderr": ""
+  },
+  {
+    "label": "hidden DOM node without AX node",
+    "timestamp_utc": "2026-10-27T06:53:23.085768+00:00",
+    "command": [
+      "/Users/thiagomacbookpro/Library/Application Support/Orb/navegador/bin/agent-browser",
+      "--session",
+      "tok",
+      "--json",
+      "--config",
+      "/tmp/orb-tok-u__15oyp/config.json",
+      "snapshot",
+      "--interactive",
+      "--urls",
+      "--compact",
+      "--selector",
+      "#hidden"
+    ],
+    "exit_code": 1,
+    "stdout": "{\"success\":false,\"data\":null,\"error\":\"No accessibility node found for selector '#hidden'\"}\n",
+    "stderr": ""
+  },
+  {
+    "label": "virtual ref is not a DOM attribute",
+    "timestamp_utc": "2026-10-27T06:53:23.099630+00:00",
+    "command": [
+      "/Users/thiagomacbookpro/Library/Application Support/Orb/navegador/bin/agent-browser",
+      "--session",
+      "tok",
+      "--json",
+      "--config",
+      "/tmp/orb-tok-u__15oyp/config.json",
+      "snapshot",
+      "--interactive",
+      "--urls",
+      "--compact",
+      "--selector",
+      "[ref=e3]"
+    ],
+    "exit_code": 1,
+    "stdout": "{\"success\":false,\"data\":null,\"error\":\"Selector '[ref=e3]' did not match any element\"}\n",
+    "stderr": ""
+  },
+  {
+    "label": "missing dialog",
+    "timestamp_utc": "2026-10-27T06:53:23.110011+00:00",
+    "command": [
+      "/Users/thiagomacbookpro/Library/Application Support/Orb/navegador/bin/agent-browser",
+      "--session",
+      "tok",
+      "--json",
+      "--config",
+      "/tmp/orb-tok-u__15oyp/config.json",
+      "snapshot",
+      "--interactive",
+      "--urls",
+      "--compact",
+      "--selector",
+      "[role=dialog]"
+    ],
+    "exit_code": 1,
+    "stdout": "{\"success\":false,\"data\":null,\"error\":\"Selector '[role=dialog]' did not match any element\"}\n",
+    "stderr": ""
+  },
+  {
+    "label": "full after selector errors",
+    "timestamp_utc": "2026-10-27T06:53:23.123700+00:00",
+    "command": [
+      "/Users/thiagomacbookpro/Library/Application Support/Orb/navegador/bin/agent-browser",
+      "--session",
+      "tok",
+      "--json",
+      "--config",
+      "/tmp/orb-tok-u__15oyp/config.json",
+      "snapshot",
+      "--interactive",
+      "--urls",
+      "--compact"
+    ],
+    "exit_code": 0,
+    "stdout": "{\"success\":true,\"data\":{\"lifecycle\":{\"effectiveLaunch\":{\"browserLaunched\":true,\"engine\":\"chrome\",\"launchHash\":4401669928658508221},\"launched\":false,\"relaunchedBrowser\":false,\"restartedBackground\":false,\"restoreStatus\":\"not_configured\",\"reused\":true,\"saveStatus\":\"not_attempted\"},\"origin\":\"file:///Users/thiagomacbookpro/Orb/docs/evidencias/navegador-rotinas-2026-10-27/snapshot-fixture.html\",\"refs\":{\"e1\":{\"name\":\"Campaign metrics\",\"role\":\"heading\"},\"e2\":{\"name\":\"Daily report\",\"role\":\"link\"},\"e3\":{\"name\":\"Save campaign\",\"role\":\"button\"},\"e4\":{\"name\":\"Cancel campaign\",\"role\":\"button\"}},\"removedRefs\":[],\"snapshot\":\"- button \\\"Save campaign\\\" [ref=e3]\\n- button \\\"Cancel campaign\\\" [ref=e4]\\n- heading \\\"Campaign metrics\\\" [level=1, ref=e1]\\n- link \\\"Daily report\\\" [ref=e2, url=file:///Users/thiagomacbookpro/Orb/docs/evidencias/navegador-rotinas-2026-10-27/snapshot-fixture.html#report]\"},\"error\":null}\n",
+    "stderr": ""
+  },
+  {
+    "label": "delta baseline",
+    "timestamp_utc": "2026-10-27T06:53:23.133723+00:00",
+    "command": [
+      "/Users/thiagomacbookpro/Library/Application Support/Orb/navegador/bin/agent-browser",
+      "--session",
+      "tok",
+      "--json",
+      "--config",
+      "/tmp/orb-tok-u__15oyp/config.json",
+      "snapshot",
+      "--interactive",
+      "--urls",
+      "--compact",
+      "--delta"
+    ],
+    "exit_code": 0,
+    "stdout": "{\"success\":true,\"data\":{\"lifecycle\":{\"effectiveLaunch\":{\"browserLaunched\":true,\"engine\":\"chrome\",\"launchHash\":4401669928658508221},\"launched\":false,\"relaunchedBrowser\":false,\"restartedBackground\":false,\"restoreStatus\":\"not_configured\",\"reused\":true,\"saveStatus\":\"not_attempted\"},\"origin\":\"file:///Users/thiagomacbookpro/Orb/docs/evidencias/navegador-rotinas-2026-10-27/snapshot-fixture.html\",\"snapshot\":{\"kind\":\"full\",\"refs\":{\"e1\":{\"name\":\"Campaign metrics\",\"role\":\"heading\"},\"e2\":{\"name\":\"Daily report\",\"role\":\"link\"},\"e3\":{\"name\":\"Save campaign\",\"role\":\"button\"},\"e4\":{\"name\":\"Cancel campaign\",\"role\":\"button\"}},\"revision\":1,\"tree\":\"- button \\\"Save campaign\\\" [ref=e3]\\n- button \\\"Cancel campaign\\\" [ref=e4]\\n- heading \\\"Campaign metrics\\\" [level=1, ref=e1]\\n- link \\\"Daily report\\\" [ref=e2, url=file:///Users/thiagomacbookpro/Orb/docs/evidencias/navegador-rotinas-2026-10-27/snapshot-fixture.html#report]\"}},\"error\":null}\n",
+    "stderr": ""
+  },
+  {
+    "label": "delta unchanged",
+    "timestamp_utc": "2026-10-27T06:53:23.153323+00:00",
+    "command": [
+      "/Users/thiagomacbookpro/Library/Application Support/Orb/navegador/bin/agent-browser",
+      "--session",
+      "tok",
+      "--json",
+      "--config",
+      "/tmp/orb-tok-u__15oyp/config.json",
+      "snapshot",
+      "--interactive",
+      "--urls",
+      "--compact",
+      "--delta"
+    ],
+    "exit_code": 0,
+    "stdout": "{\"success\":true,\"data\":{\"lifecycle\":{\"effectiveLaunch\":{\"browserLaunched\":true,\"engine\":\"chrome\",\"launchHash\":4401669928658508221},\"launched\":false,\"relaunchedBrowser\":false,\"restartedBackground\":false,\"restoreStatus\":\"not_configured\",\"reused\":true,\"saveStatus\":\"not_attempted\"},\"origin\":\"file:///Users/thiagomacbookpro/Orb/docs/evidencias/navegador-rotinas-2026-10-27/snapshot-fixture.html\",\"snapshot\":{\"baseRevision\":1,\"kind\":\"unchanged\",\"revision\":2}},\"error\":null}\n",
+    "stderr": ""
+  },
+  {
+    "label": "change fixture",
+    "timestamp_utc": "2026-10-27T06:53:23.171909+00:00",
+    "command": [
+      "/Users/thiagomacbookpro/Library/Application Support/Orb/navegador/bin/agent-browser",
+      "--session",
+      "tok",
+      "--json",
+      "--config",
+      "/tmp/orb-tok-u__15oyp/config.json",
+      "eval",
+      "document.getElementById('results').innerHTML='<button>Export report</button>';true"
+    ],
+    "exit_code": 0,
+    "stdout": "{\"success\":true,\"data\":{\"lifecycle\":{\"effectiveLaunch\":{\"browserLaunched\":true,\"engine\":\"chrome\",\"launchHash\":4401669928658508221},\"launched\":false,\"relaunchedBrowser\":false,\"restartedBackground\":false,\"restoreStatus\":\"not_configured\",\"reused\":true,\"saveStatus\":\"not_attempted\"},\"origin\":\"file:///Users/thiagomacbookpro/Orb/docs/evidencias/navegador-rotinas-2026-10-27/snapshot-fixture.html\",\"result\":true},\"error\":null}\n",
+    "stderr": ""
+  },
+  {
+    "label": "delta after change",
+    "timestamp_utc": "2026-10-27T06:53:23.184730+00:00",
+    "command": [
+      "/Users/thiagomacbookpro/Library/Application Support/Orb/navegador/bin/agent-browser",
+      "--session",
+      "tok",
+      "--json",
+      "--config",
+      "/tmp/orb-tok-u__15oyp/config.json",
+      "snapshot",
+      "--interactive",
+      "--urls",
+      "--compact",
+      "--delta"
+    ],
+    "exit_code": 0,
+    "stdout": "{\"success\":true,\"data\":{\"lifecycle\":{\"effectiveLaunch\":{\"browserLaunched\":true,\"engine\":\"chrome\",\"launchHash\":4401669928658508221},\"launched\":false,\"relaunchedBrowser\":false,\"restartedBackground\":false,\"restoreStatus\":\"not_configured\",\"reused\":true,\"saveStatus\":\"not_attempted\"},\"origin\":\"file:///Users/thiagomacbookpro/Orb/docs/evidencias/navegador-rotinas-2026-10-27/snapshot-fixture.html\",\"snapshot\":{\"kind\":\"full\",\"refs\":{\"e1\":{\"name\":\"Campaign metrics\",\"role\":\"heading\"},\"e2\":{\"name\":\"Daily report\",\"role\":\"link\"},\"e3\":{\"name\":\"Save campaign\",\"role\":\"button\"},\"e4\":{\"name\":\"Cancel campaign\",\"role\":\"button\"},\"e5\":{\"name\":\"Export report\",\"role\":\"button\"}},\"revision\":3,\"tree\":\"- button \\\"Save campaign\\\" [ref=e3]\\n- button \\\"Cancel campaign\\\" [ref=e4]\\n- heading \\\"Campaign metrics\\\" [level=1, ref=e1]\\n- link \\\"Daily report\\\" [ref=e2, url=file:///Users/thiagomacbookpro/Orb/docs/evidencias/navegador-rotinas-2026-10-27/snapshot-fixture.html#report]\\n- button \\\"Export report\\\" [ref=e5]\"}},\"error\":null}\n",
+    "stderr": ""
+  },
+  {
+    "label": "full after change",
+    "timestamp_utc": "2026-10-27T06:53:23.203532+00:00",
+    "command": [
+      "/Users/thiagomacbookpro/Library/Application Support/Orb/navegador/bin/agent-browser",
+      "--session",
+      "tok",
+      "--json",
+      "--config",
+      "/tmp/orb-tok-u__15oyp/config.json",
+      "snapshot",
+      "--interactive",
+      "--urls",
+      "--compact"
+    ],
+    "exit_code": 0,
+    "stdout": "{\"success\":true,\"data\":{\"lifecycle\":{\"effectiveLaunch\":{\"browserLaunched\":true,\"engine\":\"chrome\",\"launchHash\":4401669928658508221},\"launched\":false,\"relaunchedBrowser\":false,\"restartedBackground\":false,\"restoreStatus\":\"not_configured\",\"reused\":true,\"saveStatus\":\"not_attempted\"},\"origin\":\"file:///Users/thiagomacbookpro/Orb/docs/evidencias/navegador-rotinas-2026-10-27/snapshot-fixture.html\",\"refs\":{\"e1\":{\"name\":\"Campaign metrics\",\"role\":\"heading\"},\"e2\":{\"name\":\"Daily report\",\"role\":\"link\"},\"e3\":{\"name\":\"Save campaign\",\"role\":\"button\"},\"e4\":{\"name\":\"Cancel campaign\",\"role\":\"button\"},\"e5\":{\"name\":\"Export report\",\"role\":\"button\"}},\"removedRefs\":[],\"snapshot\":\"- button \\\"Save campaign\\\" [ref=e3]\\n- button \\\"Cancel campaign\\\" [ref=e4]\\n- heading \\\"Campaign metrics\\\" [level=1, ref=e1]\\n- link \\\"Daily report\\\" [ref=e2, url=file:///Users/thiagomacbookpro/Orb/docs/evidencias/navegador-rotinas-2026-10-27/snapshot-fixture.html#report]\\n- button \\\"Export report\\\" [ref=e5]\"},\"error\":null}\n",
+    "stderr": ""
+  },
+  {
+    "label": "close isolated session",
+    "timestamp_utc": "2026-10-27T06:53:23.216227+00:00",
+    "command": [
+      "/Users/thiagomacbookpro/Library/Application Support/Orb/navegador/bin/agent-browser",
+      "--session",
+      "tok",
+      "--json",
+      "--config",
+      "/tmp/orb-tok-u__15oyp/config.json",
+      "close"
+    ],
+    "exit_code": 0,
+    "stdout": "{\"success\":true,\"data\":{\"closed\":true,\"lifecycle\":{\"effectiveLaunch\":{\"browserLaunched\":false,\"engine\":\"chrome\",\"launchHash\":null},\"launched\":false,\"relaunchedBrowser\":false,\"restartedBackground\":false,\"restoreStatus\":\"not_configured\",\"reused\":false,\"saveStatus\":\"not_configured\"},\"restoreStatus\":\"not_configured\",\"saveStatus\":\"not_configured\"},\"error\":null}\n",
+    "stderr": ""
+  }
+]

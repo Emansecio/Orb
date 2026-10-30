@@ -202,6 +202,11 @@ ele lembrar, crie uma vez um certificado local:
 O certificado vale só neste Mac (não serve para distribuir o app). Outra identidade: `ORB_SIGN_IDENTITY="Nome do certificado"
 ./scripts/bundle.sh`. Depois da primeira compilação assinada, libere as permissões do macOS mais uma vez.
 
+O bundle assinado usa um componente próprio para acessar o Keychain. Ele é mantido em
+`~/Library/Application Support/Orb/KeychainHelper` e reutilizado nas compilações, para preservar sua identidade. Na primeira
+vez, o macOS pode pedir autorização para cada chave existente; escolha “Sempre Permitir” para que o componente possa reutilizá-la.
+Atualizar o componente, trocar o certificado ou apagar esse cache pode exigir novas autorizações.
+
 ## Primeiro uso
 
 <p align="center"><img src="docs/readme/welcome.png" width="720" alt="Tela de boas-vindas: três Orbs e os caminhos para conectar um modelo"></p>
@@ -254,6 +259,10 @@ swift test           # mais de 3.900 testes (motor, provedores, Claude Code, fer
 ./scripts/bundle.sh  # monta e assina build/Orb.app
 ./scripts/readme-shots.sh  # refaz as imagens deste README (docs/readme), com dados inventados
 ```
+
+Neste Mac, o Dock aponta para `build/Orb.app`. Após cada build, atualize o aplicativo do Dock com
+`./scripts/bundle.sh release` e abra `build/Orb.app`. Se o Orb estiver aberto, encerre-o normalmente e reabra-o após
+o bundle ficar pronto: o processo antigo pode perder acesso às chaves do Keychain. `swift build` sozinho não atualiza o app.
 
 Para reduzir o pico de processos e memória durante o desenvolvimento, rode a suíte em série e deixe os navegadores reais para a validação de integração:
 

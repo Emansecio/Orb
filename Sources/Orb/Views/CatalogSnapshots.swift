@@ -7,6 +7,8 @@ enum CatalogSnapshots {
     static func view(_ screen: String, model: AppModel) -> AnyView? {
         if let welcome = WelcomeSnapshots.view(screen) { return welcome }
         switch screen {
+        case "model-search":
+            return AnyView(ModelSearchField(query: .constant("gpt"), onSubmit: {}).frame(width: 320))
         case "conn-editor-github":
             return template("github")
         case "conn-editor-files":

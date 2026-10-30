@@ -179,7 +179,9 @@ enum MemoryGroups {
     static func make(_ items: [MemorySnapshot.Item], matching query: String = "", kind only: MemoryKind? = nil,
                      cache: FoldedTextCache? = nil) -> [MemoryGroup] {
         let words = SearchText.words(query)
-        let matching = words.isEmpty ? items : items.filter { matches($0, words, cache: cache) }
+        // Filter the kind before Unicode folding: a search in procedures need not normalize every saved conversation.
+        let eligible = only.map { kind in items.filter { $0.kind == kind } } ?? items
+        let matching = words.isEmpty ? eligible : eligible.filter { matches($0, words, cache: cache) }
         if words.isEmpty { cache?.clear() }
         return kinds.compactMap { kind in
             guard only == nil || only == kind else { return nil }
@@ -209,6 +211,8 @@ enum MemoryGroups {
 /// keystroke only compares strings. An item that changed is folded again; the cache is emptied when the search ends.
 final class FoldedTextCache {
     private var entries: [String: (item: MemorySnapshot.Item, folded: String)] = [:]
+    /// Pages retained for the current search, without keeping their normalized text elsewhere.
+    var count: Int { entries.count }
 
     func folded(_ item: MemorySnapshot.Item) -> String {
         if let entry = entries[item.path], entry.item == item { return entry.folded }

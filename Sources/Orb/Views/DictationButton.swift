@@ -4,6 +4,8 @@ import SwiftUI
 /// click closes it, ↩ closes it and sends. While it listens it turns red, with a halo that breathes with your voice.
 struct DictationButton: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.appearsActive) private var appearsActive
     let botID: UUID
 
     var body: some View {
@@ -16,8 +18,9 @@ struct DictationButton: View {
             Image(systemName: Self.symbol(phase))
                 .font(.system(size: 13, weight: isOn ? .bold : .regular))
                 .foregroundStyle(isOn ? Palette.onInk : Palette.muted)
-                .contentTransition(.symbolEffect(.replace))
-                .symbolEffect(.pulse, options: .repeating, isActive: [.starting, .downloading, .finishing, .reviewing].contains(phase))
+                .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
+                .symbolEffect(.pulse, options: .repeating,
+                              isActive: appearsActive && !reduceMotion && [.starting, .downloading, .finishing, .reviewing].contains(phase))
                 .frame(width: 28, height: 28)
                 .background { Circle().fill(isOn ? Palette.danger : .clear) }
                 .background { DictationHalo(listening: phase == .listening) }
@@ -69,14 +72,17 @@ struct DictationButton: View {
 private struct DictationHalo: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.appearsActive) private var appearsActive
     let listening: Bool
 
     var body: some View {
         // Only read while listening, so the readings after it do not redraw a halo that is not shown.
-        let level = listening ? model.dictation.level : 0
+        // A still halo must not subscribe to microphone levels just to redraw the same circle 12 times a second.
+        let animates = listening && !reduceMotion && appearsActive
+        let level = animates ? model.dictation.level : 0
         Circle()
             .fill(Palette.danger.opacity(0.28))
-            .scaleEffect(listening && !reduceMotion ? 1 + CGFloat(level) * 0.4 : 1)
+            .scaleEffect(animates ? 1 + CGFloat(level) * 0.4 : 1)
             .opacity(listening ? 1 : 0)
             // Glides between the readings instead of stepping.
             .animation(reduceMotion ? nil : .smooth(duration: 0.15), value: level)

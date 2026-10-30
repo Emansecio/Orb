@@ -211,7 +211,9 @@ struct SideWorkSheet: View {
             }
         }
         .task(id: isLive) {
-            saved = await model.store.readSideConversationAsync(prefix: Store.pedidoPrefix, id: requestID, for: botID).value?.items ?? []
+            let items = await model.store.readSideConversationAsync(prefix: Store.pedidoPrefix, id: requestID, for: botID).value?.items ?? []
+            guard !Task.isCancelled else { return }
+            saved = items
             isLoading = false
         }
     }

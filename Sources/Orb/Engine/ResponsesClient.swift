@@ -53,14 +53,35 @@ struct ResponsesClient: LLMClient {
 
     func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
         let provider = baseURL.host() ?? ""
-        return ProviderTransport.stream(session: session, credentials: credentials, body: {
-            try WireEncoder.encode(Self.requestBody(
-                model: model, messages: messages, tools: tools, toolsAsInputItem: toolsAsInputItem,
-                promptCacheKey: sendsCacheKey ? conversationID : nil, provider: provider, toolChoice: toolChoice,
-                maxOutputTokens: maxOutputTokens, effort: reasoningEffort), trailing: Self.trailingKeys)
+        // Built once: the same value is encoded for the request and fingerprinted for the cache probe.
+        let body = Self.requestBody(
+            model: model, messages: messages, tools: tools, toolsAsInputItem: toolsAsInputItem,
+            promptCacheKey: sendsCacheKey ? conversationID : nil, provider: provider, toolChoice: toolChoice,
+            maxOutputTokens: maxOutputTokens, effort: reasoningEffort)
+        let events = ProviderTransport.stream(session: session, credentials: credentials, body: {
+            try WireEncoder.encode(body, trailing: Self.trailingKeys)
         }, request: {
             ProviderTransport.authorizedRequest(baseURL.appending(path: "responses"), apiKey: $0, headers: extraHeaders)
         }, mapper: ResponsesStreamAssembler(provider: provider, model: model))
+        guard sendsCacheKey, CacheProbe.folder != nil else { return events }
+        let fingerprint = CacheProbe.fingerprint(of: body), cacheKey = conversationID
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    for try await event in events {
+                        if case .finished(let stop, let usage) = event {
+                            CacheProbe.record(fingerprint: fingerprint, model: model, conversation: cacheKey,
+                                              stop: stop, usage: usage)
+                        }
+                        continuation.yield(event)
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
     }
 
     /// Last in the body, so the part that repeats comes first (see `WireEncoder`).

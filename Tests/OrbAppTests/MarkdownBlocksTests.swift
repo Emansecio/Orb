@@ -250,6 +250,55 @@ import Testing
         }
     }
 
+    /// The kept cut of a streaming block (`StreamCut`) must make the same pieces `pieces(of:)` would, whether the code
+    /// grew or was replaced.
+    @MainActor @Test func theKeptCutMatchesAFreshCutWhileTheCodeGrows() throws {
+        let size = CodeBlockView.pieceLines
+        let cut = CodeBlockView.StreamCut()
+        var code = ""
+        var flushed: [(closed: [String], tail: String)?] = []
+        // Growth line by line past several piece boundaries, then a big append that closes two pieces at once.
+        for count in 1...(size * 3 + 5) {
+            code += "linha \(count)\n"
+            flushed.append(cut.pieces(of: code).map { ($0.closed, $0.tail) })
+        }
+        code += (0..<(size * 2)).map { "extra \($0)\n" }.joined()
+        flushed.append(cut.pieces(of: code).map { ($0.closed, $0.tail) })
+        code += "linha incompleta"
+        flushed.append(cut.pieces(of: code).map { ($0.closed, $0.tail) })
+
+        var growing = ""
+        var expected: [(closed: [String], tail: String)?] = []
+        for count in 1...(size * 3 + 5) {
+            growing += "linha \(count)\n"
+            expected.append(CodeBlockView.pieces(of: growing).map { ($0.closed, $0.tail) })
+        }
+        growing += (0..<(size * 2)).map { "extra \($0)\n" }.joined()
+        expected.append(CodeBlockView.pieces(of: growing).map { ($0.closed, $0.tail) })
+        growing += "linha incompleta"
+        expected.append(CodeBlockView.pieces(of: growing).map { ($0.closed, $0.tail) })
+
+        #expect(flushed.count == expected.count)
+        for (got, want) in zip(flushed, expected) {
+            #expect(got?.closed == want?.closed && got?.tail == want?.tail)
+        }
+    }
+
+    @MainActor @Test func theKeptCutRecutsACodeThatDidNotSimplyGrow() throws {
+        let size = CodeBlockView.pieceLines
+        let cut = CodeBlockView.StreamCut()
+        let grown = lines(size * 2 + 3) + "\n"
+        _ = try #require(cut.pieces(of: grown))
+        // A retry rewrote a line inside the closed region: the whole cut must come from the new text.
+        let rewritten = grown.replacingOccurrences(of: "linha 3\n", with: "outra linha\n")
+        let got = try #require(cut.pieces(of: rewritten))
+        let want = try #require(CodeBlockView.pieces(of: rewritten))
+        #expect(got.closed == want.closed && got.tail == want.tail)
+        // And it keeps working after the recut.
+        let longer = rewritten + "mais uma\n"
+        #expect(cut.pieces(of: longer)?.tail == CodeBlockView.pieces(of: longer)?.tail)
+    }
+
     /// The stack's spacing equals the code's line spacing: the seam between two pieces is the gap between two lines.
     @MainActor @Test func theSeamBetweenPiecesAddsNoHeight() {
         let all = (1...80).map { "linha \($0)" }
@@ -297,6 +346,48 @@ import Testing
         rows[rows.count - 1][2] += " mais um pouco" // the cell being written
         let after = try #require(TableBlockView.pieces(of: rows))
         #expect(after.closed == before.closed && after.tail != before.tail)
+    }
+
+    /// The kept measure of a streaming table (`FloorMeasure`) must give the floors `columnFloors` computes, whether
+    /// the table grew or was replaced.
+    @MainActor @Test func theKeptMeasureMatchesAFreshOneWhileTheTableGrows() {
+        let measure = TableBlockView.FloorMeasure()
+        var seen: [[CGFloat]] = []
+        for count in 1...60 {
+            seen.append(measure.floors(of: table(rows: count)))
+        }
+        for (index, floors) in seen.enumerated() {
+            #expect(floors == TableBlockView.columnFloors(of: table(rows: index + 1)))
+        }
+    }
+
+    @MainActor @Test func theKeptMeasureSeesARowThatLiftsAColumn() {
+        let measure = TableBlockView.FloorMeasure()
+        var current = table(rows: 25)
+        _ = measure.floors(of: current)
+        // A new row with a word wider than anything before lifts its column — until the cap.
+        current.rows.append(["Documentos", "x", "y"])
+        #expect(measure.floors(of: current) == TableBlockView.columnFloors(of: current))
+        current.rows.append(["https://exemplo.com.br/um/caminho/muito/comprido/mesmo/que/nao/cabe", "x", "y"])
+        let floors = measure.floors(of: current)
+        #expect(floors == TableBlockView.columnFloors(of: current))
+        #expect(floors[0] == TableBlockView.maxFloor)
+        // Once capped, further rows still fold correctly.
+        current.rows.append(["outra", "palavra", "qualquer"])
+        #expect(measure.floors(of: current) == TableBlockView.columnFloors(of: current))
+    }
+
+    @MainActor @Test func theKeptMeasureRemeasuresATableThatDidNotSimplyGrow() {
+        let measure = TableBlockView.FloorMeasure()
+        var current = table(rows: 30)
+        _ = measure.floors(of: current)
+        // An earlier row changed (a retry): the whole table is measured again.
+        current.rows[3] = ["mudou", "de", "tudo"]
+        #expect(measure.floors(of: current) == TableBlockView.columnFloors(of: current))
+        // A different table in the same place (another block): remeasured, not folded.
+        #expect(measure.floors(of: table(rows: 5, columns: 2)) == TableBlockView.columnFloors(of: table(rows: 5, columns: 2)))
+        // Fewer rows than were measured: remeasured.
+        #expect(measure.floors(of: table(rows: 2, columns: 2)) == TableBlockView.columnFloors(of: table(rows: 2, columns: 2)))
     }
 
     @MainActor @Test func theColumnsStayAlignedWhilePiecesStream() {

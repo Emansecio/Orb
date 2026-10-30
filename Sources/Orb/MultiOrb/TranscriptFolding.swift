@@ -14,13 +14,15 @@ enum TranscriptRowModel: Identifiable, Equatable {
     /// The work of a request on one line ("Trabalhou por 1 min 05 s · 12 ações"): before its answer, before the notice it
     /// ended on (stopped, failed, the app closed), or, while it runs, what it did so far. `seconds`: how long it took.
     case work([TranscriptItem], seconds: Int?, outcome: WorkOutcome = .answered)
+    /// The running request: its progress, actions, browser and pending cards share one activity block.
+    case activity([TranscriptItem])
 
     /// The id of the first item: it stays the same while the row grows, so its expanded state survives. Read for every row
     /// each time the list compares its rows, so a lone item is not put in an array for it.
     var id: UUID {
         switch self {
         case .single(let item): item.id
-        case .events(_, let items), .exchange(let items), .tools(let items), .work(let items, _, _): items[0].id
+        case .events(_, let items), .exchange(let items), .tools(let items), .work(let items, _, _), .activity(let items): items[0].id
         }
     }
 
@@ -28,7 +30,7 @@ enum TranscriptRowModel: Identifiable, Equatable {
     var span: (start: Date, end: Date) {
         switch self {
         case .single(let item): (item.date, item.date)
-        case .events(_, let items), .exchange(let items), .tools(let items), .work(let items, _, _):
+        case .events(_, let items), .exchange(let items), .tools(let items), .work(let items, _, _), .activity(let items):
             (items[0].date, items.lazy.map(\.date).max() ?? items[0].date)
         }
     }
@@ -37,7 +39,7 @@ enum TranscriptRowModel: Identifiable, Equatable {
     var items: [TranscriptItem] {
         switch self {
         case .single(let item): [item]
-        case .events(_, let items), .exchange(let items), .tools(let items), .work(let items, _, _): items
+        case .events(_, let items), .exchange(let items), .tools(let items), .work(let items, _, _), .activity(let items): items
         }
     }
 }
@@ -80,7 +82,7 @@ enum TranscriptFolding {
     static func foldedRows(_ items: [TranscriptItem], boundary: Int, liveTail: Bool) -> [TranscriptRowModel]? {
         guard items.contains(where: { switch $0.kind { case .tool, .orbMessage, .event: true; default: false } }) else { return nil }
         let rows = rows(for: items, boundary: boundary, liveTail: liveTail)
-        return rows.count == items.count ? nil : rows
+        return rows.count == items.count && !rows.contains(where: { if case .activity = $0 { true } else { false } }) ? nil : rows
     }
 
     /// The rows of a chat. Rules (see docs/historico/MULTI-ORBS.md, 5):
@@ -91,7 +93,8 @@ enum TranscriptFolding {
     /// - adjacent actions (`.tool`, and the permission cards already answered among them) become one row of actions;
     ///   anything else between them (a word of the Orb, a card that needs you, a notice) ends it, and so does `boundary`
     ///   (the end of what a compaction folded: a row is all folded or not);
-    /// - a request's work becomes one row (`workStretches`); the notices in it come right after that row, so none is hidden.
+    /// - a running request shares one activity block; its steps leave pending cards, notices and browser previews visible;
+    /// - a finished request's work becomes one row (`workStretches`); notices come right after it, so none is hidden.
     ///   The notice a request ended on goes inside it (its line says how it ended), unless it is the chat's last item, where
     ///   its buttons are;
     /// - the action that sent a message between Orbs, next to it, has no row (`sendsMessage`);
@@ -102,8 +105,13 @@ enum TranscriptFolding {
         var rows: [TranscriptRowModel] = []
         rows.reserveCapacity(items.count)
         let stretches = foldsWork ? workStretches(items, boundary: boundary, liveTail: liveTail) : [:]
+        let activity = liveTail && foldsWork ? activityStart(in: items, boundary: boundary) : nil
         var index = 0
         while index < items.count {
+            if index == activity {
+                rows.append(.activity(Array(items[index...])))
+                break
+            }
             if let stretch = stretches[index] {
                 let inside = items[stretch.range]
                 var work = inside.filter { !isNotice($0) }
@@ -172,6 +180,45 @@ enum TranscriptFolding {
         return rows
     }
 
+    /// A running request stays one block, but never takes another actor's exchange or crosses a compaction.
+    private static func activityStart(in items: [TranscriptItem], boundary: Int) -> Int? {
+        let start = items.lastIndex { if case .user = $0.kind { true } else { false } }.map { $0 + 1 } ?? 0
+        guard start >= boundary, start < items.count else { return nil }
+        let tail = items[start...]
+        guard tail.contains(where: isToolLine), tail.allSatisfy({ item in
+            if case .approval = item.kind { return true }
+            return foldsIntoWork(item)
+        }) else { return nil }
+        return start
+    }
+
+    /// A progress message and the actions it introduces form a step. Cards, notices and the live browser stay visible.
+    static func activityRows(for items: [TranscriptItem]) -> [TranscriptRowModel] {
+        var result: [TranscriptRowModel] = []
+        var step: [TranscriptItem] = []
+        var hasTools = false
+        func flush() {
+            if hasTools { result.append(.tools(step)) }
+            else { result += step.map { .single($0) } }
+            step = []
+            hasTools = false
+        }
+        for item in items {
+            if case .bot = item.kind {
+                if hasTools { flush() }
+                step.append(item)
+            } else if joinsToolRun(item) {
+                step.append(item)
+                hasTools = hasTools || isToolLine(item)
+            } else {
+                flush()
+                result.append(.single(item))
+            }
+        }
+        flush()
+        return result
+    }
+
     static func isToolLine(_ item: TranscriptItem) -> Bool {
         if case .tool = item.kind { true } else { false }
     }
@@ -208,8 +255,8 @@ enum TranscriptFolding {
     /// The stretches that fold into a work row, by their first index. A request (what follows a message of yours, to
     /// the next one) folds its work when:
     /// - it ended with the Orb's answer (its last words, with no action after them); or with no answer, on a notice that
-    ///   says how it ended (`WorkOutcome.init(ending:)`). The request that still runs (`liveTail`'s) stays open: folding
-    ///   it as it goes took away the words being read, so it folds once, when it ends;
+    ///   says how it ended (`WorkOutcome.init(ending:)`). The running request has an activity block instead of this
+    ///   finished-work disclosure; its latest words and pending cards stay visible;
     /// - its work holds only words of the Orb, actions, answered cards and notices (an exchange with other Orbs, a card
     ///   that waits, a message of yours stay in view, and a message you sent during the task splits the request);
     /// - it would otherwise take two rows or more (a single run of actions is one line already);

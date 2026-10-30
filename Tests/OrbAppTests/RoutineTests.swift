@@ -200,6 +200,22 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(run.report == "Tudo em ordem.\nNada mais a relatar.")
         #expect(run.reportFile != nil) // the Orb has a folder of its own
         #expect(saved.lastRun != nil && saved.lastResult?.hasPrefix("Tudo em ordem.") == true)
+        let home = try #require(model.inicio.entries.first { $0.id == run.id })
+        #expect(home.origin == .routine(bot: bot.id, routine: routine.id, run: run.id))
+        #expect(home.outcome == .completed)
+    }
+
+    @Test @MainActor func chatResultIsIndexedWithItsOwnConversationAndTranscriptItem() async throws {
+        let (model, bot, _) = setUp(StubModel(reply: "Resultado do chat."))
+        #expect(model.send("Confira", to: bot.id))
+        await waitUntilIdle(model, bot.id)
+        let item = try #require(model.session(bot.id).conversation?.items.last { item in
+            if case .bot(let text, _) = item.kind { return text == "Resultado do chat." }
+            return false
+        })
+        let indexed = try #require(model.inicio.entries.first { $0.id == item.id })
+        #expect(indexed.origin == .chat(bot: bot.id, chat: bot.id, item: item.id))
+        #expect(indexed.summary == "Resultado do chat.")
     }
 
     // MARK: A goal
@@ -308,6 +324,62 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(!RoutinePrompt.unattended("faça X", routine: "Diária").contains("previous run"))
     }
 
+    @Test @MainActor func nextRunReceivesOpenFollowUpsAndPreviousActivity() async throws {
+        let stub = StubModel(reply: "Atendi a cliente.\nPendências: verificar resposta de Ana na caixa de entrada.")
+        let (model, bot, routine) = setUp(stub)
+        for _ in 0..<2 {
+            model.runRoutine(routine.id)
+            await model.routineStarted()
+            await waitUntilIdle(model, bot.id)
+        }
+        let prompt = try #require(await stub.calls.received.last?.last { $0.role == .user }).content
+        #expect(prompt.contains("verificar resposta de Ana na caixa de entrada"))
+        #expect(prompt.contains("Activity from the most recent run"))
+        #expect(prompt.contains("check outstanding follow-ups"))
+        #expect(prompt.contains("carry unresolved items forward"))
+    }
+
+    @Test func previousActivityKeepsFailuresAndDoesNotIncludeCurrentRun() throws {
+        let conversation = Conversation(items: [
+            TranscriptItem(.notice(Conversation.routineRunMarker + "ontem")),
+            TranscriptItem(.bot(text: "Aguardando resposta de Ana", isStreaming: false)),
+            TranscriptItem(.notice("Conexão falhou")),
+            TranscriptItem(.notice(Conversation.routineRunMarker + "hoje")),
+            TranscriptItem(.bot(text: "execução atual", isStreaming: false))
+        ])
+        let activity = try #require(RoutineActivity.previous(in: conversation))
+        #expect(activity.contains("Aguardando resposta de Ana"))
+        #expect(activity.contains("Conexão falhou"))
+        #expect(!activity.contains("execução atual"))
+    }
+
+    @Test func followUpsSurviveRoutineEncodingAndOlderRoutinesStillDecode() throws {
+        var routine = Routine(name: "Atendimento", botID: UUID(), prompt: "Confira", schedule: .everyHours(1))
+        routine.followUps = [RoutineFollowUp(subject: "Ana", channel: "Caixa de entrada", nextStep: "Verificar resposta")]
+        let data = try JSONEncoder().encode(routine)
+        let restored = try JSONDecoder().decode(Routine.self, from: data)
+        #expect(restored.followUps == routine.followUps)
+        var object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        object.removeValue(forKey: "followUps")
+        let old = try JSONSerialization.data(withJSONObject: object)
+        #expect(try JSONDecoder().decode(Routine.self, from: old).followUps.isEmpty)
+    }
+
+    @Test @MainActor func followUpToolKeepsAnItemUntilItIsResolved() throws {
+        let (model, bot, routine) = setUp()
+        model.session(bot.id).routineID = routine.id
+        let save: JSONValue = .object(["action": .string("save"), "subject": .string("Ana"),
+                                      "channel": .string("Caixa"), "next_step": .string("Verificar resposta")])
+        _ = try model.changeFollowUp(save, routineID: routine.id, botID: bot.id)
+        let id = try #require(model.routines.first?.followUps.first?.id)
+        let list: JSONValue = .object(["action": .string("list")])
+        #expect(try model.changeFollowUp(list, routineID: routine.id, botID: bot.id).contains("Ana"))
+        let resolve: JSONValue = .object(["action": .string("resolve"), "id": .string(id.uuidString)])
+        _ = try model.changeFollowUp(resolve, routineID: routine.id, botID: bot.id)
+        #expect(try !model.changeFollowUp(list, routineID: routine.id, botID: bot.id).contains("Ana"))
+        #expect(model.routines[0].followUps[0].resolved)
+    }
+
     /// A run right after the chat knows what was just done there: the stretch the memory does not have yet heads its message.
     @Test @MainActor func aRunIsToldTheChatStretchTheMemoryDoesNotHaveYet() async throws {
         let stub = StubModel()
@@ -351,6 +423,52 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(RoutineBackground.text([]) == nil)
         let text = try #require(RoutineBackground.text(lines))
         #expect(text.hasPrefix(RoutineBackground.openTag) && text.hasSuffix(RoutineBackground.closeTag))
+    }
+
+    // MARK: The precheck
+
+    @Test @MainActor func aPrecheckThatSkipsRecordsTheSlotWithoutWakingTheModel() async throws {
+        let stub = StubModel()
+        let (model, bot, routine) = setUp(stub)
+        model.routines[0].precheck = RoutinePrecheck(command: ["/bin/sh", "-c", #"echo '{"skip": true, "reason": "fila vazia"}'"#])
+        model.runRoutine(routine.id)
+        await model.routineStarted()
+        await waitUntilIdle(model, bot.id)
+
+        #expect(await stub.calls.count == 0) // the model was never asked
+        let saved = try #require(model.routines.first)
+        #expect(saved.lastRun != nil) // the slot was consumed
+        let run = try #require(saved.runs.first)
+        #expect(run.succeeded && run.summary == "Dispensada pela pré-checagem: fila vazia")
+        #expect(saved.lastResult == run.summary)
+    }
+
+    @Test @MainActor func aPrecheckWithNoVerdictRunsTheRoutine() async throws {
+        let stub = StubModel()
+        let (model, bot, routine) = setUp(stub)
+        model.routines[0].precheck = RoutinePrecheck(command: ["/usr/bin/true"])
+        model.runRoutine(routine.id)
+        await model.routineStarted()
+        await waitUntilIdle(model, bot.id)
+
+        #expect(await stub.calls.count == 1)
+        #expect(model.routines.first?.runs.first?.summary == "Tudo em ordem.")
+    }
+
+    @Test @MainActor func aFailingOrMissingPrecheckRunsTheRoutine() async throws {
+        let stub = StubModel()
+        let (model, bot, routine) = setUp(stub)
+        model.routines[0].precheck = RoutinePrecheck(command: ["/bin/false"])
+        model.runRoutine(routine.id)
+        await model.routineStarted()
+        await waitUntilIdle(model, bot.id)
+        #expect(await stub.calls.count == 1)
+
+        model.routines[0].precheck = RoutinePrecheck(command: ["/nao/existe/programa"])
+        model.runRoutine(routine.id)
+        await model.routineStarted()
+        await waitUntilIdle(model, bot.id)
+        #expect(await stub.calls.count == 2)
     }
 
     // MARK: Permission mode
@@ -1061,5 +1179,28 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
     func end(_ token: any NSObjectProtocol) {
         ended += 1
         if let token = token as? Token { finished.append(token) }
+    }
+}
+
+/// The precheck's verdict parsing and its real subprocess runner (`RoutinePrecheck`).
+struct RoutinePrecheckVerdictTests {
+    @Test func onlyAnExplicitSkipOnTheLastLineExcusesTheRun() {
+        #expect(RoutinePrecheck.verdict(stdout: #"{"skip": true, "reason": "fila vazia"}"#, exit: 0) == .skip("fila vazia"))
+        #expect(RoutinePrecheck.verdict(stdout: #"{"skip": true}"#, exit: 0) == .skip("sem motivo informado"))
+        // Logs before the verdict are fine: the verdict is the last line.
+        #expect(RoutinePrecheck.verdict(stdout: "varrendo a fila...\n" + #"{"skip": true, "reason": "23:30"}"#, exit: 0) == .skip("23:30"))
+        #expect(RoutinePrecheck.verdict(stdout: #"{"skip": false}"#, exit: 0) == .run)
+        #expect(RoutinePrecheck.verdict(stdout: #"{"skip": true}"#, exit: 1) == .run) // a crash is not a verdict
+        #expect(RoutinePrecheck.verdict(stdout: "nada a declarar", exit: 0) == .run)
+        #expect(RoutinePrecheck.verdict(stdout: "", exit: 0) == .run)
+        #expect(RoutinePrecheck.verdict(stdout: #"{"skip": "true"}"#, exit: 0) == .run) // a string is not a flag
+    }
+
+    @Test func aRealSkipCommandAndAHangingOneResolve() async {
+        let skip = RoutinePrecheck(command: ["/bin/sh", "-c", #"echo '{"skip": true, "reason": "janela"}'"#])
+        #expect(await RoutinePrecheck.check(skip, in: nil) == .skip("janela"))
+        #expect(await RoutinePrecheck.check(RoutinePrecheck(command: ["/usr/bin/true"]), in: nil) == .run)
+        #expect(await RoutinePrecheck.check(RoutinePrecheck(command: ["/bin/false"]), in: nil) == .run)
+        #expect(await RoutinePrecheck.check(RoutinePrecheck(command: []), in: nil) == .run)
     }
 }

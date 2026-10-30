@@ -90,6 +90,8 @@ final class TextFade: NSObject {
     /// fading their colours back (`restore`).
     func fade(_ range: NSRange) {
         guard let view, let text = view.textStorage else { return }
+        // A lazy transcript can keep a text view mounted outside the viewport; those words need no animation work.
+        if view.window != nil, !Self.isVisible(view) { return finish() }
         let added = Self.words(in: text, range: range)
         let now = CACurrentMediaTime()
         if added.count <= Self.wordLimit {
@@ -124,6 +126,7 @@ final class TextFade: NSObject {
     /// Starts the link if a word fades and the view is on screen (a view SwiftUI just made is not in a window yet).
     func run() {
         guard link == nil, !words.isEmpty, let view, view.window != nil else { return }
+        guard Self.isVisible(view) else { return finish() }
         let link = view.displayLink(target: self, selector: #selector(step(_:)))
         // A colour easing in over 0.4 s reads the same at 60 Hz: on a 120 Hz screen the link does half the work, which the
         // chat's scroll gets back while a reply streams.
@@ -133,7 +136,15 @@ final class TextFade: NSObject {
     }
 
     @objc private func step(_ link: CADisplayLink) {
+        // The first tick after scrolling away, hiding the window or leaving the app releases the clock entirely.
+        guard let view, Self.isVisible(view) else { return finish() }
         apply(at: link.targetTimestamp)
+    }
+
+    private static func isVisible(_ view: NSTextView) -> Bool {
+        guard let window = view.window else { return false }
+        return !view.isHiddenOrHasHiddenAncestor && !view.visibleRect.isEmpty
+            && (OrbView.animateInactive || (NSApp.isActive && window.occlusionState.contains(.visible)))
     }
 
     /// Each word's colour at `time`; a word fully in is given back its own colour and let go.

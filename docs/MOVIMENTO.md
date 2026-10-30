@@ -218,7 +218,7 @@ extension AnyTransition {
 
 - O conteúdo do chat troca com `.opacity` em 0,18 s (sem deslizar: navegação lateral não tem direção espacial
   clara aqui). O compositor não pisca (fica fora da troca).
-- **Troca de página** (Orb, Rotinas, Conectores, Skills, boas-vindas): o mesmo fade cruzado, num `ZStack` com
+- **Troca de página** (Início, Orb, Rotinas, Conectores, Skills, boas-vindas): o mesmo fade cruzado, num `ZStack` com
   `.id(DetailPage)` e `.motion(Motion.crossFade, value: page)` (`RootView.swift`). A chave `DetailPage` não leva o id do
   Orb: de um Orb para outro a página é a mesma e só a transcrição faz o fade. A saída das boas-vindas continua mais curta
   (`Motion.exit`). O `.inspector` mora no `DetailView`, só na página do Orb, e fecha junto com ela.

@@ -23,7 +23,7 @@ extension AppModel {
         guard let orb = bot(botID) else { throw ToolError("Este Orb não existe mais.") }
         let own = routines(for: botID)
         switch try ScheduleCommand(arguments) {
-        case .create(let name, let prompt, let schedule, let goal, let enabled, let runNow):
+        case .create(let name, let prompt, let schedule, let goal, let enabled, let runNow, let precheck):
             // A run that reads an e-mail or a page must not be able to plant tasks that outlive it.
             if let refusal = sideRunRefusal(botID, routine: "Uma tarefa agendada não cria outras tarefas.") { throw refusal }
             guard own.count < Self.scheduledTaskLimit else {
@@ -34,9 +34,10 @@ extension AppModel {
             }
             var routine = Routine(name: name, botID: botID, prompt: prompt, schedule: schedule, goal: goal.map { RoutineGoal(target: $0) })
             routine.isEnabled = enabled
+            routine.precheck = precheck
             routines.append(routine)
             show(routine, of: botID)
-            if runNow { runRoutine(routine.id) }
+            if runNow { runRoutine(routine.id, manual: true) }
             // Nobody is there during a run: in "Perguntar antes" it waits for you, which is worth knowing now.
             let waits = RoutineText.waitsForAnswer(orbMode: orb.permissionMode, routineMode: nil)
             return "Agendei “\(name)”: \(schedule.label.lowercasedFirst). "
@@ -45,11 +46,12 @@ extension AppModel {
                 + (goal == nil ? "" : "Cada execução informa o progresso da meta, e a tarefa pausa quando ela for alcançada. ")
                 + "Ela aparece na aba Rotinas do painel, onde dá para pausar ou apagar."
                 + (waits ? " Como \(orb.name) pergunta antes de agir, cada execução espera a sua aprovação (em Automático ela roda sozinha)." : "")
-        case .update(let name, let prompt, let schedule, let goal):
+        case .update(let name, let prompt, let schedule, let goal, let precheck):
             if let refusal = sideRunRefusal(botID, routine: "Uma tarefa agendada não altera tarefas.") { throw refusal }
             let current = try own.named(name)
             guard let index = routines.firstIndex(where: { $0.id == current.id }) else { throw ToolError("Não achei a tarefa “\(name)”.") }
             if let prompt { routines[index].prompt = prompt }
+            if let precheck { routines[index].precheck = precheck }
             if let goal, goal != routines[index].goal?.target {
                 // The last check measured the old goal: a new one starts unmeasured.
                 routines[index].goal = goal.isEmpty ? nil : RoutineGoal(target: goal)
@@ -88,7 +90,7 @@ extension AppModel {
             if let refusal = sideRunRefusal(botID, routine: "Uma tarefa agendada não dispara outras tarefas.") { throw refusal }
             let routine = try own.named(name)
             guard !isRoutineRunning(routine.id) else { return "“\(routine.name)” já está rodando." }
-            runRoutine(routine.id)
+            runRoutine(routine.id, manual: true)
             return "Pedi para rodar “\(routine.name)” agora. " + Self.runNowNote
         case .delete(let name):
             if let refusal = sideRunRefusal(botID, routine: "Uma tarefa agendada não apaga tarefas; pode só pausá-las.") { throw refusal }

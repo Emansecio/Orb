@@ -86,9 +86,6 @@ enum LiveCardState: Equatable, Sendable {
     /// The dot of the chip breathes only while the page is live.
     var pulses: Bool { self == .live || self == .privateView }
 
-    /// Only the working states shimmer their caption: a wait or an error is still.
-    var shimmers: Bool { self == .live || self == .connecting || self == .privateView }
-
     var buttons: [Button] {
         switch self {
         case .live, .connecting: [.enlarge, .stop, .hide]
@@ -176,7 +173,9 @@ enum LiveScreenText {
     /// The caption under the chip. `work` is what the Orb says it is doing; `lastAction` what it did before the browser went.
     static func caption(for state: LiveCardState, work: String?, handoffPage: String?, lastAction: String?) -> String {
         switch state {
-        case .live, .connecting, .privateView: work ?? "Abrindo o navegador…"
+        case .live, .privateView:
+            ["Escrevendo…", "Pensando…"].contains(work ?? "") ? "Visualização do navegador" : (work ?? "Abrindo o navegador…")
+        case .connecting: work ?? "Abrindo o navegador…"
         case .needsYou: handoffCaption(page: handoffPage ?? "")
         case .protected: "Conteúdo protegido"
         case .paused: "Pausado: outro Orb está na tela"

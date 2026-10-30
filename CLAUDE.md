@@ -13,7 +13,7 @@ App nativo de macOS (SwiftUI, Swift 6, sem dependências externas) que roda vár
 - Requer Xcode 26+ (Swift 6.2 e SDK do macOS 26), mesmo com o alvo em macOS 14.
 - Compile em debug e em release (`swift build` e `swift build -c release`): as telas de revisão ficam em `#if DEBUG || ORB_DEV_TOOLS`, e um símbolo de produção preso nesse bloco só quebra no release.
 - Testes: `ORB_SKIP_REAL_BROWSER_TESTS=1 swift test --no-parallel --filter 'SuiteA|SuiteB'`, com as suítes afetadas. A suíte inteira (~3.900 testes) rouba o foco e disputa com o Orb aberto; localmente rode as filtradas e diga no relatório que a completa não rodou. `ORB_AX_SMOKE=1` liga os testes de Acessibilidade e `ORB_LIVE_TESTS=1` os que usam internet.
-- `./scripts/bundle.sh [debug|release]` gera `build/Orb.app` e não abre nem fecha o app. Com o Orb aberto pelo bundle, o processo antigo perde o Keychain após o rebuild: peça ao usuário para fechar com ⌘Q e reabrir.
+- Após cada build solicitado, gere a versão release com `./scripts/bundle.sh release` e abra `build/Orb.app`, que está fixado no Dock neste Mac. O script não abre nem fecha o app: se o Orb estiver aberto, encerre-o normalmente e reabra o bundle para que o processo atualizado possa acessar o Keychain; respeite diálogos e trabalho em andamento, sem forçar o encerramento. Confirme o processo e o bundle, conforme `AGENTS.md`.
 - Conferência visual: `<binário> --snapshot <modo> out.png` renderiza uma tela sem abrir o app. Tela nova ganha um `case` em `Snapshot.render`, com dados de exemplo. Confira em 460 e 1100 pt.
 - `ORB_DATA_DIR` troca a pasta de dados (`~/Library/Application Support/Orb`) para testes manuais.
 - `python3 scripts/fake-llm.py [porta] [--long]` sobe um servidor falso compatível com OpenAI, para testar sem chave.

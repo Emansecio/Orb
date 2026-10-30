@@ -84,8 +84,9 @@ struct HairRenderer: Sendable {
     static let satin = 0.35
 
     func render() -> (base: Canvas, shine: Canvas) {
-        let base = Canvas.render { u, v in shade(u, v).base }
-        let shine = Canvas.render { u, v in shade(u, v).shine }
+        // Each adaptive pass needs only its own layer: computing both here doubled the ray marching and shadows.
+        let base = Canvas.render { u, v in shadeBase(u, v) }
+        let shine = Canvas.render { u, v in shadeShine(u, v) }
         return (base, shine)
     }
 
@@ -157,7 +158,7 @@ struct HairRenderer: Sendable {
 
     // MARK: Shading
 
-    private func shade(_ u: Double, _ v: Double) -> (base: Pixel, shine: Pixel) {
+    private func shadeBase(_ u: Double, _ v: Double) -> Pixel {
         let q = Frame.point(u, v)
         let head = Head.front(q.x, q.y)
         let stop = head?.z ?? -3
@@ -177,7 +178,14 @@ struct HairRenderer: Sendable {
             base = Pixel(g, g, g, 1)
         }
 
-        // Shine: highlights on the hair, accents, and the hair's shadow on the head.
+        return base
+    }
+
+    /// Highlights, accents and the hair's shadow on the head, independent of the tinted base layer.
+    private func shadeShine(_ u: Double, _ v: Double) -> Pixel {
+        let q = Frame.point(u, v)
+        let head = Head.front(q.x, q.y)
+        let stop = head?.z ?? -3
         var shine = Pixel.zero
         if let p = march(x: q.x, y: q.y, stop: stop, { min(style.hair($0), accents($0).0) }) {
             let (accentDistance, index) = accents(p)
@@ -196,7 +204,7 @@ struct HairRenderer: Sendable {
             // A deep violet-black reads better than pure black on saturated bodies.
             shine = Pixel(0.012 * a, 0.006 * a, 0.022 * a, a)
         }
-        return (base, shine)
+        return shine
     }
 
     /// Kajiya–Kay style highlight band across the strands, broken up by the strand texture, plus a soft rim.

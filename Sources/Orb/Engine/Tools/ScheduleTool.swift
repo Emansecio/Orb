@@ -8,9 +8,13 @@ typealias ScheduleHandler = @Sendable (JSONValue) async throws -> String
 enum ScheduleCommand: Equatable {
     /// `goal`: what success looks like, for a task that works toward one (`RoutineGoal`). `enabled`: false creates it
     /// paused. `runNow`: its first run starts at once (as soon as the Orb is free), not at the first scheduled time.
-    case create(name: String, prompt: String, schedule: Schedule, goal: String? = nil, enabled: Bool = true, runNow: Bool = false)
-    /// Changes what is given of an existing task and keeps the rest. `goal` "" removes the goal.
-    case update(name: String, prompt: String? = nil, schedule: Schedule? = nil, goal: String? = nil)
+    /// `precheck`: a deterministic gate that can excuse a run it proves unnecessary (`RoutinePrecheck`).
+    case create(name: String, prompt: String, schedule: Schedule, goal: String? = nil, enabled: Bool = true,
+                runNow: Bool = false, precheck: RoutinePrecheck? = nil)
+    /// Changes what is given of an existing task and keeps the rest. `goal` "" removes the goal; `precheck` []
+    /// removes the check (the outer optional tells "not given" apart from "remove").
+    case update(name: String, prompt: String? = nil, schedule: Schedule? = nil, goal: String? = nil,
+                precheck: RoutinePrecheck?? = nil)
     case list
     case setEnabled(String, Bool)
     /// Runs the task once now (as soon as the Orb is free), like the Rotinas page's button.
@@ -31,16 +35,20 @@ enum ScheduleCommand: Equatable {
             let enabled = arguments.flag("enabled", default: true)
             guard enabled || !runNow else { throw ToolError("Uma tarefa criada pausada não roda agora: use enabled ou run_now, não os dois.") }
             self = .create(name: String(name.prefix(Self.nameLimit)), prompt: prompt, schedule: try Self.schedule(arguments["when"]),
-                           goal: goal.isEmpty ? nil : goal, enabled: enabled, runNow: runNow)
+                           goal: goal.isEmpty ? nil : goal, enabled: enabled, runNow: runNow,
+                           precheck: try Self.precheck(arguments))
         case "update":
             let name = try Self.taskName(arguments)
             let prompt = try arguments["prompt"]?.string.map(Self.prompt)
             let schedule = try arguments["when"].map { try Self.schedule($0) }
             let goal = arguments["goal"]?.string.map(Self.goal)
-            guard prompt != nil || schedule != nil || goal != nil else {
-                throw ToolError("Para update, diga o que muda: prompt, when ou goal (goal vazio tira a meta).")
+            // Given: set, with [] meaning "remove". Not given: keep (a ternary cannot tell .none from .some(nil)).
+            let precheck: RoutinePrecheck??
+            if arguments["precheck"] == nil { precheck = nil } else { precheck = .some(try Self.precheck(arguments)) }
+            guard prompt != nil || schedule != nil || goal != nil || precheck != nil else {
+                throw ToolError("Para update, diga o que muda: prompt, when, goal ou precheck (goal vazio tira a meta, precheck [] a pré-checagem).")
             }
-            self = .update(name: name, prompt: prompt, schedule: schedule, goal: goal)
+            self = .update(name: name, prompt: prompt, schedule: schedule, goal: goal, precheck: precheck)
         case "list":
             self = .list
         case "pause", "resume":
@@ -63,6 +71,20 @@ enum ScheduleCommand: Equatable {
     }
 
     private static func goal(_ text: String) -> String { MemoryText.clip(MemoryText.flatten(text), RoutineGoal.targetLimit) }
+
+    /// `precheck`: the argv of a command the app runs before each run (`RoutinePrecheck`); nil when not given
+    /// or an empty list (which update reads as "remove").
+    private static func precheck(_ arguments: JSONValue) throws -> RoutinePrecheck? {
+        guard let list = arguments["precheck"] else { return nil }
+        guard let argv = list.array else { throw ToolError("\"precheck\" deve ser uma lista: o programa e seus argumentos.") }
+        let command = argv.map { $0.string ?? "" }
+        guard command.count == argv.count else { throw ToolError("\"precheck\" deve conter só textos: o programa e seus argumentos.") }
+        guard !command.isEmpty else { return nil }
+        guard command.count <= 16, command.allSatisfy({ !$0.isEmpty && $0.count <= 1_000 }) else {
+            throw ToolError("\"precheck\" leva até 16 argumentos, nenhum vazio.")
+        }
+        return RoutinePrecheck(command: command)
+    }
 
     private static func taskName(_ arguments: JSONValue) throws -> String {
         let name = try arguments.requiredString("name").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -154,10 +176,12 @@ struct ScheduleTool: AgentTool {
         name: "schedule",
         description: """
         Your scheduled tasks (routines), run while the app is open. create: prompt is what each run does, self-contained \
-        (nobody answers in a run); goal (optional): what success looks like, pausing it once met. update: the \
-        name and what changes (goal "" removes it); pause, resume, run (once now), delete: the name. At most 20 tasks, \
-        15+ minutes apart; a run can only pause tasks. When the user describes something to do regularly or later, \
-        propose it with ask_user (name, when, what) and create it once they agree, unless they asked for it already.
+        (nobody answers in a run); goal (optional): what success looks like, pausing it once met; precheck (optional): \
+        argv of a program run before each run — JSON {"skip": true} on its last stdout line excuses the run, anything \
+        else runs. update: the name and what changes (goal "" removes the goal, precheck [] removes the check); pause, \
+        resume, run (once now), delete: the name. At most 20 tasks, 15+ minutes apart; a run can only pause tasks. \
+        When the user describes something to do regularly or later, propose it with ask_user (name, when, what) and \
+        create it once they agree, unless they asked for it already.
         """,
         parameters: .schema([
             "action": .object(["type": .string("string"),
@@ -167,6 +191,8 @@ struct ScheduleTool: AgentTool {
             "goal": .property("string"),
             "enabled": .property("boolean", "create: false = paused"),
             "run_now": .property("boolean", "create: true = also run once now"),
+            "precheck": .object(["type": .string("array"), "items": .object(["type": .string("string")]),
+                                 "description": .string("command argv run before each run; prints {\"skip\": true} to excuse it; update: [] removes")]),
             "when": JSONValue.schema([
                 "kind": .property("string", "daily, weekly, every_minutes, every_hours, once or cron"),
                 "hour": .property("integer"),
@@ -196,13 +222,16 @@ struct ScheduleTool: AgentTool {
     /// What the card says before the task exists, on one line: its name, when it runs and what it will be asked to do.
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) {
         switch try? ScheduleCommand(arguments) {
-        case .create(let name, let prompt, let schedule, let goal, let enabled, let runNow)?:
+        case .create(let name, let prompt, let schedule, let goal, let enabled, let runNow, let precheck)?:
             return ("Agendando tarefa", "“\(name)” · \(schedule.label) · " + MemoryText.clip(MemoryText.flatten(prompt), 400)
                 + (goal.map { " · Meta: " + MemoryText.clip($0, 200) } ?? "")
+                + (precheck.map { " · Pré-checagem: " + MemoryText.clip($0.command.joined(separator: " "), 200) } ?? "")
                 + (enabled ? "" : " · Criada pausada") + (runNow ? " · Roda agora uma vez" : ""))
-        case .update(let name, let prompt, let schedule, let goal)?:
+        case .update(let name, let prompt, let schedule, let goal, let precheck)?:
             let changes = [schedule.map(\.label), prompt.map { "Faz: " + MemoryText.clip(MemoryText.flatten($0), 300) },
-                           goal.map { $0.isEmpty ? "Sem meta" : "Meta: " + MemoryText.clip($0, 200) }].compactMap { $0 }
+                           goal.map { $0.isEmpty ? "Sem meta" : "Meta: " + MemoryText.clip($0, 200) },
+                           precheck.map { $0.map { "Pré-checagem: " + MemoryText.clip($0.command.joined(separator: " "), 200) } ?? "Sem pré-checagem" }]
+                .compactMap { $0 }
             return ("Alterando tarefa agendada", "“\(name)” · " + changes.joined(separator: " · "))
         case .list?: return ("Listando tarefas agendadas", "")
         case .setEnabled(let name, let on)?: return (on ? "Retomando tarefa agendada" : "Pausando tarefa agendada", name)

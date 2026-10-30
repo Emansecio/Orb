@@ -24,7 +24,9 @@ struct ToolSpecEconomyTests {
     /// `apps_list` saying how to control each app (~100; item 2 of the same phase) fits after both descriptions were shortened: 18,861.
     /// Raised to 19,200 for the `description` of `run_command` and `applescript` (~315): what the action is for, in words, which the
     /// working line and the folded lines of the chat say instead of the raw command. Measured at 19,180.
-    private static let specCharsCeiling = 19_200
+    /// Raised to 19,600 for `precheck` on `schedule` (~340): the argv a routine runs before each run, printed `{"skip": true}`
+    /// excusing it (docs/PLANO-INICIO-ORBS.md). Measured at 19,520.
+    private static let specCharsCeiling = 19_600
     /// `ui_read`, `ui_act` and `screenshot` together: waiting, steps, takeover, marks and OCR all have to fit here.
     private static let appControlSpecCharsCeiling = 4_800
     /// The tools of the Orb's own browser are offered only when an engine is installed, so they have a ceiling of their own.
@@ -33,7 +35,10 @@ struct ToolSpecEconomyTests {
     /// dialog 295, files 373, page 659, run 592), measured at 7,519 in all; `browse_proxy` (414, the third step) makes it 7,933.
     /// The review of the browser trimmed the descriptions (what a schema's enum or a parameter's name already says, repeated
     /// examples) to 7,010 for the same 20 tools, and the ceiling came down with it, keeping a sentence or two of room.
-    private static let browseSpecCharsCeiling = 7_200
+    /// `browse_snapshot` gained `query` and the widening of a missing selector (~300, measured at 7,312): the parameter the model
+    /// already sent dozens of times to no effect now returns the matching lines, each with its offset
+    /// (docs/INVESTIGACAO-NAVEGADOR-ROTINAS-2026-10-27.md).
+    private static let browseSpecCharsCeiling = 7_400
 
     @Test func theToolSpecsStayWellUnderTheirOldSize() {
         let now = specChars(ToolBox.all.filter { !ToolBox.browseToolNames.contains($0.spec.name) })

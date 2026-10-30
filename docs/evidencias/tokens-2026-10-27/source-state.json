@@ -1,0 +1,26 @@
+{
+  "timestamp_utc": "2026-10-27T06:27:47.013614+00:00",
+  "command": [
+    "git",
+    "diff",
+    "--check"
+  ],
+  "exit_code": 0,
+  "stdout": "",
+  "stderr": "",
+  "git_head": "aa20d46d9558b25c7b50eab60157ef609fc46b31",
+  "source_sha256": {
+    "Sources/Orb/Engine/ResponsesClient.swift": "c79e18127b680e80d95f3bd350a9678b8e73990ba216240608d41bf8c11a1564",
+    "Sources/Orb/Engine/ContextWindow.swift": "fc2eb15bdab906b18058b7bc72faad9d8bdae29d9f9a5d163c2f5b546e1dc827",
+    "Sources/Orb/Engine/ContextCondensing.swift": "53216fb6fc7de0eefc8806011d06ef720a7755a90fdea8a2fee9538eb86c8177",
+    "Sources/Orb/Engine/ContextBudget.swift": "562b2ded1aa3c5b8af38e8688a9b29bddaddd1bbfa0856444fb8cc6b52afe05b",
+    "Sources/Orb/Engine/ChunkSummary.swift": "329afc838006440b2964fcb0c38746ba97b2aa4b9f34cddf13db44bec977becf",
+    "Sources/Orb/AppModel+SkillReview.swift": "46c525205d64ab9ce0bf8f70b5f5750aea514160cb61435aa471832ba8eaa60d",
+    "Sources/Orb/Engine/SkillReview.swift": "638b7432496476afb4f4e2bceca02a1f9aafff499b89a6c2085f8c8ed208e184",
+    "Sources/Orb/Engine/LoopWatch.swift": "140746e80a5c8bd71c024fa4428dcaa596269819368a45ac196264c8372f257d",
+    "Sources/Orb/Engine/Tools/BrowseTools.swift": "90c5da07b81c6e5cd4adfa45a60412bd5233f1db8daae08efde2be9c471c04b0",
+    "Sources/Orb/ConversationCoding.swift": "c1202572a5a7202597245795b926393981d35efda14b0cd6f319cf781798342c",
+    "Sources/Orb/AppModel.swift": "a5f807671895f176ecec622939ec63cfb5befd73407ef797ce1515448c026493",
+    "Sources/Orb/Engine/ClaudePipe/ClaudeCodeClient.swift": "e3287eb72c5ae794c5dbcd498394a0b140d636ab8bc354c9f9042ea0c1dcc0e3"
+  }
+}

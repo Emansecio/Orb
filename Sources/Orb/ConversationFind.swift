@@ -252,6 +252,23 @@ final class ConversationFind {
 
     // MARK: Quotes
 
+    /// A direct navigation target is not a search and must not invent a search query.
+    func revealItem(_ itemID: UUID) {
+        jumpTokens += 1
+        jump = FindJump(token: jumpTokens, itemID: itemID, anchorY: 0.3, glides: false)
+        focus = FindFocus(itemID: itemID, query: "", isFlashing: true)
+        pausesFollowing = true
+        flashTask?.cancel()
+        let flash = delays.flash
+        flashTask = Task { [weak self] in
+            try? await Task.sleep(for: flash)
+            guard !Task.isCancelled, let self, focus?.itemID == itemID else { return }
+            focus = nil
+            jump = nil
+            pausesFollowing = false
+        }
+    }
+
     /// A quote in a message of yours was clicked (`MessageQuote`): the chat goes to the reply it came from, marks the quoted
     /// words and washes behind the reply for a moment, as a search hit does, with the bar closed. The marks go with the wash,
     /// and the chat follows the end of the conversation again.

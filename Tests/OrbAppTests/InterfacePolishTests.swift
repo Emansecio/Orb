@@ -93,6 +93,9 @@ import Testing
     @Test func aSearchAnswerBelongsOnlyToTheTermStillInTheField() {
         #expect(!RegistryQuery.isCurrent("pdf", query: "pdfs"))
         #expect(RegistryQuery.isCurrent("pdf", query: " pdf"))
+        // A cancelled request can finish after the next one starts, even for the same text: it cannot clear loading.
+        #expect(!RegistryQuery.isCurrent("pdf", query: " pdf", cancelled: true))
+        #expect(!RegistryQuery.isCurrent("pdf", query: "pdfs", cancelled: true))
     }
 
     // MARK: Catalog tabs

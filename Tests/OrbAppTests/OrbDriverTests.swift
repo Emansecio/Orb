@@ -434,6 +434,46 @@ struct OrbDriverTests {
 
     // MARK: Shimmer
 
+    @Test func typingDotsStopOutsideTheViewportAndWhenHidden() throws {
+        try #require(hasScreen)
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 120, height: 100))
+        final class Document: NSView { override var isFlipped: Bool { true } }
+        let document = Document(frame: NSRect(x: 0, y: 0, width: 120, height: 2000))
+        scroll.documentView = document
+        let dots = WizardTypingDotsView(animated: true)
+        dots.frame = NSRect(x: 10, y: 1500, width: 36, height: 20)
+        document.addSubview(dots)
+        let win = window(scroll, size: 200)
+        defer { close(win) }
+        dots.layoutSubtreeIfNeeded()
+        #expect(!dots.isAnimating)
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: 1450))
+        #expect(dots.isAnimating)
+        dots.isHidden = true
+        #expect(!dots.isAnimating)
+        dots.isHidden = false
+        #expect(dots.isAnimating)
+        scroll.contentView.scroll(to: .zero)
+        #expect(!dots.isAnimating)
+        dots.removeFromSuperview()
+        #expect(!dots.isAnimating)
+    }
+
+    @Test func hiddenStreamingTextDoesNotCreateTemporaryFadeColours() throws {
+        try #require(hasScreen)
+        let view = ProseTextView()
+        view.frame = NSRect(x: 0, y: 0, width: 180, height: 80)
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 200))
+        content.addSubview(view)
+        let win = window(content)
+        defer { close(win) }
+        view.isHidden = true
+        view.show(ProseText.make([.paragraph("Texto fora da tela")], cursor: true, cached: false, highlight: nil),
+                  cursor: true, fades: true)
+        let index = (view.string as NSString).range(of: "tela").location
+        #expect(view.layoutManager?.temporaryAttributes(atCharacterIndex: index, effectiveRange: nil)[.foregroundColor] == nil)
+    }
+
     @Test func theShimmerStopsScrolledOutOfSightAndResumes() throws {
         try #require(hasScreen)
         let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 120, height: 100))

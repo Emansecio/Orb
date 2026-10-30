@@ -76,13 +76,18 @@ enum LiveJPEG {
     /// base64 -> Data -> CGImage, decoded right here (`ShouldCacheImmediately`) so drawing it later costs the main thread nothing.
     static func decode(_ raw: LiveRawFrame) -> LiveDecodedFrame? {
         guard let jpeg = Data(base64Encoded: raw.base64),
-              let source = CGImageSourceCreateWithData(jpeg as CFData, nil),
-              let image = CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
+              let image = image(from: jpeg)
         else { return nil }
         let viewport = raw.viewport.width > 0 && raw.viewport.height > 0
             ? raw.viewport : CGSize(width: image.width, height: image.height)
         let frame = LiveFrame(image: image, viewport: viewport, scroll: raw.scroll, timestamp: raw.timestamp, isStale: raw.isStale)
         return LiveDecodedFrame(frame: frame, jpeg: jpeg)
+    }
+
+    /// Also used by the last-screen preview, off the main actor: drawing never has to decode the retained JPEG.
+    static func image(from jpeg: Data) -> CGImage? {
+        guard let source = CGImageSourceCreateWithData(jpeg as CFData, nil) else { return nil }
+        return CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
     }
 }
 

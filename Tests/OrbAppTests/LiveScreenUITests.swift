@@ -54,10 +54,10 @@ struct LiveScreenLogicTests {
         #expect(State.failed.buttons.isEmpty && State.ended.buttons.isEmpty)
     }
 
-    @Test func onlyTheLiveStatesPulseShimmerAndShowThePointer() {
-        #expect(State.live.pulses && State.live.shimmers && State.live.showsPointer)
-        #expect(!State.needsYou.pulses && !State.needsYou.shimmers && !State.needsYou.showsPointer)
-        #expect(!State.failed.shimmers && !State.paused.pulses)
+    @Test func onlyTheLiveStatesPulseAndShowThePointer() {
+        #expect(State.live.pulses && State.live.showsPointer)
+        #expect(!State.needsYou.pulses && !State.needsYou.showsPointer)
+        #expect(!State.paused.pulses)
         #expect(State.failed.dimsPage && State.paused.dimsPage && !State.live.dimsPage)
         #expect(State.live.chip == "Ao vivo" && State.needsYou.chip == "Precisa de você")
         #expect(State.protected.chip == nil && State.failed.chip == nil)
@@ -125,6 +125,9 @@ struct LiveScreenLogicTests {
             LiveScreenText.caption(for: state, work: work, handoffPage: nil, lastAction: last)
         }
         #expect(caption(.live) == "Clicando em Pagamentos")
+        #expect(caption(.live, work: "Escrevendo…") == "Visualização do navegador")
+        #expect(caption(.privateView, work: "Pensando…") == "Visualização do navegador")
+        #expect(caption(.connecting, work: "Pensando…") == "Pensando…")
         #expect(caption(.connecting, work: nil) == "Abrindo o navegador…")
         #expect(caption(.protected) == "Conteúdo protegido")
         #expect(caption(.failed) == "O navegador fechou")
@@ -419,14 +422,15 @@ struct LiveScreenFoldingTests {
 
     @Test func theCardDoesNotJoinARunOfActions() {
         let rows = TranscriptFolding.rows(for: [user, tool(), tool(), card, tool(), tool()], liveTail: true)
-        let kinds = rows.map { row -> String in
+        guard case .activity(let items) = rows.last else { Issue.record("a atividade não agrupou: \(rows)"); return }
+        let kinds = TranscriptFolding.activityRows(for: items).map { row -> String in
             switch row {
             case .tools(let items): "tools\(items.count)"
             case .single(let item): if case .browserView = item.kind { "view" } else { "single" }
             default: "other"
             }
         }
-        #expect(kinds == ["single", "tools2", "view", "tools2"])
+        #expect(kinds == ["tools2", "view", "tools2"])
     }
 
     @Test func aFinishedRequestFoldsItsWorkAndLeavesTheItemRightAfter() {
@@ -441,9 +445,13 @@ struct LiveScreenFoldingTests {
     @Test func whileTheTurnRunsItsWorkStaysOpenAndTheCardInView() {
         let items = [user, say("vou ver"), tool(), tool(), card, tool()]
         let rows = TranscriptFolding.rows(for: items, liveTail: true)
-        #expect(rows.count == 5)
+        #expect(rows.count == 2)
         #expect(!rows.contains { if case .work = $0 { true } else { false } })
-        guard case .single(let view) = rows[3], case .browserView = view.kind else { Issue.record("o cartão sumiu: \(rows)"); return }
+        guard case .activity(let inside) = rows.last else { Issue.record("a atividade sumiu: \(rows)"); return }
+        #expect(inside == Array(items.dropFirst()))
+        #expect(TranscriptFolding.activityRows(for: inside).contains { row in
+            if case .single(let item) = row, case .browserView = item.kind { true } else { false }
+        }, "the live card stays outside the step disclosures")
     }
 
     @Test func theItemIsNotAMessageForTheModelsContext() {

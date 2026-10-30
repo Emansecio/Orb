@@ -175,12 +175,61 @@ struct CodeBlockView: View, Equatable {
     var streaming = false
     var highlight: String?
 
+    /// The cut of this block while it streams, kept between flushes so only what grew past the closed pieces is
+    /// re-split — cutting the whole code at each flush made a flush cost grow with the code's length.
+    @State private var streamCut = StreamCut()
+
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.language == rhs.language && lhs.code == rhs.code && lhs.streaming == rhs.streaming && lhs.highlight == rhs.highlight
     }
 
     /// Lines per piece of a long code block while it streams.
     nonisolated static let pieceLines = 40
+
+    /// The pieces of the code block that is being written, kept between flushes. `covered` is the text the closed
+    /// pieces already account for (it always ends with "\n"): while the code still starts with it, only what came
+    /// after is re-split and the closed pieces stay the same `String`s, so the Equatable views they feed compare
+    /// in constant time. A code that does not start with it (a retry, another block in this place) is recut whole.
+    @MainActor final class StreamCut {
+        private(set) var closed: [String] = []
+        private var covered = ""
+
+        /// The same cut `pieces(of:)` makes, splitting only what grew past `covered`.
+        func pieces(of code: String) -> (closed: [String], tail: String)? {
+            guard let rest = uncovered(of: code) else {
+                covered = ""
+                closed = []
+                guard let fresh = CodeBlockView.pieces(of: code) else { return nil }
+                closed = fresh.closed
+                covered = fresh.closed.joined(separator: "\n") + "\n"
+                return fresh
+            }
+            let pieceLines = CodeBlockView.pieceLines
+            let lines: [Substring] = rest.isEmpty ? [""] : rest.split(separator: "\n", omittingEmptySubsequences: false)
+            let newPieces = (lines.count - 1) / pieceLines
+            for index in 0..<newPieces {
+                let piece = lines[index * pieceLines..<(index + 1) * pieceLines].joined(separator: "\n")
+                closed.append(piece)
+                covered += piece + "\n"
+            }
+            guard !closed.isEmpty else { return nil }
+            return (closed, lines[(newPieces * pieceLines)...].joined(separator: "\n"))
+        }
+
+        /// `code` past `covered`, or nil when `code` does not start with it. Compared and cut on the UTF-8 buffer:
+        /// `hasPrefix`/`dropFirst` would walk the whole code at every flush.
+        private func uncovered(of code: String) -> String? {
+            let rest = covered.utf8.withContiguousStorageIfAvailable { old -> String? in
+                code.utf8.withContiguousStorageIfAvailable { bytes -> String? in
+                    guard bytes.count >= old.count,
+                          old.isEmpty || memcmp(bytes.baseAddress!, old.baseAddress!, old.count) == 0
+                    else { return nil }
+                    return String(decoding: bytes[old.count...], as: UTF8.self)
+                } ?? nil
+            }
+            return rest ?? nil
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -210,7 +259,7 @@ struct CodeBlockView: View, Equatable {
     /// and only the last, the one being written, is laid out and drawn again at each flush, so the cost of a flush no
     /// longer grows with the length of the code.
     @ViewBuilder private var codeText: some View {
-        if streaming, let pieces = Self.pieces(of: code) {
+        if streaming, let pieces = streamCut.pieces(of: code) {
             // The stack's spacing is the line spacing, so the seams between pieces are the same as between lines.
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(Array(pieces.closed.enumerated()), id: \.offset) { _, piece in
@@ -300,6 +349,14 @@ struct TableBlockView: View, Equatable {
     var streaming = false
     var highlight: String?
 
+    /// The measured floors of this table, kept between flushes so only the rows that grew are measured — measuring
+    /// every cell at each flush made a flush cost grow with the table's length.
+    @State private var floorMeasure = FloorMeasure()
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.table == rhs.table && lhs.streaming == rhs.streaming && lhs.highlight == rhs.highlight
+    }
+
     /// Rows per piece of a long table while it streams.
     nonisolated static let pieceRows = 20
 
@@ -307,10 +364,40 @@ struct TableBlockView: View, Equatable {
     private static let columnSpacing: CGFloat = 18
     private static let inset: CGFloat = 10
 
+    /// The widest word seen per column (what `columnFloors` returns), measured once per row. `header` and `rows`
+    /// are what was measured: while they still lead the table's, only the new rows are folded into the floors; when
+    /// they do not (a retry, another table in this place) the table is measured whole.
+    @MainActor final class FloorMeasure {
+        private var header: [String] = []
+        private var rows: [[String]] = []
+        private(set) var floors: [CGFloat] = []
+
+        /// The floors `columnFloors` computes, measuring only what grew since the last call.
+        func floors(of table: MarkdownTable) -> [CGFloat] {
+            let columns = max(table.header.count, table.rows.map(\.count).max() ?? 0)
+            guard table.header == header, table.rows.starts(with: rows), floors.count == columns else {
+                header = table.header
+                rows = table.rows
+                floors = TableBlockView.columnFloors(of: table)
+                return floors
+            }
+            let regular = NSFont.systemFont(ofSize: 13)
+            for row in table.rows.dropFirst(rows.count) {
+                for (column, cell) in row.enumerated() where column < floors.count && floors[column] < TableBlockView.maxFloor {
+                    // A word narrower than the floor cannot lift it, so the measure starts from it.
+                    let word = TableBlockView.widestWord([cell], font: regular, seed: floors[column] - 2)
+                    floors[column] = min(ceil(word) + 2, TableBlockView.maxFloor)
+                }
+            }
+            rows = table.rows
+            return floors
+        }
+    }
+
     var body: some View {
         // Each column is at least as wide as its longest word, so a narrow chat (inspector open, small window) never
         // breaks words letter by letter; when even that does not fit, the table scrolls sideways.
-        let floors = Self.columnFloors(of: table)
+        let floors = floorMeasure.floors(of: table)
         let needed = floors.reduce(0, +) + Self.columnSpacing * CGFloat(max(floors.count - 1, 0)) + Self.inset * 2
         ViewThatFits(in: .horizontal) {
             grid(floors).frame(minWidth: needed, idealWidth: needed, maxWidth: .infinity, alignment: .leading)
@@ -349,13 +436,14 @@ struct TableBlockView: View, Equatable {
         }
     }
 
-    /// The width of the widest word of some cells, without the `**` and backticks around it. Measured, not
-    /// counted: "Documentos" is wider than "Instaladores", and a column set by letters broke it letter by letter. A word
-    /// is measured only if it could be wider than the widest so far (no character is wider than 1.2 times the type's
-    /// size; an emoji counts as two UTF-16 units) and was not measured yet, which skips most of a long table while it streams.
-    private nonisolated static func widestWord(_ cells: [String], font: NSFont) -> CGFloat {
+    /// The width of the widest word of some cells, without the `**` and backticks around it, never under `seed`.
+    /// Measured, not counted: "Documentos" is wider than "Instaladores", and a column set by letters broke it letter by
+    /// letter. A word is measured only if it could be wider than the widest so far (no character is wider than 1.2 times
+    /// the type's size; an emoji counts as two UTF-16 units) and was not measured yet, which skips most of a long table
+    /// while it streams.
+    private nonisolated static func widestWord(_ cells: [String], font: NSFont, seed: CGFloat = 0) -> CGFloat {
         let widestCharacter = font.pointSize * 1.2
-        var widest: CGFloat = 0
+        var widest = seed
         var measured = Set<Substring>()
         for cell in cells {
             for marked in cell.split(whereSeparator: \.isWhitespace) {

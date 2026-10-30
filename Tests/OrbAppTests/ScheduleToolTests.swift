@@ -118,7 +118,7 @@ struct OnceAndCronScheduleTests {
 
     @Test func theToolCreatesOneTimeAndCronTasks() throws {
         func when(_ fields: [String: JSONValue]) throws -> Schedule {
-            guard case .create(_, _, let schedule, _, _, _) = try ScheduleCommand(call("create", prompt: "x", when: .object(fields))) else { throw ToolError("") }
+            guard case .create(_, _, let schedule, _, _, _, _) = try ScheduleCommand(call("create", prompt: "x", when: .object(fields))) else { throw ToolError("") }
             return schedule
         }
         let local = try #require(ScheduleCommand.moment("2099-01-02T09:00"))
@@ -187,11 +187,11 @@ struct ScheduleCommandTests {
     }
 
     @Test func theNameDefaultsToTheStartOfThePromptAndIsKeptShort() throws {
-        guard case .create(let name, _, _, _, _, _) = try ScheduleCommand(call("create", prompt: "Resuma meus e-mails novos de hoje", when: daily9)) else {
+        guard case .create(let name, _, _, _, _, _, _) = try ScheduleCommand(call("create", prompt: "Resuma meus e-mails novos de hoje", when: daily9)) else {
             Issue.record("not a create"); return
         }
         #expect(name == "Resuma meus e-mails novos…")
-        guard case .create(let long, _, _, _, _, _) = try ScheduleCommand(call("create", name: String(repeating: "n", count: 200), prompt: "x", when: daily9)) else {
+        guard case .create(let long, _, _, _, _, _, _) = try ScheduleCommand(call("create", name: String(repeating: "n", count: 200), prompt: "x", when: daily9)) else {
             Issue.record("not a create"); return
         }
         #expect(long.count == ScheduleCommand.nameLimit)
@@ -199,7 +199,7 @@ struct ScheduleCommandTests {
 
     @Test func eachKindOfWhenIsReadAndItsLimitsAreEnforced() throws {
         func when(_ fields: [String: JSONValue]) throws -> Schedule {
-            guard case .create(_, _, let schedule, _, _, _) = try ScheduleCommand(call("create", prompt: "x", when: .object(fields))) else { throw ToolError("") }
+            guard case .create(_, _, let schedule, _, _, _, _) = try ScheduleCommand(call("create", prompt: "x", when: .object(fields))) else { throw ToolError("") }
             return schedule
         }
         #expect(try when(["kind": .string("daily"), "hour": .number(9), "minute": .number(30)]) == .daily(hour: 9, minute: 30))
@@ -274,6 +274,20 @@ struct ScheduleCommandTests {
         #expect(try ScheduleCommand(call("update", name: "A", prompt: "  novo  ", goal: "")) == .update(name: "A", prompt: "novo", goal: ""))
         #expect(throws: ToolError.self) { try ScheduleCommand(call("update", name: "A")) } // nothing to change
         #expect(throws: ToolError.self) { try ScheduleCommand(call("update", name: "A", prompt: "  ")) }
+    }
+
+    @Test func aPrecheckIsAnArgvListAndAnEmptyOneRemovesItOnUpdate() throws {
+        let argv: JSONValue = .array([.string("python3"), .string("/opt/triagem.py")])
+        #expect(try ScheduleCommand(call("create", name: "A", prompt: "x", when: daily9, extra: ["precheck": argv]))
+            == .create(name: "A", prompt: "x", schedule: .daily(hour: 9, minute: 0), precheck: RoutinePrecheck(command: ["python3", "/opt/triagem.py"])))
+        #expect(try ScheduleCommand(call("update", name: "A", extra: ["precheck": argv]))
+            == .update(name: "A", precheck: RoutinePrecheck(command: ["python3", "/opt/triagem.py"])))
+        // [] is given, so it counts as a change — and it clears the check.
+        #expect(try ScheduleCommand(call("update", name: "A", extra: ["precheck": .array([])])) == .update(name: "A", precheck: .some(nil)))
+        // Not given keeps whatever was there.
+        #expect(try ScheduleCommand(call("update", name: "A", prompt: "x")) == .update(name: "A", prompt: "x", precheck: nil))
+        #expect(throws: ToolError.self) { try ScheduleCommand(call("update", name: "A", extra: ["precheck": .string("ls")])) }
+        #expect(throws: ToolError.self) { try ScheduleCommand(call("update", name: "A", extra: ["precheck": .array([.string("ls"), .number(2)])])) }
     }
 }
 

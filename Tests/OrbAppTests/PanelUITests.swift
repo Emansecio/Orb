@@ -111,6 +111,9 @@ import Testing
                      item("fatos/b.md", .fato, "Gato", "Pixel.")]
         #expect(MemoryGroups.make(items, kind: .fato).flatMap(\.items).map(\.path) == ["fatos/a.md", "fatos/b.md"])
         #expect(MemoryGroups.make(items, matching: "consulta", kind: .preferencia).flatMap(\.items).map(\.path) == ["preferencias/p.md"])
+        let scoped = FoldedTextCache()
+        #expect(MemoryGroups.make(items, matching: "consulta", kind: .preferencia, cache: scoped).flatMap(\.items).map(\.path) == ["preferencias/p.md"])
+        #expect(scoped.count == 1) // no normalization or cache allocation for the two facts outside this filter
         let cache = FoldedTextCache()
         #expect(MemoryGroups.make(items, matching: "MEDICA", cache: cache).flatMap(\.items).map(\.path) == ["fatos/a.md"])
         // An item that changed is folded again, not served stale.

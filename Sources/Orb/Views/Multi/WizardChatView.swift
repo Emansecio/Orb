@@ -323,12 +323,15 @@ struct WizardTypingDots: NSViewRepresentable {
 
     func makeNSView(context: Context) -> WizardTypingDotsView { WizardTypingDotsView(animated: animated) }
     func updateNSView(_ view: WizardTypingDotsView, context: Context) { view.animated = animated }
+    static func dismantleNSView(_ view: WizardTypingDotsView, coordinator: ()) { view.animated = false }
 }
 
 final class WizardTypingDotsView: NSView {
     private var dots: [CALayer] = []
+    private weak var clipView: NSClipView?
     private static let key = "typing"
     var animated: Bool { didSet { if animated != oldValue { updateAnimation() } } }
+    var isAnimating: Bool { dots.contains { $0.animation(forKey: Self.key) != nil } }
 
     init(animated: Bool) {
         self.animated = animated
@@ -349,24 +352,49 @@ final class WizardTypingDotsView: NSView {
 
     override func layout() {
         super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         let step = bounds.width / 3
         for (index, dot) in dots.enumerated() {
             dot.position = CGPoint(x: step * (CGFloat(index) + 0.5), y: bounds.midY)
         }
+        CATransaction.commit()
+        updateAnimation()
     }
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         super.viewWillMove(toWindow: newWindow)
-        NotificationCenter.default.removeObserver(self, name: NSWindow.didChangeOcclusionStateNotification, object: nil)
+        let center = NotificationCenter.default
+        center.removeObserver(self, name: NSWindow.didChangeOcclusionStateNotification, object: nil)
+        center.removeObserver(self, name: NSApplication.didBecomeActiveNotification, object: nil)
+        center.removeObserver(self, name: NSApplication.didResignActiveNotification, object: nil)
         if let newWindow {
-            NotificationCenter.default.addObserver(self, selector: #selector(occlusionChanged),
-                                                   name: NSWindow.didChangeOcclusionStateNotification, object: newWindow)
+            center.addObserver(self, selector: #selector(occlusionChanged), name: NSWindow.didChangeOcclusionStateNotification, object: newWindow)
+            center.addObserver(self, selector: #selector(occlusionChanged), name: NSApplication.didBecomeActiveNotification, object: nil)
+            center.addObserver(self, selector: #selector(occlusionChanged), name: NSApplication.didResignActiveNotification, object: nil)
         }
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        observeScrolling()
         updateAnimation()
+    }
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        observeScrolling()
+    }
+
+    private func observeScrolling() {
+        let clip = window == nil ? nil : enclosingScrollView?.contentView
+        guard clip !== clipView else { return }
+        let center = NotificationCenter.default
+        if let clipView { center.removeObserver(self, name: NSView.boundsDidChangeNotification, object: clipView) }
+        clipView = clip
+        guard let clip else { return }
+        clip.postsBoundsChangedNotifications = true
+        center.addObserver(self, selector: #selector(occlusionChanged), name: NSView.boundsDidChangeNotification, object: clip)
     }
 
     override func viewDidHide() {
@@ -384,11 +412,12 @@ final class WizardTypingDotsView: NSView {
     /// The dots run only while the view is on screen: out of a window, hidden or covered, the animation is taken off.
     private func updateAnimation() {
         let visible = window.map { !isHiddenOrHasHiddenAncestor && (OrbView.animateInactive || $0.occlusionState.contains(.visible)) } ?? false
+        let inView = clipView.map { OrbVisibility.isVisible(orb: convert(bounds, to: $0), in: $0.bounds, margin: 20) } ?? true
+        let runs = visible && animated && inView && (NSApp.isActive || OrbView.animateInactive)
         for (index, dot) in dots.enumerated() {
-            guard !visible || !animated || dot.animation(forKey: Self.key) == nil else { continue }
+            guard !runs || dot.animation(forKey: Self.key) == nil else { continue }
             dot.removeAnimation(forKey: Self.key)
-            guard animated else { dot.opacity = 0.7; continue }
-            guard visible else { dot.opacity = 0.7; continue }
+            guard runs else { dot.opacity = 0.7; continue }
             let fade = CAKeyframeAnimation(keyPath: "opacity")
             fade.values = [0.3, 1, 0.3]
             fade.keyTimes = [0, 0.4, 1]

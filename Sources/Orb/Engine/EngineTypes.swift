@@ -606,6 +606,8 @@ struct ToolContext: Sendable {
     var release: CommandRelease?
     /// What `schedule` asks of the app on this Orb's behalf; nil where the app offers no scheduling (some tests).
     var schedule: ScheduleHandler?
+    /// The current routine's persistent follow-ups; absent in ordinary chat and other side work.
+    var followUps: ScheduleHandler?
     /// The user's Terminal environment that commands run in.
     var shell: ShellEnvironment = .shared
     /// Where pictures a tool returns are saved (nil: tools return text only).

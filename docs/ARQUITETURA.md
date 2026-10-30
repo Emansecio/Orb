@@ -187,7 +187,10 @@ chamada (`daily`, `weekly`, `every_minutes` de 15 a 720, `every_hours` de 1 a 24
 executa é `AppModel.schedule(_:orb:)`, que só vê as rotinas do Orb que chamou, recusa o 21º, o nome repetido e criar, alterar, disparar,
 retomar ou apagar tarefas de dentro de uma rotina (ela só pode pausar), e responde em português ("Agendei “X”: a cada 30 minutos. Próxima execução: …"), que é também o que o
 chat mostra como resultado da ferramenta. A chamada chega por `ToolContext.schedule` (um fecho preso ao Orb), com qualquer modelo. Uma execução que passa do próprio intervalo (a cada 15 min,
-levando 20) conta a próxima a partir do fim dela (`finishRoutineRun`), então nada se acumula.
+levando 20) conta a próxima a partir do fim dela (`finishRoutineRun`), então nada se acumula. Fora do agendador, `wake/<nome>.wake` na
+pasta de dados acorda a rotina na hora (`RoutineWake`: a pasta é vigiada por um descritor, o arquivo é consumido ao ser lido, o seu texto vira
+o motivo na conversa da execução; a fila, a pré-checagem e a pausa valem como na agenda). A mesma falha duas vezes seguidas vira banner uma
+só vez (`RoutineRun.isNews`).
 
 **O navegador do Orb (`Engine/Browser/`).** Um protocolo, `BrowserDriver` (abrir, snapshot com refs, clicar, preencher, ler, captura,
 abas, janela), e um driver real, `AgentBrowserDriver`, que roda a linha de comando do [agent-browser](https://github.com/vercel-labs/agent-browser)
@@ -324,6 +327,7 @@ O avatar e seu sistema de animação: `OrbModel` (config, catálogo, imagens), `
 | Compositor | `ComposerView`, `ComposerChips` (menu do "+" com anexar e skills, permissões, modelo), `ComposerSupport`, `ModelPopover`, `ModelPicker`, `ContextMeterViews`, `DictationButton` |
 | Ditado | `Dictation` (estado, permissão do microfone, escreve no rascunho; digitar o encerra), `SpeechCapture` (AVAudioEngine → SpeechAnalyzer/SpeechTranscriber do macOS 26, no aparelho), `DictationText` (frases do reconhecedor exato + o rascunho pontuado dele + palavras do rápido além delas), `DictationReview` (ao parar, o modelo menor do Orb ajusta o texto; travas contra resposta em vez de revisão) |
 | Painel do Orb | `BotInspector` (abas Geral, Memória, Pasta e acessos, Rotinas), `InspectorSupport`, `MemoryViews`, `DeleteOrbDialog`, `PermissionConfirmation` |
+| Início | `InicioView` projeta pedidos, trabalho, resultados e acompanhamentos; `InicioHistory` guarda um índice limitado de origens e o marcador de visita em `AppState`; `AppModel+Inicio` encaminha aos chats e execuções. O índice é derivado e não substitui as conversas ou as rotinas. `inicio-journal.json` mantém uma cópia limitada para recuperar entradas que não chegaram ao estado principal: a conversa é gravada antes do registro, a recuperação preserva a sequência e o cursor do estado, confere as origens conhecidas e não ressuscita entradas anteriores ao próximo número já salvo. O reset remove essa cópia. |
 | Ajustes | `SettingsView` (Geral, Orbs, Modelos, Navegador, Uso, Acesso ao Mac; `OrbsSettings` reúne o que os Orbs fazem entre si e sozinhos), `ProfileSettings` (a seção "Você" e `ProfileAvatar`, que a barra lateral também usa), `ResetOrbSheet` ("Redefinir o Orb?" e o alerta), `ProviderSettings`, `ProviderPresentation`, `CustomProviderFields`, `ClaudeCodeSettings`, `MacPermissionsView`, `ContextSettings` |
 | Páginas | `RoutinesView`, `SkillsView`, `ConnectorsView`, `CatalogParts` |
 | Sistema | `CommandPalette` (⌘K e a folha de atalhos; as teclas vêm de `ShortcutCatalog`, em `Shortcuts.swift`, a mesma lista que Ajustes → Geral mostra), `QuickAskView` (painel da barra de menus), `SheetKit` (folhas: `orbSheet`, `SheetFooter`/`SheetFooterBar`, `ActionRow` das linhas de botões dos cartões), `ImportPanel` (a importação de outro assistente, dentro da folha Novo Orb) |
@@ -393,6 +397,8 @@ conversations/<Orb>/conversa-<id>.json      cada conversa aberta com "Nova conve
                                  de conversa grava a que sai e lê a outra (`BotSession.openChat`); o que chega numa que não está
                                  na memória é gravado direto nela (`Store.amend`)
 conversations/<Orb>/routine-<rotina>.json   a conversa de cada rotina
+wake/<nome ou id>.wake           a campainha de fora: um processo externo grava o arquivo e a rotina roda na hora
+                                 (`RoutineWake`; consumido ao ser lido, o texto vira o motivo na execução)
 rascunhos.json                   o que cada compositor guarda sem enviar (`ComposerDraft`: texto e caminhos de arquivos e imagens); gravado ao sair, depois que o turno interrompido devolveu a fila, e a cada rodada do agendador; lido na abertura
 conectores/<id>.json             catálogo do conector (`ConnectorCatalog`): o que o servidor ofereceu da última vez, sem segredos
 memoria/<Orb>/…                  a memória (páginas .md + index.sqlite, _propostas/ e _skills.json das skills); memoria/_guardadas/<nome> – <data>/ de Orbs apagados ou
@@ -564,6 +570,9 @@ modelo de provedor com formato desconhecido sai da lista. A gravação increment
   A primeira mensagem da execução leva no topo `<orb_recent_chat>` (`RoutineBackground`, via `outsideContext`): o trecho do
   chat estacionado depois de `memorySavedCount` (pedidos, respostas e ações, mais recentes primeiro até 3.000 caracteres,
   segredos removidos). O que já virou página de sessão chega pelo "onde paramos" e pelas notas relacionadas.
+  `RoutinePrompt` acrescenta o último relatório disponível, até três outros registros recentes e `RoutineActivity` acrescenta
+  até 12.000 caracteres de ações, respostas e avisos da execução imediatamente anterior, inclusive interrompida. O relatório é
+  orientado a carregar os acompanhamentos abertos para a próxima execução; cada relatório armazenado tem até 8.000 caracteres.
 - Um turno de outra conversa do mesmo Orb (a que você deixou com ele trabalhando, ou a que pediu algo a outro Orb e recebeu a
   resposta) usa o mesmo estacionamento: `workingChatID` é a conversa do turno, em `conversation`, e a que está na tela fica em
   `parkedChat` até o turno acabar (`BotSession.workElsewhere` / `endWorkElsewhere`). `conversationChat` diz qual conversa está em
@@ -714,6 +723,7 @@ Modos (qualquer outro nome mostra o chat do primeiro Orb):
 | Barra de menus | `quickask`, `quickask-approvals`, `quickask-reply` |
 | Rotinas e conversas | `routines`, `routine-editor`, `routine-editor-new`, `routine-run`, `routine-run-failed`, `routine-conversation` |
 | Skills e conectores | `skills`, `skills-explore`, `skill-editor`, `skill-editor-new`, `skill-preview`, `skill-preview-installed`, `connectors` (instalados), `connectors-gallery`, `connectors-explore`, `connectors-lazy`, `conn-tools`, `conn-signin`, `conn-needs-signin`, `conn-editor-notion`, `conn-google-intro`, `conn-google-account`, `conn-google-account-agenda`, `conn-google-denied`, `conn-google-working`, `conn-google-done`, `conn-editor-supabase`, `conn-editor-github`, `conn-editor-files`, `conn-editor-slack`, `conn-editor-manual`, `conn-editor-edit`, `conn-editor-edit-registry`, `conn-editor-connecting`, `conn-editor-connected`, `conn-editor-failed`, `conn-editor-retired-slack` |
+| Início | `inicio`, `inicio-empty` (sem Orbs), `inicio-working` (um Orb com trabalho em andamento), `inicio-attention` (um resultado de rotina pedindo atenção), `inicio-long` (textos longos), `inicio-many` (14 resultados, com "Ver mais"), `inicio-reduced-motion` (a página com `reduceMotionOverride`, já que `accessibilityReduceMotion` é um ambiente somente leitura), `inicio-sidebar` (a página ao lado da `SidebarView` real), `inicio-interactive` (não grava PNG: abre uma janela real da prévia com botões que simulam trabalho e resultado, para conferir clique, foco, scroll e a pílula "Novos resultados") |
 
 Com `ORB_SEND`, o snapshot envia o prompt e espera `ORB_SNAPSHOT_WAIT` segundos antes de fotografar. Para medir o streaming sem
 abrir janela, use o modelo falso com `--long`, `ORB_SEND` e `ORB_SNAPSHOT_WAIT=40` e observe o processo (`ps -o %cpu=`,

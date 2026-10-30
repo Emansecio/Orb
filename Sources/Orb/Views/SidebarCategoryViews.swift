@@ -32,6 +32,8 @@ struct SidebarCategorySection: View {
                                           selectionSpace: selectionSpace)
                 }
             }
+            // A category heads a sub-section of "Orbs": it stands in from it.
+            .padding(.leading, SidebarCategoryLayout.subIndent)
             .sidebarDropItem(.header(category.id), drag)
             if !category.isCollapsed {
                 ForEach(ids, id: \.self) { id in
@@ -175,8 +177,8 @@ private struct SidebarCategoryHeader: View {
                     .frame(width: SidebarCategoryLayout.iconColumn)
                     .foregroundStyle(Palette.faint)
                 Text(category.name)
-                    .font(Typography.text.weight(.medium))
-                    .foregroundStyle(collapsed && holdsSelection ? Palette.ink : Palette.secondary)
+                    .font(Typography.label.weight(.medium))
+                    .foregroundStyle(collapsed && holdsSelection ? Palette.ink : Palette.faint)
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 ZStack {
@@ -289,6 +291,8 @@ enum SidebarCategoryLayout {
     static let headerContentHeight: CGFloat = 32 - 2 * 6
     /// How far a category's Orbs stand in from its heading.
     static let indent: CGFloat = 14
+    /// How far a sub-section heading (a category's, "Outros"') stands in from "Orbs".
+    static let subIndent: CGFloat = 8
     /// The heading's arrow column. 28 pt makes the name start at 46 pt, where an Orb's name starts (8 pt padding, the 30 pt
     /// avatar, an 8 pt gap), so a category and the Orbs outside it share one text edge.
     static let iconColumn: CGFloat = 28

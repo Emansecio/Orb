@@ -157,6 +157,24 @@ final class AttachmentPresentationTests {
 
     // MARK: Quick Look
 
+    @Test func concurrentThumbnailRequestsShareTheSameDecodedBitmap() async throws {
+        let source = try #require(OrbCatalog.shared.root?.appending(path: "body/perola.png"))
+        let picture = root.appending(path: "concurrent.png")
+        try FileManager.default.copyItem(at: source, to: picture)
+        let images = await withTaskGroup(of: NSImage?.self) { group in
+            for _ in 0..<64 { group.addTask { await Thumbnails.image(at: picture.path, side: 232) } }
+            var images: [NSImage] = []
+            for await image in group { if let image { images.append(image) } }
+            return images
+        }
+        #expect(images.count == 64)
+        #expect(Set(images.map(ObjectIdentifier.init)).count == 1)
+        #expect(Thumbnails.cached(path: picture.path, side: 232) === images.first)
+        let small = await Thumbnails.image(at: picture.path, side: 40)
+        #expect(small !== images.first)
+        #expect(small?.representations.first?.pixelsWide == 80)
+    }
+
     @Test func quickLookSkipsWhatIsGoneAndKeepsTheStartingPoint() throws {
         let paths = ["/a.png", "/gone.png", "/b.pdf", "antigo.txt", "/c.txt"]
         let exists: (String) -> Bool = { $0 != "/gone.png" }

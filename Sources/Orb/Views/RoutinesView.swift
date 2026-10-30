@@ -25,6 +25,7 @@ struct RoutinesView: View {
     @State private var sheet: RoutinesSheet?
 
     var body: some View {
+        ScrollViewReader { proxy in
         ScrollView {
             // Empty and full cross-fade in a ZStack (§2.13), never side by side. A card that is born or goes away comes and
             // leaves like a routine in the Orb's panel (`arrive`: rises 6 pt, leaves by fading), the others slide, bound to
@@ -59,7 +60,7 @@ struct RoutinesView: View {
                                                     isRunning: model.isRoutineRunning(routine.id),
                                                     isQueued: model.isRoutineQueued(routine.id),
                                                     onToggle: { model.setRoutineEnabled(routine.id, $0) },
-                                                    onRun: { model.runRoutine(routine.id) },
+                                                    onRun: { model.runRoutine(routine.id, manual: true) },
                                                     onEdit: { sheet = .edit(routine) },
                                                     onOpen: { sheet = .conversation(routine.id) },
                                                     onOpenRun: { sheet = .run(routine: routine.id, run: $0) },
@@ -68,6 +69,7 @@ struct RoutinesView: View {
                                                         model.request(.showTab(.routines), of: bot.id)
                                                     },
                                                     onDelete: { model.deleteRoutine(routine.id) })
+                                            .id(routine.id)
                                             .transition(.adapted(.arrive, reduceMotion: reduceMotion))
                                     }
                                 }
@@ -80,6 +82,9 @@ struct RoutinesView: View {
             }
             .motion(Motion.crossFade, value: model.routines.isEmpty)
             .pageColumn()
+        }
+        .onAppear { focusInicioRoutine(using: proxy) }
+        .onChange(of: model.inicioRoutineFocus) { focusInicioRoutine(using: proxy) }
         }
         .background(Palette.canvas)
         .navigationTitle("Rotinas")
@@ -114,6 +119,16 @@ struct RoutinesView: View {
                 RoutineRunSheet(routineID: routineID, runID: runID,
                                 onConversation: { self.sheet = .conversation(routineID) })
             }
+        }
+    }
+
+    private func focusInicioRoutine(using proxy: ScrollViewProxy) {
+        guard let id = model.inicioRoutineFocus else { return }
+        model.inicioRoutineFocus = nil
+        guard model.routines.contains(where: { $0.id == id }) else { return }
+        Task { @MainActor in
+            await Task.yield()
+            proxy.scrollTo(id, anchor: .center)
         }
     }
 
@@ -234,6 +249,7 @@ private struct TemplateCard: View {
 // MARK: Card
 
 private struct RoutineCard: View {
+    @Environment(AppModel.self) private var model
     let routine: Routine
     /// The Orb that owns it: its name and avatar, not the whole `Bot`.
     let botName: String
@@ -309,6 +325,29 @@ private struct RoutineCard: View {
                 NextRunLine(routine: routine)
             }
             if let goal = routine.goal { GoalProgressView(goal: goal) }
+            if !routine.followUps.filter({ !$0.resolved }).isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Acompanhamentos em aberto").font(Typography.label.weight(.semibold))
+                    ForEach(routine.followUps.filter { !$0.resolved }) { item in
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.subject).font(Typography.label.weight(.medium))
+                                Text("\(item.channel) · \(item.nextStep)").font(Typography.small).foregroundStyle(Palette.muted)
+                                if let checked = item.lastChecked {
+                                    Text("Verificado \(RoutineText.stamp(checked))").font(Typography.small).foregroundStyle(Palette.faint)
+                                }
+                            }
+                            Spacer()
+                            Button("Concluir") {
+                                guard let r = model.routines.firstIndex(where: { $0.id == routine.id }),
+                                      let i = model.routines[r].followUps.firstIndex(where: { $0.id == item.id }) else { return }
+                                model.routines[r].followUps[i].resolved = true
+                                model.routines[r].followUps[i].updatedAt = .now
+                            }.buttonStyle(GhostStyle())
+                        }
+                    }
+                }
+            }
             Divider()
             if routine.runs.isEmpty {
                 Text(routine.lastResult ?? "Ainda não rodou.")
@@ -502,6 +541,12 @@ private struct RunHistory: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let latest = runs.first { RunLine(run: latest, lineLimit: 3) { onOpen(latest.id) } }
+            if runs.count > 1, let current = runs[0].openFollowUps, let previous = runs[1].openFollowUps {
+                let added = Set(current).subtracting(previous).count
+                let completed = Set(previous).subtracting(current).count
+                Text("Desde a execução anterior: \(added) novos · \(completed) concluídos · \(current.count) em aberto")
+                    .font(Typography.small).foregroundStyle(Palette.muted)
+            }
             if runs.count > 1 {
                 DisclosureGroup("Execuções anteriores (\(runs.count - 1))") {
                     VStack(alignment: .leading, spacing: 2) {
@@ -583,7 +628,7 @@ private struct RunLineStyle: ButtonStyle {
 // MARK: Run report
 
 /// One run's result: the report as the Orb wrote it, how it went, and the ways on from it.
-private struct RoutineRunSheet: View {
+struct RoutineRunSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     let routineID: UUID
@@ -665,7 +710,7 @@ private struct RoutineRunSheet: View {
                 .help(Tip.routineConversation)
             if !run.succeeded {
                 Button("Rodar de novo", systemImage: "arrow.clockwise") {
-                    model.runRoutine(routineID)
+                    model.runRoutine(routineID, manual: true)
                     dismiss()
                 }
                 .buttonStyle(GhostStyle())
@@ -721,7 +766,7 @@ private struct ReportBlockView: View {
 // MARK: The routine's conversation
 
 /// A routine's own conversation, read-only: the last runs, live while one is running.
-private struct RoutineConversationSheet: View {
+struct RoutineConversationSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     let routineID: UUID
@@ -1113,6 +1158,7 @@ struct RoutineEditor: View {
             // not the editor's to overwrite.
             let current = model.routines[index]
             routine.runs = current.runs
+            routine.followUps = current.followUps
             routine.lastResult = current.lastResult
             routine.isEnabled = current.isEnabled
             // The last check measured the goal as it was: a new target starts unmeasured.
@@ -1124,7 +1170,7 @@ struct RoutineEditor: View {
             model.routines[index] = routine
         } else if isNew {
             model.routines.append(routine)
-            if runsNow { model.runRoutine(routine.id) }
+            if runsNow { model.runRoutine(routine.id, manual: true) }
         } // else deleted while open: saving does not bring it back
         dismiss()
     }
@@ -1144,6 +1190,7 @@ enum RoutinesSnapshots {
                               prompt: "Faça um resumo da minha manhã usando a agenda e o e-mail.", schedule: .daily(hour: 8, minute: 30))
         morning.lastRun = Date.now.addingTimeInterval(-3600)
         morning.lastResult = "3 reuniões hoje, 12 e-mails novos."
+        morning.followUps = [RoutineFollowUp(subject: "Ana", channel: "E-mail", nextStep: "Verificar resposta à proposta")]
         morning.runs = [
             RoutineRun(date: Date.now.addingTimeInterval(-3600), finishedAt: Date.now.addingTimeInterval(-3500), succeeded: true,
                        summary: "3 reuniões hoje, 12 e-mails novos.", report: "Hoje: 3 reuniões (10h, 14h, 16h).\n12 e-mails novos, 2 pedem resposta."),

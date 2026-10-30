@@ -251,12 +251,14 @@ private struct InstalledSkillRow: View {
     let onEdit: () -> Void
     let onDelete: () -> Void
     @State private var copied = CopiedFlash()
+    @State private var isCompact = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         // A switched-off skill dims its icon and title only: the badge says why, and the buttons stay legible.
         let dimmed = skill.isEnabled ? 1.0 : 0.55
-        HStack(alignment: .center, spacing: 14) {
+        let layout = isCompact ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12)) : AnyLayout(HStackLayout(spacing: 14))
+        layout {
             // A click anywhere on this part opens the editor; the copy button here and the controls beside it keep their own.
             HStack(alignment: .center, spacing: 14) {
                 CatalogIcon(symbol: skill.source == nil || skill.source == Skill.builtInSource || skill.source == Skill.learnedSource ? "wand.and.stars" : "shippingbox")
@@ -315,24 +317,29 @@ private struct InstalledSkillRow: View {
             .onTapGesture(perform: onEdit)
             .accessibilityAction(named: "Editar", onEdit)
             .help("Abre a skill para ler e editar")
-            Spacer(minLength: 12)
-            UseSkillButton(skill: skill)
-            // Hidden label, read by VoiceOver: names the skill, since every row has the same switch.
-            Toggle("Ativar \(skill.name)", isOn: $skill.isEnabled)
-                .toggleStyle(.switch)
-                .labelsHidden()
-                .controlSize(.small)
-                .help(Tip.skillToggle(isOn: skill.isEnabled))
-            MoreMenu(name: skill.name) {
-                Button("Editar…", action: onEdit)
-                if let folder = skill.folderURL {
-                    Link("Ver no GitHub", destination: folder)
+            if !isCompact { Spacer(minLength: 12) }
+            HStack(spacing: 14) {
+                UseSkillButton(skill: skill)
+                // Hidden label, read by VoiceOver: names the skill, since every row has the same switch.
+                Toggle("Ativar \(skill.name)", isOn: $skill.isEnabled)
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .help(Tip.skillToggle(isOn: skill.isEnabled))
+                MoreMenu(name: skill.name) {
+                    Button("Editar…", action: onEdit)
+                    if let folder = skill.folderURL {
+                        Link("Ver no GitHub", destination: folder)
+                    }
+                    Divider()
+                    Button("Apagar…", role: .destructive, action: onDelete)
                 }
-                Divider()
-                Button("Apagar…", role: .destructive, action: onDelete)
             }
+            .frame(maxWidth: isCompact ? .infinity : nil, alignment: .trailing)
         }
         .padding(Spacing.cardPadding)
+        // Change layout only at this boundary; resizing does not write every pixel into view state.
+        .onGeometryChange(for: Bool.self) { $0.size.width < 520 } action: { isCompact = $0 }
         .card(radius: Radius.large)
         .animateChanges(of: skill.isEnabled)
     }
@@ -416,7 +423,7 @@ private struct ExploreSkills: View {
         error = nil
         // "Tentar de novo" runs this outside `.task(id:)`, so nothing cancels it when the person types on: what it brings
         // counts only while its term is still the one in the field.
-        defer { if Task.isCancelled || RegistryQuery.isCurrent(term, query: query) { isLoading = false } }
+        defer { if RegistryQuery.isCurrent(term, query: query, cancelled: Task.isCancelled) { isLoading = false } }
         do {
             let found = try await SkillCatalog.shared.search(term)
             if !Task.isCancelled, RegistryQuery.isCurrent(term, query: query) { results = found }

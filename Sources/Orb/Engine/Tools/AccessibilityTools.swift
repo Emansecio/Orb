@@ -1510,7 +1510,7 @@ struct UIActTool: AgentTool {
             let target = acted.target
             let after = (try? await sessions.run(app, within: sessions.deadlines.action) { UIState.capture(root: system.root(of: app), target: target) })
                 ?? acted.before
-            acted.notes += await restoreFront(frontBefore, app: app, session: session)
+            if let restoration = await restoreFront(frontBefore, app: app, session: session) { acted.notes.append(restoration.message(app: app)) }
 
             var text = acted.summary + " " + method.tag + " " + UIState.describe(from: acted.before, to: after).clipped(to: 600)
             if let listing = acted.listing, !listing.isEmpty { text += "\nItens do menu:\n" + listing }
@@ -1519,9 +1519,9 @@ struct UIActTool: AgentTool {
         } catch {
             // Failing (or being cancelled) after acting does not leave the person with another app in front.
             watcher?.cancel()
-            let notes = await restoreFront(frontBefore, app: app, session: session)
-            guard !notes.isEmpty, !(error is CancellationError) else { throw error }
-            throw ToolError(Self.reason(error) + ".\n" + notes.joined(separator: "\n"))
+            let restoration = await restoreFront(frontBefore, app: app, session: session)
+            guard let restoration, !(error is CancellationError) else { throw error }
+            throw ToolError(Self.reason(error) + ".\n" + restoration.message(app: app))
         }
     }
 
@@ -1533,19 +1533,40 @@ struct UIActTool: AgentTool {
     /// steals focus. Unless the person pressed a key or a button in the last 2 s: then the person went to the app (to
     /// watch, say), and it stays in front and is not taken for one that steals focus. Not cancellable: it runs in its own
     /// task, awaited whatever happens to the caller's.
-    private func restoreFront(_ before: Int32?, app: AccessibilityApp, session: AXAppSession) async -> [String] {
+    private enum FrontRestoration: Sendable {
+        case person, restored, changed, failed
+
+        func message(app: AccessibilityApp) -> String {
+            switch self {
+            case .person: "Aviso: \(app.name) está na frente porque o usuário foi até ele agora; não devolvi o app anterior."
+            case .restored: "Aviso: \(app.name) veio para a frente sozinho; devolvi o app que estava na frente. Focar ou digitar nele agora pede takeover."
+            case .changed: "Aviso: \(app.name) veio para a frente sozinho, mas o foco mudou; preservei o app que ficou na frente. Focar ou digitar em \(app.name) agora pede takeover."
+            case .failed: "Aviso: \(app.name) veio para a frente sozinho; não consegui confirmar a devolução do app anterior. O usuário pode precisar selecioná-lo. Focar ou digitar em \(app.name) agora pede takeover."
+            }
+        }
+    }
+
+    private func restoreFront(_ before: Int32?, app: AccessibilityApp, session: AXAppSession) async -> FrontRestoration? {
         let system = system, sessions = sessions
         return await Task.detached(priority: .userInitiated) {
-            guard let before, before != app.pid, await system.frontmostPID() == app.pid else { return [String]() }
+            guard let before, before != app.pid, await system.frontmostPID() == app.pid else { return nil }
             if system.secondsSinceUserInput() < Self.personWentThere {
-                return ["Aviso: \(app.name) está na frente porque o usuário foi até ele agora; não devolvi o app anterior."]
+                return .person
             }
             session.state.withLock { $0.stealsFocus = true }
             let previous = AccessibilityApp(name: "", bundleID: nil, pid: before)
-            _ = try? await sessions.run(previous, within: sessions.deadlines.action) {
+            guard await system.frontmostPID() == app.pid, system.secondsSinceUserInput() >= Self.personWentThere else { return .changed }
+            do { try await sessions.run(previous, within: sessions.deadlines.action) {
                 try system.root(of: previous).setValue(.bool(true), for: "AXFrontmost")
+            } } catch { return .failed }
+            let deadline = ContinuousClock.now + .milliseconds(200)
+            while true {
+                let front = await system.frontmostPID()
+                if front == before { return .restored }
+                if let front, front != app.pid { return .changed }
+                if ContinuousClock.now >= deadline { return .failed }
+                try? await Task.sleep(for: .milliseconds(20))
             }
-            return ["Aviso: \(app.name) veio para a frente sozinho; devolvi o app que estava na frente. Focar ou digitar nele agora pede takeover."]
         }.value
     }
 
@@ -1559,9 +1580,9 @@ struct UIActTool: AgentTool {
         guard front == app.pid else { return }
         // The person went to the app and may be typing in it: nothing is sent, and the app is not sent back.
         try await refuseIfUserIsActive(app, front: .some(front))
-        let notes = await restoreFront(before, app: app, session: session)
+        let restoration = await restoreFront(before, app: app, session: session)
         throw Self.needsScreen(what, because: "\(app.name) veio para a frente ao receber o foco"
-                               + (notes.isEmpty ? "" : " (devolvi o app que estava na frente)"))
+                               + (restoration.map { ". " + $0.message(app: app) } ?? ""))
     }
 
     /// The error that tells the model only the real mouse and keyboard can do it (with the user's consent).
@@ -1592,6 +1613,7 @@ struct UIActTool: AgentTool {
                 try await focus(target, app: app)
                 try await refuseIfBroughtForward(frontBefore, app: app, session: session, what: what)
             }
+            try await refuseIfUserIsActive(app)
             if system.input.secureInputActive { notes.append(Self.secureInputNote) }
             do { try await system.input.keys(strokes, to: app.pid) } catch {
                 throw Self.needsScreen(what, because: Self.reason(error))
@@ -1697,7 +1719,9 @@ struct UIActTool: AgentTool {
     private func type(_ text: String, into target: any AccessibilityElement, replace: Bool, app: AccessibilityApp, what: String,
                       checkFront: @Sendable (Int32?) async throws -> Void) async throws -> [String] {
         try await focus(target, app: app, replace: replace)
-        try await checkFront(await system.frontmostPID())
+        let front = await system.frontmostPID()
+        try await checkFront(front)
+        try await refuseIfUserIsActive(app, front: .some(front))
         if text.isEmpty, replace {
             // Nothing to type: replacing with nothing is select all and delete (the selection `focus` made may not exist).
             do {

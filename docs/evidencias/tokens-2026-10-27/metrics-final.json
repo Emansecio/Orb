@@ -1,0 +1,4017 @@
+{
+  "started_utc": "2026-10-27T06:26:25.756684+00:00",
+  "finished_utc": "2026-10-27T06:26:26.007254+00:00",
+  "timezone": "America/Sao_Paulo",
+  "usage": {
+    "buckets": 465,
+    "total": {
+      "requests": 8214,
+      "input": 32848300,
+      "cacheRead": 436641814,
+      "cacheWrite": 66170426,
+      "cacheWrite1h": 65070438,
+      "output": 4138766,
+      "prompt": 535660540,
+      "uncached": 99018726,
+      "cache_hit": 0.8151464993109255
+    },
+    "by_model": {
+      "chatgpt/gpt-5.6-luna": {
+        "requests": 184,
+        "input": 7218945,
+        "cacheRead": 2607616,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 57585,
+        "prompt": 9826561,
+        "uncached": 7218945,
+        "cache_hit": 0.2653640475034959
+      },
+      "chatgpt/gpt-6-luna": {
+        "requests": 128,
+        "input": 3700227,
+        "cacheRead": 1247104,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 64391,
+        "prompt": 4947331,
+        "uncached": 3700227,
+        "cache_hit": 0.25207611942681823
+      },
+      "chatgpt/gpt-6.1-sol": {
+        "requests": 358,
+        "input": 15082646,
+        "cacheRead": 1777152,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 117915,
+        "prompt": 16859798,
+        "uncached": 15082646,
+        "cache_hit": 0.10540766858535316
+      },
+      "claudeCode/haiku": {
+        "requests": 662,
+        "input": 1324,
+        "cacheRead": 33542334,
+        "cacheWrite": 11140519,
+        "cacheWrite1h": 11140519,
+        "output": 449088,
+        "prompt": 44684177,
+        "uncached": 11141843,
+        "cache_hit": 0.7506535031404965
+      },
+      "claudeCode/opus": {
+        "requests": 1605,
+        "input": 3216,
+        "cacheRead": 104125732,
+        "cacheWrite": 9527417,
+        "cacheWrite1h": 9012808,
+        "output": 805783,
+        "prompt": 113656365,
+        "uncached": 9530633,
+        "cache_hit": 0.9161451890529844
+      },
+      "claudeCode/sonnet": {
+        "requests": 3439,
+        "input": 6886,
+        "cacheRead": 214428020,
+        "cacheWrite": 45502490,
+        "cacheWrite1h": 44917111,
+        "output": 1566283,
+        "prompt": 259937396,
+        "uncached": 45509376,
+        "cache_hit": 0.8249217823202322
+      },
+      "commandCode/deepseek/deepseek-v4.1-flash": {
+        "requests": 108,
+        "input": 511876,
+        "cacheRead": 5854976,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 99490,
+        "prompt": 6366852,
+        "uncached": 511876,
+        "cache_hit": 0.9196029686256253
+      },
+      "openDesign/deepseek-v4.1-flash": {
+        "requests": 566,
+        "input": 1526028,
+        "cacheRead": 24875136,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 452380,
+        "prompt": 26401164,
+        "uncached": 1526028,
+        "cache_hit": 0.9421984576134598
+      },
+      "openDesign/glm-5.3-flash": {
+        "requests": 1164,
+        "input": 4797152,
+        "cacheRead": 48183744,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 525851,
+        "prompt": 52980896,
+        "uncached": 4797152,
+        "cache_hit": 0.9094550609336618
+      }
+    },
+    "by_source": {
+      "auxiliary": {
+        "requests": 428,
+        "input": 2588309,
+        "cacheRead": 20356500,
+        "cacheWrite": 6531022,
+        "cacheWrite1h": 6531022,
+        "output": 539610,
+        "prompt": 29475831,
+        "uncached": 9119331,
+        "cache_hit": 0.6906166614946326
+      },
+      "chat": {
+        "requests": 4214,
+        "input": 21531312,
+        "cacheRead": 293429471,
+        "cacheWrite": 52600225,
+        "cacheWrite1h": 52600225,
+        "output": 1987981,
+        "prompt": 367561008,
+        "uncached": 74131537,
+        "cache_hit": 0.7983150133269848
+      },
+      "delegation": {
+        "requests": 154,
+        "input": 379254,
+        "cacheRead": 4989463,
+        "cacheWrite": 176202,
+        "cacheWrite1h": 176202,
+        "output": 101728,
+        "prompt": 5544919,
+        "uncached": 555456,
+        "cache_hit": 0.8998261291102719
+      },
+      "group": {
+        "requests": 93,
+        "input": 186,
+        "cacheRead": 3574391,
+        "cacheWrite": 826191,
+        "cacheWrite1h": 826191,
+        "output": 59464,
+        "prompt": 4400768,
+        "uncached": 826377,
+        "cache_hit": 0.8122198216311335
+      },
+      "routine": {
+        "requests": 3325,
+        "input": 8349239,
+        "cacheRead": 114291989,
+        "cacheWrite": 6036786,
+        "cacheWrite1h": 4936798,
+        "output": 1449983,
+        "prompt": 128678014,
+        "uncached": 14386025,
+        "cache_hit": 0.8882013752559159
+      }
+    },
+    "by_day": {
+      "2026-10-11": {
+        "requests": 450,
+        "input": 512568,
+        "cacheRead": 20721418,
+        "cacheWrite": 8280913,
+        "cacheWrite1h": 8280913,
+        "output": 338102,
+        "prompt": 29514899,
+        "uncached": 8793481,
+        "cache_hit": 0.702066369937434
+      },
+      "2026-10-12": {
+        "requests": 471,
+        "input": 8201290,
+        "cacheRead": 21607732,
+        "cacheWrite": 3029091,
+        "cacheWrite1h": 3029091,
+        "output": 240922,
+        "prompt": 32838113,
+        "uncached": 11230381,
+        "cache_hit": 0.6580077241344532
+      },
+      "2026-10-13": {
+        "requests": 193,
+        "input": 386,
+        "cacheRead": 15468038,
+        "cacheWrite": 2536800,
+        "cacheWrite1h": 2536800,
+        "output": 150032,
+        "prompt": 18005224,
+        "uncached": 2537186,
+        "cache_hit": 0.8590861185620351
+      },
+      "2026-10-14": {
+        "requests": 689,
+        "input": 1378,
+        "cacheRead": 38092332,
+        "cacheWrite": 15580179,
+        "cacheWrite1h": 15580179,
+        "output": 250650,
+        "prompt": 53673889,
+        "uncached": 15581557,
+        "cache_hit": 0.7096994965280046
+      },
+      "2026-10-15": {
+        "requests": 1354,
+        "input": 2708,
+        "cacheRead": 95617260,
+        "cacheWrite": 15905766,
+        "cacheWrite1h": 15905766,
+        "output": 553971,
+        "prompt": 111525734,
+        "uncached": 15908474,
+        "cache_hit": 0.8573560251125538
+      },
+      "2026-10-16": {
+        "requests": 642,
+        "input": 1284,
+        "cacheRead": 37058417,
+        "cacheWrite": 5986826,
+        "cacheWrite1h": 5986826,
+        "output": 283744,
+        "prompt": 43046527,
+        "uncached": 5988110,
+        "cache_hit": 0.860892145840244
+      },
+      "2026-10-17": {
+        "requests": 283,
+        "input": 566,
+        "cacheRead": 11057165,
+        "cacheWrite": 1124557,
+        "cacheWrite1h": 1124557,
+        "output": 128798,
+        "prompt": 12182288,
+        "uncached": 1125123,
+        "cache_hit": 0.9076427186748499
+      },
+      "2026-10-18": {
+        "requests": 95,
+        "input": 190,
+        "cacheRead": 4368309,
+        "cacheWrite": 839586,
+        "cacheWrite1h": 839586,
+        "output": 52849,
+        "prompt": 5208085,
+        "uncached": 839776,
+        "cache_hit": 0.8387553198536506
+      },
+      "2026-10-19": {
+        "requests": 662,
+        "input": 1324,
+        "cacheRead": 39690875,
+        "cacheWrite": 4809627,
+        "cacheWrite1h": 4572351,
+        "output": 370886,
+        "prompt": 44501826,
+        "uncached": 4810951,
+        "cache_hit": 0.8918931775968024
+      },
+      "2026-10-20": {
+        "requests": 432,
+        "input": 135874,
+        "cacheRead": 24341190,
+        "cacheWrite": 2339090,
+        "cacheWrite1h": 2222027,
+        "output": 225877,
+        "prompt": 26816154,
+        "uncached": 2474964,
+        "cache_hit": 0.9077062281190659
+      },
+      "2026-10-21": {
+        "requests": 554,
+        "input": 1217869,
+        "cacheRead": 26108950,
+        "cacheWrite": 508114,
+        "cacheWrite1h": 403051,
+        "output": 415194,
+        "prompt": 27834933,
+        "uncached": 1725983,
+        "cache_hit": 0.9379921985082558
+      },
+      "2026-10-22": {
+        "requests": 964,
+        "input": 3120434,
+        "cacheRead": 50148871,
+        "cacheWrite": 1983206,
+        "cacheWrite1h": 1686992,
+        "output": 449953,
+        "prompt": 55252511,
+        "uncached": 5103640,
+        "cache_hit": 0.9076306233394533
+      },
+      "2026-10-23": {
+        "requests": 562,
+        "input": 1434866,
+        "cacheRead": 30064356,
+        "cacheWrite": 1649894,
+        "cacheWrite1h": 1498989,
+        "output": 308772,
+        "prompt": 33149116,
+        "uncached": 3084760,
+        "cache_hit": 0.9069429181761589
+      },
+      "2026-10-24": {
+        "requests": 350,
+        "input": 416407,
+        "cacheRead": 14996541,
+        "cacheWrite": 957406,
+        "cacheWrite1h": 871524,
+        "output": 157126,
+        "prompt": 16370354,
+        "uncached": 1373813,
+        "cache_hit": 0.9160792124593029
+      },
+      "2026-10-25": {
+        "requests": 6,
+        "input": 12,
+        "cacheRead": 86374,
+        "cacheWrite": 47070,
+        "cacheWrite1h": 0,
+        "output": 1361,
+        "prompt": 133456,
+        "uncached": 47082,
+        "cache_hit": 0.6472095671981777
+      },
+      "2026-10-26": {
+        "requests": 479,
+        "input": 16430825,
+        "cacheRead": 7134498,
+        "cacheWrite": 592301,
+        "cacheWrite1h": 531786,
+        "output": 202980,
+        "prompt": 24157624,
+        "uncached": 17023126,
+        "cache_hit": 0.29533111368899523
+      },
+      "2026-10-27": {
+        "requests": 28,
+        "input": 1370319,
+        "cacheRead": 79488,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 7549,
+        "prompt": 1449807,
+        "uncached": 1370319,
+        "cache_hit": 0.05482660795540372
+      }
+    },
+    "by_day_model": {
+      "2026-10-11/claudeCode/haiku": {
+        "requests": 340,
+        "input": 680,
+        "cacheRead": 14852420,
+        "cacheWrite": 7818756,
+        "cacheWrite1h": 7818756,
+        "output": 237672,
+        "prompt": 22671856,
+        "uncached": 7819436,
+        "cache_hit": 0.6551038432848197
+      },
+      "2026-10-11/claudeCode/sonnet": {
+        "requests": 2,
+        "input": 12,
+        "cacheRead": 14022,
+        "cacheWrite": 462157,
+        "cacheWrite1h": 462157,
+        "output": 940,
+        "prompt": 476191,
+        "uncached": 462169,
+        "cache_hit": 0.02944616760921563
+      },
+      "2026-10-11/commandCode/deepseek/deepseek-v4.1-flash": {
+        "requests": 108,
+        "input": 511876,
+        "cacheRead": 5854976,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 99490,
+        "prompt": 6366852,
+        "uncached": 511876,
+        "cache_hit": 0.9196029686256253
+      },
+      "2026-10-12/chatgpt/gpt-5.6-luna": {
+        "requests": 184,
+        "input": 7218945,
+        "cacheRead": 2607616,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 57585,
+        "prompt": 9826561,
+        "uncached": 7218945,
+        "cache_hit": 0.2653640475034959
+      },
+      "2026-10-12/chatgpt/gpt-6.1-sol": {
+        "requests": 36,
+        "input": 981843,
+        "cacheRead": 133504,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 7065,
+        "prompt": 1115347,
+        "uncached": 981843,
+        "cache_hit": 0.11969727806682584
+      },
+      "2026-10-12/claudeCode/haiku": {
+        "requests": 101,
+        "input": 202,
+        "cacheRead": 6057155,
+        "cacheWrite": 1321307,
+        "cacheWrite1h": 1321307,
+        "output": 76084,
+        "prompt": 7378664,
+        "uncached": 1321509,
+        "cache_hit": 0.8209013176369055
+      },
+      "2026-10-12/claudeCode/sonnet": {
+        "requests": 150,
+        "input": 300,
+        "cacheRead": 12809457,
+        "cacheWrite": 1707784,
+        "cacheWrite1h": 1707784,
+        "output": 100188,
+        "prompt": 14517541,
+        "uncached": 1708084,
+        "cache_hit": 0.8823434354344168
+      },
+      "2026-10-13/claudeCode/haiku": {
+        "requests": 2,
+        "input": 4,
+        "cacheRead": 0,
+        "cacheWrite": 3040,
+        "cacheWrite1h": 3040,
+        "output": 255,
+        "prompt": 3044,
+        "uncached": 3044,
+        "cache_hit": 0.0
+      },
+      "2026-10-13/claudeCode/sonnet": {
+        "requests": 191,
+        "input": 382,
+        "cacheRead": 15468038,
+        "cacheWrite": 2533760,
+        "cacheWrite1h": 2533760,
+        "output": 149777,
+        "prompt": 18002180,
+        "uncached": 2534142,
+        "cache_hit": 0.8592313819770717
+      },
+      "2026-10-14/claudeCode/haiku": {
+        "requests": 3,
+        "input": 6,
+        "cacheRead": 0,
+        "cacheWrite": 4329,
+        "cacheWrite1h": 4329,
+        "output": 945,
+        "prompt": 4335,
+        "uncached": 4335,
+        "cache_hit": 0.0
+      },
+      "2026-10-14/claudeCode/sonnet": {
+        "requests": 686,
+        "input": 1372,
+        "cacheRead": 38092332,
+        "cacheWrite": 15575850,
+        "cacheWrite1h": 15575850,
+        "output": 249705,
+        "prompt": 53669554,
+        "uncached": 15577222,
+        "cache_hit": 0.7097568204125564
+      },
+      "2026-10-15/claudeCode/haiku": {
+        "requests": 134,
+        "input": 268,
+        "cacheRead": 9954657,
+        "cacheWrite": 1392885,
+        "cacheWrite1h": 1392885,
+        "output": 88848,
+        "prompt": 11347810,
+        "uncached": 1393153,
+        "cache_hit": 0.8772315539297891
+      },
+      "2026-10-15/claudeCode/sonnet": {
+        "requests": 1220,
+        "input": 2440,
+        "cacheRead": 85662603,
+        "cacheWrite": 14512881,
+        "cacheWrite1h": 14512881,
+        "output": 465123,
+        "prompt": 100177924,
+        "uncached": 14515321,
+        "cache_hit": 0.8551045937027004
+      },
+      "2026-10-16/claudeCode/haiku": {
+        "requests": 2,
+        "input": 4,
+        "cacheRead": 0,
+        "cacheWrite": 2980,
+        "cacheWrite1h": 2980,
+        "output": 1088,
+        "prompt": 2984,
+        "uncached": 2984,
+        "cache_hit": 0.0
+      },
+      "2026-10-16/claudeCode/opus": {
+        "requests": 83,
+        "input": 166,
+        "cacheRead": 4740479,
+        "cacheWrite": 211183,
+        "cacheWrite1h": 211183,
+        "output": 15488,
+        "prompt": 4951828,
+        "uncached": 211349,
+        "cache_hit": 0.95731899411692
+      },
+      "2026-10-16/claudeCode/sonnet": {
+        "requests": 557,
+        "input": 1114,
+        "cacheRead": 32317938,
+        "cacheWrite": 5772663,
+        "cacheWrite1h": 5772663,
+        "output": 267168,
+        "prompt": 38091715,
+        "uncached": 5773777,
+        "cache_hit": 0.8484243358431092
+      },
+      "2026-10-17/claudeCode/haiku": {
+        "requests": 6,
+        "input": 12,
+        "cacheRead": 0,
+        "cacheWrite": 7995,
+        "cacheWrite1h": 7995,
+        "output": 9419,
+        "prompt": 8007,
+        "uncached": 8007,
+        "cache_hit": 0.0
+      },
+      "2026-10-17/claudeCode/opus": {
+        "requests": 59,
+        "input": 118,
+        "cacheRead": 2556321,
+        "cacheWrite": 120215,
+        "cacheWrite1h": 120215,
+        "output": 17603,
+        "prompt": 2676654,
+        "uncached": 120333,
+        "cache_hit": 0.9550434983378502
+      },
+      "2026-10-17/claudeCode/sonnet": {
+        "requests": 218,
+        "input": 436,
+        "cacheRead": 8500844,
+        "cacheWrite": 996347,
+        "cacheWrite1h": 996347,
+        "output": 101776,
+        "prompt": 9497627,
+        "uncached": 996783,
+        "cache_hit": 0.895049258093627
+      },
+      "2026-10-18/claudeCode/sonnet": {
+        "requests": 95,
+        "input": 190,
+        "cacheRead": 4368309,
+        "cacheWrite": 839586,
+        "cacheWrite1h": 839586,
+        "output": 52849,
+        "prompt": 5208085,
+        "uncached": 839776,
+        "cache_hit": 0.8387553198536506
+      },
+      "2026-10-19/claudeCode/haiku": {
+        "requests": 21,
+        "input": 42,
+        "cacheRead": 0,
+        "cacheWrite": 94220,
+        "cacheWrite1h": 94220,
+        "output": 6495,
+        "prompt": 94262,
+        "uncached": 94262,
+        "cache_hit": 0.0
+      },
+      "2026-10-19/claudeCode/opus": {
+        "requests": 561,
+        "input": 1122,
+        "cacheRead": 36915551,
+        "cacheWrite": 4089141,
+        "cacheWrite1h": 3960408,
+        "output": 326399,
+        "prompt": 41005814,
+        "uncached": 4090263,
+        "cache_hit": 0.9002516326099513
+      },
+      "2026-10-19/claudeCode/sonnet": {
+        "requests": 80,
+        "input": 160,
+        "cacheRead": 2775324,
+        "cacheWrite": 626266,
+        "cacheWrite1h": 517723,
+        "output": 37992,
+        "prompt": 3401750,
+        "uncached": 626426,
+        "cache_hit": 0.8158518409642096
+      },
+      "2026-10-20/claudeCode/haiku": {
+        "requests": 9,
+        "input": 18,
+        "cacheRead": 0,
+        "cacheWrite": 18676,
+        "cacheWrite1h": 18676,
+        "output": 5122,
+        "prompt": 18694,
+        "uncached": 18694,
+        "cache_hit": 0.0
+      },
+      "2026-10-20/claudeCode/opus": {
+        "requests": 351,
+        "input": 708,
+        "cacheRead": 21454539,
+        "cacheWrite": 2031031,
+        "cacheWrite1h": 1986278,
+        "output": 180168,
+        "prompt": 23486278,
+        "uncached": 2031739,
+        "cache_hit": 0.9134925082637615
+      },
+      "2026-10-20/claudeCode/sonnet": {
+        "requests": 37,
+        "input": 74,
+        "cacheRead": 1395963,
+        "cacheWrite": 289383,
+        "cacheWrite1h": 217073,
+        "output": 14844,
+        "prompt": 1685420,
+        "uncached": 289457,
+        "cache_hit": 0.8282582383026189
+      },
+      "2026-10-20/openDesign/deepseek-v4.1-flash": {
+        "requests": 35,
+        "input": 135074,
+        "cacheRead": 1490688,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 25743,
+        "prompt": 1625762,
+        "uncached": 135074,
+        "cache_hit": 0.9169164982328286
+      },
+      "2026-10-21/claudeCode/haiku": {
+        "requests": 2,
+        "input": 4,
+        "cacheRead": 0,
+        "cacheWrite": 21323,
+        "cacheWrite1h": 21323,
+        "output": 8,
+        "prompt": 21327,
+        "uncached": 21327,
+        "cache_hit": 0.0
+      },
+      "2026-10-21/claudeCode/opus": {
+        "requests": 57,
+        "input": 114,
+        "cacheRead": 4238477,
+        "cacheWrite": 412957,
+        "cacheWrite1h": 381728,
+        "output": 27441,
+        "prompt": 4651548,
+        "uncached": 413071,
+        "cache_hit": 0.9111970896570346
+      },
+      "2026-10-21/claudeCode/sonnet": {
+        "requests": 14,
+        "input": 28,
+        "cacheRead": 243465,
+        "cacheWrite": 73834,
+        "cacheWrite1h": 0,
+        "output": 4561,
+        "prompt": 317327,
+        "uncached": 73862,
+        "cache_hit": 0.7672369511576387
+      },
+      "2026-10-21/openDesign/deepseek-v4.1-flash": {
+        "requests": 481,
+        "input": 1217723,
+        "cacheRead": 21627008,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 383184,
+        "prompt": 22844731,
+        "uncached": 1217723,
+        "cache_hit": 0.946695673501255
+      },
+      "2026-10-22/claudeCode/haiku": {
+        "requests": 5,
+        "input": 10,
+        "cacheRead": 0,
+        "cacheWrite": 39283,
+        "cacheWrite1h": 39283,
+        "output": 20,
+        "prompt": 39293,
+        "uncached": 39293,
+        "cache_hit": 0.0
+      },
+      "2026-10-22/claudeCode/opus": {
+        "requests": 363,
+        "input": 726,
+        "cacheRead": 23140477,
+        "cacheWrite": 1524482,
+        "cacheWrite1h": 1324962,
+        "output": 170697,
+        "prompt": 24665685,
+        "uncached": 1525208,
+        "cache_hit": 0.9381647823687037
+      },
+      "2026-10-22/claudeCode/sonnet": {
+        "requests": 44,
+        "input": 88,
+        "cacheRead": 2576394,
+        "cacheWrite": 419441,
+        "cacheWrite1h": 322747,
+        "output": 29339,
+        "prompt": 2995923,
+        "uncached": 419529,
+        "cache_hit": 0.8599666947381491
+      },
+      "2026-10-22/openDesign/deepseek-v4.1-flash": {
+        "requests": 50,
+        "input": 173231,
+        "cacheRead": 1757440,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 43453,
+        "prompt": 1930671,
+        "uncached": 173231,
+        "cache_hit": 0.9102742000061118
+      },
+      "2026-10-22/openDesign/glm-5.3-flash": {
+        "requests": 502,
+        "input": 2946379,
+        "cacheRead": 22674560,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 206444,
+        "prompt": 25620939,
+        "uncached": 2946379,
+        "cache_hit": 0.8850011313012376
+      },
+      "2026-10-23/claudeCode/haiku": {
+        "requests": 7,
+        "input": 14,
+        "cacheRead": 0,
+        "cacheWrite": 49920,
+        "cacheWrite1h": 49920,
+        "output": 126,
+        "prompt": 49934,
+        "uncached": 49934,
+        "cache_hit": 0.0
+      },
+      "2026-10-23/claudeCode/opus": {
+        "requests": 106,
+        "input": 212,
+        "cacheRead": 9627692,
+        "cacheWrite": 985731,
+        "cacheWrite1h": 934934,
+        "output": 58103,
+        "prompt": 10613635,
+        "uncached": 985943,
+        "cache_hit": 0.9071060009129766
+      },
+      "2026-10-23/claudeCode/sonnet": {
+        "requests": 52,
+        "input": 104,
+        "cacheRead": 3078008,
+        "cacheWrite": 614243,
+        "cacheWrite1h": 514135,
+        "output": 28361,
+        "prompt": 3692355,
+        "uncached": 614347,
+        "cache_hit": 0.8336164859554404
+      },
+      "2026-10-23/openDesign/glm-5.3-flash": {
+        "requests": 397,
+        "input": 1434536,
+        "cacheRead": 17358656,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 222182,
+        "prompt": 18793192,
+        "uncached": 1434536,
+        "cache_hit": 0.9236672514174282
+      },
+      "2026-10-24/claudeCode/haiku": {
+        "requests": 2,
+        "input": 4,
+        "cacheRead": 0,
+        "cacheWrite": 14252,
+        "cacheWrite1h": 14252,
+        "output": 8,
+        "prompt": 14256,
+        "uncached": 14256,
+        "cache_hit": 0.0
+      },
+      "2026-10-24/claudeCode/sonnet": {
+        "requests": 83,
+        "input": 166,
+        "cacheRead": 6846013,
+        "cacheWrite": 943154,
+        "cacheWrite1h": 857272,
+        "output": 59893,
+        "prompt": 7789333,
+        "uncached": 943320,
+        "cache_hit": 0.8788959208702465
+      },
+      "2026-10-24/openDesign/glm-5.3-flash": {
+        "requests": 265,
+        "input": 416237,
+        "cacheRead": 8150528,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 97225,
+        "prompt": 8566765,
+        "uncached": 416237,
+        "cache_hit": 0.9514125810618127
+      },
+      "2026-10-25/claudeCode/opus": {
+        "requests": 2,
+        "input": 4,
+        "cacheRead": 19666,
+        "cacheWrite": 23041,
+        "cacheWrite1h": 0,
+        "output": 546,
+        "prompt": 42711,
+        "uncached": 23045,
+        "cache_hit": 0.46044344548242844
+      },
+      "2026-10-25/claudeCode/sonnet": {
+        "requests": 4,
+        "input": 8,
+        "cacheRead": 66708,
+        "cacheWrite": 24029,
+        "cacheWrite1h": 0,
+        "output": 815,
+        "prompt": 90745,
+        "uncached": 24037,
+        "cache_hit": 0.7351148823626646
+      },
+      "2026-10-26/chatgpt/gpt-6-luna": {
+        "requests": 128,
+        "input": 3700227,
+        "cacheRead": 1247104,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 64391,
+        "prompt": 4947331,
+        "uncached": 3700227,
+        "cache_hit": 0.25207611942681823
+      },
+      "2026-10-26/chatgpt/gpt-6.1-sol": {
+        "requests": 294,
+        "input": 12730484,
+        "cacheRead": 1564160,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 103301,
+        "prompt": 14294644,
+        "uncached": 12730484,
+        "cache_hit": 0.10942280199492901
+      },
+      "2026-10-26/claudeCode/haiku": {
+        "requests": 28,
+        "input": 56,
+        "cacheRead": 2678102,
+        "cacheWrite": 351553,
+        "cacheWrite1h": 351553,
+        "output": 22998,
+        "prompt": 3029711,
+        "uncached": 351609,
+        "cache_hit": 0.8839463565996889
+      },
+      "2026-10-26/claudeCode/opus": {
+        "requests": 23,
+        "input": 46,
+        "cacheRead": 1432530,
+        "cacheWrite": 129636,
+        "cacheWrite1h": 93100,
+        "output": 9338,
+        "prompt": 1562212,
+        "uncached": 129682,
+        "cache_hit": 0.9169882192685755
+      },
+      "2026-10-26/claudeCode/sonnet": {
+        "requests": 6,
+        "input": 12,
+        "cacheRead": 212602,
+        "cacheWrite": 111112,
+        "cacheWrite1h": 87133,
+        "output": 2952,
+        "prompt": 323726,
+        "uncached": 111124,
+        "cache_hit": 0.6567343988434664
+      },
+      "2026-10-27/chatgpt/gpt-6.1-sol": {
+        "requests": 28,
+        "input": 1370319,
+        "cacheRead": 79488,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 7549,
+        "prompt": 1449807,
+        "uncached": 1370319,
+        "cache_hit": 0.05482660795540372
+      }
+    },
+    "by_model_source": {
+      "chatgpt/gpt-5.6-luna/auxiliary": {
+        "requests": 21,
+        "input": 735302,
+        "cacheRead": 147072,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 12419,
+        "prompt": 882374,
+        "uncached": 735302,
+        "cache_hit": 0.16667762196075586
+      },
+      "chatgpt/gpt-5.6-luna/chat": {
+        "requests": 163,
+        "input": 6483643,
+        "cacheRead": 2460544,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 45166,
+        "prompt": 8944187,
+        "uncached": 6483643,
+        "cache_hit": 0.2750997938661166
+      },
+      "chatgpt/gpt-6-luna/auxiliary": {
+        "requests": 4,
+        "input": 83256,
+        "cacheRead": 27648,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 1598,
+        "prompt": 110904,
+        "uncached": 83256,
+        "cache_hit": 0.24929668902834884
+      },
+      "chatgpt/gpt-6-luna/chat": {
+        "requests": 76,
+        "input": 2418910,
+        "cacheRead": 920448,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 46541,
+        "prompt": 3339358,
+        "uncached": 2418910,
+        "cache_hit": 0.27563621510481956
+      },
+      "chatgpt/gpt-6-luna/routine": {
+        "requests": 48,
+        "input": 1198061,
+        "cacheRead": 299008,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 16252,
+        "prompt": 1497069,
+        "uncached": 1198061,
+        "cache_hit": 0.19972893700958338
+      },
+      "chatgpt/gpt-6.1-sol/auxiliary": {
+        "requests": 27,
+        "input": 1049077,
+        "cacheRead": 198528,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 19005,
+        "prompt": 1247605,
+        "uncached": 1049077,
+        "cache_hit": 0.15912728788358496
+      },
+      "chatgpt/gpt-6.1-sol/chat": {
+        "requests": 194,
+        "input": 8886561,
+        "cacheRead": 1115904,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 56981,
+        "prompt": 10002465,
+        "uncached": 8886561,
+        "cache_hit": 0.1115628997452128
+      },
+      "chatgpt/gpt-6.1-sol/routine": {
+        "requests": 137,
+        "input": 5147008,
+        "cacheRead": 462720,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 41929,
+        "prompt": 5609728,
+        "uncached": 5147008,
+        "cache_hit": 0.08248528270889427
+      },
+      "claudeCode/haiku/auxiliary": {
+        "requests": 114,
+        "input": 228,
+        "cacheRead": 2465070,
+        "cacheWrite": 1481402,
+        "cacheWrite1h": 1481402,
+        "output": 86067,
+        "prompt": 3946700,
+        "uncached": 1481630,
+        "cache_hit": 0.6245901639344262
+      },
+      "claudeCode/haiku/chat": {
+        "requests": 518,
+        "input": 1036,
+        "cacheRead": 30545860,
+        "cacheWrite": 9548230,
+        "cacheWrite1h": 9548230,
+        "output": 346238,
+        "prompt": 40095126,
+        "uncached": 9549266,
+        "cache_hit": 0.7618347427066322
+      },
+      "claudeCode/haiku/routine": {
+        "requests": 30,
+        "input": 60,
+        "cacheRead": 531404,
+        "cacheWrite": 110887,
+        "cacheWrite1h": 110887,
+        "output": 16783,
+        "prompt": 642351,
+        "uncached": 110947,
+        "cache_hit": 0.827279789398631
+      },
+      "claudeCode/opus/auxiliary": {
+        "requests": 10,
+        "input": 20,
+        "cacheRead": 958601,
+        "cacheWrite": 360199,
+        "cacheWrite1h": 360199,
+        "output": 22484,
+        "prompt": 1318820,
+        "uncached": 360219,
+        "cache_hit": 0.7268626499446474
+      },
+      "claudeCode/opus/chat": {
+        "requests": 604,
+        "input": 1210,
+        "cacheRead": 59400219,
+        "cacheWrite": 6598578,
+        "cacheWrite1h": 6598578,
+        "output": 365907,
+        "prompt": 66000007,
+        "uncached": 6599788,
+        "cache_hit": 0.9000032227269309
+      },
+      "claudeCode/opus/routine": {
+        "requests": 991,
+        "input": 1986,
+        "cacheRead": 43766912,
+        "cacheWrite": 2568640,
+        "cacheWrite1h": 2054031,
+        "output": 417392,
+        "prompt": 46337538,
+        "uncached": 2570626,
+        "cache_hit": 0.9445238976658622
+      },
+      "claudeCode/sonnet/auxiliary": {
+        "requests": 150,
+        "input": 300,
+        "cacheRead": 11241181,
+        "cacheWrite": 4689421,
+        "cacheWrite1h": 4689421,
+        "output": 202219,
+        "prompt": 15930902,
+        "uncached": 4689721,
+        "cache_hit": 0.7056211255332561
+      },
+      "claudeCode/sonnet/chat": {
+        "requests": 2068,
+        "input": 4144,
+        "cacheRead": 166816064,
+        "cacheWrite": 36453417,
+        "cacheWrite1h": 36453417,
+        "output": 867275,
+        "prompt": 203273625,
+        "uncached": 36457561,
+        "cache_hit": 0.8206478533552988
+      },
+      "claudeCode/sonnet/delegation": {
+        "requests": 54,
+        "input": 108,
+        "cacheRead": 1493015,
+        "cacheWrite": 176202,
+        "cacheWrite1h": 176202,
+        "output": 25337,
+        "prompt": 1669325,
+        "uncached": 176310,
+        "cache_hit": 0.8943824599763377
+      },
+      "claudeCode/sonnet/group": {
+        "requests": 93,
+        "input": 186,
+        "cacheRead": 3574391,
+        "cacheWrite": 826191,
+        "cacheWrite1h": 826191,
+        "output": 59464,
+        "prompt": 4400768,
+        "uncached": 826377,
+        "cache_hit": 0.8122198216311335
+      },
+      "claudeCode/sonnet/routine": {
+        "requests": 1074,
+        "input": 2148,
+        "cacheRead": 31303369,
+        "cacheWrite": 3357259,
+        "cacheWrite1h": 2771880,
+        "output": 411988,
+        "prompt": 34662776,
+        "uncached": 3359407,
+        "cache_hit": 0.9030831517937282
+      },
+      "commandCode/deepseek/deepseek-v4.1-flash/auxiliary": {
+        "requests": 13,
+        "input": 38179,
+        "cacheRead": 812288,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 24626,
+        "prompt": 850467,
+        "uncached": 38179,
+        "cache_hit": 0.9551081934983956
+      },
+      "commandCode/deepseek/deepseek-v4.1-flash/chat": {
+        "requests": 95,
+        "input": 473697,
+        "cacheRead": 5042688,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 74864,
+        "prompt": 5516385,
+        "uncached": 473697,
+        "cache_hit": 0.9141290899746846
+      },
+      "openDesign/deepseek-v4.1-flash/auxiliary": {
+        "requests": 25,
+        "input": 229727,
+        "cacheRead": 1417984,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 76801,
+        "prompt": 1647711,
+        "uncached": 229727,
+        "cache_hit": 0.8605780989506048
+      },
+      "openDesign/deepseek-v4.1-flash/chat": {
+        "requests": 137,
+        "input": 530061,
+        "cacheRead": 7500288,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 73494,
+        "prompt": 8030349,
+        "uncached": 530061,
+        "cache_hit": 0.9339927816337745
+      },
+      "openDesign/deepseek-v4.1-flash/delegation": {
+        "requests": 63,
+        "input": 170037,
+        "cacheRead": 2111104,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 54413,
+        "prompt": 2281141,
+        "uncached": 170037,
+        "cache_hit": 0.92545967127854
+      },
+      "openDesign/deepseek-v4.1-flash/routine": {
+        "requests": 341,
+        "input": 596203,
+        "cacheRead": 13845760,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 247672,
+        "prompt": 14441963,
+        "uncached": 596203,
+        "cache_hit": 0.9587173156446945
+      },
+      "openDesign/glm-5.3-flash/auxiliary": {
+        "requests": 64,
+        "input": 452220,
+        "cacheRead": 3088128,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 94391,
+        "prompt": 3540348,
+        "uncached": 452220,
+        "cache_hit": 0.8722667941117653
+      },
+      "openDesign/glm-5.3-flash/chat": {
+        "requests": 359,
+        "input": 2732050,
+        "cacheRead": 19627456,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 111515,
+        "prompt": 22359506,
+        "uncached": 2732050,
+        "cache_hit": 0.8778125956807812
+      },
+      "openDesign/glm-5.3-flash/delegation": {
+        "requests": 37,
+        "input": 209109,
+        "cacheRead": 1385344,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 21978,
+        "prompt": 1594453,
+        "uncached": 209109,
+        "cache_hit": 0.8688522019777315
+      },
+      "openDesign/glm-5.3-flash/routine": {
+        "requests": 704,
+        "input": 1403773,
+        "cacheRead": 24082816,
+        "cacheWrite": 0,
+        "cacheWrite1h": 0,
+        "output": 297967,
+        "prompt": 25486589,
+        "uncached": 1403773,
+        "cache_hit": 0.9449211112558059
+      }
+    }
+  },
+  "claude_pipe": {
+    "records": 1851,
+    "first": "2026-10-19T07:19:45Z",
+    "last": "2026-10-26T07:50:15Z",
+    "by_plan": {
+      "fresh": {
+        "requests": 226,
+        "input": 456,
+        "cacheRead": 2064390,
+        "cacheWrite": 9995683,
+        "cacheWrite1h": 9271334,
+        "output": 108075,
+        "prompt": 12060529,
+        "uncached": 9996139,
+        "cache_hit": 0.1711691087513657
+      },
+      "idle": {
+        "requests": 17,
+        "input": 34,
+        "cacheRead": 1883558,
+        "cacheWrite": 23224,
+        "cacheWrite1h": 23224,
+        "output": 12025,
+        "prompt": 1906816,
+        "uncached": 23258,
+        "cache_hit": 0.9878027035644761
+      },
+      "resume": {
+        "requests": 1608,
+        "input": 3218,
+        "cacheRead": 112186562,
+        "cacheWrite": 2906426,
+        "cacheWrite1h": 2533823,
+        "output": 867586,
+        "prompt": 115096206,
+        "uncached": 2909644,
+        "cache_hit": 0.9747198965011931
+      }
+    },
+    "by_reason": {
+      "noParked": {
+        "requests": 193,
+        "input": 388,
+        "cacheRead": 1470870,
+        "cacheWrite": 6976634,
+        "cacheWrite1h": 6252285,
+        "output": 84781,
+        "prompt": 8447892,
+        "uncached": 6977022,
+        "cache_hit": 0.17411089062218124
+      },
+      "none": {
+        "requests": 1625,
+        "input": 3252,
+        "cacheRead": 114070120,
+        "cacheWrite": 2929650,
+        "cacheWrite1h": 2557047,
+        "output": 879611,
+        "prompt": 117003022,
+        "uncached": 2932902,
+        "cache_hit": 0.9749331089926891
+      },
+      "notContinuation": {
+        "requests": 33,
+        "input": 68,
+        "cacheRead": 593520,
+        "cacheWrite": 3019049,
+        "cacheWrite1h": 3019049,
+        "output": 23294,
+        "prompt": 3612637,
+        "uncached": 3019117,
+        "cache_hit": 0.16428996325952483
+      }
+    },
+    "by_day_plan": {
+      "2026-10-19/fresh": {
+        "requests": 85,
+        "input": 170,
+        "cacheRead": 810198,
+        "cacheWrite": 3688746,
+        "cacheWrite1h": 3590429,
+        "output": 42122,
+        "prompt": 4499114,
+        "uncached": 3688916,
+        "cache_hit": 0.18007945564393346
+      },
+      "2026-10-19/resume": {
+        "requests": 508,
+        "input": 1016,
+        "cacheRead": 36414657,
+        "cacheWrite": 956515,
+        "cacheWrite1h": 912650,
+        "output": 300482,
+        "prompt": 37372188,
+        "uncached": 957531,
+        "cache_hit": 0.9743785137760733
+      },
+      "2026-10-20/fresh": {
+        "requests": 38,
+        "input": 76,
+        "cacheRead": 330504,
+        "cacheWrite": 1285646,
+        "cacheWrite1h": 1212829,
+        "output": 19439,
+        "prompt": 1616226,
+        "uncached": 1285722,
+        "cache_hit": 0.20449120358167733
+      },
+      "2026-10-20/idle": {
+        "requests": 3,
+        "input": 6,
+        "cacheRead": 333414,
+        "cacheWrite": 2797,
+        "cacheWrite1h": 2797,
+        "output": 2297,
+        "prompt": 336217,
+        "uncached": 2803,
+        "cache_hit": 0.9916631223287341
+      },
+      "2026-10-20/resume": {
+        "requests": 363,
+        "input": 726,
+        "cacheRead": 20555743,
+        "cacheWrite": 711982,
+        "cacheWrite1h": 640426,
+        "output": 174939,
+        "prompt": 21268451,
+        "uncached": 712708,
+        "cache_hit": 0.9664898962317472
+      },
+      "2026-10-21/fresh": {
+        "requests": 20,
+        "input": 44,
+        "cacheRead": 186411,
+        "cacheWrite": 945308,
+        "cacheWrite1h": 809369,
+        "output": 9738,
+        "prompt": 1131763,
+        "uncached": 945352,
+        "cache_hit": 0.16470851229453518
+      },
+      "2026-10-21/idle": {
+        "requests": 4,
+        "input": 8,
+        "cacheRead": 398660,
+        "cacheWrite": 4845,
+        "cacheWrite1h": 4845,
+        "output": 2157,
+        "prompt": 403513,
+        "uncached": 4853,
+        "cache_hit": 0.987973126020723
+      },
+      "2026-10-21/resume": {
+        "requests": 111,
+        "input": 224,
+        "cacheRead": 7926658,
+        "cacheWrite": 168909,
+        "cacheWrite1h": 132001,
+        "output": 53374,
+        "prompt": 8095791,
+        "uncached": 169133,
+        "cache_hit": 0.9791085268876136
+      },
+      "2026-10-22/fresh": {
+        "requests": 30,
+        "input": 60,
+        "cacheRead": 253738,
+        "cacheWrite": 1206501,
+        "cacheWrite1h": 1104881,
+        "output": 9517,
+        "prompt": 1460299,
+        "uncached": 1206561,
+        "cache_hit": 0.17375756608749304
+      },
+      "2026-10-22/idle": {
+        "requests": 1,
+        "input": 2,
+        "cacheRead": 113332,
+        "cacheWrite": 1791,
+        "cacheWrite1h": 1791,
+        "output": 233,
+        "prompt": 115125,
+        "uncached": 1793,
+        "cache_hit": 0.9844256243213898
+      },
+      "2026-10-22/resume": {
+        "requests": 353,
+        "input": 706,
+        "cacheRead": 23899450,
+        "cacheWrite": 650501,
+        "cacheWrite1h": 578140,
+        "output": 177117,
+        "prompt": 24550657,
+        "uncached": 651207,
+        "cache_hit": 0.9734749664744207
+      },
+      "2026-10-23/fresh": {
+        "requests": 28,
+        "input": 56,
+        "cacheRead": 226691,
+        "cacheWrite": 1500911,
+        "cacheWrite1h": 1350719,
+        "output": 11972,
+        "prompt": 1727658,
+        "uncached": 1500967,
+        "cache_hit": 0.13121289051421056
+      },
+      "2026-10-23/idle": {
+        "requests": 5,
+        "input": 10,
+        "cacheRead": 587059,
+        "cacheWrite": 4374,
+        "cacheWrite1h": 4374,
+        "output": 4372,
+        "prompt": 591443,
+        "uncached": 4384,
+        "cache_hit": 0.9925876204469408
+      },
+      "2026-10-23/resume": {
+        "requests": 134,
+        "input": 268,
+        "cacheRead": 12072996,
+        "cacheWrite": 212186,
+        "cacheWrite1h": 140037,
+        "output": 75435,
+        "prompt": 12285450,
+        "uncached": 212454,
+        "cache_hit": 0.9827068605545585
+      },
+      "2026-10-24/fresh": {
+        "requests": 13,
+        "input": 26,
+        "cacheRead": 103434,
+        "cacheWrite": 810184,
+        "cacheWrite1h": 728793,
+        "output": 6567,
+        "prompt": 913644,
+        "uncached": 810210,
+        "cache_hit": 0.11321039704742766
+      },
+      "2026-10-24/idle": {
+        "requests": 4,
+        "input": 8,
+        "cacheRead": 451093,
+        "cacheWrite": 9417,
+        "cacheWrite1h": 9417,
+        "output": 2966,
+        "prompt": 460518,
+        "uncached": 9425,
+        "cache_hit": 0.979533916155286
+      },
+      "2026-10-24/resume": {
+        "requests": 89,
+        "input": 178,
+        "cacheRead": 7081807,
+        "cacheWrite": 128385,
+        "cacheWrite1h": 73097,
+        "output": 58334,
+        "prompt": 7210370,
+        "uncached": 128563,
+        "cache_hit": 0.9821697083506117
+      },
+      "2026-10-25/fresh": {
+        "requests": 2,
+        "input": 4,
+        "cacheRead": 0,
+        "cacheWrite": 40253,
+        "cacheWrite1h": 0,
+        "output": 598,
+        "prompt": 40257,
+        "uncached": 40257,
+        "cache_hit": 0.0
+      },
+      "2026-10-25/resume": {
+        "requests": 4,
+        "input": 8,
+        "cacheRead": 86374,
+        "cacheWrite": 6817,
+        "cacheWrite1h": 0,
+        "output": 763,
+        "prompt": 93199,
+        "uncached": 6825,
+        "cache_hit": 0.9267696005321946
+      },
+      "2026-10-26/fresh": {
+        "requests": 10,
+        "input": 20,
+        "cacheRead": 153414,
+        "cacheWrite": 518134,
+        "cacheWrite1h": 474314,
+        "output": 8122,
+        "prompt": 671568,
+        "uncached": 518154,
+        "cache_hit": 0.22844149810592523
+      },
+      "2026-10-26/resume": {
+        "requests": 46,
+        "input": 92,
+        "cacheRead": 4148877,
+        "cacheWrite": 71131,
+        "cacheWrite1h": 57472,
+        "output": 27142,
+        "prompt": 4220100,
+        "uncached": 71223,
+        "cache_hit": 0.9831229117793417
+      }
+    },
+    "quantiles": {
+      "messages": {
+        "min": 2,
+        "p50": 42,
+        "p95": 356,
+        "max": 477
+      },
+      "chars": {
+        "min": 1634,
+        "p50": 82617,
+        "p95": 162169,
+        "max": 200522
+      },
+      "cacheWrite": {
+        "min": 69,
+        "p50": 1310,
+        "p95": 46768,
+        "max": 172573
+      }
+    },
+    "counts_by_plan": {
+      "fresh": 226,
+      "resume": 1608,
+      "idle": 17
+    },
+    "counts_by_reason": {
+      "noParked": 193,
+      "none": 1625,
+      "notContinuation": 33
+    }
+  },
+  "sessions": [
+    {
+      "file": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/1332324E-9A7E-47E7-BBC1-6A24A5C4A510/conversa-28E7D57D-3005-4B9C-963F-196E06DEA374.json",
+      "active": false,
+      "id": "conversa-28E7D57D-3005-4B9C-963F-196E06DEA374",
+      "pipe_tag": "f9224285",
+      "messages": 1398,
+      "requests_in_history": 70,
+      "compactions": 13,
+      "covered": 1347,
+      "condensed": 1216,
+      "remaining_messages": 51,
+      "raw_remaining_chars_including_reasoning": 200419,
+      "remaining_content_chars_by_role": {
+        "user": 11056,
+        "assistant": 1043,
+        "tool": 153930
+      },
+      "remaining_reasoning_data_chars": 19932,
+      "summary_chars": 4993,
+      "chunks": 1,
+      "reasoning": {
+        "messages": 151,
+        "data_chars": 810024,
+        "text_chars": 0
+      },
+      "tools": {
+        "run_command": {
+          "count": 391,
+          "chars": 458784,
+          "errors": 30,
+          "over_4000": 7,
+          "over_24000": 0
+        },
+        "read_file": {
+          "count": 157,
+          "chars": 452520,
+          "errors": 15,
+          "over_4000": 10,
+          "over_24000": 0
+        },
+        "grep": {
+          "count": 22,
+          "chars": 80319,
+          "errors": 1,
+          "over_4000": 1,
+          "over_24000": 1
+        },
+        "recall": {
+          "count": 17,
+          "chars": 66739,
+          "errors": 0,
+          "over_4000": 2,
+          "over_24000": 0
+        },
+        "browse_read": {
+          "count": 1,
+          "chars": 15480,
+          "errors": 0,
+          "over_4000": 1,
+          "over_24000": 0
+        },
+        "web_fetch": {
+          "count": 3,
+          "chars": 10134,
+          "errors": 0,
+          "over_4000": 1,
+          "over_24000": 0
+        },
+        "task_plan": {
+          "count": 26,
+          "chars": 9701,
+          "errors": 1,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "screenshot": {
+          "count": 7,
+          "chars": 5869,
+          "errors": 4,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "list_directory": {
+          "count": 3,
+          "chars": 5318,
+          "errors": 1,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "edit_file": {
+          "count": 29,
+          "chars": 3594,
+          "errors": 3,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "write_file": {
+          "count": 32,
+          "chars": 3560,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_snapshot": {
+          "count": 2,
+          "chars": 3492,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "web_search": {
+          "count": 4,
+          "chars": 3491,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "remember": {
+          "count": 12,
+          "chars": 2711,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "glob": {
+          "count": 9,
+          "chars": 1520,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "schedule": {
+          "count": 4,
+          "chars": 1394,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "orbs": {
+          "count": 1,
+          "chars": 688,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "applescript": {
+          "count": 3,
+          "chars": 429,
+          "errors": 1,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_open": {
+          "count": 2,
+          "chars": 331,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_click": {
+          "count": 1,
+          "chars": 106,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "ask_user": {
+          "count": 1,
+          "chars": 50,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_close": {
+          "count": 2,
+          "chars": 30,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        }
+      },
+      "exact_duplicate_output_chars": 82089,
+      "repeated_identical_calls": 16,
+      "json_whitespace_savings_chars": 0,
+      "stored_pruned_tool_outputs": 115
+    },
+    {
+      "file": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/1332324E-9A7E-47E7-BBC1-6A24A5C4A510/pedido-159287E9-555E-42DE-8DE1-ED47A557955F.json",
+      "active": false,
+      "id": "pedido-159287E9-555E-42DE-8DE1-ED47A557955F",
+      "pipe_tag": "dbe62f49",
+      "messages": 84,
+      "requests_in_history": 1,
+      "compactions": 0,
+      "covered": 0,
+      "condensed": 0,
+      "remaining_messages": 84,
+      "raw_remaining_chars_including_reasoning": 162391,
+      "remaining_content_chars_by_role": {
+        "user": 6802,
+        "assistant": 3782,
+        "tool": 122402
+      },
+      "remaining_reasoning_data_chars": 0,
+      "summary_chars": 0,
+      "chunks": 0,
+      "reasoning": {},
+      "tools": {
+        "read_file": {
+          "count": 7,
+          "chars": 52713,
+          "errors": 0,
+          "over_4000": 4,
+          "over_24000": 0
+        },
+        "run_command": {
+          "count": 25,
+          "chars": 50434,
+          "errors": 2,
+          "over_4000": 5,
+          "over_24000": 0
+        },
+        "list_directory": {
+          "count": 3,
+          "chars": 9606,
+          "errors": 0,
+          "over_4000": 1,
+          "over_24000": 0
+        },
+        "recall": {
+          "count": 3,
+          "chars": 5526,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "grep": {
+          "count": 6,
+          "chars": 3902,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "write_file": {
+          "count": 2,
+          "chars": 221,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        }
+      },
+      "exact_duplicate_output_chars": 0,
+      "repeated_identical_calls": 0,
+      "json_whitespace_savings_chars": 0,
+      "stored_pruned_tool_outputs": 0
+    },
+    {
+      "file": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/1332324E-9A7E-47E7-BBC1-6A24A5C4A510/pedido-2EB0FBB7-B39F-48DE-8365-EC60EC852EDC.json",
+      "active": false,
+      "id": "pedido-2EB0FBB7-B39F-48DE-8365-EC60EC852EDC",
+      "pipe_tag": "8625235d",
+      "messages": 28,
+      "requests_in_history": 1,
+      "compactions": 0,
+      "covered": 0,
+      "condensed": 0,
+      "remaining_messages": 28,
+      "raw_remaining_chars_including_reasoning": 80351,
+      "remaining_content_chars_by_role": {
+        "user": 6827,
+        "assistant": 3851,
+        "tool": 59423
+      },
+      "remaining_reasoning_data_chars": 0,
+      "summary_chars": 0,
+      "chunks": 0,
+      "reasoning": {},
+      "tools": {
+        "read_file": {
+          "count": 3,
+          "chars": 40018,
+          "errors": 0,
+          "over_4000": 2,
+          "over_24000": 0
+        },
+        "run_command": {
+          "count": 6,
+          "chars": 18388,
+          "errors": 0,
+          "over_4000": 1,
+          "over_24000": 0
+        },
+        "list_directory": {
+          "count": 1,
+          "chars": 630,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "edit_file": {
+          "count": 2,
+          "chars": 266,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "write_file": {
+          "count": 1,
+          "chars": 121,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        }
+      },
+      "exact_duplicate_output_chars": 0,
+      "repeated_identical_calls": 0,
+      "json_whitespace_savings_chars": 0,
+      "stored_pruned_tool_outputs": 0
+    },
+    {
+      "file": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/1332324E-9A7E-47E7-BBC1-6A24A5C4A510/pedido-D827DF85-2F5C-4535-8967-1D43A512C3F3.json",
+      "active": false,
+      "id": "pedido-D827DF85-2F5C-4535-8967-1D43A512C3F3",
+      "pipe_tag": "fc1a899b",
+      "messages": 58,
+      "requests_in_history": 1,
+      "compactions": 0,
+      "covered": 0,
+      "condensed": 0,
+      "remaining_messages": 58,
+      "raw_remaining_chars_including_reasoning": 108605,
+      "remaining_content_chars_by_role": {
+        "user": 11328,
+        "assistant": 597,
+        "tool": 81118
+      },
+      "remaining_reasoning_data_chars": 0,
+      "summary_chars": 0,
+      "chunks": 0,
+      "reasoning": {},
+      "tools": {
+        "run_command": {
+          "count": 17,
+          "chars": 41353,
+          "errors": 2,
+          "over_4000": 3,
+          "over_24000": 0
+        },
+        "read_file": {
+          "count": 7,
+          "chars": 27103,
+          "errors": 1,
+          "over_4000": 2,
+          "over_24000": 0
+        },
+        "grep": {
+          "count": 2,
+          "chars": 11266,
+          "errors": 0,
+          "over_4000": 1,
+          "over_24000": 0
+        },
+        "write_file": {
+          "count": 6,
+          "chars": 800,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "schedule": {
+          "count": 1,
+          "chars": 334,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "edit_file": {
+          "count": 2,
+          "chars": 262,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        }
+      },
+      "exact_duplicate_output_chars": 0,
+      "repeated_identical_calls": 0,
+      "json_whitespace_savings_chars": 0,
+      "stored_pruned_tool_outputs": 0
+    },
+    {
+      "file": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/1332324E-9A7E-47E7-BBC1-6A24A5C4A510/pedido-E5B741BC-930E-42CC-8A07-D36CFA6CAA12.json",
+      "active": false,
+      "id": "pedido-E5B741BC-930E-42CC-8A07-D36CFA6CAA12",
+      "pipe_tag": "5003e754",
+      "messages": 68,
+      "requests_in_history": 1,
+      "compactions": 0,
+      "covered": 0,
+      "condensed": 0,
+      "remaining_messages": 68,
+      "raw_remaining_chars_including_reasoning": 162936,
+      "remaining_content_chars_by_role": {
+        "user": 8112,
+        "assistant": 2273,
+        "tool": 128289
+      },
+      "remaining_reasoning_data_chars": 0,
+      "summary_chars": 0,
+      "chunks": 0,
+      "reasoning": {},
+      "tools": {
+        "run_command": {
+          "count": 39,
+          "chars": 128171,
+          "errors": 2,
+          "over_4000": 10,
+          "over_24000": 0
+        },
+        "write_file": {
+          "count": 1,
+          "chars": 118,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        }
+      },
+      "exact_duplicate_output_chars": 0,
+      "repeated_identical_calls": 0,
+      "json_whitespace_savings_chars": 0,
+      "stored_pruned_tool_outputs": 0
+    },
+    {
+      "file": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/1332324E-9A7E-47E7-BBC1-6A24A5C4A510/routine-54CA00BB-C0DD-40D3-8B6C-CF8479DD9897.json",
+      "active": false,
+      "id": "routine-54CA00BB-C0DD-40D3-8B6C-CF8479DD9897",
+      "pipe_tag": "c7f3e0d4",
+      "messages": 4,
+      "requests_in_history": 1,
+      "compactions": 0,
+      "covered": 0,
+      "condensed": 0,
+      "remaining_messages": 4,
+      "raw_remaining_chars_including_reasoning": 25295,
+      "remaining_content_chars_by_role": {
+        "user": 7532,
+        "assistant": 207,
+        "tool": 14571
+      },
+      "remaining_reasoning_data_chars": 2788,
+      "summary_chars": 0,
+      "chunks": 0,
+      "reasoning": {
+        "messages": 1,
+        "data_chars": 2788,
+        "text_chars": 0
+      },
+      "tools": {
+        "read_file": {
+          "count": 1,
+          "chars": 14571,
+          "errors": 0,
+          "over_4000": 1,
+          "over_24000": 0
+        }
+      },
+      "exact_duplicate_output_chars": 0,
+      "repeated_identical_calls": 0,
+      "json_whitespace_savings_chars": 0,
+      "stored_pruned_tool_outputs": 0
+    },
+    {
+      "file": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/1332324E-9A7E-47E7-BBC1-6A24A5C4A510/routine-EC116C28-A2F2-4116-9C62-DAF2D67A8C11.json",
+      "active": false,
+      "id": "routine-EC116C28-A2F2-4116-9C62-DAF2D67A8C11",
+      "pipe_tag": "02bda935",
+      "messages": 24,
+      "requests_in_history": 1,
+      "compactions": 0,
+      "covered": 0,
+      "condensed": 0,
+      "remaining_messages": 24,
+      "raw_remaining_chars_including_reasoning": 43613,
+      "remaining_content_chars_by_role": {
+        "user": 9287,
+        "assistant": 1220,
+        "tool": 28406
+      },
+      "remaining_reasoning_data_chars": 0,
+      "summary_chars": 0,
+      "chunks": 0,
+      "reasoning": {},
+      "tools": {
+        "read_file": {
+          "count": 1,
+          "chars": 14571,
+          "errors": 0,
+          "over_4000": 1,
+          "over_24000": 0
+        },
+        "grep": {
+          "count": 1,
+          "chars": 5650,
+          "errors": 0,
+          "over_4000": 1,
+          "over_24000": 0
+        },
+        "run_command": {
+          "count": 7,
+          "chars": 4156,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "recall": {
+          "count": 2,
+          "chars": 3807,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "remember": {
+          "count": 1,
+          "chars": 222,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        }
+      },
+      "exact_duplicate_output_chars": 0,
+      "repeated_identical_calls": 0,
+      "json_whitespace_savings_chars": 0,
+      "stored_pruned_tool_outputs": 0
+    },
+    {
+      "file": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/1332324E-9A7E-47E7-BBC1-6A24A5C4A510.json",
+      "active": true,
+      "id": "1332324E-9A7E-47E7-BBC1-6A24A5C4A510",
+      "pipe_tag": "94d389fe",
+      "messages": 2879,
+      "requests_in_history": 177,
+      "compactions": 26,
+      "covered": 2742,
+      "condensed": 2825,
+      "remaining_messages": 137,
+      "raw_remaining_chars_including_reasoning": 168100,
+      "remaining_content_chars_by_role": {
+        "user": 44487,
+        "assistant": 13427,
+        "tool": 76519
+      },
+      "remaining_reasoning_data_chars": 0,
+      "summary_chars": 5272,
+      "chunks": 1,
+      "reasoning": {
+        "messages": 153,
+        "data_chars": 486756,
+        "text_chars": 0
+      },
+      "tools": {
+        "run_command": {
+          "count": 968,
+          "chars": 1266806,
+          "errors": 37,
+          "over_4000": 2,
+          "over_24000": 0
+        },
+        "read_file": {
+          "count": 148,
+          "chars": 351915,
+          "errors": 3,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "grep": {
+          "count": 39,
+          "chars": 64199,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "list_directory": {
+          "count": 20,
+          "chars": 35410,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "recall": {
+          "count": 20,
+          "chars": 29259,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "job_output": {
+          "count": 23,
+          "chars": 23530,
+          "errors": 1,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "applescript": {
+          "count": 34,
+          "chars": 12104,
+          "errors": 5,
+          "over_4000": 0,
+          "over_24000": 0,
+          "json_whitespace_savings_chars": 0
+        },
+        "browse_snapshot": {
+          "count": 17,
+          "chars": 11280,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_run": {
+          "count": 4,
+          "chars": 9396,
+          "errors": 1,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "remember": {
+          "count": 25,
+          "chars": 5667,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "schedule": {
+          "count": 17,
+          "chars": 4689,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "edit_file": {
+          "count": 30,
+          "chars": 3802,
+          "errors": 1,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "web_search": {
+          "count": 2,
+          "chars": 3669,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "job_list": {
+          "count": 1,
+          "chars": 3068,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "trash": {
+          "count": 5,
+          "chars": 2903,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "job_stop": {
+          "count": 3,
+          "chars": 2619,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "write_file": {
+          "count": 20,
+          "chars": 2500,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "web_fetch": {
+          "count": 3,
+          "chars": 2012,
+          "errors": 1,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_read": {
+          "count": 3,
+          "chars": 1916,
+          "errors": 1,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "ui_read": {
+          "count": 3,
+          "chars": 1846,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_open": {
+          "count": 9,
+          "chars": 1739,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "ui_act": {
+          "count": 5,
+          "chars": 1521,
+          "errors": 2,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_click": {
+          "count": 8,
+          "chars": 1354,
+          "errors": 1,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browser_tab": {
+          "count": 5,
+          "chars": 1300,
+          "errors": 2,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "screenshot": {
+          "count": 2,
+          "chars": 1099,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "orbs": {
+          "count": 6,
+          "chars": 1062,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "apps_list": {
+          "count": 3,
+          "chars": 1019,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "task_plan": {
+          "count": 2,
+          "chars": 916,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "glob": {
+          "count": 3,
+          "chars": 699,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "open": {
+          "count": 4,
+          "chars": 430,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_fill": {
+          "count": 7,
+          "chars": 187,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "ask_user": {
+          "count": 2,
+          "chars": 96,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_wait": {
+          "count": 2,
+          "chars": 42,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        }
+      },
+      "exact_duplicate_output_chars": 100853,
+      "repeated_identical_calls": 68,
+      "json_whitespace_savings_chars": 0,
+      "stored_pruned_tool_outputs": 204
+    },
+    {
+      "file": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/25C144D9-0DFE-419F-924E-FEDBDCB82A0A.json",
+      "active": true,
+      "id": "25C144D9-0DFE-419F-924E-FEDBDCB82A0A",
+      "pipe_tag": "1d63854e",
+      "messages": 81,
+      "requests_in_history": 11,
+      "compactions": 0,
+      "covered": 0,
+      "condensed": 59,
+      "remaining_messages": 81,
+      "raw_remaining_chars_including_reasoning": 94441,
+      "remaining_content_chars_by_role": {
+        "user": 6191,
+        "assistant": 17452,
+        "tool": 52366
+      },
+      "remaining_reasoning_data_chars": 0,
+      "summary_chars": 0,
+      "chunks": 0,
+      "reasoning": {},
+      "tools": {
+        "run_command": {
+          "count": 9,
+          "chars": 16227,
+          "errors": 0,
+          "over_4000": 1,
+          "over_24000": 0
+        },
+        "read_file": {
+          "count": 3,
+          "chars": 11855,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "apps_list": {
+          "count": 1,
+          "chars": 9326,
+          "errors": 0,
+          "over_4000": 1,
+          "over_24000": 0
+        },
+        "glob": {
+          "count": 2,
+          "chars": 7820,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "list_directory": {
+          "count": 5,
+          "chars": 5418,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "orb_propose": {
+          "count": 7,
+          "chars": 925,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "grep": {
+          "count": 2,
+          "chars": 555,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "ask_user": {
+          "count": 1,
+          "chars": 121,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "write_file": {
+          "count": 1,
+          "chars": 93,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "search_files": {
+          "count": 1,
+          "chars": 26,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        }
+      },
+      "exact_duplicate_output_chars": 0,
+      "repeated_identical_calls": 0,
+      "json_whitespace_savings_chars": 0,
+      "stored_pruned_tool_outputs": 5
+    },
+    {
+      "file": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/D5AE91E3-7C79-4079-95E3-34CDBD05DD0A/routine-2C54094D-3D42-4E49-AD56-59CFF8220E7E.json",
+      "active": false,
+      "id": "routine-2C54094D-3D42-4E49-AD56-59CFF8220E7E",
+      "pipe_tag": "766cc6b9",
+      "messages": 34,
+      "requests_in_history": 1,
+      "compactions": 0,
+      "covered": 0,
+      "condensed": 0,
+      "remaining_messages": 34,
+      "raw_remaining_chars_including_reasoning": 34789,
+      "remaining_content_chars_by_role": {
+        "user": 4793,
+        "assistant": 1760,
+        "tool": 24003
+      },
+      "remaining_reasoning_data_chars": 0,
+      "summary_chars": 0,
+      "chunks": 0,
+      "reasoning": {},
+      "tools": {
+        "browse_read": {
+          "count": 2,
+          "chars": 6647,
+          "errors": 0,
+          "over_4000": 1,
+          "over_24000": 0
+        },
+        "browse_run": {
+          "count": 3,
+          "chars": 6298,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "grep": {
+          "count": 2,
+          "chars": 5539,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "run_command": {
+          "count": 1,
+          "chars": 3494,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_find": {
+          "count": 2,
+          "chars": 768,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_open": {
+          "count": 3,
+          "chars": 688,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "read_file": {
+          "count": 1,
+          "chars": 436,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "write_file": {
+          "count": 1,
+          "chars": 98,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "notify": {
+          "count": 1,
+          "chars": 20,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_close": {
+          "count": 1,
+          "chars": 15,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        }
+      },
+      "exact_duplicate_output_chars": 384,
+      "repeated_identical_calls": 1,
+      "json_whitespace_savings_chars": 0,
+      "stored_pruned_tool_outputs": 0
+    },
+    {
+      "file": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/D5AE91E3-7C79-4079-95E3-34CDBD05DD0A/routine-32EF0646-818E-4613-9FB3-7DF5FA68C2D1.json",
+      "active": false,
+      "id": "routine-32EF0646-818E-4613-9FB3-7DF5FA68C2D1",
+      "pipe_tag": "51c9556a",
+      "messages": 1,
+      "requests_in_history": 1,
+      "compactions": 0,
+      "covered": 0,
+      "condensed": 0,
+      "remaining_messages": 1,
+      "raw_remaining_chars_including_reasoning": 4638,
+      "remaining_content_chars_by_role": {
+        "user": 4622,
+        "assistant": 0,
+        "tool": 0
+      },
+      "remaining_reasoning_data_chars": 0,
+      "summary_chars": 0,
+      "chunks": 0,
+      "reasoning": {},
+      "tools": {},
+      "exact_duplicate_output_chars": 0,
+      "repeated_identical_calls": 0,
+      "json_whitespace_savings_chars": 0,
+      "stored_pruned_tool_outputs": 0
+    },
+    {
+      "file": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/D5AE91E3-7C79-4079-95E3-34CDBD05DD0A/routine-617F9EB2-8B20-4CBE-842A-4531D61E88F9.json",
+      "active": false,
+      "id": "routine-617F9EB2-8B20-4CBE-842A-4531D61E88F9",
+      "pipe_tag": "f9361eea",
+      "messages": 4,
+      "requests_in_history": 1,
+      "compactions": 0,
+      "covered": 0,
+      "condensed": 0,
+      "remaining_messages": 4,
+      "raw_remaining_chars_including_reasoning": 21260,
+      "remaining_content_chars_by_role": {
+        "user": 6303,
+        "assistant": 53,
+        "tool": 14560
+      },
+      "remaining_reasoning_data_chars": 0,
+      "summary_chars": 0,
+      "chunks": 0,
+      "reasoning": {},
+      "tools": {
+        "run_command": {
+          "count": 1,
+          "chars": 14304,
+          "errors": 0,
+          "over_4000": 1,
+          "over_24000": 0
+        },
+        "browse_open": {
+          "count": 1,
+          "chars": 256,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        }
+      },
+      "exact_duplicate_output_chars": 0,
+      "repeated_identical_calls": 0,
+      "json_whitespace_savings_chars": 0,
+      "stored_pruned_tool_outputs": 0
+    },
+    {
+      "file": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/D5AE91E3-7C79-4079-95E3-34CDBD05DD0A/routine-A5E5F8EA-3B90-439F-9A02-89FCADEEACEE.json",
+      "active": false,
+      "id": "routine-A5E5F8EA-3B90-439F-9A02-89FCADEEACEE",
+      "pipe_tag": "0e8beae6",
+      "messages": 31,
+      "requests_in_history": 1,
+      "compactions": 0,
+      "covered": 0,
+      "condensed": 0,
+      "remaining_messages": 31,
+      "raw_remaining_chars_including_reasoning": 32097,
+      "remaining_content_chars_by_role": {
+        "user": 5174,
+        "assistant": 1361,
+        "tool": 16800
+      },
+      "remaining_reasoning_data_chars": 0,
+      "summary_chars": 0,
+      "chunks": 0,
+      "reasoning": {},
+      "tools": {
+        "browse_read": {
+          "count": 2,
+          "chars": 7314,
+          "errors": 0,
+          "over_4000": 1,
+          "over_24000": 0
+        },
+        "browse_snapshot": {
+          "count": 1,
+          "chars": 5506,
+          "errors": 0,
+          "over_4000": 1,
+          "over_24000": 0
+        },
+        "browse_click": {
+          "count": 4,
+          "chars": 1325,
+          "errors": 2,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "run_command": {
+          "count": 2,
+          "chars": 961,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_find": {
+          "count": 3,
+          "chars": 866,
+          "errors": 2,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_open": {
+          "count": 2,
+          "chars": 475,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_screenshot": {
+          "count": 1,
+          "chars": 312,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_wait": {
+          "count": 1,
+          "chars": 21,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "notify": {
+          "count": 1,
+          "chars": 20,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        }
+      },
+      "exact_duplicate_output_chars": 0,
+      "repeated_identical_calls": 2,
+      "json_whitespace_savings_chars": 0,
+      "stored_pruned_tool_outputs": 0
+    },
+    {
+      "file": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/D5AE91E3-7C79-4079-95E3-34CDBD05DD0A/routine-C8B4C211-08F1-4E72-B896-D7596D9BC77C.json",
+      "active": false,
+      "id": "routine-C8B4C211-08F1-4E72-B896-D7596D9BC77C",
+      "pipe_tag": "76feab96",
+      "messages": 1,
+      "requests_in_history": 1,
+      "compactions": 0,
+      "covered": 0,
+      "condensed": 0,
+      "remaining_messages": 1,
+      "raw_remaining_chars_including_reasoning": 5928,
+      "remaining_content_chars_by_role": {
+        "user": 5912,
+        "assistant": 0,
+        "tool": 0
+      },
+      "remaining_reasoning_data_chars": 0,
+      "summary_chars": 0,
+      "chunks": 0,
+      "reasoning": {},
+      "tools": {},
+      "exact_duplicate_output_chars": 0,
+      "repeated_identical_calls": 0,
+      "json_whitespace_savings_chars": 0,
+      "stored_pruned_tool_outputs": 0
+    },
+    {
+      "file": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/D5AE91E3-7C79-4079-95E3-34CDBD05DD0A.json",
+      "active": true,
+      "id": "D5AE91E3-7C79-4079-95E3-34CDBD05DD0A",
+      "pipe_tag": "297ef1ce",
+      "messages": 3516,
+      "requests_in_history": 75,
+      "compactions": 15,
+      "covered": 3262,
+      "condensed": 3427,
+      "remaining_messages": 254,
+      "raw_remaining_chars_including_reasoning": 253023,
+      "remaining_content_chars_by_role": {
+        "user": 16179,
+        "assistant": 16732,
+        "tool": 130354
+      },
+      "remaining_reasoning_data_chars": 3656,
+      "summary_chars": 2780,
+      "chunks": 1,
+      "reasoning": {
+        "messages": 2,
+        "data_chars": 3656,
+        "text_chars": 0
+      },
+      "tools": {
+        "browse_snapshot": {
+          "count": 397,
+          "chars": 465085,
+          "errors": 54,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_read": {
+          "count": 79,
+          "chars": 206828,
+          "errors": 0,
+          "over_4000": 1,
+          "over_24000": 0
+        },
+        "browse_run": {
+          "count": 144,
+          "chars": 132388,
+          "errors": 3,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_screenshot": {
+          "count": 358,
+          "chars": 72634,
+          "errors": 7,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "read_file": {
+          "count": 22,
+          "chars": 72309,
+          "errors": 0,
+          "over_4000": 2,
+          "over_24000": 0
+        },
+        "run_command": {
+          "count": 307,
+          "chars": 61869,
+          "errors": 4,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "grep": {
+          "count": 21,
+          "chars": 41374,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_click": {
+          "count": 177,
+          "chars": 41190,
+          "errors": 32,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_open": {
+          "count": 135,
+          "chars": 33012,
+          "errors": 7,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "recall": {
+          "count": 11,
+          "chars": 31469,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_press": {
+          "count": 142,
+          "chars": 22170,
+          "errors": 5,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "web_fetch": {
+          "count": 2,
+          "chars": 6656,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "task_plan": {
+          "count": 14,
+          "chars": 6212,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "write_file": {
+          "count": 49,
+          "chars": 4808,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "list_directory": {
+          "count": 3,
+          "chars": 4605,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_tabs": {
+          "count": 15,
+          "chars": 3826,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_find": {
+          "count": 8,
+          "chars": 2355,
+          "errors": 3,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "orbs": {
+          "count": 9,
+          "chars": 1842,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "schedule": {
+          "count": 8,
+          "chars": 1795,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "screenshot": {
+          "count": 1,
+          "chars": 1678,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_page": {
+          "count": 68,
+          "chars": 1427,
+          "errors": 1,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_fill": {
+          "count": 43,
+          "chars": 1245,
+          "errors": 1,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "apps_list": {
+          "count": 2,
+          "chars": 844,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_show": {
+          "count": 3,
+          "chars": 762,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_scroll": {
+          "count": 33,
+          "chars": 681,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_back": {
+          "count": 2,
+          "chars": 391,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "open": {
+          "count": 3,
+          "chars": 356,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "edit_file": {
+          "count": 3,
+          "chars": 321,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "search_files": {
+          "count": 2,
+          "chars": 286,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "remember": {
+          "count": 1,
+          "chars": 229,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "ask_user": {
+          "count": 3,
+          "chars": 224,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "ui_act": {
+          "count": 2,
+          "chars": 218,
+          "errors": 2,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "clipboard_write": {
+          "count": 2,
+          "chars": 114,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "glob": {
+          "count": 1,
+          "chars": 107,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_close": {
+          "count": 5,
+          "chars": 75,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "applescript": {
+          "count": 2,
+          "chars": 30,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "notify": {
+          "count": 1,
+          "chars": 20,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        }
+      },
+      "exact_duplicate_output_chars": 134037,
+      "repeated_identical_calls": 958,
+      "json_whitespace_savings_chars": 0,
+      "stored_pruned_tool_outputs": 86
+    },
+    {
+      "file": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/EE09B9E6-E0E0-4595-BD43-39C2324DB0CC/pedido-014DF222-05CE-4250-BFA5-F7571F53D91E.json",
+      "active": false,
+      "id": "pedido-014DF222-05CE-4250-BFA5-F7571F53D91E",
+      "pipe_tag": "daaeddfe",
+      "messages": 6,
+      "requests_in_history": 1,
+      "compactions": 0,
+      "covered": 0,
+      "condensed": 0,
+      "remaining_messages": 6,
+      "raw_remaining_chars_including_reasoning": 14678,
+      "remaining_content_chars_by_role": {
+        "user": 10605,
+        "assistant": 896,
+        "tool": 1879
+      },
+      "remaining_reasoning_data_chars": 0,
+      "summary_chars": 0,
+      "chunks": 0,
+      "reasoning": {},
+      "tools": {
+        "run_command": {
+          "count": 2,
+          "chars": 1879,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        }
+      },
+      "exact_duplicate_output_chars": 0,
+      "repeated_identical_calls": 0,
+      "json_whitespace_savings_chars": 0,
+      "stored_pruned_tool_outputs": 0
+    },
+    {
+      "file": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/EE09B9E6-E0E0-4595-BD43-39C2324DB0CC/pedido-115F5A81-347C-4F79-A321-307F26454E63.json",
+      "active": false,
+      "id": "pedido-115F5A81-347C-4F79-A321-307F26454E63",
+      "pipe_tag": "43c5d997",
+      "messages": 2,
+      "requests_in_history": 1,
+      "compactions": 0,
+      "covered": 0,
+      "condensed": 0,
+      "remaining_messages": 2,
+      "raw_remaining_chars_including_reasoning": 9236,
+      "remaining_content_chars_by_role": {
+        "user": 8302,
+        "assistant": 902,
+        "tool": 0
+      },
+      "remaining_reasoning_data_chars": 0,
+      "summary_chars": 0,
+      "chunks": 0,
+      "reasoning": {},
+      "tools": {},
+      "exact_duplicate_output_chars": 0,
+      "repeated_identical_calls": 0,
+      "json_whitespace_savings_chars": 0,
+      "stored_pruned_tool_outputs": 0
+    },
+    {
+      "file": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/EE09B9E6-E0E0-4595-BD43-39C2324DB0CC/pedido-38C176ED-A553-4CF8-9F34-28C5B6A0E2F2.json",
+      "active": false,
+      "id": "pedido-38C176ED-A553-4CF8-9F34-28C5B6A0E2F2",
+      "pipe_tag": "c995309a",
+      "messages": 22,
+      "requests_in_history": 1,
+      "compactions": 0,
+      "covered": 0,
+      "condensed": 0,
+      "remaining_messages": 22,
+      "raw_remaining_chars_including_reasoning": 37177,
+      "remaining_content_chars_by_role": {
+        "user": 3741,
+        "assistant": 1703,
+        "tool": 25176
+      },
+      "remaining_reasoning_data_chars": 0,
+      "summary_chars": 0,
+      "chunks": 0,
+      "reasoning": {},
+      "tools": {
+        "run_command": {
+          "count": 9,
+          "chars": 25025,
+          "errors": 1,
+          "over_4000": 2,
+          "over_24000": 0
+        },
+        "grep": {
+          "count": 1,
+          "chars": 151,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        }
+      },
+      "exact_duplicate_output_chars": 0,
+      "repeated_identical_calls": 0,
+      "json_whitespace_savings_chars": 0,
+      "stored_pruned_tool_outputs": 0
+    },
+    {
+      "file": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/EE09B9E6-E0E0-4595-BD43-39C2324DB0CC/pedido-599E4526-8204-4DE7-868A-76BA40592D0E.json",
+      "active": false,
+      "id": "pedido-599E4526-8204-4DE7-868A-76BA40592D0E",
+      "pipe_tag": "2895a49a",
+      "messages": 1,
+      "requests_in_history": 1,
+      "compactions": 0,
+      "covered": 0,
+      "condensed": 0,
+      "remaining_messages": 1,
+      "raw_remaining_chars_including_reasoning": 9720,
+      "remaining_content_chars_by_role": {
+        "user": 9704,
+        "assistant": 0,
+        "tool": 0
+      },
+      "remaining_reasoning_data_chars": 0,
+      "summary_chars": 0,
+      "chunks": 0,
+      "reasoning": {},
+      "tools": {},
+      "exact_duplicate_output_chars": 0,
+      "repeated_identical_calls": 0,
+      "json_whitespace_savings_chars": 0,
+      "stored_pruned_tool_outputs": 0
+    },
+    {
+      "file": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/EE09B9E6-E0E0-4595-BD43-39C2324DB0CC/pedido-6DD7A793-C1AC-420D-817D-3BBA59C1A971.json",
+      "active": false,
+      "id": "pedido-6DD7A793-C1AC-420D-817D-3BBA59C1A971",
+      "pipe_tag": "5b8ef2d6",
+      "messages": 13,
+      "requests_in_history": 1,
+      "compactions": 0,
+      "covered": 0,
+      "condensed": 0,
+      "remaining_messages": 13,
+      "raw_remaining_chars_including_reasoning": 19038,
+      "remaining_content_chars_by_role": {
+        "user": 8031,
+        "assistant": 2840,
+        "tool": 5824
+      },
+      "remaining_reasoning_data_chars": 0,
+      "summary_chars": 0,
+      "chunks": 0,
+      "reasoning": {},
+      "tools": {
+        "run_command": {
+          "count": 5,
+          "chars": 5824,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        }
+      },
+      "exact_duplicate_output_chars": 0,
+      "repeated_identical_calls": 0,
+      "json_whitespace_savings_chars": 0,
+      "stored_pruned_tool_outputs": 0
+    },
+    {
+      "file": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/EE09B9E6-E0E0-4595-BD43-39C2324DB0CC/pedido-BB6A987D-0FC9-4489-8138-04A70BB0EB08.json",
+      "active": false,
+      "id": "pedido-BB6A987D-0FC9-4489-8138-04A70BB0EB08",
+      "pipe_tag": "6135aea1",
+      "messages": 42,
+      "requests_in_history": 1,
+      "compactions": 0,
+      "covered": 0,
+      "condensed": 0,
+      "remaining_messages": 42,
+      "raw_remaining_chars_including_reasoning": 82457,
+      "remaining_content_chars_by_role": {
+        "user": 7257,
+        "assistant": 3344,
+        "tool": 50270
+      },
+      "remaining_reasoning_data_chars": 0,
+      "summary_chars": 0,
+      "chunks": 0,
+      "reasoning": {},
+      "tools": {
+        "run_command": {
+          "count": 13,
+          "chars": 30905,
+          "errors": 3,
+          "over_4000": 2,
+          "over_24000": 0
+        },
+        "read_file": {
+          "count": 1,
+          "chars": 17015,
+          "errors": 0,
+          "over_4000": 1,
+          "over_24000": 0
+        },
+        "browse_run": {
+          "count": 3,
+          "chars": 1319,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_open": {
+          "count": 3,
+          "chars": 472,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_screenshot": {
+          "count": 2,
+          "chars": 436,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "edit_file": {
+          "count": 1,
+          "chars": 108,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_close": {
+          "count": 1,
+          "chars": 15,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        }
+      },
+      "exact_duplicate_output_chars": 156,
+      "repeated_identical_calls": 2,
+      "json_whitespace_savings_chars": 0,
+      "stored_pruned_tool_outputs": 0
+    },
+    {
+      "file": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/EE09B9E6-E0E0-4595-BD43-39C2324DB0CC/pedido-CBD31C31-60E4-47C2-9795-8714FD7F6A8D.json",
+      "active": false,
+      "id": "pedido-CBD31C31-60E4-47C2-9795-8714FD7F6A8D",
+      "pipe_tag": "4769a5b7",
+      "messages": 16,
+      "requests_in_history": 1,
+      "compactions": 0,
+      "covered": 0,
+      "condensed": 0,
+      "remaining_messages": 16,
+      "raw_remaining_chars_including_reasoning": 39807,
+      "remaining_content_chars_by_role": {
+        "user": 11088,
+        "assistant": 1692,
+        "tool": 23080
+      },
+      "remaining_reasoning_data_chars": 0,
+      "summary_chars": 0,
+      "chunks": 0,
+      "reasoning": {},
+      "tools": {
+        "grep": {
+          "count": 1,
+          "chars": 15794,
+          "errors": 0,
+          "over_4000": 1,
+          "over_24000": 0
+        },
+        "run_command": {
+          "count": 6,
+          "chars": 7286,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        }
+      },
+      "exact_duplicate_output_chars": 0,
+      "repeated_identical_calls": 0,
+      "json_whitespace_savings_chars": 0,
+      "stored_pruned_tool_outputs": 0
+    },
+    {
+      "file": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/EE09B9E6-E0E0-4595-BD43-39C2324DB0CC/pedido-CF8193F7-BEBF-4E3E-BA44-158002D08F34.json",
+      "active": false,
+      "id": "pedido-CF8193F7-BEBF-4E3E-BA44-158002D08F34",
+      "pipe_tag": "69230e56",
+      "messages": 14,
+      "requests_in_history": 1,
+      "compactions": 0,
+      "covered": 0,
+      "condensed": 0,
+      "remaining_messages": 14,
+      "raw_remaining_chars_including_reasoning": 40978,
+      "remaining_content_chars_by_role": {
+        "user": 7729,
+        "assistant": 2305,
+        "tool": 24090
+      },
+      "remaining_reasoning_data_chars": 0,
+      "summary_chars": 0,
+      "chunks": 0,
+      "reasoning": {},
+      "tools": {
+        "run_command": {
+          "count": 6,
+          "chars": 24090,
+          "errors": 0,
+          "over_4000": 2,
+          "over_24000": 0
+        }
+      },
+      "exact_duplicate_output_chars": 0,
+      "repeated_identical_calls": 0,
+      "json_whitespace_savings_chars": 0,
+      "stored_pruned_tool_outputs": 0
+    },
+    {
+      "file": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/EE09B9E6-E0E0-4595-BD43-39C2324DB0CC/routine-235A91D6-AD6C-47C6-8BD9-B2721B84584A.json",
+      "active": false,
+      "id": "routine-235A91D6-AD6C-47C6-8BD9-B2721B84584A",
+      "pipe_tag": "a647c602",
+      "messages": 26,
+      "requests_in_history": 1,
+      "compactions": 0,
+      "covered": 0,
+      "condensed": 0,
+      "remaining_messages": 26,
+      "raw_remaining_chars_including_reasoning": 69085,
+      "remaining_content_chars_by_role": {
+        "user": 8274,
+        "assistant": 937,
+        "tool": 44825
+      },
+      "remaining_reasoning_data_chars": 5780,
+      "summary_chars": 0,
+      "chunks": 0,
+      "reasoning": {
+        "messages": 3,
+        "data_chars": 5780,
+        "text_chars": 0
+      },
+      "tools": {
+        "run_command": {
+          "count": 5,
+          "chars": 30526,
+          "errors": 0,
+          "over_4000": 2,
+          "over_24000": 0
+        },
+        "recall": {
+          "count": 1,
+          "chars": 7513,
+          "errors": 0,
+          "over_4000": 1,
+          "over_24000": 0
+        },
+        "read_file": {
+          "count": 3,
+          "chars": 5938,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "list_directory": {
+          "count": 1,
+          "chars": 635,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "write_file": {
+          "count": 2,
+          "chars": 193,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "notify": {
+          "count": 1,
+          "chars": 20,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        }
+      },
+      "exact_duplicate_output_chars": 0,
+      "repeated_identical_calls": 0,
+      "json_whitespace_savings_chars": 0,
+      "stored_pruned_tool_outputs": 0
+    },
+    {
+      "file": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/EE09B9E6-E0E0-4595-BD43-39C2324DB0CC.json",
+      "active": true,
+      "id": "EE09B9E6-E0E0-4595-BD43-39C2324DB0CC",
+      "pipe_tag": "870a9141",
+      "messages": 952,
+      "requests_in_history": 102,
+      "compactions": 9,
+      "covered": 789,
+      "condensed": 926,
+      "remaining_messages": 163,
+      "raw_remaining_chars_including_reasoning": 188985,
+      "remaining_content_chars_by_role": {
+        "user": 33126,
+        "assistant": 20670,
+        "tool": 58829
+      },
+      "remaining_reasoning_data_chars": 11260,
+      "summary_chars": 5006,
+      "chunks": 1,
+      "reasoning": {
+        "messages": 6,
+        "data_chars": 11260,
+        "text_chars": 0
+      },
+      "tools": {
+        "run_command": {
+          "count": 194,
+          "chars": 170247,
+          "errors": 6,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_snapshot": {
+          "count": 49,
+          "chars": 78319,
+          "errors": 5,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "read_file": {
+          "count": 14,
+          "chars": 34719,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "grep": {
+          "count": 14,
+          "chars": 21956,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_read": {
+          "count": 10,
+          "chars": 16944,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "web_fetch": {
+          "count": 11,
+          "chars": 15610,
+          "errors": 3,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_click": {
+          "count": 28,
+          "chars": 5883,
+          "errors": 1,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "recall": {
+          "count": 2,
+          "chars": 5383,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_open": {
+          "count": 22,
+          "chars": 4385,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_screenshot": {
+          "count": 23,
+          "chars": 4123,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "job_output": {
+          "count": 3,
+          "chars": 3846,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "edit_file": {
+          "count": 24,
+          "chars": 2741,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "glob": {
+          "count": 2,
+          "chars": 2563,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "list_directory": {
+          "count": 3,
+          "chars": 1857,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "remember": {
+          "count": 8,
+          "chars": 1828,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "task_plan": {
+          "count": 3,
+          "chars": 1367,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "schedule": {
+          "count": 6,
+          "chars": 794,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_show": {
+          "count": 3,
+          "chars": 726,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_tabs": {
+          "count": 3,
+          "chars": 718,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "write_file": {
+          "count": 5,
+          "chars": 501,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_find": {
+          "count": 1,
+          "chars": 388,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_press": {
+          "count": 2,
+          "chars": 364,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "clipboard_read": {
+          "count": 1,
+          "chars": 235,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "job_stop": {
+          "count": 1,
+          "chars": 149,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_fill": {
+          "count": 6,
+          "chars": 68,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "clipboard_write": {
+          "count": 1,
+          "chars": 55,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "browse_wait": {
+          "count": 2,
+          "chars": 42,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        },
+        "open": {
+          "count": 1,
+          "chars": 34,
+          "errors": 0,
+          "over_4000": 0,
+          "over_24000": 0
+        }
+      },
+      "exact_duplicate_output_chars": 5744,
+      "repeated_identical_calls": 76,
+      "json_whitespace_savings_chars": 0,
+      "stored_pruned_tool_outputs": 27
+    }
+  ],
+  "sources": [
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/state.json",
+      "bytes": 195153,
+      "sha256": "f349531fe12ad6a9aca223fdceaf18cd62998545f362c27991a57a659e39b4df"
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Orb/Sources/Orb/Engine/ChunkSummary.swift",
+      "bytes": 16633,
+      "sha256": "329afc838006440b2964fcb0c38746ba97b2aa4b9f34cddf13db44bec977becf"
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/uso/2026-10.json",
+      "bytes": 97937,
+      "sha256": "694c50e52cab3737cd36c45e50925db726e3c3b9b810aaae6b7a377daf57a998"
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/claude-pipe/cache-metrics.jsonl",
+      "bytes": 348880,
+      "sha256": "34808f58d8ac15e40e1dfd83fb82488d1d644aff591a4fea9f577cfe81af9e18"
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/1332324E-9A7E-47E7-BBC1-6A24A5C4A510/conversa-28E7D57D-3005-4B9C-963F-196E06DEA374.json",
+      "bytes": 4585210,
+      "sha256": "752716949d826b1c20d5fcf9efb883b3951635a7f51b03a5f651a8e6565d9c62"
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/1332324E-9A7E-47E7-BBC1-6A24A5C4A510/pedido-159287E9-555E-42DE-8DE1-ED47A557955F.json",
+      "bytes": 306998,
+      "sha256": "245413ca1f8386c677d7b667b0d8608a5bc8c5cf0be41bbf79b136c679eec2ba"
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/1332324E-9A7E-47E7-BBC1-6A24A5C4A510/pedido-2EB0FBB7-B39F-48DE-8365-EC60EC852EDC.json",
+      "bytes": 128050,
+      "sha256": "fa8833dcd347e7f3501f83f05a2f24ccc8df38c9a5f476cfb226e4c7fec3218f"
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/1332324E-9A7E-47E7-BBC1-6A24A5C4A510/pedido-D827DF85-2F5C-4535-8967-1D43A512C3F3.json",
+      "bytes": 208511,
+      "sha256": "2bd9053b357592acdfbe8440fedf4e265f4a565c44b08b9e1719217a1166acaf"
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/1332324E-9A7E-47E7-BBC1-6A24A5C4A510/pedido-E5B741BC-930E-42CC-8A07-D36CFA6CAA12.json",
+      "bytes": 300077,
+      "sha256": "8112bb6922c93fa900e439f5b50bfd9065bf978c5ff1f46d2036461ce2bf4051"
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/1332324E-9A7E-47E7-BBC1-6A24A5C4A510/routine-54CA00BB-C0DD-40D3-8B6C-CF8479DD9897.json",
+      "bytes": 938416,
+      "sha256": "1248cafa1101ef1320cf9d49916e6ce348076ea246927fd263091cb3a677af13"
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/1332324E-9A7E-47E7-BBC1-6A24A5C4A510/routine-EC116C28-A2F2-4116-9C62-DAF2D67A8C11.json",
+      "bytes": 637722,
+      "sha256": "a0247a1e32502f3fe467183926a3d31fd6e1e820c9d4348cfb72a4a248241478"
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/1332324E-9A7E-47E7-BBC1-6A24A5C4A510.json",
+      "bytes": 7643040,
+      "sha256": "307896592aabb8c71596a38c7489ceeae0e12b55b197b17afd369814d77ec31c"
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/25C144D9-0DFE-419F-924E-FEDBDCB82A0A.json",
+      "bytes": 211388,
+      "sha256": "3e537f3d84dff74f092ab606528cfa289469a2378bbf78cd55732d2d3eff29ed"
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/D5AE91E3-7C79-4079-95E3-34CDBD05DD0A/routine-2C54094D-3D42-4E49-AD56-59CFF8220E7E.json",
+      "bytes": 79677,
+      "sha256": "fdab9226ac210908cd420f23a5409ee7069d29ec145c9e73665325ea13e5d70c"
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/D5AE91E3-7C79-4079-95E3-34CDBD05DD0A/routine-32EF0646-818E-4613-9FB3-7DF5FA68C2D1.json",
+      "bytes": 11961,
+      "sha256": "1436cc3c2b92581289de1085672551fcf5cd5030cef578b28a57c3fd954aa761"
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/D5AE91E3-7C79-4079-95E3-34CDBD05DD0A/routine-617F9EB2-8B20-4CBE-842A-4531D61E88F9.json",
+      "bytes": 35508,
+      "sha256": "06a677a135b38b3f164ca6deeca35458c9cf1bfba69f7bbd1f6ca538d9904cb5"
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/D5AE91E3-7C79-4079-95E3-34CDBD05DD0A/routine-A5E5F8EA-3B90-439F-9A02-89FCADEEACEE.json",
+      "bytes": 59966,
+      "sha256": "42666da3f0f70612c6875beb434237ff97f37bba26a426fbed9bc5750625cdff"
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/D5AE91E3-7C79-4079-95E3-34CDBD05DD0A/routine-C8B4C211-08F1-4E72-B896-D7596D9BC77C.json",
+      "bytes": 383202,
+      "sha256": "649a05e8743f00e36697615293c2512ae5253c01f3bdd3267ba93423c399c2c0"
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/D5AE91E3-7C79-4079-95E3-34CDBD05DD0A.json",
+      "bytes": 4773311,
+      "sha256": "cd4384c9cc20e7226ba91afb8f820ce1a70fde02006a907ff053504ba322d5f2"
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/EE09B9E6-E0E0-4595-BD43-39C2324DB0CC/pedido-014DF222-05CE-4250-BFA5-F7571F53D91E.json",
+      "bytes": 25248,
+      "sha256": "ce978587c41ae91b9e0edd3033538db0fa4256581782c8d1011e1261581e8e87"
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/EE09B9E6-E0E0-4595-BD43-39C2324DB0CC/pedido-115F5A81-347C-4F79-A321-307F26454E63.json",
+      "bytes": 15059,
+      "sha256": "53802fc66b78cb26d5004bd1f99cff56e919bab8e7609255652f5711f71aa8be"
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/EE09B9E6-E0E0-4595-BD43-39C2324DB0CC/pedido-38C176ED-A553-4CF8-9F34-28C5B6A0E2F2.json",
+      "bytes": 75490,
+      "sha256": "9d834b8868838bdfe7f22bfdf09e0fcd8136772d811ab2e84b060d782b66d25e"
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/EE09B9E6-E0E0-4595-BD43-39C2324DB0CC/pedido-599E4526-8204-4DE7-868A-76BA40592D0E.json",
+      "bytes": 16596,
+      "sha256": "5b6cb848d4448df863a9d6a3dd29d0100f5e6b83cba29666877beb02a509aebf"
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/EE09B9E6-E0E0-4595-BD43-39C2324DB0CC/pedido-6DD7A793-C1AC-420D-817D-3BBA59C1A971.json",
+      "bytes": 38546,
+      "sha256": "555e8326973b66cd9e0d4b9c51dbad673fe01c8b15ef35afe5fcebce88d7b3e7"
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/EE09B9E6-E0E0-4595-BD43-39C2324DB0CC/pedido-BB6A987D-0FC9-4489-8138-04A70BB0EB08.json",
+      "bytes": 122872,
+      "sha256": "6e9153daa8c439d37c60a70c37dce0badf0955bd6aeb5cf714e5add5b580f813"
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/EE09B9E6-E0E0-4595-BD43-39C2324DB0CC/pedido-CBD31C31-60E4-47C2-9795-8714FD7F6A8D.json",
+      "bytes": 67592,
+      "sha256": "e6de85af733cb52da8096a94c4690c939b6d5dfe4e87f84daf26aa941d3add69"
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/EE09B9E6-E0E0-4595-BD43-39C2324DB0CC/pedido-CF8193F7-BEBF-4E3E-BA44-158002D08F34.json",
+      "bytes": 73079,
+      "sha256": "f0a4ae1bd68ccc30355dcb1612454fdd661580d57e874e80bf2e5d578d6af0cf"
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/EE09B9E6-E0E0-4595-BD43-39C2324DB0CC/routine-235A91D6-AD6C-47C6-8BD9-B2721B84584A.json",
+      "bytes": 239889,
+      "sha256": "38e76f8582cf9f5f1740d006429ebacb7435bab95471c1c963f096c8b6369d62"
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/EE09B9E6-E0E0-4595-BD43-39C2324DB0CC.json",
+      "bytes": 1894893,
+      "sha256": "41e2b5db8173a546f57756a97f0dad2e8ac9ff8730776a2b39fd9bcc4c3210a3"
+    }
+  ],
+  "configuration": {
+    "contextMemory": "balanced",
+    "defaultModel": "claudeCode/sonnet",
+    "bots": [
+      {
+        "id": "25C144D9-0DFE-419F-924E-FEDBDCB82A0A",
+        "name": "Dr eggbot",
+        "model": "",
+        "effort": ""
+      },
+      {
+        "id": "EE09B9E6-E0E0-4595-BD43-39C2324DB0CC",
+        "name": "Gestor LP AcessosFit",
+        "model": "chatgpt/gpt-6.1-sol",
+        "effort": ""
+      },
+      {
+        "id": "D5AE91E3-7C79-4079-95E3-34CDBD05DD0A",
+        "name": "Gestor de Campanha AcessosFit",
+        "model": "chatgpt/gpt-6.1-sol",
+        "effort": ""
+      },
+      {
+        "id": "1332324E-9A7E-47E7-BBC1-6A24A5C4A510",
+        "name": "Atendente AcessosFit",
+        "model": "chatgpt/gpt-6.1-sol",
+        "effort": "high"
+      }
+    ],
+    "auxiliary_selector_words": [
+      "haiku",
+      "mini",
+      "flash",
+      "lite",
+      "nano"
+    ],
+    "chatgpt_catalog": [
+      {
+        "id": "gpt-6.1-sol",
+        "defaultEffort": "low",
+        "matches_cheap_word": false
+      },
+      {
+        "id": "gpt-6-astra",
+        "defaultEffort": "low",
+        "matches_cheap_word": false
+      },
+      {
+        "id": "gpt-6.1-terra",
+        "defaultEffort": "low",
+        "matches_cheap_word": false
+      },
+      {
+        "id": "gpt-6-sol",
+        "defaultEffort": "medium",
+        "matches_cheap_word": false
+      },
+      {
+        "id": "gpt-6-luna",
+        "defaultEffort": "medium",
+        "matches_cheap_word": false
+      },
+      {
+        "id": "gpt-5.6-sol",
+        "defaultEffort": "low",
+        "matches_cheap_word": false
+      },
+      {
+        "id": "gpt-5.6-terra",
+        "defaultEffort": "medium",
+        "matches_cheap_word": false
+      },
+      {
+        "id": "gpt-5.6-luna",
+        "defaultEffort": "medium",
+        "matches_cheap_word": false
+      }
+    ],
+    "routines": [
+      {
+        "id": "235A91D6-AD6C-47C6-8BD9-B2721B84584A",
+        "name": "Checar e proteger site AcessosFit (6 em 6 horas)",
+        "isEnabled": true,
+        "schedule": {
+          "everyHours": {
+            "_0": 6
+          }
+        },
+        "retained_runs": 10,
+        "retained_succeeded": 6
+      },
+      {
+        "id": "C8B4C211-08F1-4E72-B896-D7596D9BC77C",
+        "name": "Análise diária Google Ads AcessosFit",
+        "isEnabled": true,
+        "schedule": {
+          "daily": {
+            "hour": 22,
+            "minute": 0
+          }
+        },
+        "retained_runs": 10,
+        "retained_succeeded": 5
+      },
+      {
+        "id": "EC116C28-A2F2-4116-9C62-DAF2D67A8C11",
+        "name": "Rodada WhatsApp AcessosFit (1h)",
+        "isEnabled": false,
+        "schedule": {
+          "cron": {
+            "expression": "21 8-23 * * *"
+          }
+        },
+        "retained_runs": 10,
+        "retained_succeeded": 9
+      },
+      {
+        "id": "32EF0646-818E-4613-9FB3-7DF5FA68C2D1",
+        "name": "Checagem nota de qualidade pós A+B (26-10)",
+        "isEnabled": false,
+        "schedule": {
+          "once": {
+            "_0": 814712400
+          }
+        },
+        "retained_runs": 1,
+        "retained_succeeded": 0
+      },
+      {
+        "id": "2C54094D-3D42-4E49-AD56-59CFF8220E7E",
+        "name": "Conferir Pix R$ 50 e campanha (19-10)",
+        "isEnabled": false,
+        "schedule": {
+          "once": {
+            "_0": 814098600
+          }
+        },
+        "retained_runs": 1,
+        "retained_succeeded": 1
+      },
+      {
+        "id": "A5E5F8EA-3B90-439F-9A02-89FCADEEACEE",
+        "name": "Conferir Pix R$ 100 e campanha (21-10)",
+        "isEnabled": false,
+        "schedule": {
+          "once": {
+            "_0": 814279500
+          }
+        },
+        "retained_runs": 1,
+        "retained_succeeded": 1
+      },
+      {
+        "id": "617F9EB2-8B20-4CBE-842A-4531D61E88F9",
+        "name": "Avaliar teste CPC 1,50 (25-10)",
+        "isEnabled": false,
+        "schedule": {
+          "once": {
+            "_0": 814626000
+          }
+        },
+        "retained_runs": 1,
+        "retained_succeeded": 0
+      },
+      {
+        "id": "54CA00BB-C0DD-40D3-8B6C-CF8479DD9897",
+        "name": "Rodada WhatsApp horária 8h-23h",
+        "isEnabled": true,
+        "schedule": {
+          "cron": {
+            "timeZone": "America/Sao_Paulo",
+            "expression": "0,30 8-23 * * *"
+          }
+        },
+        "retained_runs": 10,
+        "retained_succeeded": 8
+      }
+    ]
+  },
+  "limitations": [
+    "Usage is hourly, without per-request sizes for non-Claude clients.",
+    "Session sizes are stored raw text; the context window transforms them before sending.",
+    "Old persisted tool outputs are already pruned to about 4000 characters by ConversationCoding.",
+    "Repeated calls/results are not necessarily redundant: external state may change.",
+    "Encrypted reasoning size in characters is not its billed token count.",
+    "Files are individually consistent reads; the running app may write between reads."
+  ]
+}

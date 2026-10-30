@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import Darwin
 
 /// Everything the app keeps between launches, except conversations (see `Store`) and API keys (Keychain).
 struct AppState: Codable, Sendable {
@@ -30,6 +31,8 @@ struct AppState: Codable, Sendable {
     var categories: [SidebarCategory] = []
     /// The conversations of each Orb that has more than one (by Orb id; see `OrbChats`). Older files have none.
     var chats: [String: OrbChats] = [:]
+    /// The home page's bounded, derived index and its own visit cursor.
+    var inicio = InicioHistory()
 
     /// What the app starts with when there is no data yet (a new install, after "Redefinir o Orb"): no Orb, so the
     /// window opens on the welcome, where Atlas is one click away.
@@ -220,6 +223,29 @@ struct Store: Sendable {
 
     func save(_ state: AppState) {
         enqueue(touching: [stateURL]) { write(state, to: stateURL) }
+    }
+
+    /// A bounded recovery copy of newly recorded home events. The state remains authoritative for the visit cursor.
+    static let inicioJournalFileName = "inicio-journal.json"
+    private var inicioJournalURL: URL { directory.appendingPathComponent(Self.inicioJournalFileName) }
+
+    func readInicioJournal() -> StoreRead<InicioHistory> {
+        Self.gate.reading(inicioJournalURL) { read(InicioHistory.self, from: inicioJournalURL, ifUnreadable: "o índice de recuperação de Início começou vazio") }
+    }
+
+    func saveInicioJournal(_ history: InicioHistory) {
+        enqueue(touching: [inicioJournalURL]) { write(history, to: inicioJournalURL) }
+    }
+
+    /// The source conversation must reach disk before its new recovery entry can be replayed on a later launch.
+    func saveInicioJournal(_ history: InicioHistory, after conversation: Conversation, bot: UUID, chat: UUID) {
+        let url = conversationURL(bot, chat), note = metaURL(bot, chat), journal = inicioJournalURL
+        enqueue(touching: [url, note, journal]) {
+            let result = writeConversation(conversation, to: url, cached: true)
+            guard result != .failed else { return }
+            if result == .wrote { write(ConversationMeta(of: conversation, file: FileFingerprint(of: url)), to: note) }
+            write(history, to: journal)
+        }
     }
 
     // MARK: Composer drafts
@@ -744,6 +770,9 @@ protocol KeychainItems {
 /// The login Keychain itself.
 struct SystemKeychainItems: KeychainItems {
     func read(_ account: String, service: String) -> String? {
+        if let helper = StableKeychainHelper.current {
+            return helper.call(operation: "read", account: account, service: service)?.value
+        }
         var query = Self.baseQuery(account, service: service)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -754,6 +783,9 @@ struct SystemKeychainItems: KeychainItems {
     }
 
     func replace(_ value: String, account: String, service: String) -> Bool {
+        if let helper = StableKeychainHelper.current {
+            return helper.call(operation: "replace", account: account, service: service, value: value)?.ok == true
+        }
         let query = Self.baseQuery(account, service: service)
         guard !value.isEmpty else {
             SecItemDelete(query as CFDictionary)
@@ -790,6 +822,45 @@ struct SystemKeychainItems: KeychainItems {
         [kSecClass as String: kSecClassGenericPassword,
          kSecAttrService as String: service,
          kSecAttrAccount as String: account]
+    }
+}
+
+/// A separately signed executable whose identity survives rebuilds. Its stdin and stdout are anonymous pipes, so
+/// credentials never appear in arguments, environment variables, temporary files or logs. A failed helper never falls
+/// back to another identity: that would both hide the failure and recreate the authorization prompts.
+struct StableKeychainHelper {
+    struct Request: Encodable { var operation: String; var service: String; var account: String; var value: String? }
+    struct Reply: Decodable { var ok: Bool; var value: String? }
+    let executable: URL
+
+    static var current: StableKeychainHelper? {
+        guard Bundle.main.bundleIdentifier == LegacyMigration.identifier else { return nil }
+        let path = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/OrbKeychainHelper")
+        guard FileManager.default.isExecutableFile(atPath: path.path) else { return nil }
+        return StableKeychainHelper(executable: path)
+    }
+
+    func call(operation: String, account: String, service: String, value: String? = nil) -> Reply? {
+        guard let request = try? JSONEncoder().encode(Request(operation: operation, service: service, account: account, value: value)) else { return nil }
+        let process = Process(), input = Pipe(), output = Pipe()
+        // A helper may reject its caller and exit before reading: a closed pipe must not terminate the whole Orb.
+        guard fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1) == 0 else { return nil }
+        process.executableURL = executable
+        process.standardInput = input
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            try input.fileHandleForWriting.write(contentsOf: request)
+            try input.fileHandleForWriting.close()
+            let response = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { return nil }
+            return try JSONDecoder().decode(Reply.self, from: response)
+        } catch {
+            try? input.fileHandleForWriting.close()
+            return nil
+        }
     }
 }
 
@@ -988,6 +1059,7 @@ extension AppState {
             init(from decoder: Decoder) throws { value = try? decoder.singleValueContainer().decode(OrbChats.self) }
         }
         chats = ((try? c.decodeIfPresent([String: Chats].self, forKey: .chats)) ?? nil)?.compactMapValues(\.value) ?? [:]
+        inicio = (try? c.decodeIfPresent(InicioHistory.self, forKey: .inicio)) ?? InicioHistory()
         try migrateSingleProvider(from: decoder)
     }
 

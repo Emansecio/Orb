@@ -546,6 +546,69 @@ struct AccessibilityRefusalTests {
         #expect(bench.system.activated.isEmpty)
     }
 
+    @Test func anUnconfirmedOrRefusedFocusRestoreIsNeverReportedAsSuccessful() async throws {
+        for refused in [false, true] {
+            let button = fakeButton("Abrir")
+            let bench = Bench(windows: [fake("AXWindow", title: "A", [button])])
+            let safari = fakeApp(windows: [])
+            safari.settable = ["AXFrontmost"]
+            if refused { safari.failures["set:AXFrontmost"] = .cannotComplete }
+            let system = bench.system
+            system.roots[200] = safari
+            system.frontmost = 200
+            button.onPerform = { _ in system.frontmost = 100 }
+            try await bench.read()
+            let text = try await bench.act(["action": .string("press"), "id": .string("w1.1")])
+            #expect(text.contains("não consegui confirmar a devolução"), Comment(rawValue: text))
+            #expect(!text.contains("devolvi o app que estava na frente"))
+            #expect(system.activated.isEmpty)
+        }
+    }
+
+    @Test func aDifferentAppComingForwardDuringRestoreIsNotReportedAsRestored() async throws {
+        let button = fakeButton("Abrir")
+        let bench = Bench(windows: [fake("AXWindow", title: "A", [button])])
+        let safari = fakeApp(windows: [])
+        safari.settable = ["AXFrontmost"]
+        let system = bench.system
+        system.roots[200] = safari
+        system.frontmost = 200
+        button.onPerform = { _ in system.frontmost = 100 }
+        safari.onSet = { _, _ in system.frontmost = 300 }
+        try await bench.read()
+        let text = try await bench.act(["action": .string("press"), "id": .string("w1.1")])
+        #expect(text.contains("foco mudou") && !text.contains("devolvi o app que estava na frente"))
+        #expect(system.frontmost == 300 && system.activated.isEmpty)
+    }
+
+    @Test func aShortcutIsNotSentWhenThePersonStartsUsingTheAppDuringFocus() async throws {
+        let field = fake("AXTextField", title: "Nome")
+        field.settable = ["AXFocused"]
+        let bench = Bench(windows: [fake("AXWindow", title: "A", [field])])
+        bench.root.attrs["AXFocusedUIElement"] = .element(field)
+        let system = bench.system
+        system.frontmost = 100
+        field.onSet = { name, _ in if name == "AXFocused" { system.userIdle = 0.1 } }
+        try await bench.read()
+        let message = await failureMessage { try await bench.act(["action": .string("key"), "id": .string("w1.1"), "keys": .string("f5")]) }
+        #expect(message.contains("usuário está usando"), Comment(rawValue: message))
+        #expect(system.syntheticInput.events.isEmpty)
+    }
+
+    @Test func textIsNotSentWhenThePersonStartsUsingTheAppDuringFocus() async throws {
+        let field = fake("AXTextField", title: "Nome")
+        field.settable = ["AXFocused"]
+        let bench = Bench(windows: [fake("AXWindow", title: "A", [field])])
+        bench.root.attrs["AXFocusedUIElement"] = .element(field)
+        let system = bench.system
+        system.frontmost = 100
+        field.onSet = { name, _ in if name == "AXFocused" { system.userIdle = 0.1 } }
+        try await bench.read()
+        let message = await failureMessage { try await bench.act(["action": .string("type"), "id": .string("w1.1"), "value": .string("oi")]) }
+        #expect(message.contains("usuário está usando"), Comment(rawValue: message))
+        #expect(system.syntheticInput.events.isEmpty)
+    }
+
     @Test func anAppThePersonWentToStaysInFrontAndIsNotTakenForOneThatStealsFocus() async throws {
         let button = fakeButton("Abrir")
         let field = fake("AXTextField", title: "Nome")
@@ -725,6 +788,7 @@ struct AccessibilityReviewTests {
         try await bench.read()
         let message = await failureMessage { try await bench.act(["action": string("type"), "id": string("w1.1"), "value": string("oi")]) }
         #expect(message.hasPrefix(UIActTool.takeoverMarker) && message.contains("veio para a frente"))
+        #expect(message.contains("devolvi o app que estava na frente"), Comment(rawValue: message))
         #expect(system.syntheticInput.events.isEmpty, "nothing typed into an app the person now has in front")
         #expect(safari.assignedValue("AXFrontmost")?.bool == true && system.frontmost == 200)
         // Remembered: focusing it again needs the screen.

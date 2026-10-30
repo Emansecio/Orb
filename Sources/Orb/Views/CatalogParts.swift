@@ -231,12 +231,16 @@ struct SearchBox<Accessory: View>: View {
         HStack(spacing: Spacing.s) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(Palette.faint)
+                .accessibilityHidden(true)
             TextField(label, text: $text, prompt: prompt.map { Text($0) })
                 .textFieldStyle(.plain)
                 .font(Typography.text)
                 .focused(isFocused)
             if !text.isEmpty {
-                Button("Limpar", systemImage: "xmark.circle.fill") { text = "" }
+                Button("Limpar busca", systemImage: "xmark.circle.fill") {
+                    text = ""
+                    isFocused.wrappedValue = true
+                }
                     .labelStyle(.iconOnly)
                     .buttonStyle(.plain)
                     .foregroundStyle(Palette.faint)
@@ -361,8 +365,8 @@ enum SlowHint {
 /// outside the page's `.task(id:)`, so typing never cancels it: when it comes back after the text changed, it must not
 /// put its results, its error or its end of loading over the newer search.
 enum RegistryQuery {
-    static func isCurrent(_ started: String, query: String) -> Bool {
-        started == query.trimmingCharacters(in: .whitespaces)
+    static func isCurrent(_ started: String, query: String, cancelled: Bool = false) -> Bool {
+        !cancelled && started == query.trimmingCharacters(in: .whitespaces)
     }
 }
 

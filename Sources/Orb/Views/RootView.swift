@@ -83,10 +83,11 @@ extension RootView {
 /// parts and cross-fades its transcript), so it carries no Orb id. The moments a selection points at nothing yet (an
 /// Orb that was just deleted, before the root view picks another) are still the Orb's page, so they cause no fade.
 enum DetailPage: Hashable {
-    case orb, routines, connectors, skills, welcome
+    case orb, inicio, routines, connectors, skills, welcome
 
     static func page(for selection: SidebarItem?, botIDs: [UUID]) -> DetailPage {
         switch selection {
+        case .inicio: .inicio
         case .routines: .routines
         case .connectors: .connectors
         case .skills: .skills
@@ -159,6 +160,8 @@ private struct DetailView: View {
 
     @ViewBuilder private var content: some View {
         switch model.selection {
+        case .inicio:
+            InicioView()
         case .bot(let id):
             // The chat view stays across Orbs and swaps the Orb's own parts when `id` changes (the transcript with a
             // cross-fade, the composer and toolbar at once), so the composer is outside the fade (§2.9).

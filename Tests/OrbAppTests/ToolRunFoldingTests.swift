@@ -43,10 +43,9 @@ struct ToolRunFoldingTests {
         let answer = say("Respondi os 12 leads pendentes.")
         let items = [request] + work + [answer]
         #expect(TranscriptFolding.rows(for: items) == [.single(request), .work(work, seconds: nil), .single(answer)])
-        // While it runs it stays open, read as it happens (its runs of actions are still one line each); it folds when
-        // it ends.
+        // While it runs the request is one activity block, with its progress and actions still available.
         #expect(TranscriptFolding.rows(for: items, liveTail: true)
-                == [.single(request), .tools([work[0], work[1]]), .single(work[2]), .tools([work[3], work[4]]), .single(answer)])
+                == [.single(request), .activity(work + [answer])])
         // Only the last request is the running one.
         let next = ask("E os de ontem?")
         #expect(TranscriptFolding.rows(for: items + [next, tool()], liveTail: true)[1] == .work(work, seconds: nil))
@@ -104,17 +103,66 @@ struct ToolRunFoldingTests {
         #expect(ToolTally.work([], seconds: 40, outcome: .failed) == "Não deu certo após 40 s")
     }
 
-    @Test func whileItRunsNothingOfTheRequestFoldsIntoWork() {
+    @Test func aRunningActivityKeepsPendingCardsVisibleWithinItsSteps() {
         let request = ask()
         let work = [tool(), say("Preciso de permissão."), tool()]
         let waiting = card(nil)
-        let rows = TranscriptFolding.rows(for: [request] + work + [waiting, tool()], liveTail: true)
+        let last = tool()
+        let rows = TranscriptFolding.rows(for: [request] + work + [waiting, last], liveTail: true)
         #expect(rows.first == .single(request))
-        #expect(!rows.contains { if case .work = $0 { true } else { false } }, "the words being read stay in view")
-        #expect(rows.contains(.single(work[1])) && rows.contains(.single(waiting)))
-        // A lone run so far is one line already.
+        #expect(rows == [.single(request), .activity(work + [waiting, last])])
+        let steps = TranscriptFolding.activityRows(for: work + [waiting])
+        #expect(steps.contains(.single(waiting)), "a request for the user is never behind a disclosure")
+        // Even a single run shares the activity block with the working line and the plan.
         let run = [tool(), tool()]
-        #expect(TranscriptFolding.rows(for: [request] + run, liveTail: true) == [.single(request), .tools(run)])
+        #expect(TranscriptFolding.rows(for: [request] + run, liveTail: true) == [.single(request), .activity(run)])
+    }
+
+    @Test func progressAndItsActionsAreOneStepAndTheLatestWordsStayVisible() {
+        let intro = say("Vou conferir a rotina ativa.")
+        let first = tool("Lendo arquivo", .file), second = tool()
+        let progress = say("A rotina já está em intervalos de 30 minutos.")
+        let third = tool(), latest = say("Agora vou conferir os pagamentos.")
+        let items = [intro, first, second, progress, third, latest]
+        let steps = TranscriptFolding.activityRows(for: items)
+        #expect(steps == [.tools([intro, first, second]), .tools([progress, third]), .single(latest)])
+        #expect(TranscriptFolding.activityRows(for: items + [tool()]).first?.id == intro.id)
+        #expect(steps.flatMap(\.items) == items, "the original text and every action remain available in order")
+    }
+
+    @Test func anActivityNeverTakesAnotherRequestOrCrossesACompaction() {
+        let request = ask(), first = tool(), second = tool()
+        let next = ask("Confira os pagamentos também", duringTask: true)
+        let items = [request, first, next, second]
+        #expect(TranscriptFolding.rows(for: items, liveTail: true)
+                == [.single(request), .single(first), .single(next), .activity([second])])
+        #expect(!TranscriptFolding.rows(for: [request, first, second], boundary: 2, liveTail: true)
+            .contains { if case .activity = $0 { true } else { false } })
+    }
+
+    @Test func noticesAndBrowserCardsStayVisibleAndKeepTheirOrder() {
+        let intro = say("Conferindo os pagamentos.")
+        let browser = TranscriptItem(.browserView(BrowserViewItem(host: "example.com", startedAt: .now, actions: 1)))
+        let notice = TranscriptItem(.notice("A conexão foi retomada."))
+        let first = tool(), second = tool()
+        let items = [intro, first, browser, notice, second]
+        let steps = TranscriptFolding.activityRows(for: items)
+        #expect(steps == [.tools([intro, first]), .single(browser), .single(notice), .tools([second])])
+        #expect(steps.flatMap(\.items) == items)
+    }
+
+    @Test func aStepNamesItsPurposeAndDoesNotClaimAFailureSucceeded() {
+        let intro = say("Vou revisar a rotina.")
+        var action = call("Rodando no Terminal")
+        action.intent = "Atualizar intervalo da rotina"
+        let item = TranscriptItem(.tool(action))
+        #expect(ToolTally.stepVariants([intro, item]) == ["Atualizou intervalo da rotina"])
+        action.state = .running
+        #expect(ToolTally.stepVariants([intro, TranscriptItem(.tool(action))]) == ["Atualizando intervalo da rotina"])
+        action.state = .failed
+        #expect(ToolTally.stepVariants([intro, TranscriptItem(.tool(action))]) == ["Falhou ao atualizar intervalo da rotina"])
+        #expect(ToolTally.stepVariants([intro, tool()]) == ["Vou revisar a rotina"])
+        #expect(ToolTally.stepVariants([tool()]) == ["Ações concluídas"])
     }
 
     @Test func aRequestThatEndedWithoutAnAnswerFoldsAndSaysHowItEnded() {

@@ -1,0 +1,12 @@
+{
+  "timestamp_utc": "2026-10-27T06:23:52.803257+00:00",
+  "command": [
+    "python3",
+    "scripts/audit-token-usage.py",
+    "--output",
+    "docs/evidencias/tokens-2026-10-27/metrics.json"
+  ],
+  "exit_code": 0,
+  "stdout": "{\n  \"output\": \"/Users/thiagomacbookpro/Orb/docs/evidencias/tokens-2026-10-27/metrics.json\",\n  \"total\": {\n    \"requests\": 8214,\n    \"input\": 32848300,\n    \"cacheRead\": 436641814,\n    \"cacheWrite\": 66170426,\n    \"cacheWrite1h\": 65070438,\n    \"output\": 4138766,\n    \"prompt\": 535660540,\n    \"uncached\": 99018726,\n    \"cache_hit\": 0.8151464993109255\n  },\n  \"sessions\": 25,\n  \"active_sessions\": 4,\n  \"pipe_records\": 1851\n}\n",
+  "stderr": ""
+}

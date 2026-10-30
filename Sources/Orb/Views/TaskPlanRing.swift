@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The plan of the task (`task_plan`) in the working line, while some step of it is open: a small ring that fills as
 /// steps are done, "2/5" beside it, and a click shows the steps. A plan whose steps the model never marked (none done or
-/// in progress) is an empty, dimmed ring that says "Plano", not "0/5": a count that never moves would say the work has
+/// in progress) is an empty ring that says "Plano", not "0/5": a count that never moves would say the work has
 /// not begun while the Orb works. It reads the plan itself, so an update redraws the ring alone, in place.
 struct TaskPlanRing: View {
     let transcript: OrbTranscript
@@ -17,17 +17,19 @@ struct TaskPlanRing: View {
             Button { showsSteps.toggle() } label: {
                 HStack(spacing: 5) {
                     ring(plan)
-                    Text(tended ? "\(plan.doneCount)/\(plan.steps.count)" : "Plano")
-                        .font(Typography.small.monospacedDigit())
-                        .foregroundStyle(tended ? Palette.muted : Palette.faint)
+                    Text(tended ? "Plano \(plan.doneCount)/\(plan.steps.count)" : "Plano")
+                        .font(Typography.label.monospacedDigit())
+                        .foregroundStyle(Palette.secondary)
                         .contentTransition(reduceMotion ? .opacity : .numericText()) // digits do not roll under Reduce Motion
+                    Image(systemName: showsSteps ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Palette.muted)
                 }
                 .padding(.leading, 4)
                 .padding(.trailing, 7)
                 .padding(.vertical, 2)
                 // The fill alone fades with the pointer: the number and the ring do not animate with it.
                 .hoverFill(isHovering, in: .capsule, color: Palette.ghostSelected, resting: Palette.ghostHover)
-                .opacity(tended ? 1 : 0.7)
                 .contentShape(.capsule)
             }
             .buttonStyle(.plain)

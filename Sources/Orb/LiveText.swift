@@ -162,7 +162,7 @@ final class OrbTranscript {
     /// The chat is now another conversation (call before `show`).
     func swapped() { swaps &+= 1 }
 
-    /// A request of the Orb runs in this chat: its work stays unfolded until it ends (`TranscriptFolding.workStretches`).
+    /// A request runs in this chat: its activity block keeps the current words and pending cards visible until it ends.
     private(set) var isLive = false
 
     func setLive(_ live: Bool) {

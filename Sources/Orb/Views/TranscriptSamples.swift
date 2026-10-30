@@ -51,6 +51,32 @@ enum TranscriptSample {
                                                  state: .done, output: "total 8\ndrwxr-xr-x  3 voce  staff   96 Oct  7 10:00 .")))
         var items: [TranscriptItem]
         switch screen {
+        case "transcript-activity", "transcript-activity-open", "transcript-activity-need":
+            ToolGroupRow.opensInSnapshots = screen.hasSuffix("-open")
+            model.liveScreens = LiveFeedHub(source: ActivitySnapshotBrowser())
+            var provider = ProviderAccount(kind: .ollama)
+            provider.models = [ProviderModel(id: "modelo-teste", name: "Modelo de revisão", format: .chat)]
+            model.providers = [provider]
+            model.defaultModel = "ollama/modelo-teste"
+            func action(_ intent: String, _ state: ToolCall.State = .done) -> TranscriptItem {
+                let start = Date.now.addingTimeInterval(-60)
+                return TranscriptItem(.tool(ToolCall(kind: .shell, title: "Rodando no Terminal", detail: "python3 rotina.py",
+                                                     state: state, output: state == .done ? "ok" : nil, startedAt: start,
+                                                     finishedAt: state == .running ? nil : start.addingTimeInterval(0.1), intent: intent)))
+            }
+            let browser = LiveScreenSnapshots.items("transcript-browser-live", model: model, bot: bot)
+            items = [TranscriptItem(.user(text: "Altere a rotina para cada 30 minutos e rode uma rodada agora.", attachments: [])),
+                     TranscriptItem(.bot(text: "Encontrei uma rotina ativa e outra antiga pausada. Vou alterar só a ativa para não duplicar mensagens.", isStreaming: false)),
+                     action("Conferir rotina ativa"), action("Conferir rotina ativa"),
+                     TranscriptItem(.bot(text: "A rotina já está em intervalos de 30 minutos, mantendo a faixa das 8h às 23h.", isStreaming: false)),
+                     action("Ajustar rotina para cada 30 minutos"),
+                     TranscriptItem(.bot(text: "Agora vou conferir as respostas recentes, os pagamentos e os leads elegíveis, excluindo os contatados hoje.", isStreaming: false)),
+                     action("Revisar conversas e pagamentos", .running)]
+            items += browser.filter { if case .browserView = $0.kind { true } else { false } }
+            if screen.hasSuffix("-need") {
+                items.append(TranscriptItem(.approval(ApprovalRequest.question(
+                    OrbQuestion(text: "Qual limite de desconto posso oferecer?", options: ["Sem desconto", "Até 10%"]), botName: bot.name))))
+            }
         case "transcript-approvals":
             let batch = [ApprovalItem(toolName: "write_file", title: "Gravando arquivo", command: "~/Projetos/app/README.md"),
                          ApprovalItem(toolName: "write_file", title: "Gravando arquivo", command: "~/Projetos/app/notas.txt"),
@@ -209,6 +235,26 @@ enum TranscriptSample {
             if screen == "transcript-skill-proposal" || screen == "transcript-interrupted" { _ = await model.memory.bank(for: bot.id).proposeSkill(SkillSnapshots.proposal) }
             try? await Task.sleep(for: .seconds(1))
             model.seedConversation(Conversation(items: items), for: bot.id)
+            if screen.hasPrefix("transcript-activity") {
+                let live = model.live(bot.id)
+                live.setStatus("Pensando")
+                live.setWork(WorkLine(verb: "Pensando", actions: 4))
+                let transcript = model.orbTranscript(bot.id)
+                transcript.setLive(true)
+                transcript.showPlan(TaskPlan(goal: "Ajustar rotina e iniciar nova rodada", steps: [
+                    .init(text: "Conferir rotina ativa", state: .done),
+                    .init(text: "Ajustar intervalo", state: .done),
+                    .init(text: "Revisar conversas e pagamentos", state: .inProgress),
+                    .init(text: "Responder leads elegíveis")
+                ]))
+                if screen.hasSuffix("-need") {
+                    model.setAwaitingApproval(true, of: bot.id)
+                    live.setWork(WorkLine(verb: "Esperando sua resposta", tone: .waiting, actions: 4))
+                }
+                // Re-seed after the offscreen layer subscribed: this scene has a drawn page, never a running browser.
+                try? await Task.sleep(for: .milliseconds(500))
+                LiveScreenSnapshots.tab(model: model, botID: bot.id)
+            }
             if screen == "transcript-browser-live" { await LiveScreenSnapshots.point(model: model, botID: bot.id) }
             // The bar over the top of the conversation (⌘F), and the first message taken back into the field (Editar).
             if screen == "transcript-find" { try? await Task.sleep(for: .seconds(1)); model.request(.findInConversation, of: bot.id) }
@@ -222,5 +268,16 @@ enum TranscriptSample {
 
 private enum AgentEngineNotice {
     static let paused = AgentEngine.pausedNotice(after: 100)
+}
+
+/// Holds the transport while the review scene supplies its own frame. No real browser or socket is opened.
+private struct ActivitySnapshotBrowser: LiveBrowserSource {
+    func generation(botID: UUID) -> Int? { 1 }
+    func streamPort(botID: UUID) async throws -> Int? {
+        try await Task.sleep(for: .seconds(30))
+        return nil
+    }
+    func pageLooksSensitive(botID: UUID) -> Bool { false }
+    func setPointerHandler(_ handler: (@Sendable (UUID, LivePointer) -> Void)?, only botID: UUID?) {}
 }
 #endif

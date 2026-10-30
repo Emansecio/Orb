@@ -9,6 +9,7 @@ struct ConnectorGalleryView: View {
     let explore: () -> Void
     /// Shows an installed connector in the Instalados tab.
     let showInstalled: (UUID) -> Void
+    @State private var hasMultipleColumns = false
 
     var body: some View {
         ScrollView {
@@ -16,14 +17,16 @@ struct ConnectorGalleryView: View {
                 Text("Escolha um serviço e clique em Conectar. Os Orbs que você escolher passam a usá-lo, sempre pedindo antes de enviar ou apagar algo.")
                     .font(Typography.label)
                     .foregroundStyle(Palette.muted)
-                // A warning line under one card would make it taller than its neighbours: while any card has one, all keep its room.
+                // Keep cards aligned across columns when a neighbour has a warning.
                 let statuses = ConnectorGallery.services.map { ($0, status(of: $0)) }
-                let reservesNote = statuses.contains { if case .needsAttention = $0.1 { true } else { false } }
+                let reservesNote = hasMultipleColumns && statuses.contains { if case .needsAttention = $0.1 { true } else { false } }
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), spacing: 12, alignment: .top)], spacing: 12) {
                     ForEach(statuses, id: \.0.id) { service, status in
                         ServiceCard(service: service, status: status, reservesNote: reservesNote) { open(service, status: status) }
                     }
                 }
+                // One column needs no empty warning slot in every other card. Observe only the column-count boundary.
+                .onGeometryChange(for: Bool.self) { $0.size.width >= 2 * 290 + 12 } action: { hasMultipleColumns = $0 }
                 HStack(spacing: 6) {
                     Text("Não achou o que procura?").foregroundStyle(Palette.muted)
                     Button("Explorar o registro de conectores", action: explore).buttonStyle(.link)

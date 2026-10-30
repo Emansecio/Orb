@@ -592,6 +592,11 @@ struct Routine: Identifiable, Codable, Sendable {
     var runs: [RoutineRun] = []
     /// What the routine works toward, checked on each run; nil for a plain routine.
     var goal: RoutineGoal?
+    /// A deterministic check the app runs before the model (`RoutinePrecheck.run`): it can excuse a run it
+    /// proves unnecessary (an empty queue, a slot the prompt excludes); any doubt means the run happens.
+    var precheck: RoutinePrecheck?
+    /// Open and completed follow-ups live beyond the bounded history of runs.
+    var followUps: [RoutineFollowUp] = []
 
     static let keptRuns = 10
 
@@ -629,7 +634,29 @@ extension Routine {
         runs = try c.lossyArray(.runs)
         // A goal this version cannot read leaves a plain routine, never a routine that does not load.
         goal = (try? c.decodeIfPresent(RoutineGoal.self, forKey: .goal)) ?? nil
+        precheck = (try? c.decodeIfPresent(RoutinePrecheck.self, forKey: .precheck)) ?? nil
+        followUps = try c.lossyArray(.followUps)
     }
+}
+
+struct RoutineFollowUp: Identifiable, Codable, Sendable, Equatable {
+    var id = UUID()
+    var subject: String
+    var channel: String
+    var nextStep: String
+    var lastAction: String? = nil
+    var lastChecked: Date? = nil
+    var source: String? = nil
+    var updatedAt = Date.now
+    var resolved = false
+}
+
+/// A command the app runs before a routine's scheduled run decides to start, without waking the model. `command`
+/// is a program and its arguments (no shell); it prints one JSON object on stdout: `{"skip": true, "reason": "…"}`
+/// excuses the run. Anything else — no output, a parse failure, a nonzero exit, a timeout — means "run as usual":
+/// the check may only excuse a run it can prove unnecessary, never block one it cannot judge.
+struct RoutinePrecheck: Codable, Equatable, Sendable {
+    var command: [String]
 }
 
 /// What one run of a routine left behind: shown in the routine's history. The whole run is in the routine's
@@ -647,6 +674,8 @@ struct RoutineRun: Identifiable, Codable, Sendable, Equatable {
     var reportFile: String?
     /// The goal's check this run reported, for a routine with a goal: the history is the goal's timeline.
     var check: GoalCheck?
+    /// Open follow-ups after this run, when this version recorded them.
+    var openFollowUps: [UUID]? = nil
 }
 
 extension RoutineRun {
@@ -660,6 +689,7 @@ extension RoutineRun {
         report = try c.decodeIfPresent(String.self, forKey: .report)
         reportFile = try c.decodeIfPresent(String.self, forKey: .reportFile)
         check = (try? c.decodeIfPresent(GoalCheck.self, forKey: .check)) ?? nil
+        openFollowUps = try? c.decodeIfPresent([UUID].self, forKey: .openFollowUps)
     }
 }
 
@@ -856,6 +886,7 @@ extension Skill {
 }
 
 enum SidebarItem: Hashable {
+    case inicio
     case bot(UUID)
     case group(UUID)
     case routines

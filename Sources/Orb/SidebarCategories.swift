@@ -69,8 +69,10 @@ enum SidebarOrder {
 
 /// What a row of the Orbs reports its frame as, for dragging (`SidebarDrop`).
 enum SidebarDropKey: Hashable {
-    /// The "Orbs" title, over the loose Orbs.
+    /// The "Orbs" heading, over the whole section.
     case looseTitle
+    /// The "Outros" heading, over the loose Orbs once a category exists.
+    case othersTitle
     case row(UUID)
     case header(UUID)
     /// "Arraste um Orb para cá" of an open empty category.
@@ -123,12 +125,15 @@ enum SidebarDrop {
         var categoryID: UUID?
         var botIDs: [UUID]
         var isCollapsed = false
+        /// Drawn indented under a heading (the loose ones under "Outros"; a category's always are, flag or not).
+        var indented = false
     }
 
     static func sections(loose: [UUID], categories: [SidebarCategory], botIDs: [UUID]) -> [Section] {
         let alive = Set(botIDs)
-        return [Section(categoryID: nil, botIDs: loose)]
-            + categories.map { Section(categoryID: $0.id, botIDs: $0.botIDs.filter { alive.contains($0) }, isCollapsed: $0.isCollapsed) }
+        // The loose Orbs stand under "Outros", indented like a category's, once there is a category to sort them from.
+        return [Section(categoryID: nil, botIDs: loose, indented: !categories.isEmpty)]
+            + categories.map { Section(categoryID: $0.id, botIDs: $0.botIDs.filter { alive.contains($0) }, isCollapsed: $0.isCollapsed, indented: true) }
     }
 
     /// The list with `botID` held at height `y`. The gap opens at the place whose middle is nearest the pointer, worked out
@@ -158,6 +163,8 @@ enum SidebarDrop {
                     continue
                 }
             }
+            // The "Outros" heading over the loose Orbs, when it is drawn.
+            if section.categoryID == nil { add(.othersTitle) }
             for (index, other) in others.enumerated() where frames[.row(other)] != nil {
                 places.append((items.count, SidebarDropSlot(categoryID: section.categoryID, index: index), false))
                 add(.row(other))
@@ -186,8 +193,9 @@ enum SidebarDrop {
             if shift != 0 { shifts[item.key] = shift }
         }
         let indent = SidebarCategoryLayout.indent
-        let gapX = held.minX + (place.slot.categoryID == nil ? 0 : indent)
-        let heldIndent: CGFloat = sections.contains { $0.categoryID != nil && $0.botIDs.contains(botID) } ? indent : 0
+        let indents: (SidebarDrop.Section) -> Bool = { $0.categoryID != nil || $0.indented }
+        let gapX = held.minX + (sections.contains { $0.categoryID == place.slot.categoryID && indents($0) } ? indent : 0)
+        let heldIndent: CGFloat = sections.contains { $0.botIDs.contains(botID) && indents($0) } ? indent : 0
         return SidebarDragPreview(botID: botID, slot: place.slot, shifts: shifts,
                                   gap: CGRect(x: gapX, y: gapY, width: held.maxX - gapX, height: held.height),
                                   heldOffset: CGSize(width: gapX - held.minX - heldIndent, height: gapY - held.minY),

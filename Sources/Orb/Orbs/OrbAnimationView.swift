@@ -421,15 +421,19 @@ final class OrbAnimationView: NSView {
         let resize = resize || needsResize || scale != builtScale
         let layers = config.layers(eyes: shown.eyes, mouth: shown.mouth(base: config.mouth), brows: shown.brows)
         let waited = decoded != nil
+        var images = decoded ?? [:]
         imageRequest += 1
         if !waited {
             let reusable = resize ? [] : Set(placed.map(\.layer))
             let needed = layers.filter { !reusable.contains($0) }
-            if needed.contains(where: { OrbImages.cached($0.path, pixels: side * scale, tint: $0.tint) == nil }) {
+            // Hold the cached bitmaps through the rebuild: memory pressure may evict them between lookup and placement.
+            for item in needed { images[item] = OrbImages.cached(item.path, pixels: side * scale, tint: item.tint) }
+            if images.count < needed.count {
                 needsResize = resize
                 let request = imageRequest
                 OrbImages.load(needed, pixels: side * scale) { [weak self] images in
-                    guard let self, request == self.imageRequest else { return }
+                    // A failed decode keeps the previous whole face. Never retry a missing PNG on the main thread.
+                    guard let self, request == self.imageRequest, images.allSatisfy({ $0 != nil }) else { return }
                     var decoded: [OrbLayer: CGImage] = [:]
                     for (layer, image) in zip(needed, images) { decoded[layer] = image }
                     self.rebuild(decoded: decoded)
@@ -470,7 +474,7 @@ final class OrbAnimationView: NSView {
                 .map { ($0.layer.kind, $0) }, uniquingKeysWith: { first, _ in first })
             placed = layers.map { item in
                 if let kept = reusable.removeValue(forKey: item) { return kept }
-                let image = decoded?[item] ?? OrbImages.cgImage(item.path, pixels: side * scale, tint: item.tint)
+                let image = images[item]
                 if item.kind == .mouth {
                     mouthImage = image
                     shownViseme = nil

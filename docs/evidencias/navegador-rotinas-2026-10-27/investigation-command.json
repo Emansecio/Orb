@@ -1,0 +1,10 @@
+{
+  "timestamp_utc": "2026-10-27T06:49:56.321221+00:00",
+  "command": [
+    "python3",
+    "docs/evidencias/navegador-rotinas-2026-10-27/investigate.py"
+  ],
+  "exit_code": 0,
+  "stdout": "{\n  \"summary\": {\n    \"snapshot_calls\": 397,\n    \"failures\": 54,\n    \"categories\": {\n      \"CSS selector absent\": 34,\n      \"no AX node for CSS selector\": 20\n    },\n    \"calls_with_selector\": 261,\n    \"calls_with_ignored_query\": 74,\n    \"failure_then_immediate_new_snapshot\": 32,\n    \"failure_then_immediate_successful_snapshot\": 27,\n    \"failure_then_immediate_successful_unscoped_snapshot\": 19\n  },\n  \"routines\": [\n    {\n      \"id\": \"235A91D6-AD6C-47C6-8BD9-B2721B84584A\",\n      \"name\": \"Checar e proteger site AcessosFit (6 em 6 horas)\",\n      \"schedule\": {\n        \"everyHours\": {\n          \"_0\": 6\n        }\n      },\n      \"prompt_chars\": 3237,\n      \"retained_tools\": 51,\n      \"retained_reads\": 3,\n      \"latest_model_history_messages\": 26,\n      \"excludes_2330\": false,\n      \"requires_reading_skill\": false\n    },\n    {\n      \"id\": \"C8B4C211-08F1-4E72-B896-D7596D9BC77C\",\n      \"name\": \"Análise diária Google Ads AcessosFit\",\n      \"schedule\": {\n        \"daily\": {\n          \"minute\": 0,\n          \"hour\": 22\n        }\n      },\n      \"prompt_chars\": 646,\n      \"retained_tools\": 170,\n      \"retained_reads\": 8,\n      \"latest_model_history_messages\": 1,\n      \"excludes_2330\": false,\n      \"requires_reading_skill\": false\n    },\n    {\n      \"id\": \"54CA00BB-C0DD-40D3-8B6C-CF8479DD9897\",\n      \"name\": \"Rodada WhatsApp horária 8h-23h\",\n      \"schedule\": {\n        \"cron\": {\n          \"expression\": \"0,30 8-23 * * *\",\n          \"timeZone\": \"America/Sao_Paulo\"\n        }\n      },\n      \"prompt_chars\": 1796,\n      \"retained_tools\": 329,\n      \"retained_reads\": 143,\n      \"latest_model_history_messages\": 4,\n      \"excludes_2330\": true,\n      \"requires_reading_skill\": true\n    }\n  ]\n}\n",
+  "stderr": ""
+}

@@ -1,0 +1,12 @@
+{
+  "timestamp_utc": "2026-10-27T06:23:44.225988+00:00",
+  "command": [
+    "python3",
+    "scripts/audit-token-usage.py",
+    "--output",
+    "docs/evidencias/tokens-2026-10-27/metrics.json"
+  ],
+  "exit_code": 1,
+  "stdout": "",
+  "stderr": "Traceback (most recent call last):\n  File \"/Users/thiagomacbookpro/Orb/scripts/audit-token-usage.py\", line 189, in <module>\n    main()\n  File \"/Users/thiagomacbookpro/Orb/scripts/audit-token-usage.py\", line 171, in main\n    found = session(path, root)\n  File \"/Users/thiagomacbookpro/Orb/scripts/audit-token-usage.py\", line 110, in session\n    bot_usage = [x[\"kind\"][\"bot\"][\"_0\"].get(\"usage\") for x in data.get(\"items\", [])\n  File \"/Users/thiagomacbookpro/Orb/scripts/audit-token-usage.py\", line 110, in <listcomp>\n    bot_usage = [x[\"kind\"][\"bot\"][\"_0\"].get(\"usage\") for x in data.get(\"items\", [])\nKeyError: '_0'\n"
+}

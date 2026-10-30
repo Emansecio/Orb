@@ -92,6 +92,67 @@ enum BrowseSupport {
         }
     }
 
+    /// The two failures a `selector` comes back with when the element is not there (the command line's own words): the
+    /// scope missed, the page did not — so reading the whole page is the remedy, not giving up.
+    static func isSelectorMiss(_ message: String) -> Bool {
+        message.contains("did not match any element") || message.contains("No accessibility node found for selector")
+    }
+
+    /// The lines of a snapshot that contain `query` (any case, accents aside; literal text, never a pattern), each with
+    /// up to `context` lines around it and the character offset the block starts at, so it can be read on with `offset=`.
+    /// Refs stay whole inside their lines. At most `WebFetchTool.maxFindMatches` blocks and `budget` characters.
+    static func matches(of query: String, in tree: String, context: Int = 2, budget: Int = WebFetchTool.defaultCharacters) -> String {
+        var lines: [(offset: Int, text: Substring)] = []
+        var position = 0
+        for line in tree.split(separator: "\n", omittingEmptySubsequences: false) {
+            lines.append((position, line))
+            position += line.count + 1
+        }
+        var hits: [Int] = []
+        for (index, line) in lines.enumerated() where line.text.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil {
+            hits.append(index)
+        }
+        guard !hits.isEmpty else {
+            return "No line of this snapshot contains \"\(query)\" (\(tree.count) characters). Try other words, `full: true`, or browse_read for the text."
+        }
+        // The `context` lines around each hit; windows that touch merge into one block.
+        var blocks: [(offset: Int, text: String, hits: Int)] = []
+        var span: ClosedRange<Int>? = nil
+        var spanHits = 0
+        for index in hits {
+            let window = max(index - context, 0)...min(index + context, lines.count - 1)
+            if let current = span, window.lowerBound <= current.upperBound + 1 {
+                span = current.lowerBound...window.upperBound
+                spanHits += 1
+            } else {
+                if let done = span {
+                    let slice = lines[done]
+                    blocks.append((slice.first?.offset ?? 0, slice.map { String($0.text) }.joined(separator: "\n"), spanHits))
+                }
+                (span, spanHits) = (window, 1)
+            }
+        }
+        if let done = span {
+            let slice = lines[done]
+            blocks.append((slice.first?.offset ?? 0, slice.map { String($0.text) }.joined(separator: "\n"), spanHits))
+        }
+        var pieces: [String] = [], covered = 0, total = 0
+        for block in blocks where pieces.count < WebFetchTool.maxFindMatches {
+            let piece = "[offset=\(block.offset)]\n\(block.text)"
+            let cost = piece.count + (pieces.isEmpty ? 0 : 2)
+            if total + cost > budget, !pieces.isEmpty { break }
+            total += cost
+            pieces.append(piece)
+            covered += block.hits
+        }
+        var result = "\(hits.count) line\(hits.count == 1 ? "" : "s") match \"\(query)\"; each block starts at the offset it can be read from:\n\n"
+            + pieces.joined(separator: "\n\n")
+        if covered < hits.count {
+            result += "\n\n[+ \(hits.count - covered) more matching line\(hits.count - covered == 1 ? "" : "s") not shown; narrow `query`, or read on with `offset` from a block above.]"
+        }
+        return result
+    }
+
     /// Why typing into this field is refused, or nil. Passwords and card numbers are never typed by the Orb: the person does it
     /// (`browse_show`). The field is judged by what the snapshot said it was and, when the browser can say, by its own type.
     static func secretReason(ref: String, session: BrowserSession) async -> String? {
@@ -218,13 +279,15 @@ struct BrowseSnapshotTool: BrowseTool {
         description: """
         What the page offers to click or fill, one line per element with a ref (e12) for the other browse_* tools. Refs change \
         with the page: snapshot again after it changes. 12,000 characters (`max_chars` up to 24,000; the closing note gives the \
-        next `offset`). `full` adds text and headings; `selector` (CSS) limits it to part of the page.
+        next `offset`). `full` adds text and headings; `selector` (CSS) scopes it to one element, or the whole page when it \
+        misses; `query` gives only the lines with that text, each with neighbors and its offset.
         """,
         parameters: .schema([
             "offset": .property("integer"),
             "max_chars": .property("integer"),
             "full": .property("boolean"),
-            "selector": .property("string"),
+            "selector": .property("string", "CSS for the part of the page to list; the first match is the root."),
+            "query": .property("string", "Only the lines with this text, each with neighbors and its offset."),
         ]))
 
     func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
@@ -234,13 +297,28 @@ struct BrowseSnapshotTool: BrowseTool {
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
         let session = try await BrowseSupport.session(context)
         let offset = arguments.integer("offset", default: 0, in: 0...Int.max)
+        let query = arguments.nonEmptyString("query") ?? arguments.nonEmptyString("find")
         var (tree, url) = session.snapshotMemory
+        var widened: String?
         if offset == 0 || tree.isEmpty {
-            let snapshot = try await session.exclusive {
-                try await session.driver.snapshot(interactive: !arguments.flag("full"), selector: arguments.nonEmptyString("selector"))
+            let interactive = !arguments.flag("full")
+            let selector = arguments.nonEmptyString("selector")
+            // A scoped read that misses is read again on the whole page, inside the same lock and tab: the model's own
+            // recovery was this very second snapshot, a full model turn later.
+            let (snapshot, failed): (BrowserSnapshot, String?) = try await session.exclusive {
+                do {
+                    return (try await session.driver.snapshot(interactive: interactive, selector: selector), nil)
+                } catch BrowserDriverError.failed(let message) where selector != nil && BrowseSupport.isSelectorMiss(message) {
+                    do {
+                        return (try await session.driver.snapshot(interactive: interactive, selector: nil), message)
+                    } catch BrowserDriverError.failed(let again) {
+                        throw BrowserDriverError.failed(message + " Reading the whole page instead also failed: " + again)
+                    }
+                }
             }
             tree = snapshot.tree
             url = snapshot.url
+            widened = failed
             session.remember(snapshot, text: tree)
             if let botID = context.botID {
                 context.browser.hub?.setLabels(snapshot.refs, botID: botID, scope: context.browser.scope)
@@ -252,8 +330,11 @@ struct BrowseSnapshotTool: BrowseTool {
             return "URL: \(url)\nNothing to list on this page (it may still be loading, or have no controls). Try browse_snapshot with full: true, "
                 + "browse_read, or browse_scroll." + note
         }
-        let body = WebFetchTool.page(of: tree, arguments: arguments, truncatedDownload: nil)
-        return "URL: \(url)\n\(BrowseSupport.untrusted)\n\n" + body + note
+        let widenedNote = widened.map { "NOTE: the scoped read failed (\($0)) — the whole page is listed instead.\n" } ?? ""
+        let body = query.map {
+            BrowseSupport.matches(of: $0, in: tree, budget: arguments.integer("max_chars", default: WebFetchTool.defaultCharacters, in: 1...WebFetchTool.maxCharacters))
+        } ?? WebFetchTool.page(of: tree, arguments: arguments, truncatedDownload: nil)
+        return "URL: \(url)\n" + widenedNote + "\(BrowseSupport.untrusted)\n\n" + body + note
     }
 }
 

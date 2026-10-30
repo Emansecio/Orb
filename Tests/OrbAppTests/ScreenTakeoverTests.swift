@@ -477,7 +477,27 @@ struct ScreenTakeoverTests {
         let events = rig.world.poster.events
         if case .mouse(.up, _, .left, _)? = events.last {} else { Issue.record("the button must be released when the drag stops") }
         #expect(events.count < 17, "the drag did not go on")
-        #expect(rig.world.front?.pid == 10, "the person's app is put back all the same")
+        #expect(rig.world.front?.pid == 30, "the person's new focus is preserved")
+        #expect(!rig.world.log.contains("warp"), "the cursor is not pulled away from the new app")
+        #expect(rig.world.log.contains("associate"))
+    }
+
+    @Test func switchingBackToTheOriginalAppAlsoKeepsTheCursor() async throws {
+        let rig = TakeoverRig()
+        rig.world.poster.afterEvent = { count, world in if count == 1 { world.setFront(10, name: "Safari") } }
+        await #expect(throws: TakeoverFailure.lostFront("Notas")) {
+            _ = try await rig.takeOver { hand in try await hand.click(at: CGPoint(x: 100, y: 100), button: .left, count: 1) }
+        }
+        #expect(rig.world.front?.pid == 10)
+        #expect(!rig.world.log.contains("warp"))
+    }
+
+    @Test func focusChangedAfterTheLastActionIsNotTakenBack() async throws {
+        let rig = TakeoverRig()
+        _ = try await rig.takeOver { _ in rig.world.setFront(30, name: "Outro") }
+        #expect(rig.world.front?.pid == 30)
+        #expect(!rig.world.log.contains("warp"))
+        #expect(rig.world.log.contains("associate"))
     }
 
     @Test func aCursorThatNeverArrivesStopsTheTakeoverWithoutBlamingThePerson() async throws {

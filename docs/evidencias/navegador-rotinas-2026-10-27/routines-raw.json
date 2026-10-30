@@ -1,0 +1,147 @@
+{
+  "timestamp_utc": "2026-10-27T06:55:52.981884+00:00",
+  "source_sha256": {
+    "/Users/thiagomacbookpro/Documents/Projetos/AcessosFit-Brain/skills/whatsapp/scripts/puxar.py": "0b0c206fe4a11cde8288c6d1969a639914976a38e117d979f2d635024f5de461",
+    "/Users/thiagomacbookpro/Orbs/LP AcessosFit/Rotinas/analisa.py": "1f7360de6844fe038f05712dfc9e1231770a9ec074fa68e7d4d615e9cf04afd8"
+  },
+  "records": [
+    {
+      "label": "fresh empty queue",
+      "timestamp_utc": "2026-10-27T06:55:52.868844+00:00",
+      "command": [
+        "puxar.main (all external calls replaced by synthetic stubs)",
+        "--peek",
+        "--summary",
+        "--json"
+      ],
+      "simulated_cli_calls": [
+        [
+          "wacli",
+          "doctor",
+          "--json"
+        ],
+        [
+          "wacli",
+          "messages",
+          "list",
+          "--after",
+          "2026-10-20T00:00:00-03:00",
+          "--limit",
+          "20000",
+          "--json"
+        ]
+      ],
+      "exit_code": 0,
+      "stdout": "{\"success\": true, \"data\": {\"account\": \"work\", \"since\": \"2026-10-20\", \"observed_at\": \"2026-10-27T06:55:52.868821+00:00\", \"sync_recent_observed\": true, \"continuous_reception_confirmed\": false, \"panel\": \"/Users/thiagomacbookpro/Documents/Projetos/AcessosFit-Brain/Pendentes de Ativação.md\", \"pending\": [], \"marker_updated\": false, \"summary\": true, \"incomplete\": false, \"failures\": []}, \"error\": null}\n",
+      "stderr": ""
+    },
+    {
+      "label": "stale empty queue",
+      "timestamp_utc": "2026-10-27T06:55:52.869196+00:00",
+      "command": [
+        "puxar.main (all external calls replaced by synthetic stubs)",
+        "--peek",
+        "--summary",
+        "--json"
+      ],
+      "simulated_cli_calls": [
+        [
+          "wacli",
+          "doctor",
+          "--json"
+        ],
+        [
+          "wacli",
+          "messages",
+          "list",
+          "--after",
+          "2026-10-20T00:00:00-03:00",
+          "--limit",
+          "20000",
+          "--json"
+        ]
+      ],
+      "exit_code": 0,
+      "stdout": "{\"success\": true, \"data\": {\"account\": \"work\", \"since\": \"2026-10-20\", \"observed_at\": \"2026-10-27T06:55:52.869180+00:00\", \"sync_recent_observed\": false, \"continuous_reception_confirmed\": false, \"panel\": \"/Users/thiagomacbookpro/Documents/Projetos/AcessosFit-Brain/Pendentes de Ativação.md\", \"pending\": [], \"marker_updated\": false, \"summary\": true, \"incomplete\": false, \"failures\": []}, \"error\": null}\n",
+      "stderr": ""
+    },
+    {
+      "label": "old unresolved queue item before sweep marker",
+      "timestamp_utc": "2026-10-27T06:55:52.869525+00:00",
+      "command": [
+        "puxar.main (all external calls replaced by synthetic stubs)",
+        "--peek",
+        "--summary",
+        "--json"
+      ],
+      "simulated_cli_calls": [
+        [
+          "wacli",
+          "doctor",
+          "--json"
+        ],
+        [
+          "wacli",
+          "messages",
+          "list",
+          "--after",
+          "2026-10-20T00:00:00-03:00",
+          "--limit",
+          "20000",
+          "--json"
+        ]
+      ],
+      "exit_code": 0,
+      "stdout": "{\"success\": true, \"data\": {\"account\": \"work\", \"since\": \"2026-10-20\", \"observed_at\": \"2026-10-27T06:55:52.869500+00:00\", \"sync_recent_observed\": true, \"continuous_reception_confirmed\": false, \"panel\": \"/Users/thiagomacbookpro/Documents/Projetos/AcessosFit-Brain/Pendentes de Ativação.md\", \"pending\": [{\"jid\": \"fixture@s.whatsapp.net\", \"name\": \"Synthetic fixture\", \"timestamp\": \"2026-10-26T06:55:52.860953+00:00\", \"preview\": \"Synthetic pending request\", \"new\": false}], \"marker_updated\": false, \"summary\": true, \"incomplete\": false, \"failures\": []}, \"error\": null}\n",
+      "stderr": ""
+    },
+    {
+      "label": "ordinary health read",
+      "timestamp_utc": "2026-10-27T06:55:52.869759+00:00",
+      "command": [
+        "/Applications/Xcode.app/Contents/Developer/usr/bin/python3",
+        "/Users/thiagomacbookpro/Orbs/LP AcessosFit/Rotinas/analisa.py",
+        "/Users/thiagomacbookpro/Orb/docs/evidencias/navegador-rotinas-2026-10-27/ordinary-health-read.jsonl"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "label": "single curl of homepage",
+      "timestamp_utc": "2026-10-27T06:55:52.896816+00:00",
+      "command": [
+        "/Applications/Xcode.app/Contents/Developer/usr/bin/python3",
+        "/Users/thiagomacbookpro/Orbs/LP AcessosFit/Rotinas/analisa.py",
+        "/Users/thiagomacbookpro/Orb/docs/evidencias/navegador-rotinas-2026-10-27/single-curl-of-homepage.jsonl"
+      ],
+      "exit_code": 0,
+      "stdout": "198.51.100.10 1 probes 0 404 0 4xx 0 post 0 ev 0 badua True curl/8.0\n",
+      "stderr": ""
+    },
+    {
+      "label": "three create POSTs hours apart",
+      "timestamp_utc": "2026-10-27T06:55:52.926202+00:00",
+      "command": [
+        "/Applications/Xcode.app/Contents/Developer/usr/bin/python3",
+        "/Users/thiagomacbookpro/Orbs/LP AcessosFit/Rotinas/analisa.py",
+        "/Users/thiagomacbookpro/Orb/docs/evidencias/navegador-rotinas-2026-10-27/three-create-POSTs-hours-apart.jsonl"
+      ],
+      "exit_code": 0,
+      "stdout": "198.51.100.10 3 probes 0 404 0 4xx 0 post 3 ev 0 badua False Mozilla/5.0\n",
+      "stderr": ""
+    },
+    {
+      "label": "spoofed crawler with one secret probe",
+      "timestamp_utc": "2026-10-27T06:55:52.953400+00:00",
+      "command": [
+        "/Applications/Xcode.app/Contents/Developer/usr/bin/python3",
+        "/Users/thiagomacbookpro/Orbs/LP AcessosFit/Rotinas/analisa.py",
+        "/Users/thiagomacbookpro/Orb/docs/evidencias/navegador-rotinas-2026-10-27/spoofed-crawler-with-one-secret-probe.jsonl"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ]
+}

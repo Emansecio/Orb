@@ -86,6 +86,7 @@ enum GroupPresence {
 struct GroupPresenceStrip: View {
     let items: [GroupPresenceItem]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.appearsActive) private var appearsActive
 
     var body: some View {
         let text = GroupPresence.text(items)
@@ -106,7 +107,7 @@ struct GroupPresenceStrip: View {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(Palette.muted)
-                        .symbolEffect(.variableColor.iterative, options: .repeating, isActive: !reduceMotion)
+                        .symbolEffect(.variableColor.iterative, options: .repeating, isActive: appearsActive && !reduceMotion)
                         .accessibilityHidden(true)
                 }
             }

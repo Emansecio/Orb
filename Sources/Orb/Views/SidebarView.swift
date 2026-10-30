@@ -9,8 +9,6 @@ struct SidebarView: View {
     @Namespace private var selectionSpace
     /// An Orb's row slides from where it was to where it went (into a category, out of one) through this one.
     @Namespace private var rowSpace
-    /// The selection's background at the foot (Rotinas, Conectores, Skills) slides between the three through this one.
-    @Namespace private var footerSelectionSpace
     /// The Orbs the rows were last laid out for (nil until the first appearance): an update that adds or removes one
     /// together with the selection is a row coming or going, and its layout must not animate (an Orb that only moved in
     /// the list is neither).
@@ -28,6 +26,9 @@ struct SidebarView: View {
     @State private var drag: SidebarDragPreview?
     /// Held in a box nobody observes: the frames change at every frame of a slide or a resize, and only a drop reads them.
     @State private var dropFrames = SidebarDropFrameBox()
+    /// "Orbs" and "Outros" fold their lists: session-only, so nothing stays hidden across launches.
+    @State private var orbsUnfolded = true
+    @State private var looseUnfolded = true
 
     var body: some View {
         let order = model.sidebarBotIDs
@@ -37,36 +38,61 @@ struct SidebarView: View {
         let sections = SidebarDrop.sections(loose: looseIDs, categories: model.categories, botIDs: model.botIDs)
         let listChanged = settledBotIDs.map { Set($0) != Set(model.botIDs) } ?? false
         let isNamingNewCategory = if case .new = model.categoryNaming { true } else { false }
+        let nestedLoose = !model.categories.isEmpty && !looseIDs.isEmpty
         ScrollView {
             VStack(alignment: .leading, spacing: 1) {
+                SidebarFeatureRow(item: .inicio, name: "Início", symbol: "house",
+                                  tip: "Mostra as novidades e os acompanhamentos dos Orbs", selectionSpace: selectionSpace)
+                    .accessibilityIdentifier("sidebar-inicio")
+                    .padding(.bottom, 8)
                 // The Orbs, loose and in categories, as one place to drop on: the gap opens anywhere among them.
                 VStack(alignment: .leading, spacing: 1) {
-                    SectionTitle("Orbs") { NewOrbMenu() }
-                        .sidebarDropFrame(.looseTitle)
-                    if model.botIDs.isEmpty {
-                        // No Orbs: an invitation in the list's own place. It shows the welcome screen (what you get with
-                        // nothing selected); when that is already on screen, the click opens the New Orb sheet instead.
-                        SidebarRow(isSelected: model.selection == nil, selectionSpace: selectionSpace, isDashed: true,
-                                   help: model.selection == nil ? Tip.createFirstOrb : Tip.showWelcome) {
-                            if model.selection == nil {
-                                model.startNewOrb(from: nil)
-                            } else {
-                                model.selection = nil
+                    // "Orbs" folds the whole list; "Outros" gathers the loose ones once a category exists to sort them
+                    // from, so every list under "Orbs" is a foldable group.
+                    SidebarFoldHeader(title: "Orbs", unfolded: orbsUnfolded, ids: model.botIDs, selectionSpace: selectionSpace) {
+                        NewOrbMenu().padding(.trailing, 2)
+                    } action: {
+                        withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) { orbsUnfolded.toggle() }
+                    }
+                    .sidebarDropFrame(.looseTitle)
+                    if orbsUnfolded {
+                        if model.botIDs.isEmpty {
+                            // No Orbs: an invitation in the list's own place. It shows the welcome screen (what you get with
+                            // nothing selected); when that is already on screen, the click opens the New Orb sheet instead.
+                            SidebarRow(isSelected: model.selection == nil, selectionSpace: selectionSpace, isDashed: true,
+                                       help: model.selection == nil ? Tip.createFirstOrb : Tip.showWelcome) {
+                                if model.selection == nil {
+                                    model.startNewOrb(from: nil)
+                                } else {
+                                    model.selection = nil
+                                }
+                            } content: { _ in
+                                FirstOrbInvitation(isSelected: model.selection == nil, title: (invitationCopy ?? model.welcomeCopy).invitationTitle)
                             }
-                        } content: { _ in
-                            FirstOrbInvitation(isSelected: model.selection == nil, title: (invitationCopy ?? model.welcomeCopy).invitationTitle)
+                            .transition(.opacity)
                         }
-                        .transition(.opacity)
-                    }
-                    ForEach(looseIDs, id: \.self) { id in
-                        SidebarBotRow(botID: id, index: order.firstIndex(of: id) ?? order.count, selectionSpace: selectionSpace, rowSpace: rowSpace)
-                            .sidebarDropItem(.row(id), drag)
-                            .transition(.adapted(.arrive, reduceMotion: reduceMotion))
-                    }
-                    // The categories, after the loose Orbs: only how the list is laid out.
-                    ForEach(model.categories) { category in
-                        SidebarCategorySection(category: category, order: order, drag: drag, selectionSpace: selectionSpace, rowSpace: rowSpace)
-                            .transition(.adapted(.arrive, reduceMotion: reduceMotion))
+                        if nestedLoose {
+                            SidebarFoldHeader(title: "Outros", unfolded: looseUnfolded, ids: looseIDs,
+                                              isTargeted: !looseUnfolded && drag?.slot.categoryID == nil, sub: true,
+                                              selectionSpace: selectionSpace) { EmptyView() } action: {
+                                withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) { looseUnfolded.toggle() }
+                            }
+                            .padding(.leading, SidebarCategoryLayout.subIndent)
+                            .sidebarDropItem(.othersTitle, drag)
+                        }
+                        if !nestedLoose || looseUnfolded {
+                            ForEach(looseIDs, id: \.self) { id in
+                                SidebarBotRow(botID: id, index: order.firstIndex(of: id) ?? order.count, selectionSpace: selectionSpace, rowSpace: rowSpace)
+                                    .padding(.leading, nestedLoose ? SidebarCategoryLayout.indent : 0)
+                                    .sidebarDropItem(.row(id), drag)
+                                    .transition(.adapted(.arrive, reduceMotion: reduceMotion))
+                            }
+                        }
+                        // The categories, after the loose Orbs: only how the list is laid out.
+                        ForEach(model.categories) { category in
+                            SidebarCategorySection(category: category, order: order, drag: drag, selectionSpace: selectionSpace, rowSpace: rowSpace)
+                                .transition(.adapted(.arrive, reduceMotion: reduceMotion))
+                        }
                     }
                 }
                 .coordinateSpace(.named(SidebarDrop.space))
@@ -84,6 +110,7 @@ struct SidebarView: View {
                 // The name field of a category being made (the "+" of the Orbs, an Orb's "Mover para", the palette).
                 if isNamingNewCategory {
                     NewCategoryRow(selectionSpace: selectionSpace)
+                        .padding(.leading, SidebarCategoryLayout.subIndent)
                         .transition(.adapted(.arrive, reduceMotion: reduceMotion))
                 }
 
@@ -95,6 +122,18 @@ struct SidebarView: View {
                         .transition(.adapted(.arrive, reduceMotion: reduceMotion))
                 }
                 // MARK: end MultiOrb (WP6)
+
+                // The workspace pages, as rows after the lists: same look and selection as "Início".
+                SidebarFeatureRow(item: .routines, name: "Rotinas", symbol: "clock.arrow.circlepath",
+                                  tip: Tip.allRoutines, shortcut: AppShortcut.routines.label, selectionSpace: selectionSpace)
+                    .accessibilityIdentifier("sidebar-routines")
+                    .padding(.top, 16)
+                SidebarFeatureRow(item: .connectors, name: "Conectores", symbol: "point.3.filled.connected.trianglepath.dotted",
+                                  tip: Tip.manageConnectors, shortcut: AppShortcut.connectors.label, selectionSpace: selectionSpace)
+                    .accessibilityIdentifier("sidebar-connectors")
+                SidebarFeatureRow(item: .skills, name: "Skills", symbol: "wand.and.stars",
+                                  tip: Tip.skillsPage, shortcut: AppShortcut.skills.label, selectionSpace: selectionSpace)
+                    .accessibilityIdentifier("sidebar-skills")
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
@@ -114,6 +153,8 @@ struct SidebarView: View {
             .animation(Motion.selection(reduceMotion: reduceMotion, listChanged: listChanged),
                        value: model.selection)
             .onChange(of: model.botIDs, initial: true) { settledBotIDs = model.botIDs }
+            // A name field opens for a new category while "Orbs" is folded: it has to be seen, so the section unfolds.
+            .onChange(of: model.categoryNaming) { if case .new = model.categoryNaming { orbsUnfolded = true } }
         }
         .scrollIndicators(.never)
         .ignoresSafeArea(.container, edges: .top)
@@ -122,22 +163,6 @@ struct SidebarView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(alignment: .leading, spacing: 8) {
                 KeptMemoryBanner()
-                // Two rows: the pages with a caption under each icon (a label beside the icon does not fit in the 240 pt
-                // column), then the profile and Ajustes.
-                VStack(alignment: .leading, spacing: 0) {
-                    SectionTitle("Espaço de trabalho") { EmptyView() }
-                    HStack(spacing: 4) {
-                        FooterPageButton(item: .routines, name: "Rotinas", symbol: "clock.arrow.circlepath",
-                                         tip: Tip.allRoutines, shortcut: AppShortcut.routines.label, selectionSpace: footerSelectionSpace)
-                        FooterPageButton(item: .connectors, name: "Conectores", symbol: "point.3.filled.connected.trianglepath.dotted",
-                                         tip: Tip.manageConnectors, shortcut: AppShortcut.connectors.label, selectionSpace: footerSelectionSpace)
-                        FooterPageButton(item: .skills, name: "Skills", symbol: "wand.and.stars",
-                                         tip: Tip.skillsPage, shortcut: AppShortcut.skills.label, selectionSpace: footerSelectionSpace)
-                    }
-                    // The highlight slides between the pages (a fade under Reduce Motion), as the Orbs' does.
-                    .motion(Motion.content, value: model.selection)
-                }
-                .padding(.horizontal, 8)
                 HStack(spacing: 6) {
                     ProfileRowButton()
                     Button("Ajustes", systemImage: "gearshape") { SettingsRouter.show(using: openSettings) }
@@ -231,40 +256,109 @@ private struct NewOrbMenu: View {
     }
 }
 
-/// One of the pages at the foot of the sidebar (Rotinas, Conectores, Skills): the icon with a short caption under it,
-/// the selected page marked like a selected row.
-private struct FooterPageButton: View {
+/// One of the sidebar's page rows — "Início" at the top, the workspace pages (Rotinas, Conectores, Skills) after the
+/// lists: icon and name, the selection's background sliding between them through the rows' own namespace.
+private struct SidebarFeatureRow: View {
     @Environment(AppModel.self) private var model
     let item: SidebarItem
     let name: String
     let symbol: String
     let tip: String
-    let shortcut: String
+    var shortcut = ""
     let selectionSpace: Namespace.ID
-    @State private var isHovering = false
 
     var body: some View {
         let isSelected = model.selection == item
-        Button { model.selection = item } label: {
-            VStack(spacing: 2) {
-                // A fixed height, so the captions line up whatever the symbols' own heights are.
-                Image(systemName: symbol).font(.system(size: 15, weight: .medium)).frame(height: 18)
-                Text(name).font(Typography.small).lineLimit(1)
-            }
-            .foregroundStyle(isSelected ? Palette.ink : Palette.muted)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
-            .hoverFill(isHovering && !isSelected, in: .rect(cornerRadius: Radius.medium))
-            .background {
-                if isSelected { SlidingSelectionFill(space: selectionSpace, radius: Radius.medium) }
-            }
-            .contentShape(.rect)
+        SidebarRow(isSelected: isSelected, selectionSpace: selectionSpace,
+                   help: shortcut.isEmpty ? tip : "\(tip) (\(shortcut))") {
+            model.selection = item
+        } content: { _ in
+            Label(name, systemImage: symbol)
+                .font(Typography.text.weight(.medium))
+                .foregroundStyle(isSelected ? Palette.ink : Palette.secondary)
         }
-        .buttonStyle(.plain)
-        .onHover { isHovering = $0 }
-        .help("\(tip) (\(shortcut))")
-        .accessibilityLabel(name)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+/// A heading that folds its list — "Orbs" over the whole section, "Outros" over the loose Orbs once a category exists.
+/// Folded, it carries the selection when the open Orb hides in it, the marks of what it hides and the count. The
+/// trailing edge is free for "Orbs"' "+" (a separate target, never a nested button). `sub` draws the heading as a
+/// sub-section: smaller and quieter, so it reads under "Orbs", not beside it.
+private struct SidebarFoldHeader<Trailing: View>: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let title: String
+    let unfolded: Bool
+    /// The Orbs the heading hides when folded (all of them for "Orbs", the loose ones for "Outros").
+    let ids: [UUID]
+    /// An Orb is being dragged over the folded heading.
+    var isTargeted = false
+    /// A sub-section heading ("Outros"): smaller and quieter than "Orbs".
+    var sub = false
+    let selectionSpace: Namespace.ID
+    @ViewBuilder let trailing: Trailing
+    let action: () -> Void
+
+    var body: some View {
+        let collapsed = !unfolded
+        let holdsSelection = collapsed && ids.contains { model.selection == .bot($0) }
+        let waiting = ids.contains { model.live($0).needsYou }
+        let unread = ids.contains { model.live($0).unread > 0 }
+        let hidden = title == "Orbs" ? "os Orbs" : "os Orbs soltos"
+        HStack(spacing: 0) {
+            SidebarRow(isSelected: holdsSelection, selectionSpace: selectionSpace,
+                       help: collapsed ? "Mostra \(hidden)" : "Recolhe \(hidden)") { action() } content: { _ in
+                HStack(spacing: 10) {
+                    Image(systemName: "chevron.right")
+                        .font(SectionPlus.chevron)
+                        .rotationEffect(.degrees(collapsed ? 0 : 90))
+                        // The arrow turns in the content curve; under Reduce Motion it just takes its new direction.
+                        .animation(Motion.panel(reduceMotion: reduceMotion), value: collapsed)
+                        .frame(width: SidebarCategoryLayout.iconColumn)
+                        .foregroundStyle(Palette.faint)
+                    Text(title)
+                        .font(sub ? Typography.label.weight(.medium) : Typography.text.weight(.medium))
+                        .foregroundStyle(collapsed && holdsSelection ? Palette.ink : sub ? Palette.faint : Palette.secondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    ZStack {
+                        if collapsed && waiting {
+                            Image(systemName: "exclamationmark.bubble.fill")
+                                .font(Typography.label)
+                                .foregroundStyle(Palette.warn)
+                                .transition(.adapted(.mark, reduceMotion: reduceMotion))
+                        } else if collapsed && unread {
+                            Circle()
+                                .fill(Palette.accentText)
+                                .frame(width: 7, height: 7)
+                                .transition(.adapted(.mark, reduceMotion: reduceMotion))
+                        }
+                    }
+                    .motion(value: collapsed && (waiting || unread))
+                    // The number only stands in for the hidden Orbs: unfolded, the Orbs themselves are there to count.
+                    if collapsed {
+                        Text("\(ids.count)")
+                            .font(Typography.small)
+                            .foregroundStyle(Palette.faint)
+                            .monospacedDigit()
+                            .help(CategoryText.orbs(ids.count))
+                    }
+                }
+                .frame(minHeight: SidebarCategoryLayout.headerContentHeight)
+                .hoverFill(isTargeted, in: .rect(cornerRadius: Radius.medium))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Self.accessibilityLabel(title: title, orbCount: ids.count, collapsed: collapsed, waiting: waiting, unread: unread))
+            }
+            trailing
+        }
+    }
+
+    /// What VoiceOver reads for the heading: "Orbs, 3 Orbs, recolhidos, precisa de você".
+    private static func accessibilityLabel(title: String, orbCount: Int, collapsed: Bool, waiting: Bool, unread: Bool) -> String {
+        var parts = [title, CategoryText.orbs(orbCount), collapsed ? "recolhidos" : "expandidos"]
+        if collapsed && waiting { parts.append("precisa de você") }
+        if collapsed && unread { parts.append("não lido") }
+        return parts.joined(separator: ", ")
     }
 }
 

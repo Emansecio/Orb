@@ -326,6 +326,24 @@ struct SidebarCategoryOrganizingTests {
                             SidebarDropSlot(categoryID: list.later, index: 0)])
     }
 
+    /// With a category to sort them from, the loose Orbs stand under "Outros", indented like a category's: the gap
+    /// opens indented too, and the heading sits above it without moving.
+    @Test func underOutrosTheLooseGapIsIndentedAndTheHeadingStays() throws {
+        let (a, category) = (UUID(), UUID())
+        let sections = [SidebarDrop.Section(categoryID: nil, botIDs: [a], indented: true),
+                        SidebarDrop.Section(categoryID: category, botIDs: [], isCollapsed: true)]
+        let frames: [SidebarDropKey: CGRect] = [.looseTitle: CGRect(x: 0, y: 0, width: 264, height: 18),
+                                                .othersTitle: CGRect(x: 0, y: 19, width: 264, height: 28),
+                                                .row(a): CGRect(x: 0, y: 48, width: 264, height: 44),
+                                                .header(category): CGRect(x: 0, y: 93, width: 264, height: 28)]
+        let out = try #require(SidebarDrop.preview(dragging: a, at: 30, in: sections, frames: frames))
+        #expect(out.slot == SidebarDropSlot(categoryID: nil, index: 0))
+        #expect(out.gap == CGRect(x: SidebarCategoryLayout.indent, y: 48, width: 264 - SidebarCategoryLayout.indent, height: 44))
+        // The gap takes the held row's own place (the hole and the gap cancel, so nothing moves); "Outros" stays above it.
+        #expect(out.shifts.isEmpty && out.hides(.row(a)) && out.offset(of: .othersTitle) == .zero)
+        #expect(out.heldOffset == .zero)
+    }
+
     @Test func withNoOtherLooseOrbTheGapOpensUnderTheTitle() throws {
         let (category, a) = (UUID(), UUID())
         let sections = [SidebarDrop.Section(categoryID: nil, botIDs: []), SidebarDrop.Section(categoryID: category, botIDs: [a])]

@@ -359,6 +359,54 @@ struct OrbChatsListTests {
         #expect(userTexts(model, orb) == ["conversa b"])
     }
 
+    @Test @MainActor func deletingAHomeDestinationDuringItsReadReportsTheMissingConversation() async throws {
+        let gate = TestGate()
+        let client = Model(gate: gate)
+        let (model, orb) = setUp(client)
+        let other = UUID(), item = TranscriptItem(.bot(text: "Resultado", isStreaming: false))
+        var chats = OrbChats(first: orb, updated: .now)
+        chats.add(other, at: .now)
+        chats.active = orb
+        model.setChats(chats, for: orb)
+        model.store.save(Conversation(items: [item]), for: orb, chat: other)
+        #expect(model.send("trabalho longo", to: orb, fromUser: true))
+        await waitUntil("the model call") { await client.calls.count >= 1 }
+        model.selection = .inicio
+        #expect(model.openInicioChat(bot: orb, chat: other, item: item.id))
+        #expect(model.session(orb).opening == other)
+        model.deleteChat(other, of: orb)
+        await waitUntil("the missing destination") { model.inicioNavigationNotice != nil }
+        #expect(model.inicioJump == nil)
+        #expect(model.session(orb).chatID == orb)
+        #expect(model.live(orb).isWorking)
+        await gate.open()
+        await waitUntilIdle(model, orb)
+    }
+
+    @Test @MainActor func startingResetCancelsAnInFlightHomeNavigation() async throws {
+        let gate = TestGate()
+        let client = Model(gate: gate)
+        let (model, orb) = setUp(client)
+        let other = UUID(), item = TranscriptItem(.bot(text: "Resultado", isStreaming: false))
+        var chats = OrbChats(first: orb, updated: .now)
+        chats.add(other, at: .now)
+        chats.active = orb
+        model.setChats(chats, for: orb)
+        model.store.save(Conversation(items: [item]), for: orb, chat: other)
+        #expect(model.send("trabalho longo", to: orb, fromUser: true))
+        await waitUntil("the model call") { await client.calls.count >= 1 }
+        model.selection = .inicio
+        #expect(model.openInicioChat(bot: orb, chat: other, item: item.id))
+        #expect(model.session(orb).opening == other)
+        model.isResetting = true
+        await waitUntil("the cancelled read") { model.session(orb).opening == nil }
+        #expect(model.inicioJump == nil)
+        #expect(model.session(orb).chatID == orb)
+        model.isResetting = false
+        await gate.open()
+        await waitUntilIdle(model, orb)
+    }
+
     @Test @MainActor func theConversationOnShowComesBackAfterARelaunch() async throws {
         let client = Model()
         let (model, orb) = setUp(client)

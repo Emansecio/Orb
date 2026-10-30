@@ -9,6 +9,7 @@ extension AppModel {
     /// one on show is already empty, it stays.
     func newChat(for botID: UUID) {
         guard bot(botID) != nil, !isResetting else { return }
+        if inicioJump?.bot == botID { inicioJump = nil; sessions[botID]?.opening = nil }
         let session = session(botID)
         if !session.isUnloaded, !session.isLoading, session.shownItems.isEmpty {
             selection = .bot(botID)
@@ -22,7 +23,12 @@ extension AppModel {
 
     /// Shows another of the Orb's conversations in its chat.
     func openChat(_ chat: UUID, of botID: UUID) {
+        openChat(chat, of: botID, preservingInicioJump: false)
+    }
+
+    func openChat(_ chat: UUID, of botID: UUID, preservingInicioJump: Bool) {
         guard bot(botID) != nil, !isResetting, let chats = live(botID).chats, chats.title(of: chat) != nil else { return }
+        if !preservingInicioJump, inicioJump?.bot == botID { inicioJump = nil; sessions[botID]?.opening = nil }
         show(chat, of: botID, in: chats, fresh: false)
     }
 
@@ -151,8 +157,20 @@ extension AppModel {
                 // main thread first (a long one takes tens of milliseconds there), then shown. Opening another one meanwhile wins.
                 session.opening = chat
                 Task { [weak self] in
-                    guard let read = await self?.readChat(chat, of: botID), let self, bot(botID) != nil, session.opening == chat,
-                          let chats = live(botID).chats, chats.title(of: chat) != nil else { return }
+                    guard let read = await self?.readChat(chat, of: botID), let self, session.opening == chat else { return }
+                    if isResetting {
+                        session.opening = nil
+                        if inicioJump?.bot == botID, inicioJump?.chat == chat { inicioJump = nil }
+                        return
+                    }
+                    guard bot(botID) != nil, let chats = live(botID).chats, chats.title(of: chat) != nil else {
+                        session.opening = nil
+                        if inicioJump?.bot == botID, inicioJump?.chat == chat {
+                            inicioJump = nil
+                            inicioNavigationNotice = "A conversa de origem não está mais disponível."
+                        }
+                        return
+                    }
                     show(chat, of: botID, in: chats, fresh: false, read: read)
                 }
                 return

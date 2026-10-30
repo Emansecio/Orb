@@ -14,11 +14,37 @@ if [[ -n "${ORB_DEV_TOOLS:-}" ]]; then EXTRA=(-Xswiftc -DORB_DEV_TOOLS); fi
 swift build -c "$CONFIG" "${EXTRA[@]}"
 BIN="$(swift build -c "$CONFIG" --show-bin-path)/Orb"
 
-APP="build/Orb.app"
+SIGN_IDENTITY="${ORB_SIGN_IDENTITY:-}"
+if [[ -z "$SIGN_IDENTITY" ]]; then
+  IDENTITIES="$(security find-identity -v -p codesigning 2>/dev/null || true)"
+  [[ "$IDENTITIES" == *'"Orb Local"'* ]] && SIGN_IDENTITY="Orb Local"
+fi
+
+APP="${ORB_BUNDLE_PATH:-build/Orb.app}"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Orb"
 cp -R Sources/Orb/Resources/Orbs "$APP/Contents/Resources/Orbs"
+
+# The helper is signed once and reused byte-for-byte: the login Keychain may pin its CDHash, not just its certificate.
+# Keep it outside build/ so a clean build does not silently invalidate its Keychain authorizations.
+if [[ -n "$SIGN_IDENTITY" && "$SIGN_IDENTITY" != "-" ]]; then
+  HELPER_CACHE="${ORB_KEYCHAIN_HELPER_CACHE:-$HOME/Library/Application Support/Orb/KeychainHelper}"
+  mkdir -p "$HELPER_CACHE" "$APP/Contents/Helpers"
+  IDENTITY_FINGERPRINT="$(security find-identity -v -p codesigning | awk -v target="$SIGN_IDENTITY" '$2 == target || index($0, "\"" target "\"") {print $2; exit}')"
+  [[ -n "$IDENTITY_FINGERPRINT" ]] || { echo "Identidade de assinatura não encontrada: $SIGN_IDENTITY" >&2; exit 1; }
+  HELPER_KEY="$(shasum -a 256 Sources/OrbKeychainHelper/main.swift | awk '{print $1}'):$IDENTITY_FINGERPRINT"
+  if [[ ! -f "$HELPER_CACHE/key" || "$(cat "$HELPER_CACHE/key")" != "$HELPER_KEY" ]] || ! codesign --verify --strict "$HELPER_CACHE/OrbKeychainHelper" 2>/dev/null; then
+    swift build -c release --product OrbKeychainHelper
+    HELPER_BIN="$(swift build -c release --show-bin-path)/OrbKeychainHelper"
+    cp "$HELPER_BIN" "$HELPER_CACHE/OrbKeychainHelper.new"
+    codesign --force --sign "$SIGN_IDENTITY" --identifier app.orb.keychain-helper "$HELPER_CACHE/OrbKeychainHelper.new"
+    codesign --verify --strict "$HELPER_CACHE/OrbKeychainHelper.new"
+    mv -f "$HELPER_CACHE/OrbKeychainHelper.new" "$HELPER_CACHE/OrbKeychainHelper"
+    print -r -- "$HELPER_KEY" > "$HELPER_CACHE/key"
+  fi
+  cp "$HELPER_CACHE/OrbKeychainHelper" "$APP/Contents/Helpers/OrbKeychainHelper"
+fi
 
 # App icon: rendered by the app itself (AppIcon), straight at each size.
 ICONSET="$(mktemp -d)/AppIcon.iconset"
@@ -78,11 +104,6 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-SIGN_IDENTITY="${ORB_SIGN_IDENTITY:-}"
-if [[ -z "$SIGN_IDENTITY" ]]; then
-  IDENTITIES="$(security find-identity -v -p codesigning 2>/dev/null || true)"
-  [[ "$IDENTITIES" == *'"Orb Local"'* ]] && SIGN_IDENTITY="Orb Local"
-fi
 if [[ -n "$SIGN_IDENTITY" && "$SIGN_IDENTITY" != "-" ]]; then
   codesign --force --sign "$SIGN_IDENTITY" "$APP" >/dev/null
   echo "Assinado com \"$SIGN_IDENTITY\": as permissões do macOS sobrevivem a novas compilações."
@@ -94,6 +115,6 @@ fi
 echo "Pronto: $APP"
 # An Orb open from this bundle now runs code that no longer matches the disk: macOS stops handing it the keys it keeps in
 # the Keychain (a key pasted in it is written but not read back). It has to be opened again.
-if [[ -z "${CI:-}" ]] && pgrep -f "$PWD/$APP/Contents/MacOS/Orb" >/dev/null 2>&1; then
+if [[ -z "${CI:-}" ]] && pgrep -f "${APP:A}/Contents/MacOS/Orb" >/dev/null 2>&1; then
   echo "Atenção: o Orb está aberto com a versão anterior. Feche (⌘Q) e abra de novo; até lá ele não lê as chaves do Keychain."
 fi

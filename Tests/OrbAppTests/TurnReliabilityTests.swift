@@ -417,6 +417,107 @@ private struct HangsAfterText: LLMClient {
         await script.release()
     }
 
+    @Test @MainActor func anIdenticalConsecutiveFailureBannersOnce() async {
+        // The same failure twice in a row is told once (a dead connector would otherwise banner every slot); a
+        // different reason is news again — and every run still lands in the history, bannered or not.
+        let script = CallScript(replies: [
+            .failing(LLMError.http(status: 400, message: "modelo desconhecido")),
+            .failing(LLMError.http(status: 400, message: "modelo desconhecido")),
+            .failing(LLMError.http(status: 500, message: "servidor fora")),
+        ])
+        let (model, botID, routineID) = routineSetUp(script)
+        model.runRoutine(routineID)
+        await model.routineStarted()
+        await waitUntilIdle(model, botID)
+        #expect(model.lastBanner?.body.contains("modelo desconhecido") == true)
+        model.runRoutine(routineID) // the same failure again: recorded, not bannered (see RoutineRun.isNews)
+        await model.routineStarted()
+        await waitUntilIdle(model, botID)
+        #expect(model.routines[0].runs.count == 2)
+        #expect(model.routines[0].runs.allSatisfy { !$0.succeeded && $0.summary.contains("modelo desconhecido") })
+        model.runRoutine(routineID) // a new reason is news again
+        await model.routineStarted()
+        await waitUntilIdle(model, botID)
+        #expect(model.routines[0].runs.count == 3)
+        #expect(model.lastBanner?.body.contains("servidor fora") == true)
+    }
+
+    @Test func aRepeatedFailureIsNotNews() {
+        let failed = RoutineRun(date: .now, finishedAt: .now, succeeded: false, summary: "conector fora")
+        #expect(!RoutineRun.isNews(failure: "conector fora", afterLast: failed))
+        #expect(RoutineRun.isNews(failure: "outro motivo", afterLast: failed))
+        let skipped = RoutineRun(date: .now, finishedAt: .now, succeeded: true, summary: "Dispensada")
+        #expect(RoutineRun.isNews(failure: "conector fora", afterLast: skipped))
+        #expect(RoutineRun.isNews(failure: "conector fora", afterLast: nil))
+    }
+
+    // MARK: the wake doorbell (`wake/<routine>.wake`)
+
+    @MainActor private func wakeFolder(of model: AppModel) throws -> URL {
+        let folder = model.store.directory.appending(path: AppModel.wakeFolder)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
+    }
+
+    @Test @MainActor func aWakeFileRunsItsRoutineNow() async throws {
+        let script = CallScript([said("atendidos os 3")])
+        let (model, botID, routineID) = routineSetUp(script)
+        let file = try wakeFolder(of: model).appending(path: "Resumo da manhã" + AppModel.wakeSuffix)
+        try "3 mensagens novas no canal".write(to: file, atomically: true, encoding: .utf8)
+        model.scanWakeFolder()
+        await model.routineStarted()
+        await waitUntilIdle(model, botID)
+        #expect(!FileManager.default.fileExists(atPath: file.path)) // the bell is consumed, not re-rung
+        model.store.flush()
+        let items = await model.routineTranscript(routineID)
+        #expect(items.contains { item in
+            if case .notice(let text) = item.kind { text.contains("Acordada por sinal externo: 3 mensagens novas no canal") } else { false }
+        })
+    }
+
+    @Test @MainActor func aSwitchedOffRoutineIgnoresItsBell() async throws {
+        let script = CallScript([said("oi")])
+        let (model, _, _) = routineSetUp(script)
+        model.routines[0].isEnabled = false
+        let file = try wakeFolder(of: model).appending(path: "Resumo da manhã" + AppModel.wakeSuffix)
+        try Data().write(to: file)
+        model.scanWakeFolder()
+        try await Task.sleep(for: .milliseconds(50)) // let a would-be run show up, if one ever did
+        #expect(await script.calls.isEmpty)
+        #expect(model.routines[0].runs.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+    }
+
+    @Test @MainActor func aBellForARoutineThatIsNotThereIsDropped() async throws {
+        let script = CallScript([said("oi")])
+        let (model, _, _) = routineSetUp(script)
+        let file = try wakeFolder(of: model).appending(path: "Não existe" + AppModel.wakeSuffix)
+        try Data().write(to: file)
+        model.scanWakeFolder()
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(await script.calls.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: file.path)) // told once: not re-read every pass
+    }
+
+    @Test @MainActor func aWakeThatWaitsKeepsItsNote() async throws {
+        // The Orb is busy when the bell rings: the run queues, and when it starts the transcript still says why.
+        let script = CallScript([said("trabalho do chat"), said("relatório do sinal")], holdsCall: 1)
+        let (model, botID, routineID) = routineSetUp(script)
+        #expect(model.send("trabalhe aí", to: botID))
+        await waitUntil("the chat's call") { await script.calls.count == 1 }
+        let file = try wakeFolder(of: model).appending(path: "Resumo da manhã" + AppModel.wakeSuffix)
+        try "canal com pendências".write(to: file, atomically: true, encoding: .utf8)
+        model.scanWakeFolder()
+        #expect(model.queuedRoutines == [routineID])
+        await script.release()
+        await waitUntilIdle(model, botID)
+        model.store.flush()
+        let items = await model.routineTranscript(routineID)
+        #expect(items.contains { item in
+            if case .notice(let text) = item.kind { text.contains("Acordada por sinal externo: canal com pendências") } else { false }
+        })
+    }
+
     // MARK: P2-5: ⌘. reaches the tools, and the tools have a time limit
 
     /// Waits for `seconds` without ever looking at cancellation (a framework that never answers).

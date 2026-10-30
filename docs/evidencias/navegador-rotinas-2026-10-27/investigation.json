@@ -1,0 +1,1256 @@
+{
+  "timestamp_utc": "2026-10-27T06:55:15.910785+00:00",
+  "sources": [
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/D5AE91E3-7C79-4079-95E3-34CDBD05DD0A.json",
+      "sha256": "3d7ce0cce1a10763c9093e0e0c2c909d5db721b0c369632dbc86c1de6ab8dd84",
+      "bytes": 4773311
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/state.json",
+      "sha256": "707b4084d1449ab87a547654a51d0ac7907fdcd9ee5a92ada8732f9452698c64",
+      "bytes": 195229
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/EE09B9E6-E0E0-4595-BD43-39C2324DB0CC/routine-235A91D6-AD6C-47C6-8BD9-B2721B84584A.json",
+      "sha256": "38e76f8582cf9f5f1740d006429ebacb7435bab95471c1c963f096c8b6369d62",
+      "bytes": 239889
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/D5AE91E3-7C79-4079-95E3-34CDBD05DD0A/routine-C8B4C211-08F1-4E72-B896-D7596D9BC77C.json",
+      "sha256": "649a05e8743f00e36697615293c2512ae5253c01f3bdd3267ba93423c399c2c0",
+      "bytes": 383202
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/conversations/1332324E-9A7E-47E7-BBC1-6A24A5C4A510/routine-54CA00BB-C0DD-40D3-8B6C-CF8479DD9897.json",
+      "sha256": "1248cafa1101ef1320cf9d49916e6ce348076ea246927fd263091cb3a677af13",
+      "bytes": 938416
+    },
+    {
+      "path": "/Users/thiagomacbookpro/Library/Application Support/Orb/uso/2026-10.json",
+      "sha256": "8ddf4e21e335599856f85489ce07ae21d8f437e23fbc90fdf8a5177746d089bf",
+      "bytes": 97946
+    }
+  ],
+  "summary": {
+    "snapshot_calls": 397,
+    "failures": 54,
+    "categories": {
+      "CSS selector absent": 34,
+      "no AX node for CSS selector": 20
+    },
+    "calls_with_selector": 261,
+    "calls_with_ignored_query": 74,
+    "failure_then_immediate_new_snapshot": 32,
+    "failure_then_immediate_successful_snapshot": 27,
+    "failure_then_immediate_successful_unscoped_snapshot": 19,
+    "failure_then_only_unscoped_successful_snapshot": 14
+  },
+  "snapshot_failures": [
+    {
+      "message_index": 192,
+      "tool_call_id": "toolu_01VG6nUAEokWZx1HiL6bpQX7",
+      "category": "CSS selector absent",
+      "selector": "a[href*=\"ads/edit\"], a[href*=\"rsaassetdetails\"], [aria-label*=\"dit\"]",
+      "query_ignored": false,
+      "raw_error": "Error: Selector 'a[href*=\"ads/edit\"], a[href*=\"rsaassetdetails\"], [aria-label*=\"dit\"]' did not match any element",
+      "next_tool_names": [
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": null,
+          "succeeded": true
+        }
+      ]
+    },
+    {
+      "message_index": 240,
+      "tool_call_id": "toolu_013L4APJLjivwvSHVyN8bDJz",
+      "category": "no AX node for CSS selector",
+      "selector": "[role=dialog], [role=textbox], textarea, [role=combobox]",
+      "query_ignored": false,
+      "raw_error": "Error: No accessibility node found for selector '[role=dialog], [role=textbox], textarea, [role=combobox]'",
+      "next_tool_names": [
+        "browse_screenshot",
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": null,
+          "succeeded": true
+        }
+      ]
+    },
+    {
+      "message_index": 310,
+      "tool_call_id": "toolu_01HzzNPZWJDXUn2XaJHuJuSk",
+      "category": "no AX node for CSS selector",
+      "selector": "[role=dialog], material-dialog, .dialog, [aria-modal=true]",
+      "query_ignored": false,
+      "raw_error": "Error: No accessibility node found for selector '[role=dialog], material-dialog, .dialog, [aria-modal=true]'",
+      "next_tool_names": [
+        "browse_screenshot"
+      ],
+      "next_snapshots": []
+    },
+    {
+      "message_index": 456,
+      "tool_call_id": "toolu_01BBMzDoRrbaMZCvw17yKHhn",
+      "category": "CSS selector absent",
+      "selector": "main",
+      "query_ignored": false,
+      "raw_error": "Error: Selector 'main' did not match any element",
+      "next_tool_names": [
+        "browse_screenshot"
+      ],
+      "next_snapshots": []
+    },
+    {
+      "message_index": 475,
+      "tool_call_id": "toolu_01VvryJNHEk5CVgcYCd8TLKY",
+      "category": "CSS selector absent",
+      "selector": "button",
+      "query_ignored": false,
+      "raw_error": "Error: Selector 'button' did not match any element",
+      "next_tool_names": [
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": null,
+          "succeeded": true
+        }
+      ]
+    },
+    {
+      "message_index": 497,
+      "tool_call_id": "toolu_01986LYjk3pu2HQfPsMDF1Fd",
+      "category": "no AX node for CSS selector",
+      "selector": "[role=dialog] *, [aria-label*=\"campanha\"], [aria-label*=\"Campanha\"]",
+      "query_ignored": false,
+      "raw_error": "Error: No accessibility node found for selector '[role=dialog] *, [aria-label*=\"campanha\"], [aria-label*=\"Campanha\"]'",
+      "next_tool_names": [
+        "browse_screenshot"
+      ],
+      "next_snapshots": []
+    },
+    {
+      "message_index": 535,
+      "tool_call_id": "toolu_01DWuKETYYfUK6C8pYGYWVRN",
+      "category": "no AX node for CSS selector",
+      "selector": "textarea, input, [role=textbox], [role=radio]",
+      "query_ignored": false,
+      "raw_error": "Error: No accessibility node found for selector 'textarea, input, [role=textbox], [role=radio]'",
+      "next_tool_names": [
+        "browse_screenshot"
+      ],
+      "next_snapshots": []
+    },
+    {
+      "message_index": 546,
+      "tool_call_id": "toolu_012P9FzYzNkq2yAXuETgTkU1",
+      "category": "CSS selector absent",
+      "selector": "[role=textbox], [aria-label=\"Selecione uma campanha\"], [aria-label=\"Guardar\"]",
+      "query_ignored": false,
+      "raw_error": "Error: Selector '[role=textbox], [aria-label=\"Selecione uma campanha\"], [aria-label=\"Guardar\"]' did not match any element",
+      "next_tool_names": [
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": "textbox, [role=textbox], button[ref]",
+          "succeeded": false
+        }
+      ]
+    },
+    {
+      "message_index": 548,
+      "tool_call_id": "toolu_013nD48N3EgGbAQzyU2dRkHE",
+      "category": "CSS selector absent",
+      "selector": "textbox, [role=textbox], button[ref]",
+      "query_ignored": false,
+      "raw_error": "Error: Selector 'textbox, [role=textbox], button[ref]' did not match any element",
+      "next_tool_names": [
+        "browse_screenshot"
+      ],
+      "next_snapshots": []
+    },
+    {
+      "message_index": 584,
+      "tool_call_id": "toolu_0132fdThdSEwdkjCKMu19WJj",
+      "category": "CSS selector absent",
+      "selector": "[aria-label*=\"sitelinks\"]",
+      "query_ignored": false,
+      "raw_error": "Error: Selector '[aria-label*=\"sitelinks\"]' did not match any element",
+      "next_tool_names": [
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": "button",
+          "succeeded": false
+        }
+      ]
+    },
+    {
+      "message_index": 586,
+      "tool_call_id": "toolu_01KEs1j26CRy8WVA9BWyx4SL",
+      "category": "CSS selector absent",
+      "selector": "button",
+      "query_ignored": false,
+      "raw_error": "Error: Selector 'button' did not match any element",
+      "next_tool_names": [
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": null,
+          "succeeded": true
+        }
+      ]
+    },
+    {
+      "message_index": 661,
+      "tool_call_id": "toolu_018SnTwHQqvtRVXm8XSJHef8",
+      "category": "no AX node for CSS selector",
+      "selector": "#base-root-overlay-container-CM, [role=dialog]",
+      "query_ignored": false,
+      "raw_error": "Error: No accessibility node found for selector '#base-root-overlay-container-CM, [role=dialog]'",
+      "next_tool_names": [
+        "browse_screenshot"
+      ],
+      "next_snapshots": []
+    },
+    {
+      "message_index": 682,
+      "tool_call_id": "toolu_019jRrqMeVaSpB5qRXxEFwZx",
+      "category": "no AX node for CSS selector",
+      "selector": "[role=dialog], [aria-modal=true], .dialog",
+      "query_ignored": false,
+      "raw_error": "Error: No accessibility node found for selector '[role=dialog], [aria-modal=true], .dialog'",
+      "next_tool_names": [
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": "[role=checkbox], [role=button], button",
+          "succeeded": true
+        }
+      ]
+    },
+    {
+      "message_index": 841,
+      "tool_call_id": "toolu_012Wx5P5TtXNSUEqjSXQEW6t",
+      "category": "CSS selector absent",
+      "selector": "[role=textbox], button",
+      "query_ignored": false,
+      "raw_error": "Error: Selector '[role=textbox], button' did not match any element",
+      "next_tool_names": [
+        "browse_click"
+      ],
+      "next_snapshots": []
+    },
+    {
+      "message_index": 849,
+      "tool_call_id": "toolu_01JbNc1KuMguuAU2EJ4i3VV6",
+      "category": "CSS selector absent",
+      "selector": "[aria-label=\"Guardar\"], button",
+      "query_ignored": false,
+      "raw_error": "Error: Selector '[aria-label=\"Guardar\"], button' did not match any element",
+      "next_tool_names": [
+        "browse_press",
+        "browse_press"
+      ],
+      "next_snapshots": []
+    },
+    {
+      "message_index": 911,
+      "tool_call_id": "toolu_015q4d3dQhoZ3L83YScaZvLB",
+      "category": "no AX node for CSS selector",
+      "selector": "[aria-label=\"Palavras-chave negativas\"][role=textbox], textarea",
+      "query_ignored": false,
+      "raw_error": "Error: No accessibility node found for selector '[aria-label=\"Palavras-chave negativas\"][role=textbox], textarea'",
+      "next_tool_names": [
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": null,
+          "succeeded": true
+        }
+      ]
+    },
+    {
+      "message_index": 923,
+      "tool_call_id": "toolu_01BTkEUaMKFCVmrHFTN27QKa",
+      "category": "CSS selector absent",
+      "selector": "[aria-label=\"Selecione uma campanha\"]",
+      "query_ignored": false,
+      "raw_error": "Error: Selector '[aria-label=\"Selecione uma campanha\"]' did not match any element",
+      "next_tool_names": [
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": null,
+          "succeeded": true
+        }
+      ]
+    },
+    {
+      "message_index": 970,
+      "tool_call_id": "toolu_016ctFgSdaHmCxDPcHXQDbAx",
+      "category": "no AX node for CSS selector",
+      "selector": "[aria-label*=\"campanha\"], button",
+      "query_ignored": false,
+      "raw_error": "Error: No accessibility node found for selector '[aria-label*=\"campanha\"], button'",
+      "next_tool_names": [
+        "run_command",
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": null,
+          "succeeded": true
+        }
+      ]
+    },
+    {
+      "message_index": 979,
+      "tool_call_id": "toolu_017giGUcujtGfQ7pUqmDG7PF",
+      "category": "CSS selector absent",
+      "selector": "[aria-label=\"Ir para a última página\"]",
+      "query_ignored": false,
+      "raw_error": "Error: Selector '[aria-label=\"Ir para a última página\"]' did not match any element",
+      "next_tool_names": [
+        "browse_screenshot"
+      ],
+      "next_snapshots": []
+    },
+    {
+      "message_index": 993,
+      "tool_call_id": "toolu_012TFfAsfTdbqeT6vwUD6HW6",
+      "category": "CSS selector absent",
+      "selector": "[role=textbox]",
+      "query_ignored": false,
+      "raw_error": "Error: Selector '[role=textbox]' did not match any element",
+      "next_tool_names": [
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": null,
+          "succeeded": true
+        }
+      ]
+    },
+    {
+      "message_index": 1008,
+      "tool_call_id": "toolu_01PPy5BioVX1iV5W32tjb5Yz",
+      "category": "CSS selector absent",
+      "selector": "[role=textbox]",
+      "query_ignored": false,
+      "raw_error": "Error: Selector '[role=textbox]' did not match any element",
+      "next_tool_names": [
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": null,
+          "succeeded": true
+        }
+      ]
+    },
+    {
+      "message_index": 1035,
+      "tool_call_id": "toolu_015BYf9fVkbi8dyLoGb9Co7o",
+      "category": "CSS selector absent",
+      "selector": "[aria-label=\"Selecione uma campanha\"], button",
+      "query_ignored": false,
+      "raw_error": "Error: Selector '[aria-label=\"Selecione uma campanha\"], button' did not match any element",
+      "next_tool_names": [
+        "browse_click"
+      ],
+      "next_snapshots": []
+    },
+    {
+      "message_index": 1050,
+      "tool_call_id": "toolu_017x132A6We4d95yfPuENSy3",
+      "category": "CSS selector absent",
+      "selector": "[role=alert], button[ref], [aria-label*=\"Gympass\"]",
+      "query_ignored": false,
+      "raw_error": "Error: Selector '[role=alert], button[ref], [aria-label*=\"Gympass\"]' did not match any element",
+      "next_tool_names": [
+        "run_command",
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": null,
+          "succeeded": true
+        }
+      ]
+    },
+    {
+      "message_index": 1180,
+      "tool_call_id": "toolu_01QKmSo3cN3HS4ecijaFFfPT",
+      "category": "no AX node for CSS selector",
+      "selector": "[aria-label*=\"Transferir\"], [aria-label*=\"Expandir\"], [aria-label*=\"Mais\"]",
+      "query_ignored": false,
+      "raw_error": "Error: No accessibility node found for selector '[aria-label*=\"Transferir\"], [aria-label*=\"Expandir\"], [aria-label*=\"Mais\"]'",
+      "next_tool_names": [
+        "browse_click"
+      ],
+      "next_snapshots": []
+    },
+    {
+      "message_index": 1222,
+      "tool_call_id": "toolu_01Lxdx2gDFKdHUAtupHbM6rv",
+      "category": "CSS selector absent",
+      "selector": "#base-root-overlay-container-CM",
+      "query_ignored": false,
+      "raw_error": "Error: Selector '#base-root-overlay-container-CM' did not match any element",
+      "next_tool_names": [
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": "[role=dialog], [role=listbox], [role=option], [role=radio], [role=row]",
+          "succeeded": true
+        }
+      ]
+    },
+    {
+      "message_index": 1236,
+      "tool_call_id": "toolu_01Gps6BoE5AAVDrSYLgSupp9",
+      "category": "no AX node for CSS selector",
+      "selector": "material-dialog, [role=dialog], [aria-modal=true]",
+      "query_ignored": true,
+      "raw_error": "Error: No accessibility node found for selector 'material-dialog, [role=dialog], [aria-modal=true]'",
+      "next_tool_names": [
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": "[role=listbox], [role=option], [role=treeitem], [role=gridcell]",
+          "succeeded": true
+        }
+      ]
+    },
+    {
+      "message_index": 1333,
+      "tool_call_id": "toolu_01UGsdhukTXgMMR2VTvZYZyz",
+      "category": "CSS selector absent",
+      "selector": "textarea, [aria-label=\"Seguinte\"], [aria-label=\"Guardar\"]",
+      "query_ignored": false,
+      "raw_error": "Error: Selector 'textarea, [aria-label=\"Seguinte\"], [aria-label=\"Guardar\"]' did not match any element",
+      "next_tool_names": [
+        "browse_open"
+      ],
+      "next_snapshots": []
+    },
+    {
+      "message_index": 1420,
+      "tool_call_id": "toolu_01QiieTarVpHz7iSuLpo2kg4",
+      "category": "CSS selector absent",
+      "selector": "[role=dialog] button, material-dialog button",
+      "query_ignored": false,
+      "raw_error": "Error: Selector '[role=dialog] button, material-dialog button' did not match any element",
+      "next_tool_names": [
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": "[aria-label=\"Confirmar\"], [aria-label=\"Cancelar\"]",
+          "succeeded": false
+        }
+      ]
+    },
+    {
+      "message_index": 1422,
+      "tool_call_id": "toolu_01Pv6sGpUcZXj1mXiiUYeY9m",
+      "category": "CSS selector absent",
+      "selector": "[aria-label=\"Confirmar\"], [aria-label=\"Cancelar\"]",
+      "query_ignored": false,
+      "raw_error": "Error: Selector '[aria-label=\"Confirmar\"], [aria-label=\"Cancelar\"]' did not match any element",
+      "next_tool_names": [
+        "browse_press",
+        "browse_screenshot"
+      ],
+      "next_snapshots": []
+    },
+    {
+      "message_index": 1565,
+      "tool_call_id": "toolu_01CiRzDkLyP45VMgu1JDheFQ",
+      "category": "CSS selector absent",
+      "selector": "[aria-label^=\"Introduza ou cole\"]",
+      "query_ignored": false,
+      "raw_error": "Error: Selector '[aria-label^=\"Introduza ou cole\"]' did not match any element",
+      "next_tool_names": [
+        "browse_press",
+        "browse_screenshot"
+      ],
+      "next_snapshots": []
+    },
+    {
+      "message_index": 1605,
+      "tool_call_id": "toolu_01LBRKfwgG8i1iwJk3c5GpHS",
+      "category": "CSS selector absent",
+      "selector": "[aria-label*=\"Intervalo\"], [aria-label*=\"datas\"], [aria-label*=\"Últimos\"]",
+      "query_ignored": false,
+      "raw_error": "Error: Selector '[aria-label*=\"Intervalo\"], [aria-label*=\"datas\"], [aria-label*=\"Últimos\"]' did not match any element",
+      "next_tool_names": [
+        "browse_close"
+      ],
+      "next_snapshots": []
+    },
+    {
+      "message_index": 1628,
+      "tool_call_id": "toolu_0134E3YShmWTyVGyxy6d17KD",
+      "category": "CSS selector absent",
+      "selector": "[role=option], [role=menuitem], [role=listitem], [role=radio]",
+      "query_ignored": true,
+      "raw_error": "Error: Selector '[role=option], [role=menuitem], [role=listitem], [role=radio]' did not match any element",
+      "next_tool_names": [
+        "browse_read"
+      ],
+      "next_snapshots": []
+    },
+    {
+      "message_index": 1657,
+      "tool_call_id": "toolu_01TUWR8ZUY9J6VaFmPJ8XUKa",
+      "category": "CSS selector absent",
+      "selector": "[aria-label=\"Atualizar\"]",
+      "query_ignored": false,
+      "raw_error": "Error: Selector '[aria-label=\"Atualizar\"]' did not match any element",
+      "next_tool_names": [
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": "button",
+          "succeeded": true
+        }
+      ]
+    },
+    {
+      "message_index": 1780,
+      "tool_call_id": "toolu_01Eskf4KKbo418CocdyLxgCR",
+      "category": "no AX node for CSS selector",
+      "selector": "input[type=text], input[aria-label*=\"CPC\"], input[aria-label*=\"limite\"], [role=spinbutton]",
+      "query_ignored": false,
+      "raw_error": "Error: No accessibility node found for selector 'input[type=text], input[aria-label*=\"CPC\"], input[aria-label*=\"limite\"], [role=spinbutton]'",
+      "next_tool_names": [
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": "[role=textbox], input",
+          "succeeded": false
+        }
+      ]
+    },
+    {
+      "message_index": 1782,
+      "tool_call_id": "toolu_012ymPMsTEPTXadDXx9qGwm6",
+      "category": "no AX node for CSS selector",
+      "selector": "[role=textbox], input",
+      "query_ignored": true,
+      "raw_error": "Error: No accessibility node found for selector '[role=textbox], input'",
+      "next_tool_names": [
+        "browse_press",
+        "browse_press",
+        "browse_press",
+        "browse_screenshot"
+      ],
+      "next_snapshots": []
+    },
+    {
+      "message_index": 1802,
+      "tool_call_id": "toolu_01SpKieGVjFAqGQdhGBKtw8X",
+      "category": "no AX node for CSS selector",
+      "selector": "[aria-label*=\"Limite de lance\"], input",
+      "query_ignored": false,
+      "raw_error": "Error: No accessibility node found for selector '[aria-label*=\"Limite de lance\"], input'",
+      "next_tool_names": [
+        "apps_list"
+      ],
+      "next_snapshots": []
+    },
+    {
+      "message_index": 1817,
+      "tool_call_id": "toolu_01RxTnhv1RRyAYR9txYwb3d7",
+      "category": "CSS selector absent",
+      "selector": "[role=dialog] button",
+      "query_ignored": true,
+      "raw_error": "Error: Selector '[role=dialog] button' did not match any element",
+      "next_tool_names": [
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": null,
+          "succeeded": true
+        }
+      ]
+    },
+    {
+      "message_index": 1871,
+      "tool_call_id": "toolu_0115xGfAKbQY4nf96yLNCdnm",
+      "category": "CSS selector absent",
+      "selector": "button",
+      "query_ignored": true,
+      "raw_error": "Error: Selector 'button' did not match any element",
+      "next_tool_names": [
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": null,
+          "succeeded": true
+        }
+      ]
+    },
+    {
+      "message_index": 1885,
+      "tool_call_id": "toolu_01Dvkwx8DYF2rmMJQG6Qp75L",
+      "category": "CSS selector absent",
+      "selector": "[aria-label*=\"Transferir\"], button",
+      "query_ignored": true,
+      "raw_error": "Error: Selector '[aria-label*=\"Transferir\"], button' did not match any element",
+      "next_tool_names": [
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": null,
+          "succeeded": true
+        }
+      ]
+    },
+    {
+      "message_index": 1989,
+      "tool_call_id": "toolu_01JceTb1KTi8UwdqhC1JRYd2",
+      "category": "CSS selector absent",
+      "selector": "button",
+      "query_ignored": true,
+      "raw_error": "Error: Selector 'button' did not match any element",
+      "next_tool_names": [
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": null,
+          "succeeded": true
+        }
+      ]
+    },
+    {
+      "message_index": 2013,
+      "tool_call_id": "toolu_01TMLjNY8dha8FaH2Q25GJvA",
+      "category": "no AX node for CSS selector",
+      "selector": "#base-root-overlay-container-CM, [role=dialog]",
+      "query_ignored": false,
+      "raw_error": "Error: No accessibility node found for selector '#base-root-overlay-container-CM, [role=dialog]'",
+      "next_tool_names": [
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": null,
+          "succeeded": true
+        }
+      ]
+    },
+    {
+      "message_index": 2084,
+      "tool_call_id": "toolu_01KdHHPH1Ue4ZPrme7SazmwZ",
+      "category": "no AX node for CSS selector",
+      "selector": "[role=dialog], .dialog, #base-root-overlay-container-CM, material-dialog",
+      "query_ignored": true,
+      "raw_error": "Error: No accessibility node found for selector '[role=dialog], .dialog, #base-root-overlay-container-CM, material-dialog'",
+      "next_tool_names": [
+        "run_command",
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": "[aria-label*=\"grupo\"], [role=listbox], [role=option], [role=treeitem]",
+          "succeeded": true
+        }
+      ]
+    },
+    {
+      "message_index": 2201,
+      "tool_call_id": "toolu_01PnzKK55nkM6eTFgnD7QMKx",
+      "category": "no AX node for CSS selector",
+      "selector": "[aria-label=\"Criar palavras-chave\"]",
+      "query_ignored": false,
+      "raw_error": "Error: No accessibility node found for selector '[aria-label=\"Criar palavras-chave\"]'",
+      "next_tool_names": [
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": "[aria-label^=\"Introduza ou cole\"]",
+          "succeeded": true
+        }
+      ]
+    },
+    {
+      "message_index": 2210,
+      "tool_call_id": "toolu_01ABRV55EinCSfmVxaxBLVaL",
+      "category": "CSS selector absent",
+      "selector": "button",
+      "query_ignored": false,
+      "raw_error": "Error: Selector 'button' did not match any element",
+      "next_tool_names": [
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": "[role=main], main",
+          "succeeded": true
+        }
+      ]
+    },
+    {
+      "message_index": 2247,
+      "tool_call_id": "toolu_019mEUC9JKXFiBMcEesmmAjs",
+      "category": "CSS selector absent",
+      "selector": "main",
+      "query_ignored": false,
+      "raw_error": "Error: Selector 'main' did not match any element",
+      "next_tool_names": [
+        "browse_click",
+        "run_command",
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": "textarea, input, [role=textbox], [role=combobox]",
+          "succeeded": false
+        }
+      ]
+    },
+    {
+      "message_index": 2251,
+      "tool_call_id": "toolu_01NJ6JvD4ZJDjtCamaNVXVUQ",
+      "category": "no AX node for CSS selector",
+      "selector": "textarea, input, [role=textbox], [role=combobox]",
+      "query_ignored": false,
+      "raw_error": "Error: No accessibility node found for selector 'textarea, input, [role=textbox], [role=combobox]'",
+      "next_tool_names": [
+        "browse_screenshot"
+      ],
+      "next_snapshots": []
+    },
+    {
+      "message_index": 2271,
+      "tool_call_id": "toolu_01MGyXuh7N7tC6x6Vp21pUk1",
+      "category": "CSS selector absent",
+      "selector": "[aria-label=\"Obter resultados\"], button[aria-label*=\"resultados\"]",
+      "query_ignored": false,
+      "raw_error": "Error: Selector '[aria-label=\"Obter resultados\"], button[aria-label*=\"resultados\"]' did not match any element",
+      "next_tool_names": [
+        "run_command",
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": null,
+          "succeeded": true
+        }
+      ]
+    },
+    {
+      "message_index": 2283,
+      "tool_call_id": "toolu_01KHa3RsB9f7dTSvKxtqbStW",
+      "category": "CSS selector absent",
+      "selector": "[aria-label*=\"resultados\"], button",
+      "query_ignored": true,
+      "raw_error": "Error: Selector '[aria-label*=\"resultados\"], button' did not match any element",
+      "next_tool_names": [
+        "run_command",
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": null,
+          "succeeded": true
+        }
+      ]
+    },
+    {
+      "message_index": 2322,
+      "tool_call_id": "toolu_01VJzBDtXYb1jt8WCLAgsvsT",
+      "category": "CSS selector absent",
+      "selector": "[aria-label*=\"Obter\"], button",
+      "query_ignored": true,
+      "raw_error": "Error: Selector '[aria-label*=\"Obter\"], button' did not match any element",
+      "next_tool_names": [
+        "run_command",
+        "browse_screenshot"
+      ],
+      "next_snapshots": []
+    },
+    {
+      "message_index": 2413,
+      "tool_call_id": "toolu_01XtR1sU1hQSDZWVyMMReqn5",
+      "category": "CSS selector absent",
+      "selector": "[ref=e265], [aria-label=\"Índice de qualidade\"]",
+      "query_ignored": false,
+      "raw_error": "Error: Selector '[ref=e265], [aria-label=\"Índice de qualidade\"]' did not match any element",
+      "next_tool_names": [
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": null,
+          "succeeded": true
+        }
+      ]
+    },
+    {
+      "message_index": 2529,
+      "tool_call_id": "toolu_012pmVuQdXPa7Db5Pp2Y3Uq8",
+      "category": "CSS selector absent",
+      "selector": "[aria-label=\"Título\"]",
+      "query_ignored": false,
+      "raw_error": "Error: Selector '[aria-label=\"Título\"]' did not match any element",
+      "next_tool_names": [
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": "[role=main], body",
+          "succeeded": true
+        }
+      ]
+    },
+    {
+      "message_index": 2673,
+      "tool_call_id": "toolu_01BNpi3R8v8UFDBcCqtsKm9L",
+      "category": "no AX node for CSS selector",
+      "selector": "[role=dialog], material-dialog, .dialog",
+      "query_ignored": false,
+      "raw_error": "Error: No accessibility node found for selector '[role=dialog], material-dialog, .dialog'",
+      "next_tool_names": [
+        "browse_run"
+      ],
+      "next_snapshots": []
+    },
+    {
+      "message_index": 3184,
+      "tool_call_id": "toolu_01Lh7ZD7ztvUxbRrk3N6YNck",
+      "category": "no AX node for CSS selector",
+      "selector": "[role=dialog]",
+      "query_ignored": false,
+      "raw_error": "Error: No accessibility node found for selector '[role=dialog]'",
+      "next_tool_names": [
+        "browse_run"
+      ],
+      "next_snapshots": []
+    },
+    {
+      "message_index": 3386,
+      "tool_call_id": "toolu_013LrKxz9Lzg9pwTbytt6Ct9",
+      "category": "no AX node for CSS selector",
+      "selector": "iframe",
+      "query_ignored": false,
+      "raw_error": "Error: No accessibility node found for selector 'iframe'",
+      "next_tool_names": [
+        "browse_snapshot"
+      ],
+      "next_snapshots": [
+        {
+          "selector": null,
+          "succeeded": true
+        }
+      ]
+    }
+  ],
+  "enabled_routines": [
+    {
+      "id": "235A91D6-AD6C-47C6-8BD9-B2721B84584A",
+      "name": "Checar e proteger site AcessosFit (6 em 6 horas)",
+      "schedule": {
+        "everyHours": {
+          "_0": 6
+        }
+      },
+      "prompt_chars": 3237,
+      "retained_runs": [
+        {
+          "start": "2026-10-23T12:15:38.053200-03:00",
+          "tools": 4,
+          "failed_tools": 0,
+          "reads": 0,
+          "terminal": 4,
+          "assistant_items": 1
+        },
+        {
+          "start": "2026-10-23T18:15:54.084655-03:00",
+          "tools": 4,
+          "failed_tools": 0,
+          "reads": 0,
+          "terminal": 4,
+          "assistant_items": 2
+        },
+        {
+          "start": "2026-10-24T02:23:47.085826-03:00",
+          "tools": 10,
+          "failed_tools": 2,
+          "reads": 0,
+          "terminal": 9,
+          "assistant_items": 5
+        },
+        {
+          "start": "2026-10-24T08:23:50.404073-03:00",
+          "tools": 7,
+          "failed_tools": 0,
+          "reads": 0,
+          "terminal": 6,
+          "assistant_items": 2
+        },
+        {
+          "start": "2026-10-24T14:23:54.604958-03:00",
+          "tools": 7,
+          "failed_tools": 0,
+          "reads": 0,
+          "terminal": 6,
+          "assistant_items": 3
+        },
+        {
+          "start": "2026-10-25T04:02:14.246310-03:00",
+          "tools": 4,
+          "failed_tools": 0,
+          "reads": 0,
+          "terminal": 4,
+          "assistant_items": 1
+        },
+        {
+          "start": "2026-10-26T04:25:31.113293-03:00",
+          "tools": 2,
+          "failed_tools": 0,
+          "reads": 0,
+          "terminal": 2,
+          "assistant_items": 0
+        },
+        {
+          "start": "2026-10-26T10:25:46.902120-03:00",
+          "tools": 0,
+          "failed_tools": 0,
+          "reads": 0,
+          "terminal": 0,
+          "assistant_items": 0
+        },
+        {
+          "start": "2026-10-26T16:26:14.874465-03:00",
+          "tools": 0,
+          "failed_tools": 0,
+          "reads": 0,
+          "terminal": 0,
+          "assistant_items": 0
+        },
+        {
+          "start": "2026-10-26T22:26:36.833223-03:00",
+          "tools": 13,
+          "failed_tools": 0,
+          "reads": 3,
+          "terminal": 5,
+          "assistant_items": 5
+        }
+      ],
+      "retained_tools": 51,
+      "retained_reads": 3,
+      "latest_model_history_messages": 26,
+      "excludes_2330": false,
+      "requires_reading_skill": false
+    },
+    {
+      "id": "C8B4C211-08F1-4E72-B896-D7596D9BC77C",
+      "name": "Análise diária Google Ads AcessosFit",
+      "schedule": {
+        "daily": {
+          "minute": 0,
+          "hour": 22
+        }
+      },
+      "prompt_chars": 646,
+      "retained_runs": [
+        {
+          "start": "2026-10-17T22:39:53.429780-03:00",
+          "tools": 33,
+          "failed_tools": 4,
+          "reads": 2,
+          "terminal": 6,
+          "assistant_items": 6
+        },
+        {
+          "start": "2026-10-19T04:19:41.668282-03:00",
+          "tools": 8,
+          "failed_tools": 0,
+          "reads": 0,
+          "terminal": 1,
+          "assistant_items": 1
+        },
+        {
+          "start": "2026-10-19T22:00:00.316659-03:00",
+          "tools": 22,
+          "failed_tools": 0,
+          "reads": 0,
+          "terminal": 8,
+          "assistant_items": 8
+        },
+        {
+          "start": "2026-10-20T22:00:17.481294-03:00",
+          "tools": 0,
+          "failed_tools": 0,
+          "reads": 0,
+          "terminal": 0,
+          "assistant_items": 0
+        },
+        {
+          "start": "2026-10-22T00:14:27.485102-03:00",
+          "tools": 42,
+          "failed_tools": 6,
+          "reads": 0,
+          "terminal": 10,
+          "assistant_items": 8
+        },
+        {
+          "start": "2026-10-22T22:00:00.116362-03:00",
+          "tools": 28,
+          "failed_tools": 0,
+          "reads": 2,
+          "terminal": 8,
+          "assistant_items": 7
+        },
+        {
+          "start": "2026-10-23T22:59:09.736678-03:00",
+          "tools": 26,
+          "failed_tools": 0,
+          "reads": 2,
+          "terminal": 10,
+          "assistant_items": 4
+        },
+        {
+          "start": "2026-10-25T04:02:14.375531-03:00",
+          "tools": 4,
+          "failed_tools": 1,
+          "reads": 2,
+          "terminal": 0,
+          "assistant_items": 0
+        },
+        {
+          "start": "2026-10-26T04:25:31.124136-03:00",
+          "tools": 7,
+          "failed_tools": 3,
+          "reads": 0,
+          "terminal": 1,
+          "assistant_items": 0
+        },
+        {
+          "start": "2026-10-26T22:15:21.807825-03:00",
+          "tools": 0,
+          "failed_tools": 0,
+          "reads": 0,
+          "terminal": 0,
+          "assistant_items": 0
+        }
+      ],
+      "retained_tools": 170,
+      "retained_reads": 8,
+      "latest_model_history_messages": 1,
+      "excludes_2330": false,
+      "requires_reading_skill": false
+    },
+    {
+      "id": "54CA00BB-C0DD-40D3-8B6C-CF8479DD9897",
+      "name": "Rodada WhatsApp horária 8h-23h",
+      "schedule": {
+        "cron": {
+          "expression": "0,30 8-23 * * *",
+          "timeZone": "America/Sao_Paulo"
+        }
+      },
+      "prompt_chars": 1796,
+      "retained_runs": [
+        {
+          "start": "2026-10-26T18:00:24.820826-03:00",
+          "tools": 34,
+          "failed_tools": 1,
+          "reads": 11,
+          "terminal": 11,
+          "assistant_items": 11
+        },
+        {
+          "start": "2026-10-26T19:00:29.693495-03:00",
+          "tools": 13,
+          "failed_tools": 0,
+          "reads": 7,
+          "terminal": 3,
+          "assistant_items": 2
+        },
+        {
+          "start": "2026-10-26T20:00:08.867247-03:00",
+          "tools": 64,
+          "failed_tools": 1,
+          "reads": 24,
+          "terminal": 14,
+          "assistant_items": 12
+        },
+        {
+          "start": "2026-10-26T20:30:14.753772-03:00",
+          "tools": 43,
+          "failed_tools": 1,
+          "reads": 20,
+          "terminal": 11,
+          "assistant_items": 6
+        },
+        {
+          "start": "2026-10-26T21:00:27.783068-03:00",
+          "tools": 55,
+          "failed_tools": 0,
+          "reads": 23,
+          "terminal": 13,
+          "assistant_items": 6
+        },
+        {
+          "start": "2026-10-26T21:30:15.796427-03:00",
+          "tools": 0,
+          "failed_tools": 0,
+          "reads": 0,
+          "terminal": 0,
+          "assistant_items": 0
+        },
+        {
+          "start": "2026-10-26T22:15:21.718728-03:00",
+          "tools": 55,
+          "failed_tools": 1,
+          "reads": 25,
+          "terminal": 14,
+          "assistant_items": 7
+        },
+        {
+          "start": "2026-10-26T22:30:13.888514-03:00",
+          "tools": 33,
+          "failed_tools": 0,
+          "reads": 17,
+          "terminal": 7,
+          "assistant_items": 5
+        },
+        {
+          "start": "2026-10-26T23:00:06.845706-03:00",
+          "tools": 31,
+          "failed_tools": 1,
+          "reads": 15,
+          "terminal": 5,
+          "assistant_items": 6
+        },
+        {
+          "start": "2026-10-26T23:30:26.098855-03:00",
+          "tools": 1,
+          "failed_tools": 0,
+          "reads": 1,
+          "terminal": 0,
+          "assistant_items": 1
+        }
+      ],
+      "retained_tools": 329,
+      "retained_reads": 143,
+      "latest_model_history_messages": 4,
+      "excludes_2330": true,
+      "requires_reading_skill": true
+    }
+  ],
+  "daily_usage": {
+    "2026-10-11": {
+      "all_requests": 450,
+      "routine_requests": 2,
+      "routine_prompt": 31969
+    },
+    "2026-10-12": {
+      "all_requests": 471,
+      "routine_requests": 28,
+      "routine_prompt": 610382
+    },
+    "2026-10-13": {
+      "all_requests": 193,
+      "routine_requests": 15,
+      "routine_prompt": 296521
+    },
+    "2026-10-14": {
+      "all_requests": 689,
+      "routine_requests": 215,
+      "routine_prompt": 6776844
+    },
+    "2026-10-15": {
+      "all_requests": 1354,
+      "routine_requests": 274,
+      "routine_prompt": 8596335
+    },
+    "2026-10-16": {
+      "all_requests": 642,
+      "routine_requests": 273,
+      "routine_prompt": 12076138
+    },
+    "2026-10-17": {
+      "all_requests": 283,
+      "routine_requests": 254,
+      "routine_prompt": 9605277
+    },
+    "2026-10-18": {
+      "all_requests": 95,
+      "routine_requests": 51,
+      "routine_prompt": 1648475
+    },
+    "2026-10-19": {
+      "all_requests": 662,
+      "routine_requests": 315,
+      "routine_prompt": 11853688
+    },
+    "2026-10-20": {
+      "all_requests": 432,
+      "routine_requests": 281,
+      "routine_prompt": 13932351
+    },
+    "2026-10-21": {
+      "all_requests": 554,
+      "routine_requests": 368,
+      "routine_prompt": 15082490
+    },
+    "2026-10-22": {
+      "all_requests": 964,
+      "routine_requests": 429,
+      "routine_prompt": 18853774
+    },
+    "2026-10-23": {
+      "all_requests": 562,
+      "routine_requests": 331,
+      "routine_prompt": 12674778
+    },
+    "2026-10-24": {
+      "all_requests": 350,
+      "routine_requests": 288,
+      "routine_prompt": 9136517
+    },
+    "2026-10-25": {
+      "all_requests": 6,
+      "routine_requests": 6,
+      "routine_prompt": 133456
+    },
+    "2026-10-26": {
+      "all_requests": 479,
+      "routine_requests": 195,
+      "routine_prompt": 7369019
+    },
+    "2026-10-27": {
+      "all_requests": 55,
+      "routine_requests": 0,
+      "routine_prompt": 0
+    }
+  }
+}

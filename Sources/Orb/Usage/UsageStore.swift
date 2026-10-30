@@ -93,6 +93,8 @@ final class UsageRecorder {
         self.store = store
         self.now = now
         self.calendar = calendar
+        // The per-request cache diagnosis lines live next to the usage rows (`CacheProbe` stays off until here).
+        CacheProbe.folder = store.usageFolder
     }
 
     var hasPending: Bool { !pending.isEmpty }

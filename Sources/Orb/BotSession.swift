@@ -174,6 +174,9 @@ final class BotSession {
     /// The running turn is one the person started in the Orb's own chat (not a routine, another Orb's request or answer, a group's
     /// turn): only such a turn may send a request to a group (`DelegationHub.submitToGroup`).
     @ObservationIgnored var turnAskedByUser = false
+    /// The transcript boundary of this turn, for the home page's result index; nil when there was no
+    /// conversation to mark it on, in which case no result is recorded (an old reply is not this turn's).
+    @ObservationIgnored var inicioTurnStart: Int? = nil
     // MARK: end MultiOrb (WP1)
     /// The snapshot and rules marks of the running turn, recorded on its conversation once the model has been given them.
     @ObservationIgnored var pendingMarks: DeliveryMarks?

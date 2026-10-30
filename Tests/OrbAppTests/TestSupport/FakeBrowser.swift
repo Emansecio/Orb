@@ -14,6 +14,9 @@ final class FakeBrowserDriver: BrowserDriver, @unchecked Sendable {
         var evaluation = ""
         var tabs: [BrowserTab] = [BrowserTab(id: "t1", title: "Example", url: "https://example.com/", isActive: true)]
         var failure: BrowserDriverError?
+        /// Selectors `snapshot` cannot match (the command line's own words), and a failure every `snapshot` gets.
+        var failingSelectors: [String: BrowserDriverError] = [:]
+        var snapshotFailure: BrowserDriverError?
         var hasPage = true
         var headed = false
         var screenshotBytes: Data?
@@ -52,7 +55,10 @@ final class FakeBrowserDriver: BrowserDriver, @unchecked Sendable {
     }
 
     func snapshot(interactive: Bool, selector: String?) async throws -> BrowserSnapshot {
-        try note("snapshot interactive=\(interactive) selector=\(selector ?? "-")").snapshot
+        let state = try note("snapshot interactive=\(interactive) selector=\(selector ?? "-")")
+        if let selector, let failure = state.failingSelectors[selector] { throw failure }
+        if let failure = state.snapshotFailure { throw failure }
+        return state.snapshot
     }
 
     func click(_ ref: String) async throws { try note("click \(ref)") }
