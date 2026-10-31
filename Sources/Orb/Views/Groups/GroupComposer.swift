@@ -33,13 +33,13 @@ struct GroupComposer: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Spacing.s) {
             if isPicking {
                 MentionPicker(options: options, looks: looks, selected: min(selected, options.count - 1), choose: choose)
                     .transition(.adapted(.rise, reduceMotion: reduceMotion))
             }
             // The card: the pictures and the warning over the field, as in an Orb's composer.
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: Spacing.s) {
                 if !lane.pictures.isEmpty || lane.pendingPictures > 0 { pictureStrip }
                 if let error = lane.error { errorLine(error) }
                 HStack(alignment: .bottom, spacing: 8) {
@@ -89,13 +89,15 @@ struct GroupComposer: View {
                 }
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 9)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
             .background(isFocused ? Palette.surfaceFocused : Palette.surface, in: .rect(cornerRadius: Radius.large))
             .overlay(RoundedRectangle(cornerRadius: Radius.large).strokeBorder(isFocused ? Palette.lineStrong : Palette.line, lineWidth: 1))
         }
-        .padding(.horizontal, 28)
-        .padding(.bottom, 14)
-        .frame(maxWidth: 760, alignment: .leading)
+        .padding(.horizontal, TranscriptLayout.edge)
+        .padding(.top, Spacing.xs + Spacing.hairline)
+        .padding(.bottom, Spacing.s)
+        .frame(maxWidth: TranscriptLayout.column, alignment: .leading)
         .frame(maxWidth: .infinity)
         .animation(Motion.adapted(Motion.enter, reduceMotion: reduceMotion), value: isPicking)
         .background { ApprovalKeyMonitor(handler: handleKey) }

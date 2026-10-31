@@ -23,12 +23,14 @@ enum CommandName {
     static let sendToBackground = "Mandar o comando para segundo plano"
     static let openFolder = "Abrir pasta do Orb no Finder"
     static let toggleInspector = "Mostrar ou ocultar o painel do Orb"
+    static let dictate = "Ditar ou parar de ditar"
     static let shortcuts = "Atalhos do teclado"
     static let previousBot = "Orb anterior"
     static let nextBot = "Próximo Orb"
     static let routines = "Rotinas"
     static let connectors = "Conectores"
     static let skills = "Skills"
+    static let reloadState = "Recarregar ajustes do disco"
     static let globalShortcut = "Abrir o painel da barra de menus com ⌃⌥Espaço"
     /// ⇧↩ breaks the line in the app's message fields (the field itself only knows ⌥↩; `NewLineKey` in ComposerView makes
     /// ⇧↩ do the same instead of sending).
@@ -67,6 +69,8 @@ enum AppShortcut {
     /// ⌘↩ in the composer while the Orb works: stop and send what is written now. (The same key allows an approval card,
     /// compacts in the context panel and saves the Orb's instructions: each only exists while its view is on screen.)
     static let commandReturn = KeyboardShortcut(.return, modifiers: .command)
+    /// ⇧⌘D in the composer: dictation on or off (↩ sends, Esc closes it keeping the words).
+    static let dictate = KeyboardShortcut("d", modifiers: [.command, .shift])
     static let chooseModel = KeyboardShortcut("m", modifiers: [.command, .shift])
     /// ⌘Z while the "esqueceu isso" toast is up (a field with something to undo keeps its own).
     static let undoForget = KeyboardShortcut("z", modifiers: .command)
@@ -80,7 +84,7 @@ enum AppShortcut {
 
     /// The keys of views and of the system's Ajustes item, which `all` (the menus' keys) leaves out because they may
     /// share a key with a command of another view or with the system.
-    static let contextual: [KeyboardShortcut] = [commandReturn, chooseModel, undoForget, find, findNext, findPrevious, settings]
+    static let contextual: [KeyboardShortcut] = [commandReturn, chooseModel, dictate, undoForget, find, findNext, findPrevious, settings]
 
     /// Every key above, for the tests that check that none is used twice.
     static let all: [KeyboardShortcut] = [newBot, newChat, newGroup, toggleInspector, goTo, writeMessage, stop, sendToBackground,
@@ -116,7 +120,7 @@ extension KeyboardShortcut {
 enum ShortcutCommand: String, CaseIterable, Sendable {
     case newBot, newGroup, goTo, toggleInspector, settings, shortcuts
     case newChat, writeMessage, stop, sendToBackground, openFolder, send, newLine, queueAfterTask, stopAndSend, chooseModel, cancelEdit
-    case goToBot, previousBot, nextBot, routines, connectors, skills
+    case goToBot, previousBot, nextBot, routines, connectors, skills, dictate
     case allowApproval, denyApproval
     case compactOrSave, undoForget, find, findNext, findPrevious
     case menuBarPanel
@@ -174,6 +178,7 @@ enum ShortcutCatalog {
             ShortcutItem(command: .send, keys: "↩", title: "Enviar a mensagem (com o Orb trabalhando, direciona a tarefa)"),
             ShortcutItem(command: .queueAfterTask, keys: "⇥", title: "Pôr na fila para depois da tarefa (Orb trabalhando e algo escrito)"),
             ShortcutItem(command: .newLine, keys: CommandName.newLineKeys, title: "Nova linha na mensagem"),
+            ShortcutItem(.dictate, AppShortcut.dictate, CommandName.dictate + " (com o cursor no campo de mensagem; ↩ envia, Esc encerra mantendo o texto)"),
             ShortcutItem(.stopAndSend, AppShortcut.commandReturn, "Parar e enviar agora (Orb trabalhando e algo escrito, fora da edição de uma mensagem e sem pedido aberto)"),
             ShortcutItem(.chooseModel, AppShortcut.chooseModel, "Escolher o modelo do Orb"),
             ShortcutItem(command: .cancelEdit, keys: "esc", title: "Cancelar a edição de uma mensagem (com o cursor no campo; a lista de skills aberta fecha primeiro; o campo volta como estava)"),

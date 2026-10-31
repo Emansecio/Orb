@@ -44,7 +44,7 @@ struct SidebarView: View {
                 SidebarFeatureRow(item: .inicio, name: "Início", symbol: "house",
                                   tip: "Mostra as novidades e os acompanhamentos dos Orbs", selectionSpace: selectionSpace)
                     .accessibilityIdentifier("sidebar-inicio")
-                    .padding(.bottom, 8)
+                    .padding(.bottom, 16)
                 // The Orbs, loose and in categories, as one place to drop on: the gap opens anywhere among them.
                 VStack(alignment: .leading, spacing: 1) {
                     // "Orbs" folds the whole list; "Outros" gathers the loose ones once a category exists to sort them
@@ -308,7 +308,7 @@ private struct SidebarFoldHeader<Trailing: View>: View {
         HStack(spacing: 0) {
             SidebarRow(isSelected: holdsSelection, selectionSpace: selectionSpace,
                        help: collapsed ? "Mostra \(hidden)" : "Recolhe \(hidden)") { action() } content: { _ in
-                HStack(spacing: 10) {
+                HStack(spacing: SidebarCategoryLayout.iconGap) {
                     Image(systemName: "chevron.right")
                         .font(SectionPlus.chevron)
                         .rotationEffect(.degrees(collapsed ? 0 : 90))
@@ -485,7 +485,7 @@ private struct ProfileRowButton: View {
                     .lineLimit(1)
             }
             .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+            .padding(.vertical, Spacing.xs + Spacing.hairline)
             .frame(maxWidth: .infinity, alignment: .leading)
             .hoverFill(isHovering, in: .rect(cornerRadius: Radius.medium))
             .contentShape(.rect)
@@ -723,21 +723,36 @@ private struct BotRowContent: View, Equatable {
                 }
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
-                    Text(look.name)
+                    let name = Text(look.name)
                         .font(Typography.text.weight(.medium))
                         .foregroundStyle(Palette.ink)
                         .lineLimit(1)
-                    Spacer(minLength: 4)
-                    // The shortcut takes the time's place while the pointer is on the row.
+                    // The shortcut takes the time's place while the pointer is on the row. The name comes first: the time
+                    // shows only where both fit.
                     if let hint = row.hint {
+                        name
+                        Spacer(minLength: 4)
                         Text(hint)
                             .font(Typography.small)
                             .foregroundStyle(Palette.muted)
                             .accessibilityHidden(true)
                     } else if let replyTime = row.replyTime {
-                        Text(replyTime)
-                            .font(Typography.small.monospacedDigit())
-                            .foregroundStyle(Palette.faint)
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 4) {
+                                name.fixedSize()
+                                Spacer(minLength: 4)
+                                Text(replyTime)
+                                    .font(Typography.small.monospacedDigit())
+                                    .foregroundStyle(Palette.faint)
+                            }
+                            HStack(spacing: 4) {
+                                name
+                                Spacer(minLength: 0)
+                            }
+                        }
+                    } else {
+                        name
+                        Spacer(minLength: 4)
                     }
                     // A strip of fixed width at the right: the "+" that opens a new conversation (under the pointer only) and the
                     // chevron that folds the open Orb's list. Both 16 pt high, the name's line. The "+" is always in the layout and

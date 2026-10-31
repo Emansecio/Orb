@@ -438,7 +438,7 @@ private struct FirstRunFrame: ViewModifier {
         switch style {
         case .chat, .welcome:
             content
-                .padding(18)
+                .padding(Spacing.cardPadding)
                 .frame(maxWidth: 460, alignment: .leading)
                 .modifier(NudgePulsingCard(radius: 16, nudge: nudge))
         case .settings:
@@ -472,7 +472,7 @@ struct FirstRunCard: View {
 
     var body: some View {
         let steps = steps
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: Spacing.l) {
             if !asAlternatives {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(style.title)
@@ -488,7 +488,7 @@ struct FirstRunCard: View {
             if let name = steps.connectedName {
                 FirstRunReadyLabel(name: name)
             } else {
-                VStack(spacing: 8) {
+                VStack(spacing: Spacing.s) {
                     if !asAlternatives { claudeCodeRow(steps) }
                     FirstRunRow(symbol: "bubble.left.and.bubble.right", title: "Entrar com ChatGPT",
                                 subtitle: "Para quem tem ChatGPT Plus ou Pro. Abre o navegador para você entrar.",
@@ -563,7 +563,7 @@ struct FirstRunCard: View {
                 if isKeyOpen { keyFocused = true }
             }
             if isKeyOpen {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: Spacing.s) {
                     Picker("Provedor", selection: $keyKind) {
                         ForEach(ProviderKind.firstUseKeyKinds) { Text($0.shortName).tag($0) }
                     }
@@ -572,9 +572,7 @@ struct FirstRunCard: View {
                     HStack(spacing: 8) {
                         SecureField("Cole sua chave", text: $key)
                             .textFieldStyle(.plain)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
-                            .background(Palette.raised, in: .rect(cornerRadius: Radius.small))
+                            .sheetTextField(fill: Palette.raised, radius: Radius.small)
                             .focused($keyFocused)
                             .onSubmit(connectKey)
                             .accessibilityLabel("Chave de API de \(keyKind.shortName)")
@@ -597,7 +595,7 @@ struct FirstRunCard: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .padding(12)
+                .padding(Spacing.m)
                 .transition(.opacity)
             }
         }
@@ -757,7 +755,7 @@ struct FirstRunBanner: View {
     }
 
     private var banner: some View {
-        VStack(alignment: .leading, spacing: isCompact ? 8 : 10) {
+        VStack(alignment: .leading, spacing: isCompact ? Spacing.s : Spacing.m) {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: steps.connectedName == nil ? "cpu" : "checkmark.circle.fill")
                     .foregroundStyle(steps.connectedName == nil ? Palette.muted : Palette.ok)
@@ -815,14 +813,14 @@ struct FirstRunBanner: View {
                 }
             }
         }
-        .padding(isCompact ? 10 : 14)
+        .padding(isCompact ? Spacing.m : Spacing.l)
         .animateChanges(of: isCompact)
         .modifier(NudgePulsingCard(radius: Radius.large, nudge: model.setupNudge))
         // The phrases and the buttons that change as the connection goes (waiting, failed, ready) swap in place.
         .animateChanges(of: BannerPhase(connectedName: steps.connectedName, working: steps.working, failure: steps.failure?.message))
         // Padded, then capped: as wide as the composer under it and the transcript's text.
-        .padding(.horizontal, 28)
-        .frame(maxWidth: 760)
+        .padding(.horizontal, TranscriptLayout.edge)
+        .frame(maxWidth: TranscriptLayout.column)
         .task {
             steps.attach(model)
             await steps.detect()
@@ -855,7 +853,7 @@ struct FirstRunBanner: View {
     }
 
     private var keyPopover: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: Spacing.m) {
             Picker("Provedor", selection: $keyKind) {
                 ForEach(ProviderKind.firstUseKeyKinds) { Text($0.shortName).tag($0) }
             }
@@ -870,7 +868,7 @@ struct FirstRunBanner: View {
                     .disabled(key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
-        .padding(14)
+        .padding(Spacing.catalogCardPadding)
         .frame(width: 300)
     }
 

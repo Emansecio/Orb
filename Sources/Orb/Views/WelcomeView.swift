@@ -303,7 +303,7 @@ struct WelcomeView: View {
     /// No model yet: the note of why the screen came up (if something sent you here), then the one big button when
     /// Claude Code is ready, or the card with its paths.
     private var connect: some View {
-        VStack(spacing: 18) {
+        VStack(spacing: Spacing.xl) {
             if let reason = model.welcomeReason { WelcomeReasonNote(reason: reason) }
             if let offer {
                 WelcomeOfferView(offer: offer, run: firstRun, onStarted: startedWithOffer)
@@ -353,13 +353,13 @@ struct WelcomeView: View {
 
     private var points: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(alignment: .top, spacing: 20) {
+            HStack(alignment: .top, spacing: Spacing.xl) {
                 ForEach(Array(WelcomeCopy.points.enumerated()), id: \.element.id) { index, point in
                     WelcomePointView(point: point, isRow: false)
                         .entrance(WelcomeEntrance.point(index), enters: entering)
                 }
             }
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: Spacing.l) {
                 ForEach(Array(WelcomeCopy.points.enumerated()), id: \.element.id) { index, point in
                     WelcomePointView(point: point, isRow: true)
                         .entrance(WelcomeEntrance.point(index), enters: entering)
@@ -372,7 +372,7 @@ struct WelcomeView: View {
     // MARK: Actions
 
     private func actions(stage: WelcomeStage, copy: WelcomeCopy) -> some View {
-        VStack(spacing: 14) {
+        VStack(spacing: Spacing.l) {
             Button { model.startNewOrb(from: nil) } label: {
                 HStack(spacing: 10) {
                     Text(copy.createTitle)
@@ -389,13 +389,13 @@ struct WelcomeView: View {
             .accessibilityFocused($createFocused)
             if stage == .createWithKept {
                 KeptStartCard(memories: kept, onContinue: { model.startNewOrb(from: $0) }, onShowAll: { model.startNewOrb(from: nil) })
-                    .padding(.top, 6)
+                    .padding(.top, Spacing.xs + Spacing.hairline)
                     .transition(.adapted(.rise, reduceMotion: reduceMotion))
                     .entrance(WelcomeEntrance.keptCard, enters: entering)
             }
             otherWaysIn
-                .padding(.horizontal, 6) // room for the capsules' edges (and their growth under the pointer)
-                .padding(.top, 4)
+                .padding(.horizontal, Spacing.xs + Spacing.hairline) // room for the capsules' edges (and their growth under the pointer)
+                .padding(.top, Spacing.xs)
         }
     }
 
@@ -411,8 +411,8 @@ struct WelcomeView: View {
             .accessibilityHint("Abre a folha Novo Orb para trazer o que outro assistente sabe de você")
             .entrance(WelcomeEntrance.choice(1), enters: entering)
         return ViewThatFits(in: .horizontal) {
-            HStack(spacing: 10) { atlas; importing }
-            VStack(spacing: 8) { atlas; importing }
+            HStack(spacing: Spacing.m) { atlas; importing }
+            VStack(spacing: Spacing.s) { atlas; importing }
         }
     }
 
@@ -521,7 +521,7 @@ private struct WelcomeChoice: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 7) {
+            HStack(spacing: Spacing.s) {
                 Image(systemName: symbol)
                     .font(Typography.small.weight(.semibold))
                     .foregroundStyle(isHovering ? Palette.accentText : Palette.muted)
@@ -529,7 +529,7 @@ private struct WelcomeChoice: View {
                     .font(Typography.text.weight(.medium))
                     .foregroundStyle(isHovering ? Palette.ink : Palette.secondary)
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, Spacing.catalogCardPadding)
             .padding(.vertical, 8)
             .hoverCard(isHovering, radius: Radius.card, strongOutline: true)
             .scaleEffect(isHovering && !reduceMotion ? 1.03 : 1)
@@ -563,9 +563,9 @@ struct KeptStartCard: View {
                     .font(Typography.label.weight(.semibold))
                     .foregroundStyle(Palette.secondary)
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 10)
-            .padding(.bottom, 4)
+            .padding(.horizontal, Spacing.m)
+            .padding(.top, Spacing.s + Spacing.hairline)
+            .padding(.bottom, Spacing.xs)
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isHeader)
             let rows = Array(memories.prefix(Self.shown))
@@ -579,8 +579,8 @@ struct KeptStartCard: View {
                     Text("Ver todas (\(memories.count))")
                         .font(Typography.label)
                         .foregroundStyle(Palette.accentText)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
+                        .padding(.horizontal, Spacing.m)
+                        .padding(.vertical, Spacing.s)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(.rect)
                 }
@@ -588,7 +588,7 @@ struct KeptStartCard: View {
                 .help(Tip.allKeptMemories)
             }
         }
-        .padding(.bottom, 2)
+        .padding(.bottom, Spacing.hairline)
         .frame(width: 420)
         .card(radius: Radius.large, fill: Palette.surface.opacity(0.9))
         .accessibilityElement(children: .contain)
@@ -602,9 +602,9 @@ private struct KeptStartRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 10) {
+            HStack(spacing: Spacing.m) {
                 OrbView(config: memory.profile?.orb ?? OrbConfig(color: "grafite"), size: 26, animated: false)
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: Spacing.hairline) {
                     Text(memory.name)
                         .font(Typography.text.weight(.medium))
                         .foregroundStyle(Palette.ink)
@@ -618,8 +618,8 @@ private struct KeptStartRow: View {
                     .font(Typography.label.weight(.medium))
                     .foregroundStyle(Palette.accentText)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.horizontal, Spacing.m)
+            .padding(.vertical, Spacing.s)
             .hoverFill(isHovering, in: .rect(cornerRadius: Radius.medium))
             .contentShape(.rect)
         }

@@ -33,7 +33,7 @@ enum AttachmentLayout {
         case ...0: GridPlan(columns: 1, cell: .zero, spacing: 0, visible: 0, overflow: 0)
         case 1: GridPlan(columns: 1, cell: CGSize(width: gridWidth, height: 160), spacing: 4, visible: 1, overflow: 0)
         case 2: GridPlan(columns: 2, cell: CGSize(width: 114, height: 114), spacing: 4, visible: 2, overflow: 0)
-        default: GridPlan(columns: 3, cell: CGSize(width: 74, height: 74), spacing: 5, visible: min(count, 9), overflow: max(count - 9, 0))
+        default: GridPlan(columns: 3, cell: CGSize(width: 74, height: 74), spacing: 4, visible: min(count, 9), overflow: max(count - 9, 0))
         }
     }
 

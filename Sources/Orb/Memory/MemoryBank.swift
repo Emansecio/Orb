@@ -112,6 +112,9 @@ actor MemoryBank {
     /// What the memories related to one message may take: up to `relatedLimit` of them, each cut to `relatedSnippet`
     /// characters (the rest is one `recall` away).
     static let relatedShare = 900, relatedLimit = 3, relatedSnippet = 220
+    /// A search hit in general, and one the model asked for: `recall` is the way to a whole page, so a short rule must
+    /// arrive complete, while what runs on every message stays small.
+    static let snippetLength = 400, recallSnippet = 1_500
     /// The most of a message (and its task) the tagger reads for `related`: a long paste would slow every turn.
     static let taggedLength = 2_000
     /// How often hand edits to the pages are picked up while the app runs.
@@ -290,11 +293,17 @@ actor MemoryBank {
 
     /// Full-text search over every page except the identity, best first: relevance (bm25, titles weigh more)
     /// with a boost for facts and procedures over session notes. Hits count as uses (they age slower).
+    /// Preferences the prompt cuts or leaves out (`preferenceBlock`), for telling whoever saves one that they no longer fit.
+    func preferencesOverflow() -> Int {
+        let bodies = items(.preferencia, limit: Self.pinnedPreferenceLimit).map { MemoryText.flatten($0.body) }
+        return Self.preferenceBlock(bodies).overflow
+    }
+
     func recall(_ query: String, limit: Int = 5, excluding: Set<String> = [], now: Date = .now) -> [MemoryHit] {
         prepare(now: now)
         guard let match = MemoryText.ftsQuery(query) else { return [] }
         let hits = search(match: match, words: Set(MemoryText.words(query).map(MemoryText.stem)), rows: limit + excluding.count,
-                          excluding: excluding).prefix(limit).map(\.hit)
+                          excluding: excluding, snippetLength: Self.recallSnippet).prefix(limit).map(\.hit)
         bump(hits.map(\.path), now: now)
         return Array(hits)
     }
@@ -305,7 +314,8 @@ actor MemoryBank {
         var text: String
     }
 
-    private func search(match: String, words: Set<String>, rows limit: Int, excluding: Set<String>) -> [Candidate] {
+    private func search(match: String, words: Set<String>, rows limit: Int, excluding: Set<String>,
+                        snippetLength: Int = MemoryBank.snippetLength) -> [Candidate] {
         guard let index else { return [] }
         let rows = index.rows("""
             SELECT p.path, p.kind, p.title, p.body, p.updated FROM pages_fts JOIN pages p ON p.id = pages_fts.rowid
@@ -317,7 +327,7 @@ actor MemoryBank {
             """, [.text(match), .int(limit)])
         return rows.compactMap { row -> Candidate? in
             guard !excluding.contains(row.text(0)), let kind = MemoryKind(rawValue: row.text(1)) else { return nil }
-            return Candidate(hit: MemoryHit(path: row.text(0), kind: kind, title: row.text(2), snippet: Self.snippet(row.text(3), words: words),
+            return Candidate(hit: MemoryHit(path: row.text(0), kind: kind, title: row.text(2), snippet: Self.snippet(row.text(3), words: words, length: snippetLength),
                                             date: Date(timeIntervalSince1970: row.double(4) ?? 0)),
                              text: row.text(2) + " " + row.text(3))
         }
@@ -1061,11 +1071,11 @@ actor MemoryBank {
     }
 
     /// The part of `body` around the first line mentioning one of `words` (stemmed); short bodies whole.
-    static func snippet(_ body: String, words: Set<String>) -> String {
-        guard body.count > 400 else { return body }
+    static func snippet(_ body: String, words: Set<String>, length: Int = snippetLength) -> String {
+        guard body.count > length else { return body }
         let lines = body.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
         let line = lines.first { !Set(MemoryText.words($0).map(MemoryText.stem)).isDisjoint(with: words) } ?? lines.first ?? ""
-        return MemoryText.clip(line, 400)
+        return MemoryText.clip(line, length)
     }
 
     static let dayFormat = DateFormatter.make(locale: "pt_BR", format: "dd/MM/yyyy HH:mm")

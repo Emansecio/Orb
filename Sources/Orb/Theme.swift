@@ -147,6 +147,9 @@ enum Spacing {
     static let cardPadding: CGFloat = l
     /// Between cards of a grid or a list.
     static let cardSpacing: CGFloat = 14
+    /// Inside a catalog card (a skill, a service, a server, a template): a step under `cardPadding`, which the bigger
+    /// installed-cards use.
+    static let catalogCardPadding: CGFloat = 14
     /// Between the sections of a page.
     static let section: CGFloat = xxl
     /// A page's outer margin.

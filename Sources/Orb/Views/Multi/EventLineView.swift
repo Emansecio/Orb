@@ -52,7 +52,7 @@ struct EventLineView: View {
             .help("Ver as etapas")
             .popover(isPresented: $showsPlan, arrowEdge: .bottom) {
                 TaskPlanSteps(plan: plan)
-                    .padding(14)
+                    .padding(Spacing.m)
                     .frame(width: 320, alignment: .leading)
             }
             .accessibilityLabel(event.sentence)

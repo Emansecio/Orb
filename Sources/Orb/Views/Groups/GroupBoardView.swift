@@ -43,8 +43,7 @@ struct GroupBoardView: View {
                         .textFieldStyle(.plain)
                         .font(Typography.text)
                         .lineLimit(2...5)
-                        .padding(10)
-                        .background(Palette.surface, in: .rect(cornerRadius: Radius.medium))
+                        .sheetTextField()
                         .focused($isObjectiveFocused)
                         .onSubmit { commitObjective() }
                         .accessibilityLabel("Objetivo do grupo")
@@ -56,9 +55,7 @@ struct GroupBoardView: View {
                     TextField("Novo combinado (↩ salva)", text: $agreement)
                         .textFieldStyle(.plain)
                         .font(Typography.text)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(Palette.surface, in: .rect(cornerRadius: Radius.small))
+                        .sheetTextField(radius: Radius.small)
                         .onSubmit {
                             let text = agreement.trimmingCharacters(in: .whitespacesAndNewlines)
                             guard !text.isEmpty else { return }
@@ -80,7 +77,7 @@ struct GroupBoardView: View {
                     // The kinds of memory are told apart by the space between them, wider than the one inside a kind.
                     VStack(alignment: .leading, spacing: Spacing.m) {
                         ForEach(groups) { group in
-                            VStack(alignment: .leading, spacing: 6) {
+                            VStack(alignment: .leading, spacing: Spacing.s) {
                                 Text("\(group.title) · \(group.items.count)")
                                     .font(.system(size: 11, weight: .medium))
                                     .foregroundStyle(Palette.faint)
@@ -100,7 +97,7 @@ struct GroupBoardView: View {
                     restore(forgotten)
                     self.forgotten = nil
                 }
-                .padding(.bottom, 12)
+                .padding(.bottom, Spacing.m)
                 .transition(.adapted(.rise, reduceMotion: reduceMotion))
                 // Ten seconds to take it back; a new "Esquecer" restarts the count (the id changes with the item).
                 .task(id: forgotten.id) {
@@ -135,7 +132,7 @@ private struct UndoForgetToast: View {
     let undo: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: Spacing.m) {
             Text("Esquecido: \(title)")
                 .font(Typography.label)
                 .foregroundStyle(Palette.secondary)
@@ -143,8 +140,8 @@ private struct UndoForgetToast: View {
             Button("Desfazer", action: undo)
                 .buttonStyle(GhostStyle())
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, Spacing.m)
+        .padding(.vertical, Spacing.s)
         .card(radius: Radius.card, fill: Palette.surface)
         .shadow(color: Shadow.popover, radius: 10, y: 3)
     }

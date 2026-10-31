@@ -119,7 +119,9 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         model.runRoutine(routine.id)
         await model.routineStarted()
         #expect(model.isWorking(bot.id))
-        #expect(model.transcript(bot.id).count == before.count) // the chat shows your conversation while it runs
+        // Your items lead, then the run is narrated where you read it (the chat's file is not the one being written).
+        #expect(model.transcript(bot.id).map(\.id).starts(with: before.map(\.id)))
+        #expect(model.transcript(bot.id).count > before.count)
         await waitUntilIdle(model, bot.id)
 
         // Your chat: what it had, plus one line.

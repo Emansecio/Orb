@@ -129,11 +129,11 @@ enum OrbDesignSheet {
         let orbs = sampleOrbs
         // 18 pt: the menu-bar Pergunta rápida's status; 30: sidebar; 60: panel; 96: empty chat; 132: large.
         let sizes: [CGFloat] = [18, 30, 60, 96, 132]
-        let sheet = VStack(alignment: .leading, spacing: 18) {
+        let sheet = VStack(alignment: .leading, spacing: Spacing.xl) {
             ForEach([false, true], id: \.self) { light in
                 HStack(alignment: .bottom, spacing: 26) {
                     ForEach(Array(orbs.enumerated()), id: \.offset) { _, orb in
-                        HStack(alignment: .bottom, spacing: 14) {
+                        HStack(alignment: .bottom, spacing: Spacing.cardSpacing) {
                             ForEach(sizes, id: \.self) { size in
                                 OrbView(config: orb, size: size, animated: false)
                                     .frame(width: size * 1.25, height: size * 1.6, alignment: .bottom)

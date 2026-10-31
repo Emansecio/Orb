@@ -314,8 +314,10 @@ struct RememberTool: AgentTool {
         name: "remember",
         description: """
         Save to long-term memory: a fact about the user or their work, a preference, a short rule, or how they want \
-        you to work. One short item per call; near-duplicates refresh it. tipo skill: after a multi-step task worth \
-        repeating, fact is the whole SKILL.md the user approves.
+        you to work. One short item per call; near-duplicates refresh it. Keep decisions and lessons, not events that \
+        logs or files already record; when something changes, rewrite its memory instead of adding a correction. \
+        preferencia only for what applies to every message. tipo skill: after a multi-step task worth repeating, fact \
+        is the whole SKILL.md the user approves.
         """,
         parameters: .schema([
             "fact": .property("string", "What to remember."),
@@ -358,12 +360,20 @@ struct RememberTool: AgentTool {
         var kind = arguments["tipo"]?.string.flatMap(MemoryKind.init) ?? .fato
         if kind == .sessao { kind = .fato }
         switch await memory.remember(fact, kind: kind, title: arguments["titulo"]?.string) {
-        case .saved: return "Guardado na memória (\(kind.label.lowercased())): \(MemoryText.clip(MemoryText.flatten(fact), 200))"
-        case .updated: return "Atualizei uma lembrança parecida que já existia; agora ela diz: \(MemoryText.clip(MemoryText.flatten(fact), 200))"
+        case .saved: return "Guardado na memória (\(kind.label.lowercased())): \(MemoryText.clip(MemoryText.flatten(fact), 200))" + (await overflowNote(kind, memory))
+        case .updated: return "Atualizei uma lembrança parecida que já existia; agora ela diz: \(MemoryText.clip(MemoryText.flatten(fact), 200))" + (await overflowNote(kind, memory))
         case .alreadyKnown: return "Isso já estava na memória."
         case .empty: throw ToolError("Nada para guardar: o texto está vazio.")
         case .failed: throw ToolError("Não consegui gravar na memória (pasta indisponível).")
         }
+    }
+
+    /// A preference past the prompt's share is cut without a sign, so the model that saved it is told at once.
+    private func overflowNote(_ kind: MemoryKind, _ memory: MemoryBank) async -> String {
+        guard kind == .preferencia else { return "" }
+        let overflow = await memory.preferencesOverflow()
+        guard overflow > 0 else { return "" }
+        return " Warning: \(overflow) preferences no longer fit whole in the prompt. Shorten or merge them, or keep the detail as procedimento."
     }
 }
 
@@ -372,7 +382,7 @@ struct RecallTool: AgentTool {
         name: "recall",
         description: """
         Search your long-term memory: facts, preferences, procedures and summaries of earlier conversations. Use it \
-        before asking something the user may have told you, when they refer to past work, and as "/name" to load that skill.
+        before asking something the user may have told you, when they refer to past work, and as "/name" to load that skill, or "/name#section" for one section of a long one.
         """,
         parameters: .schema([
             "query": .property("string"),

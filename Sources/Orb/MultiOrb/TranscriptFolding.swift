@@ -14,6 +14,8 @@ enum TranscriptRowModel: Identifiable, Equatable {
     /// The work of a request on one line ("Trabalhou por 1 min 05 s · 12 ações"): before its answer, before the notice it
     /// ended on (stopped, failed, the app closed), or, while it runs, what it did so far. `seconds`: how long it took.
     case work([TranscriptItem], seconds: Int?, outcome: WorkOutcome = .answered)
+    /// Skills the Orb proposed one after another (two or more): "3 melhorias propostas", which opens into their notices.
+    case proposals([TranscriptItem])
     /// The running request: its progress, actions, browser and pending cards share one activity block.
     case activity([TranscriptItem])
 
@@ -22,7 +24,7 @@ enum TranscriptRowModel: Identifiable, Equatable {
     var id: UUID {
         switch self {
         case .single(let item): item.id
-        case .events(_, let items), .exchange(let items), .tools(let items), .work(let items, _, _), .activity(let items): items[0].id
+        case .events(_, let items), .exchange(let items), .tools(let items), .work(let items, _, _), .activity(let items), .proposals(let items): items[0].id
         }
     }
 
@@ -30,7 +32,7 @@ enum TranscriptRowModel: Identifiable, Equatable {
     var span: (start: Date, end: Date) {
         switch self {
         case .single(let item): (item.date, item.date)
-        case .events(_, let items), .exchange(let items), .tools(let items), .work(let items, _, _), .activity(let items):
+        case .events(_, let items), .exchange(let items), .tools(let items), .work(let items, _, _), .activity(let items), .proposals(let items):
             (items[0].date, items.lazy.map(\.date).max() ?? items[0].date)
         }
     }
@@ -39,7 +41,7 @@ enum TranscriptRowModel: Identifiable, Equatable {
     var items: [TranscriptItem] {
         switch self {
         case .single(let item): [item]
-        case .events(_, let items), .exchange(let items), .tools(let items), .work(let items, _, _), .activity(let items): items
+        case .events(_, let items), .exchange(let items), .tools(let items), .work(let items, _, _), .activity(let items), .proposals(let items): items
         }
     }
 }
@@ -177,7 +179,30 @@ enum TranscriptFolding {
             rows.append(.single(item))
             index += 1
         }
-        return rows
+        return joiningProposals(rows)
+    }
+
+    /// Adjacent proposal notices become one row; a lone one stays as it is, with its button in view.
+    private static func joiningProposals(_ rows: [TranscriptRowModel]) -> [TranscriptRowModel] {
+        func isProposal(_ row: TranscriptRowModel) -> Bool {
+            guard case .single(let item) = row, case .notice(let text) = item.kind else { return false }
+            return NoticeAction.proposedSlug(in: text) != nil
+        }
+        var joined: [TranscriptRowModel] = []
+        joined.reserveCapacity(rows.count)
+        var index = 0
+        while index < rows.count {
+            var next = index
+            while next < rows.count, isProposal(rows[next]) { next += 1 }
+            if next - index > 1 {
+                joined.append(.proposals(rows[index..<next].map(\.items[0])))
+                index = next
+            } else {
+                joined.append(rows[index])
+                index += 1
+            }
+        }
+        return joined
     }
 
     /// A running request stays one block, but never takes another actor's exchange or crosses a compaction.
@@ -217,6 +242,23 @@ enum TranscriptFolding {
         }
         flush()
         return result
+    }
+
+    /// The steps of a running request split so its block keeps its height: what came before the latest step folds into one
+    /// line (`earlier`); the latest step, and any card, notice or browser, which must not hide, stay in view (`current`).
+    static func activityParts(_ steps: [TranscriptRowModel]) -> (earlier: [TranscriptRowModel], current: [TranscriptRowModel]) {
+        guard let latest = steps.lastIndex(where: { if case .tools = $0 { true } else { false } }) else { return ([], steps) }
+        let folds = { (step: TranscriptRowModel) -> Bool in
+            switch step {
+            case .tools: true
+            case .single(let item): if case .bot = item.kind { true } else { false }
+            default: false
+            }
+        }
+        let earlier = steps[..<latest].filter(folds)
+        // One step alone says no less on its own line than folded.
+        guard earlier.contains(where: { if case .tools = $0 { true } else { false } }) else { return ([], steps) }
+        return (earlier, steps[..<latest].filter { !folds($0) } + steps[latest...])
     }
 
     static func isToolLine(_ item: TranscriptItem) -> Bool {

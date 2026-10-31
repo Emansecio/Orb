@@ -33,7 +33,7 @@ struct OrbMessageRow: View {
             Button {
                 unfolded.toggle()
             } label: {
-                HStack(spacing: 10) {
+                HStack(spacing: Spacing.m) {
                     ExchangeGlyph(from: message.from.id, to: to.id, awaits: awaits)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(line)
@@ -55,8 +55,8 @@ struct OrbMessageRow: View {
                         .rotationEffect(.degrees(unfolded ? 90 : 0))
                         .animation(Motion.panel(reduceMotion: reduceMotion), value: unfolded)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .padding(.horizontal, Spacing.m)
+                .padding(.vertical, Spacing.s)
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
@@ -66,7 +66,7 @@ struct OrbMessageRow: View {
             .accessibilityHint(unfolded ? "Recolhe a mensagem" : "Desdobra a mensagem")
 
             if unfolded {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: Spacing.m) {
                     Text(message.text.isEmpty ? "Sem texto." : message.text)
                         .font(Typography.text)
                         .foregroundStyle(Palette.ink)
@@ -78,7 +78,7 @@ struct OrbMessageRow: View {
                             .buttonStyle(GhostStyle(tint: nil))
                     }
                 }
-                .padding([.horizontal, .bottom], 12)
+                .padding([.horizontal, .bottom], Spacing.m)
                 .transition(AnyTransition.adapted(.unfold, reduceMotion: reduceMotion))
             }
         }

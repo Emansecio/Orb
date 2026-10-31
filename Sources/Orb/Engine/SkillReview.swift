@@ -109,7 +109,7 @@ enum SkillReview {
         the app or the catalog cannot be changed.
         2. Look for a memory procedure on the same task with recall. If there is one, fold what it says into the skill, \
         so the user ends with one place and not two.
-        3. Only then create a new skill, named for the class of task (publicar-site, revisar-pull-request), never for \
+        3. Only then create a new skill, for a class of task that will clearly come back, named for the class of task (publicar-site, revisar-pull-request), never for \
         today's incident (fix-erro-x) or for a library alone.
 
         A good skill:

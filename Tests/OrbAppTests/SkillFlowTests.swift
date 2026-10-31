@@ -42,10 +42,10 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
         let script = CallScript([said("oi")])
         let (model, botID) = setUp(script)
         let other = UUID()
-        model.skills = [Skill(slug: "resumir", name: "Resumir", summary: "Resume", instructions: "Resuma em 5 tópicos.", source: Skill.builtInSource),
-                        Skill(slug: "desligada", name: "Desligada", summary: "", instructions: "x", isEnabled: false),
+        model.skills = [Skill(slug: "resumir", name: "Resumir", summary: "Resume", instructions: "Resuma em 5 tópicos.", source: Skill.builtInSource, orbIDs: [botID]),
+                        Skill(slug: "desligada", name: "Desligada", summary: "", instructions: "x", isEnabled: false, orbIDs: [botID]),
                         Skill(slug: "de-outro", name: "De outro", summary: "", instructions: "x", orbIDs: [other]),
-                        Skill(slug: "meu", name: "Meu", summary: "", instructions: "y", source: Skill.learnedSource)]
+                        Skill(slug: "meu", name: "Meu", summary: "", instructions: "y", source: Skill.learnedSource, orbIDs: [botID])]
         #expect(model.send("oi", to: botID))
         await waitUntilIdle(model, botID)
         let bank = model.memory.bank(for: botID)
@@ -490,7 +490,7 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
         }
         let script = CallScript(steps(10) + [said("pronto"), counted, said("Nothing to save.")])
         let (model, botID) = setUpGated(script)
-        model.skills = [Skill(slug: "meu", name: "Meu", summary: "", instructions: "y", source: Skill.learnedSource)]
+        model.skills = [Skill(slug: "meu", name: "Meu", summary: "", instructions: "y", source: Skill.learnedSource, orbIDs: [botID])]
         #expect(model.send("publica o site", to: botID))
         await waitUntilIdle(model, botID)
         await waitUntil("the gate to answer") { await script.calls.count == 12 && model.session(botID).skillReview == nil }
@@ -539,5 +539,52 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
         await waitUntilIdle(model, botID)
         await waitUntil("the review to end") { await script.calls.count == 12 && model.session(botID).skillReview == nil }
         #expect(await script.calls[11].messages.last?.content == SkillReview.prompt)
+    }
+}
+
+@Suite("Seções de skill")
+struct SkillSectionTests {
+    private let text = "Abertura\n\n## Parte A\nUm\n### Detalhe\nDois\n\n```\n## falso\n```\n\n## Parte B\nTrês"
+
+    @Test("Corta nos títulos de nível dois, fora de blocos de código")
+    func splitsAtHeadings() {
+        let sections = MemoryBank.sections(of: text)
+        #expect(sections.map(\.heading) == ["", "Parte A", "Parte B"])
+        #expect(sections[1].text.contains("### Detalhe") && sections[1].text.contains("## falso"))
+    }
+
+    @Test("O recall traz abertura e seção, e lista as seções quando não acha")
+    func recallsOneSection() async throws {
+        let folder = try TempFolder()
+        let bank = MemoryBank(directory: folder.url)
+        await bank.publishSkills([SkillDigest(slug: "longa", name: "Longa", summary: "s", instructions: text, improvable: true)])
+        let section = await bank.skillText(named: "/longa#parte b")
+        #expect(section.contains("Abertura") && section.contains("Três") && !section.contains("Dois"))
+        #expect(await bank.skillText(named: "/longa#nada").contains("Parte A; Parte B"))
+        #expect(await bank.skillText(named: "/longa").contains("Dois"))
+    }
+
+    @Test("Preferências além do limite do prompt são contadas")
+    func countsOverflow() async throws {
+        let folder = try TempFolder()
+        let bank = MemoryBank(directory: folder.url)
+        await bank.remember("Curta", kind: .preferencia)
+        #expect(await bank.preferencesOverflow() == 0)
+        await bank.remember(String(repeating: "palavra ", count: 400), kind: .preferencia)
+        #expect(await bank.preferencesOverflow() > 0)
+    }
+
+    @Test("O recall devolve regra curta inteira, em linha única")
+    func recallKeepsShortRules() async throws {
+        let folder = try TempFolder()
+        let bank = MemoryBank(directory: folder.url)
+        let rule = "zebra " + String(repeating: "regra ", count: 150) + "fim"
+        await bank.remember(rule, kind: .procedimento)
+        #expect(await bank.recall("zebra").first?.snippet.hasSuffix("fim") == true)
+    }
+
+    @Test("Skill sem títulos é uma seção só")
+    func noHeadings() {
+        #expect(MemoryBank.sections(of: "Só texto").map(\.heading) == [""])
     }
 }

@@ -645,7 +645,7 @@ struct SteeringEngineTests {
         let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
-        model.skills = [Skill(slug: "resumir", name: "Resumir", summary: "", instructions: "resuma")]
+        model.skills = [Skill(slug: "resumir", name: "Resumir", summary: "", instructions: "resuma", orbIDs: [bot.id])]
         model.submit("primeiro", to: bot.id)
         await waitUntil("the model call") { await client.seen.count >= 1 }
         model.submit("/resumir isto", to: bot.id)
@@ -658,7 +658,7 @@ struct SteeringEngineTests {
         // Delivered between steps instead.
         let gate2 = TestGate()
         let (model2, bot2) = setUp(HeldModel(gate: gate2))
-        model2.skills = [Skill(slug: "resumir", name: "Resumir", summary: "", instructions: "resuma")]
+        model2.skills = [Skill(slug: "resumir", name: "Resumir", summary: "", instructions: "resuma", orbIDs: [bot2.id])]
         model2.submit("primeiro", to: bot2.id)
         await waitUntil("the turn to start") { model2.turns[bot2.id] != nil }
         model2.submit("/resumir isto", to: bot2.id)

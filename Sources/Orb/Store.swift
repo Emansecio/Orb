@@ -6,7 +6,9 @@ import Darwin
 struct AppState: Codable, Sendable {
     var bots: [Bot]
     var routines: [Routine] = []
-    var skills: [Skill] = Skill.starters
+    /// The skills the file has: an existing file with none (or without the key) keeps none — `Skill.starters`
+    /// seeds a first use only, and `AppState.init(from:)` never brings it back.
+    var skills: [Skill] = []
     var connectors: [MCPServerConfig] = []
     var providers: [ProviderAccount] = []
     /// "provider/model" for bots without a model of their own.
@@ -34,15 +36,17 @@ struct AppState: Codable, Sendable {
     /// The home page's bounded, derived index and its own visit cursor.
     var inicio = InicioHistory()
 
-    /// What the app starts with when there is no data yet (a new install, after "Redefinir o Orb"): no Orb, so the
-    /// window opens on the welcome, where Atlas is one click away.
-    static let firstUse = AppState(bots: [])
+    /// What the app starts with when there is no data yet (a new install): no Orb, so the window opens on the
+    /// welcome, where Atlas is one click away. The built-in skills come with it — only here: a reset's survivors
+    /// and a file that exists start with `skills` as it is, so they never come back once removed.
+    static let firstUse = AppState(bots: [], skills: Skill.starters)
 
     /// A state with Atlas ready, for tests and the developer modes' sample data.
-    static let initial = AppState(bots: [
-        Bot(name: "Atlas", role: "Assistente do seu Mac",
-            orb: OrbConfig(color: "indigo", eyes: "pilulas", mouth: "sorriso", accessories: ["oculos-redondos"]))
-    ])
+    static let initial: AppState = {
+        let atlas = Bot(name: "Atlas", role: "Assistente do seu Mac",
+                        orb: OrbConfig(color: "indigo", eyes: "pilulas", mouth: "sorriso", accessories: ["oculos-redondos"]))
+        return AppState(bots: [atlas], skills: Skill.starters(scopedTo: [atlas.id]))
+    }()
 }
 
 /// Something about the data files the user should know: a file that couldn't be read (and where its copy is) or
@@ -106,7 +110,8 @@ struct Store: Sendable {
         return Store(directory: location.url)
     }()
 
-    private var stateURL: URL { directory.appendingPathComponent("state.json") }
+    /// Where the app state lives: `AppModel` watches it for changes made from outside the app.
+    var stateURL: URL { directory.appendingPathComponent("state.json") }
 
     /// The Orb's first conversation (`chat` nil or the Orb's own id) is `conversations/<botID>.json`; the others it opened
     /// later (`OrbChats`) are in its archive folder, `conversa-<id>.json`.
@@ -142,6 +147,14 @@ struct Store: Sendable {
 
     func readState() -> StoreRead<AppState> {
         Self.gate.reading(stateURL) { read(AppState.self, from: stateURL, ifUnreadable: "o Orb começou do zero") }
+    }
+
+    /// Like `readState`, on a thread of the store's own: the caller (reloading the state while the app runs) is
+    /// not blocked. See `readConversationAsync`.
+    func readStateAsync() async -> StoreRead<AppState> {
+        await withCheckedContinuation { continuation in
+            Self.readQueue.async { continuation.resume(returning: readState()) }
+        }
     }
 
     /// Reads (and decodes) on the calling thread. The main thread uses this only when it cannot wait for
@@ -221,8 +234,13 @@ struct Store: Sendable {
     /// waits for the write that was running. Not undone: the process is over soon after.
     func sealWrites() { WriteSeals.seal(directory) }
 
-    func save(_ state: AppState) {
-        enqueue(touching: [stateURL]) { write(state, to: stateURL) }
+    /// `then` (on the writer queue) gets the file's fingerprint after this write: how the app tells a change of
+    /// its own from one made from outside, without the file watcher reloading what it just wrote.
+    func save(_ state: AppState, then done: (@Sendable (FileFingerprint?) -> Void)? = nil) {
+        enqueue(touching: [stateURL]) {
+            write(state, to: stateURL)
+            done?(FileFingerprint(of: stateURL))
+        }
     }
 
     /// A bounded recovery copy of newly recorded home events. The state remains authoritative for the visit cursor.
@@ -937,6 +955,12 @@ enum Keychain {
 }
 
 extension Skill {
+    /// The skills the app ships with, scoped to `ids`. `starters` itself has no scope (a first use has no Orb yet):
+    /// each Orb `createBot` makes joins it.
+    static func starters(scopedTo ids: Set<UUID>) -> [Skill] {
+        starters.map { var skill = $0; skill.orbIDs = ids; return skill }
+    }
+
     static let starters: [Skill] = [
         Skill(slug: "resumir", name: "Resumir", summary: "Resume um texto, arquivo ou página em tópicos",
               instructions: "Resuma o material que o usuário indicar (texto, caminho de arquivo ou URL; leia com suas ferramentas antes). Responda com uma conclusão de uma linha seguida de no máximo 7 tópicos curtos. Mantenha nomes, números e datas exatos.", source: builtInSource),
@@ -1014,7 +1038,26 @@ extension AppState {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         bots = try c.lossyArray(.bots)
         routines = try c.lossyArray(.routines)
-        skills = try c.lossyArray(.skills, default: Skill.starters)
+        // A file written before skills were scoped has no `orbIDs` on a skill: that skill was for every Orb, so it
+        // is given the Orbs the file has (and only those). An absent `skills` key reads as none — the starters are
+        // a first use's (`AppState.firstUse`), and a file that exists is not one.
+        struct ScopedSkill: Decodable {
+            var skill: Skill?
+            var hasScope: Bool
+            init(from decoder: Decoder) throws {
+                skill = try? Skill(from: decoder)
+                if skill == nil { DecodeLoss.record() }
+                hasScope = (try? decoder.container(keyedBy: CodingKeys.self).contains(.orbIDs)) ?? false
+            }
+            enum CodingKeys: CodingKey { case orbIDs }
+        }
+        let scoped = try c.lossyOptionals(.skills) as [ScopedSkill?]
+        let aliveBotIDs = Set(bots.map(\.id))
+        skills = scoped.compactMap { entry in
+            guard let entry, var skill = entry.skill else { return nil }
+            if !entry.hasScope { skill.orbIDs = aliveBotIDs }
+            return skill
+        }
         connectors = try c.lossyArray(.connectors)
         providers = try c.lossyArray(.providers)
         defaultModel = try c.value(.defaultModel, default: "")

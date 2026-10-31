@@ -22,8 +22,10 @@ extension AppModel {
         guard descriptor >= 0 else { return }
         let source = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: descriptor, eventMask: [.write, .extend, .attrib, .rename, .delete], queue: .global(qos: .utility))
-        source.setEventHandler { [weak self] in Task { @MainActor in self?.scanWakeFolder() } }
-        source.setCancelHandler { close(descriptor) }
+        // `@Sendable`, so the handler is not MainActor-isolated (a plain closure would inherit it from here, and
+        // the source runs it on its own queue, where that isolation does not hold).
+        source.setEventHandler { @Sendable [weak self] in Task { @MainActor in self?.scanWakeFolder() } }
+        source.setCancelHandler { @Sendable in close(descriptor) }
         source.resume()
         wakeWatch = source
     }

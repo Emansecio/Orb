@@ -78,13 +78,43 @@ extension MemoryBank {
         (try? Data(contentsOf: directory.appending(path: Self.skillsFile))).flatMap { try? JSONDecoder().decode([SkillDigest].self, from: $0) } ?? []
     }
 
-    /// `recall "/slug"`: the skill's instructions, or what the Orb has instead.
+    /// A skill longer than this names its sections, so the next read can load only the one it needs.
+    static let longSkill = 6_000
+
+    /// `recall "/slug"`: the skill's instructions, or what the Orb has instead. `recall "/slug#section"`: its opening
+    /// (where a skill decides which part applies) and the first `## ` section whose heading has that text.
     func skillText(named query: String) -> String {
-        let slug = Skill.cleanSlug(query)
+        let parts = query.split(separator: "#", maxSplits: 1).map(String.init)
+        let slug = Skill.cleanSlug(parts.first ?? query)
         let skills = skillDigests()
         guard let skill = skills.first(where: { $0.slug == slug }) else {
             return "No skill /\(slug) for this Orb." + (skills.isEmpty ? "" : " Available: " + skills.map { "/" + $0.slug }.joined(separator: ", ") + ".")
         }
-        return "Skill /\(skill.slug), \(skill.name) (instructions the user wrote, approved or installed; follow them for this task):\n\n\(skill.instructions)"
+        let header = "Skill /\(skill.slug), \(skill.name) (instructions the user wrote, approved or installed; follow them for this task):\n\n"
+        let sections = Self.sections(of: skill.instructions)
+        if parts.count == 2, sections.count > 1 {
+            let wanted = MemoryText.fold(parts[1])
+            guard let section = sections.dropFirst().first(where: { MemoryText.fold($0.heading).contains(wanted) }) else {
+                return "No section \"\(parts[1])\" in /\(slug). Sections: " + sections.dropFirst().map(\.heading).joined(separator: "; ") + "."
+            }
+            return header + [sections[0].text, section.text].filter { !$0.isEmpty }.joined(separator: "\n\n")
+        }
+        let index = skill.instructions.count > Self.longSkill && sections.count > 2
+            ? "\n\nSections, loadable with recall \"/\(slug)#section\": " + sections.dropFirst().map(\.heading).joined(separator: "; ") + "."
+            : ""
+        return header + skill.instructions + index
+    }
+
+    /// The skill split at its `## ` headings: first what comes before any of them (empty heading), then each section.
+    /// A `#` inside a fenced block is not a heading, and `### ` stays in its section.
+    static func sections(of text: String) -> [(heading: String, text: String)] {
+        var sections: [(heading: String, lines: [String])] = [("", [])]
+        var fenced = false
+        for line in text.components(separatedBy: "\n") {
+            if line.hasPrefix("```") { fenced.toggle() }
+            if !fenced, line.hasPrefix("## ") { sections.append((String(line.dropFirst(3)), [])) }
+            sections[sections.count - 1].lines.append(line)
+        }
+        return sections.map { ($0.heading, $0.lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)) }
     }
 }

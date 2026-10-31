@@ -81,8 +81,9 @@ struct ModelPopover: View {
             .buttonStyle(.plain)
             .help(Tip.modelSettings)
             .foregroundStyle(Palette.secondary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
+            .padding(.horizontal, 8)
+            .padding(.vertical, Spacing.s)
+            .padding(.horizontal, 4)
         }
         .frame(width: PopoverMetrics.width)
         .onAppear {
@@ -110,14 +111,7 @@ struct ModelPopover: View {
     }
 
     private func header(_ title: String) -> some View {
-        Text(title)
-            .font(Typography.small.weight(.semibold))
-            .foregroundStyle(Palette.muted)
-            .padding(.horizontal, 12)
-            .padding(.top, 10)
-            .padding(.bottom, 3)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityAddTraits(.isHeader)
+        Text(title).popoverSectionHeader()
     }
 
     /// A provider's name; a button that folds its models unless a search is showing them all.
@@ -139,12 +133,7 @@ struct ModelPopover: View {
                 Text("\(group.models.count)").foregroundStyle(Palette.faint)
                 Spacer()
             }
-            .font(Typography.small.weight(.semibold))
-            .foregroundStyle(Palette.muted)
-            .padding(.horizontal, 12)
-            .padding(.top, 10)
-            .padding(.bottom, 3)
-            .contentShape(.rect)
+            .popoverSectionHeader()
         }
         .buttonStyle(.plain)
         .help(isSearch ? "" : (isFolded ? "Mostra os modelos deste provedor" : "Recolhe os modelos deste provedor"))
@@ -176,11 +165,12 @@ struct ModelPopoverRow: View {
                 }
             }
             .font(Typography.text)
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 8)
             .padding(.vertical, 5)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .hoverFill(isHovering, in: .rect)
+            .hoverFill(isHovering, in: .rect(cornerRadius: Radius.small), color: Palette.ghostSelected)
             .contentShape(.rect)
+            .padding(.horizontal, 4)
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }

@@ -381,15 +381,15 @@ extension AppModel {
     /// the id the message had in the queue, which is the link the model's copy of it carries (`ChatMessage.itemID`).
     func deliverSteered(_ id: UUID, to botID: UUID) {
         guard let message = composerLane(botID).delivered(id) else { return }
-        countSkillUse(in: message.text)
+        countSkillUse(in: message.text, for: botID)
         closeStreaming(botID)
         // Marked "durante a tarefa": it reached the model in the middle of its work, not as a request of its own.
         append(.user(text: message.text, attachments: message.attachmentPaths), to: botID, duringTask: true, id: id) // follows the end only if the chat was there
     }
 
-    /// Counts one use of the skill a message starts with (`/slug`), if it does.
-    private func countSkillUse(in text: String) {
-        guard let skill = SystemPrompt.expandSkill(in: text, skills: enabledSkills)?.skill,
+    /// Counts one use of the skill a message starts with (`/slug`), if it does and this Orb may use it.
+    private func countSkillUse(in text: String, for botID: UUID) {
+        guard let skill = SystemPrompt.expandSkill(in: text, skills: skills(for: botID))?.skill,
               let index = skills.firstIndex(where: { $0.id == skill.id }) else { return }
         skills[index].uses += 1
     }

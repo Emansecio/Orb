@@ -31,7 +31,7 @@ struct ExchangeSheet: View {
     var body: some View {
         let title = parties.map(\.name).joined(separator: " e ")
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: Spacing.xl) {
                 header
                 if messages.isEmpty {
                     Text("Nada foi trocado ainda.")
@@ -41,7 +41,7 @@ struct ExchangeSheet: View {
                         .padding(.vertical, 24)
                 } else {
                     // Messages of one Orb in a row share its avatar and header (as an Orb's replies do in the chat).
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: Spacing.cardSpacing) {
                         ForEach(Array(messages.enumerated()), id: \.offset) { index, message in
                             let continues = index > 0 && messages[index - 1].from.id == message.from.id
                             VStack(alignment: .leading, spacing: 4) {
@@ -54,8 +54,8 @@ struct ExchangeSheet: View {
                                         .padding(.leading, 44) // under the bubble, which `GroupMessageBubble` sets 44 pt from the edge
                                 }
                             }
-                            // A new speaker starts a group 8 pt further down (6 pt of the stack plus 8).
-                            .padding(.top, continues ? 0 : 8)
+                            // Words of one Orb that follow each other sit 10 pt apart, as in the group's thread.
+                            .padding(.top, continues ? -4 : 0)
                         }
                     }
                 }
@@ -182,14 +182,14 @@ struct SideWorkSheet: View {
         let items = live ?? saved
         let bot = model.bot(botID)
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 12) {
+            LazyVStack(alignment: .leading, spacing: Spacing.m) {
                 if let bot {
                     ForEach(items) { item in
                         TranscriptRow(item: item, botID: botID, orb: bot.orb).equatable()
                     }
                 }
             }
-            .padding(20)
+            .padding(Spacing.sheetEdge)
         }
         // Opens at the end, the latest of the work, as a chat does; a new scroll view once the saved work arrives (it
         // is read after the sheet opens), so it starts at its end instead of the empty list's top.

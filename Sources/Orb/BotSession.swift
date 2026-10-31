@@ -95,8 +95,26 @@ final class BotSession {
     /// What the chat view reads (see `AppModel.orbTranscript`), made when first asked for.
     @ObservationIgnored private(set) var transcript: OrbTranscript?
 
-    /// The user's chat: the parked one while a routine runs, otherwise the conversation.
-    var shownItems: [TranscriptItem] { (parkedChat ?? conversation)?.items ?? [] }
+    /// The user's chat, with the running routine's own run narrated after it: a routine parks the chat so its turn
+    /// works on the routine's conversation, but its steps (calls, stream, asks) are still to be read here. The run's
+    /// slice is its items since its `routineRunMarker`, so earlier runs do not flood the chat. Only a routine's run is
+    /// narrated: a request from another Orb or a group turn keeps their separate places (the exchange panel, the group).
+    /// The parked chat's lines, in their file order, come first; the run's follow. When the run ends the chat returns
+    /// unchanged, with only the routine's event line added (`closeRoutineRun`).
+    var shownItems: [TranscriptItem] {
+        guard let parked = parkedChat, routineID != nil, (sideKind ?? .routine) == .routine,
+              let running = conversation else { return (parkedChat ?? conversation)?.items ?? [] }
+        return parked.items + running.items.suffix(from: lastRoutineRunStart(in: running))
+    }
+
+    /// Where the running routine's current run begins in its conversation: after the `routineRunMarker` notice that
+    /// opens it (`Conversation.startingRoutineRun`). Zero when there is none (a conversation the marker was written
+    /// away from, as a saved one read back): everything it holds is the run's.
+    private func lastRoutineRunStart(in running: Conversation) -> Int {
+        running.items.lastIndex { item in
+            if case .notice(let text) = item.kind { text.hasPrefix(Conversation.routineRunMarker) } else { false }
+        } ?? 0
+    }
 
     func makeTranscript() -> OrbTranscript {
         if let transcript { return transcript }
@@ -117,8 +135,18 @@ final class BotSession {
     /// The task plan when the running turn began: the turn that finishes it leaves a line in the chat (`finishTurn`).
     @ObservationIgnored var planAtTurnStart: TaskPlan?
 
-    /// The plan of the conversation on show, while it still steers the work.
-    var shownPlan: TaskPlan? { (parkedChat ?? conversation)?.activePlan }
+    /// The plan of the conversation the running turn works on: the routine's while it runs, the one on show otherwise.
+    var shownPlan: TaskPlan? { (routineID != nil ? conversation : (parkedChat ?? conversation))?.activePlan }
+
+    /// The routine whose run is the running turn. Setting it repaints the chat: the run's items start (or stop) being
+    /// narrated after the parked chat (`shownItems`).
+    var routineID: UUID? {
+        didSet {
+            if (oldValue == nil) != (routineID == nil) { model?.syncActivities() }
+            if routineID != nil { resumableSince = nil } // what a side run starts is not the task you asked for
+            showTranscript()
+        }
+    }
 
     // MARK: Streaming
 
@@ -150,13 +178,6 @@ final class BotSession {
     /// The running turn's id. A turn that was stopped can still be finishing its setup or draining events while the
     /// next one runs; only the current id may change the Orb's state.
     @ObservationIgnored var turnID: UUID?
-    /// The routine whose run is the running turn.
-    var routineID: UUID? {
-        didSet {
-            if (oldValue == nil) != (routineID == nil) { model?.syncActivities() }
-            if routineID != nil { resumableSince = nil } // what a side run starts is not the task you asked for
-        }
-    }
     /// Since when a background process that ends lets the Orb go on by itself (`AppModel.resumesByItself`): your last
     /// message, until a routine's or another Orb's run, or a stop. `resumedAfterJobs` counts the times it did since.
     @ObservationIgnored var resumableSince: Date?

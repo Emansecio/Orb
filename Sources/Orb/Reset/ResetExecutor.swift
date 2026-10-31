@@ -130,7 +130,7 @@ struct ResetExecutor {
     /// The `state.json` of a first use that keeps the providers' setup: no Orb, so the app opens on the welcome.
     private func writeSurvivors(_ survivors: ResetPlan.Survivors?, report: inout ResetReport) {
         guard let survivors else { return }
-        var state = AppState.firstUse
+        var state = AppState(bots: []) // the built-in skills of `firstUse` are a first use's: a reset writes none
         state.providers = survivors.providers
         state.defaultModel = survivors.defaultModel
         state.learnedContexts = survivors.learnedContexts

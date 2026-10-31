@@ -14,7 +14,7 @@ struct GroupHeader: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: Spacing.m) {
             StackedAvatars(members: members, size: 24)
             Text(name)
                 .font(.system(size: 13, weight: .semibold))

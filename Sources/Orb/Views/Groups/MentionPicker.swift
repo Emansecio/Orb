@@ -59,8 +59,8 @@ struct MentionPicker: View {
                             .lineLimit(1)
                         Spacer(minLength: 0)
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, Spacing.s + Spacing.hairline)
+                    .padding(.vertical, Spacing.xs + Spacing.hairline)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(index == selected ? Palette.ghostSelected : Color.clear, in: .rect(cornerRadius: Radius.small))
                     .contentShape(.rect)
@@ -69,7 +69,7 @@ struct MentionPicker: View {
                 .accessibilityAddTraits(index == selected ? .isSelected : [])
             }
         }
-        .padding(6)
+        .padding(Spacing.xs + Spacing.hairline)
         .frame(width: 260, alignment: .leading)
         .card(radius: Radius.card, fill: Palette.surface)
         .shadow(color: Shadow.popover, radius: 12, y: 4)

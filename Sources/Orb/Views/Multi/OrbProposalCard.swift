@@ -139,9 +139,9 @@ struct OrbProposalCard: View {
     // MARK: Pending
 
     private var pendingCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: Spacing.catalogCardPadding) {
             header
-            HStack(alignment: .top, spacing: 18) {
+            HStack(alignment: .top, spacing: Spacing.xl) {
                 stage
                 VStack(alignment: .leading, spacing: 10) {
                     if isEditing { editFields } else { description }
@@ -319,7 +319,7 @@ struct OrbProposalCard: View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Image(systemName: symbol)
                 .font(.system(size: 10))
-                .frame(width: 16, alignment: .center)
+                .frame(width: Spacing.iconColumn, alignment: .center)
                 .accessibilityHidden(true)
             Text(text)
                 .fixedSize(horizontal: false, vertical: true)

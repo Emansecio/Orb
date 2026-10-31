@@ -127,7 +127,7 @@ private struct InstalledConnectors: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 12, alignment: .top)], alignment: .leading, spacing: 12) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), spacing: Spacing.cardSpacing, alignment: .top)], alignment: .leading, spacing: Spacing.cardSpacing) {
                         ForEach($model.connectors) { $connector in
                             ConnectorCard(connector: $connector, status: model.connectorStatus[connector.id],
                                           usedBy: usedBy(connector), attention: attention(connector),
@@ -236,7 +236,7 @@ private struct ConnectorCard: View {
     private enum LoginState: Equatable { case none, waiting, failed(String) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: Spacing.m) {
             HStack(alignment: .top, spacing: 12) {
                 ConnectorIcon(connector: connector)
                     .opacity(connector.isEnabled ? 1 : 0.55)
@@ -489,7 +489,7 @@ private struct ConnectorCard: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .frame(width: 360, height: 160)
-                .padding(14)
+                .padding(Spacing.catalogCardPadding)
             }
             HStack(spacing: 6) {
                 Button("Tentar de novo", action: runTest).buttonStyle(SecondaryPillStyle())
@@ -587,7 +587,7 @@ struct ConnectorToolsSheet: View {
 
     @ViewBuilder private var content: some View {
         if !didLoad {
-            DelayedSpinner().frame(maxWidth: .infinity, maxHeight: .infinity).padding(30)
+            DelayedSpinner().frame(maxWidth: .infinity, maxHeight: .infinity).padding(Spacing.xxl)
         } else if let catalog, !catalog.tools.isEmpty {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -598,7 +598,7 @@ struct ConnectorToolsSheet: View {
                         }
                     }
                 }
-                .padding(.horizontal, 20)
+                .padding(.horizontal, Spacing.sheetEdge)
             }
         } else {
             Text(catalog == nil ? "O Orb ainda não conhece as ferramentas deste conector. Use “Testar” no cartão."
@@ -607,7 +607,7 @@ struct ConnectorToolsSheet: View {
                 .foregroundStyle(Palette.muted)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(30)
+                .padding(Spacing.xxl)
         }
     }
 
@@ -631,7 +631,7 @@ struct ConnectorToolsSheet: View {
                 .foregroundStyle(Palette.muted)
                 .lineLimit(1)
         }
-        .padding(.vertical, 9)
+        .padding(.vertical, Spacing.s)
         .frame(maxWidth: .infinity, alignment: .leading)
         .help(tool.name + "\n" + tool.description)
         .accessibilityElement(children: .combine)
@@ -652,7 +652,7 @@ private struct ExploreConnectors: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: Spacing.xl) {
                 CatalogSearchHeader(query: $query, prompt: "Buscar no registro oficial de conectores",
                                     info: "A busca usa o registro oficial do MCP (registry.modelcontextprotocol.io). O nome de cada servidor é verificado pelo registro, mas o código é de quem publicou.")
                 Label("Os servidores do registro são de quem os publicou. Só os marcados “Oficial” vêm do projeto do MCP; os outros rodam código de terceiros no seu Mac. Confira quem publicou antes de instalar. Para os serviços mais usados, veja a galeria.",
@@ -668,7 +668,7 @@ private struct ExploreConnectors: View {
                     }
                     // Across the whole width, not the first column of the VStack's alignment (like the Instalados one).
                     .frame(maxWidth: .infinity)
-                    .padding(.top, 30)
+                    .padding(.top, 40)
                     .transition(.opacity)
                 } else if isLoading || error != nil || results.isEmpty {
                     CatalogStateView(isLoading: isLoading, error: error, isEmpty: results.isEmpty,
@@ -698,7 +698,7 @@ private struct ExploreConnectors: View {
     }
 
     private func grid<Item: Identifiable, Card: View>(_ items: [Item], @ViewBuilder card: @escaping (Item) -> Card) -> some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), spacing: 12, alignment: .top)], spacing: 12) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), spacing: Spacing.cardSpacing, alignment: .top)], spacing: Spacing.cardSpacing) {
             ForEach(items) { card($0) }
         }
     }
@@ -765,7 +765,7 @@ private struct RegistryServerCard: View {
                     }
                 }
             }
-            .padding(14)
+            .padding(Spacing.catalogCardPadding)
             .hoverCard(isHovering, radius: Radius.large, strongOutline: true)
             .contentShape(.rect)
         }
@@ -1246,14 +1246,14 @@ struct ConnectorEditor: View {
                     .foregroundStyle(Palette.faint)
                     .textSelection(.enabled)
                     .lineLimit(8)
-                    .padding(10)
+                    .padding(Spacing.m)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Palette.raised, in: .rect(cornerRadius: Radius.small))
                     .padding(.horizontal, 20)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.vertical, 30)
+        .padding(.vertical, Spacing.xxl)
         .accessibilityElement(children: .combine)
     }
 

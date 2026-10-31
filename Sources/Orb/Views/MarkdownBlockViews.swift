@@ -3,7 +3,7 @@ import AppKit
 import os
 
 /// Space between the blocks of a reply (a blank line used to cost about 22 pt).
-let markdownBlockSpacing: CGFloat = 8
+let markdownBlockSpacing: CGFloat = 12
 
 /// One piece of a reply (a paragraph between blank lines while it streams, the whole text once it is done) drawn as
 /// its blocks. Equatable on its source: a piece that did not change is neither parsed nor measured again.
@@ -74,9 +74,9 @@ struct MarkdownBlockView: View, Equatable {
     /// size between 14 and 15 only blurred the steps).
     static func headingSize(_ level: Int) -> CGFloat {
         switch level {
-        case 1: 17
-        case 2: 15
-        default: 14
+        case 1: 20
+        case 2: 17
+        default: 15
         }
     }
 }

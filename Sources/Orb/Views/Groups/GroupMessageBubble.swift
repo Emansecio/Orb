@@ -91,7 +91,7 @@ struct GroupMessageBubble: View {
                         .allowsHitTesting(hovering)
                 }
         }
-        .padding(.leading, 44)
+        .padding(.leading, gutter)
         .padding(.trailing, 40)
         .frame(maxWidth: 720, alignment: .leading)
         .overlay(alignment: .topLeading) {
@@ -139,7 +139,7 @@ struct GroupMessageBubble: View {
                     .labelStyle(.titleAndIcon)
             }
         }
-        .padding(.top, 5)
+        .padding(.top, Spacing.xs)
     }
 
     private var text: some View {
@@ -246,7 +246,7 @@ struct GroupAssignmentLine: View {
                     .transition(.adapted(.unfold, reduceMotion: reduceMotion))
             }
         }
-        .padding(.leading, 40)
+        .padding(.leading, gutter)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Pedido de \(from?.name ?? message.from.name) a \(toName)\(message.fromChat == true ? ", a seu pedido" : "")")

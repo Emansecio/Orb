@@ -32,7 +32,7 @@ struct RadioChoiceRow: View {
 
     var body: some View {
         Button(action: select) {
-            HStack(alignment: .top, spacing: 10) {
+            HStack(alignment: .top, spacing: Spacing.m) {
                 Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
                     .foregroundStyle(isSelected ? Palette.accentText : Palette.muted)
                     .accessibilityHidden(true)

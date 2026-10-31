@@ -12,7 +12,7 @@ struct ProfileSettings: View {
 
     var body: some View {
         Section {
-            HStack(spacing: 14) {
+            HStack(spacing: Spacing.l) {
                 Button { isImporting = true } label: {
                     ProfileAvatar(photoPath: model.profilePhotoPath, initial: model.profile.initial, size: 64)
                         .overlay { Circle().strokeBorder(Palette.accent, lineWidth: 2).opacity(isDropTarget ? 1 : 0) }
@@ -27,8 +27,8 @@ struct ProfileSettings: View {
                     setPhoto(url)
                     return true
                 } isTargeted: { isDropTarget = $0 }
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: Spacing.s) {
+                    HStack(spacing: Spacing.controlGap) {
                         Button(model.profile.photo.isEmpty ? "Escolher foto…" : "Trocar foto…") { isImporting = true }
                             .help(Tip.profilePhotoChoose)
                             .chipButton()
@@ -53,7 +53,7 @@ struct ProfileSettings: View {
             field("Nome", prompt: "Como você se chama", \.name, limit: UserProfile.nameLimit)
             field("Como te chamar", prompt: model.profile.name.split(separator: " ").first.map(String.init) ?? "Opcional",
                   \.nickname, limit: UserProfile.nicknameLimit)
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: Spacing.s) {
                 Text("Sobre você")
                 LimitedTextField(title: "Sobre você", prompt: "Ex.: trabalho com design, prefiro respostas curtas e moro em Recife.",
                                  limit: UserProfile.aboutLimit, axis: .vertical, value: binding(\.about))

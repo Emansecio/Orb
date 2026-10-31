@@ -527,12 +527,12 @@ private struct NewBotFolderSection: View {
     var body: some View {
         Section {
             // The same line as the folder in the Orb's panel: what the place is called, its path under it, "Mudar…" at the end.
-            HStack(spacing: 10) {
+            HStack(spacing: Spacing.m) {
                 Image(systemName: choice == .home ? "house" : "folder")
                     .foregroundStyle(Palette.muted)
                     .frame(width: 20)
                     .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: Spacing.hairline) {
                     Text(shownName)
                         .lineLimit(1)
                         .truncationMode(.middle)

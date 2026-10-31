@@ -7,7 +7,7 @@ import os
 final class AppModel {
     // MARK: Persisted state
 
-    var bots: [Bot] { didSet { scheduleStateSave(); syncLives(); normalizeGroups(); normalizeCategories() } }
+    var bots: [Bot] { didSet { scheduleStateSave(); syncLives(); normalizeGroups(); normalizeCategories(); normalizeSkills() } }
     var routines: [Routine] { didSet { scheduleStateSave(); queueFollowsEdits(from: oldValue); syncActivities() } }
     var skills: [Skill] { didSet { scheduleStateSave() } }
     var connectors: [MCPServerConfig] { didSet { scheduleStateSave(); syncConnectors() } }
@@ -79,6 +79,14 @@ final class AppModel {
     /// The `wake/` folder's file-system source: the doorbell outside processes ring (see `RoutineWake`). Started in
     /// the real app only — a developer run or a test never watches the folder.
     @ObservationIgnored var wakeWatch: DispatchSourceFileSystemObject?
+    /// The file-system source watching `state.json` (`startStateWatch`), re-armed after every event because an
+    /// atomic save replaces the file it pointed at.
+    @ObservationIgnored private var stateWatch: DispatchSourceFileSystemObject?
+    /// `state.json` as the app last read or wrote it: a watch event that finds this fingerprint means the change is
+    /// the app's own and must not be reloaded; anything else is a change made from outside.
+    @ObservationIgnored private(set) var lastSavedStateFingerprint: FileFingerprint?
+    /// The state-file check scheduled after a burst of watch events (a save lands as several).
+    @ObservationIgnored private var stateFileTask: Task<Void, Never>?
     /// Gives freed memory back once the app has been in the background a while (see `MemoryRelief`).
     @ObservationIgnored private var backgroundRelief: Task<Void, Never>?
     var isStartingRoutine: Bool { !startingRoutines.isEmpty } // internal for tests (`startingRoutines` is private to this file)
@@ -385,6 +393,7 @@ final class AppModel {
         var notices: [StoreNotice] = []
         let stateRead = store.readState()
         notices += stateRead.notice.map { [Self.described($0, bots: [], routines: [])] } ?? []
+        lastSavedStateFingerprint = stateRead.fingerprint // the state the app starts with is also its own, to the watcher
         let state = stateRead.value ?? firstUse
         // An Orb has one conversation: the ones an older version set aside come back into it, once. Reads of the
         // conversation wait for this.
@@ -482,6 +491,7 @@ final class AppModel {
         }
         if inicio != state.inicio { scheduleStateSave() }
         normalizeGroups() // groups of Orbs that no longer exist (the state was edited, or an older build lost an Orb)
+        normalizeSkills() // the same for the Orbs named in the skills' scopes
         for (id, count) in state.unread {
             if let id = UUID(uuidString: id) { live(id).setUnread(count) }
         }
@@ -522,6 +532,7 @@ final class AppModel {
             keepsAwakeForRoutines = true
             syncActivities()
             startWakeWatch() // outside processes can ring a routine awake through `wake/`
+            startStateWatch() // and an outside change to `state.json` is read again (its own writes never are)
             scheduler = Task { [weak self] in
                 await self?.refreshConnections()
                 while !Task.isCancelled {
@@ -1154,6 +1165,8 @@ final class AppModel {
         session.conversation = Conversation()
         session.lastUsed = .now
         bots.append(bot)
+        // The built-in skills ship for every Orb: a new one joins their (always named) scope.
+        for index in skills.indices where skills[index].source == Skill.builtInSource { skills[index].orbIDs.insert(bot.id) }
         selection = .bot(bot.id)
         welcomeReason = nil
         noteOrbCreated()
@@ -1353,6 +1366,10 @@ final class AppModel {
     func stopForReset(wait: Duration = .seconds(3)) async {
         stateSave?.cancel()
         stateSave = nil
+        stateWatch?.cancel()
+        stateWatch = nil
+        stateFileTask?.cancel()
+        stateFileTask = nil
         let loop = scheduler
         loop?.cancel()
         scheduler = nil
@@ -2032,9 +2049,9 @@ final class AppModel {
     // MARK: Routines
 
     /// Runs the routine now, or, when its Orb is busy, as soon as the Orb is free (a routine waits at most once).
-    /// A run has a conversation of its own (`conversations/<Orb>/routine-<routine>.json`): your chat gets one line
-    /// when it ends, nothing else. `manual` (the card's button, the tool's "run") skips the precheck: asking to
-    /// run now means running now.
+    /// A run has a conversation of its own (`conversations/<Orb>/routine-<routine>.json`): the chat narrates it while
+    /// it runs (`BotSession.shownItems`) and gets one line when it ends. `manual` (the card's button, the tool's "run")
+    /// skips the precheck: asking to run now means running now.
     func runRoutine(_ routineID: UUID, manual: Bool = false, wakeNote: String? = nil) {
         guard !isResetting, let routine = routines.first(where: { $0.id == routineID }), bot(routine.botID) != nil else { return }
         if sessions[routine.botID]?.isUnloaded == true { // its chat is read off the main thread first
@@ -2401,12 +2418,14 @@ final class AppModel {
 
     func installedSkill(_ catalogID: String) -> Skill? { skills.first { $0.source == catalogID } }
 
-    /// Adds a catalog skill; its slug gets a numeric suffix if one is already taken.
+    /// Adds a catalog skill, scoped like a new one made by hand (`defaultScopeForNewSkill`); its slug gets a
+    /// numeric suffix if one is already taken.
     @discardableResult
     func install(_ document: SkillDocument, from entry: CatalogSkill) -> Skill? {
         if let existing = installedSkill(entry.id) { return existing }
         return addSkill(slug: Skill.slugify(entry.skillId), name: document.name, summary: document.description,
-                        instructions: document.instructions, source: entry.id, folderURL: document.folderURL)
+                        instructions: document.instructions, source: entry.id, folderURL: document.folderURL,
+                        orbIDs: defaultScopeForNewSkill())
     }
 
     /// `slug` with a numeric suffix when another skill already has it.
@@ -2419,10 +2438,10 @@ final class AppModel {
         return unique
     }
 
-    /// Adds a skill under a free slug; `orbIDs` limits it to those Orbs (nil: every Orb).
+    /// Adds a skill under a free slug; `orbIDs` names the Orbs that may use it (a skill's scope is always explicit).
     @discardableResult
     func addSkill(slug: String, name: String, summary: String, instructions: String, source: String? = nil,
-                  folderURL: URL? = nil, orbIDs: Set<UUID>? = nil) -> Skill {
+                  folderURL: URL? = nil, orbIDs: Set<UUID> = []) -> Skill {
         let skill = Skill(slug: uniqueSlug(slug), name: name, summary: summary, instructions: instructions,
                           source: source, folderURL: folderURL, orbIDs: orbIDs)
         skills.append(skill)
@@ -2508,6 +2527,136 @@ final class AppModel {
         }
     }
 
+    // MARK: The state file on disk
+
+    /// An Orb that is gone leaves every skill's scope (a skill is never "for every Orb": it names its Orbs, and
+    /// only ones that exist count). Runs whenever the list of Orbs changes — a delete, or `state.json` read again.
+    private func normalizeSkills() {
+        let alive = Set(bots.map(\.id))
+        for index in skills.indices {
+            let kept = skills[index].orbIDs.intersection(alive)
+            if kept != skills[index].orbIDs { skills[index].orbIDs = kept }
+        }
+    }
+
+    /// Where `state.json` lives.
+    private var stateFileURL: URL { store.stateURL }
+
+    /// Watches `state.json` for changes made outside the app: one descriptor, no polling. Re-armed on every event —
+    /// an atomic save replaces the file the descriptor points at, so the watch would die with it. While the file
+    /// is missing its folder is watched instead, so the file coming back is seen too (it is never made by hand here).
+    func startStateWatch() {
+        stateWatch?.cancel()
+        var url = stateFileURL, mask: DispatchSource.FileSystemEvent = [.write, .attrib, .rename, .delete]
+        var descriptor = open(url.path, O_EVTONLY)
+        if descriptor < 0 {
+            url = store.directory
+            mask = [.write]
+            descriptor = open(url.path, O_EVTONLY)
+        }
+        guard descriptor >= 0 else { return }
+        let watched = descriptor // the handlers capture a constant
+        let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: watched, eventMask: mask, queue: .global(qos: .utility))
+        // `@Sendable`, so the handler is not MainActor-isolated (a plain closure would inherit it from here, and
+        // the source runs it on its own queue, where that isolation does not hold).
+        source.setEventHandler { @Sendable [weak self] in Task { @MainActor in self?.stateFileEvent() } }
+        source.setCancelHandler { @Sendable in close(watched) }
+        source.resume()
+        stateWatch = source
+    }
+
+    /// Something landed on the watched file or folder: re-arm (the descriptor may point at a file that was just
+    /// replaced) and check once the burst settles — a save is several events in a row.
+    private func stateFileEvent() {
+        startStateWatch()
+        stateFileTask?.cancel()
+        stateFileTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            self?.checkStateFile()
+        }
+    }
+
+    /// `state.json` changed on disk: the app's own writes are known by `lastSavedStateFingerprint` (kept by the
+    /// save's callback when they land) and are ignored, and a missing file is nothing to read — the next save
+    /// writes it again. Anything else is reloaded.
+    func checkStateFile() {
+        guard !isResetting else { return }
+        let fingerprint = FileFingerprint(of: stateFileURL)
+        guard fingerprint != lastSavedStateFingerprint else { return }
+        lastSavedStateFingerprint = fingerprint
+        guard fingerprint != nil else { return }
+        reloadStateFromDisk()
+    }
+
+    /// `state.json` is read again and applied (`applyDiskState`), as at launch — "Recarregar ajustes do disco" does
+    /// it by hand, the watch does it for a change made from outside. A save still waiting would overwrite what is
+    /// being read: it is cancelled. Conversations are their own files and are not read again.
+    func reloadStateFromDisk() {
+        guard !isResetting else { return }
+        stateSave?.cancel()
+        Task { applyDiskState(await store.readStateAsync()) }
+    }
+
+    /// The state read again replaces what is in memory, as the launch assigns it (the bots last, so the skill,
+    /// group and category normalization its `didSet` runs already sees them). What is live is folded into it: an
+    /// Orb or a routine the file no longer has goes, and one it brought is read when needed, like every other.
+    private func applyDiskState(_ read: StoreRead<AppState>) {
+        guard !isResetting else { return }
+        lastSavedStateFingerprint = read.fingerprint
+        if let notice = read.notice {
+            addNotice(Self.described(notice, bots: read.value?.bots ?? bots, routines: read.value?.routines ?? routines))
+        }
+        guard let state = read.value else { return }
+        skills = state.skills
+        routines = state.routines
+        connectors = connectorSecrets.resolve(state.connectors)
+        providers = state.providers
+        defaultModel = state.defaultModel
+        contextMemory = state.contextMemory
+        profile = state.profile
+        learnedContexts = state.learnedContexts
+        priceCorrections = state.priceCorrections
+        groups = state.groups
+        categories = SidebarOrder.normalized(state.categories, botIDs: state.bots.map(\.id))
+        inicio = state.inicio
+        bots = state.bots
+        // Orbs the file no longer has: what they had in memory goes with them (nothing of theirs is deleted on
+        // disk — only `state.json` changed). An unsaved conversation is written first.
+        for id in sessions.keys.filter({ !botIDs.contains($0) }) {
+            sessions[id]?.write()
+            sessions[id]?.close()
+            sessions[id] = nil
+        }
+        // Orbs the file brought: their conversation is read when needed, as every other Orb's at launch. A read
+        // already under way is of the chat the file no longer names: it is let go of (`loadEpoch`).
+        for bot in state.bots where sessions[bot.id]?.conversation == nil {
+            sessions[bot.id]?.isUnloaded = true
+            sessions[bot.id]?.chatID = state.chats[bot.id.uuidString]?.active ?? bot.id
+            sessions[bot.id]?.loadEpoch += 1
+        }
+        for bot in state.bots {
+            let live = live(bot.id)
+            live.setUnread(state.unread[bot.id.uuidString] ?? 0)
+            live.setLastReply(state.replies[bot.id.uuidString])
+            live.setChats(state.chats[bot.id.uuidString])
+        }
+        // A routine the file no longer has leaves its place in every queue; one still there keeps it.
+        let routineIDs = Set(routines.map(\.id))
+        queuedRoutines.removeAll { !routineIDs.contains($0) }
+        queuedManualRoutines.formIntersection(routineIDs)
+        queuedWakeNotes = queuedWakeNotes.filter { routineIDs.contains($0.key) }
+        startingRoutines = startingRoutines.filter { routineIDs.contains($0.value) && botIDs.contains($0.key) }
+        if !state.bots.isEmpty { noteOrbCreated() }
+        // A selection or a "last Orb" pointing at what the file no longer has goes back to the top of the sidebar.
+        if case .bot(let id) = selection, !botIDs.contains(id) {
+            selection = sidebarBotIDs.first.map(SidebarItem.bot)
+        } else if case .group(let id) = selection, !groups.contains(where: { $0.id == id }) {
+            selection = sidebarBotIDs.first.map(SidebarItem.bot)
+        }
+        if let id = lastSelectedBotID, !botIDs.contains(id) { lastSelectedBotID = nil }
+    }
+
     // MARK: Saving
 
     private var state: AppState {
@@ -2543,7 +2692,9 @@ final class AppModel {
         stateSave = Task { [store] in
             try? await Task.sleep(for: .milliseconds(400))
             guard !Task.isCancelled else { return }
-            store.save(state)
+            store.save(state) { fingerprint in
+                Task { @MainActor in self.lastSavedStateFingerprint = fingerprint }
+            }
         }
     }
 
@@ -2556,7 +2707,9 @@ final class AppModel {
         if selection == .inicio { inicio.finishVisit(through: inicioVisitThrough) }
         stateSave?.cancel() // the snapshot below replaces any delayed write of this same state
         stateSave = nil
-        store.save(state)
+        store.save(state) { fingerprint in
+            Task { @MainActor in self.lastSavedStateFingerprint = fingerprint }
+        }
         saveDraftsIfChanged() // after the turns stopped for quitting gave their queued messages back
         for session in sessions.values { session.saveNow() }
         saveGroupSessionsNow()

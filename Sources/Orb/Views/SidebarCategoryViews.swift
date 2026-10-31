@@ -168,7 +168,7 @@ private struct SidebarCategoryHeader: View {
                    help: collapsed ? "Mostra os Orbs desta categoria" : "Recolhe os Orbs desta categoria") {
             model.setCategory(category.id, collapsed: !collapsed)
         } content: { _ in
-            HStack(spacing: 10) {
+            HStack(spacing: SidebarCategoryLayout.iconGap) {
                 Image(systemName: "chevron.right")
                     .font(SectionPlus.chevron)
                     .rotationEffect(.degrees(collapsed ? 0 : 90))
@@ -264,7 +264,7 @@ private struct CategoryNameField: View {
 
     var body: some View {
         let isPlus = symbol == "plus"
-        HStack(spacing: 10) {
+        HStack(spacing: SidebarCategoryLayout.iconGap) {
             Image(systemName: symbol)
                 .font(isPlus ? SectionPlus.glyph : SectionPlus.chevron)
                 .rotationEffect(.degrees(turned ? 90 : 0))
@@ -297,5 +297,7 @@ enum SidebarCategoryLayout {
     /// avatar, an 8 pt gap), so a category and the Orbs outside it share one text edge.
     static let iconColumn: CGFloat = 28
     /// Where the heading's name starts: the row's padding, the icon column and the space after it.
-    static let titleInset: CGFloat = 8 + iconColumn + 10
+    /// The gap after the arrow column: `iconColumn` + this puts the name at 46 pt, the Orbs' text edge.
+    static let iconGap: CGFloat = 10
+    static let titleInset: CGFloat = 8 + iconColumn + iconGap
 }

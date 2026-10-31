@@ -133,9 +133,9 @@ private struct GroupApprovalBar: View {
                     ScrollView { cards(entries) }
                         .frame(maxHeight: 300)
                 }
-                .padding(.horizontal, 28)
+                .padding(.horizontal, TranscriptLayout.edge)
                 .padding(.vertical, 8)
-                .frame(maxWidth: 760)
+                .frame(maxWidth: TranscriptLayout.column)
                 .frame(maxWidth: .infinity)
                 .transition(.quiet)
             }
@@ -158,9 +158,9 @@ private struct GroupApprovalBar: View {
     }
 
     private func cards(_ entries: [Entry]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: Spacing.m) {
             ForEach(entries, id: \.request.id) { entry in
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: Spacing.s) {
                     // The question card already says who asks; the permission card does not.
                     if !entry.request.isQuestion {
                         Text(entry.look.name)
@@ -228,7 +228,7 @@ private struct GroupThreadView: View {
         let lastSentID = items.last { if case .user = $0.kind { true } else { false } }?.id
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
+                LazyVStack(alignment: .leading, spacing: Spacing.cardSpacing) {
                     if items.isEmpty {
                         GroupEmptyState(group: group)
                             .transition(.opacity)
@@ -245,10 +245,10 @@ private struct GroupThreadView: View {
                     }
                     Color.clear.frame(height: 1).id(bottomID)
                 }
-                .padding(.horizontal, 28)
-                .padding(.top, 20)
-                .padding(.bottom, 12)
-                .frame(maxWidth: 760)
+                .padding(.horizontal, TranscriptLayout.edge)
+                .padding(.top, Spacing.xl)
+                .padding(.bottom, Spacing.m)
+                .frame(maxWidth: TranscriptLayout.column)
                 .frame(maxWidth: .infinity)
                 .animation(Motion.adapted(Motion.exit, reduceMotion: reduceMotion), value: items.isEmpty)
             }
@@ -377,14 +377,14 @@ struct GroupEmptyState: View {
         let right = Array(others.dropFirst(leftCount))
         let side = CGFloat(max(left.count, right.count)) * Self.step
         VStack(spacing: Self.titleGap) {
-            HStack(alignment: .bottom, spacing: 18) {
+            HStack(alignment: .bottom, spacing: Spacing.xl) {
                 // Both sides get the same width, so the orchestrator is exactly in the middle whatever the count.
-                HStack(alignment: .bottom, spacing: 18) {
+                HStack(alignment: .bottom, spacing: Spacing.xl) {
                     ForEach(left, id: \.id) { member in standing(member, size: 48) }
                 }
                 .frame(width: side, alignment: .trailing)
                 if let orchestrator { standing(orchestrator, size: 72) }
-                HStack(alignment: .bottom, spacing: 18) {
+                HStack(alignment: .bottom, spacing: Spacing.xl) {
                     ForEach(right, id: \.id) { member in standing(member, size: 48) }
                 }
                 .frame(width: side, alignment: .leading)

@@ -371,7 +371,10 @@ private struct WritingModel: LLMClient {
         let session = model.session(a)
         #expect(session.parkedChat?.items == chat.items) // the chat waits, untouched
         #expect(session.conversation?.items != chat.items) // the routine works on its own conversation
-        #expect(model.transcript(a).map(\.id) == chat.items.map(\.id)) // the chat view keeps showing the chat
+        // The chat narrates the run after the chat's own lines: its marker, its request and what it does. Only then
+        // the chat's items, in their order.
+        let runItems = session.conversation?.items ?? []
+        #expect(model.transcript(a).map(\.id) == chat.items.map(\.id) + runItems.map(\.id))
         #expect(!model.canSteer(a)) // a message cannot join a routine's run
 
         await gates.open("PEDIDO-RA")

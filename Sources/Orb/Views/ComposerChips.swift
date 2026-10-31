@@ -101,7 +101,7 @@ struct PermissionPopover: View {
             Text("Quando este Orb pede sua permissão")
                 .font(Typography.small.weight(.semibold))
                 .foregroundStyle(Palette.muted)
-                .padding(.horizontal, 14)
+                .padding(.horizontal, 12)
                 .padding(.top, 12)
                 .padding(.bottom, 6)
             ForEach(PermissionMode.allCases) { mode in
@@ -125,7 +125,7 @@ struct PermissionPopover: View {
                         .foregroundStyle(Palette.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(14)
+                .padding(12)
             } else {
                 Spacer().frame(height: 8)
             }
@@ -142,10 +142,10 @@ private struct PermissionRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(alignment: .top, spacing: 10) {
+            HStack(alignment: .top, spacing: Spacing.s) {
                 Image(systemName: mode.symbol)
                     .foregroundStyle(mode == .auto || mode == .bypass ? PermissionChip.tint(mode) : Palette.secondary)
-                    .frame(width: 20)
+                    .frame(width: Spacing.iconColumn)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(mode.label)
                         .font(Typography.text.weight(.medium))
@@ -160,11 +160,12 @@ private struct PermissionRow: View {
                     Image(systemName: "checkmark").font(.system(size: 11, weight: .semibold)).foregroundStyle(Palette.accentText)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 7)
+            .padding(.horizontal, 8)
+            .padding(.vertical, Spacing.s)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .hoverFill(isHovering, in: .rect)
+            .hoverFill(isHovering, in: .rect(cornerRadius: Radius.small), color: Palette.ghostSelected)
             .contentShape(.rect)
+            .padding(.horizontal, 4)
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
@@ -231,7 +232,7 @@ struct SkillsPopover: View {
                 .popoverSearchField()
                 .focused($isSearching)
                 .onSubmit { if let first = shown.first { pick(first.slug) } }
-                .padding(10)
+                .padding(Spacing.xs)
             Divider()
             if skills.isEmpty {
                 empty("Nenhuma skill ativa", "Instale ou ative skills na seção Skills da barra lateral.")
@@ -253,9 +254,9 @@ struct SkillsPopover: View {
         .onAppear { isSearching = true }
     }
 
-    /// The search field and divider (about 54 pt: the popovers' search field, `popoverSearchField`, is 6 pt taller than
-    /// the system's rounded one it replaced, which measured 48).
-    private static let chrome: CGFloat = 54
+    /// The search field and divider: the field is 6/8 inside a 4 pt outer padding (`popoverSearchField`), so ~34 pt +
+    /// the divider.
+    private static let chrome: CGFloat = 42
 
     /// The popover's height: `chrome` over the whole list of skills, at most 380. Before the
     /// list is measured, an estimate of 52 pt a skill; it depends on the Orb's skills, never on the filtered ones.
@@ -268,7 +269,7 @@ struct SkillsPopover: View {
             Text(title).font(Typography.text.weight(.medium))
             Text(detail).font(Typography.label).foregroundStyle(Palette.muted).multilineTextAlignment(.center)
         }
-        .padding(24)
+        .padding(Spacing.xxl)
         .frame(maxWidth: .infinity)
     }
 }

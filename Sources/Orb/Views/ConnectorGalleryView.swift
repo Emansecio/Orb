@@ -20,13 +20,13 @@ struct ConnectorGalleryView: View {
                 // Keep cards aligned across columns when a neighbour has a warning.
                 let statuses = ConnectorGallery.services.map { ($0, status(of: $0)) }
                 let reservesNote = hasMultipleColumns && statuses.contains { if case .needsAttention = $0.1 { true } else { false } }
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), spacing: 12, alignment: .top)], spacing: 12) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), spacing: Spacing.cardSpacing, alignment: .top)], spacing: Spacing.cardSpacing) {
                     ForEach(statuses, id: \.0.id) { service, status in
                         ServiceCard(service: service, status: status, reservesNote: reservesNote) { open(service, status: status) }
                     }
                 }
                 // One column needs no empty warning slot in every other card. Observe only the column-count boundary.
-                .onGeometryChange(for: Bool.self) { $0.size.width >= 2 * 290 + 12 } action: { hasMultipleColumns = $0 }
+                .onGeometryChange(for: Bool.self) { $0.size.width >= 2 * 290 + Spacing.cardSpacing } action: { hasMultipleColumns = $0 }
                 HStack(spacing: 6) {
                     Text("Não achou o que procura?").foregroundStyle(Palette.muted)
                     Button("Explorar o registro de conectores", action: explore).buttonStyle(.link)
@@ -169,7 +169,7 @@ private struct ServiceCard: View {
                 // The button and the badges differ in height: the row keeps one so the cards of a line stay level.
                 .frame(minHeight: 26)
             }
-            .padding(14)
+            .padding(Spacing.catalogCardPadding)
             .hoverCard(isHovering && status != .soon, radius: Radius.large, strongOutline: true)
             .opacity(status == .soon || status == .off ? 0.7 : 1)
             .contentShape(.rect)

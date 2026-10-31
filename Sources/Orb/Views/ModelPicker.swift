@@ -145,7 +145,8 @@ struct ModelSearchField: View {
             }
         }
         .popoverSearchField()
-        .padding(10)
+        // Flush with the rows' 4 pt fill inset: the field's text lands on the same 12 pt edge as the titles below.
+        .padding(Spacing.xs)
         .onAppear { isFocused = true }
     }
 }
@@ -188,14 +189,8 @@ private struct ModelChooser: View {
                             } header: {
                                 // The composer popover's header (`ModelPopover.header`), over a material because this one is pinned.
                                 Text(choice.account.kind.label)
-                                    .font(Typography.small.weight(.semibold))
-                                    .foregroundStyle(Palette.muted)
-                                    .padding(.horizontal, 12)
-                                    .padding(.top, 10)
-                                    .padding(.bottom, 3)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .popoverSectionHeader()
                                     .background(.regularMaterial)
-                                    .accessibilityAddTraits(.isHeader)
                             }
                         }
                         if shown.isEmpty {

@@ -151,6 +151,30 @@ struct ToolRunFoldingTests {
         #expect(steps.flatMap(\.items) == items)
     }
 
+    @Test func aRunningBlockFoldsEarlierStepsAndKeepsTheLatestAndWhatMustNotHide() {
+        let first = say("Um"), action = TranscriptItem(.tool(call("Lendo"))), notice = TranscriptItem(.notice("Aviso"))
+        let second = say("Dois"), other = TranscriptItem(.tool(call("Buscando"))), third = say("Três"), last = TranscriptItem(.tool(call("Rodando")))
+        let steps = TranscriptFolding.activityRows(for: [first, action, notice, second, other, third, last])
+        let parts = TranscriptFolding.activityParts(steps)
+        #expect(parts.earlier.flatMap(\.items).map(\.id) == [first, action, second, other].map(\.id))
+        #expect(parts.current.flatMap(\.items).map(\.id) == [notice, third, last].map(\.id))
+    }
+
+    @Test func proposalsOneAfterAnotherShareARowAndALoneOneStays() {
+        let one = TranscriptItem(.notice("Melhoria proposta para /a")), two = TranscriptItem(.notice("Skill proposta: /b — B"))
+        let rows = TranscriptFolding.rows(for: [one, two, say("Oi"), TranscriptItem(.notice("Melhoria proposta para /c"))])
+        #expect(rows.count == 3)
+        if case .proposals(let items) = rows[0] { #expect(items.map(\.id) == [one.id, two.id]) } else { Issue.record("not joined") }
+        if case .single = rows[2] {} else { Issue.record("a lone proposal keeps its button") }
+    }
+
+    @Test func aRunningBlockWithOneStepHasNothingToFold() {
+        let steps = TranscriptFolding.activityRows(for: [say("Um"), TranscriptItem(.tool(call("Lendo")))])
+        let parts = TranscriptFolding.activityParts(steps)
+        #expect(parts.earlier.isEmpty)
+        #expect(parts.current == steps)
+    }
+
     @Test func aStepNamesItsPurposeAndDoesNotClaimAFailureSucceeded() {
         let intro = say("Vou revisar a rotina.")
         var action = call("Rodando no Terminal")

@@ -21,7 +21,7 @@ struct CustomProviderFields<KeyRow: View>: View {
     private var parsedHeaders: GatewayForm.Headers { GatewayForm.parseHeaders(headersText) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
             Picker("Formato", selection: Binding(
                 get: { account.format },
                 set: { format in
@@ -48,7 +48,7 @@ struct CustomProviderFields<KeyRow: View>: View {
 
         keyRow
 
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
             Text("Cabeçalhos (opcional)").capabilityCaption()
             // Saved from what is typed, not from every change of the text: loading the saved headers into the field must
             // not write them back (an old header the stricter parser flags would be dropped just by opening the row).
@@ -61,7 +61,7 @@ struct CustomProviderFields<KeyRow: View>: View {
             }
         }
 
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Spacing.s) {
             Text("Modelos").capabilityCaption()
             if account.models.isEmpty {
                 if GatewayForm.urlState(account.baseURL) == .valid {
@@ -124,9 +124,9 @@ private struct ModelChips: View {
     let remove: (ProviderModel) -> Void
 
     var body: some View {
-        WrappingLayout(spacing: 6) {
+        WrappingLayout(spacing: Spacing.xs + Spacing.hairline) {
             ForEach(models) { item in
-                HStack(spacing: 4) {
+                HStack(spacing: Spacing.xs) {
                     Text(item.id).font(Typography.codeSmall)
                     Button("Remover \(item.id)", systemImage: "xmark", action: { remove(item) })
                         .labelStyle(.iconOnly)
@@ -136,8 +136,8 @@ private struct ModelChips: View {
                         .foregroundStyle(Palette.muted)
                         .help(Tip.removeModelFromList)
                 }
-                .padding(.leading, 8)
-                .padding(.trailing, 4)
+                .padding(.leading, Spacing.s)
+                .padding(.trailing, Spacing.xs)
                 .padding(.vertical, 1)
                 .background(Palette.raised, in: .capsule)
             }
@@ -226,7 +226,7 @@ private struct AllModelsSheet: View {
                     ForEach(shown) { item in
                         ModelIDRow(item: item) { remove(item) }
                             .padding(.horizontal, Spacing.sheetEdge)
-                            .padding(.vertical, 6)
+                            .padding(.vertical, Spacing.xs + Spacing.hairline)
                     }
                 }
             }

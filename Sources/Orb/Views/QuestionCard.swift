@@ -65,7 +65,7 @@ struct QuestionCard: View {
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
             if !question.options.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: Spacing.s) {
                     ForEach(question.options, id: \.self) { option in
                         QuestionOptionButton(text: option) { answer(option) }
                     }
@@ -136,9 +136,7 @@ struct QuestionCard: View {
             .lineLimit(1...5)
             .focused($replyFocused)
             .onSubmit { answer(reply) }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: Radius.small))
+            .sheetTextField(fill: Palette.raised.opacity(0.6), radius: Radius.small)
             .accessibilityLabel(question.options.isEmpty ? "Sua resposta" : "Outra resposta")
     }
 

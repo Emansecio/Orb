@@ -1,7 +1,8 @@
 import Foundation
 
-/// Connectors and skills can be offered to every Orb (the default, what they always did) or only to chosen ones
-/// ("Usar com"). `orbIDs == nil` means every Orb, including Orbs created later.
+/// Connectors can be offered to every Orb (the default, what they always did) or only to chosen ones
+/// ("Usar com"). `orbIDs == nil` means every Orb, including Orbs created later. A skill is not like this: it
+/// always names its Orbs (`Skill.orbIDs`), so it does not conform.
 protocol OrbScoped {
     var orbIDs: Set<UUID>? { get set }
 }
@@ -11,7 +12,6 @@ extension OrbScoped {
 }
 
 extension MCPServerConfig: OrbScoped {}
-extension Skill: OrbScoped {}
 
 /// How a scope reads in the UI ("Todos os Orbs", "Só Atlas", "Atlas, Lia e mais 2").
 enum OrbScopeText {
@@ -22,7 +22,7 @@ enum OrbScopeText {
         switch names.count {
         case 0: return "Nenhum Orb"
         case 1: return "Só \(names[0])"
-        default: return "Só " + list(names, limit: 2)
+        default: return names.count == bots.count ? "Todos os Orbs" : "Só " + list(names, limit: 2)
         }
     }
 
@@ -49,7 +49,7 @@ enum OrbScopeText {
 extension AppModel {
     // MARK: Which connectors and skills an Orb gets
 
-    /// Enabled skills the Orb may use (all of them unless a skill is limited to other Orbs).
+    /// Enabled skills the Orb may use: every skill names its Orbs, so this Orb's list is always its own.
     func skills(for botID: UUID) -> [Skill] {
         skills.filter { $0.isEnabled && $0.isAvailable(to: botID) }
     }
@@ -83,6 +83,13 @@ extension AppModel {
     /// The Orb a new connector starts with: the one the user was last on, if it still exists. nil means every Orb.
     func defaultScopeForNewConnector() -> Set<UUID>? {
         lastSelectedBotID.flatMap { id in bots.contains { $0.id == id } ? [id] : nil }
+    }
+
+    /// The Orbs a new skill starts with, named as every skill must: the Orb the user was last on, or every Orb
+    /// there is (unlike a connector's, a skill's scope is never "all of them" — a new Orb does not join it).
+    func defaultScopeForNewSkill() -> Set<UUID> {
+        guard let id = lastSelectedBotID, bots.contains(where: { $0.id == id }) else { return Set(bots.map(\.id)) }
+        return [id]
     }
 
     /// Orbs with "Conectores" off that would get connectors other than `id` when it is turned on for them (as choosing

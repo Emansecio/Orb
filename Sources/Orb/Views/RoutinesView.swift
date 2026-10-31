@@ -156,7 +156,7 @@ private struct RoutinesEmptyState: View {
     let onTemplate: (RoutineTemplate) -> Void
 
     var body: some View {
-        VStack(spacing: 22) {
+        VStack(spacing: Spacing.xxl) {
             VStack(spacing: 8) {
                 Image(systemName: "clock.arrow.circlepath")
                     .font(.system(size: 34, weight: .light))
@@ -179,14 +179,14 @@ private struct RoutinesEmptyState: View {
                     .font(Typography.small)
                     .foregroundStyle(Palette.muted)
             }
-            VStack(spacing: 10) {
+            VStack(spacing: Spacing.m) {
                 Text("Ou comece por um modelo")
                     .font(Typography.label.weight(.medium))
                     .foregroundStyle(Palette.muted)
                 ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: 12) { templateCards(width: 176) }
+                    HStack(alignment: .top, spacing: Spacing.m) { templateCards(width: 176) }
                         .fixedSize(horizontal: false, vertical: true)
-                    VStack(spacing: 12) { templateCards(width: nil) }
+                    VStack(spacing: Spacing.m) { templateCards(width: nil) }
                         .frame(maxWidth: 360)
                 }
                 .frame(maxWidth: 760)
@@ -194,7 +194,7 @@ private struct RoutinesEmptyState: View {
             .padding(.top, 6)
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 36)
+        .padding(.top, 40)
     }
 }
 
@@ -234,7 +234,7 @@ private struct TemplateCard: View {
                     .multilineTextAlignment(.leading)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .padding(14)
+            .padding(Spacing.catalogCardPadding)
             .hoverCard(isHovering, radius: Radius.card)
             .contentShape(.rect(cornerRadius: Radius.card))
         }
@@ -274,7 +274,7 @@ private struct RoutineCard: View {
     private var dimming: Double { routine.isEnabled ? 1 : 0.6 }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Spacing.m) {
             HStack(spacing: 8) {
                 Button(action: onOpenOrb) {
                     HStack(spacing: 8) {
@@ -359,7 +359,7 @@ private struct RoutineCard: View {
             }
             Spacer(minLength: 0)
             // The same buttons as the routine's card in the Orb's panel: ghosts for what opens something, a pill for the run.
-            HStack(spacing: 2) {
+            HStack(spacing: Spacing.xs + Spacing.hairline) {
                 Button("Editar", systemImage: "pencil", action: onEdit)
                     .buttonStyle(GhostStyle())
                     .help(Tip.editRoutine)
@@ -571,8 +571,8 @@ private struct RunLine: View {
     var body: some View {
         Button(action: action) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Image(systemName: run.succeeded ? "checkmark.circle.fill" : "xmark.circle.fill")
-                    .foregroundStyle(run.succeeded ? Palette.ok : Palette.danger)
+                Image(systemName: run.wasStopped ? "stop.circle.fill" : run.succeeded ? "checkmark.circle.fill" : "xmark.circle.fill")
+                    .foregroundStyle(run.wasStopped ? Palette.muted : run.succeeded ? Palette.ok : Palette.danger)
                     .font(Typography.small)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
@@ -601,13 +601,13 @@ private struct RunLine: View {
                     .foregroundStyle(Palette.faint)
                     .accessibilityHidden(true)
             }
-            .padding(.horizontal, 6)
+            .padding(.horizontal, Spacing.xs + Spacing.hairline)
             .padding(.vertical, 4)
             .contentShape(.rect(cornerRadius: 6))
         }
         .buttonStyle(RunLineStyle())
         .help(Tip.openRunReport)
-        .padding(.horizontal, -6)
+        .padding(.horizontal, -(Spacing.xs + Spacing.hairline))
         .accessibilityLabel("\(run.succeeded ? "Deu certo" : "Não deu certo"), \(RoutineText.stamp(run.date)). \(run.summary)"
                             + (run.check.map { ". " + $0.spokenLabel } ?? ""))
         .accessibilityHint("Abre o relatório desta execução")
@@ -691,7 +691,7 @@ struct RoutineRunSheet: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .textSelection(.enabled)
-        .padding(20)
+        .padding(Spacing.sheetEdge)
     }
 
     private func footer(run: RoutineRun) -> some View {
@@ -782,11 +782,9 @@ struct RoutineConversationSheet: View {
             if let routine, let bot = model.bot(routine.botID) {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
-                        ForEach(items) { item in
-                            TranscriptRow(item: item, botID: bot.id, orb: bot.orb).equatable()
-                        }
+                        ReadOnlyTranscriptRows(items: items, isLive: live != nil, botID: bot.id, orb: bot.orb)
                     }
-                    .padding(20)
+                    .padding(Spacing.sheetEdge)
                 }
                 // A run going on keeps its end in view, as the chat does.
                 .modifier(KeepsBottom(follows: true))

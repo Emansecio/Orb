@@ -22,7 +22,7 @@ struct WelcomeOfferView: View {
     }
 
     var body: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: Spacing.l) {
             if let name = run.connectedName {
                 FirstRunReadyLabel(name: name)
             } else {
@@ -39,7 +39,7 @@ struct WelcomeOfferView: View {
     }
 
     private var mainAction: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: Spacing.m) {
             Button(action: start) {
                 Text(offer.buttonTitle)
             }
@@ -91,7 +91,7 @@ struct WelcomeOfferView: View {
         Button {
             withAnimation(Motion.panel(reduceMotion: reduceMotion)) { showsOthers.toggle() }
         } label: {
-            HStack(spacing: 5) {
+            HStack(spacing: Spacing.xs + Spacing.hairline) {
                 Text(FirstRunOffer.othersTitle)
                 Image(systemName: showsOthers ? "chevron.up" : "chevron.down")
                     .font(.system(size: 9, weight: .semibold))
@@ -99,7 +99,7 @@ struct WelcomeOfferView: View {
             }
             .font(Typography.label)
             .foregroundStyle(Palette.secondary)
-            .padding(.vertical, 4)
+            .padding(.vertical, Spacing.xs)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -139,8 +139,8 @@ struct WelcomeReasonNote: View {
                 .foregroundStyle(Palette.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
+        .padding(.horizontal, Spacing.m)
+        .padding(.vertical, Spacing.s)
         .frame(maxWidth: 460, alignment: .leading)
         .card(radius: Radius.medium)
         .accessibilityElement(children: .combine)

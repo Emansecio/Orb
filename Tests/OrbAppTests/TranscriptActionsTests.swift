@@ -278,7 +278,9 @@ import Testing
         let failed = Conversation(items: [user("/relatorio da semana"), notice("Não deu certo: Sem conexão com o provedor")],
                                   messages: [.user(TurnPreface.prepend(preface, to: expanded))])
         let (model, id) = model(with: failed)
-        model.skills = [skill]
+        var scoped = skill
+        scoped.orbIDs = [id]
+        model.skills = [scoped]
         await model.loadedConversation(id)
 
         #expect(model.retryLastTurn(id))
@@ -297,7 +299,9 @@ import Testing
         let failed = Conversation(items: [user("/relatorio da semana", [picture.path]), notice("Não deu certo: Sem conexão com o provedor")],
                                   messages: [.user(TurnPreface.prepend(preface, to: expanded), images: [picture])])
         let (model, id) = model(with: failed)
-        model.skills = [skill]
+        var scoped = skill
+        scoped.orbIDs = [id]
+        model.skills = [scoped]
         await model.loadedConversation(id)
 
         #expect(model.retryLastTurn(id))

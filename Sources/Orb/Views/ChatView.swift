@@ -34,7 +34,7 @@ struct ChatView: View {
             if find.isOpen {
                 FindBar(find: find, botID: botID)
                     .padding(.top, 10)
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, Spacing.l)
                     .transition(.adapted(.rise, reduceMotion: reduceMotion))
             }
         }
@@ -153,7 +153,7 @@ struct CompactedFoldLine: View {
 
     var body: some View {
         Button(action: toggle) {
-            HStack(spacing: 8) {
+            HStack(spacing: Spacing.s) {
                 Image(systemName: "rectangle.compress.vertical")
                     .font(Typography.small.weight(.medium))
                     .foregroundStyle(Palette.faint)
@@ -169,7 +169,7 @@ struct CompactedFoldLine: View {
             }
             .font(Typography.label)
             .lineLimit(1)
-            .padding(.horizontal, 14)
+            .padding(.horizontal, Spacing.cardSpacing)
             .padding(.vertical, 7)
             .hoverFill(isHovered, in: .capsule, color: Palette.ghostSelected, resting: Palette.ghostHover)
             .contentShape(.capsule)
@@ -177,7 +177,7 @@ struct CompactedFoldLine: View {
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 4)
+        .padding(.vertical, Spacing.xs)
         .help(isOpen ? "Oculta de novo as mensagens que viraram resumo" : "Mostra as mensagens que viraram resumo (o Orb segue com o resumo)")
         .accessibilityLabel(fold.title)
         .accessibilityHint(isOpen ? "Oculta essas mensagens" : "Mostra essas mensagens")
@@ -197,7 +197,7 @@ struct TimeSeparatorLine: View {
                 .foregroundStyle(Palette.faint)
                 .monospacedDigit()
                 .frame(maxWidth: .infinity)
-                .padding(.top, 6)
+                .padding(.top, Spacing.xs + Spacing.hairline)
                 .accessibilityAddTraits(.isHeader)
         }
     }
@@ -219,7 +219,7 @@ private struct Midnights: TimelineSchedule {
 struct ChatDropOverlay: View {
     var detail = "Arquivos e imagens vão com a sua próxima mensagem"
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: Spacing.s) {
             Image(systemName: "arrow.down.doc")
                 .font(.system(size: 28, weight: .regular))
                 .foregroundStyle(Palette.accentText)
@@ -236,7 +236,7 @@ struct ChatDropOverlay: View {
             RoundedRectangle(cornerRadius: 18)
                 .strokeBorder(Palette.accentText.opacity(0.7), style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
         }
-        .padding(12)
+        .padding(Spacing.m)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
         .transition(.opacity)
@@ -308,7 +308,7 @@ private struct TranscriptList: View {
         let follows = followsBottom && !find.pausesFollowing
         return ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
+                LazyVStack(alignment: .leading, spacing: Spacing.m) {
                     if isLoading {
                         LoadingTranscript()
                     } else if items.isEmpty {
@@ -374,10 +374,10 @@ private struct TranscriptList: View {
                 // the empty state leaving with the first message. Never the count of messages, never a streamed token.
                 .motion(Motion.content, value: isWorking)
                 .motion(Motion.exit, value: items.isEmpty)
-                .padding(.horizontal, 28)
-                .padding(.top, 20)
-                .padding(.bottom, 12)
-                .frame(maxWidth: 760)
+                .padding(.horizontal, TranscriptLayout.edge)
+                .padding(.top, Spacing.xl)
+                .padding(.bottom, Spacing.xxl)
+                .frame(maxWidth: TranscriptLayout.column)
                 .frame(maxWidth: .infinity)
                 // A new identity once the conversation arrives, so its rows appear as they did when it was there from
                 // the start, not as an animated insertion of every one of them.
@@ -425,7 +425,17 @@ private struct TranscriptList: View {
                     scrollToFound(jump, proxy)
                 }
             }
-            .onChange(of: transcript.fold.count) { showsFolded = CompactedFoldLine.opensInBench }
+            .onChange(of: transcript.fold.count) { before, after in
+                showsFolded = CompactedFoldLine.opensInBench
+                // The rows above the fold left all at once: the old offset may point past what the lazy list has laid out,
+                // which shows only the canvas. What remains is the end of the chat, so the view goes there.
+                guard after > before else { return }
+                followsBottom = true
+                follower.follows = true
+                settleAtBottom(proxy)
+            }
+            // The chat's width changed, so every row is measured again and the first answer comes from estimates.
+            .onChange(of: model.showInspector) { if follower.follows { settleAtBottom(proxy) } }
             .onChange(of: transcript.revision) {
                 find.itemsChanged()
                 if BottomFollower.anchorsItself {
@@ -467,7 +477,7 @@ private struct TranscriptList: View {
     @ViewBuilder
     private func timed(_ rowID: UUID, _ breaks: [UUID: Date], opensTurn: Bool, @ViewBuilder row: () -> some View) -> some View {
         let date = breaks[rowID]
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Spacing.m) {
             if let date { TimeSeparatorLine(date: date) }
             row()
         }
@@ -509,6 +519,11 @@ private struct TranscriptList: View {
                          child: { plainRow($0) })
                 .modifier(RowEntrance(id: row.id, style: items[0].kind.entrance, isNew: entrances.isNew(row.id), entrances: entrances))
                 .transition(.identity)
+        case .proposals(let items):
+            FoldedThread(items: items, summary: { ProposalsSummary(count: items.count, unfolded: $0).alignedWithReplyText() },
+                         child: { plainRow($0) })
+                .modifier(RowEntrance(id: row.id, style: items[0].kind.entrance, isNew: entrances.isNew(row.id), entrances: entrances))
+                .transition(.identity)
         case .tools(let items):
             ToolGroupRow(items: items, botID: look.id, orb: look.orb, isOpen: openRuns.contains(row.id) || ToolGroupRow.opensInSnapshots,
                          find: items.contains { $0.id == found?.itemID } ? found : nil) {
@@ -524,30 +539,36 @@ private struct TranscriptList: View {
                                                 find: found, orb: look.orb) : nil) {
                 if openRuns.remove(row.id) == nil { openRuns.insert(row.id) }
             } content: {
-                activitySteps(items, avatars: avatars, redoID: redoID, dropping: dropping, found: found)
+                activitySteps(TranscriptFolding.activityRows(for: items), in: row.id, avatars: avatars, redoID: redoID,
+                              dropping: dropping, found: found)
             }
             .equatable()
             .transition(.identity)
         case .activity(let items):
-            VStack(alignment: .leading, spacing: 14) {
+            let parts = TranscriptFolding.activityParts(TranscriptFolding.activityRows(for: items))
+            let isOpen = openRuns.contains(row.id) || ToolGroupRow.opensInSnapshots
+            ActivityCard {
                 WorkingLine(look: look, avatarHidden: true, transcript: model.orbTranscript(look.id), compact: true)
-                activitySteps(items, avatars: avatars, redoID: redoID, dropping: dropping, found: found)
-            }
-            .padding(.vertical, 14)
-            .padding(.trailing, 14)
-            .background {
-                RoundedRectangle(cornerRadius: Radius.card)
-                    .fill(Palette.surface)
-                    .padding(.leading, gutter - 12)
+                if !parts.earlier.isEmpty {
+                    WorkGroupRow(items: parts.earlier.flatMap(\.items), seconds: nil, outcome: .answered, isOpen: isOpen,
+                                 inputs: isOpen ? .init(openRuns: openRuns, openSteps: openSteps, avatars: avatars, redoID: redoID,
+                                                        dropping: dropping, find: found, orb: look.orb) : nil) {
+                        if openRuns.remove(row.id) == nil { openRuns.insert(row.id) }
+                    } content: {
+                        activitySteps(parts.earlier, in: row.id, avatars: avatars, redoID: redoID, dropping: dropping, found: found)
+                    }
+                    .equatable()
+                }
+                activitySteps(parts.current, in: row.id, avatars: avatars, redoID: redoID, dropping: dropping, found: found)
             }
             .transition(.identity)
         }
     }
 
     @ViewBuilder
-    private func activitySteps(_ items: [TranscriptItem], avatars: ReplyAvatars, redoID: UUID?, dropping: Set<UUID>,
+    private func activitySteps(_ steps: [TranscriptRowModel], in owner: UUID, avatars: ReplyAvatars, redoID: UUID?, dropping: Set<UUID>,
                                found: FindFocus?) -> some View {
-        ForEach(TranscriptFolding.activityRows(for: items)) { step in
+        ForEach(steps) { step in
             if case .tools(let actions) = step {
                 ToolGroupRow(items: actions, botID: look.id, orb: look.orb,
                              isOpen: openSteps.contains(step.id) || ToolGroupRow.opensInSnapshots,
@@ -555,7 +576,7 @@ private struct TranscriptList: View {
                     if openSteps.remove(step.id) == nil {
                         openSteps.insert(step.id)
                         // Keep the outer disclosure open when this request ends while its details are being read.
-                        if let first = items.first { openRuns.insert(first.id) }
+                        openRuns.insert(owner)
                     }
                 }
                 .equatable()
@@ -619,6 +640,15 @@ private struct TranscriptList: View {
         guard !BottomFollower.anchorsItself else { return nil }
         let follower = follower
         return ReplyGrewAction(id: ObjectIdentifier(follower)) { follower.follow { proxy.scrollTo(BottomAnchor.id, anchor: .bottom) } }
+    }
+
+    /// Goes to the end now and again once the rows near it are laid out: the first scroll goes by estimated heights.
+    private func settleAtBottom(_ proxy: ScrollViewProxy) {
+        scrollToBottom(proxy)
+        Task {
+            try? await Task.sleep(for: .milliseconds(300))
+            if follower.follows { scrollToBottom(proxy) }
+        }
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
@@ -854,7 +884,7 @@ struct LoadingTranscript: View {
         ProgressView()
             .controlSize(.small)
             .frame(maxWidth: .infinity)
-            .padding(.top, 72)
+            .padding(.top, TranscriptLayout.emptyStateTop)
             .opacity(isVisible ? 1 : 0)
             .accessibilityLabel("Carregando a conversa")
             .task {
@@ -892,15 +922,15 @@ private struct EmptyChatView: View {
         let live = model.live(look.id)
         let showsFirstRun = SetupPrompt.shows(connectionsChecked: model.hasCheckedConnections, orbHasModel: model.hasModelSetup(for: look.id),
                                               connectedName: firstRun.connectedName, hasItems: true)
-        VStack(spacing: 16) {
+        VStack(spacing: Spacing.l) {
             LiveBotAvatar(botID: look.id, orb: look.orb, size: 96, interactive: true, landing: landed, fits: false, settles: true)
-                .padding(.top, 72)
+                .padding(.top, TranscriptLayout.emptyStateTop)
                 .entrance(.drop, enters: enters) {
                     // Touches the floor: the Orb's own landing. The Orb stays still under Reduce Motion.
                     if !reduceMotion { landed = 1 }
                 }
-            VStack(spacing: 16) {
-                VStack(spacing: 4) {
+            VStack(spacing: Spacing.l) {
+                VStack(spacing: Spacing.xs) {
                     Text(look.name)
                         .font(.system(size: 22, weight: .semibold))
                         .foregroundStyle(Palette.ink)
@@ -914,20 +944,20 @@ private struct EmptyChatView: View {
                             .foregroundStyle(Palette.faint)
                             .multilineTextAlignment(.center)
                             .frame(maxWidth: 360)
-                            .padding(.top, 6)
+                            .padding(.top, Spacing.xs + Spacing.hairline)
                     }
                 }
                 .entrance(.rise.delayed(EmptyChatEntrance.nameDelay), enters: enters)
                 if showsFirstRun {
                     FirstRunCard(style: .chat(botName: look.name), run: firstRun)
-                        .padding(.top, 8)
+                        .padding(.top, Spacing.s)
                         .entrance(.rise.delayed(EmptyChatEntrance.suggestionsStart), enters: enters)
                 } else {
                     let bot = live.bot
                     OrbContextLine(folder: EmptyChatContent.folderText(for: bot),
                                    capabilities: EmptyChatContent.capabilityNames(for: bot))
                         .entrance(.rise.delayed(EmptyChatEntrance.contextDelay), enters: enters)
-                    VStack(spacing: 6) {
+                    VStack(spacing: Spacing.xs + Spacing.hairline) {
                         let suggestions = EmptyChatContent.suggestions(for: bot, interviewPending: live.memory.interviewPending,
                                                                        offersRoutines: !model.routines.contains { $0.botID == look.id })
                         ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, suggestion in
@@ -941,7 +971,7 @@ private struct EmptyChatView: View {
                         }
                     }
                     .frame(maxWidth: 420)
-                    .padding(.top, 4)
+                    .padding(.top, Spacing.xs)
                 }
             }
         }
@@ -988,10 +1018,10 @@ struct SuggestionButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 10) {
+            HStack(spacing: Spacing.m) {
                 Image(systemName: symbol)
                     .foregroundStyle(caption == nil ? Palette.faint : Palette.accentText)
-                    .frame(width: 18)
+                    .frame(width: Spacing.iconColumn + Spacing.hairline)
                     .accessibilityHidden(true) // decoration: VoiceOver would read the symbol's name before the text
                 Text(text)
                     .foregroundStyle(Palette.secondary)
@@ -1011,8 +1041,8 @@ struct SuggestionButton: View {
                     .accessibilityHidden(true)
             }
             .font(Typography.text)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            .padding(.horizontal, Spacing.m)
+            .padding(.vertical, Spacing.s)
             .hoverFill(isHovering, in: .rect(cornerRadius: Radius.card), color: Palette.raised, resting: Palette.surface)
             .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Palette.line))
             .contentShape(.rect)

@@ -67,13 +67,11 @@ struct NewGroupSheet: View {
                     TextField("Ex.: Lançamento", text: Binding(get: { nameShown }, set: { written = $0; isNameEdited = true }))
                         .textFieldStyle(.plain)
                         .font(.system(size: 14))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Palette.surface, in: .rect(cornerRadius: Radius.medium))
+                        .sheetTextField()
                         .accessibilityLabel("Nome do grupo")
                 }
                 TitledSection("Orbs") {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 128), spacing: 10, alignment: .top)], alignment: .leading, spacing: 10) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 128), spacing: Spacing.cardSpacing, alignment: .top)], alignment: .leading, spacing: Spacing.cardSpacing) {
                         ForEach(looks, id: \.id) { look in
                             OrbChoiceCard(look: look, isChosen: chosen.contains(look.id),
                                           isOrchestrator: orchestrator == look.id,
@@ -95,16 +93,14 @@ struct NewGroupSheet: View {
                         .textFieldStyle(.plain)
                         .font(Typography.text)
                         .lineLimit(2...3)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Palette.surface, in: .rect(cornerRadius: Radius.medium))
+                        .sheetTextField()
                 }
             }
-            .padding(20)
+            .padding(Spacing.sheetEdge)
         }
         // Taller than the default sheet: the grid and the objective fit without scrolling at the usual window size.
         .orbSheet("Novo grupo", subtitle: "O orquestrador recebe cada pedido e divide o trabalho.", size: .medium, maxHeight: 700) {
-            HStack(spacing: 10) {
+            SheetFooterBar {
                 if !canCreate {
                     Text("Escolha pelo menos 2 Orbs")
                         .font(Typography.label)
@@ -119,8 +115,6 @@ struct NewGroupSheet: View {
                     .disabled(!canCreate)
                     .keyboardShortcut(.defaultAction)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
         }
         .onAppear(perform: start)
     }
@@ -175,7 +169,7 @@ private struct OrbChoiceCard: View {
         let core = OrbColor.core(look.orb)
         ZStack(alignment: .topLeading) {
             Button(action: toggle) {
-                VStack(spacing: 5) {
+                VStack(spacing: Spacing.xs + Spacing.hairline) {
                     SettlingOrb(idle: true, wake: isChosen ? 1 : 0) { paused in
                         BotAvatar(orb: look.orb, size: 48, paused: paused)
                     }
@@ -195,8 +189,8 @@ private struct OrbChoiceCard: View {
                         .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .padding(.horizontal, 6)
+                .padding(.vertical, Spacing.s + Spacing.hairline)
+                .padding(.horizontal, Spacing.xs + Spacing.hairline)
                 .background(isChosen ? Palette.surface : Palette.chrome, in: .rect(cornerRadius: Radius.large))
                 .overlay(RoundedRectangle(cornerRadius: Radius.large).strokeBorder(isChosen ? core : Palette.line, lineWidth: isChosen ? 2 : 1))
                 .opacity(isEnabled || isChosen ? 1 : 0.45)

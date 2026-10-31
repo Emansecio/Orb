@@ -28,7 +28,7 @@ struct WizardChatView: View {
     private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: Spacing.cardSpacing) {
                     ForEach(runner.messages) { item in
                         row(item)
                             .transition(.adapted(.rise, reduceMotion: reduceMotion))
@@ -49,8 +49,8 @@ struct WizardChatView: View {
                     }
                     Color.clear.frame(height: 1).id(Self.bottom)
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 16)
+                .padding(.horizontal, TranscriptLayout.edge)
+                .padding(.vertical, Spacing.l)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .scrollIndicators(.automatic)
@@ -100,7 +100,7 @@ struct WizardChatView: View {
         HStack(spacing: 8) {
             BotAvatar(orb: look, size: 30, animated: false)
                 .accessibilityHidden(true)
-            HStack(spacing: 7) {
+            HStack(spacing: Spacing.s) {
                 WizardTypingDots(animated: !reduceMotion)
                     .frame(width: 22, height: 8)
                 Text("escrevendo…")
@@ -143,7 +143,7 @@ struct WizardChatView: View {
         .background(isFocused ? Palette.surfaceFocused : Palette.surface, in: .rect(cornerRadius: Radius.large))
         .overlay(RoundedRectangle(cornerRadius: Radius.large).strokeBorder(isFocused ? Palette.lineStrong : Palette.line))
         .animation(Motion.fade, value: isFocused)
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 18)
         .padding(.top, 6)
         .padding(.bottom, 12)
     }
@@ -164,7 +164,7 @@ private struct WizardBotRow<Content: View>: View {
 
     var body: some View {
         // The text 44 pt in (30 + 14), on the same edge as an Orb's chat.
-        HStack(alignment: .top, spacing: 14) {
+        HStack(alignment: .top, spacing: Spacing.cardSpacing) {
             BotAvatar(orb: orb, size: 30, animated: false)
                 .offset(y: ReplyText.avatarDrop)
                 .accessibilityHidden(true)
@@ -204,7 +204,7 @@ private struct WizardUserBubble: View {
 
     var body: some View {
         HStack {
-            Spacer(minLength: 56)
+            Spacer(minLength: 56) // narrower than a chat's: the pane is a column of a sheet, not the whole window
             Text(text)
                 .foregroundStyle(Palette.ink)
                 .lineSpacing(Palette.conversationLineSpacing)

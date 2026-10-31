@@ -49,9 +49,11 @@ extension AppModel {
         return ChunkSummarizer.model(in: account, orb: orb)?.id ?? orb
     }
 
-    /// Words the recognizer should expect: the Orbs' names and this Orb's skills.
+    /// Words the recognizer should expect: the Orbs' names and this Orb's skills, routines and groups.
     private func dictationVocabulary(_ botID: UUID) -> [String] {
         var words = ["Orb"] + bots.map(\.name) + skills(for: botID).map(\.name)
+        words += routines.filter { $0.botID == botID }.map(\.name)
+        words += groups(containing: botID).map(\.name)
         words = words.filter { !$0.isEmpty }
         return Array(NSOrderedSet(array: words).array.compactMap { $0 as? String }.prefix(100))
     }

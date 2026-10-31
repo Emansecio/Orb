@@ -108,11 +108,29 @@ let gutter: CGFloat = 44
 /// one right edge for all of them.
 let cardWidth: CGFloat = 560
 
+/// The column the conversation reads in: how far in the transcript sits and how wide it grows (the composer shares
+/// both). Named here because three surfaces (chat, group, approvals bar) repeat them.
+enum TranscriptLayout {
+    static let edge: CGFloat = 28
+    static let column: CGFloat = 760
+    /// What stays free at the right of each line for the hover buttons of a reply.
+    static let actionsReserve: CGFloat = 90
+    /// The least space kept at the left of a user bubble, so a short line does not touch the right edge.
+    static let bubbleSpacer: CGFloat = 120
+    /// Rows under a tool line's symbol (a path, a detail): the symbol's column (14) plus its gap to the line (8).
+    static let detailIndent: CGFloat = 22
+    /// The symbol column of a tool line, from which `detailIndent` is derived (not `Spacing.iconColumn`, which belongs
+    /// to sidebars and forms).
+    static let toolIconColumn: CGFloat = 14
+    /// How far an empty chat pushes its first block down: the same for the spinner of a loading one.
+    static let emptyStateTop: CGFloat = 72
+}
+
 extension View {
     /// A line of the chat that is not a message (a notice, an event, a delegation) starts where the replies' text starts, so
     /// the eye keeps one left edge down the transcript instead of jumping to a centre.
     func alignedWithReplyText() -> some View {
-        padding(.leading, gutter).padding(.trailing, 90)
+        padding(.leading, gutter).padding(.trailing, TranscriptLayout.actionsReserve)
     }
 
     /// A card in the chat that asks or shows something (a permission, a question, a proposal, the live screen): one width
@@ -205,7 +223,7 @@ private struct UserBubble: View {
 
     var body: some View {
         HStack {
-            Spacer(minLength: 120)
+            Spacer(minLength: TranscriptLayout.bubbleSpacer)
             // No "Você" over it: the bubble on the right says whose it is, and its label for VoiceOver starts with "Você".
             VStack(alignment: .trailing, spacing: 6) {
                 if !attachments.isEmpty { AttachmentStack(paths: attachments) }
@@ -1068,7 +1086,7 @@ struct CommandBlock: View {
                         }
                     }
                 }
-                .padding(.horizontal, 12)
+                .padding(.horizontal, 10)
                 .padding(.top, head == nil ? 10 : 9)
                 .padding(.bottom, 10)
             }
@@ -1081,7 +1099,7 @@ struct CommandBlock: View {
                         copyButton(output)
                     }
                 }
-                .padding(.horizontal, 12)
+                .padding(.horizontal, 10)
                 .padding(.vertical, 10)
             }
             if let end {
@@ -1094,7 +1112,7 @@ struct CommandBlock: View {
                         .monospacedDigit()
                 }
                 .font(Typography.small)
-                .padding(.horizontal, 12)
+                .padding(.horizontal, 10)
                 .padding(.vertical, 7)
                 .accessibilityElement(children: .combine)
             }
@@ -1409,7 +1427,7 @@ struct WorkGroupRow<Content: View>: View, Equatable {
                         .frame(width: 14)
                     Text(line)
                         .font(Typography.label)
-                        .foregroundStyle(Palette.muted)
+                        .foregroundStyle(Palette.secondary)
                         .lineLimit(1)
                         .layoutPriority(-1)
                     if let failures {
@@ -1607,8 +1625,8 @@ private struct NoticeLine: View {
                     .fixedSize()
                     .help(action.help)
                 } else {
-                    // The first action is the one to take: the white pill; the others the gray one.
-                    if action == actions.first {
+                    // The first action is the one to take: the white pill; the others the gray one. A proposal can wait: never white.
+                    if action == actions.first, NoticeAction.proposedSlug(in: text) == nil {
                         Button { perform(action) } label: {
                             Label(action.title, systemImage: action.symbol)
                         }
@@ -1871,7 +1889,7 @@ struct ApprovalCard: View {
     // MARK: Pending
 
     private var pendingCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             details
             if request.isHandoff {
                 EmptyView()
@@ -1887,9 +1905,7 @@ struct ApprovalCard: View {
                         return .handled
                     }
                     .onAppear { noteFocused = true }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: Radius.small))
+                    .sheetTextField(fill: Palette.raised.opacity(0.6), radius: Radius.small)
                     .accessibilityLabel("Instrução ao negar")
                     .transition(.adapted(.unfold, reduceMotion: reduceMotion))
             }
@@ -2002,7 +2018,7 @@ struct ApprovalCard: View {
             }
         }
         .textSelection(.enabled)
-        .padding(10)
+        .padding(Spacing.m)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Palette.raised, in: .rect(cornerRadius: Radius.small))
     }

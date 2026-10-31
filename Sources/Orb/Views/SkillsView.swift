@@ -48,7 +48,7 @@ struct SkillsView: View {
     }
 
     private func newSkill() {
-        editing = Skill(slug: "", name: "", summary: "", instructions: "")
+        editing = Skill(slug: "", name: "", summary: "", instructions: "", orbIDs: model.defaultScopeForNewSkill())
     }
 }
 
@@ -134,7 +134,7 @@ private struct InstalledSkills: View {
                 if visible.isEmpty, !model.skills.isEmpty {
                     ContentUnavailableView.search(text: activeQuery)
                 }
-                LazyVStack(spacing: 8) {
+                LazyVStack(spacing: Spacing.cardSpacing) {
                     ForEach(visible) { skill in
                         InstalledSkillRow(skill: skill) {
                             editing = skill.wrappedValue
@@ -188,7 +188,7 @@ private struct InstalledSkills: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Palette.ink)
             ForEach(pending) { draft in
-                HStack(spacing: 14) {
+                HStack(spacing: Spacing.cardSpacing) {
                     CatalogIcon(symbol: "sparkles")
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 6) {
@@ -257,10 +257,10 @@ private struct InstalledSkillRow: View {
     var body: some View {
         // A switched-off skill dims its icon and title only: the badge says why, and the buttons stay legible.
         let dimmed = skill.isEnabled ? 1.0 : 0.55
-        let layout = isCompact ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12)) : AnyLayout(HStackLayout(spacing: 14))
+        let layout = isCompact ? AnyLayout(VStackLayout(alignment: .leading, spacing: Spacing.m)) : AnyLayout(HStackLayout(spacing: Spacing.m))
         layout {
             // A click anywhere on this part opens the editor; the copy button here and the controls beside it keep their own.
-            HStack(alignment: .center, spacing: 14) {
+            HStack(alignment: .center, spacing: Spacing.m) {
                 CatalogIcon(symbol: skill.source == nil || skill.source == Skill.builtInSource || skill.source == Skill.learnedSource ? "wand.and.stars" : "shippingbox")
                     .opacity(dimmed)
                 VStack(alignment: .leading, spacing: 3) {
@@ -303,7 +303,7 @@ private struct InstalledSkillRow: View {
                         } else {
                             CatalogBadge(text: "Criada por você", symbol: "person")
                         }
-                        if skill.orbIDs != nil {
+                        if !skill.orbIDs.isEmpty {
                             CatalogBadge(text: OrbScopeText.summary(orbIDs: skill.orbIDs, bots: model.bots), symbol: "person.2")
                         }
                         if skill.uses > 0 {
@@ -318,7 +318,7 @@ private struct InstalledSkillRow: View {
             .accessibilityAction(named: "Editar", onEdit)
             .help("Abre a skill para ler e editar")
             if !isCompact { Spacer(minLength: 12) }
-            HStack(spacing: 14) {
+            HStack(spacing: Spacing.m) {
                 UseSkillButton(skill: skill)
                 // Hidden label, read by VoiceOver: names the skill, since every row has the same switch.
                 Toggle("Ativar \(skill.name)", isOn: $skill.isEnabled)
@@ -366,7 +366,7 @@ private struct ExploreSkills: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: Spacing.xl) {
                 CatalogSearchHeader(query: $query, prompt: "Buscar no catálogo de skills (Skills.sh)",
                                     suggestions: Self.suggestions)
                 if !isSearching {
@@ -376,7 +376,7 @@ private struct ExploreSkills: View {
                                      retry: { Task { await search() } })
                         .transition(.opacity)
                 } else {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), spacing: 10, alignment: .top)], spacing: 10) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), spacing: Spacing.cardSpacing, alignment: .top)], spacing: Spacing.cardSpacing) {
                         ForEach(results) { entry in
                             CatalogSkillCard(entry: entry) { previewing = entry }
                         }
@@ -487,7 +487,7 @@ private struct CatalogSkillCard: View {
                     CatalogBadge(text: entry.installs.installsLabel, symbol: "arrow.down.circle")
                 }
             }
-            .padding(12)
+            .padding(Spacing.catalogCardPadding)
             .hoverCard(isHovering, radius: Radius.large, strongOutline: true)
             .contentShape(.rect)
         }
@@ -536,7 +536,7 @@ struct SkillPreview: View {
 
     private var content: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: Spacing.cardSpacing) {
                 HStack(spacing: 6) {
                     if entry.isFromKnownSource {
                         CatalogBadge(text: "Fonte conhecida", symbol: "checkmark.seal.fill", tint: Palette.accentText)
@@ -551,7 +551,7 @@ struct SkillPreview: View {
                 // The spinner (after 150 ms), the error and the text cross-fade in the same place (§2.13).
                 ZStack(alignment: .top) {
                     if let document {
-                        VStack(alignment: .leading, spacing: 14) {
+                        VStack(alignment: .leading, spacing: Spacing.cardSpacing) {
                             if !document.description.isEmpty {
                                 Text(document.description)
                                     .font(Typography.text)
@@ -586,7 +586,7 @@ struct SkillPreview: View {
                 }
                 .motion(Motion.content, value: PreviewPhase(isReady: document != nil, error: error))
             }
-            .padding(20)
+            .padding(Spacing.sheetEdge)
         }
     }
 
@@ -651,7 +651,7 @@ struct SkillEditor: View {
     private var isNew: Bool { !model.skills.contains { $0.id == skill.id } }
     private var finalSlug: String { Skill.cleanSlug(skill.slug) }
     private var slugTaken: Bool { model.skills.contains { $0.slug == finalSlug && $0.id != skill.id } }
-    private var chosenNoOrb: Bool { skill.orbIDs?.isEmpty == true }
+    private var chosenNoOrb: Bool { skill.orbIDs.isEmpty }
     private var canSave: Bool {
         !skill.name.trimmingCharacters(in: .whitespaces).isEmpty && !finalSlug.isEmpty
             && !skill.instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !slugTaken && !chosenNoOrb
@@ -720,7 +720,7 @@ struct SkillEditor: View {
                 }
             } }
             Section {
-                OrbScopePicker(orbIDs: $skill.orbIDs, noun: "esta skill")
+                OrbScopePicker(scoped: $skill.orbIDs, noun: "esta skill")
             } header: {
                 Text("Usar com")
             }

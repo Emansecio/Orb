@@ -51,7 +51,7 @@ struct WizardPreviewPane: View {
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
-                VStack(spacing: 14) {
+                VStack(spacing: Spacing.cardSpacing) {
                     stage
                     lookActions
                     if hasDraft {
@@ -69,7 +69,7 @@ struct WizardPreviewPane: View {
                         chips(leading: false)
                     }
                 }
-                .padding(.horizontal, 28)
+                .padding(.horizontal, Spacing.sheetEdge)
                 .padding(.bottom, 20)
                 .frame(maxWidth: .infinity)
             }
@@ -248,12 +248,12 @@ struct WizardPreviewPane: View {
     /// The chips sit centered, under the centered name and role (or the line of copy before there is a draft); `leading`
     /// is kept for a layout that puts them against the boxes' left edge.
     private func chips(leading: Bool) -> some View {
-        WizardWrap(spacing: 6, alignment: leading ? .leading : .center) {
+        WizardWrap(spacing: Spacing.xs + Spacing.hairline, alignment: leading ? .leading : .center) {
             ForEach(Array(chipItems.enumerated()), id: \.element.id) { index, item in
                 Label(item.title, systemImage: item.symbol)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Palette.secondary)
-                    .padding(.horizontal, 9)
+                    .padding(.horizontal, Spacing.s)
                     .padding(.vertical, 4)
                     // A label, not a button: no fill of its own (only the wash of a change), since nothing here is clickable.
                     .background(flashed.contains(item.field) ? Palette.findWash : .clear, in: .capsule)

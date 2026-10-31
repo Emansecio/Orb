@@ -141,7 +141,7 @@ struct ImportPanel: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: Spacing.xl) {
                     header
                     sourcePicker
                     switch source {
@@ -159,7 +159,7 @@ struct ImportPanel: View {
                             .transition(.adapted(.rise, reduceMotion: reduceMotion))
                     }
                 }
-                .padding(20)
+                .padding(Spacing.sheetEdge)
             }
             .scrollIndicators(.automatic)
             .motion(Motion.enter, value: draft != nil)
@@ -256,7 +256,7 @@ struct ImportPanel: View {
     }
 
     private var marketplaceStep: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: Spacing.s) {
             StepLabel("1. Escolha um bot")
             Text("O Orb lê as instruções, as memórias e as skills do bot que você escolher.")
                 .font(Typography.label)
@@ -277,9 +277,7 @@ struct ImportPanel: View {
                 }
                 .motion(Motion.content, value: isReading)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .card(radius: Radius.medium)
+            .sheetTextField()
             if let error {
                 Text(error)
                     .font(Typography.label)
@@ -355,7 +353,7 @@ struct ImportPanel: View {
                     .transition(.adapted(.rise, reduceMotion: reduceMotion))
             }
             if !locals.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
                     Text("Neste Mac").font(Typography.label.weight(.medium)).foregroundStyle(Palette.secondary)
                     ForEach(locals) { local in
                         HStack {
@@ -366,7 +364,7 @@ struct ImportPanel: View {
                         }
                     }
                 }
-                .padding(.top, 4)
+                .padding(.top, Spacing.xs)
             }
         }
         .motion(value: error)
@@ -523,7 +521,7 @@ private struct ImportPreview: View, Equatable {
 
     var body: some View {
         let plan = imported.plan()
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: Spacing.s) {
             StepLabel("\(step). Prévia")
             VStack(alignment: .leading, spacing: 2) {
                 Text("De: \(imported.source)").font(Typography.label.weight(.medium)).foregroundStyle(Palette.secondary)
@@ -594,7 +592,7 @@ private struct ImportGroup<Content: View>: View {
             // Full width, so every checkbox of every group sits in the same column.
             VStack(alignment: .leading, spacing: 6) { content }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 4)
+                .padding(.top, Spacing.xs)
         } label: {
             Text(count.map { "\(title) (\($0))" } ?? title)
                 .font(Typography.label.weight(.semibold))
@@ -643,7 +641,7 @@ private struct ImportSkillRow: View {
     @State private var isShowing = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
             VStack(alignment: .leading, spacing: 0) {
                 Toggle(isOn: $skill.isOn) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -659,7 +657,7 @@ private struct ImportSkillRow: View {
                 // Under the skill's text, on its left edge (the checkbox's own indent), not loose at the far edge of the column.
                 Button(isShowing ? "Ocultar" : "Ver") { isShowing.toggle() }
                     .buttonStyle(GhostStyle())
-                    .padding(.leading, 7)
+                    .padding(.leading, Spacing.s)
                     .help(Tip.importToggleSkill(isShowing: isShowing))
             }
             if isShowing {
@@ -667,7 +665,7 @@ private struct ImportSkillRow: View {
                     .font(Typography.codeSmall)
                     .foregroundStyle(Palette.muted)
                     .textSelection(.enabled)
-                    .padding(8)
+                    .padding(Spacing.s)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Palette.raised, in: .rect(cornerRadius: Radius.small))
                     .transition(.opacity)
@@ -687,14 +685,14 @@ struct ImportSummaryRow: View {
     let remove: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
             HStack(spacing: 8) {
                 Image(systemName: "square.and.arrow.down").foregroundStyle(Palette.muted)
                 Text(ImportText.summary(imported))
                     .font(Typography.text)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            HStack(spacing: 4) {
+            HStack(spacing: Spacing.xs) {
                 // With their icons, so the two read as buttons and not as words of the line above.
                 Button("Revisar", systemImage: "doc.text.magnifyingglass", action: review).buttonStyle(GhostStyle())
                     .help(Tip.importReview)

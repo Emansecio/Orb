@@ -206,18 +206,18 @@ struct InicioView: View {
     }
 
     private func section<Content: View>(_ title: String, count: Int, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: Spacing.m) {
             HStack {
-                Text(title).font(.system(size: 17, weight: .semibold)).foregroundStyle(Palette.ink).accessibilityAddTraits(.isHeader)
+                Text(title).font(Typography.title).foregroundStyle(Palette.ink).accessibilityAddTraits(.isHeader)
                 Spacer()
                 if count > 0 { Text("\(count) \(count == 1 ? "item" : "itens")").font(Typography.small).foregroundStyle(Palette.muted) }
             }
             Divider()
             content()
         }
-        .padding(16)
+        .padding(Spacing.cardPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .card(radius: Radius.card, stroke: Palette.line)
+        .card(radius: Radius.large, stroke: Palette.line)
     }
 
     private func row(botID: UUID, focus: InicioRowFocus, title: String, detail: String, date: Date?, action: @escaping () -> Void) -> some View {

@@ -69,9 +69,9 @@ extension Snapshot {
             seedProviders(model)
             return AnyView(ChatView(botID: bot.id))
         case "chat-slash":
-            model.skills = [Skill(slug: "resumir", name: "Resumir", summary: "Resume um texto ou arquivo em poucos tópicos.", instructions: "x"),
-                            Skill(slug: "revisar", name: "Revisar código", summary: "Revisa mudanças e aponta riscos.", instructions: "x"),
-                            Skill(slug: "traduzir", name: "Traduzir", summary: "Traduz mantendo o tom.", instructions: "x")]
+            model.skills = [Skill(slug: "resumir", name: "Resumir", summary: "Resume um texto ou arquivo em poucos tópicos.", instructions: "x", orbIDs: [bot.id]),
+                            Skill(slug: "revisar", name: "Revisar código", summary: "Revisa mudanças e aponta riscos.", instructions: "x", orbIDs: [bot.id]),
+                            Skill(slug: "traduzir", name: "Traduzir", summary: "Traduz mantendo o tom.", instructions: "x", orbIDs: [bot.id])]
             model.setDraft("/re", for: bot.id)
             return AnyView(ChatView(botID: bot.id))
         case "chat-greeting", "chat-greeting-returning", "chat-greeting-typed":
@@ -91,9 +91,9 @@ extension Snapshot {
             seedProviders(model)
             return AnyView(popover(ModelPopover(botID: bot.id) {}))
         case "popover-skills":
-            model.skills = [Skill(slug: "resumir", name: "Resumir", summary: "Resume um texto ou arquivo em poucos tópicos.", instructions: "x"),
-                            Skill(slug: "revisar", name: "Revisar código", summary: "Revisa mudanças e aponta riscos.", instructions: "x"),
-                            Skill(slug: "traduzir", name: "Traduzir", summary: "Traduz mantendo o tom.", instructions: "x")]
+            model.skills = [Skill(slug: "resumir", name: "Resumir", summary: "Resume um texto ou arquivo em poucos tópicos.", instructions: "x", orbIDs: [bot.id]),
+                            Skill(slug: "revisar", name: "Revisar código", summary: "Revisa mudanças e aponta riscos.", instructions: "x", orbIDs: [bot.id]),
+                            Skill(slug: "traduzir", name: "Traduzir", summary: "Traduz mantendo o tom.", instructions: "x", orbIDs: [bot.id])]
             return AnyView(popover(SkillsPopover(skills: model.enabledSkills) { _ in }))
         default:
             return nil

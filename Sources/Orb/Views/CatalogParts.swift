@@ -186,7 +186,7 @@ struct CatalogSearchHeader: View {
                                 .font(Typography.label)
                                 .foregroundStyle(Palette.secondary)
                                 .frame(width: 260, alignment: .leading)
-                                .padding(14)
+                                .padding(Spacing.catalogCardPadding)
                         }
                 }
             }
@@ -248,8 +248,8 @@ struct SearchBox<Accessory: View>: View {
             }
             accessory
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, Spacing.catalogCardPadding)
+        .padding(.vertical, Spacing.s + Spacing.hairline)
         .card(radius: Radius.card, stroke: isFocused.wrappedValue ? Palette.lineStrong : Palette.line)
     }
 }
@@ -384,9 +384,9 @@ struct CatalogStateView: View {
     var body: some View {
         Group {
             if isLoading {
-                VStack(spacing: 18) {
+                VStack(spacing: Spacing.xl) {
                     if skeleton {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), spacing: 12)], spacing: 12) {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), spacing: Spacing.cardSpacing)], spacing: Spacing.cardSpacing) {
                             ForEach(0..<6, id: \.self) { _ in SkeletonCard() }
                         }
                         .accessibilityHidden(true)
@@ -436,14 +436,15 @@ private struct SkeletonCard: View {
                 RoundedRectangle(cornerRadius: 3).fill(Palette.raised.opacity(0.7)).frame(width: 150, height: 8)
             }
         }
-        .padding(14)
+        .padding(Spacing.catalogCardPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
         .card(radius: Radius.large)
     }
 }
 
-/// "Usar com": every Orb (the default) or only the ones ticked. Choosing an Orb is all it takes; the connector or
-/// skill follows the choice (for connectors, the Orb's "Conectores" switch is turned on when the sheet is saved).
+/// "Usar com": every Orb (the default, for a connector) or only the ones ticked. Choosing an Orb is all it takes;
+/// the connector follows the choice (the Orb's "Conectores" switch is turned on when the sheet is saved). For a
+/// skill (`scoped`), "Todos os Orbs" is not offered: a skill always names its Orbs.
 struct OrbScopePicker: View {
     @Environment(AppModel.self) private var model
     @Binding var orbIDs: Set<UUID>?
@@ -451,6 +452,22 @@ struct OrbScopePicker: View {
     var noun = "este conector"
     /// Added to the explanation while every Orb is chosen.
     var allNote = ""
+    /// The scope must name its Orbs: the checklist is always on and there is no "Todos os Orbs" choice.
+    var scoped = false
+
+    /// For a connector: `orbIDs` nil is "every Orb".
+    init(orbIDs: Binding<Set<UUID>?>, noun: String = "este conector", allNote: String = "") {
+        _orbIDs = orbIDs
+        self.noun = noun
+        self.allNote = allNote
+    }
+
+    /// For a skill: its `Set<UUID>` binds through the optional storage (`nil` is never written back).
+    init(scoped orbIDs: Binding<Set<UUID>>, noun: String) {
+        _orbIDs = Binding(get: { orbIDs.wrappedValue }, set: { orbIDs.wrappedValue = $0 ?? [] })
+        self.noun = noun
+        self.scoped = true
+    }
 
     private var isChosen: Binding<Bool> {
         Binding(
@@ -465,12 +482,14 @@ struct OrbScopePicker: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Picker("Usar com", selection: isChosen) {
-                Text("Todos os Orbs").tag(false)
-                Text("Só alguns").tag(true)
+            if !scoped {
+                Picker("Usar com", selection: isChosen) {
+                    Text("Todos os Orbs").tag(false)
+                    Text("Só alguns").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
             if let selected = orbIDs {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(model.bots) { bot in
@@ -488,9 +507,9 @@ struct OrbScopePicker: View {
                 .padding(.top, 2)
                 .transition(.quiet)
             }
-            Text(orbIDs == nil
-                 ? "Todos os Orbs, inclusive os que você criar depois, podem usar \(noun).\(allNote.isEmpty ? "" : " " + allNote) Você pode mudar depois."
-                 : "Só os Orbs marcados usam \(noun). Você pode mudar depois.")
+            Text(scoped || orbIDs != nil
+                 ? "Só os Orbs marcados usam \(noun). Você pode mudar depois."
+                 : "Todos os Orbs, inclusive os que você criar depois, podem usar \(noun).\(allNote.isEmpty ? "" : " " + allNote) Você pode mudar depois.")
                 .font(Typography.small)
                 .foregroundStyle(Palette.faint)
                 .fixedSize(horizontal: false, vertical: true)

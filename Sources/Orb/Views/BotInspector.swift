@@ -272,8 +272,8 @@ struct BotInspector: View {
         }
         // The same side padding as the form's cards below, so the header, the tabs and the cards share edges.
         .padding(.horizontal, Spacing.xl)
-        .padding(.top, 18)
-        .padding(.bottom, 14)
+        .padding(.top, Spacing.sheetHeaderTop)
+        .padding(.bottom, Spacing.m)
     }
 
     /// The folder was replaced: what the panel knew about the old one no longer applies.
@@ -341,7 +341,7 @@ struct BotInspector: View {
             FoldHeader(title: "Modelo e permissões", isOpen: isOpen, tip: Tip.toggleModelCard(isOpen: isOpen),
                        spokenSummary: [modelName, warning].compactMap { $0 }.joined(separator: ", "),
                        action: { toggleFold($modelFoldOpen, isOpen: isOpen, hasProblem: unavailable != nil) }) {
-                HStack(spacing: 6) {
+                HStack(spacing: Spacing.s) {
                     // Whole; cut, when at least 80 pt are left; or left out, when only "…" would show (244 pt). The
                     // warning stays in every case, and VoiceOver hears the name in the row's value.
                     ViewThatFits(in: .horizontal) {
@@ -400,7 +400,7 @@ struct BotInspector: View {
 
     /// "Roda tudo sem perguntar" in the warning color, with a small ⓘ that says it all (hover or click).
     private func bypassLine(_ summary: String) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Spacing.s) {
             Text(ModelCardSummary.bypassLine)
                 .font(Typography.small)
                 .foregroundStyle(Palette.warn)
@@ -413,7 +413,7 @@ struct BotInspector: View {
                     Text(summary)
                         .font(Typography.label)
                         .fixedSize(horizontal: false, vertical: true)
-                        .padding(12)
+                        .padding(Spacing.m)
                         .frame(width: 280, alignment: .leading)
                 }
             Spacer(minLength: 0)
@@ -453,7 +453,7 @@ struct BotInspector: View {
 
     /// The icons of the folded row: VoiceOver gets the count from the row itself.
     private func capabilityStrip(_ bot: Bot) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Spacing.s) {
             ForEach(Capability.allCases) { capability in
                 Image(systemName: capability.symbol)
                     .font(Typography.label)
@@ -557,7 +557,7 @@ struct BotInspector: View {
     /// Under the cards, quietly: who made an Orb another made, and "Apagar", gray until the pointer is over it. Both sit
     /// outside the cards, on the same inset as the notes under a section.
     private func panelFooter(_ bot: Bot) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: Spacing.s) {
             if bot.createdByName != nil {
                 CreatedByLine(bot: bot) // MultiOrb (WP3)
             }
@@ -646,7 +646,7 @@ struct BotInspector: View {
     /// "Mudar…" at the end of the line.
     private func folderRow(_ bot: Bot) -> some View {
         let isHome = EmptyChatContent.usesHome(bot)
-        return HStack(spacing: 10) {
+        return HStack(spacing: Spacing.s) {
             Image(systemName: isHome ? "house" : "folder")
                 .foregroundStyle(Palette.muted)
                 .frame(width: 20)
@@ -1169,7 +1169,7 @@ private struct RoutineRow: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                Spacer(minLength: 6)
+                Spacer(minLength: Spacing.s)
                 Toggle("Ativa", isOn: Binding(get: { routine.isEnabled }, set: { model.setRoutineEnabled(routine.id, $0) }))
                     .toggleStyle(.switch)
                     .labelsHidden()
@@ -1185,12 +1185,12 @@ private struct RoutineRow: View {
             }
             footer
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, Spacing.xs)
         // The task the Orb just scheduled is marked for a moment (`AppModel.freshRoutine`).
         .background {
             RoundedRectangle(cornerRadius: Radius.medium)
                 .fill(Palette.accent.opacity(model.freshRoutine == routine.id ? 0.12 : 0))
-                .padding(.horizontal, -8).padding(.vertical, -4)
+                .padding(.horizontal, -Spacing.s).padding(.vertical, -Spacing.xs)
         }
         .animateChanges(of: routine.isEnabled)
         .animateChanges(of: model.freshRoutine)
@@ -1230,11 +1230,11 @@ private struct RoutineRow: View {
                 let runState = RoutineRunState(isRunning: model.isRoutineRunning(routine.id),
                                                isQueued: model.isRoutineQueued(routine.id))
                 ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 6) {
+                    HStack(spacing: Spacing.controlGap) {
                         runControl(runState)
                         editButton
                     }
-                    HStack(spacing: 6) {
+                    HStack(spacing: Spacing.controlGap) {
                         runControl(runState)
                         editButton.labelStyle(.iconOnly)
                     }
@@ -1244,7 +1244,7 @@ private struct RoutineRow: View {
                 Button("Apagar “\(routine.name)”", systemImage: "trash") { isConfirmingDelete = true }
                     .panelTrashButton()
                     .help(Tip.deleteRoutine)
-                    .padding(.trailing, -4)
+                    .padding(.trailing, -Spacing.xs)
                     .focused($deleteIsFocused)
                     // Only under the pointer, like the lembranças: a list of routines, not of trash cans. It takes Tab
                     // too, so it must also show while it has the keyboard focus.
@@ -1305,8 +1305,8 @@ private struct RoutineLastLine: View {
                     .lineLimit(isExpanded ? nil : 2)
                     .fixedSize(horizontal: false, vertical: true)
             } icon: {
-                Image(systemName: run.succeeded ? "checkmark.circle" : "xmark.circle")
-                    .foregroundStyle(run.succeeded ? Palette.ok : Palette.danger)
+                Image(systemName: run.wasStopped ? "stop.circle" : run.succeeded ? "checkmark.circle" : "xmark.circle")
+                    .foregroundStyle(run.wasStopped ? Palette.muted : run.succeeded ? Palette.ok : Palette.danger)
             }
             .font(Typography.label)
             .foregroundStyle(Palette.muted)
@@ -1410,7 +1410,7 @@ private struct IdentityEditor: View {
 
     var body: some View {
         PlaceholderTextEditor(placeholder: "Ex.: Seja direto e me lembre de fazer pausas.", text: $text, minHeight: 220)
-            .padding(.horizontal, 20)
+            .padding(.horizontal, Spacing.sheetEdge)
             .padding(.bottom, 12)
             .orbSheet("Como \(name) funciona",
                       subtitle: "Vai em toda conversa. O que \(name) aprender na entrevista entra no fim destas notas. ⌘↩ salva.",

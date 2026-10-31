@@ -36,7 +36,7 @@ struct SavedKeyField: View {
     var body: some View {
         LabeledContent(title) {
             if hasKey && !isReplacing {
-                HStack(spacing: 10) {
+                HStack(spacing: Spacing.controlGap) {
                     if isRejected {
                         Label("Chave recusada", systemImage: "exclamationmark.circle").foregroundStyle(Palette.warn)
                     } else {

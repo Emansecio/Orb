@@ -662,6 +662,8 @@ struct RoutinePrecheck: Codable, Equatable, Sendable {
 /// What one run of a routine left behind: shown in the routine's history. The whole run is in the routine's
 /// own conversation.
 struct RoutineRun: Identifiable, Codable, Sendable, Equatable {
+    /// You stopped it: not a failure, and not drawn as one.
+    var wasStopped: Bool { !succeeded && summary == BotSession.stoppedNotice }
     var id = UUID()
     var date: Date
     var finishedAt: Date?
@@ -821,8 +823,10 @@ struct Skill: Identifiable, Codable, Sendable {
     var source: String?
     /// GitHub folder of a catalog skill (its instructions may point to files there).
     var folderURL: URL?
-    /// The Orbs that may use this skill; nil means every Orb (what skills did before they were scoped).
-    var orbIDs: Set<UUID>?
+    /// The Orbs that may use this skill: always explicit, there is no "every Orb" any more. A file written before
+    /// skills were scoped has no `orbIDs` key at all — `AppState` reads that as every Orb the file has; a skill
+    /// made in code starts with none and is given its Orbs by whoever creates it.
+    var orbIDs: Set<UUID> = []
     /// The Orb that proposed it, for a skill with `learnedSource` (you approved it before it was saved).
     var learnedBy: UUID?
 }
@@ -839,7 +843,7 @@ extension Skill {
         isEnabled = try c.value(.isEnabled, default: true)
         source = try c.decodeIfPresent(String.self, forKey: .source).map { $0 == Self.legacyBuiltInSource ? Self.builtInSource : $0 }
         folderURL = try c.decodeIfPresent(URL.self, forKey: .folderURL)
-        orbIDs = (try? c.decodeIfPresent(Set<UUID>.self, forKey: .orbIDs)) ?? nil
+        orbIDs = (try? c.decodeIfPresent(Set<UUID>.self, forKey: .orbIDs)) ?? []
         learnedBy = (try? c.decodeIfPresent(UUID.self, forKey: .learnedBy)) ?? nil
     }
 
@@ -863,6 +867,9 @@ extension Skill {
         skill.orbIDs = edited.orbIDs
         return skill
     }
+
+    /// Whether the Orb may use it: a skill names its Orbs (there is no "every Orb" — see `orbIDs`).
+    func isAvailable(to botID: UUID) -> Bool { orbIDs.contains(botID) }
 
     /// An Orb may propose a better version of it: written by you or learned, not shipped with the app or installed from the catalog.
     var isImprovable: Bool { source == nil || source == Self.learnedSource }

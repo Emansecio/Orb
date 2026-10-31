@@ -38,11 +38,11 @@ struct FoldRowStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .padding(.horizontal, 6)
-            .padding(.vertical, 4)
+            .padding(.horizontal, Spacing.xs + Spacing.hairline)
+            .padding(.vertical, Spacing.xs)
             .hoverFill(isHovering, pressed: configuration.isPressed, in: .rect(cornerRadius: Radius.small))
-            .padding(.horizontal, -6)
-            .padding(.vertical, -4)
+            .padding(.horizontal, -(Spacing.xs + Spacing.hairline))
+            .padding(.vertical, -Spacing.xs)
             .contentShape(.rect)
             .opacity(configuration.isPressed ? 0.7 : 1)
             .onHover { isHovering = $0 }

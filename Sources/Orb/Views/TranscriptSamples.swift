@@ -44,6 +44,14 @@ enum TranscriptSample {
         Quer que eu faça isso agora?
         """
 
+    /// The run marker's date, as `Conversation.startingRoutineRun` writes it (its formatter is private).
+    private static let routineRunDate: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "pt_BR")
+        formatter.dateFormat = "dd/MM/yyyy 'às' HH:mm"
+        return formatter
+    }()
+
     static func view(_ screen: String, model: AppModel, bot: Bot) -> AnyView {
         let user = TranscriptItem(.user(text: "Organiza a minha pasta de Downloads", attachments: []))
         let reply = TranscriptItem(.bot(text: markdown, isStreaming: false))
@@ -222,6 +230,11 @@ enum TranscriptSample {
                      action(.shell, "Rodando em segundo plano", "npm run dev",
                             output: "[O comando continua rodando em segundo plano como o processo j1.]", seconds: 0.4),
                      action(.shell, "Rodando no Terminal", "swift test --filter ToolIntentTests", .running, output: nil, seconds: 0)]
+        case "transcript-routine":
+            // The chat while a routine runs: your lines stay, the run is narrated after them (`BotSession.shownItems`).
+            // Seeded in the task below: the launch read of the conversation would otherwise replace this one after the
+            // scene was built.
+            items = []
         case "transcript-browser-live", "transcript-browser-need", "transcript-browser-done":
             items = LiveScreenSnapshots.items(screen, model: model, bot: bot)
         case "transcript-retry":
@@ -234,7 +247,32 @@ enum TranscriptSample {
             // The notice offers "Revisar" only while the proposal it speaks of waits in the Orb's memory.
             if screen == "transcript-skill-proposal" || screen == "transcript-interrupted" { _ = await model.memory.bank(for: bot.id).proposeSkill(SkillSnapshots.proposal) }
             try? await Task.sleep(for: .seconds(1))
-            model.seedConversation(Conversation(items: items), for: bot.id)
+            if screen != "transcript-routine" { model.seedConversation(Conversation(items: items), for: bot.id) }
+            if screen == "transcript-routine" {
+                let routine = Routine(name: "Resumo da manhã", botID: bot.id,
+                                      prompt: "Faça um resumo da minha manhã usando a agenda e o e-mail.",
+                                      schedule: .daily(hour: 8, minute: 30))
+                if !model.routines.contains(where: { $0.name == routine.name }) { model.routines.append(routine) }
+                let started = Date.now.addingTimeInterval(-90)
+                var run = Conversation(items: [
+                    TranscriptItem(.notice(Conversation.routineRunMarker + Self.routineRunDate.string(from: started))),
+                    TranscriptItem(.user(text: routine.prompt, attachments: [])),
+                    TranscriptItem(.tool(ToolCall(kind: .shell, title: "Rodando no Terminal", detail: "ls -la ~/Downloads",
+                                                  state: .done, output: "total 8"))),
+                    TranscriptItem(.bot(text: "Agenda conferida: 3 reuniões hoje. Agora vou ao e-mail para completar o resumo.",
+                                        isStreaming: true))])
+                for index in run.items.indices { run.items[index].date = started.addingTimeInterval(Double(index) * 12) }
+                let session = model.session(bot.id)
+                // The chat first, then the run parks it for its own conversation.
+                session.conversation = Conversation(items: [
+                    TranscriptItem(.user(text: "Me lembra de revisar o orçamento amanhã cedo.", attachments: [])),
+                    TranscriptItem(.bot(text: "Anotado! Vou te lembrar no resumo de amanhã.", isStreaming: false))])
+                session.startRoutineRun(routine.id, conversation: run, at: started)
+                let live = model.live(bot.id)
+                live.setStatus("Pensando")
+                live.setWork(WorkLine(verb: "Lendo e-mails novos", target: "caixa de entrada", routine: routine.name, actions: 2))
+                model.orbTranscript(bot.id).setLive(true)
+            }
             if screen.hasPrefix("transcript-activity") {
                 let live = model.live(bot.id)
                 live.setStatus("Pensando")

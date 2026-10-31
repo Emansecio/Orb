@@ -40,7 +40,7 @@ enum ProseSegment: Equatable {
 enum ProseText {
     static let size: CGFloat = 14
     /// Between the items of a list.
-    static let itemSpacing: CGFloat = 4
+    static let itemSpacing: CGFloat = 6
     /// Where a list's text starts past its marker (the marker column, 18, and the gap, 8), and the indent of each level.
     static let markerWidth: CGFloat = 18
     static let markerGap: CGFloat = 8
@@ -63,7 +63,18 @@ enum ProseText {
     private static let checkboxTodo = checkboxImage(done: false)
 
     /// The space a heading has above it past the blocks' own, after another block (the first line of a text takes none).
-    static func headingLead(_ level: Int) -> CGFloat { level <= 2 ? 4 : 2 }
+    static func headingLead(_ level: Int) -> CGFloat {
+        switch level {
+        case 1: 6
+        case 2: 4
+        default: 0
+        }
+    }
+
+    /// Code among the words: a step under them, as monospaced type reads larger at one size.
+    static let inlineCodeDrop: CGFloat = 1
+    /// Code among the words: its pill, drawn behind each line it takes (`ProseTextView.drawBackground`).
+    static let inlineCodeKey = NSAttributedString.Key("OrbInlineCode")
 
     static func make(_ blocks: [MarkdownBlock], cursor: Bool, cached: Bool, highlight: String?) -> NSAttributedString {
         let text = NSMutableAttributedString()
@@ -198,14 +209,16 @@ enum ProseText {
             let piece = String(parsed[run.range].characters).replacingOccurrences(of: "\n", with: "\u{2028}")
             let intent = run.inlinePresentationIntent ?? []
             var font = intent.contains(.code)
-                ? NSFont.monospacedSystemFont(ofSize: size, weight: intent.contains(.stronglyEmphasized) ? .bold : weight)
-                : NSFont.systemFont(ofSize: size, weight: intent.contains(.stronglyEmphasized) ? .bold : weight)
+                ? NSFont.monospacedSystemFont(ofSize: size - inlineCodeDrop, weight: intent.contains(.stronglyEmphasized) ? .semibold : weight)
+                : NSFont.systemFont(ofSize: size, weight: intent.contains(.stronglyEmphasized) ? .semibold : weight)
             if intent.contains(.emphasized) {
                 font = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
             }
             var attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color, .paragraphStyle: style]
             if let background = run[AttributeScopes.SwiftUIAttributes.BackgroundColorAttribute.self] {
                 attributes[.backgroundColor] = NSColor(background)
+            } else if intent.contains(.code) {
+                attributes[Self.inlineCodeKey] = true
             }
             if intent.contains(.strikethrough) { attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
             if let link = run.link { attributes[.link] = link }
@@ -248,6 +261,8 @@ final class ProseTextView: NSTextView, @preconcurrency NSLayoutManagerDelegate {
     private var settleWork: DispatchWorkItem?
     /// The text has a quote to draw a bar beside (`drawBackground`).
     private var hasQuote = false
+    /// The text has code among its words, with pills to draw (`drawBackground`).
+    private var hasInlineCode = false
     /// The text shown, without the cursor: what a flush that only adds to it continues.
     private var shownBody: String?
     private lazy var fade = TextFade(view: self)
@@ -285,6 +300,10 @@ final class ProseTextView: NSTextView, @preconcurrency NSLayoutManagerDelegate {
         if shownBody.map({ !(body as NSString).hasPrefix($0) }) ?? true { fade.finish() }
         shownBody = body
         textStorage?.setAttributedString(text)
+        hasInlineCode = false
+        text.enumerateAttribute(ProseText.inlineCodeKey, in: NSRange(location: 0, length: text.length)) { value, _, stop in
+            if value != nil { hasInlineCode = true; stop.pointee = true }
+        }
         if let added { fade.fade(added) } else { fade.restore() }
         hasQuote = false
         text.enumerateAttribute(ProseText.quoteKey, in: NSRange(location: 0, length: text.length)) { value, _, stop in
@@ -416,7 +435,20 @@ final class ProseTextView: NSTextView, @preconcurrency NSLayoutManagerDelegate {
     /// The bar beside a quote.
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)
-        guard hasQuote, let textStorage, let layoutManager, let textContainer else { return }
+        guard hasQuote || hasInlineCode, let textStorage, let layoutManager, let textContainer else { return }
+        if hasInlineCode {
+            let origin = textContainerOrigin
+            NSColor(Palette.raised).setFill()
+            textStorage.enumerateAttribute(ProseText.inlineCodeKey, in: NSRange(location: 0, length: textStorage.length)) { value, range, _ in
+                guard value != nil else { return }
+                let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+                layoutManager.enumerateEnclosingRects(forGlyphRange: glyphs, withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
+                                                      in: textContainer) { rect, _ in
+                    let pill = rect.offsetBy(dx: origin.x, dy: origin.y).insetBy(dx: -3, dy: 0)
+                    NSBezierPath(roundedRect: pill, xRadius: 4, yRadius: 4).fill()
+                }
+            }
+        }
         NSColor(Palette.lineStrong).setFill()
         textStorage.enumerateAttribute(ProseText.quoteKey, in: NSRange(location: 0, length: textStorage.length)) { value, range, _ in
             guard value != nil else { return }

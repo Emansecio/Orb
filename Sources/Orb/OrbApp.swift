@@ -240,6 +240,10 @@ struct AppCommands: Commands {
                 .keyboardShortcut(AppShortcut.skills)
                 .disabled(sheetOpen)
             Divider()
+            // The file is watched meanwhile (`startStateWatch`); this reads it again by hand, as the launch does.
+            Button(CommandName.reloadState) { model.reloadStateFromDisk() }
+                .disabled(sheetOpen)
+            Divider()
             // Only the names and the order are read, so a status or a new unread message does not rebuild the menu.
             ForEach(Array(model.sidebarBotIDs.prefix(9).enumerated()), id: \.element) { index, id in
                 Button(model.live(id).look.name) { showMain(); model.selection = .bot(id) }

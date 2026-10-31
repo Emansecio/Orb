@@ -197,15 +197,15 @@ enum DelegationSnapshots {
     /// The fold of the exchange, closed and open, as the chat draws it (the rows are the chat's own).
     private static func foldedPreview(_ team: Team) -> some View {
         let items = foldedItems(team)
-        return VStack(alignment: .leading, spacing: 18) {
+        return VStack(alignment: .leading, spacing: Spacing.xl) {
             FoldedThread(items: items, summary: { ExchangeSummary(items: items, botID: team.atlas.id, unfolded: $0) },
                          child: { TranscriptRow(item: $0, botID: team.atlas.id, orb: team.atlas.orb).equatable() })
             FoldedThread(items: items, startsUnfolded: true,
                          summary: { ExchangeSummary(items: items, botID: team.atlas.id, unfolded: $0) },
                          child: { TranscriptRow(item: $0, botID: team.atlas.id, orb: team.atlas.orb).equatable() })
         }
-        .padding(28)
-        .frame(width: 760, alignment: .leading)
+        .padding(TranscriptLayout.edge)
+        .frame(width: TranscriptLayout.column, alignment: .leading)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Palette.canvas)
     }

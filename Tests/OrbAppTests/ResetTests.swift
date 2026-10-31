@@ -167,6 +167,7 @@ import Testing
         #expect(state.providers == providers && state.defaultModel == "openai/gpt-x")
         #expect(state.learnedContexts["openai/gpt-x"]?.tokens == 8_000)
         #expect(state.bots.isEmpty && state.routines.isEmpty && state.connectors.isEmpty) // the welcome comes next
+        #expect(state.skills.isEmpty) // a reset is not a first use: the built-in skills do not come back
         // Keychain: the connector's secrets go; the keys and the sign-in stay; an item that is not ours is not touched.
         #expect(vault.accounts == ["openai", "anthropic", "chatgpt", "outro.item"])
         // Preferences: back to the default, but for the note of which Keychain accounts came over from OpenBot.

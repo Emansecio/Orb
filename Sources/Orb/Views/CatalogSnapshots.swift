@@ -58,9 +58,10 @@ enum CatalogSnapshots {
         case "conn-tools":
             return toolsSheet()
         case "skill-editor-new":
-            return AnyView(SkillEditor(skill: Skill(slug: "", name: "", summary: "", instructions: "")))
+            return AnyView(SkillEditor(skill: Skill(slug: "", name: "", summary: "", instructions: "",
+                                                  orbIDs: model.defaultScopeForNewSkill())))
         case "skill-editor":
-            guard let skill = model.skills.first(where: { $0.orbIDs != nil }) ?? model.skills.first else { return nil }
+            guard let skill = model.skills.first(where: { !$0.orbIDs.isEmpty }) ?? model.skills.first else { return nil }
             return AnyView(SkillEditor(skill: skill))
         case "skill-proposal", "skill-proposal-update":
             guard let bot = model.bots.first, let draft = SkillSnapshots.draft(of: bot, update: screen.hasSuffix("update")) else { return nil }

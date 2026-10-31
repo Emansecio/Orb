@@ -379,12 +379,12 @@ private struct MacPermissionsHeader: View {
     let recheck: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: Spacing.m) {
             Image(systemName: summary.isComplete ? "checkmark.shield.fill" : "lock.shield")
                 .font(.system(size: 24))
                 .foregroundStyle(summary.isComplete ? Palette.ok : (summary.isLoaded ? Palette.warn : Palette.muted))
                 .frame(width: 32)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Spacing.hairline) {
                 Text(summary.title).font(Typography.text.weight(.semibold))
                 Text(summary.subtitle).capabilityCaption()
             }
@@ -408,7 +408,7 @@ private struct MacPermissionRow: View {
         let row = model.row(kind)
         let isBusy = row.badge == .asking || row.badge == .testing
         LabeledContent {
-            HStack(spacing: 8) {
+            HStack(spacing: Spacing.controlGap) {
                 StatusBadge(badge: row.badge)
                 ForEach(row.actions, id: \.title) { action in
                     Button(action.title) { perform(action) }
@@ -424,7 +424,7 @@ private struct MacPermissionRow: View {
                 Text("Há Orbs trabalhando: o que estão fazendo é interrompido.")
             }
         } label: {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Spacing.hairline) {
                 Text(kind.title)
                     .foregroundStyle(model.status(of: kind) == .appNotRunning ? Palette.muted : Palette.ink)
                 Text(row.note ?? kind.detail).capabilityCaption()
@@ -453,7 +453,7 @@ private struct NotificationRow: View {
     var body: some View {
         let state = model.notifications
         LabeledContent {
-            HStack(spacing: 8) {
+            HStack(spacing: Spacing.controlGap) {
                 StatusBadge(badge: state.map { .status($0.status) } ?? .loading)
                 switch state {
                 case .notDetermined?:
@@ -469,7 +469,7 @@ private struct NotificationRow: View {
                 }
             }
         } label: {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Spacing.hairline) {
                 Text("Notificações")
                 // `capabilityCaption` wraps at the column's width: at 460 pt the long line was cut short.
                 Text(state == .unavailable ? "Só funcionam no app instalado, não ao rodar pelo Xcode ou terminal."
@@ -506,7 +506,7 @@ private struct StatusBadge: View {
                 ProgressView().controlSize(.small)
                     .transition(.opacity)
             case .asking, .testing:
-                HStack(spacing: 6) {
+                HStack(spacing: Spacing.s) {
                     ProgressView().controlSize(.small)
                     Text(badge == .asking ? "Aguardando você" : "Testando…").font(Typography.small).foregroundStyle(Palette.muted)
                 }

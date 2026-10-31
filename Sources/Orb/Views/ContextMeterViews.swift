@@ -153,7 +153,7 @@ struct ContextMeterChip: View {
     private func chip(_ reading: ContextReading) -> some View {
         let showsPercent = !compact && reading.tone.showsPercent(pointing: isHovering || isOpen)
         return Button { isOpen.toggle() } label: {
-            HStack(spacing: 5) {
+            HStack(spacing: Spacing.xs) {
                 if showsPercent {
                     Text("\(reading.percent)%")
                         .monospacedDigit()
@@ -223,9 +223,9 @@ struct ContextPopover: View {
             Text("Contexto desta conversa")
                 .font(Typography.text.weight(.semibold))
                 .accessibilityAddTraits(.isHeader)
-                .padding(.horizontal, 14)
-                .padding(.top, 14)
-                .padding(.bottom, 10)
+                .padding(.horizontal, Spacing.m)
+                .padding(.top, Spacing.m)
+                .padding(.bottom, Spacing.s)
             gauge
             kept
             Divider().padding(.top, 12)
@@ -257,7 +257,7 @@ struct ContextPopover: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, Spacing.m)
         .padding(.bottom, 12)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Uso do contexto")
@@ -284,7 +284,7 @@ struct ContextPopover: View {
                 .help(Tip.adjustContext)
                 .font(Typography.small)
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, Spacing.m)
     }
 
     private func row(_ symbol: String, _ text: String, detail: String? = nil) -> some View {
@@ -310,7 +310,7 @@ struct ContextPopover: View {
     // MARK: Compact now
 
     private var compactSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: Spacing.m) {
             Text(compactingExplanation)
                 .font(Typography.label)
                 .foregroundStyle(Palette.muted)
@@ -340,7 +340,7 @@ struct ContextPopover: View {
             }
             if let shownResult { resultView(shownResult) }
         }
-        .padding(14)
+        .padding(Spacing.m)
     }
 
     private var compactingExplanation: String {
@@ -380,7 +380,7 @@ struct ContextPopover: View {
             .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
-        .padding(10)
+        .padding(Spacing.m)
         .background(Palette.raised, in: .rect(cornerRadius: Radius.medium))
         .accessibilityElement(children: .combine)
         .transition(.opacity)

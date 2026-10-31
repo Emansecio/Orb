@@ -78,7 +78,7 @@ struct OrbEditor: View {
     /// each is drawn once.
     private var optionsContent: some View {
         ZStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: Spacing.cardSpacing) {
                 if category == .temperament {
                     temperamentList
                 } else {

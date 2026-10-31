@@ -49,7 +49,7 @@ private struct BrowserComponentRowView: View {
     @State private var isConfirmingRemoval = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Spacing.s) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(row.title).font(.body.weight(.medium))
                 if row.updateAvailable, case .installed = row.phase {
@@ -71,7 +71,7 @@ private struct BrowserComponentRowView: View {
                 }
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, Spacing.hairline)
         .animateChanges(of: row.phase.kind)
         .confirmationDialog("Remover \(row.title)?", isPresented: $isConfirmingRemoval) {
             Button("Remover", role: .destructive) { setup.remove(row.component) }
@@ -126,7 +126,7 @@ private struct BrowserComponentRowView: View {
                 .foregroundStyle(Palette.danger)
                 .fixedSize(horizontal: false, vertical: true)
         case .installing:
-            HStack(spacing: 6) {
+            HStack(spacing: Spacing.s) {
                 Text(row.statusText).font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 if let progress = installingProgress, progress.componentFraction != nil {
@@ -134,7 +134,7 @@ private struct BrowserComponentRowView: View {
                 }
             }
         case .checking:
-            HStack(spacing: 6) {
+            HStack(spacing: Spacing.s) {
                 ProgressView().controlSize(.mini)
                 Text(row.statusText).font(.caption).foregroundStyle(.secondary)
             }

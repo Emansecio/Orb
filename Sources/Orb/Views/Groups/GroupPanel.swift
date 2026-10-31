@@ -17,8 +17,8 @@ struct GroupPanel: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .padding(.horizontal, Spacing.l)
+                .padding(.vertical, Spacing.m)
                 ZStack {
                     switch tab {
                     case .members:
@@ -97,7 +97,7 @@ private struct GroupMembersTab: View {
                 // The "+" lines up with the avatars above (the rows' own 8 pt), not with the button's hover shape.
                 .padding(.leading, Spacing.s - Spacing.ghostInset)
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, Spacing.l)
             .padding(.bottom, 16)
         }
     }
@@ -147,12 +147,12 @@ private struct MemberRow: View {
 
     var body: some View {
         let isOrchestrator = look.id == group.orchestratorID
-        HStack(spacing: 10) {
+        HStack(spacing: Spacing.m) {
             // Avatar, name and role open the member's own chat; the icon buttons stay outside, as a button cannot hold a button.
             Button {
                 model.selection = .bot(look.id)
             } label: {
-                HStack(spacing: 10) {
+                HStack(spacing: Spacing.m) {
                     BotAvatar(orb: look.orb, size: 30, animated: false)
                         .frame(width: 30, height: 30)
                         .accessibilityHidden(true)
@@ -233,14 +233,12 @@ private struct GroupSettingsTab: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: Spacing.xl) {
                 TitledSection("Nome") {
                     TextField("Nome do grupo", text: $nameDraft)
                         .textFieldStyle(.plain)
                         .font(Typography.text)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(Palette.surface, in: .rect(cornerRadius: Radius.small))
+                        .sheetTextField(radius: Radius.small)
                         .focused($isNameFocused)
                         .onSubmit { commitName() }
                 }

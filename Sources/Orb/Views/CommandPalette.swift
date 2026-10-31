@@ -189,7 +189,7 @@ struct CommandPalette: View {
     var body: some View {
         let results = results
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
+            HStack(spacing: Spacing.m) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(Palette.muted)
                     .accessibilityHidden(true)
@@ -203,11 +203,11 @@ struct CommandPalette: View {
                     .onKeyPress(.escape) { model.showCommandPalette = false; return .handled }
                     .accessibilityLabel("Ir para")
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
+            .padding(.horizontal, Spacing.l)
+            .padding(.vertical, Spacing.m)
             Divider().opacity(0.6)
             if results.isEmpty {
-                VStack(spacing: 12) {
+                VStack(spacing: Spacing.m) {
                     Text("Nada encontrado para “\(query)”.")
                         .font(Typography.text)
                         .foregroundStyle(Palette.muted)
@@ -219,12 +219,12 @@ struct CommandPalette: View {
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 1) {
+                        LazyVStack(alignment: .leading, spacing: Spacing.hairline) {
                             ForEach(Array(results.enumerated()), id: \.element.id) { index, entry in
                                 if showsHeader(at: index, in: results) {
                                     Text(entry.section.title)
                                         .sectionTitleStyle()
-                                        .padding(.horizontal, 10)
+                                        .padding(.horizontal, Spacing.s + Spacing.hairline)
                                         .padding(.top, index == 0 ? 2 : 10)
                                         .padding(.bottom, 3)
                                 }
@@ -236,7 +236,7 @@ struct CommandPalette: View {
                                 .id(entry.id)
                             }
                         }
-                        .padding(8)
+                        .padding(Spacing.s)
                     }
                     .onChange(of: selected) {
                         guard results.indices.contains(selected) else { return }
@@ -246,14 +246,14 @@ struct CommandPalette: View {
                 .transition(.quiet)
             }
             Divider().opacity(0.6)
-            HStack(spacing: 14) {
+            HStack(spacing: Spacing.m) {
                 hint("↑↓", "navegar")
                 hint("↩", "abrir")
                 hint("esc", "fechar")
                 Spacer()
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 9)
+            .padding(.horizontal, Spacing.l)
+            .padding(.vertical, Spacing.s)
         }
         .frame(width: 540, height: 430)
         .background(Palette.chrome)
@@ -263,7 +263,7 @@ struct CommandPalette: View {
     }
 
     private func hint(_ keys: String, _ text: String) -> some View {
-        HStack(spacing: 5) {
+        HStack(spacing: Spacing.xs) {
             Text(keys).font(.keyCap).foregroundStyle(Palette.secondary)
             Text(text).font(Typography.small).foregroundStyle(Palette.muted)
         }
@@ -328,7 +328,7 @@ private struct PaletteRow: View {
     @State private var isHovering = false
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: Spacing.m) {
             Group {
                 if let orb = entry.orb {
                     // Still: a list the arrows run through is no place for twenty faces blinking at once.
@@ -339,9 +339,9 @@ private struct PaletteRow: View {
                         .foregroundStyle(isSelected ? Palette.ink : Palette.muted)
                 }
             }
-            .frame(width: 22)
+            .frame(width: Spacing.iconColumn + Spacing.xs + Spacing.hairline)
             .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: Spacing.hairline) {
                 Text(entry.title)
                     .font(Typography.text.weight(.medium))
                     .foregroundStyle(Palette.ink)
@@ -353,15 +353,15 @@ private struct PaletteRow: View {
                         .lineLimit(1)
                 }
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: Spacing.s)
             if let shortcut = entry.shortcut {
                 Text(shortcut)
                     .font(.keyCap)
                     .foregroundStyle(Palette.muted)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.horizontal, Spacing.s + Spacing.hairline)
+        .padding(.vertical, Spacing.xs + Spacing.hairline)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background { RoundedRectangle(cornerRadius: Radius.small).fill(Palette.ghostSelected).opacity(isSelected ? 1 : 0) }
         // The pointer lights the row too; the keyboard's selection keeps its own, stronger fill.
@@ -386,14 +386,14 @@ struct ShortcutsSheet: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: Spacing.xl) {
                 ForEach(ShortcutCatalog.groups) { group in
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: Spacing.xs + Spacing.hairline) {
                         Text(group.title)
                             .sectionTitleStyle()
                         ForEach(group.items) { item in
                             let lines = ShortcutItem.lines(item.title)
-                            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            HStack(alignment: .firstTextBaseline, spacing: Spacing.m) {
                                 Text(item.keys)
                                     .font(.keyCap)
                                     .foregroundStyle(Palette.ink)
@@ -420,8 +420,8 @@ struct ShortcutsSheet: View {
                     }
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 12)
+            .padding(.horizontal, Spacing.sheetEdge)
+            .padding(.bottom, Spacing.m)
         }
         .orbSheet("Atalhos do teclado", subtitle: "Os comandos de Navegar também estão no menu Orbs e em Ir para… (⌘K).") {
             SheetFooterBar {

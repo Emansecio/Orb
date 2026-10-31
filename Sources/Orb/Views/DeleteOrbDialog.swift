@@ -89,7 +89,7 @@ struct SummaryLine: View {
     }
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.m) {
             Image(systemName: kind.symbol)
                 .foregroundStyle(kind.color)
                 .frame(width: 18)
@@ -151,11 +151,11 @@ struct KeptMemoryBanner: View {
     var body: some View {
         ZStack {
             if let notice = model.keptMemoryNotice {
-                HStack(spacing: 8) {
+                HStack(spacing: Spacing.s) {
                     Image(systemName: "archivebox.fill")
                         .foregroundStyle(Palette.muted)
                         .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: Spacing.hairline) {
                         Text(notice.message)
                             .font(Typography.label.weight(.medium))
                             .foregroundStyle(Palette.ink)
@@ -175,10 +175,10 @@ struct KeptMemoryBanner: View {
                         .help(Tip.dismissNotice)
                         .foregroundStyle(Palette.muted)
                 }
-                .padding(10)
+                .padding(Spacing.m)
                 .card(radius: Radius.medium, stroke: Palette.lineStrong)
-                .padding(.horizontal, 8)
-                .padding(.bottom, 4)
+                .padding(.horizontal, Spacing.s)
+                .padding(.bottom, Spacing.xs)
                 .transition(.adapted(.arrive, reduceMotion: reduceMotion))
                 .accessibilityElement(children: .contain)
                 .task(id: notice.id) {

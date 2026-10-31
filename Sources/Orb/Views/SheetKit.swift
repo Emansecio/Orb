@@ -273,6 +273,26 @@ extension View {
             .background(Palette.raised, in: .rect(cornerRadius: Radius.small))
     }
 
+    /// The plain field on a raised card used by sheets and panels (a name, a key, a link): one inset, fill and radius so
+    /// no two fields of the app draw their own box differently. `fill`/`radius` flex for the fields inset inside cards.
+    func sheetTextField(fill: Color = Palette.surface, radius: CGFloat = Radius.medium) -> some View {
+        padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(fill, in: .rect(cornerRadius: radius))
+    }
+
+    /// A section's title inside a popover's list ("Recentes", a provider's name): the same font, color and insets every
+    /// model/skills list uses, so no header drifts from the rows under it.
+    func popoverSectionHeader() -> some View {
+        font(Typography.small.weight(.semibold))
+            .foregroundStyle(Palette.muted)
+            .padding(.horizontal, 12)
+            .padding(.top, 10)
+            .padding(.bottom, 3)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityAddTraits(.isHeader)
+    }
+
     /// The gray line under a switch or a picker in the Orb's panel ("Rodar comandos e ler e escrever arquivos").
     func capabilityCaption() -> some View {
         font(Typography.small).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)

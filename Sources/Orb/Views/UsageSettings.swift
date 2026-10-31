@@ -171,7 +171,7 @@ struct UsageSettings: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 4)
+            .padding(.vertical, Spacing.xs)
             .accessibilityElement(children: .combine)
             .animateChanges(of: report.totalCost)
         }
@@ -230,9 +230,9 @@ struct UsageSettings: View {
     }
 
     private func legend(_ series: [UsageSeries], colors: [Color]) -> some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), alignment: .leading)], alignment: .leading, spacing: 6) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), alignment: .leading)], alignment: .leading, spacing: Spacing.s) {
             ForEach(Array(series.enumerated()), id: \.element.id) { index, item in
-                HStack(spacing: 6) {
+                HStack(spacing: Spacing.s) {
                     Circle().fill(colors[index]).frame(width: 8, height: 8).accessibilityHidden(true)
                     Text(item.name).font(Typography.small).foregroundStyle(Palette.muted).lineLimit(1)
                 }
@@ -273,7 +273,7 @@ struct UsageSettings: View {
         let peak = report.hourly.max() ?? 0
         let busiest = peak > 0 ? report.hourly.firstIndex(of: peak) : nil
         return Section {
-            VStack(spacing: 6) {
+            VStack(spacing: Spacing.s) {
                 HStack(alignment: .bottom, spacing: 3) {
                     ForEach(0..<24, id: \.self) { hour in
                         let fraction = peak > 0 ? Double(report.hourly[hour]) / Double(peak) : 0
@@ -295,7 +295,7 @@ struct UsageSettings: View {
                 .font(Typography.small)
                 .foregroundStyle(Palette.faint)
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, Spacing.xs)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Uso por hora do dia")
             .accessibilityValue(busiest.map { "Mais uso entre \(UsageFormat.hour($0)) e \(UsageFormat.hour(($0 + 1) % 24))" } ?? "Sem uso")
@@ -331,7 +331,7 @@ private struct UsageRowView: View {
 
     var body: some View {
         LabeledContent {
-            HStack(spacing: 10) {
+            HStack(spacing: Spacing.m) {
                 VStack(alignment: .trailing, spacing: Spacing.hairline) {
                     amount
                     if let share = row.share, row.state == .billed || measure == .tokens {
@@ -445,7 +445,7 @@ private struct PriceEditor: View {
                 Text("Preço de \(title)").font(Typography.text.weight(.semibold)).foregroundStyle(Palette.ink).lineLimit(1)
                 Text(sourceText).capabilityCaption()
             }
-            Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 8) {
+            Grid(alignment: .leading, horizontalSpacing: Spacing.m, verticalSpacing: Spacing.s) {
                 field("Entrada", text: $draft.input, focus: .input)
                 field("Entrada do cache", text: $draft.cacheRead, focus: .cacheRead, placeholder: "igual à entrada")
                 field("Gravação no cache", text: $draft.cacheWrite, focus: .cacheWrite, placeholder: "igual à entrada")

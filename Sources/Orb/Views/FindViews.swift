@@ -19,7 +19,7 @@ struct FindBar: View {
     var body: some View {
         @Bindable var find = find
         let hasResults = (find.results?.hits.isEmpty == false)
-        HStack(spacing: 8) {
+        HStack(spacing: Spacing.s) {
             Image(systemName: "magnifyingglass")
                 .font(Typography.label)
                 .foregroundStyle(Palette.muted)
@@ -37,7 +37,7 @@ struct FindBar: View {
                 .onKeyPress(.escape) { close(); return .handled }
                 .accessibilityLabel("Buscar na conversa")
             status
-            HStack(spacing: 2) {
+            HStack(spacing: Spacing.hairline) {
                 step("chevron.up", help: Tip.findPrevious(), label: "Resultado anterior", enabled: hasResults) { find.previous() }
                 step("chevron.down", help: Tip.findNext(), label: "Próximo resultado", enabled: hasResults) { find.next() }
                 step("list.bullet", help: Tip.findResults, label: "Lista de resultados", enabled: hasResults) { find.showsResults.toggle() }
@@ -47,9 +47,9 @@ struct FindBar: View {
                 step("xmark", help: Tip.findClose, label: "Fechar a busca", enabled: true) { close() }
             }
         }
-        .padding(.leading, 12)
-        .padding(.trailing, 6)
-        .padding(.vertical, 5)
+        .padding(.leading, Spacing.m)
+        .padding(.trailing, Spacing.xs + Spacing.hairline)
+        .padding(.vertical, Spacing.xs)
         .frame(maxWidth: 480)
         .background(Palette.surface, in: .rect(cornerRadius: Radius.card))
         .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Palette.lineStrong))
@@ -116,7 +116,7 @@ private struct FindResultsList: View {
         let hits = find.results?.hits ?? []
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
+                LazyVStack(alignment: .leading, spacing: Spacing.hairline) {
                     ForEach(hits) { hit in
                         FindResultRow(hit: hit, who: Self.who(of: hit.source, botName: botName), isCurrent: hit.id == find.cursor.index) {
                             find.choose(hit.id)
@@ -128,10 +128,10 @@ private struct FindResultsList: View {
                         Text("Só os primeiros \(hits.count) resultados aparecem. Escreva mais para afinar a busca.")
                             .font(Typography.small)
                             .foregroundStyle(Palette.muted)
-                            .padding(10)
+                            .padding(Spacing.m)
                     }
                 }
-                .padding(6)
+                .padding(Spacing.xs + Spacing.hairline)
             }
             .onAppear {
                 if let index = find.cursor.index { proxy.scrollTo(index, anchor: .center) }
@@ -161,7 +161,7 @@ private struct FindResultRow: View {
 
     var body: some View {
         Button(action: choose) {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Spacing.hairline) {
                 Text(who)
                     .font(Typography.small.weight(.medium))
                     .foregroundStyle(Palette.muted)
@@ -171,8 +171,8 @@ private struct FindResultRow: View {
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.horizontal, Spacing.s + Spacing.hairline)
+            .padding(.vertical, Spacing.xs + Spacing.hairline)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background { RoundedRectangle(cornerRadius: Radius.small).fill(Palette.ghostSelected).opacity(isCurrent ? 1 : 0) }
             .hoverFill(isHovering && !isCurrent, in: .rect(cornerRadius: Radius.small))

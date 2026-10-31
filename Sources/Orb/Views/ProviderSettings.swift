@@ -160,7 +160,7 @@ private struct ProviderRow: View {
             DisclosureGroup(isExpanded: Binding(get: { isExpanded }, set: { ProviderExpansion.set(kind, expanded: $0) })) {
                 details(account, status: status)
             } label: {
-                HStack(spacing: 8) {
+                HStack(spacing: Spacing.controlGap) {
                     Text(kind.shortName)
                     if isDefault {
                         CatalogBadge(text: "Padrão", tint: Palette.accentText)
@@ -196,7 +196,7 @@ private struct ProviderRow: View {
         case .disabled: (symbol, tint) = ("pause.circle", Palette.muted)
         case .noModels, .unverified: (symbol, tint) = ("circle.dashed", Palette.muted)
         }
-        return HStack(spacing: 5) {
+        return HStack(spacing: Spacing.xs) {
             Image(systemName: symbol).foregroundStyle(tint)
             Text(summary).foregroundStyle(Palette.muted)
         }
@@ -287,7 +287,7 @@ private struct ProviderRow: View {
     }
 
     private func urlField(_ account: ProviderAccount) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
             TextField("URL base", text: Binding(get: { urlDraft ?? account.baseURL }, set: { urlDraft = $0 }),
                       prompt: Text(kind == .custom ? "https://meu-gateway.exemplo/v1" : kind.defaultBaseURL))
                 .focused($isURLFocused)
@@ -328,7 +328,7 @@ private struct ProviderRow: View {
             }
         } else {
             LabeledContent {
-                HStack(spacing: 10) {
+                HStack(spacing: Spacing.controlGap) {
                     if isWorking {
                         Button("Cancelar") { signInTask?.cancel() }
                             .buttonStyle(GhostStyle())

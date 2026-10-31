@@ -57,8 +57,8 @@ struct SidebarChatList: View {
         .motion(Motion.content, value: chats.active)
         // The rows' text starts where the Orb's name does (the row's 8 pt, the 30 pt avatar, 8 pt between them).
         .padding(.leading, Self.nameInset - Self.rowInset)
-        .padding(.trailing, 6)
-        .padding(.bottom, 6)
+        .padding(.trailing, Spacing.xs + Spacing.hairline)
+        .padding(.bottom, Spacing.xs + Spacing.hairline)
         .confirmationDialog("Apagar “\(deleting?.title ?? "")”?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
                             presenting: deleting) { entry in
             Button("Apagar conversa", role: .destructive) { model.deleteChat(entry.id, of: botID) }
@@ -115,7 +115,7 @@ private struct SidebarChatRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 7) {
+            HStack(spacing: Spacing.s) {
                 Text(entry.title)
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -163,7 +163,7 @@ private struct SidebarChatAction: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 5) {
+            HStack(spacing: Spacing.xs) {
                 if let symbol { Image(systemName: symbol).font(SectionPlus.glyph) }
                 Text(title)
             }

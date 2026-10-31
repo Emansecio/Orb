@@ -13,7 +13,7 @@ enum PromptParts {
         return "You are \(bot.name), \(role). You run natively on the user's Mac inside the Orb app and can act through your tools."
     }
 
-    static let language = "Reply in the user's language (Brazilian Portuguese unless they write otherwise). Be brief and concrete."
+    static let language = "Reply in the user's language (Brazilian Portuguese unless they write otherwise). Be brief and concrete. Use bold rarely."
     static let useTools = "Use tools to find out and to act instead of asking the user to do it; read before you change things."
     static let announce = "Before a tool that changes something, say in one short sentence what you are about to do and why, and make that call in the same reply."
     /// Small models announce a step and end the turn there; the user then has to say "continua".

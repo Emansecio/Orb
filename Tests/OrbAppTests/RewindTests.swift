@@ -410,7 +410,9 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
         chat.messages = [.user(SystemPrompt.expandSkill(in: "/relatorio da semana", skills: [skill])!.prompt),
                          ChatMessage(role: .assistant, content: "feito")]
         let (model, id) = model(with: chat)
-        model.skills = [skill]
+        var scoped = skill
+        scoped.orbIDs = [id]
+        model.skills = [scoped]
         await model.loadedConversation(id)
 
         #expect(model.regenerateLastReply(id))

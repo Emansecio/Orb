@@ -66,7 +66,7 @@ struct ComposerView: View {
                 .foregroundStyle(Palette.muted)
                 .lineLimit(1)
                 .frame(height: 14)
-                .padding(.top, 6)
+                .padding(.top, Spacing.xs + Spacing.hairline)
                 .opacity(hintText.isEmpty ? 0 : 1)
                 // The line changes with the focus, the first letter and the queue, never with a key: it cross-fades
                 // (opacity only, so it holds under Reduce Motion too) instead of cutting.
@@ -75,10 +75,10 @@ struct ComposerView: View {
                 .accessibilityHidden(true)
         }
         // Padded first, then capped: the card is as wide as the transcript's text (704 pt), not 56 pt wider.
-        .padding(.horizontal, 28)
-        .frame(maxWidth: 760)
-        .padding(.top, 6)
-        .padding(.bottom, 8)
+        .padding(.horizontal, TranscriptLayout.edge)
+        .frame(maxWidth: TranscriptLayout.column)
+        .padding(.top, Spacing.xs + Spacing.hairline)
+        .padding(.bottom, Spacing.s)
         .frame(maxWidth: .infinity)
         .background {
             LinearGradient(colors: [Palette.canvas.opacity(0), Palette.canvas], startPoint: .top, endPoint: .init(x: 0.5, y: 0.35))
@@ -135,7 +135,7 @@ struct ComposerView: View {
     private func card(_ lane: ComposerLane, hint hintText: String, _ situation: Situation) -> some View {
         let matches = slashMatches
         let jobs = situation.live.jobs
-        return VStack(alignment: .leading, spacing: 10) {
+        return VStack(alignment: .leading, spacing: Spacing.m) {
             if situation.holdsRoutine {
                 RoutineStrip(botID: botID, routineName: situation.routineName)
                     .transition(.adapted(.unfold, reduceMotion: reduceMotion))
@@ -179,7 +179,7 @@ struct ComposerView: View {
                         isSlashDismissed = false
                         slashIndex = 0 // a new word means a new list: the highlight starts at its top
                     }
-                    .padding(.horizontal, 4)
+                    .padding(.horizontal, Spacing.xs)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fieldHeight = $0 }
             }
             .scrollBounceBehavior(.basedOnSize)
@@ -189,9 +189,9 @@ struct ComposerView: View {
 
             bar(situation)
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 12)
-        .padding(.bottom, 8)
+        .padding(.horizontal, Spacing.m)
+        .padding(.top, Spacing.m)
+        .padding(.bottom, Spacing.s)
         // The card grows or shrinks once when the suggestions, the strip or an error come or go (never by their item
         // count or by a key): one discrete value, so the field's own height keeps following the typing (§2.5).
         .motion(value: CardParts(suggestions: !matches.isEmpty, strip: lane.hasAttachments || lane.pendingPictures > 0,
@@ -212,8 +212,8 @@ struct ComposerView: View {
     /// itself. It goes with its button or when the text changes (`AppModel.editDraft`); a microphone that was denied also
     /// gets the way to the pane that fixes it.
     private func errorLine(_ error: String, lane: ComposerLane) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            VStack(alignment: .leading, spacing: 4) {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.s) {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .font(Typography.small)
                     .foregroundStyle(Palette.danger)
@@ -225,33 +225,33 @@ struct ComposerView: View {
                         .foregroundStyle(Palette.accentText)
                 }
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: Spacing.s)
             Button("Fechar aviso", systemImage: "xmark") { lane.error = nil }
                 .labelStyle(.iconOnly)
                 .buttonStyle(CircleGhostStyle(side: 24, fontSize: 11)) // 24 pt target with hover, not the bare 11 pt glyph
                 .foregroundStyle(Palette.muted)
                 .iconTip(Tip.dismissNotice)
         }
-        .padding(.horizontal, 4)
+        .padding(.horizontal, Spacing.xs)
         .accessibilityElement(children: .contain)
     }
 
     /// The line above the field while a message of the chat is being edited: what it is, how to leave, and the button for it.
     private var editingBanner: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Spacing.s) {
             Image(systemName: "pencil")
                 .font(.system(size: 11, weight: .medium))
                 .accessibilityHidden(true)
             Text(RewindWords.banner)
                 .font(Typography.label.weight(.medium))
-            Spacer(minLength: 8)
+            Spacer(minLength: Spacing.s)
             Button("Cancelar", systemImage: "xmark") { model.cancelEditing(botID) }
                 .labelStyle(.iconOnly)
                 .buttonStyle(CircleGhostStyle(side: 24, fontSize: 11))
                 .help(Tip.cancelEdit)
         }
         .foregroundStyle(Palette.accentText)
-        .padding(.horizontal, 4)
+        .padding(.horizontal, Spacing.xs)
         .accessibilityElement(children: .contain)
     }
 
@@ -288,7 +288,7 @@ struct ComposerView: View {
 
     private func attachmentStrip(_ lane: ComposerLane) -> some View {
         ScrollView(.horizontal) {
-            HStack(spacing: 6) {
+            HStack(spacing: Spacing.xs + Spacing.hairline) {
                 ForEach(lane.pictures, id: \.path) { image in
                     PictureChip(image: image) {
                         lane.pictures.removeAll { $0 == image }
@@ -303,8 +303,8 @@ struct ComposerView: View {
                 }
                 if lane.pendingPictures > 0 { PreparingChip(count: lane.pendingPictures).transition(chipTransition) }
             }
-            .padding(.top, 10)
-            .padding(.trailing, 10)
+            .padding(.top, RemoveButtonInset.overlap)
+            .padding(.trailing, RemoveButtonInset.overlap)
             // A chip joining or leaving fades while the others slide over; keyed by what is in the strip, so nothing
             // else in the card animates with it. Under Reduce Motion the others do not slide (that is movement):
             // the chip alone fades, by its own transition.
@@ -330,7 +330,7 @@ struct ComposerView: View {
         let waitsOnChain = situation.live.chainWork != nil
         let action = ComposerAction.current(isWorking: situation.live.isWorking, canSend: canSend, waitsOnChain: waitsOnChain)
         let secondaryStop = action.showsSecondaryStop(waitsOnChain: waitsOnChain)
-        return HStack(spacing: 2) {
+        return HStack(spacing: Spacing.hairline) {
             ComposerPlusMenu(botID: botID, attach: { isImporting = true }) { insert("/\($0) ") }
             PermissionChip(botID: botID, compact: isCompact) { isFocused = true }
             Spacer(minLength: 8)
@@ -351,7 +351,7 @@ struct ComposerView: View {
     @ViewBuilder private func actionButtons(_ action: ComposerAction, secondaryStop: Bool, _ situation: Situation) -> some View {
         let routine = situation.routineName
         let elsewhere = situation.workingChat != nil
-        HStack(spacing: 6) {
+        HStack(spacing: Spacing.s) {
             if secondaryStop {
                 Button("Parar", systemImage: "stop.fill") { model.stopTurn(botID) }
                     .labelStyle(.iconOnly)
@@ -409,7 +409,7 @@ struct ComposerView: View {
                     SkillRow(skill: skill, isHighlighted: index == min(slashIndex, matches.count - 1)) { complete(skill) }
                 }
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, Spacing.xs)
             .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: Radius.card))
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Skills sugeridas")
@@ -593,6 +593,9 @@ private struct ComposerShortcuts: View {
                                                              queuedCount: queuedCount + model.unansweredSteered(of: botID).count,
                                                              pendingPictures: pendingPictures, isEditing: isEditing,
                                                              needsYou: model.live(botID).needsYou))
+            Button("Ditar ou parar de ditar") { model.toggleDictation(botID) }
+                .keyboardShortcut(AppShortcut.dictate)
+                .disabled(!Dictation.isSupported)
             Button("Escolher modelo") { isModelOpen.toggle() }
                 .keyboardShortcut(AppShortcut.chooseModel)
             // No button takes Esc for the edit (as `.cancelAction`): a key equivalent runs before the field that has the
@@ -656,6 +659,12 @@ struct RemoveButton: View {
     }
 }
 
+/// How far a chip's remove button hangs over the chip's top-trailing corner: the strip pads top and trailing by it, so
+/// the chip keeps its size with or without the button.
+enum RemoveButtonInset {
+    static let overlap: CGFloat = 10
+}
+
 extension View {
     /// The chip's remove button at its top trailing corner. The offset centers the 24 pt target where the 14 pt symbol
     /// used to sit; every attachment chip shares it so they cannot drift apart.
@@ -663,7 +672,7 @@ extension View {
         overlay(alignment: .topTrailing) {
             RemoveButton(label: label, symbol: "xmark.circle.fill", action: action)
                 .foregroundStyle(Palette.ink, Palette.canvas)
-                .offset(x: 10, y: -10)
+                .offset(x: RemoveButtonInset.overlap, y: -RemoveButtonInset.overlap)
         }
     }
 }

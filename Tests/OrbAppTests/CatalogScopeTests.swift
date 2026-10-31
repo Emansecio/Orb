@@ -40,7 +40,9 @@ struct OrbScopeModelTests {
         #expect(connector.orbIDs == nil && connector.isForAllOrbs && connector.secretKeys.isEmpty)
         #expect(connector.isAvailable(to: UUID()))
         let skill = try JSONDecoder().decode(Skill.self, from: Data(#"{"slug":"a","name":"A","instructions":"x"}"#.utf8))
-        #expect(skill.orbIDs == nil && skill.isAvailable(to: UUID()))
+        // A skill names its Orbs: a file without the key decodes to none (the `AppState` decode gives it the file's
+        // Orbs — the "every Orb" it once meant — but the value itself is empty, and nobody may use it).
+        #expect(skill.orbIDs.isEmpty && !skill.isAvailable(to: UUID()))
     }
 
     @Test func scopeSurvivesEncoding() throws {
@@ -56,9 +58,9 @@ struct OrbScopeModelTests {
         skill.orbIDs = [b]
         let again = try JSONDecoder().decode(Skill.self, from: JSONEncoder().encode(skill))
         #expect(again.orbIDs == [b])
-        // Everyone is nil, which is not written at all.
-        skill.orbIDs = nil
-        #expect(!String(decoding: try JSONEncoder().encode(skill), as: UTF8.self).contains("orbIDs"))
+        // An empty scope is written too (as an empty list): only a file from before skills were scoped lacks the key.
+        skill.orbIDs = []
+        #expect(String(decoding: try JSONEncoder().encode(skill), as: UTF8.self).contains("orbIDs"))
     }
 
     @Test func aBadScopeFallsBackToEveryOrb() throws {
@@ -71,6 +73,7 @@ struct OrbScopeModelTests {
         let rex = Bot(name: "Rex", role: "", orb: OrbConfig())
         let bots = [atlas, lia, rex]
         #expect(OrbScopeText.summary(orbIDs: nil, bots: bots) == "Todos os Orbs")
+        #expect(OrbScopeText.summary(orbIDs: [atlas.id, lia.id, rex.id], bots: bots) == "Todos os Orbs")
         #expect(OrbScopeText.summary(orbIDs: [lia.id], bots: bots) == "Só Lia")
         #expect(OrbScopeText.summary(orbIDs: [lia.id, atlas.id], bots: bots) == "Só Atlas e Lia")
         #expect(OrbScopeText.summary(orbIDs: [UUID()], bots: bots) == "Nenhum Orb")
@@ -93,9 +96,9 @@ struct OrbScopeModelTests {
     @Test @MainActor func skillsAndConnectorsFollowTheScope() {
         let model = model()
         let (atlas, lia) = (model.bots[0].id, model.bots[1].id)
-        model.skills = [Skill(slug: "todos", name: "Todos", summary: "", instructions: "i"),
+        model.skills = [Skill(slug: "todos", name: "Todos", summary: "", instructions: "i", orbIDs: [atlas, lia]),
                         Skill(slug: "so-lia", name: "Só Lia", summary: "", instructions: "i", orbIDs: [lia]),
-                        Skill(slug: "off", name: "Off", summary: "", instructions: "i", isEnabled: false)]
+                        Skill(slug: "off", name: "Off", summary: "", instructions: "i", isEnabled: false, orbIDs: [atlas])]
         #expect(model.skills(for: atlas).map(\.slug) == ["todos"])
         #expect(model.skills(for: lia).map(\.slug) == ["todos", "so-lia"])
 
@@ -181,7 +184,7 @@ struct OrbScopeModelTests {
     @Test @MainActor func usingASkillOpensTheChatWithTheShortcut() {
         let model = model()
         let lia = model.bots[1].id
-        let skill = Skill(slug: "resumir", name: "Resumir", summary: "", instructions: "i")
+        let skill = Skill(slug: "resumir", name: "Resumir", summary: "", instructions: "i", orbIDs: [lia])
         model.selection = .bot(lia)
         model.selection = .skills
         #expect(model.preferredBot(for: skill)?.id == lia)

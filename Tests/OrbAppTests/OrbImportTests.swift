@@ -534,7 +534,7 @@ import Testing
         let skills = model.skills(for: bot.id).filter { $0.source == Skill.importedSource }
         #expect(skills.count == 2 && skills.allSatisfy { $0.orbIDs == [bot.id] })
         #expect(Set(skills.map(\.slug)) == ["resumir-3", "traduzir"]) // `resumir` and `resumir-2` were taken
-        #expect(model.skills.first { $0.id == existing.id }?.orbIDs == nil)
+        #expect(model.skills.first { $0.id == existing.id }?.orbIDs.isEmpty == true)
         let other = model.createBot(name: "Outro", role: "", orb: OrbConfig(), model: "", mode: .ask, folder: .home)
         #expect(model.skills(for: other.id).allSatisfy { $0.source != Skill.importedSource })
 

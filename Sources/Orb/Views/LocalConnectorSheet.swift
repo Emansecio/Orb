@@ -84,7 +84,7 @@ struct LocalConnectorSheet: View {
 
     /// Something is missing: what, and the button that fixes it.
     private func attention(_ state: LocalConnectorState) -> some View {
-        VStack(spacing: 14) {
+        VStack(spacing: Spacing.m) {
             Image(systemName: state == .noAccount ? "person.crop.circle.badge.plus" : "exclamationmark.triangle.fill")
                 .font(.system(size: 34))
                 .foregroundStyle(Palette.warn)
@@ -121,7 +121,7 @@ struct LocalConnectorSheet: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.vertical, 24)
+        .padding(.vertical, Spacing.xxl)
         .accessibilityElement(children: .contain)
     }
 
@@ -153,17 +153,17 @@ struct LocalConnectorSheet: View {
     }
 
     private func result(symbol: String, tint: Color, title: String, detail: String) -> some View {
-        VStack(spacing: 12) {
+        VStack(spacing: Spacing.m) {
             Image(systemName: symbol).font(.system(size: 34)).foregroundStyle(tint)
             Text(title).font(.system(size: 15, weight: .semibold))
             Text(detail)
                 .font(Typography.label)
                 .foregroundStyle(Palette.muted)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: 360)
+                .frame(maxWidth: 380)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.vertical, 30)
+        .padding(.vertical, Spacing.xxl)
         .accessibilityElement(children: .combine)
     }
 
