@@ -566,12 +566,9 @@ private struct TranscriptList: View {
                 find.itemsChanged() // a search typed while the conversation was being read
                 // The conversation just arrived from disk: start at its end, as when it was there from the first frame.
                 guard !isLoading else { return }
-                proxy.scrollTo(BottomAnchor.id, anchor: .bottom)
-                // Again after the new rows have been laid out: the bottom of a long lazy list is not measured yet now.
-                Task {
-                    await Task.yield()
-                    if followsBottom { proxy.scrollTo(BottomAnchor.id, anchor: .bottom) }
-                }
+                // Again once the rows near the end are measured: a yield came before their layout, so both scrolls went by
+                // estimate and could stop past the end, showing only the canvas until something scrolled again.
+                settleAtBottom(proxy)
             }
         }
     }
