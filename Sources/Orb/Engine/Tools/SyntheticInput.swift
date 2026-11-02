@@ -1,3 +1,4 @@
+import AppKit
 import ApplicationServices
 import Carbon.HIToolbox
 import CoreGraphics
@@ -262,6 +263,25 @@ enum SyntheticEventBuilder {
         return (down, up)
     }
 
+    /// Press, 12 interpolated moves and release; the press is held a moment by the caller's pacing.
+    static func dragEvents(from start: CGPoint, to end: CGPoint, window: UInt32, source: CGEventSource?, steps: Int = 12) throws -> [CGEvent] {
+        var plan: [(CGEventType, CGPoint)] = [(.leftMouseDown, start)]
+        for step in 1...steps {
+            let part = CGFloat(step) / CGFloat(steps)
+            plan.append((.leftMouseDragged, CGPoint(x: start.x + (end.x - start.x) * part, y: start.y + (end.y - start.y) * part)))
+        }
+        plan.append((.leftMouseUp, end))
+        return try plan.map { type, point in
+            guard let event = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: .left) else {
+                throw ToolError("O macOS não deixou criar o evento do mouse.")
+            }
+            event.setIntegerValueField(.mouseEventClickState, value: 1)
+            event.setIntegerValueField(.mouseEventWindowUnderMousePointer, value: Int64(window))
+            event.setIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent, value: Int64(window))
+            return event
+        }
+    }
+
     /// Mouse down and up for each click of a multi-click (`mouseEventClickState` counts 1, 2…), aimed at a window by its
     /// `CGWindowID` and positioned in screen points. The cursor is not moved: the events go to the pid, not to the HID tap.
     static func clickEvents(at point: CGPoint, window: UInt32, button: MouseButton, count: Int, source: CGEventSource?) throws -> [CGEvent] {
@@ -332,7 +352,21 @@ struct PidEventSink: SyntheticEventSink {
         guard AXIsProcessTrusted() else { throw ToolError(MacPermissionProblem.accessibility.modelMessage) }
         guard pid != ProcessInfo.processInfo.processIdentifier else { throw ToolError("O Orb não envia teclas nem cliques para si mesmo.") }
         guard kill(pid, 0) == 0 || errno == EPERM else { throw ToolError("O app (pid \(pid)) não está mais aberto.") }
+        // Measured on macOS 27: Chromium drops these, even through SkyLight, and the app would still report a click.
+        if event.type == .leftMouseDown || event.type == .rightMouseDown, ChromiumApp.matches(pid) {
+            throw ToolError("apps Chromium ignoram clique enviado em segundo plano")
+        }
         event.postToPid(pid)
+    }
+}
+
+/// Chromium and Electron apps, whose windows ignore mouse events sent to the pid.
+enum ChromiumApp {
+    static func matches(_ pid: Int32) -> Bool {
+        guard let app = NSRunningApplication(processIdentifier: pid) else { return false }
+        if let bundle = app.bundleIdentifier, UIFocusKeys.browsers.contains(bundle) { return bundle != "com.apple.Safari" && bundle != "org.mozilla.firefox" }
+        guard let url = app.bundleURL else { return false }
+        return FileManager.default.fileExists(atPath: url.appendingPathComponent("Contents/Frameworks/Electron Framework.framework").path)
     }
 }
 
@@ -410,6 +444,22 @@ struct LiveSyntheticInput: SyntheticInput {
             // A gap after each release, so the app sees two clicks and not one long one.
             if index % 2 == 1, index < events.count - 1 { try await pause(pacing.betweenClicks) }
         }
+    }
+
+    func drag(from start: CGPoint, to end: CGPoint, window: UInt32, to pid: Int32) async throws {
+        let events = try SyntheticEventBuilder.dragEvents(from: start, to: end, window: window, source: source)
+        // A native drag session follows the real pointer and never sees this release, so it would hang on the person's
+        // mouse. Starting one writes the drag pasteboard.
+        let pasteboard = NSPasteboard(name: .drag), written = pasteboard.changeCount
+        for event in events.dropLast() {
+            try sink.post(event, to: pid)
+            try await pause(.milliseconds(25))
+            if pasteboard.changeCount != written {
+                try? sink.post(events[events.count - 1], to: pid)
+                throw ToolError("o arrasto abriu uma sessão do sistema, que só segue o mouse real")
+            }
+        }
+        if let last = events.last { try sink.post(last, to: pid) }
     }
 
     func scroll(dx: Int, dy: Int, at point: CGPoint, window: UInt32, to pid: Int32) async throws {

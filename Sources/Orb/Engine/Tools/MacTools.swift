@@ -169,13 +169,31 @@ struct LiveURLOpener: URLOpening {
     @MainActor private static func open(_ url: URL, with app: URL?, front: Bool) async throws {
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = front
+        let before = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let opened: NSRunningApplication?
         if let app {
-            _ = try await NSWorkspace.shared.open([url], withApplicationAt: app, configuration: configuration)
+            opened = try await NSWorkspace.shared.open([url], withApplicationAt: app, configuration: configuration)
         } else if url.isFileURL, url.pathExtension.lowercased() == "app" {
-            _ = try await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+            opened = try await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
         } else {
-            _ = try await NSWorkspace.shared.open(url, configuration: configuration)
+            opened = try await NSWorkspace.shared.open(url, configuration: configuration)
         }
+        guard !front, let before, let pid = opened?.processIdentifier, pid != before else { return }
+        // Some apps activate themselves while taking the document, whatever `activates` said; watch a moment and give the
+        // front back through Accessibility, as `ui_act` does.
+        for _ in 0..<8 {
+            try? await Task.sleep(for: .milliseconds(100))
+            let idle = CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: CGEventType(rawValue: ~0)!)
+            if shouldGiveFrontBack(front: NSWorkspace.shared.frontmostApplication?.processIdentifier, opened: pid, idle: idle) {
+                AXUIElementSetAttributeValue(AXUIElementCreateApplication(before), "AXFrontmost" as CFString, kCFBooleanTrue)
+                return
+            }
+        }
+    }
+
+    /// Only an opened app that came forward by itself: a person who touched the Mac just now may have gone to it.
+    nonisolated static func shouldGiveFrontBack(front: Int32?, opened: Int32, idle: TimeInterval) -> Bool {
+        front == opened && idle >= UIActTool.personWentThere
     }
 }
 

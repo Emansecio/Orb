@@ -1018,7 +1018,7 @@ struct AccessibilityWaitTests {
         try await bench.read()
         #expect(bench.system.listings == [false])
         try await bench.read([:])
-        #expect(bench.system.listings == [false, true], "only the app in front, when none is named")
+        #expect(bench.system.listings == [false, false], "with no app named the last one read is checked; the front is not asked")
     }
 
     @Test func readWaitsForATextToAppearOnANotification() async throws {

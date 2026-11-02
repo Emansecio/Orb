@@ -49,6 +49,25 @@ struct UIOutlineTests {
         #expect(outline.cuts.isEmpty)
     }
 
+    @Test func regionsListOnlyTheBigPartsOfTheWindow() {
+        var limits = UIOutlineLimits()
+        limits.regionsOnly = true
+        let outline = UIOutlineBuilder.outline(of: sampleWindow(), prefix: "w1", query: nil, limits: limits)
+        #expect(outline.lines == ["w1 window “Notas”", "  w1.1 toolbar", "  w1.2.1 list"])
+    }
+
+    @Test func aRootKeepsItsIdsAndFramesRelativeToTheWindow() {
+        let inner = fakeButton("Dentro")
+        inner.attrs["AXPosition"] = .point(CGPoint(x: 110, y: 120))
+        inner.attrs["AXSize"] = .size(CGSize(width: 10, height: 10))
+        let region = fake("AXToolbar", [inner])
+        region.attrs["AXPosition"] = .point(CGPoint(x: 105, y: 105))
+        region.attrs["AXSize"] = .size(CGSize(width: 50, height: 50))
+        let outline = UIOutlineBuilder.outline(of: region, prefix: "w1.3", query: nil, limits: UIOutlineLimits(),
+                                               windowFrame: CGRect(x: 100, y: 100, width: 500, height: 500))
+        #expect(outline.entries["w1.3.1"]?.frame == CGRect(x: 10, y: 20, width: 10, height: 10))
+    }
+
     @Test func idsCountEveryChildSoSkippedSiblingsDoNotShiftThem() {
         let outline = UIOutlineBuilder.outline(of: sampleWindow(), prefix: "w2", query: nil, limits: UIOutlineLimits())
         // The invisible group (5th) and the empty image (6th) are not listed, and the layout group (2nd) is folded away,
@@ -187,6 +206,24 @@ struct UIReadToolTests {
         #expect(!text.contains("Menus da barra"), "menus only on request")
     }
 
+    @Test func aReadingWithoutAppStaysOnTheAppThisOrbReadLast() async throws {
+        let (tool, _, _) = setup(windows: [fake("AXWindow", title: "Compras", [fakeButton("Salvar")])])
+        _ = try await read(tool)
+        let again = try await read(tool)
+        #expect(again.hasPrefix("App: Notas"))
+        #expect(try await read(tool, ["app": .string("frontmost")]).hasPrefix("App: Notas"))
+    }
+
+    @Test func rootReadsOneRegionAndRefusesWhatIsNotAWindowId() async throws {
+        let (tool, _, _) = setup(windows: [fake("AXWindow", title: "Compras", [fake("AXToolbar", [fakeButton("Salvar")]), fakeButton("Fora")])])
+        let text = try await read(tool, ["root": .string("w1.1")])
+        #expect(text.contains("w1.1.1 button “Salvar”") && !text.contains("Fora"))
+        let refused = await failureMessage { try await read(tool, ["root": .string("m1")]) }
+        #expect(refused.contains("inválido"))
+        let gone = await failureMessage { try await read(tool, ["root": .string("w1.9")]) }
+        #expect(gone.contains("interface mudou"))
+    }
+
     @Test func chooseTheWindowByNumberOrTitleAndTheFocusedOneWhenNoneIsGiven() async throws {
         let first = fake("AXWindow", title: "Primeira", [fakeButton("A")])
         let second = fake("AXWindow", title: "Segunda Janela", focused: true, [fakeButton("B")])
@@ -320,6 +357,37 @@ struct UIActToolTests {
     }
 
     // MARK: Pressing and checking
+
+    @Test func anItemThatOnlyOpensIsOpenedWithoutAnEvent() async throws {
+        let row = fake("AXButton", title: "Arquivo", actions: ["AXOpen"])
+        let rig = rig(windows: [fake("AXWindow", title: "Principal", [row])])
+        try await readFirst(rig)
+        _ = try await act(rig, ["action": .string("press"), "id": .string("w1.1")])
+        #expect(row.performed == ["AXOpen"])
+    }
+
+    @Test func aWrapperWithoutActionsPressesItsOnlyControl() async throws {
+        let inner = fakeButton("Detalhes")
+        let wrapper = fake("AXButton", title: "Cartão", actions: [], [inner, fake("AXStaticText", value: .string("x"))])
+        let rig = rig(windows: [fake("AXWindow", title: "Principal", [wrapper])])
+        try await readFirst(rig)
+        _ = try await act(rig, ["action": .string("press"), "id": .string("w1.1")])
+        #expect(inner.performed == ["AXPress"])
+    }
+
+    @Test func theAppsOwnIdOutranksTheLabel() async throws {
+        let button = fakeButton("Enviar 3")
+        button.attrs["AXIdentifier"] = .string("send")
+        let rig = rig(windows: [fake("AXWindow", title: "Principal", [button])])
+        try await readFirst(rig)
+        button.attrs["AXTitle"] = .string("Enviar 4")
+        _ = try await act(rig, ["action": .string("press"), "id": .string("w1.1")])
+        #expect(button.performed == ["AXPress"], "same id, new title: the same button")
+        try await readFirst(rig)
+        button.attrs["AXIdentifier"] = .string("cancel")
+        let refused = await failureMessage { try await act(rig, ["action": .string("press"), "id": .string("w1.1")]) }
+        #expect(refused.contains("interface mudou"))
+    }
 
     @Test func pressClicksTheElementTheIdNamedAndReportsWhatChanged() async throws {
         let open = fakeButton("Abrir")
@@ -801,7 +869,7 @@ struct UIToolWiringTests {
         }
         let act = try #require(ToolBox.macTools.first { $0.spec.name == "ui_act" })
         let actions = act.spec.parameters["properties"]?["action"]?["enum"]?.array?.compactMap(\.string)
-        #expect(actions == ["press", "focus", "set_value", "type", "key", "select", "scroll", "click", "increment", "decrement",
+        #expect(actions == ["press", "focus", "set_value", "type", "key", "select", "scroll", "click", "drag", "increment", "decrement",
                             "show_menu", "pick_menu"])
         #expect(act.spec.parameters["required"]?.array?.compactMap(\.string) == ["action"])
     }
@@ -815,5 +883,30 @@ struct UIToolWiringTests {
         var noMac = bot
         noMac.capabilities.remove(.computerUse)
         #expect(!PromptParts.nativeToolHints(noMac).contains("ui_read"))
+    }
+}
+
+struct BackgroundFocusTests {
+    @Test func shortcutsThatPullFocusAreKnownPerApp() throws {
+        func stroke(_ text: String) throws -> KeyStroke { try KeyStroke.parse(text) }
+        #expect(UIFocusKeys.pulls(try stroke("cmd+l"), bundleID: "com.google.Chrome"))
+        #expect(UIFocusKeys.pulls(try stroke("cmd+3"), bundleID: "com.apple.Safari"))
+        #expect(UIFocusKeys.pulls(try stroke("cmd+shift+g"), bundleID: "com.apple.finder"))
+        #expect(!UIFocusKeys.pulls(try stroke("cmd+l"), bundleID: "com.apple.Notes"))
+        #expect(!UIFocusKeys.pulls(try stroke("cmd+c"), bundleID: "com.google.Chrome"))
+        #expect(!UIFocusKeys.pulls(try stroke("l"), bundleID: "com.google.Chrome"))
+    }
+
+    @MainActor @Test func theFrontGoesBackOnlyFromAnAppThatCameByItself() {
+        #expect(LiveURLOpener.shouldGiveFrontBack(front: 5, opened: 5, idle: 3))
+        #expect(!LiveURLOpener.shouldGiveFrontBack(front: 5, opened: 5, idle: 0.5))
+        #expect(!LiveURLOpener.shouldGiveFrontBack(front: 6, opened: 5, idle: 3))
+    }
+
+    @Test func aDragPressesMovesAndReleasesBetweenItsEnds() throws {
+        let events = try SyntheticEventBuilder.dragEvents(from: CGPoint(x: 0, y: 0), to: CGPoint(x: 120, y: 60), window: 7, source: nil)
+        #expect(events.map(\.type).first == .leftMouseDown && events.last?.type == .leftMouseUp && events.count == 14)
+        #expect(events[6].location == CGPoint(x: 60, y: 30))
+        #expect(events.allSatisfy { $0.getIntegerValueField(.mouseEventWindowUnderMousePointer) == 7 })
     }
 }

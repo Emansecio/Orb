@@ -309,6 +309,7 @@ final class FakeSyntheticInput: SyntheticInput, @unchecked Sendable {
         case text(String, pid: Int32)
         case click(CGPoint, window: UInt32, button: MouseButton, count: Int, pid: Int32)
         case scroll(dx: Int, dy: Int, at: CGPoint, window: UInt32, pid: Int32)
+        case drag(CGPoint, CGPoint, window: UInt32, pid: Int32)
     }
 
     private let lock = NSLock()
@@ -366,6 +367,10 @@ final class FakeSyntheticInput: SyntheticInput, @unchecked Sendable {
 
     func click(at point: CGPoint, window: UInt32, button: MouseButton, count: Int, to pid: Int32) async throws {
         try record(.click(point, window: window, button: button, count: count, pid: pid))
+    }
+
+    func drag(from start: CGPoint, to end: CGPoint, window: UInt32, to pid: Int32) async throws {
+        try record(.drag(start, end, window: window, pid: pid))
     }
 
     func scroll(dx: Int, dy: Int, at point: CGPoint, window: UInt32, to pid: Int32) async throws {

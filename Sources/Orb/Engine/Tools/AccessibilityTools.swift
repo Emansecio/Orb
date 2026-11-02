@@ -74,6 +74,17 @@ enum UIAccess {
         }
     }
 
+    /// The app a reading is about: the named one, else the app this Orb read last (the person may be using the one in
+    /// front), else the one in front. "frontmost" asks for the app in front.
+    static func forReading(_ query: String?, bot: UUID?, store: UISnapshotStore, system: any AccessibilitySystem) async throws -> AccessibilityApp {
+        let named = query?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if named.caseInsensitiveCompare("frontmost") == .orderedSame { return try await open(nil, system: system) }
+        guard named.isEmpty, system.isTrusted(), let latest = store.latest(bot: bot) else { return try await open(query, system: system) }
+        // An app that closed since is no reason to fail: this call is how the Orb would recover.
+        if let app = try? await verify(latest.app, system: system) { return app }
+        return try await open(nil, system: system)
+    }
+
     /// The app an action is about: the named one, else the app of this Orb's newest reading. Never the app in front,
     /// which is the one the user is using.
     static func forAction(_ query: String?, bot: UUID?, store: UISnapshotStore, system: any AccessibilitySystem, needsName: Bool,
@@ -204,11 +215,13 @@ struct UIReadTool: AgentTool {
         never read) and flags. Stops at 400 lines. Ids are valid for this reading only. Needs Accessibility.
         """,
         parameters: .schema([
-            "app": .property("string", "Name or bundle id (default: the frontmost)."),
+            "app": .property("string", "Name, bundle id or \"frontmost\" (default: the last read)."),
             "window": .property("string", "Number or part of the title."),
             "query": .property("string", "Only elements containing this text."),
             "max_depth": .property("integer", "1-12."),
-            "include_menus": .property("boolean"),
+            "include_menus": .property("boolean", "With x1… status items."),
+            "regions": .property("boolean", "Dense app: regions only."),
+            "root": .property("string", "Read under this id."),
             "wait": .object(["type": .string("string"), "enum": .array(["appears", "disappears", "changes"].map(JSONValue.string)),
                              "description": .string("Wait first: query appears/disappears, or id/window changes.")]),
             "id": .property("string"),
@@ -235,17 +248,21 @@ struct UIReadTool: AgentTool {
     func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
 
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) {
-        let app = arguments.nonEmptyString("app") ?? "o app da frente"
+        let app = arguments.nonEmptyString("app") ?? "o último app lido"
         let detail = [arguments.nonEmptyString("window").map { "janela \($0)" }, arguments.nonEmptyString("query").map { "busca: \($0)" },
                       arguments.nonEmptyString("wait").map { "esperando: \($0)" }]
         return ("Lendo a interface de \(app)", detail.compactMap { $0 }.joined(separator: " · "))
     }
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
-        let app = try await UIAccess.open(arguments["app"]?.string, system: system)
+        let app = try await UIAccess.forReading(arguments["app"]?.string, bot: context.botID, store: store, system: system)
         var limits = limits
         limits.maxDepth = arguments.integer("max_depth", default: limits.maxDepth, in: 1...limits.maxDepth)
-        let window = arguments["window"]?.int.map(String.init) ?? arguments.nonEmptyString("window"), query = arguments.nonEmptyString("query")
+        limits.regionsOnly = arguments.flag("regions")
+        let rootID = arguments.nonEmptyString("root")
+        if let rootID, UIResolver.parse(rootID)?.kind != "w" { throw ToolError("root \"\(rootID)\" inválido: use um id de janela de ui_read, como w1.3.") }
+        // The root's id says its window, whatever `window` says.
+        let window = rootID.flatMap { UIResolver.parse($0)?.numbers.first.map(String.init) } ?? arguments["window"]?.int.map(String.init) ?? arguments.nonEmptyString("window"), query = arguments.nonEmptyString("query")
         let menus = arguments.flag("include_menus")
 
         var waitNote: String?
@@ -267,7 +284,7 @@ struct UIReadTool: AgentTool {
                 let root = system.root(of: app)
                 // Electron and Chromium build their tree on demand: asked once per app, retried once if it came back bare.
                 let enabled = session.enableManualAccessibilityOnce(root: root, system: system) ?? false
-                return (try Self.reading(root: root, app: app, window: window, query: query, includeMenus: menus, limits: readLimits), enabled)
+                return (try Self.reading(root: root, app: app, window: window, query: query, includeMenus: menus, limits: readLimits, rootID: rootID), enabled)
             }
         }
         var reading = first
@@ -275,14 +292,14 @@ struct UIReadTool: AgentTool {
             try await Task.sleep(for: .milliseconds(300))
             reading = try await UIAccess.mapped(app) {
                 try await sessions.run(app, within: deadline) {
-                    try Self.reading(root: system.root(of: app), app: app, window: window, query: query, includeMenus: menus, limits: readLimits)
+                    try Self.reading(root: system.root(of: app), app: app, window: window, query: query, includeMenus: menus, limits: readLimits, rootID: rootID)
                 }
             }
         }
 
         var snapshot = reading.snapshot
         snapshot.generation = live.nextGeneration()
-        snapshot = snapshot.carryingOver(from: store.snapshot(bot: context.botID, app: app), partial: query != nil)
+        snapshot = snapshot.carryingOver(from: store.snapshot(bot: context.botID, app: app), partial: query != nil || rootID != nil || limits.regionsOnly)
         store.save(snapshot, bot: context.botID)
         live.remember(bot: context.botID, pid: app.pid, generation: snapshot.generation, takenAt: snapshot.takenAt,
                       window: reading.window, elements: reading.elements)
@@ -296,7 +313,7 @@ struct UIReadTool: AgentTool {
 
     /// Reads one window (and the menus when asked or when there is no window). Blocking: call it on the app's queue.
     static func reading(root: any AccessibilityElement, app: AccessibilityApp, window selector: String?, query: String?,
-                        includeMenus: Bool, limits: UIOutlineLimits) throws -> UIReading {
+                        includeMenus: Bool, limits: UIOutlineLimits, rootID: String? = nil) throws -> UIReading {
         let top: [String: AXAttributeValue]
         switch root.read(["AXRole", "AXWindows", "AXFocusedWindow"]) {
         case .values(let values): top = values
@@ -320,7 +337,19 @@ struct UIReadTool: AgentTool {
             windowIndex = index + 1
             windowTitle = UIWindowChooser.title(of: windows[index])
             chosen = windows[index]
-            let outline = UIOutlineBuilder.outline(of: windows[index], prefix: "w\(index + 1)", query: query, limits: limits)
+            var start = windows[index]
+            var windowFrame: CGRect?
+            if let rootID, let numbers = UIResolver.parse(rootID)?.numbers {
+                for position in numbers.dropFirst() {
+                    guard let children = start.elements("AXChildren"), children.indices.contains(position - 1) else {
+                        throw UIResolver.stale("\(rootID) não existe mais")
+                    }
+                    start = children[position - 1]
+                }
+                let frame = windows[index].attributes(["AXPosition", "AXSize"])
+                if case .point(let origin)? = frame["AXPosition"], case .size(let size)? = frame["AXSize"] { windowFrame = CGRect(origin: origin, size: size) }
+            }
+            let outline = UIOutlineBuilder.outline(of: start, prefix: rootID ?? "w\(index + 1)", query: query, limits: limits, windowFrame: windowFrame)
             try AXWork.checkCancellation()
             if let failure = outline.failure {
                 if failure == .apiDisabled { throw UIAccess.error(for: failure, app: app) }
@@ -351,6 +380,11 @@ struct UIReadTool: AgentTool {
                 text += "\nMenus da barra:\n" + menus.lines.joined(separator: "\n")
             } else {
                 text += "\nNão consegui ler a barra de menus de \(app.name)."
+            }
+            if let extras = UIOutlineBuilder.menuBar(of: root, extras: true) {
+                entries.merge(extras.entries) { current, _ in current }
+                elements.merge(extras.elements) { current, _ in current }
+                text += "\nItens de status:\n" + extras.lines.joined(separator: "\n")
             }
         }
         let snapshot = UISnapshot(app: app, windowIndex: windowIndex, windowTitle: windowTitle, entries: entries)
@@ -654,7 +688,7 @@ enum UIResolver {
 
     /// `w1.3.2.5` → kind "w", numbers [1, 3, 2, 5]; `m2` → kind "m", numbers [2].
     static func parse(_ id: String) -> (kind: Character, numbers: [Int])? {
-        guard id.range(of: #"^[wm][0-9]+(\.[0-9]+)*$"#, options: .regularExpression) != nil, let kind = id.first else { return nil }
+        guard id.range(of: #"^[wmx][0-9]+(\.[0-9]+)*$"#, options: .regularExpression) != nil, let kind = id.first else { return nil }
         let numbers = id.dropFirst().split(separator: ".").compactMap { Int($0) }
         return numbers.isEmpty ? nil : (kind, numbers)
     }
@@ -715,8 +749,8 @@ enum UIResolver {
 
         var current: any AccessibilityElement
         var window: (any AccessibilityElement)?
-        if parsed.kind == "m" {
-            guard let items = root.element("AXMenuBar")?.elements("AXChildren"), items.indices.contains(parsed.numbers[0] - 1) else {
+        if parsed.kind != "w" {
+            guard let items = root.element(parsed.kind == "x" ? "AXExtrasMenuBar" : "AXMenuBar")?.elements("AXChildren"), items.indices.contains(parsed.numbers[0] - 1) else {
                 throw ToolError(staleMessage)
             }
             current = items[parsed.numbers[0] - 1]
@@ -753,7 +787,10 @@ enum UIResolver {
         guard live.rawRole == entry.rawRole else {
             throw stale("\(id) era \(UIRole.short(entry.rawRole)) e agora é \(live.role)")
         }
-        if !entry.label.isEmpty, UIText.fold(live.identity) != UIText.fold(entry.label) {
+        // The app's own id, when both readings have one, says more than the label: a title may change, a button is the same.
+        if let known = entry.identifier, let now = live.identifier {
+            guard known == now else { throw stale("\(id) agora é outro elemento") }
+        } else if !entry.label.isEmpty, UIText.fold(live.identity) != UIText.fold(entry.label) {
             throw stale("\(id) era \(UIText.quoted(entry.label)) e agora é " + (live.identity.isEmpty ? "sem nome" : UIText.quoted(live.identity)))
         }
         if let pid = element.pid, pid != app.pid { throw stale("\(id) é de outro processo agora") }
@@ -840,14 +877,15 @@ enum UIMenu {
         return lines.prefix(40).joined(separator: "\n") + (lines.count > 40 ? "\n- …" : "")
     }
 
-    /// The enabled menu item whose keyboard shortcut is `stroke`, found without opening any menu (the shortcut then works
+    /// The menu item whose keyboard shortcut is `stroke` (enabled, else a disabled one, which `enabled` tells), found without opening any menu (the shortcut then works
     /// whatever the keyboard layout and with the app in the background). Looks at most `limit` items deep in submenus, and
     /// gives up after `seconds` (each item is a round trip, and a big menu must not use up the call's deadline: the key
     /// then goes as an event) or when the call was cancelled.
-    static func item(for stroke: KeyStroke, root: any AccessibilityElement, limit: Int = 800, seconds: Double = 1) -> (element: any AccessibilityElement, titles: [String])? {
+    static func item(for stroke: KeyStroke, root: any AccessibilityElement, limit: Int = 800, seconds: Double = 1) -> (element: any AccessibilityElement, titles: [String], enabled: Bool)? {
         guard let bar = root.element("AXMenuBar"), let top = bar.elements("AXChildren") else { return nil }
         var budget = limit
         let started = Date()
+        var disabled: (any AccessibilityElement, [String])?
         let names = ["AXTitle", "AXEnabled", "AXMenuItemCmdChar", "AXMenuItemCmdModifiers", "AXMenuItemCmdVirtualKey", "AXChildren"]
 
         func search(_ items: [any AccessibilityElement], path: [String], depth: Int) -> (any AccessibilityElement, [String])? {
@@ -856,14 +894,18 @@ enum UIMenu {
                 budget -= 1
                 guard let values = item.read(names).attributes else { continue }
                 let title = values["AXTitle"]?.string ?? ""
-                if values["AXEnabled"]?.bool != false, matches(stroke, values) { return (item, path + [title]) }
+                if matches(stroke, values) {
+                    if values["AXEnabled"]?.bool != false { return (item, path + [title]) }
+                    if disabled == nil { disabled = (item, path + [title]) }
+                }
                 guard depth < 3, let menu = values["AXChildren"]?.elements?.first(where: { $0.string("AXRole") == "AXMenu" }),
                       let children = menu.elements("AXChildren") else { continue }
                 if let found = search(children, path: path + [title], depth: depth + 1) { return found }
             }
             return nil
         }
-        return search(top, path: [], depth: 0).map { (element: $0.0, titles: Array($0.1.filter { !$0.isEmpty })) }
+        let found = search(top, path: [], depth: 0)
+        return (found ?? disabled).map { (element: $0.0, titles: Array($0.1.filter { !$0.isEmpty }), enabled: found != nil) }
     }
 
     /// `AXMenuItemCmdModifiers`: shift 1, option 2, control 4, and 8 for "no command key".
@@ -883,6 +925,24 @@ enum UIMenu {
             guard case .number(let key)? = values["AXMenuItemCmdVirtualKey"] else { return false }
             return modifiers == stroke.modifiers && UInt16(key) == named.virtualKey
         }
+    }
+}
+
+// MARK: - Keys that pull focus
+
+/// Shortcuts an app takes as "the person wants to type here": sent to a pid in the background they still raise the window
+/// or flip tabs in front of the person.
+enum UIFocusKeys {
+    static let browsers: Set<String> = ["com.google.Chrome", "com.apple.Safari", "company.thebrowser.Browser", "com.microsoft.edgemac",
+                                        "com.brave.Browser", "org.mozilla.firefox", "org.chromium.Chromium"]
+
+    static func pulls(_ stroke: KeyStroke, bundleID: String?) -> Bool {
+        guard stroke.modifiers.contains(.command), case .character(let raw) = stroke.key else { return false }
+        let key = Character(raw.lowercased())
+        if bundleID == "com.apple.finder" { return key == "g" && stroke.modifiers == [.command, .shift] }
+        guard browsers.contains(bundleID ?? "") else { return false }
+        if stroke.modifiers == [.command] { return key == "l" || "123456789[]".contains(key) }
+        return stroke.modifiers == [.command, .shift] && "[]{}".contains(key)
     }
 }
 
@@ -1051,7 +1111,7 @@ enum UIMethod: Sendable {
 
 struct UIActTool: AgentTool {
     enum Action: String, CaseIterable, Sendable {
-        case press, focus, setValue = "set_value", type, key, select, scroll, click, increment, decrement
+        case press, focus, setValue = "set_value", type, key, select, scroll, click, drag, increment, decrement
         case showMenu = "show_menu", pickMenu = "pick_menu"
     }
 
@@ -1063,7 +1123,7 @@ struct UIActTool: AgentTool {
         description: """
         Operate an element found with ui_read, in the background (focus and cursor untouched): press, click (id, \
         "#n" mark or x,y screenshot pixels), focus, set_value, type (value into id or the focused field), key, select, \
-        scroll, increment, decrement, show_menu, pick_menu (menu_path ["Arquivo", "Exportar…"], no id). If the screen \
+        scroll, drag (id onto the id in value), increment, decrement, show_menu, pick_menu (menu_path ["Arquivo", "Exportar…"], no id). If the screen \
         changed it fails with "a interface mudou": read again. [precisa_assumir_tela] = only real input works: repeat \
         with takeover. Anything that deletes, sends, buys or discards always asks the user first. Needs Accessibility.
         """,
@@ -1191,6 +1251,9 @@ struct UIActTool: AgentTool {
                 }
                 step.button = MouseButton(rawValue: arguments.nonEmptyString("button")?.lowercased() ?? "left") ?? .left
                 step.count = arguments.integer("count", default: 1, in: 1...2)
+            case .drag:
+                if !hasTarget { _ = try arguments.requiredString("id") }
+                step.value = try arguments.requiredString("value")
             case .scroll:
                 if !hasTarget { _ = try arguments.requiredString("id") }
                 if let direction = arguments.nonEmptyString("direction")?.lowercased() {
@@ -1388,6 +1451,7 @@ struct UIActTool: AgentTool {
         }
         switch step.action {
         case .press: return ("Clicando em \(label)", role + reference + place)
+        case .drag: return ("Arrastando \(label)", role + reference + place)
         case .click: return ("Clicando em \(label)", role + reference + (step.count == 2 ? " (duplo)" : "") + place)
         case .focus: return ("Focando em \(label)", role + reference + place)
         case .setValue: return ("Escrevendo em \(label)", text(step.value) + place)
@@ -1460,6 +1524,7 @@ struct UIActTool: AgentTool {
     enum InputPlan: Sendable {
         case click(CGPoint, window: WindowRef, button: MouseButton, count: Int)
         case scroll(dx: Int, dy: Int, at: CGPoint, window: WindowRef)
+        case drag(CGPoint, to: CGPoint, window: WindowRef)
         case keys([KeyStroke], target: (any AccessibilityElement)?)
         case text(String, target: any AccessibilityElement, replace: Bool)
     }
@@ -1598,6 +1663,11 @@ struct UIActTool: AgentTool {
         try await refuseIfUserIsActive(app)
         var notes: [String] = []
         switch plan {
+        case .drag(let start, let end, let window):
+            let id = try await windowID(window, app: app, snapshot: snapshot, what: what)
+            do { try await system.input.drag(from: start, to: end, window: id, to: app.pid) } catch {
+                throw Self.needsScreen(what, because: Self.reason(error))
+            }
         case .click(let point, let window, let button, let count):
             let id = try await windowID(window, app: app, snapshot: snapshot, what: what)
             do { try await system.input.click(at: point, window: id, button: button, count: count, to: app.pid) } catch {
@@ -1885,7 +1955,7 @@ struct UIActTool: AgentTool {
             try checkDanger(target.live.identity, target.name)
             let state = before(target)
             let actions = target.element.actionNames()
-            if let action = ["AXPress", "AXConfirm", "AXPick"].first(where: actions.contains) {
+            if let action = ["AXPress", "AXConfirm", "AXPick", "AXOpen"].first(where: actions.contains) {
                 try target.element.perform(action)
                 return Acted(summary: "\(verb) \(target.name) (\(target.id)).", target: target.element, before: state)
             }
@@ -1894,6 +1964,14 @@ struct UIActTool: AgentTool {
                 if UIRowSelection.select([target.element], in: context?.container) {
                     return Acted(summary: "Selecionei \(target.name) (\(target.id)).", target: target.element, before: state)
                 }
+            }
+            // A wrapper without actions around one control: pressing that control needs no event.
+            let inner = (target.element.elements("AXChildren") ?? []).filter { !UIOutlineBuilder.clickActions.isDisjoint(with: $0.actionNames()) }
+            if inner.count == 1, let action = ["AXPress", "AXConfirm", "AXPick", "AXOpen"].first(where: inner[0].actionNames().contains) {
+                let label = UIElementInfo(attributes: inner[0].attributes(UIElementInfo.attributeNames)).identity
+                try checkDanger(label, target.name)
+                try inner[0].perform(action)
+                return Acted(summary: "\(verb) \(target.name) (\(target.id)).", target: target.element, before: state)
             }
             guard let frame = target.frame, target.window != nil else { throw missing(target, "clique", actions) }
             return Acted(summary: "\(verb) \(target.name) (\(target.id)).", target: target.element, before: state,
@@ -1924,6 +2002,17 @@ struct UIActTool: AgentTool {
             return Acted(summary: "\(verb) \(target.name) (\(target.id)).", target: target.element, before: before(target),
                          input: .click(CGPoint(x: frame.midX, y: frame.midY), window: windowRef(target), button: step.button, count: step.count),
                          inputWhat: "clicar em \(target.name)")
+
+        case .drag:
+            let source = try resolve(step.reference ?? ""), destination = try resolve(step.value ?? "")
+            try checkDanger(source.live.identity, source.name)
+            guard let from = source.frame, let to = destination.frame, source.window != nil, destination.window != nil else {
+                throw missing(source, "arrasto", [])
+            }
+            return Acted(summary: "Arrastei \(source.name) para \(destination.name).",
+                         target: nil, before: before(source),
+                         input: .drag(CGPoint(x: from.midX, y: from.midY), to: CGPoint(x: to.midX, y: to.midY), window: windowRef(source)),
+                         inputWhat: "arrastar \(source.name)")
 
         case .focus:
             let target = try resolve(step.reference ?? "")
@@ -1994,10 +2083,17 @@ struct UIActTool: AgentTool {
             if !request.approved, let reason = UIDanger.reason(forKeys: step.keys, appName: app.name, bundleID: app.bundleID) {
                 throw ToolError("Não fiz: \(reason), e o pedido não passou pela confirmação do usuário. Repita dizendo o app (argumento app) para que ele confirme.")
             }
+            if let stroke = step.keys.first(where: { UIFocusKeys.pulls($0, bundleID: app.bundleID) }) {
+                throw needsScreen("teclar \(stroke) em \(app.name)", because: "esse atalho puxa o foco ou troca a aba à vista mesmo em segundo plano")
+            }
             let state = UIState.capture(root: root, target: target?.element, known: target?.attributes)
             // A shortcut of the menu bar is pressed as its menu item: no keyboard layout involved, works in the background.
             if step.keys.count == 1, let stroke = step.keys.first, !stroke.modifiers.isDisjoint(with: [.command, .control]),
                let item = UIMenu.item(for: stroke, root: root) {
+                // The key would die on the same disabled item, and macOS disables some (Save) just for being behind.
+                guard item.enabled else {
+                    throw needsScreen("usar \(stroke) em \(app.name)", because: "o item \(UIText.quoted(item.titles.joined(separator: " → "))) está desativado com o app em segundo plano; se ele tem AppleScript, tente por lá")
+                }
                 try checkDanger(item.titles.last ?? "", "o item \(UIText.quoted(item.titles.joined(separator: " → ")))")
                 try item.element.perform("AXPress")
                 return Acted(summary: "Usei \(stroke) pelo menu \(item.titles.joined(separator: " → ")) de \(app.name).", target: target?.element, before: state)
@@ -2091,7 +2187,7 @@ struct UIActTool: AgentTool {
                                 + "Leia de novo com ui_read e repita por id para que ele confirme.")
             }
             let state = UIState.capture(root: root, target: element)
-            if step.button == .left, step.count == 1, let action = ["AXPress", "AXConfirm", "AXPick"].first(where: element.actionNames().contains) {
+            if step.button == .left, step.count == 1, let action = ["AXPress", "AXConfirm", "AXPick", "AXOpen"].first(where: element.actionNames().contains) {
                 try element.perform(action)
                 return Acted(summary: "Cliquei em \(name) (\(description)).", target: element, before: state)
             }
@@ -2344,6 +2440,7 @@ struct UIActTool: AgentTool {
         case click(CGPoint, button: MouseButton, count: Int)
         case type(String)
         case key(KeyStroke)
+        case drag(CGPoint, to: CGPoint)
     }
 
     /// Runs the steps with the real mouse and keyboard, only through `ScreenOwner` (which brings the app forward, and puts
@@ -2389,6 +2486,10 @@ struct UIActTool: AgentTool {
                         moves.append(.click(try center(step), button: .left, count: 1))
                     case .click:
                         moves.append(.click(try center(step), button: step.button, count: step.count))
+                    case .drag:
+                        var destination = step
+                        destination.reference = step.value
+                        moves.append(.drag(try center(step), to: try center(destination)))
                     case .type:
                         if step.reference != nil { moves.append(.click(try center(step), button: .left, count: 1)) }
                         moves.append(.type(step.value ?? ""))
@@ -2413,6 +2514,7 @@ struct UIActTool: AgentTool {
                 case .click(let point, let button, let count): try await hand.click(at: point, button: button, count: count)
                 case .type(let text): try await hand.type(text)
                 case .key(let stroke): try await hand.key(stroke)
+                case .drag(let start, let end): try await hand.drag(from: start, to: end)
                 }
             }
         }

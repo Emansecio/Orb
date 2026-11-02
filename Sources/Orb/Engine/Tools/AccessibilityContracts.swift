@@ -250,6 +250,8 @@ protocol SyntheticInput: Sendable {
     func click(at point: CGPoint, window: UInt32, button: MouseButton, count: Int, to pid: Int32) async throws
     /// Scrolls by pixels; positive `dy` moves the content down (the page goes up), like a trackpad.
     func scroll(dx: Int, dy: Int, at point: CGPoint, window: UInt32, to pid: Int32) async throws
+    /// Press, move and release inside one window, without the real cursor.
+    func drag(from start: CGPoint, to end: CGPoint, window: UInt32, to pid: Int32) async throws
 }
 
 // MARK: - Window capture
@@ -329,6 +331,7 @@ struct UnavailableSyntheticInput: SyntheticInput {
         throw unavailable("O clique no app")
     }
     func scroll(dx: Int, dy: Int, at point: CGPoint, window: UInt32, to pid: Int32) async throws { throw unavailable("A rolagem no app") }
+    func drag(from start: CGPoint, to end: CGPoint, window: UInt32, to pid: Int32) async throws { throw unavailable("O arrasto no app") }
 }
 
 struct UnavailableWindowCapturer: WindowCapturer {

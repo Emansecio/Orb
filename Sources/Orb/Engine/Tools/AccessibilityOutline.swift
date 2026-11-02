@@ -82,12 +82,14 @@ struct UIElementInfo: Equatable {
     var hidden = false
     var size: CGSize?
     var secure = false
+    /// The id the app gave the element (`AXIdentifier`, `AXDOMIdentifier`): survives retitling, unlike the label.
+    var identifier: String?
 
     /// The AX attributes read for every element, in one round trip. AXValue is not among them: a password field's value
     /// must never be requested.
     static let attributeNames = [
         "AXRole", "AXSubrole", "AXRoleDescription", "AXTitle", "AXDescription", "AXHelp", "AXPlaceholderValue",
-        "AXEnabled", "AXFocused", "AXSelected", "AXHidden", "AXSize",
+        "AXEnabled", "AXFocused", "AXSelected", "AXHidden", "AXSize", "AXIdentifier", "AXDOMIdentifier",
     ]
 
     init() {}
@@ -108,6 +110,7 @@ struct UIElementInfo: Equatable {
         selected = attributes["AXSelected"]?.bool ?? false
         hidden = attributes["AXHidden"]?.bool ?? false
         if case .size(let size)? = attributes["AXSize"] { self.size = size }
+        identifier = text("AXIdentifier") ?? text("AXDOMIdentifier")
         let kind = UIText.fold(attributes["AXRoleDescription"]?.string ?? "")
         secure = attributes["AXSubrole"]?.string == "AXSecureTextField" || kind.contains("secure") || kind.contains("seguro")
     }
@@ -185,6 +188,8 @@ struct UIOutlineLimits: Sendable {
     var webDepth = 3
     /// With a query, end the walk at the first element listed for it (a wait asks only whether the text is there).
     var stopAtFirstMatch = false
+    /// List only the regions of the window, to choose a `root` in dense apps.
+    var regionsOnly = false
 }
 
 struct UIOutline {
@@ -244,11 +249,18 @@ enum UIOutlineBuilder {
     /// Actions a click can trigger.
     static let clickActions: Set<String> = ["AXPress", "AXConfirm", "AXPick", "AXOpen"]
 
+    /// Roles that divide a window into regions, for `regionsOnly`.
+    static let regionRoles: Set<String> = ["toolbar", "tabs", "table", "outline", "list", "web", "sheet", "drawer", "popover"]
+
     /// The outline of one window. Elements get ids `<prefix>.<position among its parent's children>`, counting every
     /// child (also the ones left out), so an id does not move when something beside it appears or disappears.
-    static func outline(of window: any AccessibilityElement, prefix: String, query: String?, limits: UIOutlineLimits) -> UIOutline {
+    /// With `windowFrame`, `window` is an element inside that window (`root`) and frames stay relative to the window.
+    static func outline(of window: any AccessibilityElement, prefix: String, query: String?, limits: UIOutlineLimits,
+                        windowFrame: CGRect? = nil) -> UIOutline {
         let wanted = query.map(UIText.fold).flatMap { $0.isEmpty ? nil : $0 }
         var walk = Walk()
+        walk.origin = windowFrame?.origin
+        walk.windowFrame = windowFrame
         let roots = visit(window, id: prefix, depth: 0, webDepth: nil, wanted: wanted, limits: limits, walk: &walk)
         var outline = UIOutline(cuts: walk.cuts, cancelled: walk.cancelled, failure: walk.failure, windowFrame: walk.windowFrame)
         let listed = roots.filter(\.keep)
@@ -267,7 +279,7 @@ enum UIOutlineBuilder {
         outline.lines = fitted.kept
         for (node, _) in ordered.prefix(fitted.kept.count) {
             outline.entries[node.id] = UISnapshot.Entry(rawRole: node.info.rawRole, label: node.info.identity, secure: node.info.secure,
-                                                        frame: node.frame, actionable: node.actionable)
+                                                        frame: node.frame, actionable: node.actionable, identifier: node.info.identifier)
             outline.elements[node.id] = node.element
         }
         return outline
@@ -296,7 +308,7 @@ enum UIOutlineBuilder {
         var info = UIElementInfo(attributes: attributes)
         var frame: CGRect?
         if case .point(let origin)? = attributes["AXPosition"], let size = info.size {
-            if depth == 0 {
+            if depth == 0, walk.origin == nil {
                 walk.origin = origin
                 walk.windowFrame = CGRect(origin: origin, size: size)
             }
@@ -307,7 +319,7 @@ enum UIOutlineBuilder {
         if info.isInvisible { return [] }
         info.value = UIElementInfo.readValue(of: element, info: info)
         let dropped = depth > 0 && !info.hasText && (UIRole.layoutOnly.contains(info.role) || UIRole.emptyIsNoise.contains(info.role))
-        let matches = wanted.map { info.searchText.contains($0) } ?? true
+        let matches = (wanted.map { info.searchText.contains($0) } ?? true) && (!limits.regionsOnly || depth == 0 || regionRoles.contains(info.role))
         if limits.stopAtFirstMatch, wanted != nil, matches, !dropped { walk.stopped = true }
 
         var children: [Node] = []
@@ -355,10 +367,10 @@ enum UIOutlineBuilder {
         for child in node.children where child.keep { collect(child, depth: depth + 1, limits: limits, into: &ordered) }
     }
 
-    /// The menu bar's top-level menus, ids `m1`, `m2`…
-    static func menuBar(of root: any AccessibilityElement)
+    /// The menu bar's top-level menus, ids `m1`, `m2`…; with `extras`, the app's status items, ids `x1`, `x2`…
+    static func menuBar(of root: any AccessibilityElement, extras: Bool = false)
         -> (lines: [String], entries: [String: UISnapshot.Entry], elements: [String: any AccessibilityElement])? {
-        guard let bar = root.element("AXMenuBar"), let items = bar.elements("AXChildren"), !items.isEmpty else { return nil }
+        guard let bar = root.element(extras ? "AXExtrasMenuBar" : "AXMenuBar"), let items = bar.elements("AXChildren"), !items.isEmpty else { return nil }
         var lines: [String] = []
         var entries: [String: UISnapshot.Entry] = [:]
         var elements: [String: any AccessibilityElement] = [:]
@@ -366,7 +378,7 @@ enum UIOutlineBuilder {
             guard let attributes = item.read(UIElementInfo.attributeNames).attributes else { continue }
             let info = UIElementInfo(attributes: attributes)
             guard !info.isInvisible else { continue }
-            let id = "m\(index + 1)"
+            let id = (extras ? "x" : "m") + "\(index + 1)"
             lines.append(id + " " + info.line)
             entries[id] = UISnapshot.Entry(rawRole: info.rawRole, label: info.identity, secure: false, actionable: true)
             elements[id] = item
@@ -402,6 +414,8 @@ struct UISnapshot: Sendable, Equatable {
         var frame: CGRect?
         /// Whether the element has an action a click can trigger (press, pick, confirm…).
         var actionable: Bool = false
+        /// The app's own id for the element, when it has one.
+        var identifier: String?
     }
 
     var app: AccessibilityApp

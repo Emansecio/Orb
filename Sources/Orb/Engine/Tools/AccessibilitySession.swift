@@ -373,7 +373,7 @@ final class UILiveElements: @unchecked Sendable {
             }
             list[index].used = now
             readings[key] = list
-            return list[index].elements[id].map { Found(element: $0, window: id.hasPrefix("m") ? nil : list[index].window) }
+            return list[index].elements[id].map { Found(element: $0, window: id.hasPrefix("m") || id.hasPrefix("x") ? nil : list[index].window) }
         }
     }
 

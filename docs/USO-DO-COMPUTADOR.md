@@ -34,7 +34,7 @@ AX). N2 nunca é automático.
 | Ação | N0 (AX) | N1 (evento ao pid) | N2 / ressalvas |
 |---|---|---|---|
 | Ler árvore | `AXUIElementCopyMultipleAttributeValues` com `AXChildren` e `AXPosition` no mesmo lote; funciona coberta, em outro Space, minimizada, app oculto. Electron: `AXManualAccessibility=true` e nova tentativa após 300 ms se vier < 3 filhos. Nunca `AXEnhancedUserInterface`. | — | Canvas/jogos: árvore vazia → screenshot + OCR. |
-| Pressionar | `AXPress`, depois `AXConfirm`/`AXPick`; linhas: `AXSelected`. | Clique no centro do elemento sem mover o cursor. | Folha modal aberta: AX na janela-mãe é ignorado → tratar a folha primeiro. Controles sem ação → N1 → N2. |
+| Pressionar | `AXPress`, depois `AXConfirm`/`AXPick`/`AXOpen`; linhas: `AXSelected`; invólucro sem ação: o único controle acionável dentro dele. | Clique no centro do elemento sem mover o cursor. | Folha modal aberta: AX na janela-mãe é ignorado → tratar a folha primeiro. Controles sem ação → N1 → N2. |
 | Definir texto | `AXValue` substitui; `AXSelectedTextRange` + `AXSelectedText` insere no cursor. | Campos controlados por JS ignoram `AXValue` → digitar. | Campo de senha: nunca ler; preencher só com perigo. |
 | Digitar | — | `CGEvent(keyboardEventSource:…)` + `keyboardSetUnicodeString` em pedaços de ≤ 20 UTF-16, `postToPid`; antes `AXFocused` no alvo e conferir `AXFocusedUIElement` do app; conferir de novo a cada pedaço. | Secure Input (`IsSecureEventInputEnabled()`) pode descartar: avisar. Chromium/jogos às vezes só com app ativo → N2. |
 | Atalhos | Primeiro achar no menu o item com `AXMenuItemCmdChar`/`CmdModifiers`/`CmdVirtualKey` iguais e `AXPress` nele (independe do layout, funciona em segundo plano). | Evento com `flags` explícitos; keycode via `UCKeyTranslate` no layout atual (ABNT2 ≠ US). | — |
@@ -42,7 +42,7 @@ AX). N2 nunca é automático.
 | Rolar | `AXScrollToVisible`; `AXValue` 0…1 da `AXScrollBar`. | `CGEvent(scrollWheelEvent2Source:units:.pixel…)` na janela, `postToPid`. | — |
 | Focar campo | `AXFocused=true` só no elemento. Nunca `AXMain`/`AXFocused` em janela, nem `AXRaise`. | — | Se o app se ativar sozinho: devolver o app anterior na hora e marcar o app como "rouba foco" na sessão (focar/digitar nele passa a pedir N2). Exceto se a pessoa apertou tecla ou botão nos últimos 2 s (`secondsSinceUserInput`, `.hidSystemState`): foi ela que foi ao app; ele fica na frente, sem a marca, e teclas e texto são recusados como "o usuário está usando". |
 | Listas e tabelas | `AXSelected` na linha; `AXSelectedRows`; `AXSelectedChildren`; `AXDisclosing`; combobox `AXValue`. | — | Popup (`AXPopUpButton`): tentar `AXChildren → AXMenu → item`; a maioria só expõe o menu aberto → N2. |
-| Arrastar e soltar | Não há; oferecer alternativa semântica (arquivos, AppleScript). | Não funciona (`NSDraggingSession` exige HID real). | Só N2, movimento interpolado em 15 passos. |
+| Arrastar e soltar | Não há; oferecer alternativa semântica (arquivos, AppleScript). | `ui_act drag` (`id` até o id em `value`): down, 12 movimentos e up ao pid. AppKit comum: sonda funcionou no macOS 27. Chromium e Electron recusam clique e arrasto ao pid, que chegaram de modo instável até por `SLEventPostToPid`: pedem N2. | `NSDraggingSession` nativa só segue o mouse real: detectada pela área de arrasto, solta e pede N2 (movimento interpolado em 15 passos). |
 | Clicar em coordenada | Hit-test local nos frames do snapshot (menor área que contém o ponto), confirmado por `AXUIElementCopyElementAtPosition` (usa ordem z: falha com janela coberta, por isso o local vem antes); sobe até o ancestral acionável (≤ 5 níveis) e `AXPress`. | Mouse down/up com `mouseEventClickState` e `.mouseEventWindowUnderMousePointer`/`…ThatCanHandleThisEvent` = `CGWindowID`, `postToPid`; só se a janela aceitar first mouse. | Hover/tooltips não existem em segundo plano (usar `AXHelp`) → N2. |
 | Capturar janela | — | `SCScreenshotManager.captureImage(contentFilter: SCContentFilter(desktopIndependentWindow:), configuration:)` (14.0+), `ignoreShadowsSingleWindow`, `captureResolution = .nominal`, `includeChildWindows` (14.2+), `showsCursor=false`. | Coberta ok; outro Space ok (pode vir defasada); minimizada/app oculto não (oferecer `AXMinimized=false`, visível, pede cartão). Fallback `screencapture -o -l`. Nunca `CGWindowListCreateImage`. |
 | Observar mudanças | `AXObserver`: `AXValueChanged`, `AXUIElementDestroyed`, `AXCreated`, `AXWindowCreated`, `AXFocusedUIElementChanged`, `AXFocusedWindowChanged`, `AXTitleChanged`, `AXSelectedChildrenChanged`, `AXSelectedRowsChanged`, `AXSelectedTextChanged`, `AXLayoutChanged`, `AXSheetCreated`, `AXRowCountChanged`, `AXLoadComplete`. | Polling a 250 ms quando `notificationUnsupported`. | Canvas: diff de screenshot 32×32 a 2 Hz, só se pedido. |
@@ -51,8 +51,8 @@ AX). N2 nunca é automático.
 `CGWindowListCreateImage`; o macOS reconfirma Gravação de Tela periodicamente (o manual avisa). 26: não usar a captura HDR.
 27: smoke roda aqui.
 
-**Proibidas:** `_AXUIElementGetWindow`, `CGS*`, `SLS*`/SkyLight, `CGEventPostToPSN`, `AXUIElementPostKeyboardEvent`,
-`CGWindowListCreateImage`. `.cghidEventTap` só dentro de N2.
+**Proibidas:** `CGS*`, `SLS*`/SkyLight, `CGEventPostToPSN`, `AXUIElementPostKeyboardEvent`,
+`CGWindowListCreateImage`. `.cghidEventTap` só dentro de N2. Exceção: `_AXUIElementGetWindow`, resolvido com `dlsym`, liga a janela AX ao `CGWindowID`.
 
 ## 2. Ferramentas do modelo
 
@@ -61,7 +61,7 @@ não muda). Manter as frases que `ToolSpecEconomyTests` exige: ui_read "Accessib
 "w1.3.2", "valid for this reading only"; ui_act "ui_read", "interface mudou", "always asks the user first", "pick_menu",
 "Accessibility"; screenshot "OCR", "Screen Recording", "window".
 
-**`ui_read`** (`.safe`): `wait` (`appears` | `disappears` | `changes`), `timeout` (padrão 5, 1–30); `appears`/`disappears`
+**`ui_read`** (`.safe`): sem `app`, lê o último app lido por este Orb, e só sem leitura viva o da frente; `app: "frontmost"` pede o da frente. `regions` lista só as regiões da janela e `root` lê abaixo de um id, para apps densos. `include_menus` traz também os itens de status (`x1`…). `AXIdentifier`/`AXDOMIdentifier` vencem o rótulo ao conferir um id. `wait` (`appears` | `disappears` | `changes`), `timeout` (padrão 5, 1–30); `appears`/`disappears`
 usam `query`, `changes` usa `id` ou a janela. Espera e depois lê; acrescenta `(esperei 1,2 s: apareceu …)` ou
 `(não aconteceu em 5 s)`. Orçamentos: 400 linhas, valor de 80 caracteres, 3.000 elementos visitados, teto de 14.000
 caracteres (`ToolOutputBudget.fit`), relógio de 4 s sem query e 8 s com query, no máximo 2 IPC por elemento (+1 para
@@ -89,6 +89,8 @@ Acessibilidade só a imagem; `CGRequestScreenCaptureAccess` no máximo uma vez p
 false`, como `open -g`; `URLOpening`/`LiveURLOpener`, um gravador nos testes); `front: true` ativa, e a descrição manda usá-lo
 só quando a pessoa pediu para ver. A saída diz "em segundo plano" ou "na frente"; o cartão diz "Abrindo na frente". A recusa
 "app não está aberto" do `ui_*` manda abrir com `open`, em segundo plano.
+
+Em segundo plano, `open` vigia a frente por 800 ms e a devolve por `AXFrontmost` se o app aberto se ativar sozinho e a pessoa não tiver mexido no Mac nos últimos 2 s. `ui_act key` pede `[precisa_assumir_tela]` para atalhos que puxam o foco (`UIFocusKeys`: `⌘L`, `⌘1…9`, troca de aba nos navegadores, `⌘⇧G` no Finder) e para atalho cujo item de menu está desativado, porque a tecla morreria nele.
 
 **`app_dictionary`** (`AppDictionary.swift`, `.safe`, `computerUse`): `app` (nome, bundle id ou caminho do `.app`), `search`, `suite`, `offset`. Roda `/usr/bin/sdef`
 (20 s, cancelável), lê o XML com `XMLParser` (itens `hidden` saem) e devolve uma linha por comando (`cmd show <tipo> param?:tipo -> resultado`),
@@ -230,7 +232,7 @@ app e cursor (≤ 2 pt). Opcional Finder/TextEdit só leitura com `ORB_AX_SMOKE_
 cancelável); o prompt diz que conteúdo web vai para as ferramentas do navegador.
 
 **Revisão final:** `grep` sem `activate(`, `AXRaise`, `AXMain`, `.cghidEventTap` fora de `ScreenTakeover.swift`; sem
-`_AX`, `CGS`, `SLS`, `CGWindowListCreateImage`, `PostToPSN`; nenhuma chamada AX na main nem em `runDetached`; timeout
+`CGS`, `SLS`, `CGWindowListCreateImage`, `PostToPSN`; nenhuma chamada AX na main nem em `runDetached`; timeout
 global no app; toda saída de takeover passa pela restauração; `UISnapshot` antigo decodifica; rechecagem de
 perigo em `click`, `key` e `steps`; nenhum valor de campo seguro em logs, legenda ou cartão; tetos de specs; testes antigos
 alterados só onde manda; smoke neste Mac.
