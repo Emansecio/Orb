@@ -382,6 +382,68 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(model.routines[0].followUps[0].resolved)
     }
 
+    @MainActor private func save(_ subject: String, channel: String, next: String = "Aguardar", in model: AppModel, _ routine: Routine,
+                      _ bot: Bot) throws -> String {
+        try model.changeFollowUp(.object(["action": .string("save"), "subject": .string(subject), "channel": .string(channel),
+                                          "next_step": .string(next)]), routineID: routine.id, botID: bot.id)
+    }
+
+    @Test @MainActor func aClientHasOneOpenFollowUpWhateverTheNumberLooksLike() throws {
+        let (model, bot, routine) = setUp()
+        model.session(bot.id).routineID = routine.id
+        _ = try save("Vagner — aguardando lista", channel: "WhatsApp 5511972841701", in: model, routine, bot)
+        let again = try save("Vagner — 3 de 4 vagas entregues", channel: "WhatsApp (11) 7284-1701", next: "Quarta vaga", in: model, routine, bot)
+        #expect(again.contains("sem duplicar"))
+        let open = model.routines[0].followUps.filter { !$0.resolved }
+        #expect(open.count == 1 && open[0].subject == "Vagner — 3 de 4 vagas entregues" && open[0].nextStep == "Quarta vaga")
+    }
+
+    @Test @MainActor func twinsAlreadySavedBecomeTheNewestAndAReturningClientIsRecognized() throws {
+        let (model, bot, routine) = setUp()
+        model.session(bot.id).routineID = routine.id
+        let old = RoutineFollowUp(subject: "Marcos — lead novo", channel: "WhatsApp 5511947346897", nextStep: "Pedir academia",
+                                  updatedAt: .now.addingTimeInterval(-3600))
+        let new = RoutineFollowUp(subject: "Marcos — áudio ilegível", channel: "WhatsApp 5511947346897", nextStep: "Pedir por escrito")
+        let done = RoutineFollowUp(subject: "Ana — entregue", channel: "ana@exemplo.com", nextStep: "Nada", lastAction: "Vaga entregue",
+                                   resolved: true)
+        model.routines[0].followUps = [old, new, done]
+        let list = try model.changeFollowUp(.object(["action": .string("list")]), routineID: routine.id, botID: bot.id)
+        #expect(list.contains("áudio ilegível") && !list.contains("lead novo"))
+        #expect(model.routines[0].followUps.first { $0.id == old.id }?.resolved == true)
+        let back = try save("Ana — quer renovar", channel: "Ana@Exemplo.com", in: model, routine, bot)
+        #expect(back.contains("já teve um acompanhamento concluído") && back.contains("Vaga entregue"))
+    }
+
+    @Test @MainActor func aBatchNamingOneLeadIsNotThatLeadsFollowUp() throws {
+        let (model, bot, routine) = setUp()
+        model.session(bot.id).routineID = routine.id
+        _ = try save("Lead 553181063845 — abertura enviada", channel: "WhatsApp 553181063845", in: model, routine, bot)
+        _ = try save("Toques de 30/10 (gra, Rodrigo, lead 553181063845)", channel: "WhatsApp", in: model, routine, bot)
+        #expect(model.routines[0].followUps.filter { !$0.resolved }.count == 2)
+    }
+
+    @Test func contactsAreReadFromNumbersAndAddresses() {
+        #expect(RoutineFollowUp.contacts(in: "5511972841701@s.whatsapp.net") == ["1172841701"])
+        #expect(RoutineFollowUp.contacts(in: "+55 (31) 8106-3845") == ["3181063845"])
+        #expect(RoutineFollowUp.contacts(in: "30/10 09:07–09:09, R$ 199,99").isEmpty)
+        #expect(RoutineFollowUp(subject: "x", channel: "WhatsApp 5521975331585 e 5561920000000", nextStep: "").contact == nil)
+    }
+
+    /// The scheduler opens the app at 02:49 on a routine every 30 minutes from 8 to 22 whose last run was at 22:22: the 22:30
+    /// slot is skipped, in the history, and the schedule goes on at 08:00.
+    @Test @MainActor func aSlotMissedOutsideItsHoursIsSkippedNotRunAtNight() throws {
+        let (model, bot, _) = setUp()
+        let calendar = Calendar.current
+        let lastRun = try #require(calendar.date(from: DateComponents(year: 2026, month: 11, day: 1, hour: 22, minute: 22)))
+        let now = try #require(calendar.date(from: DateComponents(year: 2026, month: 11, day: 2, hour: 2, minute: 49)))
+        model.routines[0].schedule = .cron(expression: "*/30 8-22 * * *", timeZone: nil)
+        model.routines[0].lastRun = lastRun
+        model.runDueRoutines(now: now)
+        #expect(!model.isStartingRoutine && !model.isWorking(bot.id))
+        #expect(model.routines[0].runs.first?.summary.hasPrefix("Pulada") == true)
+        #expect(calendar.component(.hour, from: model.routines[0].nextRun) == 8)
+    }
+
     /// A run right after the chat knows what was just done there: the stretch the memory does not have yet heads its message.
     @Test @MainActor func aRunIsToldTheChatStretchTheMemoryDoesNotHaveYet() async throws {
         let stub = StubModel()
@@ -1204,5 +1266,48 @@ struct RoutinePrecheckVerdictTests {
         #expect(await RoutinePrecheck.check(RoutinePrecheck(command: ["/usr/bin/true"]), in: nil) == .run)
         #expect(await RoutinePrecheck.check(RoutinePrecheck(command: ["/bin/false"]), in: nil) == .run)
         #expect(await RoutinePrecheck.check(RoutinePrecheck(command: []), in: nil) == .run)
+    }
+}
+
+/// Which late slots still run (`Routine.missedSlot`).
+struct MissedSlotTests {
+    private let calendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/Sao_Paulo")!
+        return calendar
+    }()
+
+    private func at(_ day: Int, _ hour: Int, _ minute: Int) -> Date {
+        calendar.date(from: DateComponents(year: 2026, month: 11, day: day, hour: hour, minute: minute))!
+    }
+
+    private func routine(_ schedule: Schedule, lastRun: Date) -> Routine {
+        var routine = Routine(name: "r", botID: UUID(), prompt: "p", schedule: schedule)
+        routine.lastRun = lastRun
+        return routine
+    }
+
+    @Test func aWindowedCronSkipsTheNightButRunsALittleLate() {
+        let every30 = routine(.cron(expression: "*/30 8-22 * * *", timeZone: nil), lastRun: at(1, 22, 22))
+        #expect(every30.missedSlot(now: at(2, 2, 49), calendar: calendar) == at(1, 22, 30))
+        #expect(every30.missedSlot(now: at(1, 22, 55), calendar: calendar) == nil)
+        #expect(every30.missedSlot(now: at(1, 22, 25), calendar: calendar) == nil) // not due yet
+    }
+
+    @Test func aSlotFoundAfterSeveralMissedRunsOnlyWhenTheLastIsRecent() {
+        let every30 = routine(.cron(expression: "*/30 8-22 * * *", timeZone: nil), lastRun: at(2, 8, 0))
+        #expect(every30.missedSlot(now: at(2, 12, 10), calendar: calendar) == nil) // the 12:00 slot, 10 minutes late
+        #expect(every30.missedSlot(now: at(2, 12, 45), calendar: calendar) == nil) // the 12:30 slot
+    }
+
+    @Test func aDailyRunFoundLaterThatDayOrTheNextStillRuns() {
+        let daily = routine(.daily(hour: 8, minute: 0), lastRun: at(1, 8, 0))
+        #expect(daily.missedSlot(now: at(2, 15, 0), calendar: calendar) == nil)
+        #expect(daily.missedSlot(now: at(3, 7, 59), calendar: calendar) == nil)
+    }
+
+    @Test func intervalsAndMomentsAreNeverSkipped() {
+        #expect(routine(.everyMinutes(30), lastRun: at(1, 22, 0)).missedSlot(now: at(2, 3, 0), calendar: calendar) == nil)
+        #expect(routine(.once(at(1, 23, 0)), lastRun: at(1, 22, 0)).missedSlot(now: at(2, 3, 0), calendar: calendar) == nil)
     }
 }

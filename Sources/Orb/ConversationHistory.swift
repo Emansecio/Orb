@@ -247,6 +247,11 @@ enum RoutineReport {
         RoutineFormats.stamp.string(from: date)
     }
 
+    /// "01/11/2026 às 22:30", as the user reads a run's moment.
+    static func moment(_ date: Date) -> String {
+        RoutineFormats.runDate.string(from: date)
+    }
+
     /// Saves the report as `Rotinas/<routine>/<yyyy-MM-dd HHmm>.md` inside the Orb's folder and returns that path
     /// relative to it, or nil when it could not be written. A second run in the same minute gets a number.
     static func write(_ report: String, routine: String, orb: String, date: Date, in folder: URL) -> String? {

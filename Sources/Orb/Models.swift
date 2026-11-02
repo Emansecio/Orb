@@ -661,6 +661,33 @@ struct Routine: Identifiable, Codable, Sendable {
 
     var nextRun: Date { schedule.next(after: lastRun ?? createdAt) }
 
+    /// The slot that came due, when it is past its turn: the app was closed or the Mac asleep through it, and by now the
+    /// schedule's own rhythm has moved on (a run every 30 minutes from 8 to 22, found at 02:49). Run late, it would act at
+    /// an hour the schedule leaves out, so the scheduler skips it. A slot may run up to one rhythm late: a daily one found
+    /// in the afternoon still runs. Only clock schedules: an interval counts from the last run, and a single moment still
+    /// runs late.
+    func missedSlot(now: Date, calendar: Calendar = .current) -> Date? {
+        switch schedule {
+        case .daily, .weekly, .cron: break
+        case .everyHours, .everyMinutes, .once: return nil
+        }
+        var slot = schedule.next(after: lastRun ?? createdAt, calendar: calendar)
+        guard slot <= now else { return nil }
+        var following = schedule.next(after: slot, calendar: calendar)
+        var steps = 0
+        while following <= now {
+            slot = following
+            steps += 1
+            if steps >= Self.missedSlotScan { return slot } // closed for that many slots: long past any of them
+            following = schedule.next(after: slot, calendar: calendar)
+        }
+        // A slot as close before this one as now is after it: the next one was nearer than this run would be.
+        let late = now.timeIntervalSince(slot)
+        return schedule.next(after: slot.addingTimeInterval(-late), calendar: calendar) < slot ? slot : nil
+    }
+
+    private static let missedSlotScan = 2_000
+
     /// Turning a routine back on counts from now: its old `lastRun` would make it due right away.
     mutating func setEnabled(_ enabled: Bool, now: Date = .now) {
         if enabled && !isEnabled { lastRun = now }

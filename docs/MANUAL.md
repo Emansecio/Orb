@@ -548,6 +548,9 @@ aviso dizendo por quê.
   da execução imediatamente anterior, inclusive se ela foi interrompida. O Orb é orientado a conferir acompanhamentos pendentes
   nas fontes e a levá-los ao relatório seguinte até serem resolvidos; isso depende do registro e da verificação pelo modelo.
   A rotina também pode manter acompanhamentos abertos em uma lista própria, que sobrevive ao limite do histórico de execuções.
+  Há um item aberto por contato: quando o canal tem um telefone ou e-mail ("WhatsApp 5511…"), salvar de novo atualiza o
+  item daquele cliente em vez de criar outro, e dois itens abertos do mesmo contato viram o mais recente. O número vale com ou
+  sem 55 e com ou sem o nono dígito. Se o cliente já teve um item concluído, o Orb é avisado ao abrir um novo.
   O cartão da rotina mostra essa lista e permite concluir um item. Depois de duas execuções que registram a lista, o cartão
   compara quantos acompanhamentos foram abertos ou concluídos desde a anterior.
   Ela também sabe o que vocês acabaram de fazer no chat aberto:
@@ -562,6 +565,10 @@ aviso dizendo por quê.
 - **Relatório em arquivo.** Se o Orb tem pasta própria, cada execução grava `Rotinas/<nome>/<aaaa-mm-dd hhmm>.md` nela.
 - **Permissões.** Ninguém está lá para responder, então uma rotina em "Perguntar antes" **espera por você** (o editor avisa e
   oferece "Usar Automático" e "Usar Só leitura"). Em Avançado: "Permissões da rotina" (Igual ao Orb, Automático ou Só leitura).
+- **Horário perdido.** Se o app estava fechado ou o Mac dormindo no horário, a rotina roda ao voltar, desde que o atraso seja
+  menor que o intervalo entre os horários dela: uma diária das 8h achada à tarde ainda roda. Numa agenda com horas (diária,
+  semanal ou cron), um horário já ultrapassado pelo próprio ritmo é pulado, como o das 22h30 de uma rotina de 30 em 30 minutos
+  das 8h às 22h achado às 02h49. O histórico mostra "Pulada", e a rotina segue no próximo horário.
 - Se o Orb está ocupado, a rotina entra na fila ("Na fila") e roda quando ele terminar. "Rodar agora" e "Rodar uma vez
   agora, para testar" ao criar. O mesmo vale para "Rodar agora" no painel do Orb. Rotina desativada fica "Pausada". Na página, os cartões ficam agrupados por Orb; clicar no Orb do cartão abre o painel dele na aba Rotinas, o cartão mostra "Falhou" quando a última execução falhou, e o "…" tem "Editar…" e "Apagar…" (com confirmação). Em "Agenda avançada" (cron), as formas comuns aparecem em palavras ("De segunda a sexta às 9h30").
 - **Acordar por sinal.** Um processo seu fora do app acorda a rotina na hora gravando `<nome>.wake` na pasta `wake/` da

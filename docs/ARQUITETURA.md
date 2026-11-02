@@ -573,6 +573,9 @@ modelo de provedor com formato desconhecido sai da lista. A gravação increment
   `RoutinePrompt` acrescenta o último relatório disponível, até três outros registros recentes e `RoutineActivity` acrescenta
   até 12.000 caracteres de ações, respostas e avisos da execução imediatamente anterior, inclusive interrompida. O relatório é
   orientado a carregar os acompanhamentos abertos para a próxima execução; cada relatório armazenado tem até 8.000 caracteres.
+  `routine_follow_up` mantém um item aberto por contato (`RoutineFollowUp.contact`, o telefone ou e-mail do canal, nunca do
+  assunto, onde um lote cita um lead entre outros) e `collapse` resolve os gêmeos mais antigos a cada chamada.
+  `runDueRoutines` pula, como a pré-checagem, um horário que `Routine.missedSlot` acha vencido pelo próprio ritmo da agenda.
 - Um turno de outra conversa do mesmo Orb (a que você deixou com ele trabalhando, ou a que pediu algo a outro Orb e recebeu a
   resposta) usa o mesmo estacionamento: `workingChatID` é a conversa do turno, em `conversation`, e a que está na tela fica em
   `parkedChat` até o turno acabar (`BotSession.workElsewhere` / `endWorkElsewhere`). `conversationChat` diz qual conversa está em

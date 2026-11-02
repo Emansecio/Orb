@@ -2090,6 +2090,12 @@ final class AppModel {
 
     func isRoutineQueued(_ routineID: UUID) -> Bool { queuedRoutines.contains(routineID) }
 
+    /// The routine already has its run: running, being started, waiting in the queue or for other Orbs' answers.
+    private func isRoutineHeld(_ routineID: UUID) -> Bool {
+        queuedRoutines.contains(routineID) || startingRoutines.values.contains(routineID) || isRoutineRunning(routineID)
+            || delegation.isWaiting(routine: routineID)
+    }
+
     /// The transcript of a routine that is running right now (nil when it is not).
     func liveRoutineItems(_ routineID: UUID) -> [TranscriptItem]? {
         guard let botID = botIDs.first(where: { sessions[$0]?.routineID == routineID }) else { return nil }
@@ -2132,7 +2138,7 @@ final class AppModel {
             if gated, let precheck = routine.precheck,
                case .skip(let reason) = await RoutinePrecheck.check(precheck, in: workingFolder) {
                 startingRoutines[botID] = nil
-                skippedRoutine(routine.id, reason: reason)
+                skippedRoutine(routine.id, summary: "Dispensada pela pré-checagem: " + MemoryText.clip(reason, 300))
                 // The Orb was never taken: whatever else waits for it (queued routines, delegated work) goes on.
                 if !isResetting, bot(botID) != nil, sessions[botID]?.turnTask == nil { startNextQueuedWork(for: botID) }
                 return
@@ -2146,13 +2152,11 @@ final class AppModel {
         }
     }
 
-    /// The precheck excused this slot: it counts as the run (the schedule moves on from it) and goes into the
-    /// routine's history, but the routine conversation is never loaded and the model is never woken.
-    private func skippedRoutine(_ routineID: UUID, reason: String) {
+    /// The precheck excused this slot, or it was missed (`Routine.missedSlot`): it counts as the run (the schedule moves on
+    /// from it) and goes into the routine's history, but the routine conversation is never loaded and the model is never woken.
+    private func skippedRoutine(_ routineID: UUID, summary: String, at skipped: Date = .now) {
         guard let index = routines.firstIndex(where: { $0.id == routineID }) else { return }
-        let skipped = Date.now
         routines[index].lastRun = skipped
-        let summary = "Dispensada pela pré-checagem: " + MemoryText.clip(reason, 300)
         routines[index].lastResult = summary
         recordRun(RoutineRun(date: skipped, finishedAt: skipped, succeeded: true, summary: summary), routineID: routineID, skipped: true)
     }
@@ -2414,7 +2418,12 @@ final class AppModel {
         }
         if let wokeAt, now < wokeAt.addingTimeInterval(Self.wakeSettleTime) { return }
         for routine in routines where routine.isEnabled && routine.nextRun <= now {
-            runRoutine(routine.id)
+            if let missed = routine.missedSlot(now: now), !isRoutineHeld(routine.id) {
+                skippedRoutine(routine.id, summary: "Pulada: o horário de \(RoutineReport.moment(missed)) passou com o app fechado "
+                                   + "ou o Mac dormindo, e a rotina segue no próximo horário.", at: now)
+            } else {
+                runRoutine(routine.id)
+            }
         }
     }
 
