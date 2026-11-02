@@ -530,26 +530,85 @@ struct OrbQuestion: Codable, Sendable, Equatable {
     static let optionLength = 120
     static let answerLimit = 2_000
 
+    static let fieldLimit = 6
+    static let labelLength = 60
+
+    /// One line of a short form: words to write, or one of `options` to pick.
+    struct Field: Codable, Sendable, Equatable {
+        var label: String
+        var options: [String] = []
+    }
+
     var text: String
     var options: [String] = []
+    /// Several of `options` can be picked, and "Responder" sends them.
+    var multiple = false
+    /// A short form instead of `options`.
+    var fields: [Field] = []
     /// What the person answered: one of `options` or their own words. nil while open, and when they skipped it.
     var answer: String?
 
-    /// Trimmed and cut to the limits; repeated or empty options are dropped.
-    init(text: String, options: [String] = []) {
+    /// Trimmed and cut to the limits; repeated or empty options and fields without a name are dropped.
+    init(text: String, options: [String] = [], multiple: Bool = false, fields: [Field] = []) {
         self.text = String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(Self.textLimit))
+        self.fields = fields.compactMap { field in
+            let label = String(field.label.trimmingCharacters(in: .whitespacesAndNewlines).prefix(Self.labelLength))
+            return label.isEmpty ? nil : Field(label: label, options: Self.kept(field.options))
+        }.prefix(Self.fieldLimit).map { $0 }
+        self.options = self.fields.isEmpty ? Self.kept(options) : []
+        self.multiple = multiple && self.options.count > 1
+    }
+
+    private static func kept(_ options: [String]) -> [String] {
         var kept: [String] = []
-        for option in options where kept.count < Self.optionLimit {
-            let clean = String(option.trimmingCharacters(in: .whitespacesAndNewlines).prefix(Self.optionLength))
+        for option in options where kept.count < optionLimit {
+            let clean = String(option.trimmingCharacters(in: .whitespacesAndNewlines).prefix(optionLength))
             if !clean.isEmpty, !kept.contains(clean) { kept.append(clean) }
         }
-        self.options = kept
+        return kept
+    }
+
+    /// The answer a card sends: the options picked in their order, or a line per field filled in, with the person's own words
+    /// after them. Plain text, so the model reads it as any answer and the tool's result keeps its form.
+    func composed(picked: Set<String> = [], values: [String] = [], reply: String = "") -> String? {
+        let words = reply.trimmingCharacters(in: .whitespacesAndNewlines)
+        var parts: [String]
+        if fields.isEmpty {
+            parts = options.filter(picked.contains)
+            if !words.isEmpty { parts.append(words) }
+            return Self.clean(parts.joined(separator: "; "))
+        }
+        parts = zip(fields, values).compactMap { field, value in
+            let value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return value.isEmpty ? nil : "\(field.label): \(value)"
+        }
+        if !words.isEmpty { parts.append(words) }
+        return Self.clean(parts.joined(separator: "\n"))
     }
 
     /// An answer as it is kept and sent: trimmed and capped; nil when nothing is left.
     static func clean(_ answer: String?) -> String? {
         guard let text = answer?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
         return String(text.prefix(answerLimit))
+    }
+}
+
+extension OrbQuestion {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        text = try c.value(.text, default: "")
+        options = try c.value(.options, default: [])
+        multiple = try c.value(.multiple, default: false)
+        fields = try c.lossyArray(.fields)
+        answer = try c.decodeIfPresent(String.self, forKey: .answer)
+    }
+}
+
+extension OrbQuestion.Field {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        label = try c.value(.label, default: "")
+        options = try c.value(.options, default: [])
     }
 }
 

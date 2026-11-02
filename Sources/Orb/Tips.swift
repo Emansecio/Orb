@@ -284,6 +284,19 @@ enum Tip {
     static let copyCode = "Copia este trecho de código"
     static let copyCommand = "Copia este comando"
     static let copyOutput = "Copia o resultado desta ação"
+    static let copyTableMarkdown = "Copia esta tabela em Markdown"
+    static let copyTableCSV = "Copia esta tabela em CSV, para colar numa planilha"
+    static let jumpToEnd = "Vai para o fim da conversa"
+    static let markAnswer = "Marca esta resposta; Responder envia as marcadas"
+    static let openSource = "Abre esta página no navegador"
+    static let previewPage = "Mostra a página, sem rodar scripts nem acessar a rede"
+    static let openPage = "Abre a página para usar, isolada do Mac e da rede"
+    static let ignoreProposals = "Descarta o texto e para de ouvir esta página"
+    static let useProposal = "Põe o texto na mensagem, sem enviar"
+    static let interactivePages = "Mostra páginas com scripts nas respostas, sem rede nem acesso ao Mac"
+    static let enlargeBlock = "Abre em tamanho maior"
+    static let showDrawing = "Volta ao desenho"
+    static let showSource = "Mostra a fonte deste bloco"
     static let recheckPermissions = "Lê de novo o estado das permissões do macOS"
     static let resetConfirm = "Pede a confirmação final antes de apagar"
     static func permissionAction(_ action: PermissionRowAction) -> String {
@@ -360,6 +373,7 @@ enum Tip {
          addProvider, refreshModels, removeProvider, signOutChatGPT, replaceKey, deleteKey, saveKey, keepKey, getKey, listAllModels,
          addModelByID, removeModelFromList, gatewayFormat, checkClaudeCode, installClaudeCode, signOutClaudeCode,
          usagePeriod, usageChartBy, priceCorrected, priceCorrect, priceMissing, priceRestore, copyCode, copyCommand, copyOutput,
+         copyTableMarkdown, copyTableCSV, jumpToEnd, markAnswer, openSource, previewPage, openPage, ignoreProposals, useProposal, interactivePages, enlargeBlock, showDrawing, showSource,
          recheckPermissions, resetConfirm,
          autoColor, routineTemplate, openRunReport, exploreSkills, showProviderDetails, hideProviderDetails,
          previewActivity("pensando"),

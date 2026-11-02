@@ -9,6 +9,9 @@ struct ChatView: View {
     @State private var find = ConversationFind()
     /// Files or a picture are being dragged over the chat: anywhere on it, they join the next message.
     @State private var isDropTargeted: Bool
+    /// A block of a reply in the enlarged view. Here and not in the block: a row of the lazy list can leave the screen.
+    @State private var enlarged: EnlargedBlock?
+    @State private var asksAside = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// `showsDrop`: drawn as while files are dragged over it (a `--snapshot` of it).
@@ -24,6 +27,9 @@ struct ChatView: View {
         following(stage(look))
             .safeAreaInset(edge: .bottom, spacing: 0) { composer }
             .onDrop(of: AppModel.droppableTypes, isTargeted: $isDropTargeted) { model.attachDropped($0, to: botID) }
+            .environment(\.enlargeBlock, EnlargeBlockAction { enlarged = EnlargedBlock(block: $0) })
+            .sheet(item: $enlarged) { EnlargedBlockSheet(block: $0.block) }
+            .sheet(isPresented: $asksAside) { SideQuestionSheet(botID: botID) }
             .background(Palette.canvas)
             .navigationTitle(look.name)
             .navigationSubtitle(subtitle(live))
@@ -146,6 +152,8 @@ extension ChatView {
 
     /// Another Orb on show: its own conversation to search.
     private func orbChanged() {
+        enlarged = nil
+        asksAside = false
         find.close()
         bindFind()
     }
@@ -168,6 +176,7 @@ extension ChatView {
     /// ⌘F from the command palette or a menu: the bar opens (the chat may have just been created for it).
     private func takeFindRequest() {
         if model.takeChatRequest(.findInConversation, of: botID) { find.open() }
+        if model.takeChatRequest(.askAside, of: botID) { asksAside = true }
     }
 
     private func takeInicioJump() {
@@ -248,6 +257,22 @@ struct TimeSeparatorLine: View {
     }
 }
 
+/// Where what arrived while the reader was away begins. A line in the list, so nothing moves when pictures load above it.
+struct NewItemsLine: View {
+    var body: some View {
+        HStack(spacing: Spacing.m) {
+            Rectangle().fill(Palette.accentText.opacity(0.35)).frame(height: 1)
+            Text("Novas")
+                .font(Typography.small.weight(.medium))
+                .foregroundStyle(Palette.accentText)
+            Rectangle().fill(Palette.accentText.opacity(0.35)).frame(height: 1)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Novas mensagens a partir daqui")
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+
 /// Every midnight from the start of today, by the calendar (a day of a change of clocks is not 24 hours long).
 private struct Midnights: TimelineSchedule {
     func entries(from startDate: Date, mode: TimelineScheduleMode) -> AnyIterator<Date> {
@@ -302,12 +327,19 @@ private struct TranscriptList: View {
     let find: ConversationFind
     /// Off while the user has scrolled up to read, so new content doesn't pull the view down.
     @State private var followsBottom = true
+    /// The reader is far above the end (`JumpToEnd`), and the last item there when they stopped following it, and how many
+    /// replies came after it.
+    @State private var isAwayFromEnd = false
+    @State private var leftAt: UUID?
+    @State private var arrived = 0
     /// Scrolls for the lists that cannot keep the bottom in view themselves (macOS 14).
     @State private var follower = BottomFollower()
     /// Which rows just arrived (they come in; the rest are simply there), and when the conversation itself was replaced.
     @State private var entrances = TranscriptEntrances()
     /// The second scroll to the end a new row asks for, 150 ms later: one at a time (`followResumedTurn`).
     @State private var settle = PendingScroll()
+    /// The second scroll to a message of the rail: a click on another one replaces it.
+    @State private var goingTo = PendingScroll()
     /// The messages a compaction folded are on show (`CompactedFold`): until the Orb is left or compacted again.
     @State private var showsFolded = CompactedFoldLine.opensInBench
     /// The runs of actions and the work of requests opened into their lines, by the id of their row (its first item's,
@@ -343,7 +375,13 @@ private struct TranscriptList: View {
                 .transition(.opacity)
         }
         .motion(Motion.crossFade, value: generation)
-        .onChange(of: generation) { followsBottom = true; follower.follows = true }
+        .onChange(of: generation) {
+            followsBottom = true
+            follower.follows = true
+            isAwayFromEnd = false
+            leftAt = nil
+            arrived = 0
+        }
     }
 
     private func conversation(items: [TranscriptItem], isWorking: Bool, isLoading: Bool, live: BotLive,
@@ -351,6 +389,7 @@ private struct TranscriptList: View {
                               found: FindFocus?) -> some View {
         // A result on show holds the chat where it is: a reply that grows meanwhile does not take the view to the end.
         let follows = followsBottom && !find.pausesFollowing
+        let showsJump = (isAwayFromEnd && !follows) || JumpToEndButton.showsInSnapshots
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Spacing.m) {
@@ -399,6 +438,7 @@ private struct TranscriptList: View {
                     // A chain of requests the Orb waits on (`chainWork`) keeps its line too. Its place stays while the
                     // chat has messages: a turn starting or ending changes what is in it, not the height of the list,
                     // so the conversation does not move again after the message sent goes in, nor down when it ends.
+                    PlanCard(transcript: transcript)
                     let showsLine = isWorking || live.chainWork != nil
                     let hasActivity = transcript.rows?.contains { if case .activity = $0 { true } else { false } } == true
                     if !hasActivity && (showsLine || !items.isEmpty) {
@@ -406,8 +446,9 @@ private struct TranscriptList: View {
                             if showsLine {
                                 WorkingLine(look: look, avatarHidden: avatars.lastID != nil, transcript: transcript)
                                     .transition(.adapted(.arrive, reduceMotion: reduceMotion))
-                            } else if transcript.plan != nil {
-                                // A plan left open when the turn ended: its ring alone, where the working line was.
+                            } else if let plan = transcript.plan, plan.steps.count == 1 {
+                                // A plan left open when the turn ended, too short for its card (`PlanCard`): its ring alone,
+                                // where the working line was.
                                 IdlePlanRing(transcript: transcript)
                             }
                         }
@@ -439,6 +480,20 @@ private struct TranscriptList: View {
                 withAnimation(ScrollMotion.animation(reduceMotion: reduceMotion)) { scrollToBottom(proxy) }
             }))
             .modifier(KeepsBottom(follows: follows))
+            .modifier(AwayFromEnd(isAway: $isAwayFromEnd))
+            .overlay(alignment: .trailing) {
+                RequestRail(transcript: transcript) { goToRequest($0, proxy) }
+            }
+            .overlay(alignment: .bottom) {
+                ZStack {
+                    if showsJump {
+                        JumpToEndButton(arrived: JumpToEndButton.showsInSnapshots ? 3 : arrived) { returnToEnd(proxy) }
+                            .transition(.adapted(.arrive, reduceMotion: reduceMotion))
+                    }
+                }
+                .padding(.bottom, Spacing.m)
+                .motion(Motion.content, value: showsJump)
+            }
             .environment(\.replyGrew, replyGrew(proxy))
             .environment(\.revealQuote, RevealQuoteAction { [model, find, look] quote, messageID in
                 let items = model.orbTranscript(look.id).items
@@ -451,7 +506,11 @@ private struct TranscriptList: View {
                 }
                 find.reveal(quoteOf: source, words: MessageQuote.probe(quote))
             })
-            .onChange(of: follows) { follower.follows = follows }
+            .onChange(of: follows) {
+                follower.follows = follows
+                leftAt = follows ? nil : transcript.items.last?.id
+                arrived = 0
+            }
             .onChange(of: find.jump, initial: true) {
                 guard let jump = find.jump else { return }
                 // A hit among the folded messages, or in a run of actions on one line, opens them first; the scroll
@@ -483,6 +542,7 @@ private struct TranscriptList: View {
             .onChange(of: model.showInspector) { if follower.follows { settleAtBottom(proxy) } }
             .onChange(of: transcript.revision) {
                 find.itemsChanged()
+                if leftAt != nil { arrived = JumpToEnd.arrived(in: transcript.items, after: leftAt) }
                 if BottomFollower.anchorsItself {
                     // The scroll view keeps the end as rows grow, but not always when a whole row arrives at once (a card that
                     // needs you, a long answer relayed from another Orb): it is laid out by estimate first. Settle on it.
@@ -523,8 +583,10 @@ private struct TranscriptList: View {
     private func timed(_ rowID: UUID, _ breaks: [UUID: Date], opensTurn: Bool, @ViewBuilder row: () -> some View) -> some View {
         let date = breaks[rowID]
         VStack(alignment: .leading, spacing: Spacing.m) {
+            if rowID == model.orbTranscript(look.id).newFrom { NewItemsLine() }
             if let date { TimeSeparatorLine(date: date) }
             row()
+            if let trail = model.orbTranscript(look.id).trails[rowID] { TurnTrailView(trail: trail, botID: look.id) }
         }
         .padding(.top, opensTurn && date == nil ? TurnGap.extra : 0)
     }
@@ -700,6 +762,31 @@ private struct TranscriptList: View {
         proxy.scrollTo(BottomAnchor.id, anchor: .bottom)
     }
 
+    /// The reader asked for the end: at once from far up, as after sending a message, and the chat follows it again.
+    /// Brings a message of the reader to the top of the view, opening what a compaction folded if it is there.
+    private func goToRequest(_ id: UUID, _ proxy: ScrollViewProxy) {
+        followsBottom = false
+        follower.follows = false
+        let opens = !showsFolded && model.orbTranscript(look.id).folds(id)
+        if opens { showsFolded = true }
+        goingTo.task?.cancel()
+        goingTo.task = Task { @MainActor in
+            if opens { await Task.yield() }
+            withAnimation(ScrollMotion.animation(reduceMotion: reduceMotion)) { proxy.scrollTo(id, anchor: .top) }
+            // Rows far from the last one shown go by estimate until they exist.
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            proxy.scrollTo(id, anchor: .top)
+        }
+    }
+
+    private func returnToEnd(_ proxy: ScrollViewProxy) {
+        find.resumeFollowing()
+        followsBottom = true
+        follower.follows = true
+        settleAtBottom(proxy)
+    }
+
     /// The user just sent a message (or queued one): always show it. The list glides to it if it was at
     /// the end already; from higher up it goes there at once.
     private func showSentMessage(_ proxy: ScrollViewProxy) {
@@ -860,6 +947,77 @@ enum FollowRule {
     /// something is left where they put the list, near the end or not.
     static func glides(distance: CGFloat, minY: CGFloat, wasAtBottom: Bool, startMinY: CGFloat) -> Bool {
         distance > 1 && touchLeftListInPlace(minY: minY, wasAtBottom: wasAtBottom, startMinY: startMinY)
+    }
+}
+
+/// The way back to the end of a long chat, and what came while the reader was away from it.
+enum JumpToEnd {
+    /// How far above the end the way back appears: a small scroll to reread a line needs no button.
+    static let distance: CGFloat = 240
+    /// How close to the end it goes away again: lower than `distance`, or a drag around that line would blink it.
+    static let returned: CGFloat = 120
+
+    /// The replies after the item `last`, counted from the end, so the cost is what arrived and not the conversation. An
+    /// item that left the conversation (redone, or compacted) counts nothing: there is no place left to count from.
+    static func arrived(in items: [TranscriptItem], after last: UUID?) -> Int {
+        guard let last else { return 0 }
+        var count = 0
+        for item in items.reversed() {
+            if item.id == last { return count }
+            if case .bot = item.kind { count += 1 }
+        }
+        return 0
+    }
+}
+
+/// Keeps `isAway` up to date, only when the reader crosses a limit of `JumpToEnd`: nothing is drawn again while the list scrolls.
+/// Needs macOS 15, as `BottomFollowing`: on macOS 14 the chat always follows, so there is nothing to go back to.
+struct AwayFromEnd: ViewModifier {
+    @Binding var isAway: Bool
+
+    func body(content: Content) -> some View {
+        if #available(macOS 15, *) {
+            content.onScrollGeometryChange(for: Bool?.self) { geometry in
+                let left = geometry.contentSize.height - geometry.visibleRect.maxY
+                return left > JumpToEnd.distance ? true : left < JumpToEnd.returned ? false : nil
+            } action: { _, away in
+                if let away { isAway = away }
+            }
+        } else {
+            content
+        }
+    }
+}
+
+/// An arrow over the end of the chat, with how many replies came while the reader was away.
+struct JumpToEndButton: View {
+    let arrived: Int
+    let action: () -> Void
+
+    /// Review snapshots cannot scroll the list up.
+    static var showsInSnapshots = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "arrow.down")
+                if arrived > 0 { Text(arrived == 1 ? "1 nova" : "\(arrived) novas").monospacedDigit() }
+            }
+            .font(Typography.small.weight(.medium))
+            .foregroundStyle(Palette.ink)
+            .frame(minWidth: ControlHeight.regular, minHeight: ControlHeight.regular)
+            .padding(.horizontal, arrived > 0 ? Spacing.m : 0)
+            // Circular: on a shape this short, continuous corners overrun the straight sides and leave ticks on the border.
+            .background(Palette.surface, in: Capsule(style: .circular))
+            .overlay(Capsule(style: .circular).strokeBorder(Palette.lineStrong))
+            .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .shadow(color: Shadow.popover, radius: 10, y: 3)
+        .clickablePointer()
+        .help(Tip.jumpToEnd)
+        .accessibilityLabel(arrived == 0 ? "Ir para o fim da conversa"
+                                         : "Ir para o fim da conversa, \(arrived) \(arrived == 1 ? "resposta nova" : "respostas novas")")
     }
 }
 

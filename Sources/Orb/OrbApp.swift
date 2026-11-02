@@ -220,6 +220,9 @@ struct AppCommands: Commands {
             }
             .keyboardShortcut(AppShortcut.openFolder)
             .disabled(model.commandBotID == nil)
+            Button(CommandName.askAside) { showMain(); model.askAside() }
+                .keyboardShortcut(AppShortcut.askAside)
+                .disabled(sheetOpen || model.commandBotID == nil)
             Divider()
             // Disabled (not just ignored) with a sheet open: an enabled item would keep ⌥↓ and the like from the sheet's
             // text field, and switching the screen would close the sheet along with what was typed in it.
@@ -342,6 +345,13 @@ enum Snapshot {
                     .frame(width: Snapshot.paneWidth(360))
             })
         case "memory-sheet": AnyView(model.bots.first.map { MemorySheet(botID: $0.id, name: $0.name) })
+        case "rich-sheet-diagram": AnyView(EnlargedBlockSheet(block: .diagram(source: "flowchart LR\n A[Pedido] --> B{Tem estoque?}\n B -- sim --> C[Separar]")))
+        case "rich-sheet-page":
+            AnyView(EnlargedBlockSheet(block: .page(html: #"<h3>Contador</h3><span id="n">0</span><script>document.getElementById("n").textContent = 42</script>"#)))
+        case "rich-sheet-chart":
+            AnyView(EnlargedBlockSheet(block: .chart(ChartSpec(kind: .line, title: "Leads", labels: ["Jan", "Fev", "Mar"],
+                                                               series: [.init(name: "2026", values: [3, nil, 5])]), source: "")))
+        case "side-question": AnyView(model.bots.first.map { SideQuestionSheet(botID: $0.id) })
         case "approvals": AnyView(model.bots.first.map { ApprovalCardsSample(bot: $0) })
         case "new-orb": AnyView(NewBotSheet(height: height.map { CGFloat($0) }))
         case "new-orb-import": AnyView(NewBotSheet(height: height.map { CGFloat($0) }, startsImporting: true))

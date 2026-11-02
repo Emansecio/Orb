@@ -67,6 +67,13 @@ enum Palette {
     // What a search in the conversation marks: the text it found, and the wash that fades behind the message it brought into view.
     static let findMatch = Color(hex: 0xFF9800, opacity: 0.4)
     static let findWash = Color(hex: 0x1084FE, opacity: 0.16)
+    // The colors of code on `raised` (`CodeHighlight`): softer than the state colors, which a block full of them would shout.
+    static let codeKeyword = Color(hex: 0xB9A5FF)
+    static let codeString = Color(hex: 0x8FD6A8)
+    static let codeNumber = Color(hex: 0xF2B98A)
+    static let codeType = Color(hex: 0x82CBE8)
+    static let codeAdded = Color(hex: 0x6FD9A0)
+    static let codeRemoved = Color(hex: 0xFF9494)
 
     // The welcome screen's stage light (the indigo palette's glow, and a cool floor under the Orbs).
     static let stageGlow = Color(hex: 0x6E5CFF)

@@ -40,6 +40,11 @@ struct MarkdownChunk: View, Equatable {
                 }
             }
             .padding(.top, first ? 0 : Self.lead(blocks))
+            // Links in tables: the same rule as in the prose (`PathLinks.opensOutside`).
+            .environment(\.openURL, OpenURLAction { url in
+                if url.isFileURL { PathLinks.open(url); return .handled }
+                return PathLinks.opensOutside(url) ? .systemAction : .discarded
+            })
         }
     }
 
@@ -64,6 +69,14 @@ struct MarkdownBlockView: View, Equatable {
             Rectangle().fill(Palette.line).frame(height: 1).padding(.vertical, 4)
         case .image(let alt, let path):
             ReplyImageView(alt: alt, path: path)
+        case .chart(let spec, let source):
+            ChartBlockView(spec: spec, source: source)
+        case .diagram(let source):
+            RichDrawingView(request: RichRequest(kind: .diagram, source: source), block: block).equatable()
+        case .math(let tex):
+            RichDrawingView(request: RichRequest(kind: .math, source: tex), block: block).equatable()
+        case .page(let html):
+            PageBlockView(html: html, block: block)
         default:
             // Prose blocks go to `SelectableProse`, never here.
             EmptyView()
@@ -169,6 +182,7 @@ enum FindMarking {
 /// Code on `Palette.raised`, monospaced, with its language and a button that copies it. No hairline: on the canvas the fill
 /// alone sets it apart, and it is the reply's only frame.
 struct CodeBlockView: View, Equatable {
+    @Environment(\.enlargeBlock) private var enlarge
     let language: String?
     let code: String
     /// The code is still being written (this is the last block of a reply that streams).
@@ -178,6 +192,14 @@ struct CodeBlockView: View, Equatable {
     /// The cut of this block while it streams, kept between flushes so only what grew past the closed pieces is
     /// re-split — cutting the whole code at each flush made a flush cost grow with the code's length.
     @State private var streamCut = StreamCut()
+    @State private var showsWhole = false
+    /// A ```html block as the page it writes (`PageSandbox`, no scripts), on request: code is what such a block usually is.
+    @State private var showsPage = false
+
+    /// The block can be shown as a page.
+    private var isPage: Bool {
+        !streaming && ["html", "htm"].contains(language?.lowercased()) && code.utf8.count <= PageSandbox.maxHTML
+    }
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.language == rhs.language && lhs.code == rhs.code && lhs.streaming == rhs.streaming && lhs.highlight == rhs.highlight
@@ -238,16 +260,25 @@ struct CodeBlockView: View, Equatable {
                     .font(Typography.small)
                     .foregroundStyle(Palette.muted)
                 Spacer(minLength: 8)
+                if isPage {
+                    BlockHeaderButton(title: showsPage ? "Código" : "Prévia", symbol: showsPage ? "chevron.left.forwardslash.chevron.right" : "eye",
+                                      help: showsPage ? Tip.showSource : Tip.previewPage) { showsPage.toggle() }
+                }
+                if !streaming, let enlarge { EnlargeButton { enlarge.run(.code(language: language, code: code, isClosed: true)) } }
                 CopyTextButton(text: code, help: Tip.copyCode, label: "Copiar código", copiedLabel: "Código copiado")
             }
             .padding(.horizontal, 10)
             .padding(.top, 7)
             .padding(.bottom, 2)
+            if showsPage, isPage {
+                RichPicture(request: RichRequest(kind: .page, source: code), title: "Prévia da página")
+            } else {
             codeText
                 .padding(.horizontal, 10)
                 .padding(.top, 4)
                 .padding(.bottom, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .background(Palette.raised, in: .rect(cornerRadius: Radius.small))
         .accessibilityElement(children: .contain)
@@ -267,9 +298,36 @@ struct CodeBlockView: View, Equatable {
                 }
                 CodeLines(text: pieces.tail)
             }
+        } else if !streaming, highlight == nil, let head = Self.head(of: code) {
+            // A search result shows the whole block: what it found may be in the folded part.
+            VStack(alignment: .leading, spacing: 6) {
+                CodeLines(text: showsWhole ? code : head.text, language: language)
+                ShowAllButton(isShowing: $showsWhole, hidden: head.hiddenLines)
+            }
         } else {
-            CodeLines(text: code, highlight: highlight)
+            CodeLines(text: code, highlight: highlight, language: streaming ? nil : language)
         }
+    }
+
+    /// From this many lines on a finished block folds, showing `headLines`.
+    nonisolated static let foldLines = 40
+    nonisolated static let headLines = 24
+
+    /// The first `headLines` lines and how many are left out; nil when the block is short enough to show whole.
+    nonisolated static func head(of code: String) -> (text: String, hiddenLines: Int)? {
+        var lines = 1
+        var headEnd: String.Index?
+        let utf8 = code.utf8
+        var index = utf8.startIndex
+        while index != utf8.endIndex {
+            if utf8[index] == 0x0A {
+                if lines == headLines { headEnd = index }
+                lines += 1
+            }
+            index = utf8.index(after: index)
+        }
+        guard lines > foldLines, let headEnd else { return nil }
+        return (String(code[..<headEnd]), lines - headLines)
     }
 
     /// The code cut into closed pieces of `pieceLines` lines and what is left (never empty), or nil when it is short.
@@ -288,17 +346,27 @@ struct CodeBlockView: View, Equatable {
 /// "Copiar" with its symbol, and "Copiado" with a check for a moment after a click: the button of a block of code in a
 /// reply and of a command (`CommandBlock`).
 struct CopyTextButton: View {
-    let text: String
-    let help: String
+    /// Made at the click: drawing the button must not build what it copies.
+    private let text: @MainActor () -> String
+    private let title: String
+    private let help: String
     /// What VoiceOver says, before and after the click.
-    let label: String
-    let copiedLabel: String
+    private let label: String
+    private let copiedLabel: String
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var flash = CopiedFlash()
 
+    init(text: @autoclosure @escaping @MainActor () -> String, title: String = "Copiar", help: String, label: String, copiedLabel: String) {
+        self.text = text
+        self.title = title
+        self.help = help
+        self.label = label
+        self.copiedLabel = copiedLabel
+    }
+
     var body: some View {
         Button {
-            Clipboard.copy(text)
+            Clipboard.copy(text())
             flash.trigger()
         } label: {
             HStack(spacing: 5) {
@@ -306,7 +374,7 @@ struct CopyTextButton: View {
                     .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
                 // No width is reserved for "Copiado": at rest the button sits on the block's margin. It is anchored to the
                 // right by the spacer before it, so only the symbol slides a few points, inside the same animation.
-                Text(flash.isOn ? "Copiado" : "Copiar")
+                Text(flash.isOn ? "Copiado" : title)
                     .contentTransition(.opacity)
             }
             .font(Typography.small.weight(.medium))
@@ -320,10 +388,34 @@ struct CopyTextButton: View {
     }
 }
 
-/// Lines of code in the block's style. Equatable, so a piece that did not change is not laid out again.
-private struct CodeLines: View, Equatable {
+/// Lines of code in the block's style. Equatable, so a piece that did not change is not laid out again. With a `language`
+/// their colors arrive from off the main thread (`CodeHighlight`) and only colors change, so no line moves.
+struct CodeLines: View, Equatable {
+    /// Colors, with the text they were made for: `text` can change in a view that keeps this state.
+    private struct Colored {
+        let text: String
+        let colors: AttributedString
+    }
+
     let text: String
     var highlight: String?
+    /// Nil while the block is written: half a string would color the rest of it.
+    var language: String?
+    @State private var colored: Colored?
+
+    init(text: String, highlight: String? = nil, language: String? = nil) {
+        self.text = text
+        self.highlight = highlight
+        self.language = language
+        // Already made: a row that scrolls back into view does not blink from plain to colored.
+        _colored = State(initialValue: language.flatMap { language in
+            text.utf8.count <= CodeHighlight.maxBytes ? MarkdownCache.colored(text, language: language) : nil
+        }.map { Colored(text: text, colors: $0) })
+    }
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.text == rhs.text && lhs.highlight == rhs.highlight && lhs.language == rhs.language
+    }
 
     var body: some View {
         line
@@ -331,10 +423,22 @@ private struct CodeLines: View, Equatable {
             .foregroundStyle(Palette.ink.opacity(0.9))
             .lineSpacing(2)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .task(id: language == nil ? nil : text) {
+                guard let language, colored?.text != text, CodeHighlight.colors(language) else { return }
+                let code = text
+                let colors = await Task.detached(priority: .utility) { CodeHighlight.attributed(code, language: language) }.value
+                guard let colors else { return }
+                // Kept even for a row that left the screen: the work is done, and it would redo it on the way back.
+                MarkdownCache.remember(colored: colors, of: code, language: language)
+                guard !Task.isCancelled else { return }
+                colored = Colored(text: code, colors: colors)
+            }
     }
 
     @ViewBuilder private var line: some View {
-        if highlight != nil {
+        if let colored, colored.text == text {
+            Text(FindMarking.marked(colored.colors, query: highlight))
+        } else if highlight != nil {
             Text(FindMarking.marked(text, query: highlight))
         } else {
             Text(text.isEmpty ? " " : text)
@@ -344,6 +448,7 @@ private struct CodeLines: View, Equatable {
 
 /// A Markdown table: the header in semibold, a hairline under it, the columns aligned as the table says.
 struct TableBlockView: View, Equatable {
+    @Environment(\.enlargeBlock) private var enlarge
     let table: MarkdownTable
     /// The table is still being written (it is the last block of a reply that streams).
     var streaming = false
@@ -399,12 +504,33 @@ struct TableBlockView: View, Equatable {
         // breaks words letter by letter; when even that does not fit, the table scrolls sideways.
         let floors = floorMeasure.floors(of: table)
         let needed = floors.reduce(0, +) + Self.columnSpacing * CGFloat(max(floors.count - 1, 0)) + Self.inset * 2
-        ViewThatFits(in: .horizontal) {
-            grid(floors).frame(minWidth: needed, idealWidth: needed, maxWidth: .infinity, alignment: .leading)
-            ScrollView(.horizontal) {
-                grid(floors).frame(width: needed)
+        VStack(alignment: .leading, spacing: 0) {
+            // Outside what scrolls sideways, so a wide table keeps its buttons in view.
+            HStack(spacing: Spacing.m) {
+                Text("tabela")
+                    .font(Typography.small)
+                    .foregroundStyle(Palette.muted)
+                Spacer(minLength: Spacing.s)
+                if !streaming, let enlarge { EnlargeButton { enlarge.run(.table(table)) } }
+                CopyTextButton(text: table.markdown, title: "Markdown", help: Tip.copyTableMarkdown,
+                               label: "Copiar tabela em Markdown", copiedLabel: "Tabela copiada em Markdown")
+                CopyTextButton(text: table.csv { String(MarkdownCache.attributed($0).characters) }, title: "CSV", help: Tip.copyTableCSV,
+                               label: "Copiar tabela em CSV", copiedLabel: "Tabela copiada em CSV")
+            }
+            .padding(.horizontal, Self.inset)
+            .padding(.top, 7)
+            .padding(.bottom, 2)
+            ViewThatFits(in: .horizontal) {
+                grid(floors).frame(minWidth: needed, idealWidth: needed, maxWidth: .infinity, alignment: .leading)
+                ScrollView(.horizontal) {
+                    grid(floors).frame(width: needed)
+                }
             }
         }
+        // The whole `raised`, without a hairline, as the code: on the canvas a lighter fill was too close to tell apart.
+        .background(Palette.raised, in: .rect(cornerRadius: Radius.small))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Tabela")
     }
 
     private func grid(_ floors: [CGFloat]) -> some View {
@@ -419,8 +545,6 @@ struct TableBlockView: View, Equatable {
         }
         .font(Typography.text)
         .padding(Self.inset)
-        // The whole `raised`, without a hairline, as the code: on the canvas a lighter fill was too close to tell apart.
-        .background(Palette.raised, in: .rect(cornerRadius: Radius.small))
     }
 
     /// The narrowest each column may get: its widest word (header in semibold), up to `maxFloor` so a long link or

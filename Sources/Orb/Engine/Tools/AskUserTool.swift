@@ -11,14 +11,20 @@ struct AskUserTool: AgentTool {
         name: AskUserTool.name,
         description: """
         Ask the user one question and wait for the answer: a choice only they can make, a detail you cannot find out, or which of a \
-        few ways to go. Give `options` when the answer is one of a few (2 to \(OrbQuestion.optionLimit), short); they can always \
-        answer in their own words instead. Not for what you can look up or reasonably decide yourself, and not to ask permission: \
+        few ways to go. Give `options` when the answer is one of a few (2 to \(OrbQuestion.optionLimit), short), `multiple` if several \
+        apply, or `fields` for up to \(OrbQuestion.fieldLimit) answers at once; they can always answer in their own words. Not for what you can look up or reasonably decide yourself, and not to ask permission: \
         actions that need it ask by themselves.
         """,
         parameters: .schema([
             "question": .property("string", "One question, as you would ask it in the chat."),
             "options": .object(["type": .string("array"), "description": .string("Answers to pick from, if any."),
                                 "items": .property("string")]),
+            "multiple": .property("boolean"),
+            "fields": .object(["type": .string("array"),
+                               "items": .object(["type": .string("object"), "required": .array([.string("label")]), "properties": .object([
+                                   "label": .property("string"),
+                                   "options": .object(["type": .string("array"), "items": .property("string")]),
+                               ])])]),
         ], required: ["question"]))
 
     var kind: ToolCall.Kind { .orbs }
@@ -36,7 +42,13 @@ struct AskUserTool: AgentTool {
             throw ToolError("Nobody is here to answer: decide yourself, or say in your reply what you need.")
         }
         let question = OrbQuestion(text: arguments["question"]?.string ?? "",
-                                   options: (arguments["options"]?.array ?? []).compactMap(\.string))
+                                   options: (arguments["options"]?.array ?? []).compactMap(\.string),
+                                   multiple: arguments["multiple"]?.bool ?? false,
+                                   fields: (arguments["fields"]?.array ?? []).compactMap { field in
+                                       field["label"]?.string.map {
+                                           OrbQuestion.Field(label: $0, options: (field["options"]?.array ?? []).compactMap(\.string))
+                                       }
+                                   })
         guard !question.text.isEmpty else { throw ToolError("Write the question.") }
         // A skipped question is an answer too, not a failure of the tool.
         guard let answer = await ask(question) else { return Self.skipped }

@@ -123,6 +123,7 @@ struct GeneralSettings: View {
     @Environment(AppModel.self) private var model
     @AppStorage(AppModel.notifyWhenDoneKey) private var notifyWhenDone = true
     @AppStorage(DictationReview.settingKey) private var reviewDictation = true
+    @AppStorage(PageSandbox.settingKey) private var interactivePages = true
     @AppStorage(GlobalHotKey.defaultsKey) private var globalShortcut = false
     /// Starts from the last reading (false the first time): asking the system on every init made each tab switch query it.
     /// `refresh()` reads the real state as soon as the tab appears and updates the cache.
@@ -170,6 +171,11 @@ struct GeneralSettings: View {
                     }
                     .help(Tip.reviewDictation)
                 }
+                Toggle(isOn: $interactivePages) {
+                    toggleLabel("Páginas interativas nas respostas",
+                                "Abrem isoladas, sem rede e sem acesso ao Mac. Desligado, aparecem como código.")
+                }
+                .help(Tip.interactivePages)
             }
             Section {
                 dataRow("Local dos dados", "Conversas, memórias e ajustes", button: "Mostrar no Finder", isEnabled: true,

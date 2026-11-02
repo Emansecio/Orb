@@ -25,6 +25,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Orb"
 cp -R Sources/Orb/Resources/Orbs "$APP/Contents/Resources/Orbs"
+cp -R Sources/Orb/Resources/Rich "$APP/Contents/Resources/Rich"
 
 # The helper is signed once and reused byte-for-byte: the login Keychain may pin its CDHash, not just its certificate.
 # Keep it outside build/ so a clean build does not silently invalidate its Keychain authorizations.

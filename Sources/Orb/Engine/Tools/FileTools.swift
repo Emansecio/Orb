@@ -248,8 +248,12 @@ struct WriteFileTool: AgentTool {
 }
 
 struct EditFileTool: AgentTool {
+    /// What a call says it does: how the chat knows a line holds a change (`EditDiff`).
+    static let title = "Editando arquivo"
+    static let name = "edit_file"
+
     let spec = ToolSpec(
-        name: "edit_file",
+        name: name,
         description: """
         Replace an exact piece of text in a file. `old_text` must match exactly (indentation, line breaks) and \
         be unique unless `replace_all` is true; add surrounding lines to make it unique. Read the file first; \
@@ -271,7 +275,7 @@ struct EditFileTool: AgentTool {
         let path = arguments["path"]?.string ?? ""
         let diff = Self.diff(old: arguments["old_text"]?.string ?? "", new: arguments["new_text"]?.string ?? "")
         let scope = arguments.flag("replace_all") ? "Todas as ocorrências\n" : ""
-        return ("Editando arquivo", path + "\n" + scope + diff)
+        return (Self.title, path + "\n" + scope + diff)
     }
 
     static func diff(old: String, new: String, maxLines: Int = 8) -> String {

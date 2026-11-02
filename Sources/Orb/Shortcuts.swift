@@ -19,6 +19,7 @@ enum CommandName {
     static let goTo = "Ir para…"
     static let writeMessage = "Escrever uma mensagem"
     static let findInConversation = "Buscar na conversa"
+    static let askAside = "Pergunta lateral…"
     static let stop = "Parar a resposta"
     static let sendToBackground = "Mandar o comando para segundo plano"
     static let openFolder = "Abrir pasta do Orb no Finder"
@@ -39,6 +40,8 @@ enum CommandName {
 
 /// The keys the menus declare.
 enum AppShortcut {
+    /// ⇧⌘K: a question about the chat that stays out of it (`SideQuestionSheet`); ⌥⌘K is Skills.
+    static let askAside = KeyboardShortcut("k", modifiers: [.command, .shift])
     static let newBot = KeyboardShortcut("n")
     /// ⇧⌘N: a new conversation of the Orb on show (`AppModel.newChat`).
     static let newChat = KeyboardShortcut("n", modifiers: [.command, .shift])
@@ -122,7 +125,7 @@ enum ShortcutCommand: String, CaseIterable, Sendable {
     case newChat, writeMessage, stop, sendToBackground, openFolder, send, newLine, queueAfterTask, stopAndSend, chooseModel, cancelEdit
     case goToBot, previousBot, nextBot, routines, connectors, skills, dictate
     case allowApproval, denyApproval
-    case compactOrSave, undoForget, find, findNext, findPrevious
+    case compactOrSave, undoForget, find, findNext, findPrevious, askAside
     case menuBarPanel
 }
 
@@ -172,6 +175,7 @@ enum ShortcutCatalog {
         ShortcutGroup(title: "Conversa", items: [
             ShortcutItem(.newChat, AppShortcut.newChat, CommandName.newChat + " com o Orb aberto"),
             ShortcutItem(.writeMessage, AppShortcut.writeMessage, CommandName.writeMessage),
+            ShortcutItem(.askAside, AppShortcut.askAside, CommandName.askAside),
             ShortcutItem(.stop, AppShortcut.stop, CommandName.stop),
             ShortcutItem(.sendToBackground, AppShortcut.sendToBackground, CommandName.sendToBackground + " (enquanto o Orb espera um comando do Terminal)"),
             ShortcutItem(.openFolder, AppShortcut.openFolder, CommandName.openFolder),

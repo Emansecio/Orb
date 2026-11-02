@@ -219,9 +219,11 @@ final class AppModel {
             }
             if case .bot(let id) = selection { lastSelectedBotID = id }
             if case .bot(let old) = oldValue, let left = sessions[old], left.conversation != nil { left.lastUsed = .now } // leaving it: the clock starts now
+            if case .bot(let old) = oldValue, selection != oldValue { sessions[old]?.makeTranscript().readerLeft() }
             if case .bot(let id) = selection {
                 beginLoading(id)
                 session(id).lastUsed = .now
+                orbTranscript(id).readerReturned(unread: live(id).unread)
                 setUnread(0, for: id)
                 if selection != oldValue { liveBot(id)?.glanced() } // its sidebar Orb glances toward the chat
             }
@@ -582,6 +584,7 @@ final class AppModel {
         // A while in the background, the memory freed while you used the app goes back to the system.
         NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
+                if case .bot(let id)? = self?.selection { self?.orbTranscript(id).readerLeft() }
                 self?.backgroundRelief?.cancel()
                 self?.backgroundRelief = Task {
                     try? await Task.sleep(for: .seconds(30))
@@ -1339,6 +1342,7 @@ final class AppModel {
     func appDidBecomeActive() {
         switch selection {
         case .bot(let id):
+            orbTranscript(id).readerReturned(unread: live(id).unread)
             setUnread(0, for: id)
             Task { await refreshMemory(id) } // picks up pages edited by hand meanwhile
         case .group(let id):

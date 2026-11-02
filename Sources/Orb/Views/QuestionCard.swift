@@ -17,8 +17,17 @@ struct QuestionCard: View {
     @State private var pulsesOnArrival: Bool
     @State private var pulse = 0
     @State private var reply = ""
-    @FocusState private var replyFocused: Bool
-    /// `replyFocused` as the key handler needs it (a focus state is only meant to be read while drawing).
+    /// What is picked of `multiple` options, and what is filled in of a form, a value per field.
+    @State private var picked: Set<String> = []
+    @State private var values: [String]
+    /// Where the card's own keys are being typed in.
+    private enum Spot: Hashable {
+        case reply
+        case field(Int)
+    }
+
+    @FocusState private var focus: Spot?
+    /// Whether `focus` is on the card, as the key handler needs it (a focus state is only meant to be read while drawing).
     @State private var isTyping = false
     @State private var pressed: ApprovalShortcut?
 
@@ -28,14 +37,18 @@ struct QuestionCard: View {
         self.botID = botID
         self.showsKeyHints = showsKeyHints
         _pulsesOnArrival = State(initialValue: pulses)
+        _values = State(initialValue: Array(repeating: "", count: question.fields.count))
     }
+
+    /// What "Responder" sends now.
+    private var composed: String? { question.composed(picked: picked, values: values, reply: reply) }
 
     private var isPending: Bool { request.decision == nil }
     /// Whether this is the card esc answers, so "Pular" names the key.
     private var showsKeys: Bool { showsKeyHints && model.showsApprovalKeys(request.id, of: botID) }
     /// Whether ⌘↩ answers this card right now: it is the card the keys reach and something is written to send
     /// (the same rule as `accepts` in `body`).
-    private var answerKeyApplies: Bool { showsKeys && OrbQuestion.clean(reply) != nil }
+    private var answerKeyApplies: Bool { showsKeys && composed != nil }
     private var orbName: String { model.live(botID).look.name }
 
     var body: some View {
@@ -48,10 +61,10 @@ struct QuestionCard: View {
         }
         .chatCard()
         .motion(Motion.content, value: request.decision)
-        .onChange(of: replyFocused) { isTyping = replyFocused }
+        .onChange(of: focus) { isTyping = focus != nil }
         // ⌘↩ sends what is written on the card, so with nothing written the key is not ours.
         .approvalKeys(botID: botID, approvalID: request.id, isActive: isPending, noteFocused: isTyping, pressed: $pressed,
-                      accepts: { $0 != .allow || OrbQuestion.clean(reply) != nil }, answer: perform)
+                      accepts: { $0 != .allow || composed != nil }, answer: perform)
     }
 
     // MARK: Pending
@@ -67,9 +80,18 @@ struct QuestionCard: View {
             if !question.options.isEmpty {
                 VStack(alignment: .leading, spacing: Spacing.s) {
                     ForEach(question.options, id: \.self) { option in
-                        QuestionOptionButton(text: option) { answer(option) }
+                        if question.multiple {
+                            QuestionOptionButton(text: option, isPicked: picked.contains(option)) {
+                                if picked.insert(option).inserted == false { picked.remove(option) }
+                            }
+                        } else {
+                            QuestionOptionButton(text: option) { answer(option) }
+                        }
                     }
                 }
+            }
+            ForEach(Array(question.fields.enumerated()), id: \.offset) { index, field in
+                fieldRow(field, index: index, value: $values[index])
             }
             replyField
             ActionRow {
@@ -89,7 +111,7 @@ struct QuestionCard: View {
                 .accessibilityHint(ApprovalHints.accessibilityHint("Esc", showsKeys: showsKeys))
                 .hangsOnLeadingEdge()
             } trailing: {
-                Button(action: { answer(reply) }) {
+                Button(action: sendComposed) {
                     HStack(spacing: 7) {
                         Text("Responder")
                         if answerKeyApplies {
@@ -98,7 +120,7 @@ struct QuestionCard: View {
                     }
                 }
                 .buttonStyle(PrimaryPillStyle())
-                .disabled(OrbQuestion.clean(reply) == nil)
+                .disabled(composed == nil)
                 .help(ApprovalHints.help(Tip.answerQuestion, key: AppShortcut.commandReturn.label, showsKeys: answerKeyApplies))
                 .accessibilityLabel("Responder")
                 .accessibilityHint(ApprovalHints.accessibilityHint(AppShortcut.commandReturn.label, showsKeys: answerKeyApplies))
@@ -128,16 +150,45 @@ struct QuestionCard: View {
         }
     }
 
+    /// A line of a form: words to write, or its options as chips, of which one is picked.
+    private func fieldRow(_ field: OrbQuestion.Field, index: Int, value: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(field.label)
+                .font(Typography.label.weight(.medium))
+                .foregroundStyle(Palette.secondary)
+            if field.options.isEmpty {
+                TextField(field.label, text: value, prompt: nil)
+                    .labelsHidden()
+                    .textFieldStyle(.plain)
+                    .font(Typography.text)
+                    .focused($focus, equals: .field(index))
+                    .onSubmit { submit(from: index) }
+                    .sheetTextField(fill: Palette.raised.opacity(0.6), radius: Radius.small)
+            } else {
+                WrappingLayout(spacing: Spacing.s) {
+                    ForEach(field.options, id: \.self) { option in
+                        QuestionChip(text: option, isPicked: value.wrappedValue == option) {
+                            value.wrappedValue = value.wrappedValue == option ? "" : option
+                        }
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(field.label)
+    }
+
     /// Your own words: with answers to pick it reads "Outra resposta…", without them it is the way to answer.
     private var replyField: some View {
-        TextField(question.options.isEmpty ? "Sua resposta…" : "Outra resposta…", text: $reply, axis: .vertical)
+        let offers = !question.options.isEmpty || !question.fields.isEmpty
+        return TextField(offers ? "Outra resposta…" : "Sua resposta…", text: $reply, axis: .vertical)
             .textFieldStyle(.plain)
             .font(Typography.text)
             .lineLimit(1...5)
-            .focused($replyFocused)
-            .onSubmit { answer(reply) }
+            .focused($focus, equals: .reply)
+            .onSubmit(sendComposed)
             .sheetTextField(fill: Palette.raised.opacity(0.6), radius: Radius.small)
-            .accessibilityLabel(question.options.isEmpty ? "Sua resposta" : "Outra resposta")
+            .accessibilityLabel(offers ? "Outra resposta" : "Sua resposta")
     }
 
     // MARK: Answered
@@ -184,27 +235,49 @@ struct QuestionCard: View {
         model.decide(.once, reply: reply, approvalID: request.id, botID: botID)
     }
 
+    private func sendComposed() {
+        if let composed { answer(composed) }
+    }
+
+    /// Return walks the form and sends from its last line, so the first Return never sends half of it.
+    private func submit(from index: Int) {
+        if let next = question.textField(after: index) { focus = .field(next) } else { sendComposed() }
+    }
+
     private func skip() {
         model.decide(.deny, approvalID: request.id, botID: botID)
     }
 
     private func perform(_ shortcut: ApprovalShortcut) {
         switch shortcut {
-        case .allow: answer(reply)
+        case .allow: sendComposed()
         case .deny: skip()
         }
     }
 }
 
-/// One answer to pick: a click sends it.
+extension OrbQuestion {
+    /// The next field to write in; lines of options take no typing.
+    func textField(after index: Int) -> Int? {
+        fields.indices.first { $0 > index && fields[$0].options.isEmpty }
+    }
+}
+
+/// One answer to pick: a click sends it. With `isPicked` it is one of several: a click marks it, and "Responder" sends them.
 private struct QuestionOptionButton: View {
     let text: String
+    var isPicked: Bool?
     let action: () -> Void
     @State private var isHovering = false
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 10) {
+                if let isPicked {
+                    Image(systemName: isPicked ? "checkmark.square.fill" : "square")
+                        .foregroundStyle(isPicked ? Palette.accentText : Palette.muted)
+                        .accessibilityHidden(true)
+                }
                 Text(text)
                     .foregroundStyle(Palette.ink)
                     .multilineTextAlignment(.leading)
@@ -213,7 +286,7 @@ private struct QuestionOptionButton: View {
                 Image(systemName: "arrow.right")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(Palette.hint)
-                    .opacity(isHovering ? 1 : 0)
+                    .opacity(isHovering && isPicked == nil ? 1 : 0)
                     .animation(Motion.hover(isHovering), value: isHovering)
                     .accessibilityHidden(true)
             }
@@ -227,15 +300,40 @@ private struct QuestionOptionButton: View {
         .buttonStyle(.plain)
         .clickablePointer()
         .onHover { isHovering = $0 }
-        .help(Tip.pickAnswer)
-        .accessibilityHint("Responde com esta opção")
+        .help(isPicked == nil ? Tip.pickAnswer : Tip.markAnswer)
+        .accessibilityHint(isPicked == nil ? "Responde com esta opção" : "Marca ou desmarca esta opção")
+        .accessibilityAddTraits(isPicked == true ? .isSelected : [])
+    }
+}
+
+/// An option of a form's line.
+private struct QuestionChip: View {
+    let text: String
+    let isPicked: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(text)
+                .font(Typography.label)
+                .foregroundStyle(isPicked ? Palette.ink : Palette.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(isPicked ? Palette.ghostSelected : .clear, in: .capsule)
+                .overlay(Capsule().strokeBorder(isPicked ? Palette.lineStrong : Palette.line))
+                .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .clickablePointer()
+        .accessibilityAddTraits(isPicked ? .isSelected : [])
     }
 }
 
 /// What VoiceOver says for a question card.
 enum QuestionSpeech {
     static func pending(botName: String, question: OrbQuestion) -> String {
-        let options = question.options.isEmpty ? "" : ". Opções: " + question.options.joined(separator: "; ")
+        let names = question.fields.isEmpty ? question.options : question.fields.map(\.label)
+        let options = names.isEmpty ? "" : (question.fields.isEmpty ? ". Opções: " : ". Campos: ") + names.joined(separator: "; ")
         return "\(botName) pergunta: \(question.text)\(options)"
     }
 

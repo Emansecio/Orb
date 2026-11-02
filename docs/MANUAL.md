@@ -149,7 +149,15 @@ Se o navegador não estiver instalado, o Orb fica só com `web_fetch` e `web_sea
 
 - **Escrever.** ↩ envia, ⇧↩ (ou ⌥↩) pula de linha. Digite `/` para ver as skills (↑↓ escolhem, ↩ ou ⇥ completam, Esc fecha).
 - **Respostas** vêm em Markdown de verdade: títulos, listas (inclusive de tarefas), tabelas, citações e blocos de código com
-  botão "Copiar". O Orb também **mostra imagens do seu Mac na resposta**: uma captura que ele tirou, um gráfico que gerou, uma
+  botão "Copiar". O código ganha cores em Swift, Python, JavaScript e TypeScript, shell, JSON, HTML, XML, CSS, SQL, YAML, Markdown e
+  diff, quando o bloco fecha e até 48 KB. As tabelas têm botões para copiar em Markdown ou em CSV, para colar numa planilha. Código com mais de 40 linhas aparece recolhido, com "Mostrar tudo". Código, tabelas, gráficos e diagramas têm um botão para **ampliar**.
+  - **Gráficos, diagramas e fórmulas.** O Orb pode responder com gráficos de barras, linhas, área ou pizza, diagramas Mermaid e fórmulas em bloco (`$$…$$`). Tudo é desenhado no seu Mac, sem internet, e "Código" mostra a fonte. O que não dá para desenhar continua como código, com o motivo. Preços como "$5" nunca viram fórmula: só `$$` em linha própria. No diagrama ampliado, use pinça, arraste ou os botões − e + (⌘− e ⌘=).
+  - **Páginas.** Um bloco `html` tem "Prévia", que mostra a página sem rodar scripts. Uma **página interativa** aparece como imagem, sem rodar nada, até você clicar em **Abrir página**, numa folha, uma por vez. Ela roda isolada: sem internet, sem arquivos, sem guardar nada. Só pode sugerir um texto, que aparece inteiro, e você decide se ele vai para a mensagem. Quem envia é sempre você. Desligue em Ajustes → Geral → Páginas interativas.
+  - **Sob a resposta**, quando houver: as páginas que o Orb leu (**Fontes**, um clique abre no navegador) e o que ele criou no app (rotina, memória, grupo).
+  - **Links.** Um clique em link de resposta só abre endereços da web e de e-mail. Outros esquemas, que acionariam apps, são ignorados com um aviso sonoro.
+  - **Caminhos.** Um caminho completo na resposta, de um arquivo que existe, vira link: o clique abre no Quick Look, e o clique direito traz Mostrar no Finder e Copiar caminho.
+  - **Novas e pedidos.** Ao voltar a uma conversa com resposta não lida, a linha **Novas** marca onde ela começa. Em janela larga, os traços à direita do chat são os seus pedidos: um clique leva até o pedido. Enquanto uma tarefa tem plano, o **cartão do plano** fica no fim do chat e se atualiza no lugar.
+  Quem está lendo mais acima vê uma seta no fim do chat, com quantas respostas novas chegaram; um clique volta ao fim (macOS 15 ou mais novo). O Orb também **mostra imagens do seu Mac na resposta**: uma captura que ele tirou, um gráfico que gerou, uma
   imagem que você anexou (`![o que mostra](/caminho/da/imagem.png)` numa linha só; aparece inteira, com a legenda embaixo, e o
   clique abre no Quick Look). Endereço da web nunca é carregado: só arquivos que já estão no Mac. Passe o mouse sobre uma resposta para "Copiar" ou "Copiar como Markdown". Para copiar só um trecho, clique e arraste: a seleção atravessa parágrafos, títulos e listas da resposta (blocos de código e tabelas têm a sua).
 - **Citar um trecho.** Com um trecho de uma resposta selecionado, **Citar** (ao lado de Copiar, ou no clique direito) põe o
@@ -242,7 +250,7 @@ Se o navegador não estiver instalado, o Orb fica só com `web_fetch` e `web_sea
   que abre com um clique; os arquivos que elas fizeram continuam à vista. Aberta, cada ação tem a sua linha, ligada à de
   cima por um traço: o verbo e o comando ou arquivo em fonte de código ("Rodou `swift build`", "Leu `SKILL.md`") e o tempo.
   Enquanto roda, um indicador fica no lugar do ícone; se falhou, a linha fica vermelha com "Falhou" e o código de saída.
-  Um clique na ação mostra o comando como num terminal: a pasta, `$ comando`, as primeiras 8 linhas da saída ("Mostrar
+  Uma edição de arquivo mostra as linhas que saíram (`-`) e entraram (`+`) em cores. Um clique na ação mostra o comando como num terminal: a pasta, `$ comando`, as primeiras 8 linhas da saída ("Mostrar
   tudo" para o resto), como terminou ("Concluído · 12 s", "Saiu com código 1 · 2,1 s") e o botão Copiar. As respostas do Orb ficam sem balão, ao lado
   do rosto dele, na mesma borda das linhas de trabalho; só as suas mensagens têm balão, à direita. O que o Orb diz entre uma
   ação e outra aparece menor e mais claro. Quando o pedido termina, o
@@ -741,6 +749,7 @@ tem a **Galeria**, os **Instalados** e **Explorar**.
 | ⌘N | Novo Orb |
 | ⌘K | **Ir para…**: paleta para chegar a um Orb, uma página ou uma ação (↑↓ escolhem, ↩ abre, Esc fecha) |
 | ⌘L | Escrever uma mensagem (foca o compositor) |
+| ⇧⌘K | **Pergunta lateral**: pergunta sobre a conversa que não entra nela nem na memória (usa o modelo mais barato do Orb) |
 | ⌘. | Parar a resposta |
 | ⇧⌘O | Abrir a pasta do Orb no Finder |
 | ⌥⌘B | Mostrar ou ocultar o painel do Orb |
@@ -808,6 +817,7 @@ Rodando pelo SwiftPM (sem um `.app`), ele só fecha: abra de novo. Nos modos de 
   `~/Library/Application Support/Orb` (Ajustes → Geral → Local dos dados → Mostrar no Finder). O Orb não envia estatísticas de
   uso nem relatórios de erro.
 - **Logotipos.** Os logotipos dos serviços (galeria de conectores) vêm do [Simple Icons](https://simpleicons.org) 16.34.0 (o do Slack, da 13.21.0, a última que o tinha; CC0, domínio público), embutidos no código: o app não baixa imagem nenhuma para isso. As marcas pertencem aos seus donos e aparecem só para dizer a que serviço o conector se liga; o Orb não tem vínculo nem aprovação deles.
+- **Desenhos.** Mermaid e KaTeX vão dentro do app, com versão fixa e licença MIT, e nunca usam a rede. As imagens ficam em `~/Library/Caches/Orb/rich` (até 64 MB) e podem ser apagadas: são desenhadas de novo.
 - **Chaves.** As chaves de API, o login do ChatGPT e os segredos dos conectores ficam no **Keychain** do macOS (no arquivo de dados
   fica só um marcador). O login do Claude Code é do próprio Claude Code: o Orb nunca o lê.
 - **O que vai para o provedor que você escolheu**, a cada mensagem: o que você escreveu, os anexos (imagens reduzidas; arquivos

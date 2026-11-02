@@ -148,6 +148,11 @@ enum PromptParts {
         + "for a takeover of the screen; web content goes to the browser tools."
 
     /// How a reply shows a picture on this Mac (`MarkdownBlock.image`): a capture names its copy with `ImageAttachment.note`.
+    /// What a reply can draw. Fixed text: it goes in every request and must not break the prompt cache.
+    static let richReplies = "Where it explains better than words, a reply may hold ```chart JSON {type:bar|line|area|pie,title,labels:[],"
+        + "series:[{name,values:[]}]}, ```mermaid, $$…$$ lines, or ```page (one self-contained HTML page, inline CSS/JS, no network; "
+        + "orb.propose(text) suggests a message)."
+
     static let showPicture = "To show the user a picture, put ![what it shows](/absolute/path) alone on a line of your reply "
         + "(a capture: its [imagem anexada: …] path)."
 
@@ -176,7 +181,7 @@ enum PromptParts {
         let together = hasFiles
             ? " Join simple sequential shell commands into one run_command (a && b, or a script) when you do not need to see what comes between them."
             : ""
-        return uses.joined(separator: "; ") + "." + background + together + control + " " + showPicture
+        return uses.joined(separator: "; ") + "." + background + together + control + " " + showPicture + " " + richReplies
     }
 
     /// Recipes for the Mac tasks people ask most, and the mistakes models make in them, only for an Orb that may control apps.

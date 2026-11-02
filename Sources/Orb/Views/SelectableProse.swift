@@ -29,7 +29,7 @@ enum ProseSegment: Equatable {
     static func isProse(_ block: MarkdownBlock) -> Bool {
         switch block {
         case .paragraph, .heading, .list, .quote: true
-        case .code, .table, .rule, .image: false
+        case .code, .table, .rule, .image, .chart, .diagram, .math, .page: false
         }
     }
 }
@@ -105,7 +105,7 @@ enum ProseText {
                     if number > 0 { text.append(NSAttributedString(string: "\n")) }
                     text.append(listItem(item, cached: cached || number < items.count - 1, highlight: highlight, spacing: number == items.count - 1 ? 0 : itemSpacing))
                 }
-            case .code, .table, .rule, .image:
+            case .code, .table, .rule, .image, .chart, .diagram, .math, .page:
                 continue // never in a run (`ProseSegment`)
             }
             // The space after each block, as the stack of blocks had it; none after the last.
@@ -252,7 +252,7 @@ enum ProseText {
 }
 
 /// The text view of a run of prose: read-only, selectable, transparent, laid out at the width SwiftUI gives it.
-final class ProseTextView: NSTextView, @preconcurrency NSLayoutManagerDelegate {
+final class ProseTextView: NSTextView, @preconcurrency NSLayoutManagerDelegate, NSTextViewDelegate {
     private var sizes: [CGFloat: CGSize] = [:]
     /// Widths in `sizes`, least recently used first.
     private var sizeOrder: [CGFloat] = []
@@ -290,6 +290,40 @@ final class ProseTextView: NSTextView, @preconcurrency NSLayoutManagerDelegate {
         linkTextAttributes = [.foregroundColor: NSColor(Palette.accentText), .underlineStyle: NSUnderlineStyle.single.rawValue,
                               .cursor: NSCursor.pointingHand]
         setAccessibilityRole(.staticText)
+        delegate = self
+    }
+
+    /// A file shows in Quick Look: AppKit's default would open it, and a link in a reply must not start an app.
+    func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
+        guard let url = link as? URL ?? (link as? String).flatMap(URL.init(string:)) else { return true }
+        if url.isFileURL {
+            PathLinks.open(url)
+        } else if PathLinks.opensOutside(url) {
+            return false
+        } else {
+            NSSound.beep()
+        }
+        return true
+    }
+
+    /// The file under a click.
+    private func fileLink(at event: NSEvent) -> URL? {
+        guard let textStorage, textStorage.length > 0 else { return nil }
+        let index = characterIndexForInsertion(at: convert(event.locationInWindow, from: nil))
+        guard index < textStorage.length else { return nil }
+        return (textStorage.attribute(.link, at: index, effectiveRange: nil) as? URL).flatMap { $0.isFileURL ? $0 : nil }
+    }
+
+    @objc private func previewFile(_ sender: NSMenuItem) {
+        if let url = sender.representedObject as? URL { PathLinks.open(url) }
+    }
+
+    @objc private func showFileInFinder(_ sender: NSMenuItem) {
+        if let url = sender.representedObject as? URL { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+    }
+
+    @objc private func copyFilePath(_ sender: NSMenuItem) {
+        if let url = sender.representedObject as? URL { Clipboard.copy(url.path) }
     }
 
     /// `fades`: the text is the one being written, and what it adds to the text shown fades in (`TextFade`).
@@ -421,6 +455,16 @@ final class ProseTextView: NSTextView, @preconcurrency NSLayoutManagerDelegate {
     /// With text selected, a right click offers to copy it (and to quote it, where a reply can be quoted); without, the
     /// reply's own menu ("Copiar", "Copiar como Markdown") comes up as before.
     override func menu(for event: NSEvent) -> NSMenu? {
+        if let file = fileLink(at: event) {
+            let menu = NSMenu()
+            for (title, action) in [("Visualizar", #selector(previewFile(_:))), ("Mostrar no Finder", #selector(showFileInFinder(_:))),
+                                    ("Copiar caminho", #selector(copyFilePath(_:)))] {
+                let item = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
+                item.target = self
+                item.representedObject = file
+            }
+            return menu
+        }
         guard selectedRange().length > 0 else { return nil }
         let menu = NSMenu()
         menu.addItem(withTitle: "Copiar", action: #selector(copy(_:)), keyEquivalent: "")
@@ -429,7 +473,7 @@ final class ProseTextView: NSTextView, @preconcurrency NSLayoutManagerDelegate {
     }
 
     override func rightMouseDown(with event: NSEvent) {
-        if selectedRange().length > 0 { super.rightMouseDown(with: event) } else { nextResponder?.rightMouseDown(with: event) }
+        if selectedRange().length > 0 || fileLink(at: event) != nil { super.rightMouseDown(with: event) } else { nextResponder?.rightMouseDown(with: event) }
     }
 
     /// The bar beside a quote.
@@ -499,9 +543,25 @@ struct SelectableProse: NSViewRepresentable {
         let shown = Shown(blocks: blocks, cursor: cursor, highlight: highlight, isQuiet: isQuiet)
         guard context.coordinator.shown != shown else { return }
         context.coordinator.shown = shown
-        let text = ProseText.make(blocks, cursor: cursor, cached: cached, highlight: highlight)
-        view.show(isQuiet ? ProseText.quieter(text) : text, cursor: cursor,
-                  fades: cursor && !context.environment.accessibilityReduceMotion)
+        show(in: view, isQuiet: isQuiet, fades: cursor && !context.environment.accessibilityReduceMotion)
+        guard !cursor, cached, let text = view.textStorage else { return }
+        let paths = PathLinks.unknown(in: text)
+        guard !paths.isEmpty else { return }
+        Task { @MainActor [coordinator = context.coordinator] in
+            // Only a color changes, so in the text on show: setting it again would drop a selection.
+            guard await PathLinks.check(paths), coordinator.shown == shown, let text = view.textStorage else { return }
+            PathLinks.link(text)
+        }
+    }
+
+    private func show(in view: ProseTextView, isQuiet: Bool, fades: Bool) {
+        var text = ProseText.make(blocks, cursor: cursor, cached: cached, highlight: highlight)
+        if !cursor, cached {
+            let linked = NSMutableAttributedString(attributedString: text)
+            PathLinks.link(linked)
+            text = linked
+        }
+        view.show(isQuiet ? ProseText.quieter(text) : text, cursor: cursor, fades: fades)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: ProseTextView, context: Context) -> CGSize? {

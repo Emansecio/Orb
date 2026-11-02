@@ -44,6 +44,84 @@ enum TranscriptSample {
         Quer que eu faça isso agora?
         """
 
+    /// A reply with code in a few languages and a table with cells that exports must get right.
+    private static let richMarkdown = #"""
+        A taxa mudou em dois lugares. O cálculo ficou assim:
+
+        ```swift
+        // Preço final, com a taxa da moeda
+        @MainActor struct Preco: Sendable {
+            let valor: Decimal
+            func total(taxa: Decimal = 0.12) -> String {
+                guard valor > 0 else { return "grátis" }
+                return "R$ \(valor * (1 + taxa))"
+            }
+        }
+        ```
+
+        ```python
+        @dataclass
+        class Fila:
+            nome: str = "leads"  # uma fila por dia
+            def __len__(self):
+                return 42 if self.nome else None
+        ```
+
+        ```json
+        { "moeda": "BRL", "taxa": 0.12, "ativa": true }
+        ```
+
+        ```diff
+        @@ -1,2 +1,3 @@
+        -let taxa = 0.1
+        +let taxa = 0.12
+        +let moeda = "BRL"
+        ```
+
+        | Plano | Taxa | Observação |
+        | --- | ---: | :---: |
+        | **Básico** | 0,10 | sem `moeda` |
+        | Pro | 0,12 | com a, b \| c |
+
+        ```chart
+        {"type":"bar","title":"Leads por mês","labels":["Jan","Fev","Mar","Abr"],
+         "series":[{"name":"2025","values":[12,18,9,22]},{"name":"2026","values":[20,16,27,31]}]}
+        ```
+
+        ```chart
+        {"type":"pie","title":"Origem","labels":["Busca","Indicação","Anúncio"],"values":[48,31,21]}
+        ```
+
+        ```mermaid
+        flowchart LR
+          A[Pedido] --> B{Tem estoque?}
+          B -- sim --> C[Separar]
+          B -- não --> D[Avisar o cliente]
+        ```
+
+        ```mermaid
+        flowchart TD
+          A --> B[
+        ```
+
+        $$
+        \int_0^1 x^2\,dx = \frac{1}{3}
+        $$
+
+        ```html
+        <h2 style="color:#459FFE">Prévia</h2><p>Sem scripts.</p><script>document.body.innerHTML = "falhou"</script>
+        <img src="https://exemplo.invalid/x.png" alt="sem rede">
+        ```
+
+        ```page
+        <h3>Contador</h3><button id="b">Somar</button> <span id="n">0</span>
+        <script>let n = 41; const s = document.getElementById("n"); s.textContent = ++n;
+        document.getElementById("b").onclick = () => { s.textContent = ++n; orb.propose("Cheguei a " + n); };</script>
+        ```
+
+        Custa $5 ou $10, e o relatório está em `/tmp` e em /Users/voce/inexistente/nota.md.
+        """#
+
     /// The run marker's date, as `Conversation.startingRoutineRun` writes it (its formatter is private).
     private static let routineRunDate: DateFormatter = {
         let formatter = DateFormatter()
@@ -237,6 +315,34 @@ enum TranscriptSample {
             items = []
         case "transcript-browser-live", "transcript-browser-need", "transcript-browser-done":
             items = LiveScreenSnapshots.items(screen, model: model, bot: bot)
+        case "transcript-rich":
+            // Colors in code, the buttons of a table, a change in `edit_file` and the way back to the end.
+            ToolGroupRow.opensInSnapshots = true
+            ToolCallLine.opensInSnapshots = true
+            JumpToEndButton.showsInSnapshots = true
+            let start = Date.now.addingTimeInterval(-60)
+            let edit = ToolCall(kind: .file, title: EditFileTool.title,
+                                detail: "/Users/voce/Projetos/app/Sources/Preco.swift\n" + EditFileTool.diff(old: "let taxa = 0.1", new: "let taxa = 0.12\nlet moeda = \"BRL\""),
+                                state: .done, output: "Arquivo editado.", startedAt: start, finishedAt: start.addingTimeInterval(0.2))
+            items = [user, TranscriptItem(.tool(edit)), TranscriptItem(.bot(text: richMarkdown, isStreaming: false))]
+        case "transcript-rich-work":
+            // The rail, the plan's card, what a turn read and changed, and the fuller questions.
+            let start = Date.now.addingTimeInterval(-60)
+            func call(_ kind: ToolCall.Kind, _ title: String, _ detail: String) -> TranscriptItem {
+                TranscriptItem(.tool(ToolCall(kind: kind, title: title, detail: detail, state: .done, output: "ok", startedAt: start, finishedAt: start.addingTimeInterval(1))))
+            }
+            items = [TranscriptItem(.user(text: "Pesquise os preços dos concorrentes", attachments: [])),
+                     call(.browser, "Lendo página", "https://www.exemplo.com.br/precos"),
+                     call(.browser, "Lendo página", "https://docs.exemplo.org/planos"),
+                     call(.schedule, "Agendando tarefa", "“Conferir preços” · toda segunda · 9h"),
+                     call(.memory, "Guardando na memória (fato)", "O plano Pro custa R$ 49"),
+                     TranscriptItem(.bot(text: "O Pro continua a R$ 49. Deixei uma rotina semanal para conferir.", isStreaming: false)),
+                     TranscriptItem(.user(text: "Agora monte o relatório para a reunião de sexta", attachments: [])),
+                     TranscriptItem(.bot(text: "Preciso de dois detalhes.", isStreaming: false)),
+                     TranscriptItem(.approval(ApprovalRequest.question(
+                         OrbQuestion(text: "Quais seções entram?", options: ["Resumo", "Preços", "Riscos"], multiple: true), botName: bot.name))),
+                     TranscriptItem(.approval(ApprovalRequest.question(
+                         OrbQuestion(text: "Como devo enviar?", fields: [.init(label: "Para quem"), .init(label: "Formato", options: ["PDF", "Planilha"])]), botName: bot.name)))]
         case "transcript-retry":
             items = [user, TranscriptItem(.notice("Não deu certo: Sem conexão com o provedor: A conexão com a Internet parece estar desligada."))]
         default:
@@ -292,6 +398,11 @@ enum TranscriptSample {
                 // Re-seed after the offscreen layer subscribed: this scene has a drawn page, never a running browser.
                 try? await Task.sleep(for: .milliseconds(500))
                 LiveScreenSnapshots.tab(model: model, botID: bot.id)
+            }
+            if screen == "transcript-rich-work" {
+                model.orbTranscript(bot.id).showPlan(TaskPlan(goal: "Montar o relatório", steps: [
+                    TaskPlan.Step(text: "Reunir os preços", state: .done), TaskPlan.Step(text: "Escrever o resumo", state: .inProgress),
+                    TaskPlan.Step(text: "Conferir os números", state: .pending)]))
             }
             if screen == "transcript-browser-live" { await LiveScreenSnapshots.point(model: model, botID: bot.id) }
             // The bar over the top of the conversation (⌘F), and the first message taken back into the field (Editar).

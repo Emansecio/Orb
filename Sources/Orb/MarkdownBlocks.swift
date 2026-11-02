@@ -21,6 +21,14 @@ enum MarkdownBlock: Equatable, Sendable {
     /// `![what it shows](/path/picture.png)` on a line of its own: a picture on this Mac that the reply shows (a capture,
     /// a chart the Orb drew). `path` is absolute. Never a web address (see `MarkdownBlocks.image`).
     case image(alt: String, path: String)
+    /// A closed ```chart fence that reads as a chart. Anything else in it stays code.
+    case chart(ChartSpec, source: String)
+    /// A closed ```mermaid fence, drawn by `RichRenderer`.
+    case diagram(source: String)
+    /// `$$…$$` on lines of their own, or a closed ```math fence, drawn by `RichRenderer`.
+    case math(tex: String)
+    /// A closed ```page fence: an interactive page, shown as its picture until the person opens it.
+    case page(html: String)
 }
 
 struct MarkdownListItem: Equatable, Sendable {
@@ -41,6 +49,47 @@ struct MarkdownTable: Equatable, Sendable {
     var header: [String]
     var rows: [[String]]
     var alignments: [Alignment]
+
+    /// The table as Markdown again: a "|" of a cell goes back to the escaped form the reader took it from.
+    var markdown: String {
+        func row(_ cells: [String]) -> String {
+            "| " + cells.map { $0.replacingOccurrences(of: "|", with: "\\|") }.joined(separator: " | ") + " |"
+        }
+        let rule = header.indices.map { column -> String in
+            switch alignments.indices.contains(column) ? alignments[column] : .leading {
+            case .leading: "---"
+            case .center: ":---:"
+            case .trailing: "---:"
+            }
+        }
+        return ([row(header), "| " + rule.joined(separator: " | ") + " |"] + rows.map(row)).joined(separator: "\n")
+    }
+
+    /// The table as CSV (RFC 4180). `shown` gives the text of a cell, so a spreadsheet gets the words and not their Markdown.
+    func csv(shown: (String) -> String) -> String {
+        ([header] + rows).map { cells in
+            cells.map { Self.csvField(shown($0)) }.joined(separator: ",")
+        }.joined(separator: "\r\n")
+    }
+
+    /// Quoted when it has a comma, a quote or a line break. A cell a spreadsheet would run as a formula starts with an
+    /// apostrophe: a reply's text may come from a page the Orb read, and pasting it must not execute anything. A number with
+    /// its sign stays as it is. Read by scalars: a combining mark after a "," or "=" joins it into another `Character`.
+    private static func csvField(_ text: String) -> String {
+        let scalars = text.unicodeScalars
+        let safe = isFormula(text) ? "'" + text : text
+        guard scalars.contains(where: { $0 == "," || $0 == "\"" || $0 == "\n" || $0 == "\r" }) else { return safe }
+        return "\"" + safe.replacingOccurrences(of: "\"", with: "\"\"") + "\""
+    }
+
+    private static func isFormula(_ text: String) -> Bool {
+        guard let first = text.unicodeScalars.first else { return false }
+        switch first {
+        case "=", "@", "\t", "\r": return true
+        case "+", "-": return !text.unicodeScalars.dropFirst().allSatisfy { ("0"..."9").contains($0) || $0 == "." || $0 == "," || $0 == "%" || $0 == " " }
+        default: return false
+        }
+    }
 }
 
 enum MarkdownBlocks {
@@ -73,7 +122,14 @@ enum MarkdownBlocks {
                     code.append(lines[index])
                     index += 1
                 }
-                blocks.append(.code(language: fence.language, code: code.joined(separator: "\n"), isClosed: closed))
+                let source = code.joined(separator: "\n")
+                blocks.append((closed ? richBlock(language: fence.language, source: source) : nil)
+                              ?? .code(language: fence.language, code: source, isClosed: closed))
+                continue
+            }
+            if let math = math(startingAt: index, in: lines) {
+                blocks.append(.math(tex: math.tex))
+                index = math.next
                 continue
             }
             if let heading = heading(line) {
@@ -146,7 +202,7 @@ enum MarkdownBlocks {
                 }
                 return String(repeating: "  ", count: item.depth) + prefix + inlinePlain(item.text)
             }.joined(separator: "\n")
-        case .code(_, let code, _):
+        case .code(_, let code, _), .chart(_, let code), .diagram(let code), .math(let code), .page(let code):
             return code
         case .table(let table):
             return ([table.header] + table.rows).map { $0.map(inlinePlain).joined(separator: "\t") }.joined(separator: "\n")
@@ -177,6 +233,44 @@ enum MarkdownBlocks {
             if character == " " { width += 1 } else if character == "\t" { width += 4 } else { break }
         }
         return width
+    }
+
+    /// The block a closed fence stands for, when it is one of those drawn instead of shown as code. Only a closed fence: the
+    /// block streams as code and swaps once, when it is whole.
+    private static func richBlock(language: String?, source: String) -> MarkdownBlock? {
+        guard let language, !source.isEmpty else { return nil }
+        if language.lowercased() == "page" { return source.utf8.count <= PageSandbox.maxHTML ? .page(html: source) : nil }
+        guard source.utf8.count <= richSourceLimit else { return nil }
+        switch language.lowercased() {
+        case "chart": return ChartSpec.parse(source).map { .chart($0, source: source) }
+        case "mermaid", "mmd": return .diagram(source: source)
+        case "math", "latex", "tex", "katex": return .math(tex: source)
+        default: return nil
+        }
+    }
+
+    /// Past this a block stays code: nobody reads a formula or a diagram this long.
+    static let richSourceLimit = 32 * 1024
+
+    /// `$$…$$` alone on a line, or `$$` alone on a line down to the next one. Inline math is left out on purpose: "$5 e $10"
+    /// is a sentence. A "$$" that never closes in its piece stays text.
+    private static func math(startingAt start: Int, in lines: [Substring]) -> (tex: String, next: Int)? {
+        let first = lines[start].trimmingCharacters(in: .whitespaces)
+        guard first.hasPrefix("$$"), indent(of: lines[start]) <= 3 else { return nil }
+        if first.count > 4, first.hasSuffix("$$") {
+            let tex = first.dropFirst(2).dropLast(2).trimmingCharacters(in: .whitespaces)
+            return tex.isEmpty || tex.contains("$") ? nil : (tex, start + 1)
+        }
+        guard first == "$$" else { return nil }
+        var index = start + 1
+        while index < lines.count {
+            if lines[index].trimmingCharacters(in: .whitespaces) == "$$" {
+                let tex = lines[(start + 1)..<index].joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+                return tex.isEmpty || tex.utf8.count > richSourceLimit ? nil : (tex, index + 1)
+            }
+            index += 1
+        }
+        return nil
     }
 
     private static func fenceOpening(_ line: Substring) -> (ticks: Int, language: String?)? {
@@ -299,7 +393,7 @@ enum MarkdownBlocks {
     /// Whether a line begins a block of its own (so it ends the paragraph above it).
     private static func startsBlock(_ line: Substring, at index: Int, in lines: [Substring]) -> Bool {
         if fenceOpening(line) != nil || heading(line) != nil || isRule(line) || isQuote(line) || listMarker(line) != nil
-            || image(line) != nil { return true }
+            || image(line) != nil || math(startingAt: index, in: lines) != nil { return true }
         return index + 1 < lines.count && table(startingAt: index, in: lines) != nil
     }
 

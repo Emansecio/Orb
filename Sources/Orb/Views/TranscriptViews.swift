@@ -766,6 +766,7 @@ enum MarkdownCache {
     private struct Key: Hashable {
         let source: String
         let endsParagraph: Bool
+        var language: String?
     }
 
     /// Two generations of parsed values, bounded by the UTF-8 bytes of the source text they hold.
@@ -804,6 +805,9 @@ enum MarkdownCache {
 
     private static var inlineText = Generations<AttributedString>()
     private static var blockLists = Generations<[MarkdownBlock]>()
+    private static var coloredCode = Generations<AttributedString>()
+    /// What a run of color costs over the bytes of its text: many short runs, so more than the text itself.
+    private static let coloredCodeWeight = 8
     /// The longest text worth keeping.
     private static let longestText = 64 * 1024
 
@@ -815,6 +819,17 @@ enum MarkdownCache {
         let parsed = parse(source, endsParagraph: endsParagraph)
         inlineText.remember(parsed, for: key, size: size)
         return parsed
+    }
+
+    /// The colors of a block of code, once `CodeHighlight` gave them (a row made again takes them at once).
+    static func colored(_ code: String, language: String) -> AttributedString? {
+        let size = code.utf8.count
+        return coloredCode.value(for: Key(source: code, endsParagraph: false, language: language), size: size * coloredCodeWeight)
+    }
+
+    static func remember(colored: AttributedString, of code: String, language: String) {
+        coloredCode.remember(colored, for: Key(source: code, endsParagraph: false, language: language),
+                             size: code.utf8.count * coloredCodeWeight)
     }
 
     /// The blocks of a reply, or of one paragraph of it.
@@ -832,6 +847,7 @@ enum MarkdownCache {
     static func removeAll() {
         inlineText.removeAll()
         blockLists.removeAll()
+        coloredCode.removeAll()
     }
 
     /// Entries of inline text kept.
@@ -983,7 +999,7 @@ struct ToolCallLine: View {
             // A detail on one line (a path, an address) heads the block; a longer one (a script) is the block's text.
             let detail = hidden?.detail
             let oneLine = detail.map { !$0.contains("\n") } ?? false
-            CommandBlock(command: oneLine ? nil : detail, prompt: false, folder: nil,
+            CommandBlock(command: oneLine ? nil : detail, prompt: false, isDiff: call.title == EditFileTool.title, folder: nil,
                          heading: oneLine ? detail.map { (call.kind.symbol, $0) } : nil, output: call.output)
         }
     }
@@ -1044,6 +1060,8 @@ struct CommandBlock: View {
     /// Long commands fold (`CommandExcerpt`) and open whole on request: what is approved is never hidden, only folded. A
     /// risky one is always shown whole.
     var foldsCommand = true
+    /// What an `edit_file` changes: its "-" and "+" lines in color (`EditDiff`).
+    var isDiff = false
     var folder: String?
     /// A symbol and a line above it all when there is no folder (the file an action read).
     var heading: (symbol: String, text: String)?
@@ -1133,9 +1151,10 @@ struct CommandBlock: View {
 
     @ViewBuilder private func commandText(_ command: String) -> some View {
         let excerpt = foldsCommand ? CommandExcerpt.excerpt(of: command) : nil
+        let shown = showsWholeCommand ? command : excerpt?.text ?? command
         VStack(alignment: .leading, spacing: 6) {
             (Text(prompt ? "$ " : "").foregroundStyle(Palette.faint)
-                + Text(showsWholeCommand ? command : excerpt?.text ?? command).foregroundStyle(isCode ? Palette.ink : Palette.secondary))
+                + (isDiff ? Text(EditDiff.colored(shown)) : Text(shown)).foregroundStyle(isCode ? Palette.ink : Palette.secondary))
                 .font(isCode ? Typography.code : Typography.label)
                 .lineSpacing(2)
                 .textSelection(.enabled)
@@ -1162,13 +1181,21 @@ struct CommandBlock: View {
     }
 
     private func showAllButton(isShowing: Binding<Bool>, hidden: Int) -> some View {
-        Button(isShowing.wrappedValue ? "Mostrar menos" : CommandExcerpt.showAll(hidden: hidden)) {
-            isShowing.wrappedValue.toggle()
-        }
-        .buttonStyle(.plain)
-        .font(Typography.small.weight(.medium))
-        .foregroundStyle(Palette.muted)
-        .clickablePointer()
+        ShowAllButton(isShowing: isShowing, hidden: hidden)
+    }
+}
+
+/// "Mostrar tudo (mais 12 linhas)" under what was folded, and "Mostrar menos" once it is open.
+struct ShowAllButton: View {
+    @Binding var isShowing: Bool
+    let hidden: Int
+
+    var body: some View {
+        Button(isShowing ? "Mostrar menos" : CommandExcerpt.showAll(hidden: hidden)) { isShowing.toggle() }
+            .buttonStyle(.plain)
+            .font(Typography.small.weight(.medium))
+            .foregroundStyle(Palette.muted)
+            .clickablePointer()
     }
 }
 
@@ -1967,7 +1994,7 @@ struct ApprovalCard: View {
             let isCommand = request.toolName == "run_command"
             let shown = isCommand ? ShownCommand.split(request.command) : (command: request.command, folder: nil)
             CommandBlock(command: shown.command, prompt: isCommand, isCode: !request.isHandoff, foldsCommand: !request.isDangerous,
-                         folder: shown.folder, fill: Palette.raised, copies: false)
+                         isDiff: request.toolName == EditFileTool.name, folder: shown.folder, fill: Palette.raised, copies: false)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         if let note = request.note {
@@ -1993,7 +2020,7 @@ struct ApprovalCard: View {
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Palette.secondary)
                     if !item.command.isEmpty {
-                        Text(item.command)
+                        (item.toolName == EditFileTool.name ? Text(EditDiff.colored(item.command)) : Text(item.command))
                             .font(Typography.code)
                             .foregroundStyle(Palette.muted)
                             .lineLimit(2)

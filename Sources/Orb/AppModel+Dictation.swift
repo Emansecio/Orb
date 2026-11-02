@@ -40,6 +40,25 @@ extension AppModel {
         return result.text
     }
 
+    /// A question about the chat that stays out of it: the same cheap model, no tools, and nothing added to the conversation or
+    /// to what the Orb remembers. `onText` gets the answer as it is written. nil when no model can answer.
+    func askAside(_ question: String, of botID: UUID, onText: @escaping @MainActor (String) -> Void) async -> SideQuestion.Outcome {
+        guard !isResetting, let bot = bot(botID), let ref = modelRef(for: bot), let account = account(ref.provider),
+              account.isEnabled, isUsable(account) else { return .failed("Este Orb não tem um modelo disponível.") }
+        let model = Self.dictationReviewer(in: account, orb: ref.model)
+        guard let client = clientOverride?() ?? account.client(for: account.models.first { $0.id == model },
+                                                               credentials: Self.credentials(for: ref.provider),
+                                                               conversationID: botID.uuidString + "-lateral") else {
+            return .failed("Não consegui falar com o modelo.")
+        }
+        let context = session(botID).conversation?.messages ?? []
+        let result = await SideQuestion.ask(question, context: context, client: client, model: model, onText: onText)
+        if let usage = result.usage, !isResetting, self.bot(botID) != nil {
+            recordAuxiliaryUsage(usage, botID: botID, model: ModelRef(provider: ref.provider, model: model).text)
+        }
+        return result.outcome
+    }
+
     /// Which model reads the dictation over: the cheap one of the Orb's maker (`ChunkSummarizer.model`), Haiku on Claude
     /// Code (whose list has it under that name), else the Orb's own.
     static func dictationReviewer(in account: ProviderAccount, orb: String) -> String {
