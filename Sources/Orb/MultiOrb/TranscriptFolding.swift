@@ -381,7 +381,7 @@ enum TranscriptFolding {
     static func foldableEventKind(of item: TranscriptItem) -> OrbEvent.Kind? {
         guard case .event(let event) = item.kind else { return nil }
         switch event.kind {
-        case .orbCreated, .joinedGroup, .leftGroup, .routineCreated, .routineRun, .groupWorked: return event.kind
+        case .orbCreated, .joinedGroup, .leftGroup, .routineCreated, .groupWorked: return event.kind
         default: return nil
         }
     }

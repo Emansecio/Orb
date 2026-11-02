@@ -244,3 +244,22 @@ extension Optional<OrbEvent.Outcome> {
         }
     }
 }
+
+/// A routine's run in its Orb's chat, read like a message: which run, when, and its whole report. A run the routine no
+/// longer keeps shows the line saved in the chat.
+struct RoutineRunMessage: View {
+    @Environment(AppModel.self) private var model
+    let event: OrbEvent
+    let date: Date
+
+    var body: some View {
+        let run = model.routines.lazy.flatMap(\.runs).first { $0.id == event.runID }
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Label("\(event.detail ?? "Rotina") · \(RoutineText.stamp(date))", systemImage: "clock.arrow.circlepath")
+                .font(Typography.small)
+                .foregroundStyle(event.outcome == .failed ? Palette.danger : Palette.muted)
+            MarkdownChunk(source: run?.report ?? run?.summary ?? event.note ?? event.sentence).equatable()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}

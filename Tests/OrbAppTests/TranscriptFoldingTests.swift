@@ -88,13 +88,13 @@ struct TranscriptFoldingTests {
         #expect(try decoded("Guardado na memória: x") == .notice("Guardado na memória: x"))
     }
 
-    @Test("Rodadas seguidas da mesma rotina viram uma linha; de outra rotina não")
+    @Test("Cada rodada de rotina fica como sua própria mensagem")
     func routineRunsFoldByRoutine() {
         func run(_ name: String, _ outcome: OrbEvent.Outcome = .finished) -> TranscriptItem {
             TranscriptItem(.event(OrbEvent(kind: .routineRun, actor: atlas, detail: name, note: "nada novo", outcome: outcome)))
         }
         let same = [run("WhatsApp"), run("WhatsApp", .failed), run("WhatsApp")]
-        #expect(TranscriptFolding.rows(for: same) == [.events(.routineRun, same)])
+        #expect(TranscriptFolding.rows(for: same) == same.map { .single($0) })
         let title = TranscriptFolding.eventsTitle(.routineRun, same)
         #expect(title.hasPrefix("Rotina “WhatsApp” · 3 rodadas · última ") && title.hasSuffix(" · 1 não terminou"))
         #expect(TranscriptFolding.rows(for: [run("WhatsApp"), run("Anúncios")]).count == 2)

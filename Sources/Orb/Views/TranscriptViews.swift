@@ -73,7 +73,11 @@ struct TranscriptRow: View, Equatable {
             GreetingMessage(orb: orb, botID: botID, text: text, isLast: isLastReply, showsAvatar: showsAvatar, highlight: find?.query)
         // MARK: MultiOrb (WP0)
         case .event(let event):
-            EventLineView(event: event).alignedWithReplyText()
+            if event.kind == .routineRun {
+                RoutineRunMessage(event: event, date: item.date).alignedWithReplyText()
+            } else {
+                EventLineView(event: event).alignedWithReplyText()
+            }
         case .orbMessage(let message):
             // A card: from the gutter, as wide as the others (`cardWidth`), not narrowed by the text's right margin.
             OrbMessageRow(message: message, botID: botID).padding(.leading, gutter)
