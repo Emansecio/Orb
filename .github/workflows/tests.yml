@@ -61,14 +61,12 @@ jobs:
       - name: Compilar (release)
         run: swift build -c release
 
-      # Em série: a máquina do CI tem poucos núcleos, e com ~3900 testes em paralelo os que esperam por algo (processos,
-      # servidores falsos, prazos de rede) estouram o tempo. Aqui leva ~2 min; no CI, alguns minutos.
+      # Em série: a máquina do CI tem poucos núcleos, e com ~5000 testes em paralelo os que esperam por algo (processos,
+      # servidores falsos, prazos de rede) estouram o tempo. Localmente, scripts/test.sh roda com metade dos núcleos.
       # A saída vai também para um arquivo (tee, com pipefail para a falha do swift test não se perder) que o passo
-      # seguinte lê para contar o que rodou, falhou e foi pulado.
+      # seguinte lê para contar o que rodou, falhou e foi pulado. A integração com navegadores reais só roda quando
+      # pedida (ORB_REAL_BROWSER_TESTS=1), então não entra aqui.
       - name: Rodar os testes
-        env:
-          # A suíte padrão usa servidores e drivers falsos; integração com navegadores reais é local e explícita.
-          ORB_SKIP_REAL_BROWSER_TESTS: '1'
         run: |
           set -o pipefail
           swift test --no-parallel 2>&1 | tee "$RUNNER_TEMP/swift-test.log"

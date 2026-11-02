@@ -4,7 +4,7 @@ import Testing
 
 // The same guarantees as AgentBrowserHardeningTests, against the real `agent-browser` and a real Chrome: a command never starts a
 // browser of its own choosing, a stale session with other flags is not reused, and quitting closes what the tools server of a Claude
-// Code turn opened. Skipped without the browser (and with ORB_SKIP_REAL_BROWSER_TESTS=1), like the other real-browser tests.
+// Code turn opened. Only with ORB_REAL_BROWSER_TESTS=1 and the browser installed, like the other real-browser tests.
 @Suite(.serialized)
 struct RealBrowserHardeningTests {
     private static func driver(for config: AgentBrowserConfig) -> AgentBrowserDriver {

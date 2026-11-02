@@ -2,11 +2,12 @@ import Foundation
 import Testing
 @testable import Orb
 
-// Tests against the real browser. Nothing here runs without it: the installation test needs an environment variable, and the
-// smoke tests run only when `agent-browser` and a Chrome (or Brave) are found (in the app's own `navegador` folder, or anywhere the
-// locator looks). CI has none of them. Set ORB_SKIP_REAL_BROWSER_TESTS=1 to leave them out on a Mac that has them. Real browsers
-// run headless here, so they never take the focus of the Mac. The measurements that chose this browser are in
-// docs/REVISAO-NAVEGADOR-2026-10-16.md.
+// Tests against the real browser. Nothing here runs unless asked: the installation test needs ORB_INSTALL_BROWSERS, and the
+// smoke tests need ORB_REAL_BROWSER_TESTS=1 and an `agent-browser` and a Chrome (or Brave) (in the app's own `navegador` folder,
+// or anywhere the locator looks). Asked for, not skipped on request: they start Chrome and reach the internet (example.com,
+// DuckDuckGo, Google), which a plain `swift test` on a Mac in use must not do. They run headless, except the one that opens the
+// window of `browse_show` and takes the focus of the Mac, which also needs ORB_REAL_BROWSER_WINDOW=1. The measurements that
+// chose this browser are in docs/REVISAO-NAVEGADOR-2026-10-16.md.
 
 enum RealBrowsers {
     static let environment = ProcessInfo.processInfo.environment
@@ -20,14 +21,17 @@ enum RealBrowsers {
     /// The tests that start real browsers take turns (they look at the processes of the same folder).
     static let gate = RealBrowserGate()
 
-    static let skipped = environment["ORB_SKIP_REAL_BROWSER_TESTS"] == "1"
+    static let requested = environment["ORB_REAL_BROWSER_TESTS"] == "1"
+
+    /// The test that opens a browser window over whatever the person is doing.
+    static let showsWindows = environment["ORB_REAL_BROWSER_WINDOW"] == "1"
 
     static let locator = BrowserLocator.live(path: environment["PATH"], managedRoot: root)
 
     static func status() -> BrowserStatus { locator.status() }
 
     /// Whether the browser can be started on this Mac.
-    static var isReady: Bool { !skipped && status().isReady }
+    static var isReady: Bool { requested && status().isReady }
 
     /// What `ORB_INSTALL_BROWSERS` asks to install ("agent-browser,chrome", or "all").
     static var toInstall: [BrowserComponent] {

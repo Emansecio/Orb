@@ -1,11 +1,11 @@
 import SwiftUI
 import AppKit
 
-/// `Orb --pipe-tools` declares the Orb's tools to the Claude Code CLI (which is only a pipe to the model): no window, and none of
-/// the app's AppKit/SwiftUI setup, so `OrbApp.main()` is never reached; anything else is the app.
-@main
-enum Launcher {
-    static func main() {
+/// The app's entry point, called by the `OrbMain` executable. `Orb --pipe-tools` declares the Orb's tools to the Claude
+/// Code CLI (which is only a pipe to the model): no window, and none of the app's AppKit/SwiftUI setup, so `OrbApp.main()`
+/// is never reached; anything else is the app.
+public enum Launcher {
+    @MainActor public static func main() {
         if let options = ClaudePipeServer.Options(arguments: CommandLine.arguments) {
             ClaudePipeServer.run(options)
         }

@@ -39,7 +39,7 @@ struct BrowserDriverRealityTests {
 
     /// The quoting above only matters if the real `batch` reads it back as the words that were meant. Asks the real command line
     /// (no browser starts: the `fill` fails on an element that is not there, and its reply still says how the command was read).
-    @Test(.enabled(if: !RealBrowsers.skipped && RealBrowsers.status().agentBrowser != nil))
+    @Test(.enabled(if: RealBrowsers.requested && RealBrowsers.status().agentBrowser != nil))
     func theRealBatchReadsTheQuotedWordsBackAsTheyWere() async throws {
         let executable = try #require(RealBrowsers.status().agentBrowser)
         let sockets = "/tmp/orbab-\(UUID().uuidString.prefix(8))"

@@ -20,6 +20,18 @@ struct ChatView: View {
     var body: some View {
         let live = model.live(botID)
         let look = live.look
+        // Three parts, each its own expression: one chain of every modifier took the type checker over ten seconds.
+        following(stage(look))
+            .safeAreaInset(edge: .bottom, spacing: 0) { composer }
+            .onDrop(of: AppModel.droppableTypes, isTargeted: $isDropTargeted) { model.attachDropped($0, to: botID) }
+            .background(Palette.canvas)
+            .navigationTitle(look.name)
+            .navigationSubtitle(subtitle(live))
+            .toolbar { actions(look) }
+    }
+
+    /// The conversation with the find bar and the drop overlay over it.
+    private func stage(_ look: BotLook) -> some View {
         // Switching Orbs swaps the conversation for the other's with a cross-fade (§2.9) while the composer, the
         // toolbar and the panel, outside this container, change at once and never flash: the transcript is a view of
         // its own per Orb (`.id`), so SwiftUI fades the old one out and the new one in.
@@ -44,48 +56,36 @@ struct ChatView: View {
             ZStack { if isDropTargeted { ChatDropOverlay() } }
                 .motion(Motion.hover(isDropTargeted), value: isDropTargeted) // a fade under Reduce Motion, not a cut
         }
-        .onAppear { bindFind(); takeFindRequest(); takeInicioJump() }
-        .onChange(of: botID) {
-            find.close()
-            bindFind()
-        }
-        .onChange(of: model.sessions[botID]?.chatID) { find.close(); takeInicioJump() } // another of the Orb's conversations
-        .onChange(of: model.inicioJump) { takeInicioJump() }
-        .onChange(of: model.orbTranscript(botID).revision) { takeInicioJump() }
-        .onChange(of: model.sessions[botID]?.isLoading) { takeInicioJump() }
-        .alert("Resultado indisponível", isPresented: Binding(get: { model.inicioNavigationNotice != nil },
-                                                              set: { if !$0 { model.inicioNavigationNotice = nil } })) {
-            Button("OK") { model.inicioNavigationNotice = nil }
-        } message: { Text(model.inicioNavigationNotice ?? "") }
-        .onChange(of: model.pendingChatRequest) { takeFindRequest() }
-        // MARK: MultiOrb (WP2): a banner for an approval raised while the Orb works on another Orb's request opens that work.
-        // Filtered by Orb: a target of another Orb is not ours to present (the sheet would open empty) and not ours to clear.
-        .sheet(item: Binding(get: { SideWorkTarget.shown(model.sideWorkToShow, for: botID) },
-                             set: { if $0 == nil, SideWorkTarget.shown(model.sideWorkToShow, for: botID) != nil { model.sideWorkToShow = nil } })) { target in
-            SideWorkSheet(botID: target.botID, requestID: target.requestID)
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(spacing: 0) {
-                FirstRunBanner(botID: botID)
-                    .id(botID)
-                // One composer for every Orb (its draft and attachments live in the Orb's lane): changing Orbs does not
-                // build it again, and it clears what belongs to one Orb itself (`ComposerView.orbChanged`).
-                ComposerView(botID: botID, isDropTargeted: isDropTargeted)
+    }
+
+    /// What the chat follows: the Orb and conversation on show, a jump from Início, ⌘F asked from elsewhere, and
+    /// the side work a banner opens.
+    private func following(_ content: some View) -> some View {
+        content
+            .onAppear { appeared() }
+            .onChange(of: botID) { orbChanged() }
+            .onChange(of: model.sessions[botID]?.chatID) { chatChanged() } // another of the Orb's conversations
+            .onChange(of: model.inicioJump) { takeInicioJump() }
+            .onChange(of: model.orbTranscript(botID).revision) { takeInicioJump() }
+            .onChange(of: model.sessions[botID]?.isLoading) { takeInicioJump() }
+            .alert("Resultado indisponível", isPresented: navigationNoticeShown) {
+                Button("OK") { model.inicioNavigationNotice = nil }
+            } message: { Text(model.inicioNavigationNotice ?? "") }
+            .onChange(of: model.pendingChatRequest) { takeFindRequest() }
+            // MARK: MultiOrb (WP2): a banner for an approval raised while the Orb works on another Orb's request opens that work.
+            // Filtered by Orb: a target of another Orb is not ours to present (the sheet would open empty) and not ours to clear.
+            .sheet(item: sideWorkShown) { target in
+                SideWorkSheet(botID: target.botID, requestID: target.requestID)
             }
-        }
-        .onDrop(of: AppModel.droppableTypes, isTargeted: $isDropTargeted) { model.attachDropped($0, to: botID) }
-        .background(Palette.canvas)
-        .navigationTitle(look.name)
-        .navigationSubtitle(subtitle(live))
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button(CommandName.newChat, systemImage: "square.and.pencil") { model.newChat(for: botID) }
-                    .help("\(CommandName.newChat): \(look.name) começa do zero, com a mesma memória (\(AppShortcut.newChat.label))")
-                Button("Buscar na conversa", systemImage: "magnifyingglass") { find.open() }
-                    .keyboardShortcut(AppShortcut.find)
-                    .help(Tip.findInConversation())
-                InspectorToolbarButton()
-            }
+    }
+
+    private var composer: some View {
+        VStack(spacing: 0) {
+            FirstRunBanner(botID: botID)
+                .id(botID)
+            // One composer for every Orb (its draft and attachments live in the Orb's lane): changing Orbs does not
+            // build it again, and it clears what belongs to one Orb itself (`ComposerView.orbChanged`).
+            ComposerView(botID: botID, isDropTargeted: isDropTargeted)
         }
     }
 }
@@ -109,6 +109,51 @@ extension ChatView {
     private func subtitle(_ live: BotLive) -> String {
         guard let chats = live.chats else { return "" }
         return chats.title(of: chats.active) ?? ""
+    }
+
+    /// The "Resultado indisponível" alert is open while a notice waits; closing it drops the notice.
+    private var navigationNoticeShown: Binding<Bool> {
+        Binding(get: { model.inicioNavigationNotice != nil },
+                set: { if !$0 { model.inicioNavigationNotice = nil } })
+    }
+
+    /// The side work this chat presents: only a target of this Orb, and only this Orb's is cleared when the sheet closes.
+    private var sideWorkShown: Binding<SideWorkTarget?> {
+        Binding(get: { SideWorkTarget.shown(model.sideWorkToShow, for: botID) },
+                set: { newValue in
+                    guard newValue == nil, SideWorkTarget.shown(model.sideWorkToShow, for: botID) != nil else { return }
+                    model.sideWorkToShow = nil
+                })
+    }
+
+    @ToolbarContentBuilder
+    private func actions(_ look: BotLook) -> some ToolbarContent {
+        ToolbarItemGroup(placement: .primaryAction) {
+            Button(CommandName.newChat, systemImage: "square.and.pencil") { model.newChat(for: botID) }
+                .help("\(CommandName.newChat): \(look.name) começa do zero, com a mesma memória (\(AppShortcut.newChat.label))")
+            Button("Buscar na conversa", systemImage: "magnifyingglass") { find.open() }
+                .keyboardShortcut(AppShortcut.find)
+                .help(Tip.findInConversation())
+            InspectorToolbarButton()
+        }
+    }
+
+    private func appeared() {
+        bindFind()
+        takeFindRequest()
+        takeInicioJump()
+    }
+
+    /// Another Orb on show: its own conversation to search.
+    private func orbChanged() {
+        find.close()
+        bindFind()
+    }
+
+    /// Another of the Orb's conversations on show.
+    private func chatChanged() {
+        find.close()
+        takeInicioJump()
     }
 
     /// What the find bar searches (the stored items of this Orb's chat, never its rows) and how it speaks to VoiceOver.

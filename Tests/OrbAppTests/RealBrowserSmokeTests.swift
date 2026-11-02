@@ -102,8 +102,8 @@ struct RealBrowserSmokeTests {
     // A real public page.
     @Test(.enabled(if: RealBrowsers.isReady), .timeLimit(.minutes(3))) func opensExampleCom() async throws { try await Self.publicPage() }
 
-    // The window (browse_show). It takes the focus of the Mac: run it only when nobody is using it.
-    @Test(.enabled(if: RealBrowsers.isReady), .timeLimit(.minutes(3))) func showsAWindowAndGoesBack() async throws { try await Self.window() }
+    // The window (browse_show). It takes the focus of the Mac: only with ORB_REAL_BROWSER_WINDOW=1, when nobody is using it.
+    @Test(.enabled(if: RealBrowsers.showsWindows && RealBrowsers.isReady), .timeLimit(.minutes(3))) func showsAWindowAndGoesBack() async throws { try await Self.window() }
 
     static func localPage() async throws {
         let scenario = try await RealBrowserScenario.make()
