@@ -215,6 +215,35 @@ struct GroupLoopTests {
         #expect(page.body.contains("## Resultado\nPlano pronto: lançar em outubro."))
         #expect(page.body.contains("- Atlas") && page.body.contains("- Pesquisador"))
         #expect(page.body.contains("3 turnos"))
+        #expect(!page.body.contains("Revisão:")) // nobody reviewed
+    }
+
+    @Test @MainActor func aReviewersVerdictCountsTheRoundShowsALineAndGoesToTheBoard() async throws {
+        let world = GroupWorld()
+        let first = await startOrchestratorTurn(world, text: "Faça um app de notas")
+        let build = try world.fake.ask(from: world.atlas.id, to: world.pesquisador.id, text: "construa", parent: first)
+        world.fake.finish(first, reply: "Delego.")
+        await world.fake.run(build, reply: "Feito em ~/notas.") // not a review: no round
+        #expect(world.hub.run(world.groupID)?.round == 0 && world.hub.run(world.groupID)?.verdict == nil)
+
+        let review1 = try world.fake.ask(from: world.atlas.id, to: world.revisor.id, text: "revise", parent: first)
+        await world.fake.run(review1, reply: "**CHANGES:** o botão salvar não funciona.")
+        #expect(world.hub.run(world.groupID)?.round == 1 && world.hub.run(world.groupID)?.verdict == .changes)
+        let review2 = try world.fake.ask(from: world.atlas.id, to: world.revisor.id, text: "revise de novo", parent: first)
+        await world.fake.run(review2, reply: "APPROVED\nTudo confere.")
+        #expect(world.hub.run(world.groupID)?.round == 2 && world.hub.run(world.groupID)?.verdict == .approved)
+
+        let lines = world.items.compactMap { item -> String? in
+            if case .notice(let text) = item.kind { text } else { nil }
+        }
+        #expect(lines == ["Revisão: pediu mudanças (rodada 1)", "Revisão: aprovado na rodada 2"])
+
+        await world.fake.wake(first, reply: "Pronto, revisado e aprovado.")
+        await world.waitForFinish()
+        let bank = world.model.memory.groupBank(for: world.groupID)
+        await waitUntil("the session page") { await bank.snapshot().items(.sessao).count == 1 }
+        let page = try #require(await bank.snapshot().items(.sessao).first)
+        #expect(page.body.contains("Revisão: aprovada na rodada 2"))
     }
 }
 

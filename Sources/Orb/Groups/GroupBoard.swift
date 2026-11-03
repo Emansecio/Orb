@@ -47,7 +47,7 @@ enum GroupBoard {
     /// The session page of a finished request (rules only, no model): what was asked and what the group came to. Secrets are
     /// scrubbed and each entry is one line, as in `SessionSummary`.
     static func sessionPage(request: String, result: String, members: [String], turns: Int, tokens: Int, group: String,
-                            started: Date, ended: Date = .now) -> MemoryPage {
+                            started: Date, ended: Date = .now, review: String? = nil) -> MemoryPage {
         func line(_ text: String, _ limit: Int) -> String { MemoryText.clip(MemoryText.flatten(MemorySanitizer.scrub(text)), limit) }
         var body = "## Pedido\n" + line(request, 600)
         let outcome = result.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -61,6 +61,7 @@ enum GroupBoard {
                 .joined(separator: "\n")
             body += "\n\n## Resultado\n" + MemoryText.clip(MemorySanitizer.scrub(answer), 900)
         }
+        if let review, !review.isEmpty { body += "\n\nRevisão: " + line(review, 120) }
         if !members.isEmpty { body += "\n\n## Quem participou\n" + members.map { "- " + line($0, 60) }.joined(separator: "\n") }
         body += "\n\n## Uso\n" + GroupUsageText.summary(turns: turns, tokens: tokens)
         return MemoryPage(path: SessionSummary.sessionPath(at: started), kind: .sessao, title: line(request, 70), body: body,

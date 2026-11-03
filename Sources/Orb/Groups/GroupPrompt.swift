@@ -29,11 +29,15 @@ enum GroupPrompt {
             duty = "You receive each user message first. Answer yourself when it is quick; otherwise split the work and use \(orbs) ask to "
                 + "assign each piece to the right member (a self-contained task and the result you expect). Members work in parallel and "
                 + "their results arrive as messages. When all results are in, write ONE final answer for the user that merges them. "
-                + "Stop when the goal is done."
+                + "Stop when the goal is done. For work that makes files or code, set done_when in task_plan from the user's request, "
+                + "have one member build it, then ask a different member to review it against done_when (run and test it); send fixes "
+                + "back to the builder, at most 3 review rounds. Your final answer says what was delivered, where, and the review "
+                + "verdict. If no other member can review, review it yourself."
         case .member:
             duty = "Do what you are asked or @mentioned for and answer with the result only; the app posts it to the thread. "
                 + "If you need another member, ask them directly with \(orbs). Save durable shared facts (decisions, links, conventions) "
-                + "with \(remember)."
+                + "with \(remember). When asked to review, check every criterion yourself and start the answer with APPROVED or "
+                + "CHANGES: followed by the fixes."
         }
         return [intro, duty].joined(separator: "\n")
     }

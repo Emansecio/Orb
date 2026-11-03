@@ -35,6 +35,9 @@ struct GroupRun: Equatable, Sendable {
     /// The last thing the orchestrator said that closed a round, and the last thing anyone said (the page's result).
     var finalText: String?
     var lastText: String?
+    /// Review replies seen (a member's reply that starts with APPROVED or CHANGES) and the last verdict.
+    var round = 0
+    var verdict: ReviewVerdict?
 
     static func new(group: OrbGroup, request: String, now: Date = .now) -> GroupRun {
         GroupRun(id: UUID(), groupID: group.id, request: request, startedAt: now)

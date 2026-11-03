@@ -10,7 +10,7 @@ struct GroupCreateTool: AgentTool {
         description: """
         Create a group of the user's Orbs, only when the user asks for one in this chat. A group has a shared thread on its own \
         screen and an orchestrator that takes each request and hands out the work. If you are a member, send it the first \
-        request with orbs ask, the group's name as to.
+        request with orbs ask, the group's name as to. To build software, include a builder and a reviewer.
         """,
         parameters: .schema([
             "name": .property("string", "Short, like a project's: Lançamento."),

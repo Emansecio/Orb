@@ -207,6 +207,7 @@ final class GroupHub: GroupTurnHooks {
             if !interim { run.asked[request.envelope.id] = nil }
         }
         let text = (reply ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        var review: (ReviewVerdict, Int)?
         switch outcome {
         case .ok:
             if !text.isEmpty {
@@ -222,7 +223,13 @@ final class GroupHub: GroupTurnHooks {
                 update(group.id) { run in
                     run.lastText = text
                     if !interim, member == group.orchestratorID, fromUser { run.finalText = text }
+                    if !interim, member != group.orchestratorID, let verdict = ReviewVerdict.read(text) {
+                        run.round += 1
+                        run.verdict = verdict
+                        review = (verdict, run.round)
+                    }
                 }
+                if let review { session.append(.notice(ReviewVerdict.eventLine(review.0, round: review.1))) }
             }
             setAssignment(request.envelope.id, to: .replied, in: session)
         case .failed, .refused:
@@ -341,7 +348,8 @@ final class GroupHub: GroupTurnHooks {
         // The page of the board: what was asked and what the group came to (rules only, no model).
         let page = GroupBoard.sessionPage(request: run.request, result: run.finalText ?? run.lastText ?? "",
                                           members: run.participants.map { name(of: $0) }, turns: run.turnsUsed,
-                                          tokens: run.tokensUsed, group: group.name, started: run.startedAt, ended: now())
+                                          tokens: run.tokensUsed, group: group.name, started: run.startedAt, ended: now(),
+                                          review: run.verdict.map { ReviewVerdict.pageLine($0, round: run.round) })
         // Each member's own chat gets a line, and its next turn what the member did here (the thread is not its chat).
         for member in run.participants {
             let said = session.conversation.items.compactMap { item -> String? in

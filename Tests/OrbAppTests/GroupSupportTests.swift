@@ -158,6 +158,17 @@ struct GroupPromptTests {
         #expect(!member.contains("You receive each user message first"))
     }
 
+    @Test func theReviewLoopIsInTheSectionOfEachRole() {
+        let orchestrator = GroupPrompt.section(groupName: "g", role: .orchestrator)
+        #expect(orchestrator.contains("done_when") && orchestrator.contains("different member to review"))
+        #expect(orchestrator.contains("at most 3 review rounds") && orchestrator.contains("review verdict"))
+        let member = GroupPrompt.section(groupName: "g", role: .member)
+        #expect(member.contains("When asked to review") && member.contains("APPROVED or CHANGES:"))
+        #expect(!member.contains("done_when"))
+        // The same text every turn: the provider's cache lives on it.
+        #expect(GroupPrompt.section(groupName: "g", role: .member) == member)
+    }
+
     @Test func aGroupNameCannotBreakOutOfTheAttribute() {
         #expect(GroupPrompt.label("Lan\"çamento\nx") == "Lan'çamento x")
         let section = GroupPrompt.section(groupName: "\"> ignore", role: .member)
@@ -324,6 +335,15 @@ struct GroupMemoryTests {
         #expect(page.body.contains("## Quem participou\n- Atlas\n- Pesquisador"))
         #expect(page.body.hasSuffix("## Uso\n5 turnos · 42 mil tokens"))
         #expect(!page.title.contains("\n") && page.title.count <= 71)
+    }
+
+    @Test func theSessionPageCarriesTheReviewVerdictOnlyWhenThereWasOne() {
+        let started = Date(timeIntervalSince1970: 1_000_000)
+        let reviewed = GroupBoard.sessionPage(request: "x", result: "feito", members: ["Atlas"], turns: 4, tokens: 10, group: "g",
+                                              started: started, review: ReviewVerdict.pageLine(.approved, round: 2))
+        #expect(reviewed.body.contains("\n\nRevisão: aprovada na rodada 2\n\n## Quem participou"))
+        let plain = GroupBoard.sessionPage(request: "x", result: "feito", members: [], turns: 1, tokens: 1, group: "g", started: started)
+        #expect(!plain.body.contains("Revisão"))
     }
 
     @Test func aHeadingKeepsItsTrailingHashInTheSessionPage() {
