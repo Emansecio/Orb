@@ -415,9 +415,12 @@ actor AgentEngine {
                         // when the reply asks the user something: then the user is the one to answer.
                         let skipsPlan = earlier != nil || remindedOfPlan || stopAsked || !(planTouched || picksUpTask)
                             || Self.endsWaitingForUser(said)
-                        let open = skipsPlan ? [] : request.context.taskPlan.plan?.openSteps ?? []
-                        if let reminder = earlier ?? (open.isEmpty ? nil : PlanReminder.text(open: open)) {
-                            if earlier == nil { remindedOfPlan = true }
+                        // A "done" with criteria of the plan still unmet (`done_when`), before the open steps.
+                        let unmet = earlier != nil || stopAsked || !(planTouched || picksUpTask) || Self.endsWaitingForUser(said)
+                            ? nil : PlanReminder.unmetCriteria(in: request.context.taskPlan.plan, said: said)
+                        let open = skipsPlan || unmet != nil ? [] : request.context.taskPlan.plan?.openSteps ?? []
+                        if let reminder = earlier ?? unmet ?? (open.isEmpty ? nil : PlanReminder.text(open: open)) {
+                            if earlier == nil, unmet == nil { remindedOfPlan = true }
                             reminders += 1
                             workedSinceReminder = false
                             nudges.append(messages.count)

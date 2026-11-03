@@ -21,21 +21,40 @@ struct TaskPlan: Codable, Sendable, Equatable {
         var reason: String?
     }
 
+    /// What must hold for the task to count as done, taken from the user's request. Met only with evidence (what was
+    /// run or seen), so "done" is a claim the plan can check.
+    struct Criterion: Codable, Sendable, Equatable {
+        enum State: String, Codable, Sendable, CaseIterable {
+            case open, met, failed
+
+            init(from decoder: Decoder) throws { self = try decoder.rawValue(Self.self, fallback: .open) }
+        }
+
+        var text: String
+        var state = State.open
+        var evidence: String?
+    }
+
     // Limits of what is kept: the plan goes in front of the model again and again, so every character counts.
     static let maxSteps = 12
     static let goalLimit = 200
     static let stepLimit = 100
     static let reasonLimit = 60
     static let nextLimit = 160
+    static let maxCriteria = 6
+    static let criterionLimit = 120
+    static let evidenceLimit = 120
     /// Done steps written out one by one; past this they are only numbered (`compact`).
     static let doneShown = 3
     /// The longest `compact` can be (all the limits at their worst), checked by the tests.
-    static let maxCompactLength = 2_800
+    static let maxCompactLength = 4_500
 
     var goal: String
     var steps: [Step]
     var next: String?
     var updatedAt: Date = .now
+    /// The `done_when` list; empty for a plan that sets none (and for every plan saved before it existed).
+    var criteria: [Criterion] = []
 
     /// Some step is not done yet: the plan still steers the work (it goes in the prompt and shows in the chat).
     var isActive: Bool { steps.contains { $0.state != .done } }
@@ -59,6 +78,7 @@ struct TaskPlan: Codable, Sendable, Equatable {
     func render() -> String {
         var lines = [Self.heading + "Objetivo: " + goal]
         lines += steps.indices.map { line(for: $0) }
+        lines += criteriaLines()
         if let next { lines.append("Próximo passo: " + next) }
         return lines.joined(separator: "\n")
     }
@@ -74,8 +94,18 @@ struct TaskPlan: Codable, Sendable, Equatable {
         } else {
             lines += steps.indices.map { line(for: $0) }
         }
+        lines += criteriaLines()
         if let next { lines.append("Próximo passo: " + next) }
         return lines.joined(separator: "\n")
+    }
+
+    /// "Done when:" and each criterion with its state and evidence; always whole (at most `maxCriteria`, so short).
+    private func criteriaLines() -> [String] {
+        guard !criteria.isEmpty else { return [] }
+        return ["Done when:"] + criteria.indices.map { index in
+            let criterion = criteria[index]
+            return "\(index + 1) [\(criterion.state.rawValue)] \(criterion.text)" + (criterion.evidence.map { " — " + $0 } ?? "")
+        }
     }
 
     private func line(for index: Int) -> String {
@@ -111,12 +141,18 @@ struct TaskPlan: Codable, Sendable, Equatable {
                 throw ToolError("At most \(maxSteps) steps (got \(texts.count)): merge some, or plan the next part when this one is done.")
             }
             let next = arguments["next"]?.string.map { clip($0, nextLimit) }
-            return TaskPlan(goal: goal, steps: texts.map { Step(text: $0) }, next: next?.isEmpty == false ? next : nil, updatedAt: now)
+            let criteria = (arguments["done_when"]?.array ?? []).compactMap(\.string).map { clip($0, criterionLimit) }.filter { !$0.isEmpty }
+            guard criteria.count <= maxCriteria else {
+                throw ToolError("At most \(maxCriteria) `done_when` criteria (got \(criteria.count)): keep the ones the request really asks for.")
+            }
+            return TaskPlan(goal: goal, steps: texts.map { Step(text: $0) }, next: next?.isEmpty == false ? next : nil, updatedAt: now,
+                            criteria: criteria.map { Criterion(text: $0) })
         case .update:
             guard var plan else { throw ToolError("There is no plan: create one with action \"set\".") }
             let updates = arguments["updates"]?.array ?? []
             let next = arguments["next"]?.string
-            guard !updates.isEmpty || next != nil else { throw ToolError("Give `updates`, `next`, or both.") }
+            let checks = arguments["checks"]?.array ?? []
+            guard !updates.isEmpty || !checks.isEmpty || next != nil else { throw ToolError("Give `updates`, `checks`, `next`, or any of them.") }
             for update in updates {
                 guard let number = update["step"]?.int, plan.steps.indices.contains(number - 1) else {
                     let given = update["step"]?.int.map(String.init) ?? "?"
@@ -129,6 +165,23 @@ struct TaskPlan: Codable, Sendable, Equatable {
                 guard state != .blocked || !reason.isEmpty else { throw ToolError("Say in `reason` why step \(number) is blocked.") }
                 plan.steps[number - 1].state = state
                 plan.steps[number - 1].reason = state == .blocked ? reason : nil
+            }
+            for check in checks {
+                guard let number = check["criterion"]?.int, plan.criteria.indices.contains(number - 1) else {
+                    let given = check["criterion"]?.int.map(String.init) ?? "?"
+                    throw ToolError(plan.criteria.isEmpty
+                        ? "There is no criterion \(given): the plan has no `done_when` (set one with action \"set\")."
+                        : "There is no criterion \(given): the plan has criteria 1 to \(plan.criteria.count).")
+                }
+                guard let state = check["state"]?.string.flatMap(Criterion.State.init(rawValue:)) else {
+                    throw ToolError("`state` of criterion \(number) is one of " + Criterion.State.allCases.map(\.rawValue).joined(separator: ", ") + ".")
+                }
+                let evidence = clip(check["evidence"]?.string ?? "", evidenceLimit)
+                guard state != .met || !evidence.isEmpty else {
+                    throw ToolError("Say in `evidence` what you ran or saw that shows criterion \(number) is met.")
+                }
+                plan.criteria[number - 1].state = state
+                plan.criteria[number - 1].evidence = state != .open && !evidence.isEmpty ? evidence : nil
             }
             if let next {
                 let clipped = clip(next, nextLimit)
@@ -186,6 +239,15 @@ extension TaskPlan.Step {
     }
 }
 
+extension TaskPlan.Criterion {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        text = try c.value(.text, default: "")
+        state = try c.value(.state, default: .open)
+        evidence = try c.decodeIfPresent(String.self, forKey: .evidence)
+    }
+}
+
 extension TaskPlan {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -193,6 +255,7 @@ extension TaskPlan {
         steps = try c.lossyArray(.steps)
         next = try c.decodeIfPresent(String.self, forKey: .next)
         updatedAt = try c.value(.updatedAt, default: .distantPast)
+        criteria = try c.lossyArray(.criteria)
     }
 }
 

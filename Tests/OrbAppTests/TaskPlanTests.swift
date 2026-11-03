@@ -88,7 +88,7 @@ struct TaskPlanToolTests {
             == "Say in `reason` why step 3 is blocked.")
         #expect(message(#"{"action": "update", "updates": [{"step": 1, "state": "finished"}]}"#, existing)
             == "`state` of step 1 is one of pending, in_progress, done, blocked.")
-        #expect(message(#"{"action": "update"}"#, existing) == "Give `updates`, `next`, or both.")
+        #expect(message(#"{"action": "update"}"#, existing) == "Give `updates`, `checks`, `next`, or any of them.")
         #expect(message(#"{"action": "set", "steps": ["a"]}"#) == "Give the `goal`.")
         #expect(message(#"{"action": "set", "goal": "x", "steps": []}"#) == "Give the `steps`, 1 to \(TaskPlan.maxSteps).")
         #expect(message(#"{"action": "rename"}"#) == "`action` is one of set, update, clear.")
@@ -314,5 +314,112 @@ struct TaskPlanConversationTests {
         var chat = Conversation(messages: plannedTask())
         chat.taskPlan = TaskPlan.replay(chat.messages)
         #expect(chat.startingRoutineRun(at: .now).taskPlan == nil)
+    }
+}
+
+// MARK: - Acceptance criteria (`done_when` and `checks`)
+
+struct TaskPlanCriteriaTests {
+    private let withCriteria = arguments("""
+    {"action": "set", "goal": "Corrigir o login", "steps": ["Ajustar", "Testar"], \
+    "done_when": ["os testes passam", "  ", "o botão entra com Enter"]}
+    """)
+
+    private func update(_ json: String, on plan: TaskPlan?) throws -> TaskPlan {
+        try #require(try TaskPlan.applying(arguments(json), to: plan))
+    }
+
+    @Test func setKeepsTheCriteriaOpenAndDropsEmptyOnes() throws {
+        let made = try plan(withCriteria)
+        #expect(made.criteria.map(\.text) == ["os testes passam", "o botão entra com Enter"])
+        #expect(made.criteria.allSatisfy { $0.state == .open && $0.evidence == nil })
+        #expect(try plan().criteria.isEmpty, "a set without done_when has none")
+        #expect(made.render().contains("Done when:\n1 [open] os testes passam\n2 [open] o botão entra com Enter"))
+        #expect(made.compact().contains("2 [open] o botão entra com Enter"))
+    }
+
+    @Test func aSetReplacesTheCriteria() throws {
+        let again = try update(#"{"action": "set", "goal": "Outro", "steps": ["a"], "done_when": ["x"]}"#, on: try plan(withCriteria))
+        #expect(again.criteria.map(\.text) == ["x"])
+    }
+
+    @Test func checksMarkACriterionWithItsEvidence() throws {
+        let made = try update("""
+        {"action": "update", "checks": [{"criterion": 1, "state": "met", "evidence": "swift test 12/12 ok"}, \
+        {"criterion": 2, "state": "failed"}]}
+        """, on: try plan(withCriteria))
+        #expect(made.criteria[0].state == .met && made.criteria[0].evidence == "swift test 12/12 ok")
+        #expect(made.criteria[1].state == .failed && made.criteria[1].evidence == nil)
+        #expect(made.compact().contains("1 [met] os testes passam — swift test 12/12 ok"))
+        let reopened = try update(#"{"action": "update", "checks": [{"criterion": 1, "state": "open"}]}"#, on: made)
+        #expect(reopened.criteria[0].state == .open && reopened.criteria[0].evidence == nil)
+    }
+
+    @Test func metNeedsEvidenceAndABadCheckChangesNothing() throws {
+        let base = try plan(withCriteria)
+        let noEvidence = #"{"action": "update", "updates": [{"step": 1, "state": "done"}], "checks": [{"criterion": 1, "state": "met", "evidence": " "}]}"#
+        #expect(throws: ToolError.self) { try TaskPlan.applying(arguments(noEvidence), to: base) }
+        #expect(throws: ToolError.self) {
+            try TaskPlan.applying(arguments(#"{"action": "update", "checks": [{"criterion": 3, "state": "failed"}]}"#), to: base)
+        }
+        #expect(throws: ToolError.self) {
+            try TaskPlan.applying(arguments(#"{"action": "update", "checks": [{"criterion": 1, "state": "ok"}]}"#), to: base)
+        }
+        let bare = try plan()
+        #expect(throws: ToolError.self) {
+            try TaskPlan.applying(arguments(#"{"action": "update", "checks": [{"criterion": 1, "state": "met", "evidence": "x"}]}"#), to: bare)
+        }
+    }
+
+    @Test func aRefusedCallLeavesTheBoardAsItWas() async throws {
+        let board = TaskPlanBoard(try plan(withCriteria))
+        await #expect(throws: ToolError.self) {
+            try await run(arguments(#"{"action": "update", "updates": [{"step": 1, "state": "done"}], "checks": [{"criterion": 1, "state": "met"}]}"#), on: board)
+        }
+        #expect(board.plan?.steps[0].state == .pending)
+    }
+
+    @Test func criteriaAreLimitedInNumberAndLength() throws {
+        let many = (1...(TaskPlan.maxCriteria + 1)).map { "\"c\($0)\"" }.joined(separator: ", ")
+        #expect(throws: ToolError.self) {
+            try TaskPlan.applying(arguments(#"{"action": "set", "goal": "g", "steps": ["a"], "done_when": [\#(many)]}"#), to: nil)
+        }
+        let long = String(repeating: "palavra ", count: 100)
+        let made = try plan(arguments(#"{"action": "set", "goal": "g", "steps": ["a"], "done_when": ["\#(long)"]}"#))
+        #expect(made.criteria[0].text.count <= TaskPlan.criterionLimit + 1)
+        let checked = try update(#"{"action": "update", "checks": [{"criterion": 1, "state": "met", "evidence": "\#(long)"}]}"#, on: made)
+        #expect((checked.criteria[0].evidence?.count ?? 0) <= TaskPlan.evidenceLimit + 1)
+    }
+
+    @Test func theLongestPlanWithCriteriaStaysUnderItsCeiling() throws {
+        let long = String(repeating: "x", count: 400)
+        let steps = (1...TaskPlan.maxSteps).map { _ in "\"\(long)\"" }.joined(separator: ", ")
+        let criteria = (1...TaskPlan.maxCriteria).map { _ in "\"\(long)\"" }.joined(separator: ", ")
+        var made = try plan(arguments(#"{"action": "set", "goal": "\#(long)", "steps": [\#(steps)], "next": "\#(long)", "done_when": [\#(criteria)]}"#))
+        let checks = (1...TaskPlan.maxCriteria).map { #"{"criterion": \#($0), "state": "met", "evidence": "\#(long)"}"# }
+        let blocked = (1...TaskPlan.maxSteps).map { #"{"step": \#($0), "state": "blocked", "reason": "\#(long)"}"# }
+        made = try update(#"{"action": "update", "updates": [\#(blocked.joined(separator: ", "))], "checks": [\#(checks.joined(separator: ", "))]}"#, on: made)
+        #expect(made.compact().count <= TaskPlan.maxCompactLength, "\(made.compact().count)")
+        #expect(made.render().count <= TaskPlan.maxCompactLength, "\(made.render().count)")
+    }
+
+    @Test func aPlanSavedBeforeCriteriaExistedStillOpens() throws {
+        let old = #"{"goal": "Publicar", "steps": [{"text": "a", "state": "done"}], "updatedAt": 0}"#
+        let decoded = try JSONDecoder().decode(TaskPlan.self, from: Data(old.utf8))
+        #expect(decoded.criteria.isEmpty && decoded.steps.count == 1)
+        let odd = #"{"goal": "g", "steps": [], "criteria": [{"text": "x", "state": "weird"}, 7]}"#
+        let tolerant = try JSONDecoder().decode(TaskPlan.self, from: Data(odd.utf8))
+        #expect(tolerant.criteria == [TaskPlan.Criterion(text: "x")], "an unknown state reads as open, an unreadable item is dropped")
+    }
+
+    @Test func criteriaSurviveTheEncodeDecodeRoundTrip() throws {
+        let made = try update(#"{"action": "update", "checks": [{"criterion": 1, "state": "met", "evidence": "ok"}]}"#, on: try plan(withCriteria))
+        let back = try JSONDecoder().decode(TaskPlan.self, from: try JSONEncoder().encode(made))
+        #expect(back == made)
+    }
+
+    @Test func theToolOffersTheNewFields() {
+        let schema = TaskPlanTool().spec.parameters.jsonString
+        #expect(schema.contains("done_when") && schema.contains("checks") && schema.contains("evidence"))
     }
 }

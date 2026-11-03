@@ -1916,6 +1916,55 @@ extension AgentEngineTests {
         #expect(await plan.received[5].last == .user(AgentEngine.promiseNudge))
     }
 
+    // MARK: Closing with criteria unmet (`done_when`)
+
+    private var setPlanWithCriteria: LLMEvent {
+        planCall("p0", #"{"action": "set", "goal": "Corrigir o login", "steps": ["Ajustar"], "done_when": ["testes passam", "Enter entra"]}"#)
+    }
+
+    private func check(_ criterion: Int, _ state: String, _ evidence: String) -> LLMEvent {
+        planCall("k\(criterion)", #"{"action": "update", "checks": [{"criterion": \#(criterion), "state": "\#(state)", "evidence": "\#(evidence)"}]}"#)
+    }
+
+    @Test func aDoneWithCriteriaUnmetIsRemindedOfThemAndEndsOnceTheyAreMet() async {
+        let script = CallScript([[setPlanWithCriteria], [mark(1)], [.text("Pronto, tudo funcionando.")],
+                             [check(1, "met", "swift test ok")], [check(2, "met", "teste manual")], [.text("Pronto, critérios cumpridos.")],
+                             [.text("nunca pedido")]], whenExhausted: .fim)
+        let events = await run(AgentEngine(), planTurn(script))
+        let received = await script.received
+        let reminder = received[3].last
+        #expect(reminder?.role == .user && reminder?.content
+            .hasPrefix("Before you say it is done: criteria not met yet: 1 [open] testes passam; 2 [open] Enter entra.") == true)
+        #expect(received.count == 6, "the criteria are met: the turn ends")
+        #expect(!messages(events).contains { $0.content.hasPrefix("Before you say it is done") })
+    }
+
+    @Test func aReplyThatOwnsUpToAnUnmetCriterionOrAsksTheUserEndsTheTurn() async {
+        let honest = CallScript([[setPlanWithCriteria], [mark(1)], [.text("Pronto, mas o critério 2 falhou: Enter não entra.")]], whenExhausted: .fim)
+        _ = await run(AgentEngine(), planTurn(honest))
+        #expect(await honest.received.count == 3)
+        let asking = CallScript([[setPlanWithCriteria], [mark(1)], [.text("Pronto. Quer que eu teste o Enter também?")]], whenExhausted: .fim)
+        _ = await run(AgentEngine(), planTurn(asking))
+        #expect(await asking.received.count == 3)
+        let noClaim = CallScript([[setPlanWithCriteria], [mark(1)], [.text("Segue o resumo da mudança.")]], whenExhausted: .fim)
+        _ = await run(AgentEngine(), planTurn(noClaim))
+        #expect(await noClaim.received.count == 3)
+    }
+
+    @Test func theCriteriaReminderSharesTheAllowanceAndSkipsAPlanOfAnotherTask() async {
+        // A plan from earlier that this turn never touched: the reply is not questioned.
+        var old = steps(1)
+        old.criteria = [TaskPlan.Criterion(text: "testes passam")]
+        let other = CallScript([[touch(1)], [.text("Pronto.")]], whenExhausted: .fim)
+        _ = await run(AgentEngine(), planTurn(other, plan: old))
+        #expect(await other.received.count == 2)
+        // Never met: reminded, then the allowance (2 reminders) ends it.
+        let stubborn = CallScript([[setPlanWithCriteria], [mark(1)], [.text("Pronto.")], [touch(1)], [.text("Pronto, sim.")], [touch(2)],
+                               [.text("Pronto de novo.")], [.text("nunca pedido")]], whenExhausted: .fim)
+        _ = await run(AgentEngine(), planTurn(stubborn))
+        #expect(await stubborn.received.count == 7)
+    }
+
     // MARK: The step limit, for a caller that sets one
 
     @Test func theStepLimitPausesWithItsNotice() async {

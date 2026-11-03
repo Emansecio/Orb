@@ -55,6 +55,53 @@ struct CompletionWatchTests {
         #expect(watch.reminder(for: "Não salvei em ~/Desktop/nada.pdf.", fileExists: exists) == nil)
     }
 
+    private func edit(_ name: String = "edit_file", failed: Bool = false) -> (ToolCallRequest, String, Bool) {
+        (ToolCallRequest(id: "e", name: name, arguments: #"{"path":"a.swift"}"#), failed ? "Error" : "ok", failed)
+    }
+
+    @Test func filesChangedAfterTheLastPassingCheckAreQuestioned() {
+        var watch = CompletionWatch()
+        watch.record(command("swift test"), result: "Código de saída: 0\n", failed: false)
+        let (call, result, failed) = edit()
+        watch.record(call, result: result, failed: failed)
+        let reminder = watch.reminder(for: "Pronto, tudo passando.")
+        #expect(reminder?.hasPrefix("You changed files after the last passing check") == true)
+        #expect(watch.reminder(for: "Mudei o arquivo, mais nada.") == nil, "no claim of being done")
+        #expect(watch.reminder(for: "Pronto, mas os testes ainda falham depois da mudança.") == nil, "owns up")
+    }
+
+    @Test func aWriteCountsLikeAnEditAndAFailedOneDoesNot() {
+        var watch = CompletionWatch()
+        watch.record(command("swift build"), result: "Código de saída: 0\n", failed: false)
+        let failedEdit = edit("write_file", failed: true)
+        watch.record(failedEdit.0, result: failedEdit.1, failed: failedEdit.2)
+        #expect(watch.reminder(for: "Pronto.") == nil, "the write did not happen")
+        let write = edit("write_file")
+        watch.record(write.0, result: write.1, failed: write.2)
+        #expect(watch.reminder(for: "Pronto.") != nil)
+    }
+
+    @Test func noCheckInTheTurnOrACheckAfterTheEditLeavesTheReplyAlone() {
+        var noCheck = CompletionWatch()
+        let write = edit("write_file")
+        noCheck.record(write.0, result: write.1, failed: write.2)
+        #expect(noCheck.reminder(for: "Pronto, criei o texto.") == nil, "a task with nothing to run")
+        var rerun = CompletionWatch()
+        rerun.record(command("swift test"), result: "Código de saída: 0\n", failed: false)
+        rerun.record(write.0, result: write.1, failed: write.2)
+        rerun.record(command("swift test"), result: "Código de saída: 0\n", failed: false)
+        #expect(rerun.reminder(for: "Pronto, tudo passando.") == nil)
+    }
+
+    @Test func aFailedCheckAfterTheEditKeepsTheFailureReminderFirst() {
+        var watch = CompletionWatch()
+        watch.record(command("swift test"), result: "Código de saída: 0\n", failed: false)
+        let write = edit()
+        watch.record(write.0, result: write.1, failed: write.2)
+        watch.record(command("swift test"), result: "Código de saída: 1\n", failed: true)
+        #expect(watch.reminder(for: "Pronto.")?.contains("failed and has not passed") == true)
+    }
+
     @Test func buildAndTestCommandsAreRecognized() {
         for check in ["swift build -c release", "xcodebuild -scheme App test", "cargo test", "go vet ./...", "make", "npx tsc --noEmit",
                       "yarn lint", "./gradlew assembleDebug build", "cd app && nice -n 15 swift test --filter X",

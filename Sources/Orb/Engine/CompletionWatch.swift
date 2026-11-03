@@ -12,17 +12,29 @@ struct CompletionWatch: Sendable {
     /// Counts one call that ran (refusals never did). A command still running, sent to the background or started there,
     /// has no verdict yet and changes nothing; nor does one that never started (a folder that is not there).
     mutating func record(_ call: ToolCallRequest, result: String, failed: Bool) {
+        // A file written or edited (and the write took) is a change no check has seen yet.
+        if Self.editTools.contains(call.name), !failed { editedSincePass = true }
         guard call.name == "run_command", let command = JSONValue.parse(call.arguments)?["command"]?.string,
               Self.isCheck(command), result.hasPrefix(CommandOutput.exitLead) || result.contains(CommandOutput.timedOutNote.dropFirst())
         else { return }
         lastCheck = (command, !failed)
+        if !failed { editedSincePass = false }
     }
+
+    private static let editTools: Set<String> = ["write_file", "edit_file"]
+    /// Files changed after the last passing check. Only matters once a check ran in the turn: a task with no build or
+    /// test (a note, a document) has nothing to run again.
+    private var editedSincePass = false
 
     /// What to remind the model of before `said` ends the turn, or nil when nothing contradicts it.
     func reminder(for said: String, fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) -> String? {
         if let check = lastCheck, !check.passed, Self.claimsDone(said), !Self.ownsUpToFailure(said) {
             return "Before you finish: the last check you ran (`\(check.command.clipped(to: 120))`) failed and has not passed "
                 + "since. Fix it and run it again, or tell the user plainly that it still fails and why; do not report it as done."
+        }
+        if let check = lastCheck, editedSincePass, Self.claimsDone(said), !Self.ownsUpToFailure(said) {
+            return "You changed files after the last passing check (`\(check.command.clipped(to: 120))`): run it again before "
+                + "saying it is done."
         }
         let missing = Self.savedPaths(in: said).filter { !fileExists($0) }
         if !missing.isEmpty {

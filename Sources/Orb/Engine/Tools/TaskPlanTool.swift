@@ -30,19 +30,26 @@ struct TaskPlanTool: AgentTool {
         name: TaskPlanTool.name,
         description: """
         Plan of a task with several steps (not a question or a quick request), shown to you again as you work. set: goal \
-        and 1 to \(TaskPlan.maxSteps) steps (replaces the plan). update: steps by number (blocked needs a reason) and/or next. \
-        clear: drop it.
+        and 1 to \(TaskPlan.maxSteps) steps (replaces the plan). update: steps by number (blocked needs a reason), checks and/or next. \
+        clear: drop it. For a task that makes files or code, set done_when (what the request needs, up to \(TaskPlan.maxCriteria)) \
+        and mark each criterion met, with evidence, before you say it is done.
         """,
         // No descriptions where the description above or the name says it: every character goes with every request.
         parameters: .schema([
             "action": .object(["type": .string("string"), "enum": .array(TaskPlan.Action.allNames.map(JSONValue.string))]),
             "goal": .property("string"),
             "steps": .object(["type": .string("array"), "items": .property("string")]),
+            "done_when": .object(["type": .string("array"), "items": .property("string")]),
             "updates": .object(["type": .string("array"), "items": .schema([
                 "step": .property("integer"),
                 "state": .object(["type": .string("string"), "enum": .array(TaskPlan.State.allCases.map { .string($0.rawValue) })]),
                 "reason": .property("string"),
             ], required: ["step", "state"])]),
+            "checks": .object(["type": .string("array"), "items": .schema([
+                "criterion": .property("integer"),
+                "state": .object(["type": .string("string"), "enum": .array(TaskPlan.Criterion.State.allCases.map { .string($0.rawValue) })]),
+                "evidence": .property("string"),
+            ], required: ["criterion", "state"])]),
             "next": .property("string", "What you will do next (\"\" clears it)."),
         ], required: ["action"]))
 

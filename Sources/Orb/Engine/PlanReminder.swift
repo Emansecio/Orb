@@ -11,6 +11,19 @@ enum PlanReminder {
             + "reason (task_plan update); or tell the user plainly why you stop here."
     }
 
+    /// The reminder for a reply that says the work is done while criteria of the plan's `done_when` are not met; nil when
+    /// there are none, or the reply does not claim to be done.
+    static func unmetCriteria(in plan: TaskPlan?, said: String) -> String? {
+        guard let plan, !plan.criteria.isEmpty, CompletionWatch.claimsDone(said),
+              !CompletionWatch.ownsUpToFailure(said) else { return nil }
+        let unmet = plan.criteria.indices.filter { plan.criteria[$0].state != .met }
+        guard !unmet.isEmpty else { return nil }
+        let list = unmet.map { "\($0 + 1) [\(plan.criteria[$0].state.rawValue)] \(plan.criteria[$0].text.clipped(to: 60))" }
+            .joined(separator: "; ")
+        return "Before you say it is done: criteria not met yet: \(list). Check each (task_plan checks, with evidence), or tell "
+            + "the user plainly which ones you could not meet."
+    }
+
     /// A message the user sent during the task that asks it to stop ("para", "pode parar", "chega"): the closing reminder
     /// does not follow it. Only what the user typed counts: what the app adds to a message (a picture's note, an attachment's
     /// text) comes after a blank line.
