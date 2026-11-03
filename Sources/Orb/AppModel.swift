@@ -244,6 +244,8 @@ final class AppModel {
     @ObservationIgnored let dictation = Dictation()
     /// Models ("provider/model") that answered that they cannot read pictures, so later turns do not try again.
     @ObservationIgnored private var visionRejected: Set<String> = []
+    /// What each Orb last saw of the files it read or wrote, kept across its turns (`FileStamps`).
+    @ObservationIgnored private var fileStamps: [UUID: FileStamps] = [:]
     /// Context windows learned from refusals ("provider/model"); they shrink the history budget of that model.
     @ObservationIgnored private(set) var learnedContexts: [String: LearnedContext]
     /// Where outputs too big for a conversation are saved for the model to read back (`saidas/<id>/` in the data folder).
@@ -1241,10 +1243,21 @@ final class AppModel {
         sessions[botID]?.routineID.flatMap { id in routines.first { $0.id == id }?.permissionMode }
     }
 
+    /// The Orb's record of the files it read or wrote (`ToolContext.stamps`).
+    private func stamps(for botID: UUID) -> FileStamps {
+        if let known = fileStamps[botID] { return known }
+        let made = FileStamps()
+        fileStamps[botID] = made
+        return made
+    }
+
     /// The Orb as its running turn sees it: a routine's run may have a permission mode of its own.
-    private func effectiveBot(_ botID: UUID) -> Bot? {
+    /// `workFolder`: the folder this turn works in instead of the Orb's own (a member's worktree in a group); the copy carries it
+    /// to everything that reads the folder (tools, workspace snapshot, instructions file, system prompt), the saved Orb keeps its own.
+    private func effectiveBot(_ botID: UUID, workFolder: URL? = nil) -> Bot? {
         guard var bot = bot(botID) else { return nil }
         if let mode = routineModeOverride(botID) { bot.permissionMode = mode }
+        if let workFolder { bot.workingDirectory = OrbFolder.storedPath(workFolder) }
         return bot
     }
 
@@ -1607,15 +1620,15 @@ final class AppModel {
     /// `origin`: where the text comes from. A request from another Orb or the answers to the Orb's own requests (`SendOrigin`)
     /// enter the conversation as `.orbMessage` lines, not as your bubble; they read no memory request, expand no skill, and
     /// the turn carries the grant for `orbs` (see `DelegationHub`). `model`: another model for this turn only ("Outro modelo"
-    /// under a failure); the Orb keeps its own.
+    /// under a failure); the Orb keeps its own. `workFolder`: the folder this turn works in instead of the Orb's own (`effectiveBot`).
     @discardableResult
     func send(_ text: String, attachments: [URL] = [], images pictures: [ImageAttachment] = [], to botID: UUID,
               fromUser: Bool = false, bubble: UUID = UUID(), endsEdit: Bool = true, origin: SendOrigin = .user,
-              model override: ModelRef? = nil) -> Bool {
+              model override: ModelRef? = nil, workFolder: URL? = nil) -> Bool {
         let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let session = session(botID)
         guard !isResetting, !typed.isEmpty || !pictures.isEmpty || !attachments.isEmpty, session.turnTask == nil,
-              let bot = effectiveBot(botID) else { return false }
+              let bot = effectiveBot(botID, workFolder: workFolder) else { return false }
         ensureLoaded(botID)
         // "/compactar [foco]" is a command of the composer, not a message for the model.
         if fromUser, attachments.isEmpty, pictures.isEmpty, let focus = CompactionCommand.parse(typed) {
@@ -1729,6 +1742,7 @@ final class AppModel {
         // The plan the conversation has: the turn's calls change this copy, the conversation keeps its own from them.
         let plan = session.conversation?.taskPlan
         context.taskPlan = TaskPlanBoard(plan)
+        context.stamps = stamps(for: botID)
         let userTurns = session.userTurnCount()
         // MARK: MultiOrb (WP1)
         if multi.orbs || multi.groupCreate { context.orbs = delegationHandler(for: botID) }

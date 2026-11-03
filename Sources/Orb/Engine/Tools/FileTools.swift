@@ -34,6 +34,16 @@ struct ReadFileTool: AgentTool {
     }
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
+        guard let stamps = context.stamps else { return try await read(arguments, context: context) }
+        // Taken before reading: a change while the file is read leaves an older stamp, so the next write is refused, not missed.
+        let url = context.url(for: try arguments.requiredString("path")).resolvingLinkChain
+        let before = FileStamps.stamp(of: url)
+        let result = try await read(arguments, context: context)
+        stamps.record(url, stamp: before)
+        return result
+    }
+
+    private func read(_ arguments: JSONValue, context: ToolContext) async throws -> String {
         let requested = context.url(for: try arguments.requiredString("path"))
         if requested.isInLinkLoop { throw ToolError("Link simbólico em loop (aponta de volta para si mesmo): \(requested.path)") }
         let url = requested.resolvingLinkChain
@@ -204,6 +214,15 @@ struct WriteFileTool: AgentTool {
     }
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
+        guard let stamps = context.stamps else { return try await write(arguments, context: context) }
+        let target = context.url(for: try arguments.requiredString("path")).resolvingLinkChain
+        try stamps.check(target)
+        let result = try await write(arguments, context: context)
+        stamps.record(target)
+        return result
+    }
+
+    private func write(_ arguments: JSONValue, context: ToolContext) async throws -> String {
         let url = context.url(for: try arguments.requiredString("path"))
         if url.isInLinkLoop { throw ToolError("Link simbólico em loop (aponta de volta para si mesmo): \(url.path)") }
         let target = url.resolvingLinkChain
@@ -291,6 +310,15 @@ struct EditFileTool: AgentTool {
     }
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
+        guard let stamps = context.stamps else { return try await edit(arguments, context: context) }
+        let target = context.url(for: try arguments.requiredString("path")).resolvingLinkChain
+        try stamps.check(target)
+        let result = try await edit(arguments, context: context)
+        stamps.record(target)
+        return result
+    }
+
+    private func edit(_ arguments: JSONValue, context: ToolContext) async throws -> String {
         let url = context.url(for: try arguments.requiredString("path"))
         if url.isInLinkLoop { throw ToolError("Link simbólico em loop (aponta de volta para si mesmo): \(url.path)") }
         let target = url.resolvingLinkChain

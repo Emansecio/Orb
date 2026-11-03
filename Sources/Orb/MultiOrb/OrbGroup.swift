@@ -10,6 +10,8 @@ struct OrbGroup: Identifiable, Codable, Sendable, Equatable {
     var orchestratorID: UUID
     var policy = GroupPolicy()
     var createdAt = Date.now
+    /// The repository or folder the members share ("" = none). In a git repository each member works in its own worktree.
+    var projectFolder = ""
 
     /// How many Orbs a group has.
     static let memberLimits = 2...8
@@ -39,6 +41,7 @@ extension OrbGroup {
         orchestratorID = try c.decodeIfPresent(UUID.self, forKey: .orchestratorID) ?? memberIDs.first ?? UUID()
         policy = (try? c.decodeIfPresent(GroupPolicy.self, forKey: .policy)) ?? GroupPolicy()
         createdAt = try c.value(.createdAt, default: Date.now)
+        projectFolder = try c.value(.projectFolder, default: "")
     }
 }
 

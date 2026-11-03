@@ -43,6 +43,8 @@ struct OrbEnvelope: Codable, Equatable, Sendable {
     /// The asker's conversation the request was sent from (`BotSession.conversationChat`): its answer goes back there.
     /// nil when a routine's run, a request or a group's turn asked.
     var chat: UUID?
+    /// A project folder the receiver should work in (a worktree of it when it is a git repository). ask only.
+    var folder: String?
 }
 
 extension OrbEnvelope {
@@ -65,5 +67,6 @@ extension OrbEnvelope {
         fromChat = try c.value(.fromChat, default: false)
         servingRoutine = (try? c.decodeIfPresent(UUID.self, forKey: .servingRoutine)) ?? nil
         chat = (try? c.decodeIfPresent(UUID.self, forKey: .chat)) ?? nil
+        folder = (try? c.decodeIfPresent(String.self, forKey: .folder)) ?? nil
     }
 }

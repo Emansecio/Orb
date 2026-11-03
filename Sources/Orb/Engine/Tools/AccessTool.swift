@@ -102,7 +102,7 @@ struct AccessRequest: Codable, Sendable, Equatable {
 
     /// The folder as the Orb stores it. It has to exist and to be a folder of its own: the home folder, the root and anything
     /// that contains the home are not (`PermissionPolicy.ownFolder`), since the Orb would then write anywhere unasked.
-    private static func checkedFolder(_ path: String, home: URL) throws -> String {
+    static func checkedFolder(_ path: String, home: URL) throws -> String {
         let expanded = (path as NSString).expandingTildeInPath
         guard expanded.hasPrefix("/") else { throw ToolError("folder must be an absolute path or start with ~/.") }
         let url = URL(fileURLWithPath: expanded)

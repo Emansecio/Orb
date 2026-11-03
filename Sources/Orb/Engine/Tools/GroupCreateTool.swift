@@ -18,6 +18,7 @@ struct GroupCreateTool: AgentTool {
                                 "description": .string("The Orbs' names, \(OrbGroup.memberLimits.lowerBound) to \(OrbGroup.memberLimits.upperBound). You are in it only if you name yourself.")]),
             "orchestrator": .property("string", "One of the members. Default: the first."),
             "objective": .property("string", "What the group should deliver, if the user said."),
+            "folder": .property("string", "Existing project folder, absolute or starting with ~. In a git repo each member works on its own branch."),
         ], required: ["name", "members"]))
 
     var kind: ToolCall.Kind { .orbs }

@@ -17,6 +17,7 @@ struct OrbsTool: AgentTool {
             "action": .object(["type": .string("string"), "enum": .array(actions.map(JSONValue.string))]),
             "to": .property("string", "Teammate name."),
             "message": .property("string", "Up to \(DelegationLimits.messageLimit) characters."),
+            "folder": .property("string", "ask only: existing project folder, absolute or starting with ~. In a git repo the teammate works on its own branch."),
         ], required: ["action"]))
 
     var kind: ToolCall.Kind { .orbs }

@@ -304,7 +304,7 @@ struct WorkspaceSnapshot: Sendable, Equatable, Codable {
     }
 
     /// `git` in the environment's PATH; the system's own shim when it is not found.
-    private static func findGit(in environment: [String: String]) -> String {
+    static func findGit(in environment: [String: String]) -> String {
         for directory in (environment["PATH"] ?? "").split(separator: ":") {
             let candidate = String(directory) + "/git"
             if FileManager.default.isExecutableFile(atPath: candidate) { return candidate }
@@ -312,7 +312,7 @@ struct WorkspaceSnapshot: Sendable, Equatable, Codable {
         return systemGit
     }
 
-    private static let systemGit = "/usr/bin/git"
+    static let systemGit = "/usr/bin/git"
 
     /// Whether `/usr/bin/git` is a real git: the Command Line Tools, or an Xcode that `xcode-select` points to.
     static func developerToolsAreInstalled(manager: FileManager = .default) -> Bool {

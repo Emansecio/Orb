@@ -345,6 +345,7 @@ final class GroupHub: GroupTurnHooks {
         update(groupID) { $0.phase = .done }
         let summary = GroupUsageText.summary(turns: run.turnsUsed, tokens: run.tokensUsed)
         session.append(.event(OrbEvent(kind: .groupRunDone, detail: summary, chainID: run.id, groupID: groupID)))
+        cleanUpWorkFolders(of: group, run: run.id, session: session)
         // The page of the board: what was asked and what the group came to (rules only, no model).
         let page = GroupBoard.sessionPage(request: run.request, result: run.finalText ?? run.lastText ?? "",
                                           members: run.participants.map { name(of: $0) }, turns: run.turnsUsed,

@@ -95,13 +95,13 @@ extension AppModel {
     /// its chat (`group_create`); its chat says so ("Atlas criou o grupo…") in place of "entrou no grupo", and so does the thread.
     @discardableResult
     func createGroup(name: String, members: [UUID], orchestrator: UUID? = nil, objective: String = "",
-                     policy: GroupPolicy = GroupPolicy(), createdBy creator: UUID? = nil) -> OrbGroup? {
+                     policy: GroupPolicy = GroupPolicy(), projectFolder: String = "", createdBy creator: UUID? = nil) -> OrbGroup? {
         var seen = Set<UUID>()
         let ids = members.filter { bot($0) != nil && seen.insert($0).inserted }
         guard OrbGroup.memberLimits.contains(ids.count) else { return nil }
         let title = Self.groupTitle(name, fallback: ids.compactMap { bot($0)?.name })
         let group = OrbGroup(name: title, memberIDs: ids, orchestratorID: orchestrator.flatMap { ids.contains($0) ? $0 : nil } ?? ids[0],
-                             policy: policy)
+                             policy: policy, projectFolder: projectFolder)
         groups.append(group)
         let session = groupSession(group.id)
         let created = OrbEvent(kind: .groupCreated, actor: creator.map(orbRef), detail: "\(title) · \(ids.count)", groupID: group.id)

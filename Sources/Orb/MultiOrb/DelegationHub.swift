@@ -66,6 +66,10 @@ final class DelegationHub: DelegationService {
 
     func isStarting(_ botID: UUID) -> Bool { starting.contains(botID) }
 
+    /// The folder a request's turns work in when it is not the Orb's own (a worktree, or a group's project folder); it outlives
+    /// the first turn so the turn that resumes the request after its children answered works in the same place.
+    private var workFolders: [UUID: URL] = [:]
+
     /// Some request between Orbs is open (not a group's: groups do not depend on the switch).
     var hasActiveChains: Bool { requests.values.contains { Self.isOpen($0.state) && $0.envelope.groupID == nil } || inbox.values.contains { !$0.isEmpty } }
 
@@ -73,6 +77,12 @@ final class DelegationHub: DelegationService {
 
     func submit(from: UUID, to name: String, text: String, kind: OrbEnvelope.Kind, messageID: UUID,
                 groupID: UUID?) throws -> OrbEnvelope {
+        try submit(from: from, to: name, text: text, kind: kind, messageID: messageID, groupID: groupID, folder: nil)
+    }
+
+    /// `folder`: a project folder the receiver of an `ask` works in (a worktree of it when it is a git repository).
+    func submit(from: UUID, to name: String, text: String, kind: OrbEnvelope.Kind, messageID: UUID,
+                groupID: UUID?, folder: String?) throws -> OrbEnvelope {
         guard let model, !isShuttingDown, let sender = model.bot(from) else { throw DelegationRefusal.switchedOff }
         let session = model.session(from)
         let context = session.chain
@@ -112,6 +122,7 @@ final class DelegationHub: DelegationService {
                                    groupID: groupID ?? context?.groupID, sentAt: now)
         envelope.chat = session.conversationChat
         if kind == .tell { return leaveNotice(envelope, session: session) }
+        envelope.folder = folder
         // A routine's run that asks is resumed by the answer (`holdRoutine`), so the answer must say which run it is for.
         if session.routineID != nil, session.sideKind == nil { envelope.servingRoutine = session.routineID }
         requests[envelope.id] = DelegationRequest(envelope: envelope, state: .queued)
@@ -215,6 +226,10 @@ final class DelegationHub: DelegationService {
                 startGroupRun(request)
                 return true
             }
+            if let folder = request.envelope.folder, !folder.isEmpty {
+                startFolderRun(request, folder: folder)
+                return true
+            }
             let ready = startRun(request, conversation: Conversation(), text: OrbEnvelopeText.request(request.envelope),
                                  origin: .orb(request.envelope), resuming: false)
             if ready { return true }
@@ -237,7 +252,9 @@ final class DelegationHub: DelegationService {
             let pictures = self.groupHooks?.images(for: request) ?? []
             let envelope = request.envelope
             let body = envelope.from.id == envelope.to.id && !envelope.fromChat ? envelope.text : OrbEnvelopeText.request(envelope)
-            let prompt = preface.isEmpty ? body : preface + "\n\n" + body
+            // Where the member works (its own worktree of the group's project) comes after the group's preface, before the request.
+            let work = await self.groupWork(for: request)
+            let prompt = [preface, work?.note ?? "", body].filter { !$0.isEmpty }.joined(separator: "\n\n")
             // Read off the main thread while `starting` still holds the Orb, so nothing else takes it meanwhile.
             let read = await model.store.readSideConversationAsync(prefix: Store.grupoPrefix, id: envelope.groupID ?? request.id, for: botID)
             self.starting.remove(botID)
@@ -254,7 +271,55 @@ final class DelegationHub: DelegationService {
             model.addNotice(AppModel.labeled(read.notice, for: model.bot(botID)))
             let conversation = read.value?.closingInterruptedTurn(notice: BotSession.quitSideNotice) ?? Conversation()
             if !self.startRun(current, conversation: conversation, text: prompt, origin: .orb(current.envelope), resuming: false,
-                              images: pictures) {
+                              images: pictures, workFolder: work?.folder) {
+                self.schedulePump(botID)
+            }
+        }
+    }
+
+    /// Where a group turn works and what the model is told about it; nil when the group has no project folder (or it is gone).
+    private func groupWork(for request: DelegationRequest) async -> (folder: URL, note: String)? {
+        guard let model, let groupID = request.envelope.groupID, let group = model.group(groupID), !group.projectFolder.isEmpty else { return nil }
+        let project = URL(fileURLWithPath: group.projectFolder)
+        guard project.isExistingDirectory else { return nil }
+        let root = WorkFolders.root(in: model.store.directory)
+        let member = request.envelope.to
+        // The orchestrator keeps the main checkout: it merges what the members commit.
+        if member.id == group.orchestratorID {
+            return (project, await WorkFolders.orchestratorNote(project: project, run: request.envelope.chainID, root: root))
+        }
+        let work = await WorkFolders.prepare(project: project, member: member.name, run: request.envelope.chainID, root: root)
+        return (work.url, WorkFolders.memberNote(work))
+    }
+
+    /// A request that names a project `folder`: the receiver works in a worktree of it (read off the main thread, the Orb held
+    /// meanwhile, like a group turn).
+    private func startFolderRun(_ request: DelegationRequest, folder: String) {
+        guard let model else { return }
+        let botID = request.envelope.to.id
+        starting.insert(botID)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let project = URL(fileURLWithPath: folder)
+            var work: WorkFolder?
+            if project.isExistingDirectory {
+                work = await WorkFolders.prepare(project: project, member: request.envelope.to.name, run: request.id,
+                                                 root: WorkFolders.root(in: model.store.directory))
+            }
+            self.starting.remove(botID)
+            guard let current = self.requests[request.id], current.state == .queued else { return self.schedulePump(botID) }
+            if self.chainStates[current.envelope.chainID]?.cancelled == true {
+                self.requests[current.id]?.state = .cancelled
+                return self.schedulePump(botID)
+            }
+            guard model.canTakeSideWork(botID) else {
+                self.queues[botID, default: []].insert(current.id, at: 0)
+                return
+            }
+            let body = OrbEnvelopeText.request(current.envelope)
+            let text = work.map { body + "\n\n" + WorkFolders.memberNote($0, asked: true) } ?? body
+            if !self.startRun(current, conversation: Conversation(), text: text, origin: .orb(current.envelope), resuming: false,
+                              workFolder: work?.url) {
                 self.schedulePump(botID)
             }
         }
@@ -264,7 +329,7 @@ final class DelegationHub: DelegationService {
     /// conversation shows it. False when the turn could not begin (the request then failed and its asker was told).
     @discardableResult
     private func startRun(_ request: DelegationRequest, conversation: Conversation, text: String, origin: SendOrigin,
-                          resuming: Bool, images: [ImageAttachment] = []) -> Bool {
+                          resuming: Bool, images: [ImageAttachment] = [], workFolder: URL? = nil) -> Bool {
         guard let model else { return false }
         let envelope = request.envelope
         let botID = envelope.to.id
@@ -283,7 +348,9 @@ final class DelegationHub: DelegationService {
         waitingSince[envelope.id] = nil
         chainStates[envelope.chainID]?.touched = .now
         if kind == .group { groupHooks?.turnStarted(running) }
-        guard model.send(text, images: images, to: botID, origin: origin) else {
+        if let workFolder { workFolders[envelope.id] = workFolder }
+        guard model.send(text, images: images, to: botID, origin: origin, workFolder: workFolders[envelope.id]) else {
+            workFolders[envelope.id] = nil
             session.endSideRun()
             session.scheduleSave(delay: 0)
             fail(running, "Não consegui começar: confira o modelo em Ajustes")
@@ -327,6 +394,7 @@ final class DelegationHub: DelegationService {
             }
         }
         own.items.settingReceived(requestID, to: !finished ? .cancelled : waits ? .open : (outcome?.status == .ok ? .replied : .failed))
+        if !waits { workFolders[requestID] = nil } // a request that waits for its children resumes in the same folder
         // The conversation of the run goes to its file; the chat comes back.
         write(own, kind: kind, runID: runID, for: botID)
         if waits { suspended[requestID] = own }
@@ -822,7 +890,14 @@ final class DelegationHub: DelegationService {
                         + "trabalha no fio dele e a resposta final chega sozinha como mensagem; não espere nem repita o pedido. "
                         + "O usuário acompanha na tela do grupo."
                 }
-                let envelope = try submit(from: botID, to: name, text: text, kind: kind, messageID: messageID, groupID: groupID)
+                // A project folder is for a plain request: a group's turns use the group's own (`OrbGroup.projectFolder`).
+                var folder: String?
+                if kind == .ask, groupID == nil, let path = arguments["folder"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !path.isEmpty {
+                    folder = try AccessRequest.checkedFolder(path, home: model.homeFolder)
+                }
+                let envelope = try submit(from: botID, to: name, text: text, kind: kind, messageID: messageID, groupID: groupID,
+                                          folder: folder)
                 return kind == .ask
                     ? "Pedido enviado a \(envelope.to.name) (id \(envelope.shortID)). A resposta chega sozinha como mensagem"
                         + (envelope.servingRoutine != nil ? " e retoma esta execução da rotina" : "")
@@ -1061,8 +1136,13 @@ final class DelegationHub: DelegationService {
             }
             lead = orb
         }
+        var project = ""
+        if let path = arguments["folder"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty {
+            project = try AccessRequest.checkedFolder(path, home: model.homeFolder)
+        }
         guard let group = model.createGroup(name: name, members: members.map(\.id), orchestrator: lead.id,
-                                            objective: arguments["objective"]?.string ?? "", createdBy: botID) else {
+                                            objective: arguments["objective"]?.string ?? "", projectFolder: project,
+                                            createdBy: botID) else {
             throw DelegationRefusal.groupSetup(.unavailable)
         }
         let others = members.filter { $0.id != lead.id }.map(\.name)
@@ -1070,7 +1150,7 @@ final class DelegationHub: DelegationService {
             ? "Para mandar o primeiro pedido, use orbs ask com to “\(group.name)”."
             : "Você não é membro: o usuário manda os pedidos na tela do grupo."
         return "Grupo \(group.name) criado: \(lead.name) orquestra; os outros membros são \(Self.list(others)). O usuário vê o grupo "
-            + "na lateral. " + next
+            + "na lateral. " + (project.isEmpty ? "" : "Pasta do projeto: \(project); os membros (menos o orquestrador) trabalham cada um no seu ramo. ") + next
     }
 
     /// Who a request went to, as the asker reads it: the Orb, or the group for a request sent to one from a chat.

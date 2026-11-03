@@ -35,11 +35,11 @@ struct MultiOrbRoundTripTests {
 
         let envelope = OrbEnvelope(kind: .reply, from: revisor, to: atlas, text: "Pronto", hop: 2, path: [atlas.id, revisor.id],
                                    replyTo: request, servingRequest: UUID(), status: .ok, groupID: group,
-                                   sentAt: Date(timeIntervalSince1970: 1_000_000))
+                                   sentAt: Date(timeIntervalSince1970: 1_000_000), folder: "/Users/x/projeto")
         #expect(try roundTrip(envelope) == envelope)
 
         let orbGroup = OrbGroup(name: "Lançamento", memberIDs: [atlas.id, revisor.id], orchestratorID: atlas.id,
-                                policy: GroupPolicy(membersMayTalk: false))
+                                policy: GroupPolicy(membersMayTalk: false), projectFolder: "/Users/x/projeto")
         #expect(try roundTrip(orbGroup) == orbGroup)
 
         let proposal = OrbProposal(creator: atlas, name: "Pesquisador", role: "Pesquisa na web", instructions: "Você pesquisa.",
@@ -143,7 +143,7 @@ struct MultiOrbCompatibilityTests {
         let group = try decode(OrbGroup.self, #"{"memberIDs":["\#(one)"]}"#)
         #expect(group.policy == GroupPolicy())
         #expect(group.orchestratorID == UUID(uuidString: one))
-    }
+        #expect(group.projectFolder.isEmpty, "a group saved before the shared folder existed has none")    }
 
     @Test func aBotWithAnUnreadableOriginStillLoads() throws {
         let bot = try decode(Bot.self, #"{"id":"00000000-0000-4000-8000-0000000000A1","name":"Filho","createdBy":42,"createdByName":["x"],"createdAt":"ontem"}"#)
@@ -184,6 +184,7 @@ struct MultiOrbCompatibilityTests {
 
         let envelope = try decode(OrbEnvelope.self, #"{"id":"00000000-0000-4000-8000-0000000000C3","chainID":"00000000-0000-4000-8000-0000000000D4","kind":"?","from":{"id":"00000000-0000-4000-8000-0000000000A1","name":"A"},"to":{"id":"00000000-0000-4000-8000-0000000000B2","name":"B"}}"#)
         #expect(envelope.kind == .tell && envelope.hop == 1 && envelope.path.isEmpty && envelope.text.isEmpty)
+        #expect(envelope.folder == nil)
 
         let pause = try decode(GroupPauseItem.self, #"{"groupID":"00000000-0000-4000-8000-0000000000C3","runID":"00000000-0000-4000-8000-0000000000D4","reason":"x","state":"y"}"#)
         #expect(pause.reason == .turns && pause.state == .ended)

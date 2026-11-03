@@ -637,6 +637,8 @@ struct ToolContext: Sendable {
     var accessSupport: AccessSupport?
     /// Opens the access card of `request_access` and waits for the answer. The engine sets it for the tool call.
     var requestAccess: AccessHandler?
+    /// What this Orb last saw of the files it read or wrote: `write_file` and `edit_file` refuse a file that changed since. Nil in tests.
+    var stamps: FileStamps?
     /// The plan of the task (`task_plan`) as this turn leaves it; the app starts it from the conversation's plan.
     var taskPlan = TaskPlanBoard()
     /// Whether the permission check (the approval card, when there was one) judged this very call dangerous: set by the
