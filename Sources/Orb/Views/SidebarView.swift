@@ -72,18 +72,17 @@ struct SidebarView: View {
                             .transition(.opacity)
                         }
                         if nestedLoose {
+                            // Lit only while an Orb is dragged over it: with no drag, `drag?.slot.categoryID` is nil too.
                             SidebarFoldHeader(title: "Outros", unfolded: looseUnfolded, ids: looseIDs,
-                                              isTargeted: !looseUnfolded && drag?.slot.categoryID == nil, sub: true,
+                                              isTargeted: !looseUnfolded && drag.map { $0.slot.categoryID == nil } == true, sub: true,
                                               selectionSpace: selectionSpace) { EmptyView() } action: {
                                 withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) { looseUnfolded.toggle() }
                             }
-                            .padding(.leading, SidebarCategoryLayout.subIndent)
                             .sidebarDropItem(.othersTitle, drag)
                         }
                         if !nestedLoose || looseUnfolded {
                             ForEach(looseIDs, id: \.self) { id in
                                 SidebarBotRow(botID: id, index: order.firstIndex(of: id) ?? order.count, selectionSpace: selectionSpace, rowSpace: rowSpace)
-                                    .padding(.leading, nestedLoose ? SidebarCategoryLayout.indent : 0)
                                     .sidebarDropItem(.row(id), drag)
                                     .transition(.adapted(.arrive, reduceMotion: reduceMotion))
                             }
@@ -110,7 +109,6 @@ struct SidebarView: View {
                 // The name field of a category being made (the "+" of the Orbs, an Orb's "Mover para", the palette).
                 if isNamingNewCategory {
                     NewCategoryRow(selectionSpace: selectionSpace)
-                        .padding(.leading, SidebarCategoryLayout.subIndent)
                         .transition(.adapted(.arrive, reduceMotion: reduceMotion))
                 }
 
@@ -199,10 +197,12 @@ struct SectionTitle<Trailing: View>: View {
             Spacer(minLength: 4)
             trailing
         }
-        // The text starts on the rows' content edge (the Orbs' avatars), 8 pt inside the list's own 8 pt.
+        // The text starts on the rows' content edge (the Orbs' avatars), 8 pt inside the list's own 8 pt, and the title is
+        // as tall as "Orbs"' (a row), so both sections open alike.
+        .frame(minHeight: SidebarCategoryLayout.headerContentHeight)
         .padding(.leading, 8)
         .padding(.trailing, 2)
-        .padding(.bottom, 4)
+        .padding(.vertical, 6)
     }
 }
 
@@ -273,17 +273,24 @@ private struct SidebarFeatureRow: View {
                    help: shortcut.isEmpty ? tip : "\(tip) (\(shortcut))") {
             model.selection = item
         } content: { _ in
-            Label(name, systemImage: symbol)
-                .font(Typography.text.weight(.medium))
-                .foregroundStyle(isSelected ? Palette.ink : Palette.secondary)
+            // The icon in the grid's column, so the name starts on the Orbs' names (a `Label` sizes it to the symbol).
+            HStack(spacing: SidebarCategoryLayout.iconGap) {
+                Image(systemName: symbol)
+                    .frame(width: SidebarCategoryLayout.iconColumn)
+                    .accessibilityHidden(true)
+                Text(name)
+            }
+            .font(Typography.text.weight(.medium))
+            .foregroundStyle(isSelected ? Palette.ink : Palette.secondary)
+            .frame(minHeight: SidebarCategoryLayout.headerContentHeight)
         }
     }
 }
 
 /// A heading that folds its list — "Orbs" over the whole section, "Outros" over the loose Orbs once a category exists.
 /// Folded, it carries the selection when the open Orb hides in it, the marks of what it hides and the count. The
-/// trailing edge is free for "Orbs"' "+" (a separate target, never a nested button). `sub` draws the heading as a
-/// sub-section: smaller and quieter, so it reads under "Orbs", not beside it.
+/// trailing edge is free for "Orbs"' "+" (a separate target, never a nested button). `sub` draws the heading as a row
+/// of the grid (a category's look), so it reads under "Orbs", not beside it.
 private struct SidebarFoldHeader<Trailing: View>: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -293,7 +300,7 @@ private struct SidebarFoldHeader<Trailing: View>: View {
     let ids: [UUID]
     /// An Orb is being dragged over the folded heading.
     var isTargeted = false
-    /// A sub-section heading ("Outros"): smaller and quieter than "Orbs".
+    /// A sub-section heading ("Outros"), drawn as a category's.
     var sub = false
     let selectionSpace: Namespace.ID
     @ViewBuilder let trailing: Trailing
@@ -308,18 +315,21 @@ private struct SidebarFoldHeader<Trailing: View>: View {
         HStack(spacing: 0) {
             SidebarRow(isSelected: holdsSelection, selectionSpace: selectionSpace,
                        help: collapsed ? "Mostra \(hidden)" : "Recolhe \(hidden)") { action() } content: { _ in
-                HStack(spacing: SidebarCategoryLayout.iconGap) {
-                    Image(systemName: "chevron.right")
-                        .font(SectionPlus.chevron)
-                        .rotationEffect(.degrees(collapsed ? 0 : 90))
-                        // The arrow turns in the content curve; under Reduce Motion it just takes its new direction.
-                        .animation(Motion.panel(reduceMotion: reduceMotion), value: collapsed)
-                        .frame(width: SidebarCategoryLayout.iconColumn)
-                        .foregroundStyle(Palette.faint)
+                let chevron = Image(systemName: "chevron.right")
+                    .font(SectionPlus.chevron)
+                    .rotationEffect(.degrees(collapsed ? 0 : 90))
+                    // The arrow turns in the content curve; under Reduce Motion it just takes its new direction.
+                    .animation(Motion.panel(reduceMotion: reduceMotion), value: collapsed)
+                    .foregroundStyle(Palette.faint)
+                // "Outros" is a row of the grid, as a category's heading; "Orbs" a section title, as "Grupos", with its
+                // arrow after the word.
+                HStack(spacing: sub ? SidebarCategoryLayout.iconGap : 4) {
+                    if sub { chevron.frame(width: SidebarCategoryLayout.iconColumn) }
                     Text(title)
-                        .font(sub ? Typography.label.weight(.medium) : Typography.text.weight(.medium))
-                        .foregroundStyle(collapsed && holdsSelection ? Palette.ink : sub ? Palette.faint : Palette.secondary)
+                        .font(sub ? Typography.text.weight(.medium) : Typography.label.weight(.medium))
+                        .foregroundStyle(collapsed && holdsSelection ? Palette.ink : sub ? Palette.secondary : Palette.faint)
                         .lineLimit(1)
+                    if !sub { chevron }
                     Spacer(minLength: 4)
                     ZStack {
                         if collapsed && waiting {

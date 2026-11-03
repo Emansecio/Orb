@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 // The sidebar's categories (see `SidebarCategory`): a heading that folds its Orbs and the field that names one (opened
 // from the "+" of "Orbs"). Only how the list is laid out: nothing here deletes an Orb.
 
-/// A category in the sidebar: its heading and, unfolded, its Orbs indented under it. Where a dragged Orb lands is the
+/// A category in the sidebar: its heading and, unfolded, its Orbs under it. Where a dragged Orb lands is the
 /// sidebar's (`SidebarDropDelegate`): this reports its rows' frames, moves them out of the gap's way and lights its
 /// heading when folded and aimed at.
 struct SidebarCategorySection: View {
@@ -32,13 +32,10 @@ struct SidebarCategorySection: View {
                                           selectionSpace: selectionSpace)
                 }
             }
-            // A category heads a sub-section of "Orbs": it stands in from it.
-            .padding(.leading, SidebarCategoryLayout.subIndent)
             .sidebarDropItem(.header(category.id), drag)
             if !category.isCollapsed {
                 ForEach(ids, id: \.self) { id in
                     SidebarBotRow(botID: id, index: order.firstIndex(of: id) ?? order.count, selectionSpace: selectionSpace, rowSpace: rowSpace)
-                        .padding(.leading, SidebarCategoryLayout.indent)
                         .sidebarDropItem(.row(id), drag)
                         .transition(.adapted(.unfold, reduceMotion: reduceMotion))
                 }
@@ -177,8 +174,8 @@ private struct SidebarCategoryHeader: View {
                     .frame(width: SidebarCategoryLayout.iconColumn)
                     .foregroundStyle(Palette.faint)
                 Text(category.name)
-                    .font(Typography.label.weight(.medium))
-                    .foregroundStyle(collapsed && holdsSelection ? Palette.ink : Palette.faint)
+                    .font(Typography.text.weight(.medium))
+                    .foregroundStyle(collapsed && holdsSelection ? Palette.ink : Palette.secondary)
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 ZStack {
@@ -285,19 +282,16 @@ private struct CategoryNameField: View {
     }
 }
 
-/// Where the rows of a category stand, as plain values.
+/// The sidebar's one grid: a row's leading column (an Orb's avatar, a heading's arrow, a page's icon) and the text edge
+/// after it, so every row below a section title starts its name on the same line. No row stands in from another: the
+/// sidebar is too narrow to spend width on depth, which the titles and the arrows already show.
 enum SidebarCategoryLayout {
     /// A heading is 32 pt tall at least (a click target): its content takes what is left of the row's 6 pt above and below.
     static let headerContentHeight: CGFloat = 32 - 2 * 6
-    /// How far a category's Orbs stand in from its heading.
-    static let indent: CGFloat = 14
-    /// How far a sub-section heading (a category's, "Outros"') stands in from "Orbs".
-    static let subIndent: CGFloat = 8
-    /// The heading's arrow column. 28 pt makes the name start at 46 pt, where an Orb's name starts (8 pt padding, the 30 pt
-    /// avatar, an 8 pt gap), so a category and the Orbs outside it share one text edge.
-    static let iconColumn: CGFloat = 28
-    /// Where the heading's name starts: the row's padding, the icon column and the space after it.
-    /// The gap after the arrow column: `iconColumn` + this puts the name at 46 pt, the Orbs' text edge.
-    static let iconGap: CGFloat = 10
+    /// The leading column, as wide as an Orb's avatar: arrows and icons stand centered on the avatars.
+    static let iconColumn: CGFloat = 30
+    /// The gap after it, the avatar's.
+    static let iconGap: CGFloat = 8
+    /// Where a row's name starts: the row's padding, the column and the gap.
     static let titleInset: CGFloat = 8 + iconColumn + iconGap
 }

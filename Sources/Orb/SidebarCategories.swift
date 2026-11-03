@@ -94,7 +94,7 @@ struct SidebarDragPreview: Equatable {
     var slot: SidebarDropSlot
     /// How far each row, heading or hint stands moved down (up when negative) to open the gap; missing means it stays.
     var shifts: [SidebarDropKey: CGFloat]
-    /// The gap, in the Orbs' coordinate space: as tall as the Orb's row, indented in a category.
+    /// The gap, in the Orbs' coordinate space: as tall and as wide as the Orb's row.
     var gap: CGRect
     /// Where the Orb's own row is moved to, hidden: into the gap, so on the drop it shows there and nothing slides.
     var heldOffset: CGSize
@@ -125,15 +125,12 @@ enum SidebarDrop {
         var categoryID: UUID?
         var botIDs: [UUID]
         var isCollapsed = false
-        /// Drawn indented under a heading (the loose ones under "Outros"; a category's always are, flag or not).
-        var indented = false
     }
 
     static func sections(loose: [UUID], categories: [SidebarCategory], botIDs: [UUID]) -> [Section] {
         let alive = Set(botIDs)
-        // The loose Orbs stand under "Outros", indented like a category's, once there is a category to sort them from.
-        return [Section(categoryID: nil, botIDs: loose, indented: !categories.isEmpty)]
-            + categories.map { Section(categoryID: $0.id, botIDs: $0.botIDs.filter { alive.contains($0) }, isCollapsed: $0.isCollapsed, indented: true) }
+        return [Section(categoryID: nil, botIDs: loose)]
+            + categories.map { Section(categoryID: $0.id, botIDs: $0.botIDs.filter { alive.contains($0) }, isCollapsed: $0.isCollapsed) }
     }
 
     /// The list with `botID` held at height `y`. The gap opens at the place whose middle is nearest the pointer, worked out
@@ -192,13 +189,9 @@ enum SidebarDrop {
             }
             if shift != 0 { shifts[item.key] = shift }
         }
-        let indent = SidebarCategoryLayout.indent
-        let indents: (SidebarDrop.Section) -> Bool = { $0.categoryID != nil || $0.indented }
-        let gapX = held.minX + (sections.contains { $0.categoryID == place.slot.categoryID && indents($0) } ? indent : 0)
-        let heldIndent: CGFloat = sections.contains { $0.botIDs.contains(botID) && indents($0) } ? indent : 0
         return SidebarDragPreview(botID: botID, slot: place.slot, shifts: shifts,
-                                  gap: CGRect(x: gapX, y: gapY, width: held.maxX - gapX, height: held.height),
-                                  heldOffset: CGSize(width: gapX - held.minX - heldIndent, height: gapY - held.minY),
+                                  gap: CGRect(x: held.minX, y: gapY, width: held.width, height: held.height),
+                                  heldOffset: CGSize(width: 0, height: gapY - held.minY),
                                   coveredHint: place.coversHint ? place.slot.categoryID : nil)
     }
 }
