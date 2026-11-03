@@ -4,8 +4,6 @@ import SwiftUI
 /// draft to the form), Cancelar (discards everything) and Criar Orb (enabled once the draft has a name) on the right.
 struct WizardFooter: View {
     let canCreate: Bool
-    /// The assistant said the draft is complete: "Criar Orb" is the next step and shows it (a halo, and ⌘↩ as well as ↩).
-    var isReady = false
     /// The assistant stopped at its limit without a name: the way out is the form, so the foot offers it.
     var hitLimit = false
     /// "Ir para o Formulário": the same step as the mode picker (the draft fills the form).
@@ -39,8 +37,6 @@ struct WizardFooter: View {
                 .buttonStyle(PrimaryPillStyle())
                 .keyboardShortcut(.defaultAction)
                 .disabled(!canCreate)
-                .shadow(color: Palette.stageGlow.opacity(isReady && canCreate ? 0.4 : 0), radius: 7, y: 1)
-                .animation(Motion.fade, value: isReady)
                 .background {
                     Button("", action: create).keyboardShortcut(.return, modifiers: .command).opacity(0).accessibilityHidden(true)
                         .disabled(!canCreate)

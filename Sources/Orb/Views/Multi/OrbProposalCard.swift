@@ -190,9 +190,8 @@ struct OrbProposalCard: View {
         ZStack {
             Circle()
                 .fill(Palette.raised)
-                .shadow(color: Palette.stageGlow.opacity(0.12), radius: 18)
             Circle()
-                .fill(RadialGradient(colors: [Palette.stageGlow.opacity(0.12), .clear], center: .center, startRadius: 0, endRadius: 52))
+                .fill(RadialGradient(colors: [Color.white.opacity(0.07), .clear], center: .center, startRadius: 0, endRadius: 52))
             SettlingOrb(idle: activity == .idle, wake: poke) { settled in
                 BotAvatar(orb: shown.orb, size: 72, activity: activity, celebration: .light, paused: settled, poke: poke)
             }

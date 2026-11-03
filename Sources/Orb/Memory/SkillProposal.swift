@@ -46,9 +46,14 @@ struct SkillProposal: Equatable, Sendable {
     var instructions: String
     var modified = Date.distantPast
 
-    /// "Publicar site" for `publicar-site`; you can change it in the editor.
+    /// "Publicar site" for `publicar-site`; you can change it in the editor. The slug lost case and accents, so a word the
+    /// summary writes ("LP", "AcessosFit", "memória") comes back as written there; its first word is skipped, capitalized
+    /// only because it opens the sentence.
     var name: String {
-        let words = slug.replacingOccurrences(of: "-", with: " ")
+        let written = summary.split { !$0.isLetter && !$0.isNumber }.dropFirst()
+        let words = slug.split(separator: "-").map { word in
+            String(written.first { $0.compare(word, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame } ?? word)
+        }.joined(separator: " ")
         return words.prefix(1).uppercased() + words.dropFirst()
     }
 

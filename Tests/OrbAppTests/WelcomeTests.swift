@@ -88,7 +88,7 @@ import Testing
     // MARK: What it says
 
     @Test func theTitleDiffersBetweenFirstUseAndAnEmptiedList() {
-        #expect(WelcomeCopy.firstUse.title == "Olá! Este é o Orb.")
+        #expect(WelcomeCopy.firstUse.title == "Este é o Orb")
         #expect(WelcomeCopy.returning.title == "Hora de um Orb novo")
         #expect(WelcomeCopy.firstUse.subtitle == WelcomeCopy.returning.subtitle)
         #expect(WelcomeCopy.firstUse.createTitle == "Criar meu primeiro Orb")

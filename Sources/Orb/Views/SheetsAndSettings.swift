@@ -248,7 +248,7 @@ struct NewBotSheet: View {
             .motion(value: tab)
             Group {
                 if isAssistant {
-                    WizardFooter(canCreate: wizard.draft.canCreate, isReady: wizard.draft.ready, hitLimit: wizard.hitLimit, toForm: passDraftToForm,
+                    WizardFooter(canCreate: wizard.draft.canCreate, hitLimit: wizard.hitLimit, toForm: passDraftToForm,
                                  cancel: requestClose, create: createFromAssistant)
                 } else {
                     SheetFooter(message: isImporting ? ImportText.notCreatedYet : hint, cancel: requestClose,

@@ -75,8 +75,7 @@ enum Palette {
     static let codeAdded = Color(hex: 0x6FD9A0)
     static let codeRemoved = Color(hex: 0xFF9494)
 
-    // The welcome screen's stage light (the indigo palette's glow, and a cool floor under the Orbs).
-    static let stageGlow = Color(hex: 0x6E5CFF)
+    // The welcome screen's cool floor under the Orbs.
     static let stageFloor = Color(hex: 0x86DFFF)
 
     static let conversationFont = Font.system(size: 14)
@@ -507,10 +506,9 @@ struct HeroPillStyle: ButtonStyle {
             .padding(.horizontal, 22)
             .frame(minHeight: ControlHeight.hero)
             .background {
-                // The halo is the capsule's own shadow in the stage color; only its opacity changes with the hover.
+                // The hover is a step of the surface, not a halo: a colored glow is the look of every AI template.
                 Capsule()
-                    .fill(Palette.ink)
-                    .shadow(color: Palette.stageGlow.opacity(isHovering ? 0.5 : 0.35), radius: 16, y: 4)
+                    .fill(Palette.ink.opacity(isHovering ? 0.88 : 1))
                     .animation(reduceMotion ? nil : Motion.hover(isHovering), value: isHovering)
             }
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)

@@ -55,7 +55,7 @@ enum WelcomeCopy: Equatable {
 
     var title: String {
         switch self {
-        case .firstUse: "Olá! Este é o Orb."
+        case .firstUse: "Este é o Orb"
         case .returning: "Hora de um Orb novo"
         }
     }
@@ -643,7 +643,8 @@ struct WelcomeBackdrop: View, Equatable {
                 Palette.canvas
                 // Over the whole area: a frame would show its edge.
                 Rectangle().fill(EllipticalGradient(
-                    colors: [Palette.stageGlow.opacity(0.24), Palette.stageGlow.opacity(0.09), Palette.stageGlow.opacity(0)],
+                    // Neutral light, as in the Orb editor: the Orbs carry the color, the stage does not compete.
+                    colors: [Color.white.opacity(0.06), Color.white.opacity(0.02), Color.white.opacity(0)],
                     center: UnitPoint(x: 0.5, y: size.height > 0 ? heroY / size.height : 0.3),
                     startRadiusFraction: 0, endRadiusFraction: 0.75))
                 Rectangle()

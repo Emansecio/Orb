@@ -15,6 +15,23 @@ import Testing
         #expect(history.entries.last?.outcome == .failed)
     }
 
+    @Test func runsThatWentAsPlannedFoldIntoTheNewestOfTheirRoutine() {
+        let bot = UUID(), chat = UUID(), whatsapp = UUID(), site = UUID()
+        func entry(_ origin: InicioEntry.Origin, _ outcome: InicioEntry.Outcome) -> InicioEntry {
+            InicioEntry(id: UUID(), sequence: 0, date: .now, origin: origin, outcome: outcome, summary: "")
+        }
+        func run(_ routine: UUID, _ outcome: InicioEntry.Outcome) -> InicioEntry {
+            entry(.routine(bot: bot, routine: routine, run: UUID()), outcome)
+        }
+        // Newest first, as Novidades lists them.
+        let newest = run(whatsapp, .completed), failed = run(whatsapp, .failed), answer = entry(.chat(bot: bot, chat: chat, item: UUID()), .completed)
+        let entries = [newest, run(site, .completed), failed, run(whatsapp, .skipped), answer, run(whatsapp, .completed), run(site, .attention)]
+        let news = InicioNews.folded(entries)
+        #expect(news.map(\.entry.id) == [newest.id, entries[1].id, failed.id, answer.id, entries[6].id])
+        #expect(news.map(\.runs) == [3, 1, 1, 1, 1]) // the skipped run counts among the three; failure and attention keep their rows
+        #expect(InicioNews.folded([]).isEmpty)
+    }
+
     @Test func cursorOnlyAdvancesThroughPresentedEntriesAndRoundTrips() throws {
         var history = InicioHistory()
         let bot = UUID(), routine = UUID(), run = UUID()

@@ -132,6 +132,16 @@ struct SkillProposalValidationTests {
         if case .failure(let refusal) = SkillProposal.validate(text, among: skills) { refusal.problems } else { [] }
     }
 
+    @Test func theNameTakesCaseAndAccentsFromTheSummary() {
+        func name(_ slug: String, _ summary: String) -> String { SkillProposal(slug: slug, summary: summary, instructions: "").name }
+        #expect(name("publicar-lp-docker", "Publica e protege a LP AcessosFit em Docker/OrbStack.") == "Publicar LP Docker")
+        #expect(name("revisar-memoria-orb", "Audita e reconcilia a memória persistente do Orb.") == "Revisar memória Orb")
+        #expect(name("atendimento-acessosfit", "Rodada de atendimento da AcessosFit no WhatsApp.") == "Atendimento AcessosFit")
+        // The summary's first word is capitalized only because it opens the sentence; an absent word stays as in the slug.
+        #expect(name("site-novo", "Site novo em produção.") == "Site novo")
+        #expect(name("publicar-site", "") == "Publicar site")
+    }
+
     private func refuses(_ text: String, among skills: [SkillDigest] = [], mentioning word: String, sourceLocation: SourceLocation = #_sourceLocation) {
         let found = problems(text, among: skills)
         #expect(found.contains { $0.contains(word) }, "\(found)", sourceLocation: sourceLocation)

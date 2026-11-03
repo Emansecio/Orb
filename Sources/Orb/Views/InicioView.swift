@@ -54,7 +54,6 @@ struct InicioView: View {
                 }
                 if model.botIDs.isEmpty {
                     VStack(spacing: 12) {
-                        Image(systemName: "sparkles").font(.system(size: 32)).foregroundStyle(Palette.faint).accessibilityHidden(true)
                         Text("Ainda não há Orbs").font(Typography.title).foregroundStyle(Palette.ink)
                         Text("Crie seu primeiro Orb para começar.").font(Typography.text).foregroundStyle(Palette.muted)
                         Button("Criar Orb") { model.selection = nil }.buttonStyle(PrimaryPillStyle())
@@ -165,7 +164,7 @@ struct InicioView: View {
             guard routine.goal?.check?.status == .attention else { return nil }
             return routine.runs.first(where: { $0.check?.status == .attention })?.id
         })
-        let news = events.filter { !currentAttention.contains($0.id) }
+        let news = InicioNews.folded(events.filter { !currentAttention.contains($0.id) })
         return section("Novidades", count: news.count) {
             if news.isEmpty {
                 Text(model.inicioVisitBase == nil ? "Ainda não há resultados recentes." : "Nenhuma novidade desde sua última visita.")
@@ -174,7 +173,7 @@ struct InicioView: View {
                     Button("Ver resultados recentes") { showingRecent = true }.buttonStyle(GhostStyle())
                 }
             } else {
-                ForEach(Array(showingAll ? news : Array(news.prefix(5)))) { event in eventRow(event) }
+                ForEach(showingAll ? news : Array(news.prefix(5))) { eventRow($0) }
                 if news.count > 5 {
                     Button(showingAll ? "Mostrar menos" : "Ver mais") { showingAll.toggle() }.buttonStyle(GhostStyle())
                 }
@@ -184,11 +183,15 @@ struct InicioView: View {
     }
 
     @ViewBuilder private var followUps: some View {
-        let items = model.routines.flatMap { routine in routine.followUps.filter { !$0.resolved }.map { (routine, $0) } }
+        // Orb by Orb, its avatar and name once over its run of items: one Orb may keep dozens.
+        let items = model.botIDs.flatMap { bot in
+            model.routines.filter { $0.botID == bot }.flatMap { routine in routine.followUps.filter { !$0.resolved }.map { (routine, $0) } }
+        }
         if !items.isEmpty {
             section("Acompanhamentos", count: items.count) {
-                ForEach(items, id: \.1.id) { routine, item in
-                    row(botID: routine.botID, focus: .followUp(item.id), title: item.subject,
+                ForEach(Array(items.enumerated()), id: \.element.1.id) { index, pair in
+                    let (routine, item) = pair
+                    row(botID: routine.botID, focus: .followUp(item.id), title: item.subject, showsOrb: index == 0 || items[index - 1].0.botID != routine.botID,
                         detail: "\(item.channel) · \(item.nextStep)" + (item.lastChecked.map { " · Verificado " + RoutineText.stamp($0) } ?? " · Sem verificação registrada"), date: nil) {
                         guard model.routines.contains(where: { $0.id == routine.id && $0.followUps.contains(where: { $0.id == item.id }) }) else {
                             unavailable = "Este acompanhamento não está mais disponível."; return
@@ -200,9 +203,10 @@ struct InicioView: View {
         }
     }
 
-    private func eventRow(_ event: InicioEntry) -> some View {
-        row(botID: event.botID, focus: .news(event.id), title: event.summary.isEmpty ? "Resultado registrado" : event.summary,
-            detail: outcome(event.outcome), date: event.date) { open(event) }
+    private func eventRow(_ news: InicioNews) -> some View {
+        let event = news.entry
+        return row(botID: event.botID, focus: .news(event.id), title: event.summary.isEmpty ? "Resultado registrado" : event.summary,
+                   detail: outcome(event.outcome) + (news.runs > 1 ? " · a última de \(news.runs) rodadas" : ""), date: event.date) { open(event) }
     }
 
     private func section<Content: View>(_ title: String, count: Int, @ViewBuilder content: () -> Content) -> some View {
@@ -220,9 +224,12 @@ struct InicioView: View {
         .card(radius: Radius.large, stroke: Palette.line)
     }
 
-    private func row(botID: UUID, focus: InicioRowFocus, title: String, detail: String, date: Date?, action: @escaping () -> Void) -> some View {
+    private func row(botID: UUID, focus: InicioRowFocus, title: String, showsOrb: Bool = true, detail: String, date: Date?,
+                     action: @escaping () -> Void) -> some View {
         HStack(alignment: .center, spacing: 10) {
-            if let bot = model.bot(botID) {
+            if !showsOrb {
+                Color.clear.frame(width: 32, height: 1) // under the avatar of the row that opens the Orb's run
+            } else if let bot = model.bot(botID) {
                 Button { model.selection = .bot(botID) } label: {
                     LiveBotAvatar(botID: botID, orb: bot.orb, size: 32, restsWhenIdle: true)
                 }.buttonStyle(.plain).help("Abrir conversa de \(bot.name)").accessibilityLabel("Abrir conversa de \(bot.name)")
@@ -231,21 +238,22 @@ struct InicioView: View {
                     .onKeyPress(.space) { model.selection = .bot(botID); return .handled }
             }
             VStack(alignment: .leading, spacing: 3) {
-                if let bot = model.bot(botID) {
+                if showsOrb, let bot = model.bot(botID) {
                     Button(bot.name) { model.selection = .bot(botID) }
                         .buttonStyle(.plain).font(Typography.small.weight(.semibold)).foregroundStyle(Palette.secondary)
                         .help("Abrir conversa de \(bot.name)")
                         .focusable()
                         .onKeyPress(.return) { model.selection = .bot(botID); return .handled }
                         .onKeyPress(.space) { model.selection = .bot(botID); return .handled }
-                } else {
+                } else if showsOrb {
                     Text("Orb indisponível").font(Typography.small.weight(.semibold)).foregroundStyle(Palette.secondary)
                 }
                 Button(action: action) {
                     HStack(alignment: .center, spacing: 8) {
                         VStack(alignment: .leading, spacing: 3) {
-                        Text(title).font(Typography.text).foregroundStyle(Palette.ink).lineLimit(3).multilineTextAlignment(.leading)
-                        Text(detail).font(Typography.small).foregroundStyle(Palette.muted).lineLimit(2).multilineTextAlignment(.leading)
+                        // Summaries come from the Orbs in Markdown: drawn as the chat draws them, from its cache.
+                        Text(MarkdownCache.attributed(title)).font(Typography.text).foregroundStyle(Palette.ink).lineLimit(3).multilineTextAlignment(.leading)
+                        Text(MarkdownCache.attributed(detail)).font(Typography.small).foregroundStyle(Palette.muted).lineLimit(2).multilineTextAlignment(.leading)
                         }
                         Spacer(minLength: 4)
                         if let date { Text(ReplyTime.label(date)).font(Typography.small).foregroundStyle(Palette.faint) }
@@ -267,7 +275,7 @@ struct InicioView: View {
         case .completed: "Concluído"
         case .failed: "Não terminou"
         case .attention: "Pede atenção"
-        case .skipped: "Dispensada pela pré-checagem"
+        case .skipped: "Pulada" // by the precheck or a missed slot: the summary says which
         case .recorded: "Resultado anterior"
         }
     }

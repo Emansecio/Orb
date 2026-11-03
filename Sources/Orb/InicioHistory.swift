@@ -26,6 +26,33 @@ struct InicioEntry: Codable, Equatable, Sendable, Identifiable {
     }
 }
 
+/// A row of Novidades: an entry, and how many runs of its routine it stands for.
+struct InicioNews: Identifiable {
+    var entry: InicioEntry
+    var runs = 1
+    var id: UUID { entry.id }
+
+    /// Runs that went as planned fold into the newest of their routine (`entries` newest first): one every 30 minutes would
+    /// otherwise fill the page with runs that found nothing. A failure or a run that asks for attention keeps its own row.
+    static func folded(_ entries: [InicioEntry]) -> [InicioNews] {
+        var result: [InicioNews] = []
+        var rowOfRoutine: [UUID: Int] = [:]
+        for entry in entries {
+            guard case .routine(_, let routine, _) = entry.origin, entry.outcome == .completed || entry.outcome == .skipped else {
+                result.append(InicioNews(entry: entry))
+                continue
+            }
+            if let row = rowOfRoutine[routine] {
+                result[row].runs += 1
+            } else {
+                rowOfRoutine[routine] = result.count
+                result.append(InicioNews(entry: entry))
+            }
+        }
+        return result
+    }
+}
+
 /// Saved together with the visit cursor, so a cursor never overtakes its entries in the writer queue.
 struct InicioHistory: Codable, Equatable, Sendable {
     var entries: [InicioEntry] = []
