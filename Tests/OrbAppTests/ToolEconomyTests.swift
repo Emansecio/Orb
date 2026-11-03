@@ -28,7 +28,9 @@ struct ToolSpecEconomyTests {
     /// excusing it (docs/PLANO-INICIO-ORBS.md). Measured at 19,520.
     /// Raised to 20,000 for `regions` and `root` on `ui_read` and the `frontmost` of its `app`: reading a dense app by parts spends
     /// far less per request than these sentences cost (docs/USO-DO-COMPUTADOR.md). Measured at 19,956.
-    private static let specCharsCeiling = 20_000
+    /// Raised to 20,400 for `request_access` (the access card asked from the chat, instead of sending the person to the panel)
+    /// and `done_when`/`checks` on `task_plan` (acceptance criteria checked before "done"). Measured at 20,377.
+    private static let specCharsCeiling = 20_400
     /// `ui_read`, `ui_act` and `screenshot` together: waiting, steps, takeover, marks and OCR all have to fit here.
     private static let appControlSpecCharsCeiling = 4_800
     /// The tools of the Orb's own browser are offered only when an engine is installed, so they have a ceiling of their own.

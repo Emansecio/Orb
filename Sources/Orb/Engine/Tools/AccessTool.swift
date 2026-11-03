@@ -12,8 +12,7 @@ struct AccessTool: AgentTool {
     let spec = ToolSpec(
         name: AccessTool.name,
         description: """
-        Ask the user for access this task needs: switches that are off, Automático mode, a work folder. Shows a card; they accept \
-        or decline. Use it instead of sending them to the panel. It never grants "Sem pedir permissão".
+        Ask the user, on a card, for access this task needs: switches that are off, Automático mode, a work folder.
         """,
         parameters: .schema([
             "capabilities": .object(["type": .string("array"),

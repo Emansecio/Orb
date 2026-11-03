@@ -30,9 +30,8 @@ struct TaskPlanTool: AgentTool {
         name: TaskPlanTool.name,
         description: """
         Plan of a task with several steps (not a question or a quick request), shown to you again as you work. set: goal \
-        and 1 to \(TaskPlan.maxSteps) steps (replaces the plan). update: steps by number (blocked needs a reason), checks and/or next. \
-        clear: drop it. For a task that makes files or code, set done_when (what the request needs, up to \(TaskPlan.maxCriteria)) \
-        and mark each criterion met, with evidence, before you say it is done.
+        and 1 to \(TaskPlan.maxSteps) steps (replaces the plan). update: steps by number (blocked needs a reason), checks, next. \
+        clear: drop it. Making files or code: set done_when from the request and check each met, with evidence, before saying done.
         """,
         // No descriptions where the description above or the name says it: every character goes with every request.
         parameters: .schema([
