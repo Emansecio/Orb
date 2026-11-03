@@ -72,7 +72,7 @@ Tudo em `Sources/Orb/`.
 | Arquivo | Papel |
 |---|---|
 | `EngineTypes.swift` | contratos: `JSONValue`, `ChatMessage`, `LLMClient`/`LLMEvent`/`LLMError`, `TokenUsage`, `CacheHealth`, `AgentTool`, `ToolRisk`, `ToolContext`, `MCPServerConfig` |
-| `AgentEngine.swift` | o laço do turno: modelo ↔ ferramentas, até 100 passos (150 em rotinas), retentativas, cortes por limite, grupos de aprovação, `TurnEvent`/`TurnRequest` |
+| `AgentEngine.swift` | o laço do turno: modelo ↔ ferramentas, sem limite de passos no turno do chat (vai até o modelo responder ou você parar; o assistente de criação e a revisão de skills têm limite próprio), retentativas, cortes por limite, grupos de aprovação, `TurnEvent`/`TurnRequest` |
 | `CompletionWatch.swift` | confere, sem chamar modelo, a resposta que fecharia o turno contra o que as chamadas mostraram: se o último build/teste/lint (`run_command`, no começo de um passo e sem pipe que esconda o código de saída) falhou e a resposta diz que está pronto sem admitir a falha, ou se ela diz ter salvo um caminho do Mac que não existe, o modelo recebe um lembrete (da mesma cota do `stopReminder`) para corrigir ou contar a verdade |
 | `Providers.swift` | `ProviderKind`, `ProviderAccount`, `ModelRef` (`provedor/modelo`), `ModelCatalog` (listas ao vivo), qual cliente para qual formato |
 | `OpenAIClient.swift`, `ResponsesClient.swift`, `AnthropicClient.swift` | os três formatos (chat completions, Responses, Messages): corpo da requisição e mapeamento dos eventos |
@@ -270,6 +270,31 @@ nada em vez de inventar. Vale para qualquer modelo, o do Claude Code incluído: 
 Os nomes e as descrições das ferramentas para o modelo são em inglês; o que aparece para você (título e detalhe de cada
 linha, cartões) é em português (`AgentTool.summary`).
 
+### Trabalho de programação
+
+O que deixa um Orb (ou um grupo) programar, testar e entregar sem cliques além do primeiro:
+
+- **Acesso pelo chat (`request_access`, `Engine/Tools/AccessTool.swift`, `AppModel+Access.swift`, `Views/Multi/AccessCard.swift`).**
+  Só no chat do próprio Orb. O cartão "Liberar / Agora não" usa o caminho do `orb_propose` (`ApprovalRequest.access`,
+  `ApprovalGate.requestAccess`, `alwaysAsks` e `isHandoff`), e "Liberar" aplica capacidades, Automático e pasta por `AppModel.update`.
+  Como as ferramentas são fixadas no começo do turno, o turno que pediu termina e o app manda a continuação uma vez
+  (`BotSession.accessGranted`, `resumeAfterAccess`, no molde de `showJobs`). Detalhes em [PERMISSOES.md](PERMISSOES.md).
+- **Critério de aceite (`TaskPlan.criteria`).** `task_plan set` aceita `done_when` (até 6) e `update` aceita `checks` (`met` exige
+  `evidence`). No fim do turno, depois do `CompletionWatch`, `PlanReminder.unmetCriteria` lembra os critérios que faltam quando a
+  resposta diz que acabou. O `CompletionWatch` também lembra de rodar o check de novo quando houve `write_file`/`edit_file`
+  depois do último check que passou.
+- **Revisão no grupo (`Groups/GroupReview.swift`).** O prompt do orquestrador manda definir `done_when`, construir com um membro,
+  revisar com outro (até 3 rodadas) e dar o veredito na resposta final. O revisor começa com `APPROVED` ou `CHANGES:`;
+  `ReviewVerdict.read` conta a rodada (`GroupRun.round`, `verdict`), põe "Revisão: …" no fio e na página da sessão do quadro.
+- **Pasta do projeto e worktrees (`MultiOrb/WorkFolders.swift`, `Groups/GroupHub+WorkFolders.swift`).** `OrbGroup.projectFolder`
+  (por `group_create folder`) e `OrbEnvelope.folder` (por `orbs ask folder`). Num repositório git, cada membro ganha um worktree em
+  `<dados>/trabalho/<projeto>-<hash>/<membro>-<execução>` no ramo `orb/<membro>/<execução>`; o orquestrador fica no checkout
+  principal e faz o merge. A pasta entra só na cópia do `Bot` do turno (`AppModel.send(workFolder:)`), então `ToolContext`,
+  snapshot, instruções da pasta, prompt e `ownFolder` a veem sem mudar o Orb salvo. No fim da execução do grupo, o que já entrou
+  no HEAD é removido sem `--force`; o resto fica, com aviso no fio.
+- **Trava de escrita velha (`Engine/Tools/FileStamps.swift`).** Por Orb, até 500 caminhos: depois de ler ou gravar, guarda data e
+  tamanho; `write_file`/`edit_file` recusam quando o arquivo mudou desde então (outro Orb ou você).
+
 ### Uso e custos (`Usage/`)
 
 | Arquivo | Papel |
@@ -362,7 +387,7 @@ ComposerView ── AppModel.submit ─┬─ Orb livre ─► AppModel.send ─
    (snapshot da pasta, em cache de 60 s, e instruções da pasta), `TurnPrompt.native` (prompt do sistema estável + prefácio
    por mensagem), o cliente (`ProviderAccount.client` pelo formato do modelo), as ferramentas (`ToolBox.offered` + as dos
    conectores permitidos) e o `TurnRequest` (`Sendable`). Se o turno foi parado nesse meio-tempo (`isCurrent`), nada segue.
-5. **Laço** (`AgentEngine.play`, até 100 passos): entrega mensagens da fila; ajusta a janela (`ContextWindow.fit` com o
+5. **Laço** (`AgentEngine.play`, sem limite de passos no chat): entrega mensagens da fila; ajusta a janela (`ContextWindow.fit` com o
    `ContextCut` do turno); chama o modelo com até 4 tentativas e recuo (`withRetries`, status "Provedor ocupado", "Limite do provedor" ou
    "Conexão caiu, tentando de novo em N s", conforme o erro); trata o motivo de parada (recusa, resposta cortada, estouro de contexto); roda as chamadas
    (`runCalls`: um cartão para o que pergunta junto, leituras em paralelo, o resto em ordem); registra cada mensagem. Com

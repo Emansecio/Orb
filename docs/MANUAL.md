@@ -327,6 +327,14 @@ palavras e **Pular** (**Esc**), que o deixa seguir com o que der para decidir so
 também responde. Respondida, a pergunta fica na conversa com a sua resposta marcada. Rotinas e pedidos de outros Orbs não
 perguntam: dizem no relatório o que falta.
 
+### Pedir acesso pelo chat
+
+Quando uma tarefa precisa de algo que o Orb não tem ("Terminal e arquivos" desligado, modo Perguntar antes, outra pasta), ele
+não manda você ao painel: mostra um cartão com o que falta e o motivo ("Terminal e arquivos · Modo Automático · Pasta
+~/Projetos/app"). **Liberar** liga tudo de uma vez e o Orb continua sozinho; **Agora não** o deixa seguir com o que tem, e ele não
+pede de novo naquela conversa. O cartão nunca liga "Sem pedir permissão": esse modo só se escolhe no painel. Rotinas, grupos e
+pedidos de outros Orbs não mostram o cartão.
+
 ### Liberações
 
 Painel do Orb → **Pasta e acessos** → **Liberações** lista cada "Sempre permitir" ("Rodar comandos git", "Gravar em
@@ -616,6 +624,21 @@ Com **Orbs podem conversar entre si** ligado em Ajustes → Orbs, um Orb pede aj
   orquestrador**.
 - Quando um Orb não pode fazer algo (outro Orb não existe, o nome é de um grupo, o grupo só deixa o orquestrador distribuir), a
   recusa diz o que aconteceu e o que fazer em seguida, e o Orb explica isso a você.
+
+### Programar com Orbs
+
+- **Sozinho.** Peça como pediria a uma pessoa: "cria um CLI em Swift com testes em ~/Projetos/conversor". Se faltar acesso, vem o
+  cartão **Liberar**. O Orb planeja com os critérios de pronto tirados do seu pedido ("os testes passam", "o comando converte
+  CSV"), roda, testa e só diz que acabou depois de conferir cada um, dizendo o que viu. Se mexeu em arquivo depois do último
+  teste verde, roda o teste de novo antes.
+- **Em grupo.** "Monta um grupo Dev com o Construtor e o Revisor na pasta ~/Projetos/conversor e adiciona exportação em JSON." O
+  orquestrador define os critérios, passa a construção a um membro e a revisão a outro, que roda e testa e responde
+  **APPROVED** ou **CHANGES**. As correções voltam ao construtor (até 3 rodadas), o fio mostra "Revisão: pediu mudanças
+  (rodada 1)" e "Revisão: aprovado na rodada 2", e a resposta final diz o que foi entregue, onde, e o veredito.
+- **Sem se atropelar.** Numa pasta com git, cada membro trabalha numa cópia própria (worktree, em
+  `~/Library/Application Support/Orb/trabalho/`) num ramo `orb/<membro>/…`, e o orquestrador junta os ramos aprovados na pasta
+  do projeto. Ao fim, as cópias já juntadas somem; as que não foram juntadas ficam, com aviso no fio. Sem git, todos usam a
+  mesma pasta. Em qualquer caso, um Orb não grava por cima de um arquivo que mudou depois que ele o leu: lê de novo primeiro.
 
 ## Contexto da conversa
 
