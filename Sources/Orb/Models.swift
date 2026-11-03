@@ -504,10 +504,14 @@ struct ApprovalRequest: Identifiable, Codable, Sendable, Equatable {
     /// The Orb asks the person something (`ask_user`) and waits for the answer. Like a hand-off it is not a permission: it has no
     /// rules to grant, never groups, and a change of permission mode does not answer it.
     var question: OrbQuestion?
+    /// The Orb asks for more access (`request_access`): the card lists what is missing and asks Liberar / Agora não. Like a
+    /// hand-off it is not a permission: it has no rules to grant, never groups, and a change of permission mode does not answer it.
+    var access: AccessRequest?
 
     var isBatch: Bool { items.count > 1 }
     var isProposal: Bool { proposal != nil }
     var isQuestion: Bool { question != nil }
+    var isAccess: Bool { access != nil }
 
     /// The card `browse_show` opens. `page` is the address (and title) of the page left open in the window.
     static func handoff(botName: String, page: String) -> ApprovalRequest {
@@ -629,6 +633,7 @@ extension ApprovalRequest {
         // Only the card's contents: a proposal this version cannot read leaves a plain card the person can still answer.
         proposal = (try? c.decodeIfPresent(OrbProposal.self, forKey: .proposal)) ?? nil
         question = (try? c.decodeIfPresent(OrbQuestion.self, forKey: .question)) ?? nil
+        access = (try? c.decodeIfPresent(AccessRequest.self, forKey: .access)) ?? nil
     }
 }
 

@@ -182,6 +182,8 @@ final class BotSession {
     /// message, until a routine's or another Orb's run, or a stop. `resumedAfterJobs` counts the times it did since.
     @ObservationIgnored var resumableSince: Date?
     @ObservationIgnored var resumedAfterJobs = 0
+    /// The person allowed an access card (`request_access`) in the running turn: when it ends, the Orb goes on by itself, once.
+    @ObservationIgnored var accessGranted = false
     /// When the running routine's run began.
     @ObservationIgnored var routineStart: Date?
     // MARK: MultiOrb (WP1)

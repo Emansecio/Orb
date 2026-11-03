@@ -633,6 +633,10 @@ struct ToolContext: Sendable {
     /// Asks the person a question (`ask_user`) and waits for the answer, nil when they skipped it. The engine sets it for the tool
     /// call; the tool is only offered where the person is (`MultiOrbOffering.askUser`).
     var askUser: QuestionHandler?
+    /// What `request_access` knows about the Orb and how to apply what the person allows; nil where the Orb cannot ask.
+    var accessSupport: AccessSupport?
+    /// Opens the access card of `request_access` and waits for the answer. The engine sets it for the tool call.
+    var requestAccess: AccessHandler?
     /// The plan of the task (`task_plan`) as this turn leaves it; the app starts it from the conversation's plan.
     var taskPlan = TaskPlanBoard()
     /// Whether the permission check (the approval card, when there was one) judged this very call dangerous: set by the

@@ -55,7 +55,8 @@ enum PromptParts {
     static func whereToTurnOn(_ bot: Bot) -> String { "the Orb's panel (Geral → \"Pode usar\")" }
 
     /// What the Orb may do right now, in plain words, and how to work with that.
-    static func permissions(_ bot: Bot) -> String {
+    /// `offersAccess`: the Orb has `request_access`, so it asks for a switch that is off instead of pointing at the panel.
+    static func permissions(_ bot: Bot, offersAccess: Bool = false) -> String {
         var lines = ["## What you may do"]
         switch bot.permissionMode {
         case .ask:
@@ -88,8 +89,9 @@ enum PromptParts {
         let off = Capability.allCases.filter { !bot.capabilities.contains($0) }
         if !off.isEmpty {
             lines.append("Switched off for this Orb: " + off.map { "\"\($0.label)\" (\(offEffect($0)))" }.joined(separator: "; ")
-                + ". Do not emulate a switched-off capability another way (osascript, curl, a script…). Tell the user which switch to "
-                + "turn on, in \(whereToTurnOn(bot)), and why you need it.")
+                + ". Do not emulate a switched-off capability another way (osascript, curl, a script…). "
+                + (offersAccess ? "If the task needs one, ask with request_access (the user clicks a card), and say why."
+                    : "Tell the user which switch to turn on, in \(whereToTurnOn(bot)), and why you need it."))
         }
         lines.append(macRealities(bot))
         return lines.joined(separator: "\n")

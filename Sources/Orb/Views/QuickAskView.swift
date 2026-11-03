@@ -542,17 +542,17 @@ struct QuickAskApprovalCard: View {
                     .foregroundStyle(Palette.warn)
             }
             ActionRow {
-                Button(request.isProposal ? "Não criar" : request.isQuestion ? "Pular" : request.isHandoff ? "Cancelar" : "Não permitir") {
+                Button(request.isProposal ? "Não criar" : request.isAccess ? "Agora não" : request.isQuestion ? "Pular" : request.isHandoff ? "Cancelar" : "Não permitir") {
                     model.decide(.deny, approvalID: request.id, botID: entry.bot.id)
                 }
                 .buttonStyle(GhostStyle())
-                .help(request.isQuestion ? Tip.skipQuestion : request.isHandoff ? Tip.handoffCancel : Tip.deny)
+                .help(request.isQuestion ? Tip.skipQuestion : request.isAccess ? Tip.declineAccess : request.isHandoff ? Tip.handoffCancel : Tip.deny)
                 .hangsOnLeadingEdge()
             } trailing: {
-                if request.isDangerous || request.isProposal || request.isQuestion { // a new Orb, or an answer, is given in the app
+                if request.isDangerous || request.isProposal || request.isQuestion || request.isAccess { // a new Orb, an access or an answer is given in the app
                     Button(request.isQuestion ? "Responder" : "Abrir o app", action: openApp)
                         .buttonStyle(SecondaryPillStyle())
-                        .help(request.isQuestion ? Tip.answerInApp : Tip.reviewRiskyInApp)
+                        .help(request.isQuestion ? Tip.answerInApp : request.isAccess ? Tip.accessInApp : Tip.reviewRiskyInApp)
                 } else {
                     Button(request.isHandoff ? "Pronto" : request.isBatch ? "Permitir as \(request.items.count)" : "Permitir") {
                         model.decide(.once, approvalID: request.id, botID: entry.bot.id)

@@ -70,6 +70,22 @@ extension ApprovalGate {
     }
 }
 
+extension ApprovalGate {
+    /// The card of `request_access`: `show` puts it in the conversation, and this waits for "Liberar" (`.once`) or "Agora não" and
+    /// Parar (`.deny`); on "Liberar" the Orb gets what the card lists (`AccessSupport.grant`). Like a hand-off it asks whatever the
+    /// permission mode is, and a change of mode never answers it.
+    func requestAccess(_ asked: AccessRequest, support: AccessSupport, botName: String, botID: UUID,
+                       show: (ApprovalRequest) -> Void) async -> AccessOutcome {
+        let card = ApprovalRequest(toolName: AccessTool.name, title: "\(botName) precisa de acesso", command: asked.items.joined(separator: ", "),
+                                   reason: asked.reason, access: asked)
+        open(card.id, botID: botID, alwaysAsks: true, isHandoff: true)
+        show(card)
+        let answer = await wait(for: card.id)
+        guard answer.decision != .deny, !Task.isCancelled else { return .declined }
+        return await support.grant(asked)
+    }
+}
+
 // MARK: MultiOrb (WP3)
 extension ApprovalGate {
     /// The creation card of `orb_propose`: `show` puts it in the conversation, and this waits for "Criar" (`.once`) or "Não criar" and

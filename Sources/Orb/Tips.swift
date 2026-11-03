@@ -133,6 +133,9 @@ enum Tip {
     static let answerQuestion = "Envia o que você escreveu como resposta. Escrever no campo de mensagem também responde"
     static let answerInApp = "Abre a conversa para responder à pergunta"
     static let skipQuestion = "Deixa a pergunta sem resposta: o Orb segue com o que puder decidir sozinho"
+    static let grantAccess = "Liga tudo o que está listado neste Orb e ele continua sozinho. Dá para desligar depois, no painel do Orb"
+    static let declineAccess = "Não muda nada: o Orb segue com o que tem ou explica o que falta"
+    static let accessInApp = "Abre a conversa para liberar o acesso"
 
     // MARK: Orb panel: browser
     static let removeBrowserProxy = "Tira o proxy do navegador deste Orb; as próximas páginas abrem direto"

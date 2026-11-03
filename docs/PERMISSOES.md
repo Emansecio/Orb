@@ -369,6 +369,16 @@ sem foco, ⌘↩ permite.
 são `alwaysAsks` (perigo ou mudança de instruções continuam esperando); "Só leitura" nega todos. A conversa marca o que foi
 respondido sozinho.
 
+### Pedir acesso pelo chat (`request_access`)
+
+No chat próprio do Orb (mesmo critério do `ask_user`: fora de rotina, pedido de outro Orb e grupo), a ferramenta
+`request_access` mostra um cartão "Liberar / Agora não" com o que falta: capacidades (`terminal`, `browser`, `computerUse`),
+modo Automático e uma pasta de trabalho. "Liberar" aplica tudo por `AppModel.update` (`grantAccess`); o modo nunca passa de
+Automático, e "Sem pedir permissão" só se liga no painel. A pasta tem de existir e não pode ser a home, a raiz nem conter a
+home (a regra de `PermissionPolicy.ownFolder`), e é conferida de novo ao liberar. O cartão é `alwaysAsks` + `isHandoff` no
+`ApprovalGate`: trocar o modo não o responde. As ferramentas novas só chegam no turno seguinte; por isso o resultado manda o
+Orb encerrar o turno, e `BotSession.finishTurn` manda "continua" uma vez por cartão aceito (exceto se há rascunho no campo).
+
 ## Claude Code
 
 Um Orb no Claude Code passa pela mesma `PermissionPolicy.evaluate` e pelo mesmo `ApprovalGate` que os outros: o motor julga a chamada,

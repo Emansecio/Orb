@@ -878,7 +878,7 @@ actor AgentEngine {
         return PermissionPolicy.call(for: tool, arguments: arguments, context: request.context).risk == .safe
     }
 
-    static let waitsForThePerson: Set<String> = [AskUserTool.name, OrbProposeTool.name]
+    static let waitsForThePerson: Set<String> = [AskUserTool.name, OrbProposeTool.name, AccessTool.name]
 
     /// What the model is sent: the system prompt and the turn so far, fitted to the budget. `messages` itself stays
     /// whole, so trimming is recomputed from the full record before every call.
@@ -1023,6 +1023,15 @@ actor AgentEngine {
             context.askUser = { [self] question in
                 await ask(question, resuming: summary.title, request: request, out: out)
             }
+            if tool.spec.name == AccessTool.name, var access = context.accessSupport {
+                // The mode as it is now: a change made during the turn is already in force.
+                access.mode = live.mode
+                context.accessSupport = access
+                let support = access
+                context.requestAccess = { [self] asked in
+                    await requestAccess(asked, support: support, resuming: summary.title, request: request, out: out)
+                }
+            }
             // MARK: MultiOrb (WP3)
             if tool.spec.name == OrbProposeTool.name, var creation = context.orbCreation {
                 // The mode as it is now, not as it was when the turn began: the tool refuses to propose in read-only.
@@ -1069,6 +1078,18 @@ actor AgentEngine {
         }
         out.yield(.status(title))
         return answer
+    }
+
+    /// The card of `request_access`: it waits like an approval, even in "Sem pedir permissão", and what it lists is turned on when
+    /// the person says "Liberar".
+    private func requestAccess(_ asked: AccessRequest, support: AccessSupport, resuming title: String, request: TurnRequest,
+                               out: AsyncStream<TurnEvent>.Continuation) async -> AccessOutcome {
+        let outcome = await gate.requestAccess(asked, support: support, botName: request.bot.name, botID: request.bot.id) { card in
+            out.yield(.approval(card))
+            out.yield(.status("Esperando sua resposta"))
+        }
+        out.yield(.status(title))
+        return outcome
     }
 
     // MARK: MultiOrb (WP3)

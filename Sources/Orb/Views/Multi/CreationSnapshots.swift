@@ -3,6 +3,7 @@ import SwiftUI
 
 /// `--snapshot` modes of the creation card: `orb-proposal` (open), `orb-proposal-editing`, `orb-proposal-created`,
 /// `orb-proposal-dismissed`, `orb-proposal-narrow` (520 pt wide) and `orb-created-sidebar` (the new row and the "Criado por" line).
+/// Also the access card of `request_access`: `access-card` (open), `access-card-granted`, `access-card-declined`, `access-card-narrow`.
 @MainActor
 enum CreationSnapshots {
     static func view(_ screen: String, model: AppModel) -> AnyView? {
@@ -14,6 +15,10 @@ enum CreationSnapshots {
         case "orb-proposal-dismissed": return page(card(creator, decision: .deny, long: false), model: model, height: 220)
         case "orb-proposal-narrow": return page(card(creator, long: true), model: model, width: 520, height: 520)
         case "orb-created-sidebar": return sidebar(creator, model: model)
+        case "access-card": return page(accessCard(creator), model: model)
+        case "access-card-granted": return page(accessCard(creator, decision: .once), model: model)
+        case "access-card-declined": return page(accessCard(creator, decision: .deny), model: model)
+        case "access-card-narrow": return page(accessCard(creator), model: model, width: 460)
         default: return nil
         }
     }
@@ -44,6 +49,16 @@ enum CreationSnapshots {
                 EventLineView(event: OrbEvent(kind: .orbCreated, actor: OrbRef(creator), subject: OrbRef(id: UUID(), name: proposal.name)))
             }
         }
+    }
+
+    /// What a task in a project folder asks for: the terminal, Automático and the folder.
+    private static func accessCard(_ creator: Bot, decision: ApprovalDecision? = nil) -> some View {
+        let access = AccessRequest(capabilities: [.terminal], autoMode: true,
+                                   folder: NSHomeDirectory() + "/Projetos/orb-teste",
+                                   reason: "Para criar o projeto e rodar os testes na pasta que você indicou.")
+        let card = ApprovalRequest(toolName: AccessTool.name, title: "\(creator.name) precisa de acesso",
+                                   command: access.items.joined(separator: ", "), reason: access.reason, decision: decision, access: access)
+        return AccessCard(request: card, access: access, botID: creator.id)
     }
 
     private static func page(_ content: some View, model: AppModel, width: CGFloat = 760, height: CGFloat? = nil) -> AnyView {

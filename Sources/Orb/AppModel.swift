@@ -1770,7 +1770,7 @@ final class AppModel {
                                          conversationIsNew: history.isEmpty && tellsWhereLeftOff, userTurns: userTurns,
                                          canSave: bot.permissionMode != .readOnly, alreadySent: sentMemories,
                                          profile: profile.promptSection)
-            let inputs = await TurnPromptInputs.gather(bot: bot, skills: skills, brief: brief)
+            let inputs = await TurnPromptInputs.gather(bot: bot, skills: skills, brief: brief, offersAccess: multi.access)
             var message = prompt + AttachmentText.block(for: attachments, texts: await files, room: attachmentRoom)
             if let told = await outsideText(outside, of: botID) { message = told + "\n\n" + message }
             guard session.isCurrent(turn) else { return } // stopped while preparing
@@ -1812,6 +1812,7 @@ final class AppModel {
                                             scope: sessionID)
             // MARK: MultiOrb (WP3)
             if multi.propose { context.orbCreation = orbCreationSupport(for: bot) }
+            if multi.access { context.accessSupport = accessSupport(for: bot) }
             // MARK: end MultiOrb (WP3)
             context.groupMemory = groupTurn?.bank // MultiOrb (WP5)
             if multi.groupRecall {

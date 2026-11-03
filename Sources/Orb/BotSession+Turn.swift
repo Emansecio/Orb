@@ -387,6 +387,10 @@ extension BotSession {
         conversation?.turnOpen = nil
         let botID = id
         let ranRoutine = routineID != nil
+        // Taken now: the next turn starts clean, and the chat is the one this turn worked on (it may not be the one on show).
+        let grantedAccess = accessGranted
+        accessGranted = false
+        let turnChat = workingChatID ?? conversationChat ?? botID
         // A task that stopped at the step limit is not done: a routine run or another Orb's request records that it did
         // not finish, and why (the engine's "Pausei depois de…", the run's last notice).
         let paused = conversation?.isTaskPaused ?? false
@@ -499,6 +503,8 @@ extension BotSession {
             model.settleSteering(id, succeeded: !userStopped)
         }
         if startsQueuedRoutines { model.startNextQueuedWork(for: id) }
+        // Whatever you wrote during the turn went first (above): the Orb goes on by itself only if nothing took it.
+        if grantedAccess, !ranRoutine, completed, !userStopped { model.resumeAfterAccess(of: botID, in: turnChat) }
         // Last, so a message or a routine that took the Orb at once is not met by a review. A proposal the turn made
         // (you asked for a skill, or the Orb proposed one) is told now; the review comes in the background.
         if !ranRoutine {

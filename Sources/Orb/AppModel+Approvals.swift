@@ -93,6 +93,7 @@ extension AppModel {
         // For VoiceOver, when the card appears in the chat being shown (the banner covers the other cases).
         if selectedBot?.id == botID, let name = bot(botID)?.name {
             announceForAccessibility(request.isProposal ? "\(name) quer criar um Orb"
+                                     : request.isAccess ? "\(name) precisa de acesso"
                                      : request.isQuestion ? "\(name) pergunta: \(request.command)"
                                      : request.isHandoff ? "\(name) espera você terminar no navegador" : "\(name) precisa da sua permissão")
         }

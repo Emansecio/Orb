@@ -254,17 +254,20 @@ struct TurnPromptInputs: Sendable {
     var instructions: FolderInstructions?
     var environment = MacEnvironment.current()
     var now = Date.now
+    /// The Orb is offered `request_access` (its own chat).
+    var offersAccess = false
 
     /// Reads the folder (cached for a minute) and its instruction file, off the main thread.
-    static func gather(bot: Bot, skills: [Skill], brief: MemoryBrief) async -> TurnPromptInputs {
+    static func gather(bot: Bot, skills: [Skill], brief: MemoryBrief, offersAccess: Bool = false) async -> TurnPromptInputs {
         async let snapshot = WorkspaceSnapshots.shared.snapshot(for: bot.id, folder: bot.workingURL)
         async let instructions = FolderInstructions.loadInBackground(from: bot.workingURL)
-        return await TurnPromptInputs(bot: bot, skills: skills, brief: brief, snapshot: snapshot, instructions: instructions)
+        return await TurnPromptInputs(bot: bot, skills: skills, brief: brief, snapshot: snapshot, instructions: instructions,
+                                      offersAccess: offersAccess)
     }
 
     fileprivate var folderSection: String { instructions?.prompt(trustedHash: bot.trustedInstructionsHash) ?? "" }
     fileprivate var skillsSection: String { PromptParts.skills(skills) }
-    fileprivate var permissionsSection: String { PromptParts.permissions(bot) }
+    fileprivate var permissionsSection: String { PromptParts.permissions(bot, offersAccess: offersAccess) }
 }
 
 /// The system prompt plus the per-message context of a turn.

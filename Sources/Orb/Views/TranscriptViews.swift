@@ -60,6 +60,8 @@ struct TranscriptRow: View, Equatable {
                 OrbProposalCard(request: request, proposal: proposal, botID: botID, pulses: entering)
             } else if let question = request.question {
                 QuestionCard(request: request, question: question, botID: botID, pulses: entering)
+            } else if let access = request.access {
+                AccessCard(request: request, access: access, botID: botID, pulses: entering)
             } else if request.isHandoff, request.decision == nil, model.liveCardDrawsHandoff(of: botID) {
                 // The live card of this turn's browser stands for it (its "Terminei" and "Cancelar" answer this request);
                 // answered, it is the usual line again. Not observed: the row changes when the request is answered.

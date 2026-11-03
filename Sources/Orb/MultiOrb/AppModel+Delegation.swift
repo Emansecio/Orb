@@ -39,7 +39,7 @@ extension AppModel {
         let hasTeam = inGroup || (orbsCanTalk && bots.count > 1) || (ownChat && canStartGroups(botID))
         return MultiOrbOffering(orbs: hasTeam, propose: ownChat, groupMemory: false,
                                 groupRecall: ownChat && !groups(containing: botID).isEmpty,
-                                groupCreate: ownChat && orbsCanStartGroups && bots.count > 1, askUser: ownChat,
+                                groupCreate: ownChat && orbsCanStartGroups && bots.count > 1, askUser: ownChat, access: ownChat,
                                 sideRun: !ownChat)
     }
 
