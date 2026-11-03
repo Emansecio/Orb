@@ -163,9 +163,10 @@ struct ToolSpecEconomyTests {
 
     /// The multi-Orb tools (`orbs`, `orb_propose`, `group_*`, `ask_user`) were measured at 3,705 characters in all
     /// (docs/REVISAO-TOKENS-PROMPT-2026-10-17.md); they had no ceiling of their own. `multiple` and `fields` of `ask_user`
-    /// (the fuller questions, 2026-11-02) took it to 3,964.
+    /// (the fuller questions, 2026-11-02) took it to 3,964. `folder` on `orbs` and `group_create` (a shared project, a git
+    /// worktree per member) and the builder/reviewer hint of `group_create` took it to 4,173.
     @Test func theMultiOrbToolSpecsStayWithinTheirOwnCeiling() {
-        #expect(specChars(ToolBox.multiOrbTools + [AskUserTool()]) <= 4_000)
+        #expect(specChars(ToolBox.multiOrbTools + [AskUserTool()]) <= 4_200)
     }
 
     /// A run nobody watches (a routine, a request from another Orb, a group's turn) can only list and pause tasks: `schedule`
