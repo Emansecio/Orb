@@ -21,7 +21,17 @@ class FlippedView: NSView {
     override var isFlipped: Bool { true }
 }
 
+/// What the mouse events a view got carried, for the logs: the keys held (`deviceIndependentFlagsMask` raw value, so
+/// command is 1 << 20), the pressure (0 to 1, 1 for a plain mouse button) and the click count.
+@MainActor func mouseFields(_ view: NSView, _ event: NSEvent) -> [String: Any] {
+    let point = view.convert(event.locationInWindow, from: nil)
+    return ["x": point.x, "y": point.y, "clicks": event.clickCount, "pressure": Double(event.pressure),
+            "modifiers": event.modifierFlags.intersection(.deviceIndependentFlagsMask).rawValue]
+}
+
 /// Draws and takes clicks, but exposes nothing to Accessibility: only a screenshot (and a coordinate) can find it.
+/// Logs "canvas" (x, y, clicks, pressure, modifiers) on a press and "canvasdrag" (the same) on each drag, so a test can tell
+/// the keys held, the click count and the pen pressure the events carried.
 final class CanvasView: NSView {
     override var isFlipped: Bool { true }
     override func isAccessibilityElement() -> Bool { false }
@@ -34,9 +44,69 @@ final class CanvasView: NSView {
         NSBezierPath(rect: bounds.insetBy(dx: 2, dy: 2)).stroke()
     }
 
-    override func mouseDown(with event: NSEvent) {
-        let point = convert(event.locationInWindow, from: nil)
-        log("canvas", ["x": point.x, "y": point.y, "clicks": event.clickCount])
+    override func mouseDown(with event: NSEvent) { log("canvas", mouseFields(self, event)) }
+    override func mouseDragged(with event: NSEvent) { log("canvasdrag", mouseFields(self, event)) }
+}
+
+/// Starts a real drag-and-drop session (`NSDraggingSession`) carrying a string as soon as the mouse is dragged from it.
+/// Logs "dragstart" when the session begins and "dragend" (operation: 0 when nothing was dropped, 1 for a copy) when it ends.
+final class DragSourceView: NSView, NSDraggingSource {
+    static let payload = "arrastado"
+    private var started = false
+    override var isFlipped: Bool { true }
+    override func isAccessibilityElement() -> Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.systemBlue.setFill()
+        bounds.fill()
+    }
+
+    override func mouseDown(with event: NSEvent) { started = false }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard !started else { return }
+        started = true
+        let item = NSDraggingItem(pasteboardWriter: Self.payload as NSString)
+        let image = NSImage(size: NSSize(width: 48, height: 24), flipped: false) { rect in
+            NSColor.systemYellow.setFill()
+            rect.fill()
+            return true
+        }
+        item.setDraggingFrame(NSRect(x: 0, y: 0, width: 48, height: 24), contents: image)
+        beginDraggingSession(with: [item], event: event, source: self)
+        log("dragstart")
+    }
+
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation { .copy }
+
+    func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        log("dragend", ["operation": operation.rawValue])
+    }
+}
+
+/// Takes a string dropped on it. Logs "drop" with the string as `value`.
+final class DropView: NSView {
+    override var isFlipped: Bool { true }
+    override func isAccessibilityElement() -> Bool { false }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        registerForDraggedTypes([.string])
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.systemGreen.setFill()
+        bounds.fill()
+    }
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation { .copy }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        log("drop", ["value": sender.draggingPasteboard.string(forType: .string) ?? ""])
+        return true
     }
 }
 
@@ -206,36 +276,54 @@ let controller = Controller()
     let canvas = CanvasView(frame: CGRect(x: 20, y: 436, width: 240, height: 160))
     content.addSubview(canvas)
     Shared.canvas = canvas
+
+    // A drag source and a drop target, side by side next to the canvas.
+    content.addSubview(label("Origem", 290, 410))
+    let source = DragSourceView(frame: CGRect(x: 290, y: 436, width: 140, height: 76))
+    content.addSubview(source)
+    Shared.source = source
+    content.addSubview(label("Destino", 470, 410))
+    let destination = DropView(frame: CGRect(x: 470, y: 436, width: 140, height: 76))
+    content.addSubview(destination)
+    Shared.destination = destination
     return window
 }
 
 @MainActor enum Shared {
     static var canvas: CanvasView?
+    static var source: DragSourceView?
+    static var destination: DropView?
     static var cover: NSWindow?
+    static var destinationCover: NSWindow?
 }
 
 /// A magenta window over the fixture's own, to test capturing a covered window; driven by "cover" / "uncover" on stdin.
-@MainActor func setCover(_ on: Bool, over window: NSWindow) {
-    log("cover", ["on": on])
-    if !on { Shared.cover?.orderOut(nil); return }
-    let panel = Shared.cover ?? NSWindow(contentRect: window.frame, styleMask: [.borderless], backing: .buffered, defer: false)
-    panel.setFrame(window.frame, display: true)
+/// "coverdest" / "uncoverdest" cover only the drop target instead, so a drop there would land on this window, not on it.
+@MainActor func setCover(_ on: Bool, over window: NSWindow, destinationOnly: Bool = false) {
+    log("cover", ["on": on, "destination": destinationOnly])
+    let existing = destinationOnly ? Shared.destinationCover : Shared.cover
+    if !on { existing?.orderOut(nil); return }
+    let frame = destinationOnly ? Shared.destination.map { window.convertToScreen($0.convert($0.bounds, to: nil)) } ?? window.frame : window.frame
+    let panel = existing ?? NSWindow(contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)
+    panel.setFrame(frame, display: true)
     panel.backgroundColor = .magenta
     panel.isOpaque = true
     panel.level = .floating
     panel.isReleasedWhenClosed = false
     panel.setAccessibilityLabel("Cobertura")
     panel.orderFrontRegardless()
-    Shared.cover = panel
+    if destinationOnly { Shared.destinationCover = panel } else { Shared.cover = panel }
 }
 
-/// The center of the canvas in screen points with the origin at the top left of the main display (what Accessibility uses).
-@MainActor func canvasCenter(in window: NSWindow) -> [Double] {
-    guard let canvas = Shared.canvas else { return [0, 0] }
-    let onScreen = window.convertToScreen(canvas.convert(canvas.bounds, to: nil))
+/// The center of a view in screen points with the origin at the top left of the main display (what Accessibility uses).
+@MainActor func screenCenter(of view: NSView?, in window: NSWindow) -> [Double] {
+    guard let view else { return [0, 0] }
+    let onScreen = window.convertToScreen(view.convert(view.bounds, to: nil))
     let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
     return [onScreen.midX, primaryHeight - onScreen.midY]
 }
+
+@MainActor func canvasCenter(in window: NSWindow) -> [Double] { screenCenter(of: Shared.canvas, in: window) }
 
 /// The center of the canvas in points from the window's top left corner (title bar included): where a screenshot of the window has it.
 @MainActor func canvasInWindow(_ window: NSWindow) -> [Double] {
@@ -277,14 +365,18 @@ let controller = Controller()
         window.orderFrontRegardless()
         log("ready", ["pid": ProcessInfo.processInfo.processIdentifier, "window": window.windowNumber,
                       "frame": [window.frame.origin.x, window.frame.origin.y, window.frame.width, window.frame.height],
-                      "canvasCenter": canvasCenter(in: window), "canvasInWindow": canvasInWindow(window)])
-        // Commands from the test, one per line: cover, uncover, quit. Stdin closing means the test is gone.
+                      "canvasCenter": canvasCenter(in: window), "canvasInWindow": canvasInWindow(window),
+                      "sourceCenter": screenCenter(of: Shared.source, in: window),
+                      "destinationCenter": screenCenter(of: Shared.destination, in: window)])
+        // Commands from the test, one per line: cover, uncover, coverdest, uncoverdest, quit. Stdin closing means the test is gone.
         Thread.detachNewThread {
             while let line = readLine() {
                 DispatchQueue.main.async {
                     switch line {
                     case "cover": setCover(true, over: window)
                     case "uncover": setCover(false, over: window)
+                    case "coverdest": setCover(true, over: window, destinationOnly: true)
+                    case "uncoverdest": setCover(false, over: window, destinationOnly: true)
                     case "quit": exit(0)
                     default: break
                     }

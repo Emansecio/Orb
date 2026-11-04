@@ -57,6 +57,10 @@ final class FixtureApp: @unchecked Sendable {
     /// The same point in points from the window's top left corner (title bar included): where a screenshot of the window has it.
     let canvasInWindow: CGPoint
     let frame: CGRect
+    /// The window server's number for its window, and the centers (screen points) of the drag source and the drop target.
+    let windowNumber: UInt32
+    let sourceCenter: CGPoint
+    let destinationCenter: CGPoint
 
     private init(child: ChildProcess, ready: JSONValue) {
         self.child = child
@@ -64,7 +68,12 @@ final class FixtureApp: @unchecked Sendable {
         let center = ready["canvasCenter"]?.array ?? []
         let box = ready["frame"]?.array ?? []
         let inWindow = ready["canvasInWindow"]?.array ?? []
+        let source = ready["sourceCenter"]?.array ?? []
+        let destination = ready["destinationCenter"]?.array ?? []
         pid = Int32(number(ready["pid"]))
+        windowNumber = UInt32(number(ready["window"]))
+        sourceCenter = CGPoint(x: number(source.first), y: number(source.last))
+        destinationCenter = CGPoint(x: number(destination.first), y: number(destination.last))
         canvasCenter = CGPoint(x: number(center.first), y: number(center.last))
         canvasInWindow = CGPoint(x: number(inWindow.first), y: number(inWindow.last))
         frame = CGRect(x: number(box.first), y: number(box.dropFirst().first), width: number(box.dropFirst(2).first), height: number(box.last))
@@ -83,6 +92,14 @@ final class FixtureApp: @unchecked Sendable {
             try await Task.sleep(for: .milliseconds(20))
         }
         throw ToolError("O OrbAXFixture não ficou pronto em 30 s.")
+    }
+
+    /// The fixture's window as the window server has it, which is what a mouse event sent to the process needs to reach it.
+    func eventWindow() throws -> EventWindow {
+        guard let window = WindowServerList.capturable().first(where: { $0.windowID == windowNumber && $0.pid == pid }) else {
+            throw ToolError("O servidor de janelas não lista a janela \(windowNumber) do fixture.")
+        }
+        return EventWindow(id: window.windowID, frame: window.frame)
     }
 
     var logged: [JSONValue] { child.replies }
@@ -208,6 +225,12 @@ private func expectUndisturbed(_ fixture: FixtureApp, _ comment: Comment, _ body
 }
 
 private func text(_ event: JSONValue?, _ key: String) -> String? { event?[key]?.string }
+
+/// The app whose window is on top at `point` when it is not `window` itself: what a drop there would land on instead.
+private func coveringOwner(over window: EventWindow, at point: CGPoint) -> String? {
+    guard let top = WindowStack.onTop(at: point), top.windowID != window.id else { return nil }
+    return top.owner
+}
 private func number(_ event: JSONValue?, _ key: String) -> Double? { if case .number(let n)? = event?[key] { n } else { nil } }
 
 // MARK: - Smoke
@@ -559,6 +582,118 @@ struct AXSmokeTests {
             seen.insert((r / 32) << 6 | (g / 32) << 3 | (b / 32))
         }
         return (Double(magenta) / Double(max(total, 1)), seen.count)
+    }
+
+    // MARK: Mouse events sent to the process (no cursor, no focus)
+
+    // The fixture's canvas logs "canvas" on a press and "canvasdrag" on each drag, with x, y (in the canvas), clicks, pressure
+    // and modifiers (NSEvent.ModifierFlags raw value). Its drag source starts a real NSDraggingSession with a string, and its
+    // drop target logs "drop" with the string as value; the source logs "dragend" with operation 0 (nothing dropped) or 1 (copy).
+
+    @Test func aBackgroundClickReachesTheCanvasAtTheRightPlaceThroughItsWindow() async throws {
+        // The routing: a mouse event posted to the pid needs the window number and the point inside the window.
+        let fixture = try await FixtureApp.launch()
+        defer { fixture.stop() }
+        let window = try fixture.eventWindow()
+        try await expectUndisturbed(fixture, "background click") {
+            try await LiveSyntheticInput().click(at: fixture.canvasCenter, window: window, button: .left, count: 1, modifiers: [],
+                                                 hold: .zero, to: fixture.pid)
+        }
+        let logged = await fixture.waitFor("canvas")
+        #expect(logged != nil, "the click arrived")
+        // The canvas is 240 x 160 points: its center is (120, 80) in its own flipped coordinates.
+        #expect(abs((number(logged, "x") ?? -100) - 120) <= 3 && abs((number(logged, "y") ?? -100) - 80) <= 3, "and at the point asked for")
+    }
+
+    @Test func aBackgroundClickCarriesTheKeysHeldAndTheClickCount() async throws {
+        let fixture = try await FixtureApp.launch()
+        defer { fixture.stop() }
+        let window = try fixture.eventWindow()
+        let input = LiveSyntheticInput()
+        try await expectUndisturbed(fixture, "cmd-click and triple click") {
+            try await input.click(at: fixture.canvasCenter, window: window, button: .left, count: 1, modifiers: [.command], hold: .zero, to: fixture.pid)
+            _ = await fixture.waitFor("canvas")
+            try await input.click(at: fixture.canvasCenter, window: window, button: .left, count: 3, modifiers: [], hold: .zero, to: fixture.pid)
+        }
+        _ = await fixture.waitFor("canvas") { number($0, "clicks") == 3 }
+        let presses = fixture.events("canvas")
+        #expect(presses.compactMap { number($0, "clicks") } == [1, 1, 2, 3], "one click, then a triple click counted 1, 2, 3")
+        let command = NSEvent.ModifierFlags.command.rawValue
+        let flags = presses.compactMap { number($0, "modifiers") }.map { UInt($0) }
+        #expect(flags.first.map { $0 & command != 0 } == true, "the first press carries the command key")
+        #expect(flags.dropFirst().allSatisfy { $0 & command == 0 }, "the others carry none: the keys of the first did not stay")
+    }
+
+    @Test func aBackgroundDragBecomesARealDropAndTheDeskStaysAsItWas() async throws {
+        let fixture = try await FixtureApp.launch()
+        defer { fixture.stop() }
+        let window = try fixture.eventWindow()
+        let destination = fixture.destinationCenter
+        let path = DragPath.arc(from: fixture.sourceCenter, to: destination).map { StrokePoint(point: $0) }
+        var outcome: DragOutcome?
+        try await expectUndisturbed(fixture, "drag and drop") {
+            outcome = try await LiveSyntheticInput().drag(along: path, window: window, modifiers: [], duration: .milliseconds(700),
+                                                          watch: DragWatch(coverAtEnd: { coveringOwner(over: window, at: destination) }),
+                                                          to: fixture.pid)
+        }
+        #expect(outcome == .dropped, "it turned into a system drag-and-drop and was let go on the target")
+        let dropped = await fixture.waitFor("drop")
+        #expect(text(dropped, "value") == "arrastado")
+        let ended = await fixture.waitFor("dragend")
+        #expect(number(ended, "operation") == 1, "the session ended as a copy")
+    }
+
+    @Test func aDropOntoACoveredTargetIsCancelledAndNothingIsDropped() async throws {
+        let fixture = try await FixtureApp.launch()
+        defer { fixture.stop() }
+        let window = try fixture.eventWindow()
+        let destination = fixture.destinationCenter
+        fixture.send("coverdest")
+        #expect(await fixture.waitFor("cover") != nil, "the fixture covered its drop target")
+        try await Task.sleep(for: .milliseconds(500))
+        let top = try #require(WindowStack.onTop(at: destination), "something is on top of the target")
+        try #require(top.windowID != window.id, "and it is the cover, not the fixture's window")
+
+        let path = DragPath.arc(from: fixture.sourceCenter, to: destination).map { StrokePoint(point: $0) }
+        var stopped: DragStopped?
+        try await expectUndisturbed(fixture, "covered drop") {
+            do {
+                _ = try await LiveSyntheticInput().drag(along: path, window: window, modifiers: [], duration: .milliseconds(700),
+                                                        watch: DragWatch(coverAtEnd: { coveringOwner(over: window, at: destination) }),
+                                                        to: fixture.pid)
+                Issue.record("the drag should have stopped before letting go")
+            } catch let error as DragStopped {
+                stopped = error
+            }
+        }
+        #expect(stopped?.ending == .dropCancelled, "Escape cancelled the session before the release: \(stopped.map { "\($0)" } ?? "no stop")")
+        let ended = await fixture.waitFor("dragend")
+        #expect(number(ended, "operation") == 0, "the session ended with nothing dropped")
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(fixture.events("drop").isEmpty, "nothing reached the target under the cover")
+    }
+
+    @Test func aPenStrokeCarriesItsPressureToTheCanvas() async throws {
+        let fixture = try await FixtureApp.launch()
+        defer { fixture.stop() }
+        let window = try fixture.eventWindow()
+        let center = fixture.canvasCenter
+        // Three corners, 60 pt apart, densified to a point every 4 pt, the pressure interpolated between the readings.
+        let stroke = DragPath.stroke([StrokePoint(point: CGPoint(x: center.x - 60, y: center.y), pressure: 0.2),
+                                      StrokePoint(point: CGPoint(x: center.x, y: center.y - 30), pressure: 0.8),
+                                      StrokePoint(point: CGPoint(x: center.x + 60, y: center.y), pressure: 0.4)])
+        try await expectUndisturbed(fixture, "pen stroke") {
+            _ = try await LiveSyntheticInput().drag(along: stroke, window: window, modifiers: [], duration: .milliseconds(600),
+                                                    watch: DragWatch(), to: fixture.pid)
+        }
+        _ = await fixture.waitFor("canvasdrag") { (number($0, "pressure") ?? 0) > 0.35 && (number($0, "pressure") ?? 1) < 0.45 }
+        let expected = stroke.compactMap(\.pressure)
+        let drags = fixture.events("canvasdrag").compactMap { number($0, "pressure") }
+        // The app may merge drags that arrive close together, so not every point is seen; each one seen has a pressure of the stroke.
+        #expect(drags.count >= stroke.count / 2, "most of the \(stroke.count - 1) drags were seen: \(drags.count)")
+        #expect(drags.allSatisfy { seen in expected.contains { abs($0 - seen) < 0.02 } }, "pressures seen: \(drags)")
+        #expect((drags.max() ?? 0) > 0.7 && (drags.min() ?? 1) < 0.3, "and they rise and fall as the stroke asked")
+        #expect(abs((number(fixture.events("canvas").first, "pressure") ?? -1) - 0.2) < 0.02, "the press carries the first one")
     }
 
     // MARK: Taking the screen over (ORB_AX_TAKEOVER=1)
