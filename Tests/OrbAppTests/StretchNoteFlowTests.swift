@@ -165,7 +165,9 @@ final class StretchNoteFlowTests {
     @Test func nothingIsAskedBelowSixtyPercentOfTheBudget() async throws {
         let (model, botID, asked) = try setUp()
         await warmUp(model, botID)
-        try grow(to: 0.5, model, botID)
+        // Well below: each added pair moves the fill by several points, and the note measures against the room the tools
+        // leave (a bigger set of tools, a smaller room), so 0.5 could land within reach of the 60%.
+        try grow(to: 0.4, model, botID)
         model.writesStretchNotes = true
 
         await say("e agora?", model, botID)
