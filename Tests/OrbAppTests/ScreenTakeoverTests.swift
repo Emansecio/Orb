@@ -109,7 +109,7 @@ final class FakeApplicationElement: AccessibilityElement, @unchecked Sendable {
 /// The events a takeover posts. Like the real thing, a move or drag puts the cursor there.
 final class FakeTakeoverPoster: TakeoverEventPoster, @unchecked Sendable {
     enum Event: Equatable {
-        case mouse(TakeoverMouseEvent, CGPoint, MouseButton, clickState: Int)
+        case mouse(TakeoverMouseEvent, CGPoint, MouseButton, clickState: Int, modifiers: KeyStroke.Modifiers = [])
         case key(UInt16, down: Bool, KeyStroke.Modifiers)
         case text([UInt16])
     }
@@ -135,7 +135,7 @@ final class FakeTakeoverPoster: TakeoverEventPoster, @unchecked Sendable {
         afterEvent?(count, world!)
     }
 
-    func mouse(_ event: TakeoverMouseEvent, at point: CGPoint, button: MouseButton, clickState: Int) {
+    func mouse(_ event: TakeoverMouseEvent, at point: CGPoint, button: MouseButton, clickState: Int, modifiers: KeyStroke.Modifiers) {
         if (event == .moved || event == .dragged), !cursorIgnoresEvents {
             if cursorArrivesAfterReads > 0 {
                 world?.moveLater(to: point, afterReads: cursorArrivesAfterReads)
@@ -143,7 +143,7 @@ final class FakeTakeoverPoster: TakeoverEventPoster, @unchecked Sendable {
                 world?.cursorNow = point
             }
         }
-        record(.mouse(event, point, button, clickState: clickState))
+        record(.mouse(event, point, button, clickState: clickState, modifiers: modifiers))
     }
     func key(virtualKey: UInt16, down: Bool, modifiers: KeyStroke.Modifiers) { record(.key(virtualKey, down: down, modifiers)) }
     func text(_ units: [UInt16]) { record(.text(units)) }
@@ -232,23 +232,103 @@ struct ScreenTakeoverTests {
         let rig = TakeoverRig()
         _ = try await rig.takeOver { hand in try await hand.click(at: CGPoint(x: 5, y: 6), button: .right, count: 2) }
         let states = rig.world.poster.events.compactMap { event -> Int? in
-            if case .mouse(.down, _, .right, let state) = event { state } else { nil }
+            if case .mouse(.down, _, .right, let state, _) = event { state } else { nil }
         }
         #expect(states == [1, 2])
     }
 
-    @Test func aDragMovesInFifteenInterpolatedStepsAndReleasesAtTheEnd() async throws {
+    @Test func aDragFollowsTheArcAndReleasesAtTheEnd() async throws {
         let rig = TakeoverRig()
-        _ = try await rig.takeOver { hand in try await hand.drag(from: CGPoint(x: 0, y: 0), to: CGPoint(x: 150, y: 300)) }
+        let start = CGPoint(x: 0, y: 0), end = CGPoint(x: 150, y: 300)
+        _ = try await rig.takeOver { hand in try await hand.drag(from: start, to: end) }
         let events = rig.world.poster.events
         let dragged = events.compactMap { event -> CGPoint? in
-            if case .mouse(.dragged, let point, _, _) = event { point } else { nil }
+            if case .mouse(.dragged, let point, _, _, _) = event { point } else { nil }
         }
-        #expect(dragged.count == 15)
-        #expect(dragged.first == CGPoint(x: 10, y: 20) && dragged.last == CGPoint(x: 150, y: 300))
-        #expect(events.first == .mouse(.moved, CGPoint(x: 0, y: 0), .left, clickState: 0))
-        #expect(events[1] == .mouse(.down, CGPoint(x: 0, y: 0), .left, clickState: 1))
-        #expect(events.last == .mouse(.up, CGPoint(x: 150, y: 300), .left, clickState: 1))
+        let arc = DragPath.arc(from: start, to: end)
+        #expect(dragged == Array(arc.dropFirst()), "every point of the arc but the first, which is where it is pressed")
+        #expect(events.first == .mouse(.moved, start, .left, clickState: 0))
+        #expect(events[1] == .mouse(.down, start, .left, clickState: 1))
+        #expect(events.last == .mouse(.up, end, .left, clickState: 1))
+        #expect(events.count == arc.count + 2, "a move, the press, one drag per point after the first, the release")
+    }
+
+    @Test func aClickWithKeysHeldCarriesThemOnEveryPressAndReleaseAndCountsUpToThree() async throws {
+        let rig = TakeoverRig()
+        let point = CGPoint(x: 40, y: 50)
+        _ = try await rig.takeOver { hand in try await hand.click(at: point, button: .left, count: 5, modifiers: [.command, .shift]) }
+        let keys: KeyStroke.Modifiers = [.command, .shift]
+        #expect(rig.world.poster.events == [
+            .mouse(.moved, point, .left, clickState: 0),
+            .mouse(.down, point, .left, clickState: 1, modifiers: keys), .mouse(.up, point, .left, clickState: 1, modifiers: keys),
+            .mouse(.down, point, .left, clickState: 2, modifiers: keys), .mouse(.up, point, .left, clickState: 2, modifiers: keys),
+            .mouse(.down, point, .left, clickState: 3, modifiers: keys), .mouse(.up, point, .left, clickState: 3, modifiers: keys),
+        ], "the move there carries no keys; a count above three is three")
+    }
+
+    @Test func aPlainClickCarriesNoKeys() async throws {
+        let rig = TakeoverRig()
+        _ = try await rig.takeOver { hand in try await hand.click(at: CGPoint(x: 1, y: 2), button: .left, count: 1) }
+        let flags = rig.world.poster.events.compactMap { event -> KeyStroke.Modifiers? in
+            if case .mouse(_, _, _, _, let modifiers) = event { modifiers } else { nil }
+        }
+        #expect(flags == [[], [], []])
+    }
+
+    @Test func movingPutsThePointerThereWithoutPressingAnything() async throws {
+        let rig = TakeoverRig()
+        let target = CGPoint(x: 220, y: 330)
+        let seen = TakeoverCursorSeen()
+        _ = try await rig.takeOver { hand in
+            try await hand.move(to: target)
+            seen.set(rig.world.cursorNow)
+        }
+        #expect(seen.value == target, "the pointer stays there until the takeover ends")
+        #expect(rig.world.poster.events == [.mouse(.moved, target, .left, clickState: 0)])
+        #expect(rig.world.cursorNow == CGPoint(x: 500, y: 300), "and then goes back to where the person had it")
+    }
+
+    @Test func aDragAlongPointsPressesAtTheFirstAndReleasesAtTheLastCarryingTheKeys() async throws {
+        let rig = TakeoverRig()
+        let path = [CGPoint(x: 10, y: 10), CGPoint(x: 30, y: 15), CGPoint(x: 90, y: 60)]
+        _ = try await rig.takeOver { hand in try await hand.drag(along: path, modifiers: [.option]) }
+        #expect(rig.world.poster.events == [
+            .mouse(.moved, path[0], .left, clickState: 0),
+            .mouse(.down, path[0], .left, clickState: 1, modifiers: [.option]),
+            .mouse(.dragged, path[1], .left, clickState: 0, modifiers: [.option]),
+            .mouse(.dragged, path[2], .left, clickState: 0, modifiers: [.option]),
+            .mouse(.up, path[2], .left, clickState: 1, modifiers: [.option]),
+        ])
+    }
+
+    @Test func aDragAlongNeedsTwoPointsAndPostsNothingOtherwise() async throws {
+        let rig = TakeoverRig()
+        await #expect(throws: ToolError.self) {
+            _ = try await rig.takeOver { hand in try await hand.drag(along: [CGPoint(x: 1, y: 1)], modifiers: []) }
+        }
+        #expect(rig.world.poster.events.isEmpty)
+    }
+
+    @Test func aDragAlongThatStopsLetsGoWithTheSameKeysAndAtTheLastPointReached() async throws {
+        let rig = TakeoverRig()
+        let path = (0...20).map { CGPoint(x: 10 * CGFloat($0), y: 5) }
+        // The person grabs the mouse just as the third drag is posted: the release goes where the second one arrived.
+        rig.world.poster.afterEvent = { count, world in if count == 5 { world.cursorNow = CGPoint(x: 900, y: 900) } }
+        await #expect(throws: TakeoverFailure.userMovedMouse) {
+            _ = try await rig.takeOver { hand in try await hand.drag(along: path, modifiers: [.command]) }
+        }
+        let events = rig.world.poster.events
+        #expect(events.count == 6, "the move, the press, three drags, the release")
+        #expect(events.last == .mouse(.up, path[2], .left, clickState: 1, modifiers: [.command]))
+    }
+
+    @Test func theStepLimitIsPerMoveSoALongStrokeIsNotCutHalfway() async throws {
+        // 100 moves of about 3 ms each take far longer than the 150 ms step limit together, and each one is well inside it.
+        let rig = TakeoverRig(stepLimit: .milliseconds(150))
+        rig.world.poster.delay = .milliseconds(3)
+        let path = (0..<100).map { CGPoint(x: CGFloat($0), y: 0) }
+        _ = try await rig.takeOver { hand in try await hand.drag(along: path, modifiers: []) }
+        #expect(rig.world.poster.events.last == .mouse(.up, path[99], .left, clickState: 1))
     }
 
     @Test func textGoesInChunksOfTwentyUnitsAndNeverSplitsACharacter() async throws {
@@ -463,8 +543,8 @@ struct ScreenTakeoverTests {
         }
         let events = rig.world.poster.events
         #expect(events.count == 9, "8 events, then the release")
-        if case .mouse(.up, _, .left, _)? = events.last {} else { Issue.record("the button must be released when the drag stops") }
-        #expect(events.filter { if case .mouse(.dragged, _, _, _) = $0 { true } else { false } }.count == 6)
+        if case .mouse(.up, _, .left, _, _)? = events.last {} else { Issue.record("the button must be released when the drag stops") }
+        #expect(events.filter { if case .mouse(.dragged, _, _, _, _) = $0 { true } else { false } }.count == 6)
     }
 
     @Test func ifAnotherAppTakesTheFrontNothingMoreIsSentAndTheButtonIsReleased() async throws {
@@ -475,7 +555,7 @@ struct ScreenTakeoverTests {
             _ = try await rig.takeOver { hand in try await hand.drag(from: .zero, to: CGPoint(x: 300, y: 300)) }
         }
         let events = rig.world.poster.events
-        if case .mouse(.up, _, .left, _)? = events.last {} else { Issue.record("the button must be released when the drag stops") }
+        if case .mouse(.up, _, .left, _, _)? = events.last {} else { Issue.record("the button must be released when the drag stops") }
         #expect(events.count < 17, "the drag did not go on")
         #expect(rig.world.front?.pid == 30, "the person's new focus is preserved")
         #expect(!rig.world.log.contains("warp"), "the cursor is not pulled away from the new app")
@@ -508,9 +588,9 @@ struct ScreenTakeoverTests {
             _ = try await rig.takeOver { hand in try await hand.click(at: CGPoint(x: 100, y: 100), button: .left, count: 1) }
         }
         #expect(rig.world.front?.pid == 10)
-        let moves = rig.world.poster.events.filter { if case .mouse(.moved, _, _, _) = $0 { true } else { false } }
+        let moves = rig.world.poster.events.filter { if case .mouse(.moved, _, _, _, _) = $0 { true } else { false } }
         #expect(moves.count == 2, "the move is posted once more before giving up")
-        #expect(!rig.world.poster.events.contains { if case .mouse(.down, _, _, _) = $0 { true } else { false } }, "nothing was pressed")
+        #expect(!rig.world.poster.events.contains { if case .mouse(.down, _, _, _, _) = $0 { true } else { false } }, "nothing was pressed")
         #expect(rig.world.log.contains("warp"), "the cursor is put back, since the person did not take it")
     }
 
@@ -615,4 +695,12 @@ final class TakeoverFrontSeen: @unchecked Sendable {
     private var stored: Int32?
     var value: Int32? { lock.withLock { stored } }
     func set(_ value: Int32?) { lock.withLock { stored = value } }
+}
+
+/// The cursor a `@Sendable` body saw.
+final class TakeoverCursorSeen: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: CGPoint?
+    var value: CGPoint? { lock.withLock { stored } }
+    func set(_ value: CGPoint?) { lock.withLock { stored = value } }
 }

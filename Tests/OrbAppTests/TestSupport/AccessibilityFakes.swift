@@ -489,6 +489,10 @@ final class FakeTakeoverHand: TakeoverHand, @unchecked Sendable {
         case type(String)
         case key(KeyStroke)
         case drag(from: CGPoint, to: CGPoint)
+        /// A click with keys held; a click with none is recorded as `.click`, whatever its count.
+        case modifiedClick(CGPoint, button: MouseButton, count: Int, modifiers: KeyStroke.Modifiers)
+        case move(CGPoint)
+        case dragAlong([CGPoint], modifiers: KeyStroke.Modifiers)
     }
 
     private let lock = NSLock()
@@ -500,6 +504,11 @@ final class FakeTakeoverHand: TakeoverHand, @unchecked Sendable {
     func type(_ text: String) async throws { record(.type(text)) }
     func key(_ stroke: KeyStroke) async throws { record(.key(stroke)) }
     func drag(from start: CGPoint, to end: CGPoint) async throws { record(.drag(from: start, to: end)) }
+    func click(at point: CGPoint, button: MouseButton, count: Int, modifiers: KeyStroke.Modifiers) async throws {
+        record(modifiers.isEmpty ? .click(point, button: button, count: count) : .modifiedClick(point, button: button, count: count, modifiers: modifiers))
+    }
+    func move(to point: CGPoint) async throws { record(.move(point)) }
+    func drag(along points: [CGPoint], modifiers: KeyStroke.Modifiers) async throws { record(.dragAlong(points, modifiers: modifiers)) }
 }
 
 /// Records taking the screen and giving it back, also when the body throws or the task is cancelled.

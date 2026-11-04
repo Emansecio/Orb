@@ -92,7 +92,8 @@ enum TakeoverMouseEvent: Sendable, Equatable {
 /// Posts the real events of a takeover (`.cghidEventTap`, a private event source so the person's held keys and buttons
 /// do not mix in).
 protocol TakeoverEventPoster: Sendable {
-    func mouse(_ event: TakeoverMouseEvent, at point: CGPoint, button: MouseButton, clickState: Int)
+    /// `modifiers` are the flags the event carries: exactly these, whatever the person holds on the real keyboard.
+    func mouse(_ event: TakeoverMouseEvent, at point: CGPoint, button: MouseButton, clickState: Int, modifiers: KeyStroke.Modifiers)
     func key(virtualKey: UInt16, down: Bool, modifiers: KeyStroke.Modifiers)
     /// Types the characters as one key press carrying the text.
     func text(_ units: [UInt16])
@@ -127,8 +128,6 @@ protocol TakeoverIndicator: Sendable {
 /// The mouse and keyboard of a takeover. It aborts when the cursor is not where it was put (the person grabbed the mouse)
 /// and when a step or the whole takeover takes too long.
 final class LiveTakeoverHand: TakeoverHand, @unchecked Sendable {
-    /// Interpolated steps of a drag.
-    static let dragSteps = 15
     /// How far (points) the real cursor may be from where the hand put it.
     static let driftTolerance: CGFloat = 3
     /// Longest chunk typed as one event, in UTF-16 units.
@@ -200,12 +199,13 @@ final class LiveTakeoverHand: TakeoverHand, @unchecked Sendable {
     /// Posts a move and waits for the cursor to arrive. The window server moves the cursor in one jump, so while it has
     /// not arrived it is still where the hand left it: a cursor found anywhere else was moved by the person. One that stays
     /// put past `arrival` (posted twice) is a slow system, not the person: the takeover stops and the cursor is put back.
-    private func place(_ point: CGPoint, _ event: TakeoverMouseEvent, button: MouseButton, deadline: ContinuousClock.Instant) async throws {
+    private func place(_ point: CGPoint, _ event: TakeoverMouseEvent, button: MouseButton, deadline: ContinuousClock.Instant,
+                       modifiers: KeyStroke.Modifiers = []) async throws {
         let previous = lock.withLock { () -> CGPoint in
             defer { expected = point }
             return expected
         }
-        poster.mouse(event, at: point, button: button, clickState: 0)
+        poster.mouse(event, at: point, button: button, clickState: 0, modifiers: modifiers)
         let started = ContinuousClock.now
         let settleBy = min(started.advanced(by: Self.arrival), deadline)
         var posted = 1
@@ -222,7 +222,7 @@ final class LiveTakeoverHand: TakeoverHand, @unchecked Sendable {
             let now = ContinuousClock.now
             if now >= deadline || (now >= settleBy && looks >= Self.minimumLooks) { break }
             if posted == 1, started.duration(to: .now) >= Self.repost {
-                poster.mouse(event, at: point, button: button, clickState: 0)
+                poster.mouse(event, at: point, button: button, clickState: 0, modifiers: modifiers)
                 posted += 1
             }
             try await Task.sleep(for: .milliseconds(3))
@@ -233,16 +233,28 @@ final class LiveTakeoverHand: TakeoverHand, @unchecked Sendable {
     // MARK: TakeoverHand
 
     func click(at point: CGPoint, button: MouseButton, count: Int) async throws {
+        try await click(at: point, button: button, count: count, modifiers: [])
+    }
+
+    func click(at point: CGPoint, button: MouseButton, count: Int, modifiers: KeyStroke.Modifiers) async throws {
         let deadline = begin()
         try tick(deadline)
+        // The keys are held only for the press and the release, not for getting there: a move that carried them could
+        // select or hover differently in the app on the way.
         try await place(point, .moved, button: button, deadline: deadline)
         try await pauseBriefly()
         for state in 1...max(1, min(count, 3)) {
             try tick(deadline)
-            poster.mouse(.down, at: point, button: button, clickState: state)
-            poster.mouse(.up, at: point, button: button, clickState: state)
+            poster.mouse(.down, at: point, button: button, clickState: state, modifiers: modifiers)
+            poster.mouse(.up, at: point, button: button, clickState: state, modifiers: modifiers)
             if state < count { try await pauseBriefly() }
         }
+    }
+
+    func move(to point: CGPoint) async throws {
+        let deadline = begin()
+        try tick(deadline)
+        try await place(point, .moved, button: .left, deadline: deadline)
     }
 
     func type(_ text: String) async throws {
@@ -282,28 +294,36 @@ final class LiveTakeoverHand: TakeoverHand, @unchecked Sendable {
     }
 
     func drag(from start: CGPoint, to end: CGPoint) async throws {
-        let deadline = begin()
+        try await drag(along: DragPath.arc(from: start, to: end), modifiers: [])
+    }
+
+    func drag(along points: [CGPoint], modifiers: KeyStroke.Modifiers) async throws {
+        guard let start = points.first, let end = points.last, points.count >= 2 else {
+            throw ToolError("Um arrasto precisa de pelo menos dois pontos.")
+        }
+        var deadline = begin()
         try tick(deadline)
         try await place(start, .moved, button: .left, deadline: deadline)
         try await pauseBriefly()
         try tick(deadline)
-        poster.mouse(.down, at: start, button: .left, clickState: 1)
+        poster.mouse(.down, at: start, button: .left, clickState: 1, modifiers: modifiers)
         var last = start
         do {
-            for step in 1...Self.dragSteps {
-                let progress = CGFloat(step) / CGFloat(Self.dragSteps)
-                let point = CGPoint(x: start.x + (end.x - start.x) * progress, y: start.y + (end.y - start.y) * progress)
+            for point in points.dropFirst() {
+                // The step limit is for one move: a stroke of hundreds of points would otherwise run out of it halfway. The
+                // limit of the whole takeover still holds.
+                deadline = begin()
                 try tick(deadline)
-                try await place(point, .dragged, button: .left, deadline: deadline)
+                try await place(point, .dragged, button: .left, deadline: deadline, modifiers: modifiers)
                 last = point
                 try await pauseBriefly()
             }
         } catch {
             // Never leave the button held down in the other app.
-            poster.mouse(.up, at: last, button: .left, clickState: 1)
+            poster.mouse(.up, at: last, button: .left, clickState: 1, modifiers: modifiers)
             throw error
         }
-        poster.mouse(.up, at: end, button: .left, clickState: 1)
+        poster.mouse(.up, at: end, button: .left, clickState: 1, modifiers: modifiers)
     }
 }
 
@@ -572,7 +592,7 @@ final class LiveTakeoverPoster: TakeoverEventPoster, @unchecked Sendable {
     private let lock = NSLock()
     private var characterKeys: [Character: UInt16]?
 
-    func mouse(_ event: TakeoverMouseEvent, at point: CGPoint, button: MouseButton, clickState: Int) {
+    func mouse(_ event: TakeoverMouseEvent, at point: CGPoint, button: MouseButton, clickState: Int, modifiers: KeyStroke.Modifiers) {
         let cgButton: CGMouseButton
         let down: CGEventType, up: CGEventType, dragged: CGEventType
         switch button {
@@ -588,6 +608,8 @@ final class LiveTakeoverPoster: TakeoverEventPoster, @unchecked Sendable {
         }
         guard let cg = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: cgButton) else { return }
         if event == .down || event == .up { cg.setIntegerValueField(.mouseEventClickState, value: Int64(max(1, clickState))) }
+        // Set always, also empty: the flags asked for must be the only ones on the event.
+        cg.flags = SyntheticEventBuilder.flags(for: modifiers)
         cg.post(tap: .cghidEventTap)
     }
 
