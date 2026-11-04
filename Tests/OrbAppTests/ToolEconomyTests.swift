@@ -30,7 +30,9 @@ struct ToolSpecEconomyTests {
     /// far less per request than these sentences cost (docs/USO-DO-COMPUTADOR.md). Measured at 19,956.
     /// Raised to 20,400 for `request_access` (the access card asked from the chat, instead of sending the person to the panel)
     /// and `done_when`/`checks` on `task_plan` (acceptance criteria checked before "done"). Measured at 20,377.
-    private static let specCharsCeiling = 20_400
+    /// Raised to 20,850 for the mouse of `ui_act`: modifiers, hold, `move`, `drag` to another app (`to`, `to_app`, `duration`) and `draw`
+    /// (`path`), about 440 characters (docs/USO-DO-COMPUTADOR.md). The sub-ceiling below did not need to grow. Measured at 20,822.
+    private static let specCharsCeiling = 20_850
     /// `ui_read`, `ui_act` and `screenshot` together: waiting, steps, takeover, marks and OCR all have to fit here.
     private static let appControlSpecCharsCeiling = 4_800
     /// The tools of the Orb's own browser are offered only when an engine is installed, so they have a ceiling of their own.

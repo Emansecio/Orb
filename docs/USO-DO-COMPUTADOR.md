@@ -39,11 +39,11 @@ AX). N2 nunca é automático.
 | Digitar | — | `CGEvent(keyboardEventSource:…)` + `keyboardSetUnicodeString` em pedaços de ≤ 20 UTF-16, `postToPid`; antes `AXFocused` no alvo e conferir `AXFocusedUIElement` do app; conferir de novo a cada pedaço. | Secure Input (`IsSecureEventInputEnabled()`) pode descartar: avisar. Chromium/jogos às vezes só com app ativo → N2. |
 | Atalhos | Primeiro achar no menu o item com `AXMenuItemCmdChar`/`CmdModifiers`/`CmdVirtualKey` iguais e `AXPress` nele (independe do layout, funciona em segundo plano). | Evento com `flags` explícitos; keycode via `UCKeyTranslate` no layout atual (ABNT2 ≠ US). | — |
 | Menus | `AXPress` no caminho `AXMenuBar → AXMenu → item` sem abrir o menu e sem ativar o app; menus de status por `AXExtrasMenuBar`. | — | Habilitado pode estar defasado; menus dinâmicos (Recentes, Janela, Serviços) só se preenchem abertos. Menu de contexto (`AXShowMenu`) e abrir menu são visíveis e modais → N2. |
-| Rolar | `AXScrollToVisible`; `AXValue` 0…1 da `AXScrollBar`. | `CGEvent(scrollWheelEvent2Source:units:.pixel…)` na janela, `postToPid`. | — |
+| Rolar | `AXScrollToVisible`; `AXValue` 0…1 da `AXScrollBar`. | `CGEvent(scrollWheelEvent2Source:units:.pixel…)` na janela, `postToPid`. Por `x,y` (pixels do screenshot) em vez de `id`, e com `modifiers` (⌘ ou ⌥ dão zoom em alguns apps), que a barra não leva: com teclas seguradas vai sempre por evento, em passos de 60 px (sem teclas, uma página é 90% da área). | — |
 | Focar campo | `AXFocused=true` só no elemento. Nunca `AXMain`/`AXFocused` em janela, nem `AXRaise`. | — | Se o app se ativar sozinho: devolver o app anterior na hora e marcar o app como "rouba foco" na sessão (focar/digitar nele passa a pedir N2). Exceto se a pessoa apertou tecla ou botão nos últimos 2 s (`secondsSinceUserInput`, `.hidSystemState`): foi ela que foi ao app; ele fica na frente, sem a marca, e teclas e texto são recusados como "o usuário está usando". |
 | Listas e tabelas | `AXSelected` na linha; `AXSelectedRows`; `AXSelectedChildren`; `AXDisclosing`; combobox `AXValue`. | — | Popup (`AXPopUpButton`): tentar `AXChildren → AXMenu → item`; a maioria só expõe o menu aberto → N2. |
-| Arrastar e soltar | Não há; oferecer alternativa semântica (arquivos, AppleScript). | `ui_act drag` (`id` até o id em `value`): down, 12 movimentos e up ao pid. AppKit comum: sonda funcionou no macOS 27. Chromium e Electron recusam clique e arrasto ao pid, que chegaram de modo instável até por `SLEventPostToPid`: pedem N2. | `NSDraggingSession` nativa só segue o mouse real: detectada pela área de arrasto, solta e pede N2 (movimento interpolado em 15 passos). |
-| Clicar em coordenada | Hit-test local nos frames do snapshot (menor área que contém o ponto), confirmado por `AXUIElementCopyElementAtPosition` (usa ordem z: falha com janela coberta, por isso o local vem antes); sobe até o ancestral acionável (≤ 5 níveis) e `AXPress`. | Mouse down/up com `mouseEventClickState` e `.mouseEventWindowUnderMousePointer`/`…ThatCanHandleThisEvent` = `CGWindowID`, `postToPid`; só se a janela aceitar first mouse. | Hover/tooltips não existem em segundo plano (usar `AXHelp`) → N2. |
+| Arrastar e soltar | Não há; para mover arquivos, alternativa semântica (`mv`, Finder por AppleScript). | `ui_act drag` (origem `id` ou `x,y`; fim em `to`, um id/marca ou `x,y` em pixels; `to_app` para o fim em outro app, lido na última leitura ou screenshot deste Orb): mouse down, arco de pontos (`DragPath.arc`, `duration` 150–5000 ms, 500 por padrão) e up ao pid, com o número da janela no campo 51 e `CGEventSetWindowLocation` (medido no macOS 27.0.1: o arrasto interno e a sessão nativa de `NSDraggingSession` seguem esses eventos, também para a janela de outro app, sem mover o cursor real nem ativar app). O sistema solta no que está por cima no ponto de soltar (`WindowStack.onTop`): entre janelas ou apps os dois pontos são conferidos antes de apertar ("Nada foi pressionado" se algo cobre um deles); na mesma janela não se confere antes (arrasto interno funciona coberto), e se um arrastar e soltar começa com o fim coberto, Esc cancela antes de soltar. A pessoa passar a usar o app de origem ou o de destino interrompe (o arrasto interno volta ao começo). O fim pode ser perigoso (Lixeira, "Excluir"…): `UIDanger.reason(forDropOnto:)`. Chromium e Electron recusam clique e arrasto ao pid, que chegaram de modo instável até por `SLEventPostToPid`: pedem N2. O Dock não recebe um arrasto em segundo plano: recusado (Lixeira: `pick_menu` ["Arquivo", "Mover para o Lixo"] ou ⌘⌫ no Finder). | N2: `hand.drag(along:modifiers:)` com o arco (também para `to_app`). |
+| Clicar em coordenada | Hit-test local nos frames do snapshot (menor área que contém o ponto), confirmado por `AXUIElementCopyElementAtPosition` (usa ordem z: falha com janela coberta, por isso o local vem antes); sobe até o ancestral acionável (≤ 5 níveis) e `AXPress`. `AXPress` não leva teclas, três cliques, clique longo nem outro botão: com `modifiers`, `count` 3, `hold` > 0 ou botão que não o esquerdo vai direto ao evento. | Mouse down/up com `mouseEventClickState` e o número da janela (campo 51 + `CGEventSetWindowLocation`), `postToPid`; só se a janela aceitar first mouse. `modifiers` (⌘⇧⌥⌃), `count` 1–3 e `hold` 0–3000 ms (clique longo) chegam ao app. Passar o mouse (`ui_act move`, 3 pontos até o alvo) chega à janela como `mouseMoved`, mas as áreas de rastreio do AppKit não reagem a movimento postado: tooltips e realces que seguem o ponteiro real podem não aparecer (ler `AXHelp` por `ui_read`). Caneta (`ui_act draw`): `path` em pixels do último screenshot, pontos `[[x,y,pressão],…]` ou caminho SVG, vira um arrasto com pressão; nunca solta um arrastar e soltar (se começa um, o Esc cancela). | Hover: `hand.move(to:)`. Caneta: `hand.drag(along:)` sem pressão. Clique longo só em segundo plano. |
 | Capturar janela | — | `SCScreenshotManager.captureImage(contentFilter: SCContentFilter(desktopIndependentWindow:), configuration:)` (14.0+), `ignoreShadowsSingleWindow`, `captureResolution = .nominal`, `includeChildWindows` (14.2+), `showsCursor=false`. | Coberta ok; outro Space ok (pode vir defasada); minimizada/app oculto não (oferecer `AXMinimized=false`, visível, pede cartão). Fallback `screencapture -o -l`. Nunca `CGWindowListCreateImage`. |
 | Observar mudanças | `AXObserver`: `AXValueChanged`, `AXUIElementDestroyed`, `AXCreated`, `AXWindowCreated`, `AXFocusedUIElementChanged`, `AXFocusedWindowChanged`, `AXTitleChanged`, `AXSelectedChildrenChanged`, `AXSelectedRowsChanged`, `AXSelectedTextChanged`, `AXLayoutChanged`, `AXSheetCreated`, `AXRowCountChanged`, `AXLoadComplete`. | Polling a 250 ms quando `notificationUnsupported`. | Canvas: diff de screenshot 32×32 a 2 Hz, só se pedido. |
 
@@ -52,7 +52,7 @@ AX). N2 nunca é automático.
 27: smoke roda aqui.
 
 **Proibidas:** `CGS*`, `SLS*`/SkyLight, `CGEventPostToPSN`, `AXUIElementPostKeyboardEvent`,
-`CGWindowListCreateImage`. `.cghidEventTap` só dentro de N2. Exceção: `_AXUIElementGetWindow`, resolvido com `dlsym`, liga a janela AX ao `CGWindowID`.
+`CGWindowListCreateImage`. `.cghidEventTap` só dentro de N2. Exceções: `_AXUIElementGetWindow`, resolvido com `dlsym`, liga a janela AX ao `CGWindowID`; `CGEventSetWindowLocation`, também por `dlsym`, e o campo de evento 51 (o número da janela que o AppKit lê, sem constante pública), ambos medidos no macOS 27.0.1: sem eles um evento de mouse postado a um pid chega ao app sem janela e é descartado, e com eles chegam clique com teclas, clique longo, pressão, rolagem com teclas e sessões nativas de arrastar e soltar (até para a janela de outro app), sem mover o cursor real nem ativar app. Não há API pública que leve um evento a uma janela de outro processo sem tomar o mouse; o risco é a Apple mudar o campo em outra versão do macOS: o evento deixaria de chegar, e o degrau seguinte (N2) continua valendo.
 
 ## 2. Ferramentas do modelo
 
@@ -67,10 +67,19 @@ usam `query`, `changes` usa `id` ou a janela. Espera e depois lê; acrescenta `(
 caracteres (`ToolOutputBudget.fit`), relógio de 4 s sem query e 8 s com query, no máximo 2 IPC por elemento (+1 para
 papéis com valor), profundidade 3 dentro de `AXWebArea` sem query (com aviso para usar o navegador).
 
-**`ui_act`** (`.sensitive`): ações `press, focus, set_value, type, key, select, scroll, click, increment, decrement,
-show_menu, pick_menu`; argumentos `keys` ("cmd+s", "return"…), `ids`, `x`/`y` (pixels do último screenshot com marcas
-daquela janela), `button`, `count` (1–2), `direction`/`amount` (1–10 páginas), `wait`/`timeout` (substituem o settle
-fixo), `steps` (≤ 8, param na primeira falha; schema `{"type":"object"}`), `takeover`. `id` aceita `"#12"`. `app` ausente
+**`ui_act`** (`.sensitive`): ações `press, focus, set_value, type, key, select, scroll, click, move, drag, draw, increment,
+decrement, show_menu, pick_menu`; argumentos `keys` ("cmd+s", "return"…), `ids`, `x`/`y` (pixels do último screenshot com marcas
+daquela janela), `button`, `count` (1–3), `modifiers` ("cmd+shift" ou "cmd,shift", com os nomes de `KeyStroke`; vale em
+`click`, `drag` e `scroll`), `hold` (0–3000 ms, clique longo), `direction`/`amount` (1–10 páginas; com `modifiers`, passos de 60 px),
+`to`/`to_app`/`duration` (150–5000 ms) do `drag`, `path` do `draw`, `wait`/`timeout` (substituem o settle
+fixo), `steps` (≤ 8, param na primeira falha; schema `{"type":"object"}`), `takeover`. `id` aceita `"#12"`. `click` com
+`modifiers`, `count` 3, `hold` > 0 ou botão que não o esquerdo pula o `AXPress` e vai ao evento ("Cliquei com ⌘ em…", "Pressionei por 1,2 s…",
+"Dei três cliques em…"). `move` (passar o mouse) manda 3 pontos até o alvo (`id` ou `x,y`) e avisa que dicas e realces que seguem o ponteiro
+real podem não aparecer. `drag` vai do `id`/`x,y` a `to` (id, marca ou `x,y`; o antigo `value` ainda vale); `to_app` o resolve na última leitura
+do outro app por este Orb; a saída diz "Arrastei X até Y" ou, se virou arrastar e soltar do sistema, "Arrastei X e soltei em Y (arrastar e soltar do sistema)";
+`DragStopped` (a pessoa voltou ao app, um fim coberto) vira erro sem o marcador de takeover, exceto o fim coberto, que o pede junto com a saída de cobrir.
+O cartão de `drag` nomeia o fim (e o `to_app`) e é perigoso se o fim for a Lixeira ou um botão de apagar. `draw` precisa de screenshot (2–500 pontos
+`[x,y]` ou `[x,y,pressão]`, ou caminho SVG por `SVGPath.parse`; o tempo padrão cresce com o comprimento, até 5 s). `app` ausente
 = app do snapshot mais novo **deste Orb**, nunca o da frente; sem snapshot, `pick_menu`/`key` exigem `app`. Saída diz o
 método (`[segundo plano · AX]`, `[segundo plano · evento ao app]`, `[assumi a tela 2,1 s · devolvi ao Safari]`) + diff
 (≤ 600 caracteres) + resultado do `wait`. Escalada: `ToolError` com o marcador estável `[precisa_assumir_tela]` e o motivo
@@ -119,8 +128,9 @@ carregada), cancelam com o ⌘. e uma falha do pedido volta ao texto simples. Ja
 mesmo repetindo as células: a tabela tem teto de 4.000 caracteres, e tirar do texto o que caiu nela arriscaria perder o que o Vision
 não pôs em célula nenhuma (títulos, legendas) e, na captura de janela, a posição para clicar. Formulários só saem se Vision os ler como tabela; a API não tem campo.
 
-**Specs:** teto total 18.900 caracteres, 18.861 medidos (subiu com `task_plan`, com o `front` do `open`, com o `app_dictionary` e com o `apps_list`), sub-teto testado de 4.800 para
-`ui_read`+`ui_act`+`screenshot`.
+**Specs:** teto total 20.850 caracteres, 20.822 medidos (subiu com `task_plan`, com o `front` do `open`, com o `app_dictionary`, com o `apps_list` e com o mouse do `ui_act`:
+modificadores, `hold`, `move`, `drag` entre apps e `draw`, ~440), sub-teto testado de 4.800 para
+`ui_read`+`ui_act`+`screenshot` (4.433 medidos).
 
 ## 3. Desempenho e confiabilidade
 

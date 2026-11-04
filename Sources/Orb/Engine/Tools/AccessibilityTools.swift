@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import os
 
 // Reading and operating other apps' interface through the Accessibility API (`ui_read`, `ui_act`), for apps that have
 // no AppleScript or Shortcuts support, in the background: no focus is taken, the cursor does not move and nothing is
@@ -1069,13 +1070,24 @@ enum UIDanger {
         guard !found.isEmpty else { return nil }
         let messaging = assumeMessaging || isMessagingApp(name: appName, bundleID: bundleID)
         for rule in rules where !rule.onlyInMessaging || messaging {
-            for phrase in rule.phrases {
-                let wanted = words(phrase)
-                guard !wanted.isEmpty, found.count >= wanted.count else { continue }
-                if (0...(found.count - wanted.count)).contains(where: { Array(found[$0..<($0 + wanted.count)]) == wanted }) { return rule.reason }
-            }
+            if rule.phrases.contains(where: { has($0, in: found) }) { return rule.reason }
         }
         return nil
+    }
+
+    /// Whether the words of `phrase` come one after the other in `found`.
+    private static func has(_ phrase: String, in found: [String]) -> Bool {
+        let wanted = words(phrase)
+        guard !wanted.isEmpty, found.count >= wanted.count else { return false }
+        return (0...(found.count - wanted.count)).contains { Array(found[$0..<($0 + wanted.count)]) == wanted }
+    }
+
+    /// Why letting something go on an element with this name is irreversible: what pressing it would do, or the Trash.
+    static func reason(forDropOnto label: String, appName: String?, bundleID: String?) -> String? {
+        if let reason = reason(forLabel: label, appName: appName, bundleID: bundleID) { return reason }
+        let found = words(label)
+        guard ["lixeira", "trash", "recycle bin", "itens excluidos", "deleted items"].contains(where: { has($0, in: found) }) else { return nil }
+        return "move o que for solto para a Lixeira, e talvez não dê para desfazer"
     }
 
     /// Why pressing these keys is irreversible: Return sends in a mail or chat app, ⌘⌫ deletes in the Finder.
@@ -1111,7 +1123,7 @@ enum UIMethod: Sendable {
 
 struct UIActTool: AgentTool {
     enum Action: String, CaseIterable, Sendable {
-        case press, focus, setValue = "set_value", type, key, select, scroll, click, drag, increment, decrement
+        case press, focus, setValue = "set_value", type, key, select, scroll, click, move, drag, draw, increment, decrement
         case showMenu = "show_menu", pickMenu = "pick_menu"
     }
 
@@ -1123,7 +1135,8 @@ struct UIActTool: AgentTool {
         description: """
         Operate an element found with ui_read, in the background (focus and cursor untouched): press, click (id, \
         "#n" mark or x,y screenshot pixels), focus, set_value, type (value into id or the focused field), key, select, \
-        scroll, drag (id onto the id in value), increment, decrement, show_menu, pick_menu (menu_path ["Arquivo", "Exportar…"], no id). If the screen \
+        scroll, move (hover), drag (to `to`, or into to_app), draw (pen stroke along path), increment, decrement, \
+        show_menu, pick_menu (menu_path ["Arquivo", "Exportar…"], no id). If the screen \
         changed it fails with "a interface mudou": read again. [precisa_assumir_tela] = only real input works: repeat \
         with takeover. Anything that deletes, sends, buys or discards always asks the user first. Needs Accessibility.
         """,
@@ -1138,7 +1151,13 @@ struct UIActTool: AgentTool {
             "x": .property("integer"),
             "y": .property("integer"),
             "button": .property("string", "left, right, middle"),
-            "count": .property("integer", "Clicks, 1-2."),
+            "count": .property("integer", "Clicks, 1-3."),
+            "modifiers": .property("string", "cmd+shift, option…"),
+            "hold": .property("integer", "Press ms, max 3000."),
+            "to": .property("string", "Drag end: id or x,y."),
+            "to_app": .property("string", "App of `to`."),
+            "duration": .property("integer", "ms, 150-5000."),
+            "path": .property("string", "[[x,y,pressure?],…] or SVG, screenshot px."),
             "direction": .property("string", "up, down, left, right"),
             "amount": .property("integer", "Pages, 1-10."),
             "wait": .property("string", "Text to wait for after acting, or changes."),
@@ -1184,8 +1203,22 @@ struct UIActTool: AgentTool {
         var point: CGPoint?
         var button: MouseButton = .left
         var count = 1
+        /// Keys held while clicking, dragging or scrolling.
+        var modifiers: KeyStroke.Modifiers = []
+        /// How long a click keeps the button down (a long press).
+        var hold: Duration = .zero
         var direction: String?
         var amount = 1
+        /// Where a drag lets go: an id or mark, or a pixel of the screenshot of the app it ends in (`toApp`, else this one).
+        var destination: String?
+        var destinationPoint: CGPoint?
+        var toApp: String?
+        /// A drag's or a stroke's duration; nil for the default.
+        var duration: Duration?
+        /// The points of a `draw`, in pixels of the screenshot.
+        var stroke: [StrokePoint] = []
+
+        var clicking: Clicking { Clicking(button: button, count: count, modifiers: modifiers, hold: hold) }
 
         /// Cuts "cmd+s, return" into its shortcuts at the commas, except the comma that is the key itself ("cmd+,", ",").
         /// A comma is the key when it comes right after a "+", or when it starts a piece that nothing follows but
@@ -1211,6 +1244,82 @@ struct UIActTool: AgentTool {
             return pieces.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         }
 
+        /// `x` and `y` as pixels of the last screenshot; models also send them as text.
+        static func pixel(in arguments: JSONValue) -> CGPoint? {
+            func coordinate(_ key: String) -> Int? {
+                arguments[key]?.int ?? arguments[key]?.string.flatMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+            }
+            guard let x = coordinate("x"), let y = coordinate("y") else { return nil }
+            return CGPoint(x: x, y: y)
+        }
+
+        /// "cmd+shift", "cmd, option" or a list: the names `KeyStroke.parse` knows, read through it so there is one vocabulary.
+        static func modifiers(in arguments: JSONValue) throws -> KeyStroke.Modifiers {
+            let text = arguments["modifiers"]?.array.map { $0.compactMap(\.string).joined(separator: "+") } ?? arguments.nonEmptyString("modifiers") ?? ""
+            let names = text.split { "+, ".contains($0) }
+            guard !names.isEmpty else { return [] }
+            do { return try KeyStroke.parse(names.joined(separator: "+") + "+a").modifiers } catch let error as KeyStroke.ParseError {
+                throw ToolError(error.errorDescription ?? "Modificador inválido.")
+            }
+        }
+
+        /// The duration asked for, clamped to 150 ms…5 s; nil (the default of the action) when not given.
+        static func duration(in arguments: JSONValue) -> Duration? {
+            let milliseconds = arguments.integer("duration", default: 0, in: 0...5000)
+            return milliseconds == 0 ? nil : .milliseconds(max(150, milliseconds))
+        }
+
+        /// The Dock takes no drop from a drag sent in the background (it reads the real pointer), and is no app to read.
+        static func isDock(_ app: String) -> Bool { ["dock", "com.apple.dock"].contains(UIText.fold(app)) }
+
+        /// Where a drag ends: `to` (an id, or "x,y" pixels), else the older `value`; in the app `to_app` when given.
+        static func parseEnd(of step: inout Step, in arguments: JSONValue) throws {
+            let numbers = arguments["to"]?.array?.compactMap(\.number)
+            let text = arguments.nonEmptyString("to") ?? arguments.nonEmptyString("value")
+            let pair = numbers?.count == 2 ? numbers : text.map { $0.split(separator: ",", omittingEmptySubsequences: false).compactMap { Double($0.trimmingCharacters(in: .whitespaces)) } }
+            if let pair, pair.count == 2 {
+                step.destinationPoint = CGPoint(x: pair[0].rounded(), y: pair[1].rounded())
+            } else if let text {
+                step.destination = text.trimmingCharacters(in: .whitespaces)
+            } else {
+                throw ToolError("Faltou o argumento \"to\": o id (ou x,y em pixels do screenshot) onde soltar.")
+            }
+            step.toApp = arguments.nonEmptyString("to_app")?.trimmingCharacters(in: .whitespaces)
+            if let app = step.toApp, isDock(app) {
+                throw ToolError("O Dock não recebe arrastar e soltar de um arrasto em segundo plano. Para a Lixeira use pick_menu "
+                                + "[\"Arquivo\", \"Mover para o Lixo\"] ou a tecla cmd+delete no Finder.")
+            }
+        }
+
+        static let strokeBounds = 2...500
+
+        /// The points of a `draw`: [[x,y],…] or [[x,y,pressure],…] (a list, or the JSON text of one), else SVG path data.
+        static func stroke(in arguments: JSONValue) throws -> [StrokePoint] {
+            var list = arguments["path"]?.array
+            if list == nil, let text = arguments.nonEmptyString("path")?.trimmingCharacters(in: .whitespacesAndNewlines) {
+                if text.hasPrefix("["), let parsed = JSONValue.parse(text)?.array {
+                    list = parsed
+                } else {
+                    guard text.count <= 20_000 else { throw ToolError("O caminho SVG de path é grande demais; mande um traço mais curto ou menos pontos.") }
+                    let points = try SVGPath.parse(text)
+                    guard points.count >= 2 else { throw ToolError("O caminho de path precisa de pelo menos 2 pontos.") }
+                    return points.map { StrokePoint(point: $0) }
+                }
+            }
+            guard let list else {
+                throw ToolError("Faltou o argumento \"path\": pontos [[x,y],…] ou um caminho SVG, em pixels do último screenshot.")
+            }
+            guard strokeBounds.contains(list.count) else {
+                throw ToolError("path precisa de \(strokeBounds.lowerBound) a \(strokeBounds.upperBound) pontos (vieram \(list.count)).")
+            }
+            return try list.enumerated().map { index, item in
+                guard let numbers = item.array?.map(\.number), (2...3).contains(numbers.count), let x = numbers[0], let y = numbers[1] else {
+                    throw ToolError("O ponto \(index + 1) de path precisa ser [x, y] ou [x, y, pressão].")
+                }
+                return StrokePoint(point: CGPoint(x: x, y: y), pressure: numbers.count == 3 ? numbers[2].map { min(1, max(0, $0)) } : nil)
+            }
+        }
+
         static func parse(_ arguments: JSONValue) throws -> Step {
             let actionName = try arguments.requiredString("action")
             guard let action = Action(rawValue: actionName) else {
@@ -1221,6 +1330,11 @@ struct UIActTool: AgentTool {
             step.ids = (arguments["ids"]?.array ?? []).compactMap(\.string).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
             if step.reference == nil, step.ids.count == 1 { step.reference = step.ids.removeFirst() }
             let hasTarget = step.reference != nil || !step.ids.isEmpty
+            /// What a click, hover, drag or scroll starts from: an element, or a pixel of the screenshot.
+            func needSource() throws {
+                step.point = Self.pixel(in: arguments)
+                if step.point == nil, !hasTarget { throw ToolError("Faltou o argumento \"id\" (ou x e y, em pixels do último screenshot).") }
+            }
             switch action {
             case .pickMenu:
                 guard let path = UIActTool.menuPath(in: arguments) else {
@@ -1241,21 +1355,23 @@ struct UIActTool: AgentTool {
                 }
                 if step.keys.isEmpty { throw ToolError(KeyStroke.ParseError.empty.errorDescription ?? "Atalho vazio.") }
             case .click:
-                func coordinate(_ key: String) -> Int? {
-                    arguments[key]?.int ?? arguments[key]?.string.flatMap { Int($0.trimmingCharacters(in: .whitespaces)) }
-                }
-                if let x = coordinate("x"), let y = coordinate("y") {
-                    step.point = CGPoint(x: x, y: y)
-                } else if !hasTarget {
-                    throw ToolError("Faltou o argumento \"id\" (ou x e y, em pixels do último screenshot).")
-                }
+                try needSource()
                 step.button = MouseButton(rawValue: arguments.nonEmptyString("button")?.lowercased() ?? "left") ?? .left
-                step.count = arguments.integer("count", default: 1, in: 1...2)
+                step.count = arguments.integer("count", default: 1, in: 1...3)
+                step.hold = .milliseconds(arguments.integer("hold", default: 0, in: 0...3000))
+                step.modifiers = try Self.modifiers(in: arguments)
+            case .move:
+                try needSource()
             case .drag:
-                if !hasTarget { _ = try arguments.requiredString("id") }
-                step.value = try arguments.requiredString("value")
+                try needSource()
+                try Self.parseEnd(of: &step, in: arguments)
+                step.modifiers = try Self.modifiers(in: arguments)
+                step.duration = Self.duration(in: arguments)
+            case .draw:
+                step.stroke = try Self.stroke(in: arguments)
+                step.duration = Self.duration(in: arguments)
             case .scroll:
-                if !hasTarget { _ = try arguments.requiredString("id") }
+                try needSource()
                 if let direction = arguments.nonEmptyString("direction")?.lowercased() {
                     guard ["up", "down", "left", "right"].contains(direction) else {
                         throw ToolError("direction desconhecida \"\(direction)\": use up, down, left ou right.")
@@ -1263,6 +1379,7 @@ struct UIActTool: AgentTool {
                     step.direction = direction
                 }
                 step.amount = arguments.integer("amount", default: 1, in: 1...10)
+                step.modifiers = try Self.modifiers(in: arguments)
             case .select:
                 if !hasTarget { _ = try arguments.requiredString("id") }
                 step.value = arguments.nonEmptyString("value")
@@ -1338,6 +1455,14 @@ struct UIActTool: AgentTool {
         return found
     }
 
+    /// The entries a drag would let go on, in the readings of the app it ends in (`to_app`, else the one it starts in).
+    private func destinations(of step: Step, app: String?) -> [(snapshot: UISnapshot, entry: UISnapshot.Entry)] {
+        let named = step.toApp ?? app
+        var found = targets(step.destination, app: named)
+        if let point = step.destinationPoint { found += targets(at: point, app: named) }
+        return found
+    }
+
     /// What the call would click, from the last readings: the approval card names it. When readings disagree, the one
     /// that makes the call dangerous is shown, so the card is not milder than the check.
     private func target(of step: Step, app: String?) -> (snapshot: UISnapshot, entry: UISnapshot.Entry)? {
@@ -1374,6 +1499,17 @@ struct UIActTool: AgentTool {
                 let app = found.snapshot.app
                 if let reason = UIDanger.reason(forLabel: found.entry.label, appName: app.name, bundleID: app.bundleID) { return reason }
                 if let value = step.value, let reason = UIDanger.reason(forLabel: value, appName: app.name, bundleID: app.bundleID) { return reason }
+            }
+            return nil
+        case .drag:
+            // What is dragged, and what it is let go on: dropping on the Trash or on a delete button cannot be taken back.
+            for found in targets(of: step, app: appArgument) {
+                let app = found.snapshot.app
+                if let reason = UIDanger.reason(forLabel: found.entry.label, appName: app.name, bundleID: app.bundleID) { return reason }
+            }
+            for found in destinations(of: step, app: appArgument) {
+                let app = found.snapshot.app
+                if let reason = UIDanger.reason(forDropOnto: found.entry.label, appName: app.name, bundleID: app.bundleID) { return reason }
             }
             return nil
         case .setValue, .type:
@@ -1451,19 +1587,58 @@ struct UIActTool: AgentTool {
         }
         switch step.action {
         case .press: return ("Clicando em \(label)", role + reference + place)
-        case .drag: return ("Arrastando \(label)", role + reference + place)
-        case .click: return ("Clicando em \(label)", role + reference + (step.count == 2 ? " (duplo)" : "") + place)
+        case .drag: return ("Arrastando \(label)", role + reference + dragEnd(of: step, app: app) + place)
+        case .click: return ("Clicando em \(label)", role + reference + Self.clickDetail(step) + place)
+        case .move: return ("Passando o mouse sobre \(label)", role + reference + place)
+        case .draw: return ("Desenhando em \(appName)", "traço de \(step.stroke.count) pontos")
         case .focus: return ("Focando em \(label)", role + reference + place)
         case .setValue: return ("Escrevendo em \(label)", text(step.value) + place)
         case .type: return (step.reference == nil ? "Digitando no campo em foco" : "Digitando em \(label)", text(step.value) + place)
         case .key: return ("Teclando \(step.keysText)", (step.reference == nil ? "" : role + reference) + place)
         case .select: return ("Selecionando \(step.value.map(UIText.quoted) ?? label)", role + reference + place)
-        case .scroll: return ("Rolando \(label)", [step.direction, "\(step.amount) pág."].compactMap { $0 }.joined(separator: " ") + place)
+        case .scroll:
+            return ("Rolando \(label)", [step.direction, Self.scrollSize(amount: step.amount, modifiers: step.modifiers)].compactMap { $0 }.joined(separator: " ") + place)
         case .increment: return ("Aumentando \(label)", place)
         case .decrement: return ("Diminuindo \(label)", place)
         case .showMenu: return ("Abrindo o menu \(label)", place)
         case .pickMenu: return ("Escolhendo no menu de \(appName)", step.menuPath.joined(separator: " → "))
         }
+    }
+
+    /// " → “Pasta” em Finder": where a drag lets go, as the card says it (the element that makes the call dangerous first).
+    private func dragEnd(of step: Step, app: String?) -> String {
+        let ends = destinations(of: step, app: app)
+        let found = ends.first { UIDanger.reason(forDropOnto: $0.entry.label, appName: $0.snapshot.app.name, bundleID: $0.snapshot.app.bundleID) != nil } ?? ends.first
+        let named = found.flatMap { $0.entry.label.isEmpty ? nil : UIText.quoted($0.entry.label) }
+        let raw = step.destination ?? step.destinationPoint.map { "x \(Int($0.x)), y \(Int($0.y))" } ?? ""
+        return " → " + (named ?? raw) + (step.toApp.map { " em \($0)" } ?? "")
+            + (step.modifiers.isEmpty ? "" : " (com \(Self.symbols(step.modifiers)))")
+    }
+
+    /// ⌃⌥⇧⌘, the way the menus write the keys held.
+    static func symbols(_ modifiers: KeyStroke.Modifiers) -> String {
+        [(KeyStroke.Modifiers.control, "⌃"), (.option, "⌥"), (.shift, "⇧"), (.command, "⌘")].filter { modifiers.contains($0.0) }.map(\.1).joined()
+    }
+
+    /// How a click differs from a plain one, for the card: " (duplo, ⌘, segurando 1,2 s)".
+    static func clickDetail(_ step: Step) -> String {
+        var parts: [String] = []
+        if step.count == 2 { parts.append("duplo") } else if step.count == 3 { parts.append("triplo") }
+        if !step.modifiers.isEmpty { parts.append(symbols(step.modifiers)) }
+        if step.hold > .zero { parts.append("segurando \(UIClock.seconds(step.hold))") }
+        if step.button != .left { parts.append(step.button == .right ? "botão direito" : "botão do meio") }
+        return parts.isEmpty ? "" : " (" + parts.joined(separator: ", ") + ")"
+    }
+
+    /// What a click did, for the output: "Cliquei com ⌘ em", "Pressionei por 1,2 s em", "Dei três cliques em".
+    static func clickVerb(_ click: Clicking) -> String {
+        var verb = click.hold > .zero ? "Pressionei por \(UIClock.seconds(click.hold))" : click.count == 3 ? "Dei três cliques"
+            : click.count == 2 ? "Dei dois cliques" : "Cliquei"
+        var with: [String] = []
+        if !click.modifiers.isEmpty { with.append(symbols(click.modifiers)) }
+        if click.button != .left { with.append(click.button == .right ? "o botão direito" : "o botão do meio") }
+        if !with.isEmpty { verb += " com " + with.joined(separator: " e ") }
+        return verb + " em"
     }
 
     // MARK: Running
@@ -1475,7 +1650,7 @@ struct UIActTool: AgentTool {
         // What the approval card judged: an action whose live target turns out dangerous runs only if the card said so. The
         // engine hands the card's own verdict over (`judgedDanger`); only a call no card was computed for judges itself here.
         let approved = context.judgedDanger ?? (danger(arguments, context: context) != nil)
-        if arguments.flag("takeover") { return try await takeOver(steps, app: app, context: context) }
+        if arguments.flag("takeover") { return try await takeOver(steps, app: app, context: context, approved: approved) }
 
         var done: [String] = []
         var last: Performed?
@@ -1518,13 +1693,49 @@ struct UIActTool: AgentTool {
         var bot: UUID?
         var approved: Bool
         var stealsFocus: Bool
+        /// Where a drag lets go when that is another app, found before the step runs.
+        var remote: DropTarget?
+    }
+
+    /// How a click presses: the button, how many times, with which keys held and for how long each press stays down.
+    struct Clicking: Sendable {
+        var button: MouseButton = .left
+        var count = 1
+        var modifiers: KeyStroke.Modifiers = []
+        var hold: Duration = .zero
+
+        /// What an `AXPress` can stand for: it carries none of the rest.
+        var isPlain: Bool { button == .left && count == 1 && modifiers.isEmpty && hold == .zero }
+    }
+
+    /// Where a drag lets go when that is a window of another app: the point on the screen, the window and what is there.
+    struct DropTarget: Sendable {
+        var app: AccessibilityApp
+        var point: CGPoint
+        var window: EventWindow
+        /// How the output names it: `button “Pasta” em Finder`.
+        var name: String
+    }
+
+    /// A drag or a pen stroke to send, with the points already on the screen.
+    struct DragPlan: Sendable {
+        var path: [StrokePoint]
+        var window: WindowRef
+        var drop: DropTarget?
+        var modifiers: KeyStroke.Modifiers = []
+        var duration: Duration
+        /// What the output says when the drag turned into a system drag-and-drop that was let go.
+        var droppedSummary = ""
+        /// A pen stroke never becomes a drag-and-drop: it is stopped if it tries.
+        var pen = false
     }
 
     /// Events still to send to the app after the Accessibility part (N1).
     enum InputPlan: Sendable {
-        case click(CGPoint, window: WindowRef, button: MouseButton, count: Int)
-        case scroll(dx: Int, dy: Int, at: CGPoint, window: WindowRef)
-        case drag(CGPoint, to: CGPoint, window: WindowRef)
+        case click(CGPoint, window: WindowRef, Clicking)
+        case move([CGPoint], window: WindowRef)
+        case scroll(dx: Int, dy: Int, at: CGPoint, window: WindowRef, modifiers: KeyStroke.Modifiers)
+        case drag(DragPlan)
         case keys([KeyStroke], target: (any AccessibilityElement)?)
         case text(String, target: any AccessibilityElement, replace: Bool)
     }
@@ -1550,8 +1761,9 @@ struct UIActTool: AgentTool {
     private func perform(_ step: Step, app: AccessibilityApp, context: ToolContext, approved: Bool, waitsAfter: Bool) async throws -> Performed {
         let snapshot = store.snapshot(bot: context.botID, app: app)
         let session = sessions.session(for: app.pid)
+        let remote = try await dropTarget(for: step, app: app, bot: context.botID, approved: approved)
         let request = Request(step: step, snapshot: snapshot, bot: context.botID, approved: approved,
-                              stealsFocus: session.state.withLock { $0.stealsFocus })
+                              stealsFocus: session.state.withLock { $0.stealsFocus }, remote: remote)
         let frontBefore = await system.frontmostPID()
         let system = system, live = live
         var watcher: AXEventWatcher?
@@ -1568,7 +1780,9 @@ struct UIActTool: AgentTool {
             var acted = first
             var method = UIMethod.accessibility
             if let plan = acted.input {
-                acted.notes += try await send(plan, what: acted.inputWhat, app: app, snapshot: snapshot, frontBefore: frontBefore, session: session)
+                let sent = try await send(plan, what: acted.inputWhat, app: app, snapshot: snapshot, frontBefore: frontBefore, session: session)
+                acted.notes += sent.notes
+                acted.summary = sent.summary ?? acted.summary
                 method = .event
             }
             if !waitsAfter { await settle.wait(on: events) }
@@ -1588,6 +1802,45 @@ struct UIActTool: AgentTool {
             guard let restoration, !(error is CancellationError) else { throw error }
             throw ToolError(Self.reason(error) + ".\n" + restoration.message(app: app))
         }
+    }
+
+    /// Where a drag with `to_app` lets go: the other app's element or pixel, found in its latest reading of this Orb (the
+    /// window server says where its window is now), with the window the system will drop into. Nil when the step is no
+    /// such drag, or `to_app` is the app it starts in. Refuses a drop on something that cannot be taken back unless the card said so.
+    private func dropTarget(for step: Step, app: AccessibilityApp, bot: UUID?, approved: Bool) async throws -> DropTarget? {
+        guard step.action == .drag, let name = step.toApp else { return nil }
+        let other = try await UIAccess.open(name, system: system)
+        guard other.pid != app.pid else { return nil }
+        guard let snapshot = store.snapshot(bot: bot, app: other) else {
+            throw ToolError("Ainda não li a interface de \(other.name); chame ui_read (ou screenshot) dele antes de soltar lá.")
+        }
+        let system = system, live = live
+        let reached = try await UIAccess.mapped(other) {
+            try await sessions.run(other, within: sessions.deadlines.action) { () throws -> (point: CGPoint, ref: WindowRef, label: String, name: String) in
+                let root = system.root(of: other)
+                if let pixel = step.destinationPoint {
+                    let spot = try Spot.read(snapshot, root: root, app: other)
+                    try spot.check(pixel)
+                    let label = Self.localHit(pixel, in: snapshot).flatMap { snapshot.entries[$0.id]?.label } ?? ""
+                    return (spot.screen(pixel), spot.ref, label, "x \(Int(pixel.x)), y \(Int(pixel.y))")
+                }
+                let id = try UIResolver.id(for: step.destination ?? "", in: snapshot, app: other)
+                let cached = live.element(bot: bot, pid: other.pid, generation: snapshot.generation, takenAt: snapshot.takenAt, id: id)
+                let target = try UIResolver.resolve(id: id, root: root, app: other, snapshot: snapshot, cached: cached)
+                guard let frame = target.frame, target.window != nil else { throw ToolError("\(target.name) não diz onde está na tela.") }
+                return (CGPoint(x: frame.midX, y: frame.midY), Self.windowRef(of: target, in: snapshot), target.live.identity, target.name)
+            }
+        }
+        if !approved, let reason = UIDanger.reason(forDropOnto: reached.label, appName: other.name, bundleID: other.bundleID) {
+            throw Self.dropRefusal(reached.name, reason)
+        }
+        let window = try await eventWindow(reached.ref, app: other, snapshot: snapshot, what: "soltar em \(other.name)")
+        return DropTarget(app: other, point: reached.point, window: window, name: "\(reached.name) em \(other.name)")
+    }
+
+    static func dropRefusal(_ name: String, _ reason: String) -> ToolError {
+        ToolError("Não fiz: soltar em \(name) \(reason), e o pedido não passou pela confirmação do usuário. "
+                  + "Leia de novo com ui_read e repita por id para que ele confirme.")
     }
 
     /// A key or a click of the person's this recent means it was the person who went to the app, not the app that came.
@@ -1658,33 +1911,36 @@ struct UIActTool: AgentTool {
 
     // MARK: Events to the app (N1)
 
+    /// What went out to the app: notes for the output, and the summary to use when the events show the action was something
+    /// else than it looked (a drag that became a system drag-and-drop).
+    struct Sent: Sendable {
+        var notes: [String] = []
+        var summary: String?
+    }
+
     private func send(_ plan: InputPlan, what: String, app: AccessibilityApp, snapshot: UISnapshot?, frontBefore: Int32?,
-                      session: AXAppSession) async throws -> [String] {
+                      session: AXAppSession) async throws -> Sent {
         try await refuseIfUserIsActive(app)
         var notes: [String] = []
         switch plan {
-        case .drag(let start, let end, let window):
+        case .drag(let drag):
+            return try await send(drag, what: what, app: app, snapshot: snapshot)
+        case .click(let point, let window, let click):
             let target = try await eventWindow(window, app: app, snapshot: snapshot, what: what)
-            let path = [StrokePoint(point: start), StrokePoint(point: end)]
             do {
-                _ = try await system.input.drag(along: path, window: target, modifiers: [], duration: .milliseconds(300), watch: DragWatch(), to: app.pid)
-            } catch let stopped as DragStopped {
-                throw ToolError("Não deu para \(what): \(Self.reason(stopped)).")
-            } catch is CancellationError {
-                throw CancellationError()
+                try await system.input.click(at: point, window: target, button: click.button, count: click.count, modifiers: click.modifiers,
+                                             hold: click.hold, to: app.pid)
             } catch {
                 throw Self.needsScreen(what, because: Self.reason(error))
             }
-        case .click(let point, let window, let button, let count):
+        case .move(let points, let window):
             let target = try await eventWindow(window, app: app, snapshot: snapshot, what: what)
-            do {
-                try await system.input.click(at: point, window: target, button: button, count: count, modifiers: [], hold: .zero, to: app.pid)
-            } catch {
+            do { try await system.input.move(along: points, window: target, to: app.pid) } catch {
                 throw Self.needsScreen(what, because: Self.reason(error))
             }
-        case .scroll(let dx, let dy, let point, let window):
+        case .scroll(let dx, let dy, let point, let window, let modifiers):
             let target = try await eventWindow(window, app: app, snapshot: snapshot, what: what)
-            do { try await system.input.scroll(dx: dx, dy: dy, at: point, window: target, modifiers: [], to: app.pid) } catch {
+            do { try await system.input.scroll(dx: dx, dy: dy, at: point, window: target, modifiers: modifiers, to: app.pid) } catch {
                 throw Self.needsScreen(what, because: Self.reason(error))
             }
         case .keys(let strokes, let target):
@@ -1703,7 +1959,81 @@ struct UIActTool: AgentTool {
                 try await refuseIfBroughtForward(frontBefore, app: app, session: session, what: what, front: .some(front))
             }
         }
-        return notes
+        return Sent(notes: notes)
+    }
+
+    // MARK: Drags and strokes (N1)
+
+    /// Remembers what the drop watch found on top, so the error can say it was that and not the person.
+    private final class CoverLog: Sendable {
+        private let found = OSAllocatedUnfairLock<String?>(initialState: nil)
+        func note(_ owner: String) { found.withLock { $0 = owner } }
+        var owner: String? { found.withLock { $0 } }
+    }
+
+    /// A drag or a pen stroke sent to the app. A drag that ends in another window or app is a system drag-and-drop, and
+    /// the system lets go on whatever is on top at the end point: both ends must show the window the call is about
+    /// before anything is pressed. Within one window nothing is checked first (an in-app drag works under a cover); the
+    /// watch cancels a drop that starts under one.
+    private func send(_ drag: DragPlan, what: String, app: AccessibilityApp, snapshot: UISnapshot?) async throws -> Sent {
+        guard drag.path.count >= 2 else { throw ToolError("Não deu para \(what): faltaram pontos no caminho.") }
+        let source = try await eventWindow(drag.window, app: app, snapshot: snapshot, what: what)
+        let endWindow = drag.drop?.window ?? source
+        let endApp = drag.drop?.app ?? app
+        let start = drag.path[0].point, end = drag.path[drag.path.count - 1].point
+        if drag.drop != nil {
+            try showing(source, at: start, of: app, end: "o arrasto começa")
+            try showing(endWindow, at: end, of: endApp, end: "o arrasto termina")
+        }
+        let system = system, covered = CoverLog()
+        let people = [app] + (drag.drop.map { [$0.app] } ?? [])
+        let watch = DragWatch(
+            coverAtEnd: {
+                // A pen stroke that turned into a drag-and-drop is cancelled whatever is at the end.
+                if drag.pen { covered.note(""); return "" }
+                guard let top = system.windowOnTop(at: end), top.windowID != endWindow.id else { return nil }
+                covered.note(top.owner)
+                return top.owner
+            },
+            interruption: {
+                guard system.secondsSinceUserInput() < 3, let front = await system.frontmostPID(),
+                      let used = people.first(where: { $0.pid == front }) else { return nil }
+                return "o usuário passou a usar \(used.name)"
+            })
+        if let reason = await watch.interruption() { throw ToolError("Não deu para \(what): \(reason); nada foi pressionado.") }
+        do {
+            let outcome = try await system.input.drag(along: drag.path, window: source, modifiers: drag.modifiers, duration: drag.duration,
+                                                      watch: watch, to: app.pid)
+            return Sent(summary: outcome == .dropped ? drag.droppedSummary : nil)
+        } catch let stopped as DragStopped {
+            throw Self.stopped(stopped, what: what, pen: drag.pen, coveredBy: covered.owner)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            throw Self.needsScreen(what, because: Self.reason(error))
+        }
+    }
+
+    /// Before pressing, the window of a drag's end must be the one on top at its point.
+    private func showing(_ window: EventWindow, at point: CGPoint, of app: AccessibilityApp, end: String) throws {
+        guard let top = system.windowOnTop(at: point), top.windowID != window.id else { return }
+        let who = top.pid == app.pid ? "outra janela de \(app.name)" : (top.owner.isEmpty ? "outra janela" : top.owner)
+        throw ToolError("Nada foi pressionado: \(who) está por cima de onde \(end) (\(app.name)), e um arrasto entre janelas ou apps "
+                        + "segue o que está por cima. Traga a janela de \(app.name) para a vista, ou repita com takeover: true.")
+    }
+
+    /// A drag that stopped early. No marker for the person's sake, nor for a drop the watch cancelled; a pen stroke that
+    /// started a drag-and-drop, or a drop under a cover, can be redone once the way is clear (or with the real mouse).
+    private static func stopped(_ stopped: DragStopped, what: String, pen: Bool, coveredBy owner: String?) -> ToolError {
+        if pen, owner != nil {
+            return ToolError("Não deu para \(what): o traço começou um arrastar e soltar do app (o ponto de partida tem algo que se arrasta), "
+                             + "e cancelei com Esc antes de soltar; nada foi solto. Comece o traço numa área livre do desenho, ou repita com takeover: true.")
+        }
+        if owner != nil {
+            return ToolError("\(takeoverMarker) Não deu para \(what): \(reason(stopped)). Tire o que está por cima do ponto de soltar "
+                             + "(ou traga a janela de destino para a vista) e repita, ou repita com takeover: true.")
+        }
+        return ToolError("Não deu para \(what): \(reason(stopped)).")
     }
 
     static let secureInputNote = "Aviso: a Entrada Segura do macOS está ligada (um campo de senha em algum app); teclas podem ter sido descartadas."
@@ -1946,9 +2276,26 @@ struct UIActTool: AgentTool {
                             + "Repita dizendo o app (argumento app) para que ele confirme, ou mande o texto sem quebra de linha.")
         }
 
-        func windowRef(_ target: UIResolver.Resolved) -> WindowRef {
-            let shotID = snapshot?.shot.flatMap { shot in target.windowFrame.map { close(shot.windowFrame, $0) } == true ? shot.windowID : nil }
-            return WindowRef(frame: target.windowFrame, title: snapshot?.windowTitle ?? "", windowID: shotID)
+        func windowRef(_ target: UIResolver.Resolved) -> WindowRef { Self.windowRef(of: target, in: snapshot) }
+
+        /// A place the call points at, on the screen: an element by id, or a pixel of the last screenshot.
+        func place(_ reference: String?, _ pixel: CGPoint?) throws -> Place {
+            if let pixel {
+                let spot = try Spot.read(snapshot, root: root, app: app)
+                try spot.check(pixel)
+                let label = snapshot.flatMap { localHit(pixel, in: $0) }.flatMap { snapshot?.entries[$0.id]?.label } ?? ""
+                return Place(point: spot.screen(pixel), window: spot.ref, name: "x \(Int(pixel.x)), y \(Int(pixel.y))", label: label, element: nil)
+            }
+            let target = try resolve(reference ?? "")
+            guard let frame = target.frame, target.window != nil else { throw missing(target, "clique", target.element.actionNames()) }
+            return Place(point: CGPoint(x: frame.midX, y: frame.midY), window: windowRef(target), name: target.name, label: target.live.identity,
+                         element: target.element)
+        }
+
+        /// Letting go on something that cannot be taken back runs only if the approval card said so.
+        func checkDrop(_ label: String, _ name: String) throws {
+            guard !request.approved, let reason = UIDanger.reason(forDropOnto: label, appName: app.name, bundleID: app.bundleID) else { return }
+            throw dropRefusal(name, reason)
         }
 
         func missing(_ target: UIResolver.Resolved, _ what: String, _ actions: [String]) -> ToolError {
@@ -1986,7 +2333,7 @@ struct UIActTool: AgentTool {
             }
             guard let frame = target.frame, target.window != nil else { throw missing(target, "clique", actions) }
             return Acted(summary: "\(verb) \(target.name) (\(target.id)).", target: target.element, before: state,
-                         input: .click(CGPoint(x: frame.midX, y: frame.midY), window: windowRef(target), button: .left, count: 1),
+                         input: .click(CGPoint(x: frame.midX, y: frame.midY), window: windowRef(target), Clicking()),
                          inputWhat: "clicar em \(target.name)")
         }
 
@@ -2006,24 +2353,43 @@ struct UIActTool: AgentTool {
         case .click:
             if let point = step.point { return try click(at: point, request: request, root: root, system: system, app: app, resolve: resolve, press: press) }
             let target = try resolve(step.reference ?? "")
-            if step.button == .left, step.count == 1 { return try press(target) }
+            if step.clicking.isPlain { return try press(target) }
             try checkDanger(target.live.identity, target.name)
             guard let frame = target.frame, target.window != nil else { throw missing(target, "clique", target.element.actionNames()) }
-            let verb = step.button == .right ? "Cliquei com o botão direito em" : (step.count == 2 ? "Dei dois cliques em" : "Cliquei em")
-            return Acted(summary: "\(verb) \(target.name) (\(target.id)).", target: target.element, before: before(target),
-                         input: .click(CGPoint(x: frame.midX, y: frame.midY), window: windowRef(target), button: step.button, count: step.count),
+            return Acted(summary: "\(clickVerb(step.clicking)) \(target.name) (\(target.id)).", target: target.element, before: before(target),
+                         input: .click(CGPoint(x: frame.midX, y: frame.midY), window: windowRef(target), step.clicking),
                          inputWhat: "clicar em \(target.name)")
 
+        case .move:
+            let spot = try place(step.reference, step.point)
+            return Acted(summary: "Passei o mouse sobre \(spot.name).", target: spot.element, before: UIState.capture(root: root, target: spot.element),
+                         input: .move(approach(to: spot.point, within: spot.window.frame), window: spot.window),
+                         inputWhat: "passar o mouse sobre \(spot.name)", notes: [hoverNote])
+
         case .drag:
-            let source = try resolve(step.reference ?? ""), destination = try resolve(step.value ?? "")
-            try checkDanger(source.live.identity, source.name)
-            guard let from = source.frame, let to = destination.frame, source.window != nil, destination.window != nil else {
-                throw missing(source, "arrasto", [])
+            let source = try place(step.reference, step.point)
+            try checkDanger(source.label, source.name)
+            let end: (point: CGPoint, name: String)
+            if let remote = request.remote {
+                end = (remote.point, remote.name)
+            } else {
+                let destination = try place(step.destination, step.destinationPoint)
+                try checkDrop(destination.label, destination.name)
+                end = (destination.point, destination.name)
             }
-            return Acted(summary: "Arrastei \(source.name) para \(destination.name).",
-                         target: nil, before: before(source),
-                         input: .drag(CGPoint(x: from.midX, y: from.midY), to: CGPoint(x: to.midX, y: to.midY), window: windowRef(source)),
-                         inputWhat: "arrastar \(source.name)")
+            let drag = DragPlan(path: DragPath.arc(from: source.point, to: end.point).map { StrokePoint(point: $0) }, window: source.window,
+                                drop: request.remote, modifiers: step.modifiers, duration: step.duration ?? .milliseconds(500),
+                                droppedSummary: "Arrastei \(source.name) e soltei em \(end.name) (arrastar e soltar do sistema).")
+            return Acted(summary: "Arrastei \(source.name) até \(end.name).", target: nil, before: UIState.capture(root: root, target: source.element),
+                         input: .drag(drag), inputWhat: "arrastar \(source.name)")
+
+        case .draw:
+            let spot = try Spot.read(snapshot, root: root, app: app)
+            for (index, point) in step.stroke.enumerated() { try spot.check(point.point, number: index + 1) }
+            let path = DragPath.stroke(step.stroke.map { StrokePoint(point: spot.screen($0.point), pressure: $0.pressure) })
+            let drag = DragPlan(path: path, window: spot.ref, duration: step.duration ?? strokeDuration(path), pen: true)
+            return Acted(summary: "Desenhei um traço de \(step.stroke.count) pontos em \(spot.ref.title.isEmpty ? app.name : UIText.quoted(spot.ref.title)).",
+                         target: nil, before: UIState.capture(root: root, target: nil), input: .drag(drag), inputWhat: "desenhar")
 
         case .focus:
             let target = try resolve(step.reference ?? "")
@@ -2118,6 +2484,15 @@ struct UIActTool: AgentTool {
             return try select(step, resolve: resolve, root: root, app: app, before: before, press: press, checkDanger: checkDanger)
 
         case .scroll:
+            if let pixel = step.point {
+                guard let direction = step.direction else { throw ToolError("Diga direction (up, down, left ou right) para rolar em x \(Int(pixel.x)), y \(Int(pixel.y)).") }
+                let spot = try place(nil, pixel)
+                let delta = scrollDelta(direction, amount: step.amount, size: spot.window.frame?.size ?? .zero, modifiers: step.modifiers)
+                return Acted(summary: "Rolei \(spot.name) \(scrollWords(direction, amount: step.amount, modifiers: step.modifiers)).", target: nil,
+                             before: UIState.capture(root: root, target: nil),
+                             input: .scroll(dx: delta.dx, dy: delta.dy, at: spot.point, window: spot.window, modifiers: step.modifiers),
+                             inputWhat: "rolar em \(spot.name)")
+            }
             let target = try resolve(step.reference ?? "")
             let state = before(target)
             let actions = target.element.actionNames()
@@ -2128,7 +2503,7 @@ struct UIActTool: AgentTool {
                 try target.element.perform("AXScrollToVisible")
                 return Acted(summary: "Rolei até \(target.name) (\(target.id)).", target: target.element, before: state)
             }
-            return try scroll(target, direction: direction, amount: step.amount, before: state, windowRef: windowRef(target))
+            return try scroll(target, direction: direction, amount: step.amount, modifiers: step.modifiers, before: state, windowRef: windowRef(target))
 
         case .increment, .decrement:
             let target = try resolve(step.reference ?? "")
@@ -2158,26 +2533,10 @@ struct UIActTool: AgentTool {
                               app: AccessibilityApp, resolve: (String) throws -> UIResolver.Resolved,
                               press: (UIResolver.Resolved, String) throws -> Acted) throws -> Acted {
         let step = request.step
-        guard let snapshot = request.snapshot, let shot = snapshot.shot else {
-            throw ToolError("x e y são pixels do último screenshot com marcas da janela; tire um screenshot de \(app.name) antes (ou use um id).")
-        }
-        let relative = CGPoint(x: pixel.x / shot.scale, y: pixel.y / shot.scale)
-        guard CGRect(origin: .zero, size: shot.windowFrame.size).contains(relative) else {
-            throw ToolError("O ponto x \(Int(pixel.x)), y \(Int(pixel.y)) fica fora da imagem (\(shot.pixelWidth)×\(shot.pixelHeight) px).")
-        }
-        // The window must still have the size it had in the picture, or the pixels point elsewhere now.
-        guard let windows = root.elements("AXWindows"), let window = UIWindowChooser.window(of: snapshot, in: windows) else {
-            throw UIResolver.stale("a janela \(UIText.quoted(snapshot.windowTitle)) não está mais aberta")
-        }
-        let now = window.read(["AXPosition", "AXSize"]).attributes ?? [:]
-        guard case .point(let origin)? = now["AXPosition"], case .size(let size)? = now["AXSize"] else {
-            throw UIResolver.stale("não consegui ler onde está a janela")
-        }
-        guard abs(size.width - shot.windowFrame.width) <= 2, abs(size.height - shot.windowFrame.height) <= 2 else {
-            throw UIResolver.stale("a janela mudou de tamanho desde o screenshot; tire outro")
-        }
-        let screen = CGPoint(x: origin.x + relative.x, y: origin.y + relative.y)
-        let windowRef = WindowRef(frame: CGRect(origin: origin, size: size), title: snapshot.windowTitle, windowID: shot.windowID)
+        let spot = try Spot.read(request.snapshot, root: root, app: app)
+        try spot.check(pixel)
+        guard let snapshot = request.snapshot else { throw Spot.missingShot(app) }
+        let screen = spot.screen(pixel), window = spot.window, windowRef = spot.ref
         let description = "x \(Int(pixel.x)), y \(Int(pixel.y))"
 
         let local = localHit(pixel, in: snapshot)
@@ -2198,24 +2557,24 @@ struct UIActTool: AgentTool {
                                 + "Leia de novo com ui_read e repita por id para que ele confirme.")
             }
             let state = UIState.capture(root: root, target: element)
-            if step.button == .left, step.count == 1, let action = ["AXPress", "AXConfirm", "AXPick", "AXOpen"].first(where: element.actionNames().contains) {
+            if step.clicking.isPlain, let action = ["AXPress", "AXConfirm", "AXPick", "AXOpen"].first(where: element.actionNames().contains) {
                 try element.perform(action)
                 return Acted(summary: "Cliquei em \(name) (\(description)).", target: element, before: state)
             }
-            return Acted(summary: "Cliquei em \(name) (\(description)).", target: element, before: state,
-                         input: .click(screen, window: windowRef, button: step.button, count: step.count), inputWhat: "clicar em \(description)")
+            return Acted(summary: "\(clickVerb(step.clicking)) \(name) (\(description)).", target: element, before: state,
+                         input: .click(screen, window: windowRef, step.clicking), inputWhat: "clicar em \(description)")
         }
         if let target {
-            if step.button == .left, step.count == 1, target.entry.actionable || local?.actionable == true {
+            if step.clicking.isPlain, target.entry.actionable || local?.actionable == true {
                 return try press(target, "Cliquei em")
             }
             let state = UIState.capture(root: root, target: target.element, known: target.attributes)
-            return Acted(summary: "Cliquei em \(target.name) (\(target.id), \(description)).", target: target.element, before: state,
-                         input: .click(screen, window: windowRef, button: step.button, count: step.count), inputWhat: "clicar em \(target.name)")
+            return Acted(summary: "\(clickVerb(step.clicking)) \(target.name) (\(target.id), \(description)).", target: target.element, before: state,
+                         input: .click(screen, window: windowRef, step.clicking), inputWhat: "clicar em \(target.name)")
         }
-        return Acted(summary: "Cliquei em \(description) de \(snapshot.windowTitle.isEmpty ? app.name : UIText.quoted(snapshot.windowTitle)).",
+        return Acted(summary: "\(clickVerb(step.clicking)) \(description) de \(snapshot.windowTitle.isEmpty ? app.name : UIText.quoted(snapshot.windowTitle)).",
                      target: nil, before: UIState.capture(root: root, target: nil),
-                     input: .click(screen, window: windowRef, button: step.button, count: step.count), inputWhat: "clicar em \(description)")
+                     input: .click(screen, window: windowRef, step.clicking), inputWhat: "clicar em \(description)")
     }
 
     /// Whether `element` is in `window`, or in a sheet or drawer of it: its `AXWindow` (or that window's parent) is the
@@ -2267,6 +2626,84 @@ struct UIActTool: AgentTool {
     }
 
     private static func area(_ frame: CGRect?) -> CGFloat { frame.map { $0.width * $0.height } ?? .infinity }
+
+    /// A place a call points at, on the screen.
+    struct Place: Sendable {
+        var point: CGPoint
+        var window: WindowRef
+        /// How the output names it: `button “Salvar”`, or `x 10, y 20` for a pixel.
+        var name: String
+        /// What the danger check reads: the element's name, empty when none is known.
+        var label: String
+        var element: (any AccessibilityElement)?
+    }
+
+    /// The pixels of an app's last screenshot, put on the screen: where its window is now, and how big the picture is.
+    struct Spot: Sendable {
+        var origin: CGPoint
+        var size: CGSize
+        var scale: Double
+        var pixelWidth: Int
+        var pixelHeight: Int
+        var window: any AccessibilityElement
+        var ref: WindowRef
+
+        static func missingShot(_ app: AccessibilityApp) -> ToolError {
+            ToolError("x, y e path são pixels do último screenshot com marcas da janela; tire um screenshot de \(app.name) antes (ou use um id).")
+        }
+
+        /// Reads where the window is now. It must still have the size it had in the picture, or the pixels point elsewhere.
+        /// Blocking: runs on the app's queue.
+        static func read(_ snapshot: UISnapshot?, root: any AccessibilityElement, app: AccessibilityApp) throws -> Spot {
+            guard let snapshot, let shot = snapshot.shot, shot.scale > 0 else { throw missingShot(app) }
+            guard let windows = root.elements("AXWindows"), let window = UIWindowChooser.window(of: snapshot, in: windows) else {
+                throw UIResolver.stale("a janela \(UIText.quoted(snapshot.windowTitle)) não está mais aberta")
+            }
+            let now = window.read(["AXPosition", "AXSize"]).attributes ?? [:]
+            guard case .point(let origin)? = now["AXPosition"], case .size(let size)? = now["AXSize"] else {
+                throw UIResolver.stale("não consegui ler onde está a janela")
+            }
+            guard abs(size.width - shot.windowFrame.width) <= 2, abs(size.height - shot.windowFrame.height) <= 2 else {
+                throw UIResolver.stale("a janela mudou de tamanho desde o screenshot; tire outro")
+            }
+            return Spot(origin: origin, size: shot.windowFrame.size, scale: shot.scale, pixelWidth: shot.pixelWidth, pixelHeight: shot.pixelHeight,
+                        window: window, ref: WindowRef(frame: CGRect(origin: origin, size: size), title: snapshot.windowTitle, windowID: shot.windowID))
+        }
+
+        func screen(_ pixel: CGPoint) -> CGPoint { CGPoint(x: origin.x + pixel.x / scale, y: origin.y + pixel.y / scale) }
+
+        /// The pixel must be inside the picture (`number`: which point of a path).
+        func check(_ pixel: CGPoint, number: Int? = nil) throws {
+            guard CGRect(origin: .zero, size: size).contains(CGPoint(x: pixel.x / scale, y: pixel.y / scale)) else {
+                let which = number.map { "O ponto \($0) de path (x \(Int(pixel.x)), y \(Int(pixel.y)))" } ?? "O ponto x \(Int(pixel.x)), y \(Int(pixel.y))"
+                throw ToolError("\(which) fica fora da imagem (\(pixelWidth)×\(pixelHeight) px).")
+            }
+        }
+    }
+
+    /// The window an element is in, as the reading and the screenshot knew it.
+    static func windowRef(of target: UIResolver.Resolved, in snapshot: UISnapshot?) -> WindowRef {
+        let shotID = snapshot?.shot.flatMap { shot in target.windowFrame.map { close(shot.windowFrame, $0) } == true ? shot.windowID : nil }
+        return WindowRef(frame: target.windowFrame, title: snapshot?.windowTitle ?? "", windowID: shotID)
+    }
+
+    static let hoverNote = "Aviso: tooltips e realces que seguem o ponteiro real podem não aparecer em segundo plano (o movimento chega à janela, "
+        + "mas as áreas de rastreio do AppKit não reagem). Para ler a dica use ui_read (AXHelp) ou repita com takeover: true."
+
+    /// A short run-up to a hover that ends on the point, from the side that has room inside the window.
+    static func approach(to point: CGPoint, within frame: CGRect?) -> [CGPoint] {
+        let left = frame.map { point.x - $0.minX >= 24 } ?? true
+        let above = frame.map { point.y - $0.minY >= 16 } ?? true
+        let start = CGPoint(x: point.x + (left ? -24 : 24), y: point.y + (above ? -16 : 16))
+        return [start, CGPoint(x: (start.x + point.x) / 2, y: (start.y + point.y) / 2), point]
+    }
+
+    /// A pen stroke takes longer the longer it is: about 2 ms a point of screen, between 300 ms and 5 s.
+    static func strokeDuration(_ path: [StrokePoint]) -> Duration {
+        var length = 0.0
+        for (one, next) in zip(path, path.dropFirst()) { length += Double(hypot(next.point.x - one.point.x, next.point.y - one.point.y)) }
+        return .milliseconds(Int(min(5000, max(300, 300 + length * 2))))
+    }
 
     /// Lists and tables (`AXSelected`, `AXSelectedRows`), pop-up buttons (their menu, without opening it), combo boxes
     /// (`AXValue`), tab and radio groups.
@@ -2389,8 +2826,10 @@ struct UIActTool: AgentTool {
         return words.joined(separator: " ")
     }
 
-    /// The scroll bar's value (0…1) moved by pages; else a scroll event sent to the app over the area.
-    private static func scroll(_ target: UIResolver.Resolved, direction: String, amount: Int, before state: UIState, windowRef: WindowRef) throws -> Acted {
+    /// The scroll bar's value (0…1) moved by pages; else a scroll event sent to the app over the area. Keys held (to zoom,
+    /// say) can only go as an event.
+    private static func scroll(_ target: UIResolver.Resolved, direction: String, amount: Int, modifiers: KeyStroke.Modifiers,
+                               before state: UIState, windowRef: WindowRef) throws -> Acted {
         var area: (any AccessibilityElement)? = target.element
         var areaRole = target.live.rawRole
         for _ in 0..<5 where areaRole != "AXScrollArea" {
@@ -2399,9 +2838,9 @@ struct UIActTool: AgentTool {
         }
         let vertical = direction == "up" || direction == "down"
         let sign: Double = direction == "up" || direction == "left" ? -1 : 1
-        let words = "\(direction == "up" ? "para cima" : direction == "down" ? "para baixo" : direction == "left" ? "para a esquerda" : "para a direita") (\(amount) pág.)"
+        let words = scrollWords(direction, amount: amount, modifiers: modifiers)
         let scrollArea = areaRole == "AXScrollArea" ? area : nil
-        if let scrollArea, let bar = scrollArea.element(vertical ? "AXVerticalScrollBar" : "AXHorizontalScrollBar"),
+        if modifiers.isEmpty, let scrollArea, let bar = scrollArea.element(vertical ? "AXVerticalScrollBar" : "AXHorizontalScrollBar"),
            bar.isSettable("AXValue"), case .number(let current)? = bar.attribute("AXValue") {
             // A page is what the area shows; the bar's value runs over what is hidden.
             var page = 0.25
@@ -2420,12 +2859,31 @@ struct UIActTool: AgentTool {
             frame = CGRect(origin: origin, size: size)
         }
         guard let frame else { throw ToolError("\(target.name) não rola por Acessibilidade e não diz onde está na tela.") }
-        let pixels = Int(Double(vertical ? frame.height : frame.width) * 0.9) * amount
-        // Positive values move the content down (the page goes up), like a trackpad.
-        let delta = Int(-sign) * pixels
+        let delta = scrollDelta(direction, amount: amount, size: frame.size, modifiers: modifiers)
         return Acted(summary: "Rolei \(target.name) (\(target.id)) \(words).", target: target.element, before: state,
-                     input: .scroll(dx: vertical ? 0 : delta, dy: vertical ? delta : 0, at: CGPoint(x: frame.midX, y: frame.midY), window: windowRef),
+                     input: .scroll(dx: delta.dx, dy: delta.dy, at: CGPoint(x: frame.midX, y: frame.midY), window: windowRef, modifiers: modifiers),
                      inputWhat: "rolar \(target.name)")
+    }
+
+    static func scrollWords(_ direction: String, amount: Int, modifiers: KeyStroke.Modifiers) -> String {
+        let way = direction == "up" ? "para cima" : direction == "down" ? "para baixo" : direction == "left" ? "para a esquerda" : "para a direita"
+        return "\(way) (\(scrollSize(amount: amount, modifiers: modifiers)))"
+    }
+
+    /// "2 pág." — or, with keys held, steps of 60 pixels: "2 passos, com ⌥".
+    static func scrollSize(amount: Int, modifiers: KeyStroke.Modifiers) -> String {
+        modifiers.isEmpty ? "\(amount) pág." : "\(amount) \(amount == 1 ? "passo" : "passos"), com \(symbols(modifiers))"
+    }
+
+    /// The pixels of a scroll event: a page is nine tenths of the area; with keys held (to zoom) a step is 60 pixels, so the
+    /// model can stop short of the end of the zoom.
+    static func scrollDelta(_ direction: String, amount: Int, size: CGSize, modifiers: KeyStroke.Modifiers) -> (dx: Int, dy: Int) {
+        let vertical = direction == "up" || direction == "down"
+        let sign = direction == "up" || direction == "left" ? -1 : 1
+        let unit = modifiers.isEmpty ? Int(Double(vertical ? size.height : size.width) * 0.9) : 60
+        // Positive values move the content down (the page goes up), like a trackpad.
+        let delta = -sign * unit * amount
+        return (vertical ? 0 : delta, vertical ? delta : 0)
     }
 
     /// A number or a yes/no for an element that holds one (sliders, checkboxes); text for everything else.
@@ -2448,68 +2906,70 @@ struct UIActTool: AgentTool {
     // MARK: Taking the screen over (N2)
 
     private enum Move: Sendable {
-        case click(CGPoint, button: MouseButton, count: Int)
+        case click(CGPoint, Clicking)
+        case hover(CGPoint)
         case type(String)
         case key(KeyStroke)
-        case drag(CGPoint, to: CGPoint)
+        case drag([CGPoint], modifiers: KeyStroke.Modifiers)
     }
 
     /// Runs the steps with the real mouse and keyboard, only through `ScreenOwner` (which brings the app forward, and puts
     /// the user's app, window and cursor back whatever happens). Where each step lands is read in the background first.
-    private func takeOver(_ steps: [Step], app: AccessibilityApp, context: ToolContext) async throws -> String {
+    private func takeOver(_ steps: [Step], app: AccessibilityApp, context: ToolContext, approved: Bool) async throws -> String {
         let snapshot = store.snapshot(bot: context.botID, app: app)
         let system = system, live = live
         let bot = context.botID
+        // Where a drag into another app lets go is read from that app first (its own queue).
+        var drops: [Int: DropTarget] = [:]
+        for (index, step) in steps.enumerated() { drops[index] = try await dropTarget(for: step, app: app, bot: bot, approved: approved) }
+        let ends = drops
         let (moves, window, before) = try await UIAccess.mapped(app) {
             try await sessions.run(app, within: sessions.deadlines.action) { () throws -> ([Move], (any AccessibilityElement)?, UIState) in
                 let root = system.root(of: app)
                 var moves: [Move] = []
                 var window: (any AccessibilityElement)?
-                func center(_ step: Step) throws -> CGPoint {
-                    if let pixel = step.point {
-                        guard let snapshot, let shot = snapshot.shot else {
-                            throw ToolError("x e y são pixels do último screenshot com marcas da janela; tire um screenshot antes.")
-                        }
-                        guard let windows = root.elements("AXWindows"), let found = UIWindowChooser.window(of: snapshot, in: windows) else {
-                            throw UIResolver.stale("a janela \(UIText.quoted(snapshot.windowTitle)) não está mais aberta")
-                        }
-                        let now = found.read(["AXPosition", "AXSize"]).attributes ?? [:]
-                        guard case .point(let origin)? = now["AXPosition"], case .size(let size)? = now["AXSize"] else {
-                            throw UIResolver.stale("não consegui ler onde está a janela")
-                        }
-                        // As in the background: the pixels point elsewhere in a window that changed size since the picture.
-                        guard abs(size.width - shot.windowFrame.width) <= 2, abs(size.height - shot.windowFrame.height) <= 2 else {
-                            throw UIResolver.stale("a janela mudou de tamanho desde o screenshot; tire outro")
-                        }
-                        window = window ?? found
-                        return CGPoint(x: origin.x + pixel.x / shot.scale, y: origin.y + pixel.y / shot.scale)
+                func center(_ reference: String?, _ pixel: CGPoint?) throws -> CGPoint {
+                    if let pixel {
+                        let spot = try Spot.read(snapshot, root: root, app: app)
+                        try spot.check(pixel)
+                        window = window ?? spot.window
+                        return spot.screen(pixel)
                     }
-                    let id = try UIResolver.id(for: step.reference ?? "", in: snapshot, app: app)
+                    let id = try UIResolver.id(for: reference ?? "", in: snapshot, app: app)
                     let cached = snapshot.flatMap { live.element(bot: bot, pid: app.pid, generation: $0.generation, takenAt: $0.takenAt, id: id) }
                     let target = try UIResolver.resolve(id: id, root: root, app: app, snapshot: snapshot, cached: cached)
                     window = window ?? target.window
                     guard let frame = target.frame else { throw ToolError("\(target.name) não diz onde está na tela.") }
                     return CGPoint(x: frame.midX, y: frame.midY)
                 }
-                for step in steps {
+                for (index, step) in steps.enumerated() {
                     switch step.action {
                     case .press, .focus, .select, .showMenu:
-                        moves.append(.click(try center(step), button: .left, count: 1))
+                        moves.append(.click(try center(step.reference, step.point), Clicking()))
                     case .click:
-                        moves.append(.click(try center(step), button: step.button, count: step.count))
+                        // The real mouse has no long press here: it is a background feature.
+                        if step.hold > .zero { throw ToolError("Segurar o clique só funciona em segundo plano; repita sem takeover.") }
+                        moves.append(.click(try center(step.reference, step.point), step.clicking))
+                    case .move:
+                        moves.append(.hover(try center(step.reference, step.point)))
                     case .drag:
-                        var destination = step
-                        destination.reference = step.value
-                        moves.append(.drag(try center(step), to: try center(destination)))
+                        let end = try ends[index]?.point ?? center(step.destination, step.destinationPoint)
+                        moves.append(.drag(DragPath.arc(from: try center(step.reference, step.point), to: end), modifiers: step.modifiers))
+                    case .draw:
+                        let spot = try Spot.read(snapshot, root: root, app: app)
+                        for (number, point) in step.stroke.enumerated() { try spot.check(point.point, number: number + 1) }
+                        window = window ?? spot.window
+                        let path = DragPath.stroke(step.stroke.map { StrokePoint(point: spot.screen($0.point), pressure: $0.pressure) })
+                        moves.append(.drag(path.map(\.point), modifiers: []))
                     case .type:
-                        if step.reference != nil { moves.append(.click(try center(step), button: .left, count: 1)) }
+                        if step.reference != nil { moves.append(.click(try center(step.reference, step.point), Clicking())) }
                         moves.append(.type(step.value ?? ""))
                     case .setValue:
-                        moves.append(.click(try center(step), button: .left, count: 1))
+                        moves.append(.click(try center(step.reference, step.point), Clicking()))
                         moves.append(.key(KeyStroke(.character("a"), modifiers: .command)))
                         moves.append(.type(step.value ?? ""))
                     case .key:
-                        if step.reference != nil { moves.append(.click(try center(step), button: .left, count: 1)) }
+                        if step.reference != nil { moves.append(.click(try center(step.reference, step.point), Clicking())) }
                         moves += step.keys.map(Move.key)
                     case .scroll, .increment, .decrement, .pickMenu:
                         throw ToolError("\(step.action.rawValue) funciona em segundo plano; repita sem takeover.")
@@ -2522,10 +2982,12 @@ struct UIActTool: AgentTool {
             for move in moves {
                 try Task.checkCancellation()
                 switch move {
-                case .click(let point, let button, let count): try await hand.click(at: point, button: button, count: count)
+                case .click(let point, let click):
+                    try await hand.click(at: point, button: click.button, count: click.count, modifiers: click.modifiers)
+                case .hover(let point): try await hand.move(to: point)
                 case .type(let text): try await hand.type(text)
                 case .key(let stroke): try await hand.key(stroke)
-                case .drag(let start, let end): try await hand.drag(from: start, to: end)
+                case .drag(let points, let modifiers): try await hand.drag(along: points, modifiers: modifiers)
                 }
             }
         }

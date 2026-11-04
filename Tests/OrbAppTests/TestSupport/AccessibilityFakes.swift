@@ -184,6 +184,8 @@ final class FakeAccessibility: AccessibilitySystem, @unchecked Sendable {
     var hitHandler: (@Sendable (AccessibilityApp, CGPoint) -> FakeElement?)?
     /// What the window server lists per process (`windowList`); empty by default, like a list that has nothing for the app.
     var listedWindows: [Int32: [CapturableWindow]] = [:]
+    /// Answers `windowOnTop`; nil result means no window there, which the tools read as "nothing covers it".
+    var onTopHandler: (@Sendable (CGPoint) -> CapturableWindow?)?
     private var rootRequests = 0
     private var frontmostRequests = 0
     private var appListings: [Bool] = []
@@ -224,6 +226,7 @@ final class FakeAccessibility: AccessibilitySystem, @unchecked Sendable {
         return frontmost
     }
     func windowList(pid: Int32) -> [CapturableWindow] { listedWindows[pid] ?? [] }
+    func windowOnTop(at point: CGPoint) -> CapturableWindow? { onTopHandler?(point) }
     func secondsSinceUserInput() -> TimeInterval { userIdle }
 
     var events: any AccessibilityEvents { axEvents }
@@ -326,6 +329,7 @@ final class FakeSyntheticInput: SyntheticInput, @unchecked Sendable {
     private let lock = NSLock()
     private var log: [Event] = []
     private var lastDetails = Details()
+    private var watched: DragWatch?
     private var secure = false
     private var failure: (any Error)?
     /// Characters per chunk of `text`; the real implementation sends at most 20 UTF-16 units at a time.
@@ -348,6 +352,10 @@ final class FakeSyntheticInput: SyntheticInput, @unchecked Sendable {
     var details: Details { lock.withLock { lastDetails } }
     /// What the next `drag` answers (or throws), after recording it.
     var dragOutcome: Result<DragOutcome, any Error> = .success(.moved)
+    /// The watch the last drag was given: a test asks it what the real input would while it moves.
+    var lastWatch: DragWatch? { lock.withLock { watched } }
+    /// Runs inside a drag with its watch, like the real input asking it on the way (a cover found, the person back).
+    var whileDragging: (@Sendable (DragWatch) async -> Void)?
     /// Everything typed to `pid`, in order.
     func typed(to pid: Int32) -> String {
         events.compactMap { if case .text(let text, pid) = $0 { text } else { nil } }.joined()
@@ -397,6 +405,8 @@ final class FakeSyntheticInput: SyntheticInput, @unchecked Sendable {
               watch: DragWatch, to pid: Int32) async throws -> DragOutcome {
         try record(.drag(path.first?.point ?? .zero, path.last?.point ?? .zero, window: window.id, pid: pid))
         note(Details(modifiers: modifiers, duration: duration, path: path, frame: window.frame))
+        lock.withLock { watched = watch }
+        await whileDragging?(watch)
         return try dragOutcome.get()
     }
 
@@ -489,8 +499,8 @@ final class FakeTakeoverHand: TakeoverHand, @unchecked Sendable {
         case type(String)
         case key(KeyStroke)
         case drag(from: CGPoint, to: CGPoint)
-        /// A click with keys held; a click with none is recorded as `.click`, whatever its count.
-        case modifiedClick(CGPoint, button: MouseButton, count: Int, modifiers: KeyStroke.Modifiers)
+        /// The calls with keys held, hover and a path, which the older ones above cannot carry.
+        case clickHeld(CGPoint, button: MouseButton, count: Int, modifiers: KeyStroke.Modifiers)
         case move(CGPoint)
         case dragAlong([CGPoint], modifiers: KeyStroke.Modifiers)
     }
@@ -504,10 +514,15 @@ final class FakeTakeoverHand: TakeoverHand, @unchecked Sendable {
     func type(_ text: String) async throws { record(.type(text)) }
     func key(_ stroke: KeyStroke) async throws { record(.key(stroke)) }
     func drag(from start: CGPoint, to end: CGPoint) async throws { record(.drag(from: start, to: end)) }
+
+    /// A plain click keeps being recorded as before; only what the older call cannot carry is recorded as itself.
     func click(at point: CGPoint, button: MouseButton, count: Int, modifiers: KeyStroke.Modifiers) async throws {
-        record(modifiers.isEmpty ? .click(point, button: button, count: count) : .modifiedClick(point, button: button, count: count, modifiers: modifiers))
+        if modifiers.isEmpty, count <= 2 { return try await click(at: point, button: button, count: count) }
+        record(.clickHeld(point, button: button, count: count, modifiers: modifiers))
     }
+
     func move(to point: CGPoint) async throws { record(.move(point)) }
+
     func drag(along points: [CGPoint], modifiers: KeyStroke.Modifiers) async throws { record(.dragAlong(points, modifiers: modifiers)) }
 }
 

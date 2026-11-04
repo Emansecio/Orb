@@ -869,8 +869,8 @@ struct UIToolWiringTests {
         }
         let act = try #require(ToolBox.macTools.first { $0.spec.name == "ui_act" })
         let actions = act.spec.parameters["properties"]?["action"]?["enum"]?.array?.compactMap(\.string)
-        #expect(actions == ["press", "focus", "set_value", "type", "key", "select", "scroll", "click", "drag", "increment", "decrement",
-                            "show_menu", "pick_menu"])
+        #expect(actions == ["press", "focus", "set_value", "type", "key", "select", "scroll", "click", "move", "drag", "draw", "increment",
+                            "decrement", "show_menu", "pick_menu"])
         #expect(act.spec.parameters["required"]?.array?.compactMap(\.string) == ["action"])
     }
 
