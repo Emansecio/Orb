@@ -535,7 +535,7 @@ struct LiveSyntheticInput: SyntheticInput {
         var dropping = false
         var reached = 0
         do {
-            for index in 1...max(1, moves) where moves > 0 {
+            for index in 1...moves {
                 try await Task.sleep(for: step)
                 if let reason = await watch.interruption() { throw Interrupted(reason: reason) }
                 try sink.post(events[index], to: pid)
@@ -545,6 +545,8 @@ struct LiveSyntheticInput: SyntheticInput {
                     if let cover = watch.coverAtEnd() { throw Interrupted(reason: Self.covered(cover)) }
                 }
             }
+            // The app may start the session on the last move, after the check above.
+            if !dropping, pasteboard() != written { dropping = true }
             if dropping, let cover = watch.coverAtEnd() { throw Interrupted(reason: Self.covered(cover)) }
             try sink.post(events[events.count - 1], to: pid)
             return dropping ? .dropped : .moved
