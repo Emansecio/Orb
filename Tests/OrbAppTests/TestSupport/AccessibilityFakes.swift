@@ -226,7 +226,7 @@ final class FakeAccessibility: AccessibilitySystem, @unchecked Sendable {
         return frontmost
     }
     func windowList(pid: Int32) -> [CapturableWindow] { listedWindows[pid] ?? [] }
-    func windowOnTop(at point: CGPoint) -> CapturableWindow? { onTopHandler?(point) }
+    func windowOnTop(at point: CGPoint) async -> CapturableWindow? { onTopHandler?(point) }
     func secondsSinceUserInput() -> TimeInterval { userIdle }
 
     var events: any AccessibilityEvents { axEvents }

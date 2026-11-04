@@ -227,9 +227,18 @@ private func expectUndisturbed(_ fixture: FixtureApp, _ comment: Comment, _ body
 private func text(_ event: JSONValue?, _ key: String) -> String? { event?[key]?.string }
 
 /// The app whose window is on top at `point` when it is not `window` itself: what a drop there would land on instead.
+@MainActor
 private func coveringOwner(over window: EventWindow, at point: CGPoint) -> String? {
-    guard let top = WindowStack.onTop(at: point), top.windowID != window.id else { return nil }
+    guard let top = onTop(at: point), top.windowID != window.id else { return nil }
     return top.owner
+}
+
+/// `WindowStack.onTop` as the app gets it: the window server's hit test needs an app connection, which the test process
+/// only has once `NSApplication` exists.
+@MainActor
+private func onTop(at point: CGPoint) -> CapturableWindow? {
+    _ = NSApplication.shared
+    return WindowStack.onTop(at: point)
 }
 private func number(_ event: JSONValue?, _ key: String) -> Double? { if case .number(let n)? = event?[key] { n } else { nil } }
 
@@ -532,11 +541,12 @@ struct AXSmokeTests {
         let scale = shot.text.range(of: #"(\d+(?:[.,]\d+)?)\s*px/pt"#, options: .regularExpression)
             .flatMap { Double(shot.text[$0].replacingOccurrences(of: ",", with: ".").split(separator: " ").first ?? "") } ?? 1
         let x = fixture.canvasInWindow.x * scale, y = fixture.canvasInWindow.y * scale
+        var answer = ""
         try await expectUndisturbed(fixture, "click") {
-            _ = try await session.act("click", ["x": .number(x), "y": .number(y)])
+            answer = try await session.act("click", ["x": .number(x), "y": .number(y)])
         }
         let logged = await fixture.waitFor("canvas")
-        #expect(logged != nil)
+        #expect(logged != nil, "the click arrived; the tool said: \(answer)")
     }
 
     @Test(.enabled(if: AXSmoke.capture))
@@ -633,7 +643,7 @@ struct AXSmokeTests {
         var outcome: DragOutcome?
         try await expectUndisturbed(fixture, "drag and drop") {
             outcome = try await LiveSyntheticInput().drag(along: path, window: window, modifiers: [], duration: .milliseconds(700),
-                                                          watch: DragWatch(coverAtEnd: { coveringOwner(over: window, at: destination) }),
+                                                          watch: DragWatch(coverAtEnd: { await coveringOwner(over: window, at: destination) }),
                                                           to: fixture.pid)
         }
         #expect(outcome == .dropped, "it turned into a system drag-and-drop and was let go on the target")
@@ -651,7 +661,7 @@ struct AXSmokeTests {
         fixture.send("coverdest")
         #expect(await fixture.waitFor("cover") != nil, "the fixture covered its drop target")
         try await Task.sleep(for: .milliseconds(500))
-        let top = try #require(WindowStack.onTop(at: destination), "something is on top of the target")
+        let top = try #require(await onTop(at: destination), "something is on top of the target")
         try #require(top.windowID != window.id, "and it is the cover, not the fixture's window")
 
         let path = DragPath.arc(from: fixture.sourceCenter, to: destination).map { StrokePoint(point: $0) }
@@ -659,7 +669,7 @@ struct AXSmokeTests {
         try await expectUndisturbed(fixture, "covered drop") {
             do {
                 _ = try await LiveSyntheticInput().drag(along: path, window: window, modifiers: [], duration: .milliseconds(700),
-                                                        watch: DragWatch(coverAtEnd: { coveringOwner(over: window, at: destination) }),
+                                                        watch: DragWatch(coverAtEnd: { await coveringOwner(over: window, at: destination) }),
                                                         to: fixture.pid)
                 Issue.record("the drag should have stopped before letting go")
             } catch let error as DragStopped {

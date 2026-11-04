@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 import ImageIO
@@ -305,8 +306,25 @@ enum WindowStack {
     /// are normal windows, floating panels, the Dock, the menu bar, menus and help tags.
     static let topLayer = 200
 
+    /// Asks the window server, which skips windows that let clicks through: an invisible full-screen overlay (the
+    /// Screenshot app leaves one on macOS 27) is listed on top of everything but receives no drop. Without an app
+    /// connection (`NSApp`) the server answers 0, and the listing is walked instead.
+    @MainActor
     static func onTop(at point: CGPoint) -> CapturableWindow? {
-        let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+        if NSApp != nil {
+            // AppKit counts from the bottom left of the main display; the point is from its top left.
+            let cocoa = NSPoint(x: point.x, y: CGDisplayBounds(CGMainDisplayID()).height - point.y)
+            var below = 0
+            // A few rounds at most: only a window above the drop layers (never hit in practice) makes it look further down.
+            for _ in 0..<4 {
+                let number = NSWindow.windowNumber(at: cocoa, belowWindowWithWindowNumber: below)
+                guard number > 0, let window = info.first(where: { ($0[kCGWindowNumber as String] as? NSNumber)?.intValue == number })
+                else { break }
+                if ((window[kCGWindowLayer as String] as? NSNumber)?.intValue ?? 0) <= topLayer { return capturable(window) }
+                below = number
+            }
+        }
         return onTop(at: point, in: info)
     }
 
@@ -315,15 +333,19 @@ enum WindowStack {
         for window in info {
             let layer = (window[kCGWindowLayer as String] as? NSNumber)?.intValue ?? 0
             let alpha = (window[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1
-            guard (0...topLayer).contains(layer), alpha > 0.01,
-                  let pid = (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
-                  let number = (window[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
-                  let bounds = (window[kCGWindowBounds as String] as? NSDictionary).flatMap({ CGRect(dictionaryRepresentation: $0 as CFDictionary) }),
-                  bounds.contains(point) else { continue }
-            return CapturableWindow(windowID: number, pid: pid, frame: bounds, title: window[kCGWindowName as String] as? String ?? "",
-                                    isOnScreen: true, owner: window[kCGWindowOwnerName as String] as? String ?? "")
+            guard (0...topLayer).contains(layer), alpha > 0.01, let found = capturable(window), found.frame.contains(point) else { continue }
+            return found
         }
         return nil
+    }
+
+    private static func capturable(_ window: [String: Any]) -> CapturableWindow? {
+        guard let pid = (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
+              let number = (window[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
+              let bounds = (window[kCGWindowBounds as String] as? NSDictionary).flatMap({ CGRect(dictionaryRepresentation: $0 as CFDictionary) })
+        else { return nil }
+        return CapturableWindow(windowID: number, pid: pid, frame: bounds, title: window[kCGWindowName as String] as? String ?? "",
+                                isOnScreen: true, owner: window[kCGWindowOwnerName as String] as? String ?? "")
     }
 }
 

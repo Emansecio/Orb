@@ -703,6 +703,35 @@ struct AccessibilityPointingTests {
         #expect(UIActTool.localHit(CGPoint(x: 500, y: 500), in: snapshot) == nil)
     }
 
+    @Test func aRowScrolledOutOfViewIsNotWhatIsAtThePoint() throws {
+        // A list showing rows down to y 110; row 13 sits below it, under whatever the window shows there.
+        let entries: [String: UISnapshot.Entry] = [
+            "w1": .init(rawRole: "AXWindow", label: "A", secure: false, frame: CGRect(x: 0, y: 0, width: 400, height: 300)),
+            "w1.1": .init(rawRole: "AXScrollArea", label: "", secure: false, frame: CGRect(x: 10, y: 10, width: 200, height: 100)),
+            "w1.1.1": .init(rawRole: "AXTable", label: "", secure: false, frame: CGRect(x: 10, y: 10, width: 200, height: 400)),
+            "w1.1.1.13": .init(rawRole: "AXRow", label: "13", secure: false, frame: CGRect(x: 10, y: 150, width: 200, height: 20), actionable: true),
+            "w1.1.1.2": .init(rawRole: "AXRow", label: "2", secure: false, frame: CGRect(x: 10, y: 30, width: 200, height: 20), actionable: true),
+        ]
+        let shot = ShotGeometry(pixelWidth: 400, pixelHeight: 300, scale: 1, windowFrame: windowFrame, windowID: 1)
+        let snapshot = UISnapshot(app: AccessibilityApp(name: "X", bundleID: nil, pid: 1), windowIndex: 1, windowTitle: "A", entries: entries, shot: shot)
+        #expect(UIActTool.localHit(CGPoint(x: 50, y: 160), in: snapshot)?.id == "w1", "the hidden row is not there, nor its table")
+        #expect(UIActTool.localHit(CGPoint(x: 50, y: 40), in: snapshot)?.id == "w1.1.1.2", "a row in view still is")
+    }
+
+    @Test func aHitOnTheWindowItselfClicksThePointNotWhatTheReadingHasThere() async throws {
+        // A canvas Accessibility does not see: the app answers with the window, and the reading's element at the point
+        // (here OK; in a real app a row scrolled out of view) is not what is shown there.
+        let (bench, ok, _) = pointingBench()
+        try await bench.read()
+        try bench.addShot(marks: [:], windowFrame: windowFrame, windowID: 55)
+        let window = try #require(bench.root.attrs["AXWindows"]?.elements?.first as? FakeElement)
+        bench.system.hitHandler = { _, _ in window }
+        let text = try await bench.act(["action": .string("click"), "x": .number(180), "y": .number(110)])
+        #expect(text.hasPrefix("Cliquei em x 180, y 110 de “A”."))
+        #expect(ok.performed.isEmpty)
+        #expect(bench.system.syntheticInput.events == [.click(CGPoint(x: 190, y: 155), window: 55, button: .left, count: 1, pid: 100)])
+    }
+
     @Test func aResizedWindowMakesThePointStale() async throws {
         let (bench, ok, _) = pointingBench()
         try await bench.read()
@@ -878,6 +907,7 @@ struct AccessibilityReviewTests {
         #expect(!UIActTool.belongs(loose, to: window))
         (loose.attrs["AXParent"]?.element as? FakeElement)?.attrs["AXParent"] = .element(window)
         #expect(UIActTool.belongs(loose, to: window))
+        #expect(UIActTool.belongs(window, to: window), "the window itself, which the app answers where nothing else is")
     }
 
     @Test func takeoverAtAPointChecksTheWindowStillHasTheScreenshotsSize() async throws {
@@ -2070,7 +2100,7 @@ struct AccessibilityMouseTests {
 
         // The watch finds a window over the end point while the drag runs, and the drop is cancelled.
         bench.system.onTopHandler = { [safari] _ in safari }
-        bench.system.syntheticInput.whileDragging = { watch in _ = watch.coverAtEnd() }
+        bench.system.syntheticInput.whileDragging = { watch in _ = await watch.coverAtEnd() }
         bench.system.syntheticInput.dragOutcome = .failure(DragStopped(reason: "Safari está por cima", ending: .dropCancelled))
         let covered = await failureMessage { try await bench.act(call) }
         #expect(covered.hasPrefix(UIActTool.takeoverMarker) && covered.contains("nada foi solto") && covered.contains("takeover: true"))
@@ -2092,13 +2122,13 @@ struct AccessibilityMouseTests {
         let watch = try #require(bench.system.syntheticInput.lastWatch)
         let notas = CapturableWindow(windowID: 55, pid: 100, frame: windowFrame, title: "A", owner: "Notas")
         bench.system.onTopHandler = { _ in notas }
-        #expect(watch.coverAtEnd() == nil, "the app's own window is on top at the end")
+        #expect(await watch.coverAtEnd() == nil, "the app's own window is on top at the end")
         bench.system.onTopHandler = { [safari] _ in safari }
-        #expect(watch.coverAtEnd() == "Safari")
+        #expect(await watch.coverAtEnd() == "Safari")
         bench.system.onTopHandler = { _ in CapturableWindow(windowID: 13, pid: 201, frame: .zero, title: "", owner: "") }
-        #expect(watch.coverAtEnd() == "", "a window with no owner name is still a cover (the text says \"outra janela\")")
+        #expect(await watch.coverAtEnd() == "", "a window with no owner name is still a cover (the text says \"outra janela\")")
         bench.system.onTopHandler = nil
-        #expect(watch.coverAtEnd() == nil, "nothing known there: nothing is said to cover it")
+        #expect(await watch.coverAtEnd() == nil, "nothing known there: nothing is said to cover it")
 
         bench.system.frontmost = 100
         bench.system.userIdle = 1
@@ -2155,7 +2185,7 @@ struct AccessibilityMouseTests {
         bench.system.onTopHandler = { [safari] _ in safari }
         _ = try await bench.act(["action": string("drag"), "id": string("w1.1"), "to": string("w1.2")])
         #expect(bench.system.syntheticInput.events.count == 1, "an in-app drag works under a cover")
-        #expect(bench.system.syntheticInput.lastWatch?.coverAtEnd() == "Safari")
+        #expect(await bench.system.syntheticInput.lastWatch?.coverAtEnd() == "Safari")
     }
 
     @Test func toAppIsReadFromThatAppsOwnScreenshotAndNeedsAReading() async throws {
@@ -2276,9 +2306,9 @@ struct AccessibilityMouseTests {
         let bench = try await drawBench()
         _ = try await bench.act(["action": string("draw"), "path": points([[10, 10], [60, 40]])])
         let watch = try #require(bench.system.syntheticInput.lastWatch)
-        #expect(watch.coverAtEnd() != nil, "whatever is at the end, a drop that starts is cancelled")
+        #expect(await watch.coverAtEnd() != nil, "whatever is at the end, a drop that starts is cancelled")
 
-        bench.system.syntheticInput.whileDragging = { watch in _ = watch.coverAtEnd() }
+        bench.system.syntheticInput.whileDragging = { watch in _ = await watch.coverAtEnd() }
         bench.system.syntheticInput.dragOutcome = .failure(DragStopped(reason: "x", ending: .dropCancelled))
         let message = await failureMessage { try await bench.act(["action": string("draw"), "path": points([[10, 10], [60, 40]])]) }
         #expect(message.hasPrefix("Não deu para desenhar: o traço começou um arrastar e soltar") && message.contains("cancelei com Esc"))

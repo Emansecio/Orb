@@ -1982,8 +1982,8 @@ struct UIActTool: AgentTool {
         let endApp = drag.drop?.app ?? app
         let start = drag.path[0].point, end = drag.path[drag.path.count - 1].point
         if drag.drop != nil {
-            try showing(source, at: start, of: app, end: "o arrasto começa")
-            try showing(endWindow, at: end, of: endApp, end: "o arrasto termina")
+            try await showing(source, at: start, of: app, end: "o arrasto começa")
+            try await showing(endWindow, at: end, of: endApp, end: "o arrasto termina")
         }
         let system = system, covered = CoverLog()
         let people = [app] + (drag.drop.map { [$0.app] } ?? [])
@@ -1991,7 +1991,7 @@ struct UIActTool: AgentTool {
             coverAtEnd: {
                 // A pen stroke that turned into a drag-and-drop is cancelled whatever is at the end.
                 if drag.pen { covered.note(""); return "" }
-                guard let top = system.windowOnTop(at: end), top.windowID != endWindow.id else { return nil }
+                guard let top = await system.windowOnTop(at: end), top.windowID != endWindow.id else { return nil }
                 covered.note(top.owner)
                 return top.owner
             },
@@ -2015,8 +2015,8 @@ struct UIActTool: AgentTool {
     }
 
     /// Before pressing, the window of a drag's end must be the one on top at its point.
-    private func showing(_ window: EventWindow, at point: CGPoint, of app: AccessibilityApp, end: String) throws {
-        guard let top = system.windowOnTop(at: point), top.windowID != window.id else { return }
+    private func showing(_ window: EventWindow, at point: CGPoint, of app: AccessibilityApp, end: String) async throws {
+        guard let top = await system.windowOnTop(at: point), top.windowID != window.id else { return }
         let who = top.pid == app.pid ? "outra janela de \(app.name)" : (top.owner.isEmpty ? "outra janela" : top.owner)
         throw ToolError("Nada foi pressionado: \(who) está por cima de onde \(end) (\(app.name)), e um arrasto entre janelas ou apps "
                         + "segue o que está por cima. Traga a janela de \(app.name) para a vista, ou repita com takeover: true.")
@@ -2544,10 +2544,18 @@ struct UIActTool: AgentTool {
         // The app's hit test sees what is really on top (a popover, a sheet); it is z-ordered, so a covered window answers
         // nothing and the reading decides. It sees every window of the app, though: what it finds in another window (one
         // over the screenshot's) is not what the click is about, and the reading decides then too.
+        func atThePoint() -> Acted {
+            Acted(summary: "\(clickVerb(step.clicking)) \(description) de \(snapshot.windowTitle.isEmpty ? app.name : UIText.quoted(snapshot.windowTitle)).",
+                  target: nil, before: UIState.capture(root: root, target: nil),
+                  input: .click(screen, window: windowRef, step.clicking), inputWhat: "clicar em \(description)")
+        }
         if let hit = system.hitTest(app, at: screen), belongs(hit, to: window), !(target.map { related(hit, to: $0.element) } ?? false) {
+            // The window itself: nothing Accessibility knows is there (a canvas), so whatever the reading has at the point (a
+            // row scrolled out of view) is not it either.
+            if hit.isSame(as: window) { return atThePoint() }
             var element: any AccessibilityElement = hit
             for _ in 0..<5 where clickable(element) == false {
-                guard let parent = element.element("AXParent") else { break }
+                guard let parent = element.element("AXParent"), !parent.isSame(as: window) else { break }
                 element = parent
             }
             let info = UIElementInfo(attributes: element.attributes(UIElementInfo.attributeNames))
@@ -2572,14 +2580,13 @@ struct UIActTool: AgentTool {
             return Acted(summary: "\(clickVerb(step.clicking)) \(target.name) (\(target.id), \(description)).", target: target.element, before: state,
                          input: .click(screen, window: windowRef, step.clicking), inputWhat: "clicar em \(target.name)")
         }
-        return Acted(summary: "\(clickVerb(step.clicking)) \(description) de \(snapshot.windowTitle.isEmpty ? app.name : UIText.quoted(snapshot.windowTitle)).",
-                     target: nil, before: UIState.capture(root: root, target: nil),
-                     input: .click(screen, window: windowRef, step.clicking), inputWhat: "clicar em \(description)")
+        return atThePoint()
     }
 
     /// Whether `element` is in `window`, or in a sheet or drawer of it: its `AXWindow` (or that window's parent) is the
     /// window, or, for an element that does not say, the window is among its ancestors.
     static func belongs(_ element: any AccessibilityElement, to window: any AccessibilityElement) -> Bool {
+        if element.isSame(as: window) { return true }
         if let own = element.element("AXWindow") {
             return own.isSame(as: window) || own.element("AXParent")?.isSame(as: window) == true
         }
@@ -2612,7 +2619,9 @@ struct UIActTool: AgentTool {
     static func localHit(_ pixel: CGPoint, in snapshot: UISnapshot) -> (id: String, actionable: Bool)? {
         guard let shot = snapshot.shot, shot.scale > 0 else { return nil }
         let point = CGPoint(x: pixel.x / shot.scale, y: pixel.y / shot.scale)
-        let containing = snapshot.entries.filter { $0.key.hasPrefix("w") && ($0.value.frame?.contains(point) ?? false) }
+        let containing = snapshot.entries.filter {
+            $0.key.hasPrefix("w") && ($0.value.frame?.contains(point) ?? false) && !scrolledAway($0.key, at: point, in: snapshot.entries)
+        }
         guard let smallest = containing.min(by: { area($0.value.frame) < area($1.value.frame) || (area($0.value.frame) == area($1.value.frame) && $0.key.count > $1.key.count) }) else {
             return nil
         }
@@ -2626,6 +2635,17 @@ struct UIActTool: AgentTool {
     }
 
     private static func area(_ frame: CGRect?) -> CGFloat { frame.map { $0.width * $0.height } ?? .infinity }
+
+    /// Whether a scroll area around the entry leaves the point out: a row scrolled out of view keeps a frame, under whatever
+    /// the window shows below the list.
+    private static func scrolledAway(_ id: String, at point: CGPoint, in entries: [String: UISnapshot.Entry]) -> Bool {
+        var id = Substring(id)
+        while let dot = id.lastIndex(of: ".") {
+            id = id[..<dot]
+            if let entry = entries[String(id)], entry.rawRole == "AXScrollArea", let frame = entry.frame, !frame.contains(point) { return true }
+        }
+        return false
+    }
 
     /// A place a call points at, on the screen.
     struct Place: Sendable {

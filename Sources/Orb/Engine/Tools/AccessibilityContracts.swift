@@ -263,7 +263,7 @@ enum DragOutcome: Sendable, Equatable {
 struct DragWatch: Sendable {
     /// Asked when a system drag-and-drop starts and again right before it is let go: the app whose window covers the end
     /// point (a drop lands in whatever is on top there), or nil when the end point is clear.
-    var coverAtEnd: @Sendable () -> String? = { nil }
+    var coverAtEnd: @Sendable () async -> String? = { nil }
     /// Asked between moves: why to stop now (the person went to the app), or nil to go on.
     var interruption: @Sendable () async -> String? = { nil }
 }

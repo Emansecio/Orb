@@ -140,7 +140,7 @@ protocol AccessibilitySystem: Sendable {
     func windowList(pid: Int32) -> [CapturableWindow]
     /// The window on top at a point in screen coordinates, of any app and any layer up to help tags (what a system
     /// drag-and-drop let go there would land in). Needs no permission.
-    func windowOnTop(at point: CGPoint) -> CapturableWindow?
+    func windowOnTop(at point: CGPoint) async -> CapturableWindow?
     /// Seconds since the user last pressed a key or a mouse button. Infinite when unknown.
     func secondsSinceUserInput() -> TimeInterval
     /// Notifications from an app (`AXObserver`).
@@ -159,7 +159,7 @@ extension AccessibilitySystem {
     func hitTest(_ app: AccessibilityApp, at point: CGPoint) -> (any AccessibilityElement)? { nil }
     func frontmostPID() async -> Int32? { nil }
     func windowList(pid: Int32) -> [CapturableWindow] { [] }
-    func windowOnTop(at point: CGPoint) -> CapturableWindow? { nil }
+    func windowOnTop(at point: CGPoint) async -> CapturableWindow? { nil }
     func secondsSinceUserInput() -> TimeInterval { .infinity }
     var events: any AccessibilityEvents { UnavailableAccessibilityEvents() }
     var input: any SyntheticInput { UnavailableSyntheticInput() }
@@ -228,7 +228,7 @@ struct LiveAccessibilitySystem: AccessibilitySystem {
         return Self.windows(in: info, pid: pid)
     }
 
-    func windowOnTop(at point: CGPoint) -> CapturableWindow? { WindowStack.onTop(at: point) }
+    func windowOnTop(at point: CGPoint) async -> CapturableWindow? { await MainActor.run { WindowStack.onTop(at: point) } }
 
     /// The normal-layer windows of `pid` in a window-server listing.
     static func windows(in info: [[String: Any]], pid: Int32) -> [CapturableWindow] {

@@ -542,12 +542,12 @@ struct LiveSyntheticInput: SyntheticInput {
                 reached = index
                 if !dropping, pasteboard() != written {
                     dropping = true
-                    if let cover = watch.coverAtEnd() { throw Interrupted(reason: Self.covered(cover)) }
+                    if let cover = await watch.coverAtEnd() { throw Interrupted(reason: Self.covered(cover)) }
                 }
             }
             // The app may start the session on the last move, after the check above.
             if !dropping, pasteboard() != written { dropping = true }
-            if dropping, let cover = watch.coverAtEnd() { throw Interrupted(reason: Self.covered(cover)) }
+            if dropping, let cover = await watch.coverAtEnd() { throw Interrupted(reason: Self.covered(cover)) }
             try sink.post(events[events.count - 1], to: pid)
             return dropping ? .dropped : .moved
         } catch {
