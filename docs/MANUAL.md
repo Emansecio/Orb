@@ -401,14 +401,19 @@ usando o Mac e o app da frente, o foco e o cursor ficam onde estavam.
   Se um app não responde no prazo, o Orb diz isso e **não** faz depois o que tinha pedido (nada de clique atrasado); um
   Parar no meio de um clique sempre solta o botão. Em tabelas muito longas, escolher uma linha pelo texto olha as primeiras
   500 e diz até onde olhou; o Orb então usa a busca (`query`) da leitura.
+- **Mouse em segundo plano, sem pegar o seu**: o Orb também clica com teclas seguradas (⌘, ⇧, ⌥, ⌃), dá dois ou três cliques, segura o
+  clique, passa o mouse por cima de algo, **arrasta, também de um app para outro**, e **desenha** um traço numa tela de desenho ou num
+  campo de assinatura, tudo sem mover o seu cursor nem tirar você do app em que está. Quando uma janela cobre o ponto onde o arrasto
+  soltaria, ele **cancela sem soltar** (nada é jogado no lugar errado) e diz o que está por cima. Dicas que aparecem ao passar o mouse
+  talvez não surjam em segundo plano; o Orb então lê o texto de ajuda do elemento ou pede o cartão "Usar a tela".
 - **Abrir sem tirar você do que está fazendo**: `open` abre apps, arquivos e links **em segundo plano**; o app abre (ou recebe o
   arquivo) atrás do que você está usando, e o Orb o opera dali. Ele só traz o app para a frente (`front: true`) quando você pede
   para ver ou quando a tarefa não anda em segundo plano, e o cartão de permissão diz "Abrindo na frente".
 - **Se um app vem para a frente sozinho** depois de uma ação, o Orb devolve o app que estava na frente e passa a pedir o cartão
   "Usar a tela" para focar ou digitar nele. Se foi **você** quem foi ao app (apertou uma tecla ou clicou nos últimos 2 s), ele
   fica na frente, o Orb não o marca como app que rouba o foco e não digita nele enquanto você o usa.
-- **O cartão "Usar a tela"**: o que só funciona com o mouse e o teclado de verdade (arrastar e soltar, menus de contexto, passar o
-  mouse, apps sem Acessibilidade) o Orb **pede** antes. Você aprova o cartão (ele lista as etapas), o Orb traz o app para a frente
+- **O cartão "Usar a tela"**: o que só funciona com o mouse e o teclado de verdade (menus de contexto, dicas ao passar o
+  mouse, apps do tipo Chrome e Electron, apps sem Acessibilidade) o Orb **pede** antes. Você aprova o cartão (ele lista as etapas), o Orb traz o app para a frente
   por até 10 s, faz o que precisa e **devolve** o app que estava na frente, a janela e o cursor. Um aviso "Orb está usando a tela
   — mexa o mouse para parar" fica na tela; mexer o mouse interrompe. Só um Orb usa a tela por vez, em todo o Mac. Em "Só leitura"
   o Orb não assume a tela.

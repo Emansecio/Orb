@@ -46,8 +46,9 @@ private struct Bench {
     }
 
     /// Adds a screenshot's marks and geometry to the last reading, as the screenshot tool does.
-    func addShot(marks: [Int: String], windowFrame: CGRect, scale: Double = 2, windowID: UInt32 = 77) throws {
-        var snapshot = try #require(store.snapshot(bot: context.botID, app: AccessibilityApp(name: "Notas", bundleID: "com.apple.Notes", pid: 100)))
+    func addShot(marks: [Int: String], windowFrame: CGRect, scale: Double = 2, windowID: UInt32 = 77,
+                 app: AccessibilityApp = AccessibilityApp(name: "Notas", bundleID: "com.apple.Notes", pid: 100)) throws {
+        var snapshot = try #require(store.snapshot(bot: context.botID, app: app))
         snapshot.marks = marks
         snapshot.shot = ShotGeometry(pixelWidth: Int(windowFrame.width * scale), pixelHeight: Int(windowFrame.height * scale), scale: scale,
                                      windowFrame: windowFrame, windowID: windowID)
@@ -1776,6 +1777,649 @@ struct UILiveElementsTests {
         #expect(otherWindow.carryingOver(from: first, partial: true).marks.isEmpty)
         let late = UISnapshot(app: app, windowIndex: 1, windowTitle: "A", entries: [:], takenAt: Date.now.addingTimeInterval(120))
         #expect(late.carryingOver(from: first, partial: true).shot == nil)
+    }
+}
+
+// MARK: - Mouse: keys held, long press, hover, drag between apps, pen strokes
+
+struct AccessibilityMouseTests {
+    private func string(_ text: String) -> JSONValue { .string(text) }
+    private func number(_ value: Double) -> JSONValue { .number(value) }
+    private func points(_ list: [[Double]]) -> JSONValue { .array(list.map { .array($0.map { .number($0) }) }) }
+
+    private func refusal(_ body: () throws -> Void) -> String {
+        do { try body(); return "" } catch { return (error as? ToolError)?.message ?? "\(error)" }
+    }
+
+    private func parse(_ action: String, _ extra: [String: JSONValue] = [:]) throws -> UIActTool.Step {
+        try UIActTool.Step.parse(.object(["action": string(action)].merging(extra) { $1 }))
+    }
+
+    private let safari = CapturableWindow(windowID: 12, pid: 200, frame: .zero, title: "", owner: "Safari")
+    private let finderFrame = CGRect(x: 700, y: 100, width: 300, height: 300)
+
+    /// Notas (pid 100): "OK" (center 190,160), "Pasta" (330,265) and "Lixeira" (425,315) in a window at 100,100 listed as 55.
+    private func makeBench() -> (bench: Bench, ok: FakeElement, folder: FakeElement) {
+        let ok = framed(fakeButton("OK"), CGRect(x: 150, y: 150, width: 80, height: 20))
+        let folder = framed(fakeButton("Pasta"), CGRect(x: 300, y: 250, width: 60, height: 30))
+        let trash = framed(fakeButton("Lixeira"), CGRect(x: 400, y: 300, width: 50, height: 30))
+        let bench = Bench(windows: [framed(fake("AXWindow", title: "A", [ok, folder, trash]), windowFrame)])
+        bench.system.listedWindows[100] = [CapturableWindow(windowID: 55, pid: 100, frame: windowFrame, title: "A", owner: "Notas")]
+        return (bench, ok, folder)
+    }
+
+    /// The same, with the Finder (pid 300) read too: "Docs" (770,165) and "Lixeira" (770,215) in a window listed as 90.
+    private func makeBenchWithFinder() async throws -> (bench: Bench, docs: FakeElement) {
+        let (bench, _, _) = makeBench()
+        let docs = framed(fakeButton("Docs"), CGRect(x: 720, y: 150, width: 100, height: 30))
+        let trash = framed(fakeButton("Lixeira"), CGRect(x: 720, y: 200, width: 100, height: 30))
+        bench.system.apps.append(FakeAccessibility.app("Finder", "com.apple.finder", pid: 300))
+        bench.system.roots[300] = fakeApp(windows: [framed(fake("AXWindow", title: "Pastas", [docs, trash]), finderFrame)])
+        bench.system.listedWindows[300] = [CapturableWindow(windowID: 90, pid: 300, frame: finderFrame, title: "Pastas", owner: "Finder")]
+        try await bench.read(["app": string("Notas")])
+        try await bench.read(["app": string("Finder")])
+        return (bench, docs)
+    }
+
+    // MARK: Reading the arguments
+
+    @Test func modifiersCountHoldAndDurationAreReadWithinTheirLimits() throws {
+        let id: [String: JSONValue] = ["id": string("w1.1")]
+        #expect(try parse("click", id.merging(["modifiers": string("cmd+shift")]) { $1 }).modifiers == [.command, .shift])
+        #expect(try parse("click", id.merging(["modifiers": string("Command, alt")]) { $1 }).modifiers == [.command, .option])
+        #expect(try parse("click", id.merging(["modifiers": .array([string("ctrl"), string("opt")])]) { $1 }).modifiers == [.control, .option])
+        #expect(try parse("click", id).modifiers.isEmpty)
+        #expect(try parse("click", id.merging(["modifiers": string(" ")]) { $1 }).modifiers.isEmpty)
+        let unknown = refusal { _ = try parse("click", id.merging(["modifiers": string("cmd+hyper")]) { $1 }) }
+        #expect(unknown.contains("Modificador desconhecido") && unknown.contains("hyper"))
+
+        #expect(try parse("click", id).count == 1)
+        #expect(try parse("click", id.merging(["count": number(3)]) { $1 }).count == 3)
+        #expect(try parse("click", id.merging(["count": number(9)]) { $1 }).count == 3, "three is the most")
+        #expect(try parse("click", id.merging(["count": number(0)]) { $1 }).count == 1)
+        #expect(try parse("click", id).hold == .zero)
+        #expect(try parse("click", id.merging(["hold": number(1200)]) { $1 }).hold == .milliseconds(1200))
+        #expect(try parse("click", id.merging(["hold": string("90000")]) { $1 }).hold == .milliseconds(3000))
+
+        let drag: [String: JSONValue] = ["id": string("w1.1"), "to": string("w1.2")]
+        #expect(try parse("drag", drag).duration == nil, "the default is the action's own")
+        #expect(try parse("drag", drag.merging(["duration": number(10)]) { $1 }).duration == .milliseconds(150))
+        #expect(try parse("drag", drag.merging(["duration": number(900)]) { $1 }).duration == .milliseconds(900))
+        #expect(try parse("drag", drag.merging(["duration": number(99_999)]) { $1 }).duration == .seconds(5))
+        #expect(try parse("scroll", id.merging(["modifiers": string("option")]) { $1 }).modifiers == [.option])
+    }
+
+    @Test func movesDragsAndScrollsTakeAnElementOrPixels() throws {
+        #expect(try parse("move", ["x": number(40), "y": string("50")]).point == CGPoint(x: 40, y: 50))
+        #expect(try parse("move", ["id": string("w1.1")]).reference == "w1.1")
+        #expect(try parse("scroll", ["x": number(1), "y": number(2), "direction": string("up")]).point == CGPoint(x: 1, y: 2))
+        #expect(try parse("drag", ["x": number(1), "y": number(2), "to": string("#4")]).point == CGPoint(x: 1, y: 2))
+        for action in ["move", "scroll", "click"] {
+            #expect(refusal { _ = try parse(action) }.contains("\"id\""), Comment(rawValue: action))
+        }
+        #expect(refusal { _ = try parse("drag", ["id": string("w1.1")]) }.contains("\"to\""), "a drag needs its end")
+    }
+
+    @Test func theEndOfADragIsAnIdAMarkOrPixelsAndTheOldValueStillWorks() throws {
+        func end(_ extra: [String: JSONValue]) throws -> UIActTool.Step {
+            try parse("drag", ["id": string("w1.1")].merging(extra) { $1 })
+        }
+        #expect(try end(["to": string("w2.3.1")]).destination == "w2.3.1")
+        #expect(try end(["to": string("#12")]).destination == "#12")
+        #expect(try end(["to": string("m2")]).destination == "m2")
+        #expect(try end(["value": string("w1.2")]).destination == "w1.2", "the older argument")
+        #expect(try end(["to": string("120, 40")]).destinationPoint == CGPoint(x: 120, y: 40))
+        #expect(try end(["to": string("120,40")]).destination == nil)
+        #expect(try end(["to": .array([number(7), number(9)])]).destinationPoint == CGPoint(x: 7, y: 9))
+        #expect(try end(["to": string("w1.2"), "to_app": string(" Finder ")]).toApp == "Finder")
+        #expect(try end(["to": string("w1.2")]).toApp == nil)
+    }
+
+    @Test func theDockTakesNoDropFromABackgroundDrag() async throws {
+        for name in ["Dock", "dock", "com.apple.dock"] {
+            let message = refusal { _ = try parse("drag", ["id": string("w1.1"), "to": string("w1.2"), "to_app": string(name)]) }
+            #expect(message.contains("Dock") && message.contains("pick_menu") && message.contains("Mover para o Lixo"), Comment(rawValue: name))
+        }
+        let (bench, _, _) = makeBench()
+        try await bench.read()
+        let message = await failureMessage {
+            try await bench.act(["action": string("drag"), "id": string("w1.1"), "to": string("w1.2"), "to_app": string("Dock")])
+        }
+        #expect(message.contains("Dock"))
+        #expect(bench.system.syntheticInput.events.isEmpty && bench.system.screenOwner.takes == 0)
+    }
+
+    @Test func aPenPathIsPointsWithOptionalPressureJSONTextOrSVG() throws {
+        let stroke = try parse("draw", ["path": points([[10, 10], [60, 40, 0.5], [120, 20, 7]])]).stroke
+        #expect(stroke.map(\.point) == [CGPoint(x: 10, y: 10), CGPoint(x: 60, y: 40), CGPoint(x: 120, y: 20)])
+        #expect(stroke.map(\.pressure) == [nil, 0.5, 1], "a pressure above 1 is held at 1")
+        #expect(try parse("draw", ["path": points([[1, 1, -3], [2, 2]])]).stroke.first?.pressure == 0)
+        #expect(try parse("draw", ["path": string("[[10,10],[20,25.5]]")]).stroke.map(\.point) == [CGPoint(x: 10, y: 10), CGPoint(x: 20, y: 25.5)],
+                "models send the list as text too")
+        #expect(try parse("draw", ["path": points([[1, 1], [2, 2]]), "duration": number(2000)]).duration == .seconds(2))
+
+        #expect(refusal { _ = try parse("draw") }.contains("\"path\""))
+        #expect(refusal { _ = try parse("draw", ["path": points([[1, 1]])]) }.contains("2 a 500"))
+        #expect(refusal { _ = try parse("draw", ["path": points((0..<501).map { [Double($0), 1] })]) }.contains("2 a 500"))
+        #expect(try parse("draw", ["path": points((0..<500).map { [Double($0), 1] })]).stroke.count == 500)
+        #expect(refusal { _ = try parse("draw", ["path": .array([points([[1, 1]]), .string("x")])]) }.contains("O ponto"))
+        #expect(refusal { _ = try parse("draw", ["path": .array([.array([number(1)]), .array([number(2), number(2)])])]) }.contains("O ponto 1"))
+        #expect(refusal { _ = try parse("draw", ["path": string("isto não é um caminho")]) }.isEmpty == false, "an SVG that cannot be read is refused")
+        #expect(refusal { _ = try parse("draw", ["path": string("M 0 0 L " + String(repeating: "1 1 ", count: 6000))]) }.contains("grande demais"))
+    }
+
+    @Test func theCardAndTheOutputNameKeysAndHold() {
+        #expect(UIActTool.symbols([.command, .shift, .option, .control]) == "⌃⌥⇧⌘")
+        #expect(UIActTool.symbols([]).isEmpty)
+        #expect(UIActTool.clickVerb(.init()) == "Cliquei em")
+        #expect(UIActTool.clickVerb(.init(modifiers: .command)) == "Cliquei com ⌘ em")
+        #expect(UIActTool.clickVerb(.init(count: 3)) == "Dei três cliques em")
+        #expect(UIActTool.clickVerb(.init(count: 2, modifiers: [.shift])) == "Dei dois cliques com ⇧ em")
+        #expect(UIActTool.clickVerb(.init(hold: .milliseconds(1200))) == "Pressionei por 1,2 s em")
+        #expect(UIActTool.clickVerb(.init(button: .right, modifiers: .command)) == "Cliquei com ⌘ e o botão direito em")
+        #expect(UIActTool.clickVerb(.init(button: .middle)) == "Cliquei com o botão do meio em")
+        #expect(UIActTool.Clicking().isPlain)
+        #expect(![UIActTool.Clicking(count: 2), .init(modifiers: .shift), .init(button: .right), .init(hold: .milliseconds(1))].contains { $0.isPlain })
+    }
+
+    // MARK: Clicking with keys, count and hold
+
+    @Test func keysHeldTurnAPressIntoAnEventWithThoseKeys() async throws {
+        let (bench, ok, _) = makeBench()
+        try await bench.read()
+        let call: [String: JSONValue] = ["action": string("click"), "id": string("w1.1"), "modifiers": string("cmd")]
+        let text = try await bench.act(call)
+        #expect(text.hasPrefix("Cliquei com ⌘ em button “OK” (w1.1)."))
+        #expect(text.contains("[segundo plano · evento ao app]") && ok.performed.isEmpty, "an AXPress cannot carry keys")
+        let input = bench.system.syntheticInput
+        #expect(input.events == [.click(CGPoint(x: 190, y: 160), window: 55, button: .left, count: 1, pid: 100)])
+        #expect(input.details.modifiers == [.command] && input.details.hold == .zero && input.details.frame == windowFrame)
+
+        let card = bench.actor().summary(.object(call))
+        #expect(card.title == "Clicando em “OK”" && card.detail.contains("(⌘)"))
+    }
+
+    @Test func aLongPressAndATripleClickAreEventsToo() async throws {
+        let (bench, ok, _) = makeBench()
+        try await bench.read()
+        let held = try await bench.act(["action": string("click"), "id": string("w1.1"), "hold": number(1200)])
+        #expect(held.hasPrefix("Pressionei por 1,2 s em button “OK”"))
+        #expect(bench.system.syntheticInput.details.hold == .milliseconds(1200))
+        let triple = try await bench.act(["action": string("click"), "id": string("w1.1"), "count": number(3), "modifiers": string("cmd+shift")])
+        #expect(triple.hasPrefix("Dei três cliques com ⇧⌘ em button “OK”"))
+        #expect(bench.system.syntheticInput.events.last == .click(CGPoint(x: 190, y: 160), window: 55, button: .left, count: 3, pid: 100))
+        #expect(bench.system.syntheticInput.details.modifiers == [.command, .shift])
+        let right = try await bench.act(["action": string("click"), "id": string("w1.1"), "button": string("right"), "modifiers": string("ctrl")])
+        #expect(right.hasPrefix("Cliquei com ⌃ e o botão direito em"))
+        #expect(ok.performed.isEmpty)
+        let card = bench.actor().summary(.object(["action": string("click"), "id": string("w1.1"), "count": number(3), "modifiers": string("cmd+shift"),
+                                                  "hold": number(1200)]))
+        #expect(card.detail.contains("(triplo, ⇧⌘, segurando 1,2 s)"))
+    }
+
+    @Test func aPlainClickStillPressesThroughAccessibility() async throws {
+        let (bench, ok, _) = makeBench()
+        try await bench.read()
+        let text = try await bench.act(["action": string("click"), "id": string("w1.1"), "count": number(1), "hold": number(0)])
+        #expect(text.contains("[segundo plano · AX]") && ok.performed == ["AXPress"])
+        #expect(bench.system.syntheticInput.events.isEmpty)
+    }
+
+    @Test func aClickAtAPixelCarriesKeysToo() async throws {
+        let (bench, ok, _) = makeBench()
+        try await bench.read()
+        try bench.addShot(marks: [:], windowFrame: windowFrame, windowID: 55)
+        let text = try await bench.act(["action": string("click"), "x": number(180), "y": number(110), "modifiers": string("shift")])
+        #expect(text.hasPrefix("Cliquei com ⇧ em button “OK” (w1.1, x 180, y 110)."))
+        #expect(ok.performed.isEmpty)
+        #expect(bench.system.syntheticInput.events == [.click(CGPoint(x: 190, y: 155), window: 55, button: .left, count: 1, pid: 100)])
+        #expect(bench.system.syntheticInput.details.modifiers == [.shift])
+    }
+
+    // MARK: Hover
+
+    @Test func hoveringSendsAShortApproachAndAdmitsWhatItCannotShow() async throws {
+        let (bench, ok, _) = makeBench()
+        try await bench.read()
+        let text = try await bench.act(["action": string("move"), "id": string("w1.1")])
+        #expect(text.hasPrefix("Passei o mouse sobre button “OK”") && text.contains("[segundo plano · evento ao app]"))
+        #expect(text.contains("AXHelp") && text.contains("takeover") && text.contains("tooltips"))
+        guard case .move(let approach, let window, let pid)? = bench.system.syntheticInput.events.first else {
+            Issue.record("no move was sent")
+            return
+        }
+        #expect(approach.count == 3 && approach.last == CGPoint(x: 190, y: 160) && window == 55 && pid == 100)
+        #expect(approach.dropLast().allSatisfy { windowFrame.contains($0) }, "the run-up stays inside the window")
+        #expect(ok.performed.isEmpty, "a hover presses nothing")
+        #expect(bench.actor().danger(.object(["action": string("move"), "id": string("w1.1")])) == nil)
+        #expect(bench.actor().summary(.object(["action": string("move"), "id": string("w1.1")])).title == "Passando o mouse sobre “OK”")
+    }
+
+    @Test func hoveringAtAPixelEndsOnThatPixel() async throws {
+        let (bench, _, _) = makeBench()
+        try await bench.read()
+        try bench.addShot(marks: [:], windowFrame: windowFrame, windowID: 55)
+        _ = try await bench.act(["action": string("move"), "x": number(180), "y": number(110)])
+        guard case .move(let approach, let window, _)? = bench.system.syntheticInput.events.first else {
+            Issue.record("no move was sent")
+            return
+        }
+        #expect(approach.last == CGPoint(x: 190, y: 155) && window == 55)
+        let corner = UIActTool.approach(to: CGPoint(x: 105, y: 105), within: windowFrame)
+        #expect(corner.first == CGPoint(x: 129, y: 121) && corner.last == CGPoint(x: 105, y: 105), "from the side that has room")
+    }
+
+    // MARK: Drag
+
+    @Test func aDragGoesFromOneElementToAnotherAlongAnArc() async throws {
+        let (bench, ok, folder) = makeBench()
+        try await bench.read()
+        let text = try await bench.act(["action": string("drag"), "id": string("w1.1"), "to": string("w1.2")])
+        #expect(text.hasPrefix("Arrastei button “OK” até button “Pasta”.") && text.contains("[segundo plano · evento ao app]"))
+        let input = bench.system.syntheticInput
+        #expect(input.events == [.drag(CGPoint(x: 190, y: 160), CGPoint(x: 330, y: 265), window: 55, pid: 100)])
+        #expect(input.details.path.count >= 2 && input.details.path.first?.point == CGPoint(x: 190, y: 160))
+        #expect(input.details.path.last?.point == CGPoint(x: 330, y: 265))
+        #expect(input.details.duration == .milliseconds(500) && input.details.modifiers.isEmpty)
+        #expect(ok.performed.isEmpty && folder.performed.isEmpty)
+        let card = bench.actor().summary(.object(["action": string("drag"), "id": string("w1.1"), "to": string("w1.2")]))
+        #expect(card.title == "Arrastando “OK”" && card.detail.contains("→ “Pasta”"))
+    }
+
+    @Test func theOlderValueArgumentStillNamesTheEnd() async throws {
+        let (bench, _, _) = makeBench()
+        try await bench.read()
+        _ = try await bench.act(["action": string("drag"), "id": string("w1.1"), "value": string("w1.2")])
+        #expect(bench.system.syntheticInput.events == [.drag(CGPoint(x: 190, y: 160), CGPoint(x: 330, y: 265), window: 55, pid: 100)])
+    }
+
+    @Test func aDragCanStartAndEndAtPixelsOrMarksWithKeysAndADuration() async throws {
+        let (bench, _, _) = makeBench()
+        try await bench.read()
+        try bench.addShot(marks: [4: "w1.2"], windowFrame: windowFrame, windowID: 55)
+        // Pixel (180, 110) → screen (190, 155); pixel (300, 230) → (250, 215).
+        let pixels = try await bench.act(["action": string("drag"), "x": number(180), "y": number(110), "to": string("300,230"),
+                                          "modifiers": string("option"), "duration": number(900)])
+        #expect(pixels.hasPrefix("Arrastei x 180, y 110 até x 300, y 230."))
+        let input = bench.system.syntheticInput
+        #expect(input.events == [.drag(CGPoint(x: 190, y: 155), CGPoint(x: 250, y: 215), window: 55, pid: 100)])
+        #expect(input.details.modifiers == [.option] && input.details.duration == .milliseconds(900))
+
+        let mark = try await bench.act(["action": string("drag"), "id": string("w1.1"), "to": string("#4")])
+        #expect(mark.hasPrefix("Arrastei button “OK” até button “Pasta”."))
+        let list = try await bench.act(["action": string("drag"), "x": number(180), "y": number(110), "to": .array([number(300), number(230)])])
+        #expect(list.contains("até x 300, y 230"))
+    }
+
+    @Test func aDragThatBecameASystemDropSaysSo() async throws {
+        let (bench, _, _) = makeBench()
+        try await bench.read()
+        bench.system.syntheticInput.dragOutcome = .success(.dropped)
+        let text = try await bench.act(["action": string("drag"), "id": string("w1.1"), "to": string("w1.2")])
+        #expect(text.hasPrefix("Arrastei button “OK” e soltei em button “Pasta” (arrastar e soltar do sistema)."))
+    }
+
+    @Test func aDragThatStoppedSaysWhyAndOnlyACoveredEndAsksForTheScreen() async throws {
+        let (bench, _, _) = makeBench()
+        try await bench.read()
+        let call: [String: JSONValue] = ["action": string("drag"), "id": string("w1.1"), "to": string("w1.2")]
+        bench.system.syntheticInput.dragOutcome = .failure(DragStopped(reason: "o usuário passou a usar Notas", ending: .carriedBack))
+        let person = await failureMessage { try await bench.act(call) }
+        #expect(person.hasPrefix("Não deu para arrastar button “OK”: o usuário passou a usar Notas; levei o arrasto de volta ao começo"))
+        #expect(!person.contains(UIActTool.takeoverMarker), "the person came back: the real mouse would not help")
+
+        // The watch finds a window over the end point while the drag runs, and the drop is cancelled.
+        bench.system.onTopHandler = { [safari] _ in safari }
+        bench.system.syntheticInput.whileDragging = { watch in _ = watch.coverAtEnd() }
+        bench.system.syntheticInput.dragOutcome = .failure(DragStopped(reason: "Safari está por cima", ending: .dropCancelled))
+        let covered = await failureMessage { try await bench.act(call) }
+        #expect(covered.hasPrefix(UIActTool.takeoverMarker) && covered.contains("nada foi solto") && covered.contains("takeover: true"))
+        #expect(covered.contains("Safari está por cima") && covered.contains("Tire o que está por cima"))
+    }
+
+    @Test func aChromiumAppRefusesTheDragAndTheLadderAsksForTheScreen() async throws {
+        let (bench, _, _) = makeBench()
+        try await bench.read()
+        bench.system.syntheticInput.error = ToolError("apps Chromium ignoram clique enviado em segundo plano")
+        let message = await failureMessage { try await bench.act(["action": string("drag"), "id": string("w1.1"), "to": string("w1.2")]) }
+        #expect(message.hasPrefix(UIActTool.takeoverMarker) && message.contains("Chromium") && message.contains("repetir pode duplicar"))
+    }
+
+    @Test func theWatchSeesAWindowOverTheEndAndThePersonComingBack() async throws {
+        let (bench, _, _) = makeBench()
+        try await bench.read()
+        _ = try await bench.act(["action": string("drag"), "id": string("w1.1"), "to": string("w1.2")])
+        let watch = try #require(bench.system.syntheticInput.lastWatch)
+        let notas = CapturableWindow(windowID: 55, pid: 100, frame: windowFrame, title: "A", owner: "Notas")
+        bench.system.onTopHandler = { _ in notas }
+        #expect(watch.coverAtEnd() == nil, "the app's own window is on top at the end")
+        bench.system.onTopHandler = { [safari] _ in safari }
+        #expect(watch.coverAtEnd() == "Safari")
+        bench.system.onTopHandler = { _ in CapturableWindow(windowID: 13, pid: 201, frame: .zero, title: "", owner: "") }
+        #expect(watch.coverAtEnd() == "", "a window with no owner name is still a cover (the text says \"outra janela\")")
+        bench.system.onTopHandler = nil
+        #expect(watch.coverAtEnd() == nil, "nothing known there: nothing is said to cover it")
+
+        bench.system.frontmost = 100
+        bench.system.userIdle = 1
+        #expect(await watch.interruption() == "o usuário passou a usar Notas")
+        bench.system.userIdle = 5
+        #expect(await watch.interruption() == nil, "the app is in front but the person is not typing")
+        bench.system.userIdle = 1
+        bench.system.frontmost = 200
+        #expect(await watch.interruption() == nil, "another app is the one in use")
+    }
+
+    // MARK: Drag between windows and apps
+
+    @Test func aDragIntoAnotherAppIsSentToTheSourceAfterCheckingBothEnds() async throws {
+        let (bench, docs) = try await makeBenchWithFinder()
+        let notasTop = CapturableWindow(windowID: 55, pid: 100, frame: windowFrame, title: "A", owner: "Notas")
+        let finderTop = CapturableWindow(windowID: 90, pid: 300, frame: finderFrame, title: "Pastas", owner: "Finder")
+        let frame = finderFrame
+        bench.system.onTopHandler = { point in frame.contains(point) ? finderTop : (windowFrame.contains(point) ? notasTop : nil) }
+        let text = try await bench.act(["action": string("drag"), "app": string("Notas"), "id": string("w1.1"), "to": string("w1.1"), "to_app": string("Finder")])
+        #expect(text.hasPrefix("Arrastei button “OK” até button “Docs” em Finder."))
+        #expect(bench.system.syntheticInput.events == [.drag(CGPoint(x: 190, y: 160), CGPoint(x: 770, y: 165), window: 55, pid: 100)],
+                "the events go to the app the drag starts in; the system drops on what is on top")
+        #expect(docs.performed.isEmpty)
+        let card = bench.actor().summary(.object(["action": string("drag"), "id": string("w1.1"), "to": string("w1.1"), "to_app": string("Finder")]))
+        #expect(card.detail.contains("→ “Docs” em Finder"))
+    }
+
+    @Test func aCoveredEndOrStartStopsBeforePressingAnything() async throws {
+        let (bench, _) = try await makeBenchWithFinder()
+        let finderTop = CapturableWindow(windowID: 90, pid: 300, frame: finderFrame, title: "Pastas", owner: "Finder")
+        let notasTop = CapturableWindow(windowID: 55, pid: 100, frame: windowFrame, title: "A", owner: "Notas")
+        let frame = finderFrame
+        let call: [String: JSONValue] = ["action": string("drag"), "app": string("Notas"), "id": string("w1.1"), "to": string("w1.1"), "to_app": string("Finder")]
+
+        bench.system.onTopHandler = { [safari] point in frame.contains(point) ? safari : notasTop }
+        let end = await failureMessage { try await bench.act(call) }
+        #expect(end.contains("Nada foi pressionado") && end.contains("Safari") && end.contains("onde o arrasto termina") && end.contains("takeover: true"))
+        #expect(!end.contains(UIActTool.takeoverMarker))
+
+        bench.system.onTopHandler = { [safari] point in frame.contains(point) ? finderTop : safari }
+        let start = await failureMessage { try await bench.act(call) }
+        #expect(start.contains("Nada foi pressionado") && start.contains("Safari") && start.contains("onde o arrasto começa"))
+
+        bench.system.onTopHandler = { point in frame.contains(point) ? finderTop : CapturableWindow(windowID: 56, pid: 100, frame: windowFrame, title: "B", owner: "Notas") }
+        let other = await failureMessage { try await bench.act(call) }
+        #expect(other.contains("outra janela de Notas"), "another window of the same app covers the start")
+        #expect(bench.system.syntheticInput.events.isEmpty, "nothing was pressed in any of the three")
+    }
+
+    @Test func aDragInsideOneWindowIsNotCheckedFirstButTheWatchStillGuardsTheDrop() async throws {
+        let (bench, _, _) = makeBench()
+        try await bench.read()
+        bench.system.onTopHandler = { [safari] _ in safari }
+        _ = try await bench.act(["action": string("drag"), "id": string("w1.1"), "to": string("w1.2")])
+        #expect(bench.system.syntheticInput.events.count == 1, "an in-app drag works under a cover")
+        #expect(bench.system.syntheticInput.lastWatch?.coverAtEnd() == "Safari")
+    }
+
+    @Test func toAppIsReadFromThatAppsOwnScreenshotAndNeedsAReading() async throws {
+        let (bench, _) = try await makeBenchWithFinder()
+        let finderTop = CapturableWindow(windowID: 90, pid: 300, frame: finderFrame, title: "Pastas", owner: "Finder")
+        let frame = finderFrame
+        bench.system.onTopHandler = { point in frame.contains(point) ? finderTop : CapturableWindow(windowID: 55, pid: 100, frame: windowFrame, title: "A", owner: "Notas") }
+        // The Finder's screenshot: 2 px per point, its window listed as 90. Pixel (100, 60) → 750, 130.
+        try bench.addShot(marks: [:], windowFrame: finderFrame, windowID: 90, app: AccessibilityApp(name: "Finder", bundleID: "com.apple.finder", pid: 300))
+        let text = try await bench.act(["action": string("drag"), "app": string("Notas"), "id": string("w1.1"), "to": string("100,60"), "to_app": string("Finder")])
+        #expect(text.hasPrefix("Arrastei button “OK” até x 100, y 60 em Finder."))
+        #expect(bench.system.syntheticInput.events == [.drag(CGPoint(x: 190, y: 160), CGPoint(x: 750, y: 130), window: 55, pid: 100)])
+
+        let (unread, _, _) = makeBench()
+        unread.system.apps.append(FakeAccessibility.app("Finder", "com.apple.finder", pid: 300))
+        try await unread.read()
+        let message = await failureMessage { try await unread.act(["action": string("drag"), "id": string("w1.1"), "to": string("w1.1"), "to_app": string("Finder")]) }
+        #expect(message.contains("Ainda não li a interface de Finder"))
+        let missing = await failureMessage { try await unread.act(["action": string("drag"), "id": string("w1.1"), "to": string("w1.1"), "to_app": string("Fantasma")]) }
+        #expect(!missing.isEmpty)
+        #expect(unread.system.syntheticInput.events.isEmpty)
+    }
+
+    @Test func toAppNamingTheSourceAppIsAnOrdinaryDrag() async throws {
+        let (bench, _, _) = makeBench()
+        try await bench.read()
+        _ = try await bench.act(["action": string("drag"), "id": string("w1.1"), "to": string("w1.2"), "to_app": string("Notas")])
+        #expect(bench.system.syntheticInput.events == [.drag(CGPoint(x: 190, y: 160), CGPoint(x: 330, y: 265), window: 55, pid: 100)])
+    }
+
+    // MARK: What a drop can destroy
+
+    @Test func droppingOnTheTrashOrADeleteButtonIsDangerous() async throws {
+        #expect(UIDanger.reason(forDropOnto: "Lixeira", appName: "Finder", bundleID: "com.apple.finder")?.contains("Lixeira") == true)
+        #expect(UIDanger.reason(forDropOnto: "Trash", appName: nil, bundleID: nil) != nil)
+        #expect(UIDanger.reason(forDropOnto: "Esvaziar Lixeira", appName: nil, bundleID: nil) != nil)
+        #expect(UIDanger.reason(forDropOnto: "Excluir", appName: nil, bundleID: nil) != nil, "what pressing it would do")
+        #expect(UIDanger.reason(forDropOnto: "Pasta", appName: nil, bundleID: nil) == nil)
+        #expect(UIDanger.reason(forDropOnto: "", appName: nil, bundleID: nil) == nil)
+        #expect(UIDanger.reason(forLabel: "Lixeira", appName: nil, bundleID: nil) == nil, "pressing the Trash is harmless; dropping on it is not")
+
+        let (bench, _, _) = makeBench()
+        try await bench.read()
+        let toTrash: [String: JSONValue] = ["action": string("drag"), "id": string("w1.1"), "to": string("w1.3")]
+        let card = try #require(bench.actor().danger(.object(toTrash)))
+        #expect(card.contains("Lixeira"))
+        #expect(bench.actor().danger(.object(["action": string("drag"), "id": string("w1.1"), "to": string("w1.2")])) == nil)
+        #expect(bench.actor().summary(.object(toTrash)).detail.contains("→ “Lixeira”"))
+
+        // A card that did not show it does not cover the Trash found at run time.
+        var unconfirmed = bench.context
+        unconfirmed.judgedDanger = false
+        let message = await failureMessage { try await bench.actor().run(.object(toTrash), context: unconfirmed) }
+        #expect(message.hasPrefix("Não fiz:") && message.contains("Lixeira") && bench.system.syntheticInput.events.isEmpty)
+        var confirmed = bench.context
+        confirmed.judgedDanger = true
+        _ = try await bench.actor().run(.object(toTrash), context: confirmed)
+        #expect(bench.system.syntheticInput.events.count == 1)
+
+        // By pixel too: the Trash is at 400…450 × 300…330 on screen, 600…700 × 400…460 in pixels.
+        try bench.addShot(marks: [:], windowFrame: windowFrame, windowID: 55)
+        let byPixel: [String: JSONValue] = ["action": string("drag"), "id": string("w1.1"), "to": string("650,430")]
+        #expect(bench.actor().danger(.object(byPixel)) != nil)
+    }
+
+    @Test func droppingOnTheTrashOfAnotherAppIsAskedToo() async throws {
+        let (bench, _) = try await makeBenchWithFinder()
+        let call: [String: JSONValue] = ["action": string("drag"), "app": string("Notas"), "id": string("w1.1"), "to": string("w1.2"), "to_app": string("Finder")]
+        #expect(bench.actor().danger(.object(call))?.contains("Lixeira") == true, "w1.2 of the Finder is its Trash; the same id in Notas is a folder")
+        #expect(bench.actor().summary(.object(call)).detail.contains("→ “Lixeira” em Finder"))
+        var unconfirmed = bench.context
+        unconfirmed.judgedDanger = false
+        let message = await failureMessage { try await bench.actor().run(.object(call), context: unconfirmed) }
+        #expect(message.hasPrefix("Não fiz:") && message.contains("Lixeira") && bench.system.syntheticInput.events.isEmpty)
+    }
+
+    // MARK: Draw
+
+    private func drawBench() async throws -> Bench {
+        let (bench, _, _) = makeBench()
+        try await bench.read()
+        // 2 px per point, its window at 100,100 (listed as 55): pixel (10, 10) → screen (105, 105).
+        try bench.addShot(marks: [:], windowFrame: windowFrame, windowID: 55)
+        return bench
+    }
+
+    @Test func aPenStrokeFollowsItsPointsInScreenshotPixels() async throws {
+        let bench = try await drawBench()
+        let text = try await bench.act(["action": string("draw"), "path": points([[10, 10], [60, 40], [120, 20]])])
+        #expect(text.hasPrefix("Desenhei um traço de 3 pontos em “A”.") && text.contains("[segundo plano · evento ao app]"))
+        let input = bench.system.syntheticInput
+        #expect(input.events == [.drag(CGPoint(x: 105, y: 105), CGPoint(x: 160, y: 110), window: 55, pid: 100)])
+        #expect(input.details.path.first?.point == CGPoint(x: 105, y: 105) && input.details.path.last?.point == CGPoint(x: 160, y: 110))
+        #expect(input.details.modifiers.isEmpty && input.details.duration >= .milliseconds(300) && input.details.duration <= .seconds(5))
+        #expect(bench.actor().summary(.object(["action": string("draw"), "path": points([[1, 1], [2, 2]])])).title == "Desenhando em o app da última leitura")
+        #expect(bench.actor().danger(.object(["action": string("draw"), "path": points([[1, 1], [2, 2]])])) == nil)
+    }
+
+    @Test func aPenStrokeKeepsItsPressuresAndTakesItsDuration() async throws {
+        let bench = try await drawBench()
+        _ = try await bench.act(["action": string("draw"), "path": points([[10, 10, 0.2], [60, 40, 0.9], [120, 20, 5]]), "duration": number(1500)])
+        let path = bench.system.syntheticInput.details.path
+        #expect(path.first?.pressure == 0.2 && path.last?.pressure == 1)
+        #expect(bench.system.syntheticInput.details.duration == .milliseconds(1500))
+        _ = try await bench.act(["action": string("draw"), "path": string("[[10,10],[40,40]]")])
+        #expect(bench.system.syntheticInput.events.count == 2, "the list as text draws too")
+    }
+
+    @Test func aLongerStrokeTakesLongerUpToFiveSeconds() {
+        func stroke(_ length: Double) -> Duration { UIActTool.strokeDuration([StrokePoint(point: .zero), StrokePoint(point: CGPoint(x: length, y: 0))]) }
+        #expect(stroke(0) == .milliseconds(300))
+        #expect(stroke(100) == .milliseconds(500))
+        #expect(stroke(100) < stroke(400))
+        #expect(stroke(1_000_000) == .seconds(5))
+    }
+
+    @Test func aPenStrokeNeverBecomesADragAndDrop() async throws {
+        let bench = try await drawBench()
+        _ = try await bench.act(["action": string("draw"), "path": points([[10, 10], [60, 40]])])
+        let watch = try #require(bench.system.syntheticInput.lastWatch)
+        #expect(watch.coverAtEnd() != nil, "whatever is at the end, a drop that starts is cancelled")
+
+        bench.system.syntheticInput.whileDragging = { watch in _ = watch.coverAtEnd() }
+        bench.system.syntheticInput.dragOutcome = .failure(DragStopped(reason: "x", ending: .dropCancelled))
+        let message = await failureMessage { try await bench.act(["action": string("draw"), "path": points([[10, 10], [60, 40]])]) }
+        #expect(message.hasPrefix("Não deu para desenhar: o traço começou um arrastar e soltar") && message.contains("cancelei com Esc"))
+        #expect(!message.contains(UIActTool.takeoverMarker) && message.contains("takeover: true"))
+    }
+
+    @Test func aStrokeNeedsAScreenshotAndStaysInsideIt() async throws {
+        let (noShot, _, _) = makeBench()
+        try await noShot.read()
+        let missing = await failureMessage { try await noShot.act(["action": string("draw"), "path": points([[10, 10], [60, 40]])]) }
+        #expect(missing.contains("tire um screenshot de Notas"))
+        #expect(noShot.system.syntheticInput.events.isEmpty)
+
+        let bench = try await drawBench()
+        let outside = await failureMessage { try await bench.act(["action": string("draw"), "path": points([[10, 10], [2000, 10]])]) }
+        #expect(outside.contains("O ponto 2 de path") && outside.contains("fora da imagem"))
+        let svg = await failureMessage { try await bench.act(["action": string("draw"), "path": string("isto não é um caminho")]) }
+        #expect(!svg.isEmpty && bench.system.syntheticInput.events.isEmpty)
+    }
+
+    // MARK: Scroll
+
+    @Test func scrollingAtAPixelWithKeysHeldMovesInSmallSteps() async throws {
+        let (bench, _, _) = makeBench()
+        try await bench.read()
+        try bench.addShot(marks: [:], windowFrame: windowFrame, windowID: 55)
+        let zoom = try await bench.act(["action": string("scroll"), "x": number(180), "y": number(110), "direction": string("down"), "amount": number(2),
+                                        "modifiers": string("option")])
+        #expect(zoom.hasPrefix("Rolei x 180, y 110 para baixo (2 passos, com ⌥).") && zoom.contains("[segundo plano · evento ao app]"))
+        #expect(bench.system.syntheticInput.events == [.scroll(dx: 0, dy: -120, at: CGPoint(x: 190, y: 155), window: 55, pid: 100)])
+        #expect(bench.system.syntheticInput.details.modifiers == [.option])
+
+        _ = try await bench.act(["action": string("scroll"), "x": number(180), "y": number(110), "direction": string("right")])
+        #expect(bench.system.syntheticInput.events.last == .scroll(dx: -360, dy: 0, at: CGPoint(x: 190, y: 155), window: 55, pid: 100),
+                "without keys a page is nine tenths of the window")
+        #expect(bench.system.syntheticInput.details.modifiers.isEmpty)
+        let blind = await failureMessage { try await bench.act(["action": string("scroll"), "x": number(180), "y": number(110)]) }
+        #expect(blind.contains("direction"))
+    }
+
+    @Test func keysHeldKeepAScrollOffTheScrollBar() async throws {
+        let bar = fake("AXScrollBar", value: .number(0))
+        bar.settable = ["AXValue"]
+        let area = framed(fake("AXScrollArea", description: "Lista", [fakeButton("Item")]), CGRect(x: 100, y: 120, width: 200, height: 100))
+        area.attrs["AXVerticalScrollBar"] = .element(bar)
+        area.attrs["AXContents"] = .elements([fake("AXGroup", size: CGSize(width: 200, height: 500))])
+        let bench = Bench(windows: [framed(fake("AXWindow", title: "A", [area]), windowFrame)])
+        bench.system.listedWindows[100] = [CapturableWindow(windowID: 55, pid: 100, frame: windowFrame, title: "A")]
+        try await bench.read()
+        _ = try await bench.act(["action": string("scroll"), "id": string("w1.1"), "direction": string("down"), "modifiers": string("cmd")])
+        #expect(bar.assignedValue("AXValue") == nil, "the bar cannot carry keys")
+        #expect(bench.system.syntheticInput.events == [.scroll(dx: 0, dy: -60, at: CGPoint(x: 200, y: 170), window: 55, pid: 100)])
+        #expect(bench.system.syntheticInput.details.modifiers == [.command])
+        #expect(bench.actor().summary(.object(["action": string("scroll"), "id": string("w1.1"), "direction": string("down"), "modifiers": string("cmd")]))
+            .detail.contains("1 passo, com ⌘"))
+    }
+
+    // MARK: Steps
+
+    @Test func theNewActionsWorkInsideSteps() async throws {
+        let (bench, ok, _) = makeBench()
+        try await bench.read()
+        try bench.addShot(marks: [:], windowFrame: windowFrame, windowID: 55)
+        let steps: [JSONValue] = [
+            .object(["action": string("click"), "id": string("w1.1"), "modifiers": string("cmd")]),
+            .object(["action": string("move"), "x": number(180), "y": number(110)]),
+            .object(["action": string("drag"), "id": string("w1.1"), "to": string("300,230")]),
+            .object(["action": string("draw"), "path": points([[10, 10], [60, 40]])]),
+        ]
+        let text = try await bench.act(["action": string("press"), "steps": .array(steps)])
+        #expect(text.hasPrefix("1. Cliquei com ⌘ em") && text.contains("\n2. Passei o mouse sobre") && text.contains("\n3. Arrastei"))
+        #expect(text.contains("\n4. Desenhei um traço de 2 pontos"))
+        #expect(bench.system.syntheticInput.events.count == 4 && ok.performed.isEmpty)
+        let card = bench.actor().summary(.object(["action": string("press"), "steps": .array(steps)]))
+        #expect(card.title == "Fazendo 4 passos em o app da última leitura" && card.detail.contains("Arrastando") && card.detail.contains("Desenhando"))
+
+        // The first step that fails stops the rest, and the message says which.
+        bench.system.syntheticInput.error = ToolError("apps Chromium ignoram clique enviado em segundo plano")
+        let failed = await failureMessage { try await bench.act(["action": string("press"), "steps": .array(Array(steps.dropFirst()))]) }
+        #expect(failed.hasPrefix("O passo 1 de 3 falhou"))
+    }
+
+    // MARK: Taking the screen over
+
+    @Test func takeoverCarriesKeysTheHoverTheArcAndThePenToTheRealHand() async throws {
+        let (bench, _, _) = makeBench()
+        try await bench.read()
+        try bench.addShot(marks: [:], windowFrame: windowFrame, windowID: 55)
+        let hand = bench.system.screenOwner.hand
+
+        _ = try await bench.act(["action": string("click"), "id": string("w1.1"), "modifiers": string("cmd"), "takeover": .bool(true)])
+        _ = try await bench.act(["action": string("click"), "id": string("w1.1"), "count": number(3), "takeover": .bool(true)])
+        _ = try await bench.act(["action": string("click"), "id": string("w1.1"), "takeover": .bool(true)])
+        _ = try await bench.act(["action": string("move"), "x": number(180), "y": number(110), "takeover": .bool(true)])
+        #expect(hand.actions == [
+            .clickHeld(CGPoint(x: 190, y: 160), button: .left, count: 1, modifiers: [.command]),
+            .clickHeld(CGPoint(x: 190, y: 160), button: .left, count: 3, modifiers: []),
+            .click(CGPoint(x: 190, y: 160), button: .left, count: 1),
+            .move(CGPoint(x: 190, y: 155)),
+        ])
+
+        _ = try await bench.act(["action": string("drag"), "id": string("w1.1"), "to": string("w1.2"), "modifiers": string("shift"), "takeover": .bool(true)])
+        _ = try await bench.act(["action": string("draw"), "path": points([[10, 10], [60, 40]]), "takeover": .bool(true)])
+        let paths = hand.actions.compactMap { action -> ([CGPoint], KeyStroke.Modifiers)? in
+            if case .dragAlong(let path, let modifiers) = action { (path, modifiers) } else { nil }
+        }
+        #expect(paths.count == 2)
+        #expect(paths[0].0.first == CGPoint(x: 190, y: 160) && paths[0].0.last == CGPoint(x: 330, y: 265) && paths[0].1 == [.shift])
+        #expect(paths[1].0.first == CGPoint(x: 105, y: 105) && paths[1].0.last == CGPoint(x: 130, y: 120) && paths[1].1.isEmpty)
+        #expect(bench.system.syntheticInput.events.isEmpty, "the real hand did it, nothing was posted to the app")
+    }
+
+    @Test func takeoverDragsIntoAnotherAppAndRefusesWhatOnlyTheBackgroundCanDo() async throws {
+        let (bench, _) = try await makeBenchWithFinder()
+        _ = try await bench.act(["action": string("drag"), "app": string("Notas"), "id": string("w1.1"), "to": string("w1.1"), "to_app": string("Finder"),
+                                 "takeover": .bool(true)])
+        guard case .dragAlong(let path, _)? = bench.system.screenOwner.hand.actions.last else {
+            Issue.record("no drag reached the hand")
+            return
+        }
+        #expect(path.first == CGPoint(x: 190, y: 160) && path.last == CGPoint(x: 770, y: 165))
+
+        let hold = await failureMessage { try await bench.act(["action": string("click"), "app": string("Notas"), "id": string("w1.1"), "hold": number(900), "takeover": .bool(true)]) }
+        #expect(hold.contains("Segurar o clique") && hold.contains("sem takeover"))
+        let scroll = await failureMessage { try await bench.act(["action": string("scroll"), "app": string("Notas"), "id": string("w1.1"), "direction": string("down"), "takeover": .bool(true)]) }
+        #expect(scroll.contains("segundo plano"))
+        let takeover = bench.actor().danger(.object(["action": string("drag"), "app": string("Notas"), "id": string("w1.1"), "to": string("w1.2"), "to_app": string("Finder"),
+                                                     "takeover": .bool(true)]))
+        #expect(takeover?.contains("assume a tela") == true && takeover?.contains("Lixeira") == true)
+    }
+
+    // MARK: The schema
+
+    @Test func theSchemaOffersTheMouseArguments() throws {
+        let act = try #require(ToolBox.macTools.first { $0.spec.name == "ui_act" })
+        for key in ["modifiers", "hold", "to", "to_app", "duration", "path", "count"] {
+            #expect(act.spec.parameters["properties"]?[key]?["type"] != nil, Comment(rawValue: key))
+        }
+        #expect(act.spec.parameters["properties"]?["count"]?["description"]?.string?.contains("1-3") == true)
+        let description = act.spec.description
+        #expect(description.contains("move") && description.contains("draw") && description.contains("to_app"))
     }
 }
 
