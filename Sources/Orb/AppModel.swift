@@ -34,6 +34,8 @@ final class AppModel {
     var inicioRoutineFocus: UUID?
     /// Orbs asking each other for work.
     @ObservationIgnored lazy var delegation: DelegationHub = DelegationHub(model: self)
+    /// What is in flight (an Orb's own task, a group's request, an Orb's request to another), kept on disk so the next launch goes on with it.
+    @ObservationIgnored lazy var workJournal = WorkJournal(store: store)
     /// A group's thread and its live state, made when the group is first opened.
     @ObservationIgnored var groupSessions: [UUID: GroupSession] = [:]
     @ObservationIgnored var groupLives: [UUID: GroupLive] = [:]
@@ -518,6 +520,7 @@ final class AppModel {
             for await botID in changes { await self?.showJobs(of: botID) }
         }
         guard runsBackgroundWork else { return }
+        if !devRun { resumeInterruptedWork() } // a developer run over a copy of real data must not set real work going
         let outputs = outputsDirectory
         // A developer run shares the user's $TMPDIR (`ORB_DATA_DIR` only moves the data), so it leaves alone what a running app wrote.
         let cleansTemporaryFiles = !DevRun.isActive
@@ -561,7 +564,8 @@ final class AppModel {
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 ApprovalNotifications.clear(self?.pendingApprovals.map(\.id) ?? [])
-                self?.stopTurnsForQuit() // before the save: the cards close and each cut-off task says the app closed on it
+                self?.stopTurnsForQuit()
+                self?.workJournal.markCleanQuit() // before the save, which waits for the writer queue // before the save: the cards close and each cut-off task says the app closed on it
                 self?.saveNow()
                 // Commands and CLIs in the middle of a turn lead process groups of their own and would outlive the app.
                 ChildProcessGroups.killAllNow(including: self?.jobs.runningGroups ?? [])
@@ -1959,6 +1963,12 @@ final class AppModel {
     /// requests) and the transcript says it was interrupted.
     func stopTurnsForQuit() {
         delegation.isShuttingDown = true // the turns that end now answer nobody and start nothing
+        // What is in flight stays in the journal (the next launch resumes it); only Parar removes an entry. The processes that die with the app are counted.
+        var lostJobs: [UUID: Int] = [:]
+        for id in sessions.keys {
+            if let count = liveBot(id)?.jobs.count, count > 0 { lostJobs[id] = count }
+        }
+        workJournal.freeze(lostJobs: lostJobs)
         // A run that waits for other Orbs ends here: the answers will not come (nothing between Orbs survives the app closing).
         for (routineID, wait) in delegation.waitingRoutines {
             delegation.forgetWaitingRoutine(routineID)

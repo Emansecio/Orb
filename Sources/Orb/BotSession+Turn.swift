@@ -42,6 +42,7 @@ extension BotSession {
         planAtTurnStart = conversation?.taskPlan
         model?.workAnnouncer.reset()
         model?.live(id).setTurnSpend(nil)
+        if routineID == nil { model?.workJournal.chatTaskBegan(bot: id, chat: conversationChat ?? id) } // a quit or crash resumes it
         // Written at once, with the message that opened the turn: a crash in the next seconds no longer loses it.
         if conversation != nil {
             conversation?.turnOpen = true
@@ -385,6 +386,7 @@ extension BotSession {
     func finishTurn(_ turn: UUID, succeeded: Bool = true, userStopped: Bool = false, startsQueuedRoutines: Bool = true) {
         guard turnID == turn, turnTask != nil, let model else { return }
         conversation?.turnOpen = nil
+        if routineID == nil { model.workJournal.chatTaskEnded(bot: id) } // done, failed or stopped; a quit keeps it (the journal is frozen)
         let botID = id
         let ranRoutine = routineID != nil
         // Taken now: the next turn starts clean, and the chat is the one this turn worked on (it may not be the one on show).

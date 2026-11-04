@@ -7,7 +7,7 @@ typealias BridgeHandler = @Sendable (JSONValue) async throws -> String
 /// Opens the creation card for a proposal and waits for the person's decision. The engine defines it, as it does `handoff`.
 typealias ProposalHandler = @Sendable (OrbProposal) async -> ProposalOutcome
 
-/// A request between Orbs as the app keeps it while it is in flight (memory only; a request does not survive the app closing).
+/// A request between Orbs as the app keeps it while it is in flight (memory only; the `WorkJournal` keeps the envelope of one outside any group, to send it again after the app closed).
 struct DelegationRequest: Sendable, Equatable {
     enum State: String, Sendable {
         case queued, running, awaitingChildren, replied, failed, cancelled

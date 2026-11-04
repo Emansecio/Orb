@@ -24,7 +24,9 @@ final class GroupHub: GroupTurnHooks {
         didSet { delegation.groupHooks = self }
     }
     /// The requests in progress, by group.
-    private(set) var runs: [UUID: GroupRun] = [:]
+    private(set) var runs: [UUID: GroupRun] = [:] {
+        didSet { model?.workJournal.syncGroupRuns(runs.values.filter(\.isOpen)) } // the journal follows the open ones (a resume after a close)
+    }
     private(set) var activeTurns: [UUID: ActiveTurn] = [:]
     /// Where each member's last turn in each group left the thread, so the next turn is handed only what came after.
     private var consumed: [UUID: [UUID: Int]] = [:]
@@ -124,6 +126,21 @@ final class GroupHub: GroupTurnHooks {
         refreshLive(groupID)
         scheduleIdleCheck(groupID)
         return request
+    }
+
+    /// The app closed in the middle of a request (`WorkJournal`): a new run takes its place, the thread says so, and the orchestrator
+    /// is handed `recovery` as the person's turn would be (what is lost, what to check). `request` is what was asked, for the board's
+    /// page. False when the group cannot take it now (gone, resetting, already at work).
+    @discardableResult
+    func resume(_ groupID: UUID, request: String, recovery: String, notice: String) -> Bool {
+        guard let model, !model.isResetting, activeRun(groupID) == nil, let group = model.group(groupID),
+              let session = model.groupSession(groupID) else { return false }
+        runs[groupID] = .new(group: group, request: request, now: now())
+        session.append(.notice(notice))
+        model.groupLive(groupID).setRunState(.running)
+        refreshLive(groupID)
+        enqueue(group.orchestratorID, text: recovery, shown: recovery, images: [], in: groupID)
+        return true
     }
 
     /// Asks `member` for a turn on behalf of the person. `shown` is the message as typed (empty for pictures alone): what the

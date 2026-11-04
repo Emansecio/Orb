@@ -4,7 +4,7 @@ import Foundation
 /// target's own `BotSession` as a side run: the chat is parked, a conversation of its own (`pedido-<id>.json`) takes its place, the
 /// permissions and mode are the target's. When the turn ends, the last thing the target said goes back to the asker as a reply
 /// that wakes it (a new turn of its chat, or the continuation of the request it was serving when it asked). Nothing here is
-/// saved but those conversations: requests in flight die with the app (`Conversation.closingInterruptedTurn`).
+/// saved but those conversations: requests in flight die with the app (`Conversation.closingInterruptedTurn`), and the next launch sends again the ones the `WorkJournal` kept (`resubmit`).
 ///
 /// Without an `AppModel` it is the quiet shell the contract describes: it refuses everything and holds nothing.
 @MainActor
@@ -126,6 +126,7 @@ final class DelegationHub: DelegationService {
         // A routine's run that asks is resumed by the answer (`holdRoutine`), so the answer must say which run it is for.
         if session.routineID != nil, session.sideKind == nil { envelope.servingRoutine = session.routineID }
         requests[envelope.id] = DelegationRequest(envelope: envelope, state: .queued)
+        model.workJournal.requestBegan(envelope) // a close of the app resumes it (`resubmit`)
         if let serving = envelope.servingRequest { requests[serving]?.openChildren.insert(envelope.id) }
         queues[plan.target.id, default: []].append(envelope.id)
         // What the asker's chat shows: "Atlas pediu ajuda ao Revisor" (the exchange lives in the lines, not in a card).
@@ -137,6 +138,29 @@ final class DelegationHub: DelegationService {
         schedulePump(plan.target.id)
         return envelope
     }
+
+    /// The app closed on this request (`WorkJournal`): it goes to the same target again, once, in the same chain, so the answer wakes
+    /// the asker as it would have. The target is told to check what is already done. A request that was itself serving another
+    /// is not kept (the one it served is redone and asks again). False when it cannot be sent anymore: an Orb is gone, or the
+    /// switch is off.
+    func resubmit(_ original: OrbEnvelope) -> Bool {
+        guard let model, !isShuttingDown, model.orbsCanTalk, model.bot(original.from.id) != nil, model.bot(original.to.id) != nil,
+              requests[original.id] == nil else { return false }
+        var envelope = original
+        envelope.text = Self.resumedPrefix + original.text
+        envelope.sentAt = .now
+        var chain = chainStates[envelope.chainID]
+            ?? ChainState(origin: .chat(envelope.from.id), originBot: envelope.from.id, groupID: nil, chat: envelope.chat)
+        chain.touched = .now
+        chainStates[envelope.chainID] = chain
+        requests[envelope.id] = DelegationRequest(envelope: envelope, state: .queued)
+        queues[envelope.to.id, default: []].append(envelope.id)
+        refresh(envelope.from.id, envelope.to.id)
+        schedulePump(envelope.to.id)
+        return true
+    }
+
+    static let resumedPrefix = "(Resumed after the app closed: check what is already done before repeating anything.)\n\n"
 
     /// A notice (`tell`) runs no turn. In a group it is a post in the thread, which the member's next turn reads with the rest
     /// of the thread; elsewhere it is a line of the target's latest conversation (`AppModel.latestChat`), saved with it,
@@ -1028,6 +1052,10 @@ final class DelegationHub: DelegationService {
 
     func refresh(_ ids: [UUID]) {
         guard let model else { return }
+        // Every change of a request passes here: the journal forgets the ones that ended (answered, failed, stopped).
+        if model.workJournal.tracksRequests {
+            model.workJournal.syncRequests(open: Set(requests.values.filter { Self.isOpen($0.state) }.map(\.id)))
+        }
         for id in Set(ids) {
             guard let live = model.liveBot(id) else { continue }
             let asks = openRequests(from: id)

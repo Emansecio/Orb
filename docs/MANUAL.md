@@ -280,6 +280,7 @@ Se o navegador não estiver instalado, o Orb fica só com `web_fetch` e `web_sea
   ("4 min · 30 ações · 180 mil tokens", sem contar o histórico relido do cache, e com o valor em dólares, que conta, quando o
   modelo é pago por uso e o preço é conhecido). Um pedido de
   outro Orb que passa de 3 h trabalhando gera um banner com **Parar**; ele não é encerrado sozinho.
+- **Sair do app no meio de uma tarefa.** Quando o app fecha (ao sair ou por uma queda) com uma tarefa em andamento, na abertura seguinte ela continua sozinha, uma vez: a conversa do Orb recebe o mesmo "continua" do botão **Continuar**, um pedido a um grupo volta ao orquestrador com o aviso "O app fechou no meio deste pedido; retomando." e um pedido de um Orb a outro é reenviado. Processos em segundo plano morrem com o app e o Orb é avisado de quantos eram. Para encerrar de verdade, use **Parar** antes de sair. Se o app cair duas vezes em 10 minutos, nada é retomado, e ficam os avisos com **Continuar**. Rotinas não entram nisso: o agendamento as roda de novo.
 - **Skills.** `/resumir`, `/organizar` e `/revisar` vêm prontas; veja [Conectores e skills](#conectores-e-skills).
 
 ## Permissões

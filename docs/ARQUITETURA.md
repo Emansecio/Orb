@@ -425,6 +425,7 @@ conversations/<Orb>/routine-<rotina>.json   a conversa de cada rotina
 wake/<nome ou id>.wake           a campainha de fora: um processo externo grava o arquivo e a rotina roda na hora
                                  (`RoutineWake`; consumido ao ser lido, o texto vira o motivo na execução)
 rascunhos.json                   o que cada compositor guarda sem enviar (`ComposerDraft`: texto e caminhos de arquivos e imagens); gravado ao sair, depois que o turno interrompido devolveu a fila, e a cada rodada do agendador; lido na abertura
+execucoes.json                   o que estava em andamento (`WorkJournal`): tarefa do chat de um Orb, pedido a um grupo, pedido de um Orb a outro; gravado só quando um trabalho começa ou termina, nunca por token. Sair do app não apaga as entradas: a próxima abertura retoma cada uma, uma vez (`AppModel+Resume`). Ver "Retomar sozinho" abaixo
 conectores/<id>.json             catálogo do conector (`ConnectorCatalog`): o que o servidor ofereceu da última vez, sem segredos
 memoria/<Orb>/…                  a memória (páginas .md + index.sqlite, _propostas/ e _skills.json das skills); memoria/_guardadas/<nome> – <data>/ de Orbs apagados ou
                                  redefinidos, com perfil.json (nome, papel e aparência) ao lado das páginas
@@ -438,6 +439,17 @@ uso/aaaa-mm.json                 histórico de uso: uma linha por hora × Orb ×
 *.corrupt-<aaaammdd-hhmmss>      cópia de um arquivo que não pôde ser lido (nunca sobrescrito)
 .migrado-do-openbot              marca de que a migração do OpenBot já foi feita
 ```
+
+### Retomar sozinho
+
+Uma tarefa interrompida por sair do app ou por uma queda continua sozinha na abertura seguinte, uma vez por interrupção; **Parar** antes de sair é o jeito de encerrar de verdade. `WorkJournal` (`MultiOrb/WorkJournal.swift`, `execucoes.json`) guarda uma entrada quando o trabalho começa (`BotSession.beginTurn` no chat do próprio Orb, nunca em rotina, pedido ou turno de grupo; `GroupHub.runs`; `DelegationHub.submit` fora de grupo e fora de outro pedido) e a tira quando termina, falha ou a pessoa para (`finishTurn`, o fim da rodada do grupo, `DelegationHub.refresh`). `stopTurnsForQuit` congela o diário (`freeze`): os turnos que terminam ao sair não apagam nada, e é isso que a abertura retoma. O que cada entrada vira:
+
+- **Tarefa do chat**: a conversa já termina no aviso "O app foi fechado no meio desta tarefa." (`closingInterruptedTurn`); o Orb recebe a mesma mensagem do botão "Continuar", só se a pessoa não escreveu depois do corte, e com a contagem de processos em segundo plano que morreram com o app (só o número, nunca o comando).
+- **Pedido a um grupo**: o fio ganha "O app fechou no meio deste pedido; retomando." e o orquestrador recebe um turno com as atribuições marcadas como perdidas (`GroupHub.resume`).
+- **Pedido de um Orb a outro**: reenviado ao mesmo destino, na mesma cadeia, com o aviso para conferir o que já foi feito (`DelegationHub.resubmit`); a resposta acorda quem pediu como sempre. Um pedido feito enquanto o Orb atendia outro pedido ou uma rotina não é guardado: quem pediu é refeito do começo e pergunta de novo.
+- **Rotinas**: não são retomadas; o agendamento as roda de novo.
+
+Cada entrada retoma uma vez (`resumes`); a que já foi retomada é descartada e fica o "Continuar" do aviso. Guarda contra ciclo de quedas: `cleanQuit` fica falso ao abrir e verdadeiro no `willTerminate`; duas aberturas depois de queda em menos de 10 minutos não retomam nada e limpam o diário. A retomada espera a primeira checagem das conexões e, para a tarefa do chat, até um minuto por um Orb que outra coisa tomou na abertura.
 
 Fora dela: o **Keychain** (serviço `app.orb.mac`; uma conta por provedor com chave, `chatgpt` com o JSON do login e
 `mcp.<id do conector>.<NOME>` para segredos de conectores e `mcp.<id>.oauth` para o login de um conector), as **preferências** (`UserDefaults`: `notifyWhenDone`,

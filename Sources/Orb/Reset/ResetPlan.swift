@@ -138,7 +138,7 @@ enum ResetGuard {
     /// drafts and the folders above).
     static func removes(entry name: String) -> Bool {
         name == "state.json" || name.hasPrefix("state.json.") || name == Store.draftsFileName
-            || name == Store.inicioJournalFileName || name.hasPrefix(Store.inicioJournalFileName + ".") || ownedFolders.contains(name)
+            || name == Store.workJournalFileName || name == Store.inicioJournalFileName || name.hasPrefix(Store.inicioJournalFileName + ".") || ownedFolders.contains(name)
     }
 
     /// Preferences that survive a reset: the note of which Keychain accounts were already dealt with, so a key the

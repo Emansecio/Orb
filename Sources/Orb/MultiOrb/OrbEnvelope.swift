@@ -1,7 +1,7 @@
 import Foundation
 
 /// What travels between Orbs: a request, a notice or a reply, with where it stands in its chain (the Orbs that asked each
-/// other, from the first to the last). Memory only: delegation state is not saved (`DelegationRequest`).
+/// other, from the first to the last). Delegation state is memory only, except a request outside any group, whose envelope the `WorkJournal` keeps so the next launch can send it again.
 struct OrbEnvelope: Codable, Equatable, Sendable {
     enum Kind: String, Codable, Sendable {
         case ask, tell, reply

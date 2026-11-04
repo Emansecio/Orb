@@ -2,7 +2,7 @@ import Foundation
 
 /// One request of the person to a group, from the message that starts it until the group has nothing left to do: its chain of
 /// turns (`id` is the chain's id in the delegation hub) and what it has spent. Nothing limits it: the person stops it (Parar
-/// grupo, ⌘.). Memory only: a request does not survive the app closing.
+/// grupo, ⌘.). Memory only; the `WorkJournal` keeps the fact that one was open, and the next launch resumes it.
 struct GroupRun: Equatable, Sendable {
     enum Phase: Equatable, Sendable {
         case active
