@@ -263,45 +263,74 @@ enum SyntheticEventBuilder {
         return (down, up)
     }
 
-    /// Press, 12 interpolated moves and release; the press is held a moment by the caller's pacing.
-    static func dragEvents(from start: CGPoint, to end: CGPoint, window: UInt32, source: CGEventSource?, steps: Int = 12) throws -> [CGEvent] {
-        var plan: [(CGEventType, CGPoint)] = [(.leftMouseDown, start)]
-        for step in 1...steps {
-            let part = CGFloat(step) / CGFloat(steps)
-            plan.append((.leftMouseDragged, CGPoint(x: start.x + (end.x - start.x) * part, y: start.y + (end.y - start.y) * part)))
-        }
-        plan.append((.leftMouseUp, end))
-        return try plan.map { type, point in
-            guard let event = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: .left) else {
-                throw ToolError("O macOS não deixou criar o evento do mouse.")
-            }
-            event.setIntegerValueField(.mouseEventClickState, value: 1)
-            event.setIntegerValueField(.mouseEventWindowUnderMousePointer, value: Int64(window))
-            event.setIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent, value: Int64(window))
-            return event
-        }
+    /// AppKit reads an event's window from this field (`NSEvent.windowNumber`), not from the two documented ones. Not in
+    /// the headers; measured on macOS 27.0.1: a pid's mouse or scroll event without it reaches the app with no window, and
+    /// no view gets it.
+    static let windowNumberField = CGEventField(rawValue: 51)!
+
+    /// Aims a mouse or scroll event at a window: its number in the documented fields and in the one AppKit reads, and the
+    /// point inside the window (`locationInWindow`, which AppKit would otherwise take from the screen point).
+    static func aim(_ event: CGEvent, at point: CGPoint, window: EventWindow) {
+        let id = Int64(window.id)
+        event.setIntegerValueField(.mouseEventWindowUnderMousePointer, value: id)
+        event.setIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent, value: id)
+        event.setIntegerValueField(windowNumberField, value: id)
+        WindowLocation.set(event, to: CGPoint(x: point.x - window.frame.minX, y: point.y - window.frame.minY))
     }
 
-    /// Mouse down and up for each click of a multi-click (`mouseEventClickState` counts 1, 2…), aimed at a window by its
-    /// `CGWindowID` and positioned in screen points. The cursor is not moved: the events go to the pid, not to the HID tap.
-    static func clickEvents(at point: CGPoint, window: UInt32, button: MouseButton, count: Int, source: CGEventSource?) throws -> [CGEvent] {
+    /// One mouse event aimed at the window. The flags are set explicitly, so what the person holds down on the real
+    /// keyboard (or the last event of the private source) cannot leak in; `pressure` only for a pen stroke.
+    static func mouseEvent(_ type: CGEventType, at point: CGPoint, button: CGMouseButton = .left, clickState: Int = 1,
+                           flags: CGEventFlags = [], pressure: Double? = nil, window: EventWindow, source: CGEventSource?) throws -> CGEvent {
+        guard let event = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: button) else {
+            throw ToolError("O macOS não deixou criar o evento do mouse.")
+        }
+        event.setIntegerValueField(.mouseEventClickState, value: Int64(clickState))
+        event.flags = flags
+        if let pressure { event.setDoubleValueField(.mouseEventPressure, value: min(max(pressure, 0), 1)) }
+        aim(event, at: point, window: window)
+        return event
+    }
+
+    /// Mouse down and up for each click of a multi-click (`mouseEventClickState` counts 1, 2, 3), with `modifiers` held.
+    /// The cursor is not moved: the events go to the pid, not to the HID tap.
+    static func clickEvents(at point: CGPoint, window: EventWindow, button: MouseButton, count: Int,
+                            modifiers: KeyStroke.Modifiers = [], source: CGEventSource?) throws -> [CGEvent] {
         let types: (down: CGEventType, up: CGEventType, button: CGMouseButton) = switch button {
         case .left: (.leftMouseDown, .leftMouseUp, .left)
         case .right: (.rightMouseDown, .rightMouseUp, .right)
         case .middle: (.otherMouseDown, .otherMouseUp, .center)
         }
+        let flags = Self.flags(for: modifiers)
         var events: [CGEvent] = []
         for click in 1...max(1, min(count, 3)) {
             for type in [types.down, types.up] {
-                guard let event = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: types.button) else {
-                    throw ToolError("O macOS não deixou criar o evento do mouse.")
-                }
-                event.setIntegerValueField(.mouseEventClickState, value: Int64(click))
-                event.setIntegerValueField(.mouseEventWindowUnderMousePointer, value: Int64(window))
-                event.setIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent, value: Int64(window))
-                events.append(event)
+                events.append(try mouseEvent(type, at: point, button: types.button, clickState: click, flags: flags, window: window, source: source))
             }
         }
+        return events
+    }
+
+    /// Pointer moves with no button held, for hovering.
+    static func moveEvents(along points: [CGPoint], window: EventWindow, source: CGEventSource?) throws -> [CGEvent] {
+        try points.map { try mouseEvent(.mouseMoved, at: $0, window: window, source: source) }
+    }
+
+    /// Press at the first point, a drag to each of the others, release at the last. With pressures (a pen stroke), each
+    /// event carries its own and the release none.
+    static func dragEvents(along path: [StrokePoint], window: EventWindow, modifiers: KeyStroke.Modifiers = [],
+                           source: CGEventSource?) throws -> [CGEvent] {
+        guard let first = path.first, let last = path.last, path.count >= 2 else {
+            throw ToolError("Um arrasto precisa de pelo menos dois pontos.")
+        }
+        let flags = Self.flags(for: modifiers)
+        let pen = path.contains { $0.pressure != nil }
+        func pressure(_ point: StrokePoint) -> Double? { pen ? point.pressure ?? 0.5 : nil }
+        var events = [try mouseEvent(.leftMouseDown, at: first.point, flags: flags, pressure: pressure(first), window: window, source: source)]
+        for point in path.dropFirst() {
+            events.append(try mouseEvent(.leftMouseDragged, at: point.point, flags: flags, pressure: pressure(point), window: window, source: source))
+        }
+        events.append(try mouseEvent(.leftMouseUp, at: last.point, flags: flags, pressure: pen ? 0 : nil, window: window, source: source))
         return events
     }
 
@@ -320,9 +349,11 @@ enum SyntheticEventBuilder {
     }
 
     /// Pixel scroll events at `point` (screen points, over the window): positive `dy` moves the content down, like a trackpad.
-    static func scrollEvents(dx: Int, dy: Int, at point: CGPoint, window: UInt32, source: CGEventSource?) throws -> [CGEvent] {
+    static func scrollEvents(dx: Int, dy: Int, at point: CGPoint, window: EventWindow, modifiers: KeyStroke.Modifiers = [],
+                             source: CGEventSource?) throws -> [CGEvent] {
         let horizontal = scrollSteps(dx)
         let vertical = scrollSteps(dy)
+        let flags = Self.flags(for: modifiers)
         var events: [CGEvent] = []
         for index in 0..<max(horizontal.count, vertical.count) {
             let x = Int32(horizontal.indices.contains(index) ? horizontal[index] : 0)
@@ -330,13 +361,27 @@ enum SyntheticEventBuilder {
             guard let event = CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 2, wheel1: y, wheel2: x, wheel3: 0) else {
                 throw ToolError("O macOS não deixou criar o evento de rolagem.")
             }
-            // Unlike mouse events, a scroll event keeps no window fields (they read back as 0): the app finds the window
-            // under `location`, which is why the point matters and `window` is only the caller's record of where it aimed.
             event.location = point
+            event.flags = flags
+            aim(event, at: point, window: window)
             events.append(event)
         }
         return events
     }
+}
+
+/// `CGEventSetWindowLocation`: the point inside the window, which AppKit reads as `locationInWindow`. CoreGraphics exports
+/// it without declaring it in its headers, so it is looked up at run time; a macOS without it sends the window number only.
+enum WindowLocation {
+    private typealias Setter = @convention(c) (CGEvent, CGPoint) -> Void
+    private static let setter: Setter? = {
+        guard let symbol = dlsym(dlopen(nil, RTLD_LAZY), "CGEventSetWindowLocation") else { return nil }
+        return unsafeBitCast(symbol, to: Setter.self)
+    }()
+
+    static var available: Bool { setter != nil }
+
+    static func set(_ event: CGEvent, to point: CGPoint) { setter?(event, point) }
 }
 
 // MARK: - Delivering events
@@ -377,8 +422,9 @@ struct SyntheticPacing: Sendable {
     var betweenChunks: Duration = .milliseconds(1)
     var betweenClicks: Duration = .milliseconds(15)
     var betweenScrolls: Duration = .milliseconds(8)
+    var betweenMoves: Duration = .milliseconds(16)
 
-    static let none = SyntheticPacing(betweenKeys: .zero, betweenChunks: .zero, betweenClicks: .zero, betweenScrolls: .zero)
+    static let none = SyntheticPacing(betweenKeys: .zero, betweenChunks: .zero, betweenClicks: .zero, betweenScrolls: .zero, betweenMoves: .zero)
 }
 
 struct LiveSyntheticInput: SyntheticInput {
@@ -389,6 +435,8 @@ struct LiveSyntheticInput: SyntheticInput {
     var pacing = SyntheticPacing()
     /// Whether Secure Event Input is on; replaceable so tests need no password field.
     var secureInput: @Sendable () -> Bool = { IsSecureEventInputEnabled() }
+    /// The change count of the system's drag pasteboard, which starting a drag-and-drop writes; replaceable for tests.
+    var dragPasteboardCount: @Sendable () -> Int = { NSPasteboard(name: .drag).changeCount }
 
     var secureInputActive: Bool { secureInput() }
 
@@ -435,39 +483,109 @@ struct LiveSyntheticInput: SyntheticInput {
         return sent
     }
 
-    func click(at point: CGPoint, window: UInt32, button: MouseButton, count: Int, to pid: Int32) async throws {
-        let events = try SyntheticEventBuilder.clickEvents(at: point, window: window, button: button, count: count, source: source)
+    func click(at point: CGPoint, window: EventWindow, button: MouseButton, count: Int, modifiers: KeyStroke.Modifiers,
+               hold: Duration, to pid: Int32) async throws {
+        let events = try SyntheticEventBuilder.clickEvents(at: point, window: window, button: button, count: count, modifiers: modifiers, source: source)
         for (index, event) in events.enumerated() {
             // Stop is looked at only before a press: between a press and its release it would leave the button held down in the app.
             if index % 2 == 0 { try Task.checkCancellation() }
             try sink.post(event, to: pid)
+            // A long press waits with the button down; a Stop then still lets go.
+            if index % 2 == 0, hold > .zero { try? await Task.sleep(for: hold) }
             // A gap after each release, so the app sees two clicks and not one long one.
             if index % 2 == 1, index < events.count - 1 { try await pause(pacing.betweenClicks) }
         }
     }
 
-    func drag(from start: CGPoint, to end: CGPoint, window: UInt32, to pid: Int32) async throws {
-        let events = try SyntheticEventBuilder.dragEvents(from: start, to: end, window: window, source: source)
-        // A native drag session follows the real pointer and never sees this release, so it would hang on the person's
-        // mouse. Starting one writes the drag pasteboard.
-        let pasteboard = NSPasteboard(name: .drag), written = pasteboard.changeCount
-        for event in events.dropLast() {
+    func move(along points: [CGPoint], window: EventWindow, to pid: Int32) async throws {
+        for event in try SyntheticEventBuilder.moveEvents(along: points, window: window, source: source) {
+            try Task.checkCancellation()
             try sink.post(event, to: pid)
-            try await pause(.milliseconds(25))
-            if pasteboard.changeCount != written {
-                try? sink.post(events[events.count - 1], to: pid)
-                throw ToolError("o arrasto abriu uma sessão do sistema, que só segue o mouse real")
-            }
+            try await pause(pacing.betweenMoves)
         }
-        if let last = events.last { try sink.post(last, to: pid) }
     }
 
-    func scroll(dx: Int, dy: Int, at point: CGPoint, window: UInt32, to pid: Int32) async throws {
-        let events = try SyntheticEventBuilder.scrollEvents(dx: dx, dy: dy, at: point, window: window, source: source)
+    func scroll(dx: Int, dy: Int, at point: CGPoint, window: EventWindow, modifiers: KeyStroke.Modifiers, to pid: Int32) async throws {
+        let events = try SyntheticEventBuilder.scrollEvents(dx: dx, dy: dy, at: point, window: window, modifiers: modifiers, source: source)
         for event in events {
             try Task.checkCancellation()
             try sink.post(event, to: pid)
             try await pause(pacing.betweenScrolls)
         }
+    }
+
+    /// Why a drag stops early, with the person's words for it.
+    private struct Interrupted: Error { var reason: String }
+
+    /// A drag sent to the app. Measured on macOS 27: with the window aimed (`SyntheticEventBuilder.aim`) a native
+    /// drag-and-drop session follows these events, also onto another app's window, without the real pointer. The system
+    /// drops on whatever window is on top where it is let go, so when one starts (the drag pasteboard changes) the end
+    /// point must be clear; if it is not, or the drag has to stop, Escape cancels the session before the button is let go
+    /// (nothing is dropped). An in-app drag that has to stop is carried back to where it began and let go there.
+    func drag(along path: [StrokePoint], window: EventWindow, modifiers: KeyStroke.Modifiers, duration: Duration,
+              watch: DragWatch, to pid: Int32) async throws -> DragOutcome {
+        let source = source
+        let events = try SyntheticEventBuilder.dragEvents(along: path, window: window, modifiers: modifiers, source: source)
+        let moves = events.count - 2
+        let step = moves > 0 ? duration / moves : .zero
+        try Task.checkCancellation()
+        if let reason = await watch.interruption() { throw ToolError(reason + "; nada foi pressionado") }
+        let pasteboard = dragPasteboardCount, written = pasteboard()
+        try sink.post(events[0], to: pid)
+        var dropping = false
+        var reached = 0
+        do {
+            for index in 1...max(1, moves) where moves > 0 {
+                try await Task.sleep(for: step)
+                if let reason = await watch.interruption() { throw Interrupted(reason: reason) }
+                try sink.post(events[index], to: pid)
+                reached = index
+                if !dropping, pasteboard() != written {
+                    dropping = true
+                    if let cover = watch.coverAtEnd() { throw Interrupted(reason: Self.covered(cover)) }
+                }
+            }
+            if dropping, let cover = watch.coverAtEnd() { throw Interrupted(reason: Self.covered(cover)) }
+            try sink.post(events[events.count - 1], to: pid)
+            return dropping ? .dropped : .moved
+        } catch {
+            let reason = (error as? Interrupted)?.reason ?? (error is CancellationError ? "o pedido foi parado" : nil)
+            // A post that failed (the app is gone) leaves nothing to let go of.
+            guard let reason else { throw error }
+            if dropping {
+                try? await letGoOfTheDrop(at: path[reached].point, window: window, modifiers: modifiers, to: pid)
+                if error is CancellationError { throw error }
+                throw DragStopped(reason: reason, ending: .dropCancelled)
+            }
+            try? carryBack(from: path[reached].point, to: path[0].point, window: window, modifiers: modifiers, to: pid)
+            if error is CancellationError { throw error }
+            throw DragStopped(reason: reason, ending: .carriedBack)
+        }
+    }
+
+    static func covered(_ owner: String) -> String {
+        "\(owner.isEmpty ? "outra janela" : owner) está por cima onde o arrasto terminaria, e o macOS solta no que está por cima"
+    }
+
+    /// Escape cancels a drag-and-drop the app is running; the release that follows then drops nothing (measured: the
+    /// session ends with no operation). The release goes where the drag is, so nothing else moves.
+    private func letGoOfTheDrop(at point: CGPoint, window: EventWindow, modifiers: KeyStroke.Modifiers, to pid: Int32) async throws {
+        let escape = try SyntheticEventBuilder.keyEvents(KeyStroke(.named(.escape)), layout: layout, source: source)
+        try sink.post(escape.down, to: pid)
+        try sink.post(escape.up, to: pid)
+        try? await Task.sleep(for: .milliseconds(30))
+        let flags = SyntheticEventBuilder.flags(for: modifiers)
+        try sink.post(try SyntheticEventBuilder.mouseEvent(.leftMouseUp, at: point, flags: flags, window: window, source: source), to: pid)
+    }
+
+    /// Back to where the drag began in a few quick moves, and let go there.
+    private func carryBack(from point: CGPoint, to start: CGPoint, window: EventWindow, modifiers: KeyStroke.Modifiers, to pid: Int32) throws {
+        let flags = SyntheticEventBuilder.flags(for: modifiers)
+        for step in 1...4 {
+            let part = CGFloat(step) / 4
+            let back = CGPoint(x: point.x + (start.x - point.x) * part, y: point.y + (start.y - point.y) * part)
+            try sink.post(try SyntheticEventBuilder.mouseEvent(.leftMouseDragged, at: back, flags: flags, window: window, source: source), to: pid)
+        }
+        try sink.post(try SyntheticEventBuilder.mouseEvent(.leftMouseUp, at: start, flags: flags, window: window, source: source), to: pid)
     }
 }

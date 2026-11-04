@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 import Testing
@@ -368,6 +369,139 @@ struct SyntheticInputTests {
         #expect(sink.events.allSatisfy { $0.location == CGPoint(x: 5, y: 6) })
     }
 
+    // MARK: Aiming at the window
+
+    /// Measured on macOS 27: without the window number in the field AppKit reads, and the point inside the window, a
+    /// pid's mouse event reaches the app with no window and no view gets it.
+    @Test func mouseEventsCarryTheWindowAppKitReadsAndThePointInsideIt() throws {
+        let window = EventWindow(id: 4242, frame: CGRect(x: 900, y: 1168, width: 520, height: 252))
+        let events = try SyntheticEventBuilder.clickEvents(at: CGPoint(x: 1353, y: 1310), window: window, button: .left, count: 1, source: nil)
+        for event in events {
+            #expect(event.getIntegerValueField(SyntheticEventBuilder.windowNumberField) == 4242)
+            let seen = try #require(NSEvent(cgEvent: event))
+            #expect(seen.windowNumber == 4242)
+            // The point inside the window is applied by the window server for the app that owns the window, so it only
+            // shows in a real app (AXSmokeTests); here the symbol has to exist on this macOS.
+            #expect(WindowLocation.available)
+        }
+        let scroll = try SyntheticEventBuilder.scrollEvents(dx: 0, dy: 30, at: CGPoint(x: 1000, y: 1200), window: window, source: nil)
+        #expect(scroll.allSatisfy { NSEvent(cgEvent: $0)?.windowNumber == 4242 })
+    }
+
+    @Test func modifiersAndTripleClicksReachTheEventsAndNothingElseLeaksIn() throws {
+        let window = EventWindow(id: 1, frame: .zero)
+        let events = try SyntheticEventBuilder.clickEvents(at: .zero, window: window, button: .left, count: 3, modifiers: [.command, .shift], source: nil)
+        #expect(events.map { $0.getIntegerValueField(.mouseEventClickState) } == [1, 1, 2, 2, 3, 3])
+        #expect(events.allSatisfy { $0.flags.intersection([.maskCommand, .maskShift, .maskAlternate, .maskControl]) == [.maskCommand, .maskShift] })
+        let scroll = try SyntheticEventBuilder.scrollEvents(dx: 0, dy: 10, at: .zero, window: window, source: CGEventSource(stateID: .privateState))
+        #expect(scroll.allSatisfy { $0.flags.intersection([.maskCommand, .maskShift, .maskAlternate, .maskControl]).isEmpty })
+    }
+
+    @Test func aLongPressHoldsTheButtonDownBeforeLettingGo() async throws {
+        let sink = RecordingSink()
+        let clock = ContinuousClock(), started = clock.now
+        try await input(sink: sink).click(at: .zero, window: EventWindow(id: 1, frame: .zero), button: .left, count: 1,
+                                          modifiers: [], hold: .milliseconds(120), to: 9)
+        #expect(started.duration(to: clock.now) >= .milliseconds(120))
+        #expect(sink.events.map(\.type) == [.leftMouseDown, .leftMouseUp])
+    }
+
+    @Test func aPenStrokeCarriesItsPressuresAndAMouseDragNone() throws {
+        let window = EventWindow(id: 1, frame: .zero)
+        let pen = try SyntheticEventBuilder.dragEvents(along: [StrokePoint(point: .zero, pressure: 0.2), StrokePoint(point: CGPoint(x: 4, y: 0), pressure: 0.8)],
+                                                       window: window, source: nil)
+        #expect(pen.map { $0.getDoubleValueField(.mouseEventPressure) } == [0.2, 0.8, 0])
+        let mouse = try SyntheticEventBuilder.dragEvents(along: [StrokePoint(point: .zero), StrokePoint(point: CGPoint(x: 4, y: 0))], window: window, source: nil)
+        #expect(mouse.map(\.type) == [.leftMouseDown, .leftMouseDragged, .leftMouseUp])
+    }
+
+    // MARK: Drag
+
+    private static let dragWindow = EventWindow(id: 5, frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+    private static let line = (0...6).map { StrokePoint(point: CGPoint(x: 100 + 50 * $0, y: 100)) }
+
+    /// A drag whose drag pasteboard changes after the given number of posts, as a drag-and-drop starting would.
+    private func dragInput(_ sink: RecordingSink, sessionAfter posts: Int?) -> LiveSyntheticInput {
+        var live = input(sink: sink)
+        live.dragPasteboardCount = { posts.map { sink.posted.count >= $0 ? 1 : 0 } ?? 0 }
+        return live
+    }
+
+    @Test func aDragInsideTheAppEndsWhereItWasAsked() async throws {
+        let sink = RecordingSink()
+        let outcome = try await dragInput(sink, sessionAfter: nil).drag(along: Self.line, window: Self.dragWindow, modifiers: [.option],
+                                                                        duration: .zero, watch: DragWatch(), to: 3)
+        #expect(outcome == .moved)
+        #expect(sink.events.first?.type == .leftMouseDown && sink.events.last?.type == .leftMouseUp && sink.events.count == 8)
+        #expect(sink.events.last?.location == CGPoint(x: 400, y: 100))
+        #expect(sink.events.allSatisfy { $0.flags.contains(.maskAlternate) })
+    }
+
+    @Test func aDragAndDropOntoAClearEndIsDropped() async throws {
+        let sink = RecordingSink()
+        let outcome = try await dragInput(sink, sessionAfter: 2).drag(along: Self.line, window: Self.dragWindow, modifiers: [], duration: .zero,
+                                                                      watch: DragWatch(coverAtEnd: { nil }), to: 3)
+        #expect(outcome == .dropped)
+        #expect(sink.events.last?.type == .leftMouseUp && sink.events.last?.location == CGPoint(x: 400, y: 100))
+    }
+
+    @Test func aDragAndDropOntoACoveredEndIsCancelledWithEscapeBeforeLettingGo() async throws {
+        let sink = RecordingSink()
+        let drag = dragInput(sink, sessionAfter: 2)
+        await #expect(throws: DragStopped.self) {
+            _ = try await drag.drag(along: Self.line, window: Self.dragWindow, modifiers: [], duration: .zero,
+                                    watch: DragWatch(coverAtEnd: { "Safari" }), to: 3)
+        }
+        let types = sink.events.map(\.type)
+        #expect(Array(types.suffix(3)) == [.keyDown, .keyUp, .leftMouseUp], "Escape, then the release")
+        #expect(sink.events[sink.events.count - 3].getIntegerValueField(.keyboardEventKeycode) == 53)
+        // Stopped as soon as the session showed up: never carried on toward the covered end.
+        #expect(types.filter { $0 == .leftMouseDragged }.count == 1)
+    }
+
+    @Test func aDragTheWatchStopsIsCarriedBackAndLetGoWhereItBegan() async throws {
+        let sink = RecordingSink()
+        let drag = dragInput(sink, sessionAfter: nil)
+        let asked = CallCounter()
+        let watch = DragWatch(interruption: { asked.next() >= 4 ? "o usuário foi para o app" : nil })
+        do {
+            _ = try await drag.drag(along: Self.line, window: Self.dragWindow, modifiers: [], duration: .zero, watch: watch, to: 3)
+            Issue.record("the drag should have stopped")
+        } catch let stopped as DragStopped {
+            #expect(stopped.ending == .carriedBack && stopped.reason == "o usuário foi para o app")
+        }
+        #expect(sink.events.last?.type == .leftMouseUp && sink.events.last?.location == CGPoint(x: 100, y: 100))
+        #expect(!sink.events.contains { $0.type == .keyDown }, "no Escape for a drag inside the app")
+    }
+
+    @Test func aDragTheWatchRefusesBeforeStartingPressesNothing() async {
+        let sink = RecordingSink()
+        await #expect(throws: ToolError.self) {
+            _ = try await dragInput(sink, sessionAfter: nil).drag(along: Self.line, window: Self.dragWindow, modifiers: [], duration: .zero,
+                                                                  watch: DragWatch(interruption: { "o usuário está usando o app" }), to: 3)
+        }
+        #expect(sink.events.isEmpty)
+    }
+
+    @Test func stoppingADragLetsGoOfTheButton() async throws {
+        let sink = RecordingSink()
+        sink.afterPost = { count in
+            if count == 3 { withUnsafeCurrentTask { $0?.cancel() } }
+        }
+        let drag = dragInput(sink, sessionAfter: nil)
+        let task = Task { try await drag.drag(along: Self.line, window: Self.dragWindow, modifiers: [], duration: .milliseconds(60), watch: DragWatch(), to: 3) }
+        await #expect(throws: CancellationError.self) { _ = try await task.value }
+        #expect(sink.events.last?.type == .leftMouseUp && sink.events.last?.location == CGPoint(x: 100, y: 100))
+    }
+
+    @Test func theDragTakesTheTimeItIsGiven() async throws {
+        let sink = RecordingSink()
+        let clock = ContinuousClock(), started = clock.now
+        _ = try await dragInput(sink, sessionAfter: nil).drag(along: Self.line, window: Self.dragWindow, modifiers: [], duration: .milliseconds(180),
+                                                              watch: DragWatch(), to: 3)
+        #expect(started.duration(to: clock.now) >= .milliseconds(170))
+    }
+
     // MARK: Scroll
 
     @Test func aScrollIsCutIntoSteps() {
@@ -427,4 +561,13 @@ struct SyntheticInputTests {
         #expect(throws: ToolError.self) { try PidEventSink().post(event, to: ProcessInfo.processInfo.processIdentifier) }
         #expect(throws: ToolError.self) { try PidEventSink().post(event, to: 2_000_000_000) }
     }
+}
+
+/// Counts calls from any thread.
+private final class CallCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+
+    /// The count after this call.
+    func next() -> Int { lock.withLock { value += 1; return value } }
 }

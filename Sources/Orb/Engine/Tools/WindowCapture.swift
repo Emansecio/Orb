@@ -299,6 +299,34 @@ enum WindowServerList {
     }
 }
 
+/// Which window is on top at a point, for a drag-and-drop: the system drops on whatever is there, whichever app's.
+enum WindowStack {
+    /// Layers above this are not where a drop lands: the drag image itself (500), the cursor and screen savers. Below it
+    /// are normal windows, floating panels, the Dock, the menu bar, menus and help tags.
+    static let topLayer = 200
+
+    static func onTop(at point: CGPoint) -> CapturableWindow? {
+        let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        return onTop(at: point, in: info)
+    }
+
+    /// The first window of a front-to-back on-screen listing that contains the point and shows something.
+    static func onTop(at point: CGPoint, in info: [[String: Any]]) -> CapturableWindow? {
+        for window in info {
+            let layer = (window[kCGWindowLayer as String] as? NSNumber)?.intValue ?? 0
+            let alpha = (window[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1
+            guard (0...topLayer).contains(layer), alpha > 0.01,
+                  let pid = (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
+                  let number = (window[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
+                  let bounds = (window[kCGWindowBounds as String] as? NSDictionary).flatMap({ CGRect(dictionaryRepresentation: $0 as CFDictionary) }),
+                  bounds.contains(point) else { continue }
+            return CapturableWindow(windowID: number, pid: pid, frame: bounds, title: window[kCGWindowName as String] as? String ?? "",
+                                    isOnScreen: true, owner: window[kCGWindowOwnerName as String] as? String ?? "")
+        }
+        return nil
+    }
+}
+
 /// Holds the `SCWindow`s of the last ScreenCaptureKit listing (a capture needs the object, not just its number); listed
 /// again only for a window it does not know or whose size changed.
 actor SCKSession {

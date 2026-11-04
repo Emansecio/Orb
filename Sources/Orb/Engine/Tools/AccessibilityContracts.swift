@@ -237,9 +237,60 @@ enum MouseButton: String, Sendable, Equatable, Hashable {
     case left, right, middle
 }
 
+/// The window a mouse or scroll event is for: its number and where it is, so the event can say the point inside it.
+/// Measured on macOS 27: a pid's mouse event without both reaches the app with no window, and the app drops it.
+struct EventWindow: Sendable, Equatable {
+    var id: UInt32
+    /// In screen points, origin at the top left of the main display (the window server's bounds).
+    var frame: CGRect
+}
+
+/// One point of a drag or a pen stroke, in screen points; `pressure` from 0 to 1, nil for a plain mouse.
+struct StrokePoint: Sendable, Equatable {
+    var point: CGPoint
+    var pressure: Double? = nil
+}
+
+/// How a drag that went all the way ended.
+enum DragOutcome: Sendable, Equatable {
+    /// Inside the app: no system drag-and-drop started.
+    case moved
+    /// It became a system drag-and-drop and was let go over the end point.
+    case dropped
+}
+
+/// What a drag looks at while it runs.
+struct DragWatch: Sendable {
+    /// Asked when a system drag-and-drop starts and again right before it is let go: the app whose window covers the end
+    /// point (a drop lands in whatever is on top there), or nil when the end point is clear.
+    var coverAtEnd: @Sendable () -> String? = { nil }
+    /// Asked between moves: why to stop now (the person went to the app), or nil to go on.
+    var interruption: @Sendable () async -> String? = { nil }
+}
+
+/// A drag that stopped before its end. Nothing is left pressed; `ending` says how it was let go.
+struct DragStopped: Error, Sendable, Equatable, LocalizedError {
+    enum Ending: Sendable, Equatable {
+        /// Carried back to where it began and let go there, so an in-app drag leaves things as they were.
+        case carriedBack
+        /// A system drag-and-drop was cancelled with Escape before letting go: nothing was dropped.
+        case dropCancelled
+    }
+
+    var reason: String
+    var ending: Ending
+
+    var errorDescription: String? {
+        switch ending {
+        case .carriedBack: "\(reason); levei o arrasto de volta ao começo e soltei lá"
+        case .dropCancelled: "\(reason); cancelei o arrastar e soltar com Esc antes de soltar, nada foi solto"
+        }
+    }
+}
+
 /// Keyboard and mouse events sent to one process (`CGEvent.postToPid`): they do not move the cursor or touch the focus of
 /// the person using the Mac. Points are in screen coordinates (origin at the top left of the main display, like
-/// Accessibility frames); `window` is the `CGWindowID` the event is meant for.
+/// Accessibility frames); `window` is the window the event is meant for.
 protocol SyntheticInput: Sendable {
     /// Whether Secure Event Input is on (a password field somewhere): keystrokes may be dropped.
     var secureInputActive: Bool { get }
@@ -247,11 +298,17 @@ protocol SyntheticInput: Sendable {
     func keys(_ strokes: [KeyStroke], to pid: Int32) async throws
     /// Types text in chunks, stopping between chunks when the task is cancelled. Returns how many characters were sent.
     @discardableResult func text(_ text: String, to pid: Int32) async throws -> Int
-    func click(at point: CGPoint, window: UInt32, button: MouseButton, count: Int, to pid: Int32) async throws
+    /// `count` clicks (1 to 3) with `modifiers` held; `hold` keeps each press down that long (a long press).
+    func click(at point: CGPoint, window: EventWindow, button: MouseButton, count: Int, modifiers: KeyStroke.Modifiers,
+               hold: Duration, to pid: Int32) async throws
+    /// Moves the pointer the app sees (never the real one) through the points: hovering.
+    func move(along points: [CGPoint], window: EventWindow, to pid: Int32) async throws
     /// Scrolls by pixels; positive `dy` moves the content down (the page goes up), like a trackpad.
-    func scroll(dx: Int, dy: Int, at point: CGPoint, window: UInt32, to pid: Int32) async throws
-    /// Press, move and release inside one window, without the real cursor.
-    func drag(from start: CGPoint, to end: CGPoint, window: UInt32, to pid: Int32) async throws
+    func scroll(dx: Int, dy: Int, at point: CGPoint, window: EventWindow, modifiers: KeyStroke.Modifiers, to pid: Int32) async throws
+    /// Presses at the first point, moves through the others within `duration` and lets go at the last, with `modifiers`
+    /// held, without the real cursor. Throws `DragStopped` when it had to stop before the end.
+    func drag(along path: [StrokePoint], window: EventWindow, modifiers: KeyStroke.Modifiers, duration: Duration,
+              watch: DragWatch, to pid: Int32) async throws -> DragOutcome
 }
 
 // MARK: - Window capture
@@ -264,6 +321,8 @@ struct CapturableWindow: Sendable, Equatable {
     var frame: CGRect
     var title: String = ""
     var isOnScreen: Bool = true
+    /// The owning app's name, as the window server lists it (filled in only where a message needs it).
+    var owner: String = ""
 }
 
 /// Images of single windows, also when covered or on another Space.
@@ -289,6 +348,28 @@ protocol TakeoverHand: Sendable {
     func key(_ stroke: KeyStroke) async throws
     /// Presses at `start`, moves in interpolated steps and releases at `end`.
     func drag(from start: CGPoint, to end: CGPoint) async throws
+    /// A click with `modifiers` held, `count` 1 to 3.
+    func click(at point: CGPoint, button: MouseButton, count: Int, modifiers: KeyStroke.Modifiers) async throws
+    /// Puts the real pointer at `point` and leaves it there (hovering).
+    func move(to point: CGPoint) async throws
+    /// Presses at the first point, moves through the others and releases at the last, with `modifiers` held.
+    func drag(along points: [CGPoint], modifiers: KeyStroke.Modifiers) async throws
+}
+
+extension TakeoverHand {
+    func click(at point: CGPoint, button: MouseButton, count: Int, modifiers: KeyStroke.Modifiers) async throws {
+        guard modifiers.isEmpty, count <= 2 else { throw unavailable("Clicar com teclas seguradas ou três vezes com o mouse real") }
+        try await click(at: point, button: button, count: count)
+    }
+
+    func move(to point: CGPoint) async throws { throw unavailable("Passar o mouse real por cima") }
+
+    func drag(along points: [CGPoint], modifiers: KeyStroke.Modifiers) async throws {
+        guard modifiers.isEmpty, let start = points.first, let end = points.last else {
+            throw unavailable("Arrastar com teclas seguradas usando o mouse real")
+        }
+        try await drag(from: start, to: end)
+    }
 }
 
 struct TakeoverReport<Value: Sendable>: Sendable {
@@ -327,11 +408,18 @@ struct UnavailableSyntheticInput: SyntheticInput {
     var secureInputActive: Bool { false }
     func keys(_ strokes: [KeyStroke], to pid: Int32) async throws { throw unavailable("O envio de teclas ao app") }
     func text(_ text: String, to pid: Int32) async throws -> Int { throw unavailable("A digitação no app") }
-    func click(at point: CGPoint, window: UInt32, button: MouseButton, count: Int, to pid: Int32) async throws {
+    func click(at point: CGPoint, window: EventWindow, button: MouseButton, count: Int, modifiers: KeyStroke.Modifiers,
+               hold: Duration, to pid: Int32) async throws {
         throw unavailable("O clique no app")
     }
-    func scroll(dx: Int, dy: Int, at point: CGPoint, window: UInt32, to pid: Int32) async throws { throw unavailable("A rolagem no app") }
-    func drag(from start: CGPoint, to end: CGPoint, window: UInt32, to pid: Int32) async throws { throw unavailable("O arrasto no app") }
+    func move(along points: [CGPoint], window: EventWindow, to pid: Int32) async throws { throw unavailable("Passar o mouse no app") }
+    func scroll(dx: Int, dy: Int, at point: CGPoint, window: EventWindow, modifiers: KeyStroke.Modifiers, to pid: Int32) async throws {
+        throw unavailable("A rolagem no app")
+    }
+    func drag(along path: [StrokePoint], window: EventWindow, modifiers: KeyStroke.Modifiers, duration: Duration,
+              watch: DragWatch, to pid: Int32) async throws -> DragOutcome {
+        throw unavailable("O arrasto no app")
+    }
 }
 
 struct UnavailableWindowCapturer: WindowCapturer {

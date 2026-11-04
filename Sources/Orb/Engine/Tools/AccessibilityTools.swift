@@ -1664,18 +1664,27 @@ struct UIActTool: AgentTool {
         var notes: [String] = []
         switch plan {
         case .drag(let start, let end, let window):
-            let id = try await windowID(window, app: app, snapshot: snapshot, what: what)
-            do { try await system.input.drag(from: start, to: end, window: id, to: app.pid) } catch {
+            let target = try await eventWindow(window, app: app, snapshot: snapshot, what: what)
+            let path = [StrokePoint(point: start), StrokePoint(point: end)]
+            do {
+                _ = try await system.input.drag(along: path, window: target, modifiers: [], duration: .milliseconds(300), watch: DragWatch(), to: app.pid)
+            } catch let stopped as DragStopped {
+                throw ToolError("Não deu para \(what): \(Self.reason(stopped)).")
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
                 throw Self.needsScreen(what, because: Self.reason(error))
             }
         case .click(let point, let window, let button, let count):
-            let id = try await windowID(window, app: app, snapshot: snapshot, what: what)
-            do { try await system.input.click(at: point, window: id, button: button, count: count, to: app.pid) } catch {
+            let target = try await eventWindow(window, app: app, snapshot: snapshot, what: what)
+            do {
+                try await system.input.click(at: point, window: target, button: button, count: count, modifiers: [], hold: .zero, to: app.pid)
+            } catch {
                 throw Self.needsScreen(what, because: Self.reason(error))
             }
         case .scroll(let dx, let dy, let point, let window):
-            let id = try await windowID(window, app: app, snapshot: snapshot, what: what)
-            do { try await system.input.scroll(dx: dx, dy: dy, at: point, window: id, to: app.pid) } catch {
+            let target = try await eventWindow(window, app: app, snapshot: snapshot, what: what)
+            do { try await system.input.scroll(dx: dx, dy: dy, at: point, window: target, modifiers: [], to: app.pid) } catch {
                 throw Self.needsScreen(what, because: Self.reason(error))
             }
         case .keys(let strokes, let target):
@@ -1715,11 +1724,11 @@ struct UIActTool: AgentTool {
                         + "Espere um pouco e tente de novo, ou peça a ele.")
     }
 
-    /// The `CGWindowID` of the window: the one the screenshot captured when it is the same window, else the window the
-    /// app has with the same frame (±2 pt) and title. Windows come from the window server's list, which needs no
-    /// permission (the title may be missing without Screen Recording: then the frame decides); ScreenCaptureKit, which
-    /// needs Screen Recording, only when that list has nothing for the app.
-    private func windowID(_ window: WindowRef, app: AccessibilityApp, snapshot: UISnapshot?, what: String) async throws -> UInt32 {
+    /// The window an event goes to, by its `CGWindowID` and where it is now: the one the screenshot captured when it is
+    /// the same window, else the window the app has with the same frame (±2 pt) and title. Windows come from the window
+    /// server's list, which needs no permission (the title may be missing without Screen Recording: then the frame
+    /// decides); ScreenCaptureKit, which needs Screen Recording, only when that list has nothing for the app.
+    private func eventWindow(_ window: WindowRef, app: AccessibilityApp, snapshot: UISnapshot?, what: String) async throws -> EventWindow {
         let known = window.windowID ?? snapshot?.shot.flatMap { shot in
             window.frame.map { Self.close(shot.windowFrame, $0) } == true ? shot.windowID : nil
         }
@@ -1730,7 +1739,9 @@ struct UIActTool: AgentTool {
             if !current.isEmpty, !current.contains(where: { $0.windowID == known }) {
                 throw UIResolver.stale("a janela do screenshot não existe mais; tire outro")
             }
-            return known
+            let frame = current.first { $0.windowID == known }?.frame ?? window.frame ?? snapshot?.shot?.windowFrame
+            guard let frame else { throw Self.needsScreen(what, because: "não sei onde está a janela \(UIText.quoted(window.title))") }
+            return EventWindow(id: known, frame: frame)
         }
         let windows: [CapturableWindow]
         if !listed.isEmpty {
@@ -1744,7 +1755,7 @@ struct UIActTool: AgentTool {
             window.frame.map { Self.close(candidate.frame, $0) } ?? true && UIText.fold(candidate.title) == UIText.fold(window.title)
         } ?? windows.first { candidate in window.frame.map { Self.close(candidate.frame, $0) } ?? false }
         guard let match else { throw Self.needsScreen(what, because: "não achei a janela \(UIText.quoted(window.title)) para mandar o evento") }
-        return match.windowID
+        return EventWindow(id: match.windowID, frame: match.frame)
     }
 
     static func close(_ one: CGRect, _ other: CGRect, tolerance: CGFloat = 2) -> Bool {

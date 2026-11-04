@@ -904,9 +904,12 @@ struct BackgroundFocusTests {
     }
 
     @Test func aDragPressesMovesAndReleasesBetweenItsEnds() throws {
-        let events = try SyntheticEventBuilder.dragEvents(from: CGPoint(x: 0, y: 0), to: CGPoint(x: 120, y: 60), window: 7, source: nil)
-        #expect(events.map(\.type).first == .leftMouseDown && events.last?.type == .leftMouseUp && events.count == 14)
+        let path = (0...12).map { StrokePoint(point: CGPoint(x: 10 * $0, y: 5 * $0)) }
+        let window = EventWindow(id: 7, frame: CGRect(x: 0, y: 0, width: 400, height: 300))
+        let events = try SyntheticEventBuilder.dragEvents(along: path, window: window, source: nil)
+        #expect(events.first?.type == .leftMouseDown && events.last?.type == .leftMouseUp && events.count == 14)
         #expect(events[6].location == CGPoint(x: 60, y: 30))
         #expect(events.allSatisfy { $0.getIntegerValueField(.mouseEventWindowUnderMousePointer) == 7 })
+        #expect(events.allSatisfy { $0.getIntegerValueField(SyntheticEventBuilder.windowNumberField) == 7 })
     }
 }

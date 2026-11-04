@@ -309,11 +309,23 @@ final class FakeSyntheticInput: SyntheticInput, @unchecked Sendable {
         case text(String, pid: Int32)
         case click(CGPoint, window: UInt32, button: MouseButton, count: Int, pid: Int32)
         case scroll(dx: Int, dy: Int, at: CGPoint, window: UInt32, pid: Int32)
+        /// From the first point of the path to the last.
         case drag(CGPoint, CGPoint, window: UInt32, pid: Int32)
+        case move([CGPoint], window: UInt32, pid: Int32)
+    }
+
+    /// The details of the last mouse call that the events above leave out.
+    struct Details: Equatable {
+        var modifiers: KeyStroke.Modifiers = []
+        var hold: Duration = .zero
+        var duration: Duration = .zero
+        var path: [StrokePoint] = []
+        var frame: CGRect = .zero
     }
 
     private let lock = NSLock()
     private var log: [Event] = []
+    private var lastDetails = Details()
     private var secure = false
     private var failure: (any Error)?
     /// Characters per chunk of `text`; the real implementation sends at most 20 UTF-16 units at a time.
@@ -333,6 +345,9 @@ final class FakeSyntheticInput: SyntheticInput, @unchecked Sendable {
     }
 
     var events: [Event] { lock.withLock { log } }
+    var details: Details { lock.withLock { lastDetails } }
+    /// What the next `drag` answers (or throws), after recording it.
+    var dragOutcome: Result<DragOutcome, any Error> = .success(.moved)
     /// Everything typed to `pid`, in order.
     func typed(to pid: Int32) -> String {
         events.compactMap { if case .text(let text, pid) = $0 { text } else { nil } }.joined()
@@ -365,16 +380,29 @@ final class FakeSyntheticInput: SyntheticInput, @unchecked Sendable {
         return sent
     }
 
-    func click(at point: CGPoint, window: UInt32, button: MouseButton, count: Int, to pid: Int32) async throws {
-        try record(.click(point, window: window, button: button, count: count, pid: pid))
+    private func note(_ details: Details) { lock.withLock { lastDetails = details } }
+
+    func click(at point: CGPoint, window: EventWindow, button: MouseButton, count: Int, modifiers: KeyStroke.Modifiers,
+               hold: Duration, to pid: Int32) async throws {
+        try record(.click(point, window: window.id, button: button, count: count, pid: pid))
+        note(Details(modifiers: modifiers, hold: hold, frame: window.frame))
     }
 
-    func drag(from start: CGPoint, to end: CGPoint, window: UInt32, to pid: Int32) async throws {
-        try record(.drag(start, end, window: window, pid: pid))
+    func move(along points: [CGPoint], window: EventWindow, to pid: Int32) async throws {
+        try record(.move(points, window: window.id, pid: pid))
+        note(Details(frame: window.frame))
     }
 
-    func scroll(dx: Int, dy: Int, at point: CGPoint, window: UInt32, to pid: Int32) async throws {
-        try record(.scroll(dx: dx, dy: dy, at: point, window: window, pid: pid))
+    func drag(along path: [StrokePoint], window: EventWindow, modifiers: KeyStroke.Modifiers, duration: Duration,
+              watch: DragWatch, to pid: Int32) async throws -> DragOutcome {
+        try record(.drag(path.first?.point ?? .zero, path.last?.point ?? .zero, window: window.id, pid: pid))
+        note(Details(modifiers: modifiers, duration: duration, path: path, frame: window.frame))
+        return try dragOutcome.get()
+    }
+
+    func scroll(dx: Int, dy: Int, at point: CGPoint, window: EventWindow, modifiers: KeyStroke.Modifiers, to pid: Int32) async throws {
+        try record(.scroll(dx: dx, dy: dy, at: point, window: window.id, pid: pid))
+        note(Details(modifiers: modifiers, frame: window.frame))
     }
 }
 
@@ -517,5 +545,29 @@ final class FakeScreenOwner: ScreenOwner, @unchecked Sendable {
         let value = try outcome.get()
         return TakeoverReport(value: value, duration: started.duration(to: clock.now), restoredApp: restoredApp, cursorRestored: cursorRestored,
                               restoreFailed: restoreFailed)
+    }
+}
+
+// MARK: - Mouse calls by window number
+
+/// The older call shapes, for tests that only care about the window's number: the window is placed at the origin, so a
+/// point inside it is the same as on the screen.
+extension SyntheticInput {
+    func click(at point: CGPoint, window: UInt32, button: MouseButton, count: Int, to pid: Int32) async throws {
+        try await click(at: point, window: EventWindow(id: window, frame: .zero), button: button, count: count, modifiers: [], hold: .zero, to: pid)
+    }
+
+    func scroll(dx: Int, dy: Int, at point: CGPoint, window: UInt32, to pid: Int32) async throws {
+        try await scroll(dx: dx, dy: dy, at: point, window: EventWindow(id: window, frame: .zero), modifiers: [], to: pid)
+    }
+}
+
+extension SyntheticEventBuilder {
+    static func clickEvents(at point: CGPoint, window: UInt32, button: MouseButton, count: Int, source: CGEventSource?) throws -> [CGEvent] {
+        try clickEvents(at: point, window: EventWindow(id: window, frame: .zero), button: button, count: count, source: source)
+    }
+
+    static func scrollEvents(dx: Int, dy: Int, at point: CGPoint, window: UInt32, source: CGEventSource?) throws -> [CGEvent] {
+        try scrollEvents(dx: dx, dy: dy, at: point, window: EventWindow(id: window, frame: .zero), source: source)
     }
 }
