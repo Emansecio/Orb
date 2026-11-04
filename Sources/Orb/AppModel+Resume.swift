@@ -84,7 +84,7 @@ extension AppModel {
         let recovery = "The app closed during this request. Assignments marked lost: "
             + (lost.isEmpty ? "none" : lost.joined(separator: "; "))
             + ". Check what is already done, then reassign what is left."
-        if !groupHub.resume(groupID, request: entry.text ?? "", recovery: recovery, notice: Self.groupResumedNotice) {
+        if !groupHub.resume(groupID, runID: entry.runID, request: entry.text ?? "", recovery: recovery, notice: Self.groupResumedNotice) {
             workJournal.dropGroupRun(groupID)
         }
     }

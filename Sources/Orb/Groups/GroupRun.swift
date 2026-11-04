@@ -39,8 +39,9 @@ struct GroupRun: Equatable, Sendable {
     var round = 0
     var verdict: ReviewVerdict?
 
-    static func new(group: OrbGroup, request: String, now: Date = .now) -> GroupRun {
-        GroupRun(id: UUID(), groupID: group.id, request: request, startedAt: now)
+    /// `id`: a request resumed after the app closed keeps its run's id, so each member finds its worktree and branch again.
+    static func new(group: OrbGroup, request: String, now: Date = .now, id: UUID = UUID()) -> GroupRun {
+        GroupRun(id: id, groupID: group.id, request: request, startedAt: now)
     }
 
     var isOpen: Bool { phase == .active }

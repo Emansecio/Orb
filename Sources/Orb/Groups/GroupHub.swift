@@ -132,10 +132,10 @@ final class GroupHub: GroupTurnHooks {
     /// is handed `recovery` as the person's turn would be (what is lost, what to check). `request` is what was asked, for the board's
     /// page. False when the group cannot take it now (gone, resetting, already at work).
     @discardableResult
-    func resume(_ groupID: UUID, request: String, recovery: String, notice: String) -> Bool {
+    func resume(_ groupID: UUID, runID: UUID?, request: String, recovery: String, notice: String) -> Bool {
         guard let model, !model.isResetting, activeRun(groupID) == nil, let group = model.group(groupID),
               let session = model.groupSession(groupID) else { return false }
-        runs[groupID] = .new(group: group, request: request, now: now())
+        runs[groupID] = .new(group: group, request: request, now: now(), id: runID ?? UUID())
         session.append(.notice(notice))
         model.groupLive(groupID).setRunState(.running)
         refreshLive(groupID)

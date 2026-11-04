@@ -323,6 +323,7 @@ import Testing
         let resumed = try #require(again.workJournal.entries.first)
         #expect(resumed.kind == .groupRun && resumed.resumes == 1)
         #expect(resumed.runID == hub.activeRun(world.groupID)?.id, "the entry follows the new run")
+        #expect(hub.activeRun(world.groupID)?.id == run.id, "the resumed run keeps its id: each member finds its worktree again")
 
         // Stopping the group removes it.
         hub.stopGroup(world.groupID)
