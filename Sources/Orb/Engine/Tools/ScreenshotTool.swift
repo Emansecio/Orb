@@ -462,11 +462,12 @@ struct ScreenshotTool: AgentTool {
     }
 
     /// Vision for one picture at a time per process: it is heavy.
-    static let visionGate = AsyncGate(limit: 1)
+    private static let visionGate = AsyncGate(limit: 1)
 
     /// A full display through the same one-at-a-time gate as windows: two 5K accurate passes at once only fight for the CPU.
-    static func recognizeDisplay(_ file: URL) async throws -> String {
-        try await visionGate.run {
+    /// `gate` is for tests, which must not share the process-wide one with the other suites running in parallel.
+    static func recognizeDisplay(_ file: URL, gate: AsyncGate? = nil) async throws -> String {
+        try await (gate ?? visionGate).run {
             try await withDeadline(ocrDeadline, "a leitura do texto da imagem") {
                 try await TextRecognizer.recognizeWithTables(imageAt: file)
             }

@@ -298,11 +298,13 @@ struct ScreenshotToolTests {
         let file = shots.appending("display.png")
         try Fixtures.png(text: "HELLO WORLD").write(to: file)
         let gate = TestGate()
-        let holder = Task { try await ScreenshotTool.visionGate.run { await gate.wait() } }
+        // A gate of its own: the process-wide one is shared with the window tests running in parallel.
+        let vision = AsyncGate(limit: 1)
+        let holder = Task { try await vision.run { await gate.wait() } }
         // Let the holder own the gate before the read asks for it.
-        await waitUntil("the gate to be taken") { await ScreenshotTool.visionGate.isBusy }
-        let read = Task { try await ScreenshotTool.recognizeDisplay(file) }
-        await waitUntil("the read to queue behind the one holding Vision") { await ScreenshotTool.visionGate.waitingCount == 1 }
+        await waitUntil("the gate to be taken") { await vision.isBusy }
+        let read = Task { try await ScreenshotTool.recognizeDisplay(file, gate: vision) }
+        await waitUntil("the read to queue behind the one holding Vision") { await vision.waitingCount == 1 }
         await gate.open()
         try await holder.value
         let text = try await read.value
