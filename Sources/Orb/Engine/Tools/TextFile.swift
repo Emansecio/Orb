@@ -290,14 +290,24 @@ enum FileWriter {
             do {
                 try data.write(to: target, options: .atomic)
             } catch {
-                // Atomic replacement needs a writable folder; a writable file in a read-only one can still be updated.
-                // Only then: writing in place truncates first, so after any other failure (a full disk) the old content
-                // would be lost along with the new.
-                guard manager.isWritableFile(atPath: target.path),
-                      !manager.isWritableFile(atPath: target.deletingLastPathComponent().path) else { throw error }
+                // Atomic replacement needs a writable folder (and a volume that renames); a writable file can still be
+                // updated in place. Not when the disk is full: writing in place truncates first, so the old content would
+                // be lost along with the new.
+                guard manager.isWritableFile(atPath: target.path), !isOutOfSpace(error) else { throw error }
                 try data.write(to: target)
             }
             if let permissions { try? manager.setAttributes([.posixPermissions: permissions], ofItemAtPath: target.path) }
         }
+    }
+
+    /// The write failed for lack of room (full disk, or a quota), as said by the error or one wrapped inside it.
+    static func isOutOfSpace(_ error: Error) -> Bool {
+        var current: NSError? = error as NSError
+        while let error = current {
+            if error.domain == NSCocoaErrorDomain, error.code == NSFileWriteOutOfSpaceError { return true }
+            if error.domain == NSPOSIXErrorDomain, [Int(ENOSPC), Int(EDQUOT)].contains(error.code) { return true }
+            current = error.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        return false
     }
 }

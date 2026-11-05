@@ -73,6 +73,15 @@ final class FileAccessTests {
         #expect(try workspace.readText("ro2/notas.txt") == "novo")
     }
 
+    @Test func aFullDiskIsToldApartSoTheFileIsNotTruncated() {
+        #expect(FileWriter.isOutOfSpace(CocoaError(.fileWriteOutOfSpace)))
+        #expect(FileWriter.isOutOfSpace(POSIXError(.ENOSPC)))
+        #expect(FileWriter.isOutOfSpace(NSError(domain: NSCocoaErrorDomain, code: NSFileWriteUnknownError,
+                                                userInfo: [NSUnderlyingErrorKey: POSIXError(.EDQUOT) as NSError])))
+        #expect(!FileWriter.isOutOfSpace(CocoaError(.fileWriteNoPermission)))
+        #expect(!FileWriter.isOutOfSpace(POSIXError(.EACCES)))
+    }
+
     @Test func errorsThatAreNotAboutPermissionPassThrough() throws {
         struct Other: Error {}
         #expect(FileAccess.denial(Other(), path: "/x", writing: false) == nil)
