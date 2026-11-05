@@ -100,7 +100,8 @@ final class Dictation {
             } catch is CancellationError {
                 await capture.cancel()
             } catch {
-                guard let self, self.capture === capture else { return }
+                // Cancelled earlier, before the analyzers existed: they are alive now and nobody else will close them.
+                guard let self, self.capture === capture else { return await capture.cancel() }
                 let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
                 self.end()
                 self.fail(botID, message)

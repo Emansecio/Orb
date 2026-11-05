@@ -62,6 +62,8 @@ enum UsageFormat {
 @MainActor @Observable
 final class UsageModel {
     private(set) var report: UsageReport?
+    /// Rows a full month file could not take: the totals are lower than what was used.
+    private(set) var dropped = 0
     private var generation = 0
 
     func reload(model: AppModel, period: UsagePeriod, now: Date = .now, calendar: Calendar = .current, animation: Animation?) async {
@@ -76,8 +78,10 @@ final class UsageModel {
             UsageReport.make(buckets: read.buckets, period: period, now: now, calendar: calendar, book: book, orbNames: orbs,
                              rememberedNames: read.names)
         }.value
-        guard mine == generation else { return }
+        // Before the staleness check: the file that was set aside is gone for the newer read, so only this one can tell.
         for notice in read.notices { model.addNotice(AppModel.described(notice, bots: model.bots, routines: model.routines)) }
+        guard mine == generation else { return }
+        dropped = read.dropped
         withAnimation(animation) { report = made }
     }
 }
@@ -113,7 +117,16 @@ struct UsageSettings: View {
                     rowsSection("Por modelo", rows: report.modelRows, report: report, isModel: true)
                     hourSection(report)
                 }
-                Section {} footer: { FormFootnote { note } }
+                Section {} footer: {
+                    FormFootnote {
+                        VStack(alignment: .leading, spacing: 4) {
+                            note
+                            if usage.dropped > 0 {
+                                Text("\(usage.dropped) registros do mês não couberam no arquivo de uso e não entram nos totais.")
+                            }
+                        }
+                    }
+                }
             }
         }
         .formStyle(.grouped)

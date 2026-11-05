@@ -44,6 +44,7 @@ extension AppModel {
 
     /// Deletes a connector, and with it the account its login lives in.
     func removeConnector(_ id: UUID) {
+        cancelSignIn(connector: id) // a login waiting for the browser would keep its loopback port and `signingIn`
         connectors.removeAll { $0.id == id }
         Task { [connectorAuth] in await connectorAuth.deleteAccount(id) }
     }

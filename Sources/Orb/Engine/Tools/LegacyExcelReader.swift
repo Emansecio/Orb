@@ -198,7 +198,10 @@ private struct CompoundFile {
         let shift = bytes.le16(0x1E)
         guard shift == 9 || shift == 12 else { throw corrupt }
         self.shift = shift
-        miniShift = max(bytes.le16(0x20), 1)
+        // The spec says 6; a wild value would overflow `1 << miniShift` and trap in the mini-stream slicing.
+        let miniShift = bytes.le16(0x20)
+        guard (1...12).contains(miniShift) else { throw corrupt }
+        self.miniShift = miniShift
         cutoff = Int(bytes.le32(0x38))
         let sectorSize = 1 << shift
         func offset(of sector: UInt32) -> Int { (Int(sector) + 1) << shift }
@@ -207,10 +210,18 @@ private struct CompoundFile {
         var fatSectors: [UInt32] = (0..<109).map { bytes.le32(0x4C + 4 * $0) }.filter { $0 < Self.firstSpecial }
         var next = bytes.le32(0x44)
         var hops = 0
-        while next < Self.firstSpecial, hops < Int(bytes.le32(0x48)), hops < 100_000 {
+
+        // A DIFAT sector can point at itself and list the same FAT sectors over and over; a file cannot have more
+        // sectors than it has bytes for, so cap the hops and drop repeats (otherwise a 1.5 KB file asks for GBs).
+        let sectorCount = bytes.count >> shift
+        var seenFat = Set<UInt32>()
+        fatSectors = fatSectors.filter { seenFat.insert($0).inserted }
+        while next < Self.firstSpecial, hops < Int(bytes.le32(0x48)), hops < sectorCount {
             let start = offset(of: next)
             guard start + sectorSize <= bytes.count else { break }
-            fatSectors += (0..<(sectorSize / 4 - 1)).map { bytes.le32(start + 4 * $0) }.filter { $0 < Self.firstSpecial }
+            for entry in (0..<(sectorSize / 4 - 1)).map({ bytes.le32(start + 4 * $0) }) where entry < Self.firstSpecial {
+                if seenFat.insert(entry).inserted { fatSectors.append(entry) }
+            }
             next = bytes.le32(start + sectorSize - 4)
             hops += 1
         }
@@ -230,6 +241,8 @@ private struct CompoundFile {
             let units = (0..<nameLength).map { UInt16(directory.le16(base + 2 * $0)) }
             var size = Int(directory.le32(base + 120))
             if shift == 12 { size |= Int(directory.le32(base + 124)) << 32 }
+            // A stream fits in the file; a negative size (high dword with bit 31) would trap in `prefix`.
+            size = min(max(size, 0), bytes.count)
             entries.append(Entry(name: String(decoding: units, as: UTF16.self), type: Int(directory[base + 66]),
                                  start: directory.le32(base + 116), size: size))
         }
@@ -259,7 +272,8 @@ private struct CompoundFile {
         var sector = start
         var steps = 0
         let size = 1 << shift
-        while sector < firstSpecial, steps <= fat.count {
+        let maxSteps = min(fat.count, bytes.count >> shift)
+        while sector < firstSpecial, steps <= maxSteps {
             let begin = (Int(sector) + 1) << shift
             guard begin < bytes.count else { break }
             output += bytes[begin..<min(begin + size, bytes.count)]
@@ -275,7 +289,8 @@ private struct CompoundFile {
         var sector = start
         var steps = 0
         let sectorSize = 1 << miniShift
-        while sector < Self.firstSpecial, steps <= miniFat.count, output.count < size {
+        let maxSteps = min(miniFat.count, miniStream.count / sectorSize)
+        while sector < Self.firstSpecial, steps <= maxSteps, output.count < size {
             let begin = Int(sector) << miniShift
             guard begin < miniStream.count else { break }
             output += miniStream[begin..<min(begin + sectorSize, miniStream.count)]
@@ -716,8 +731,10 @@ private enum HTMLTables {
 
         private mutating func closeCell() {
             guard let top = stack.last, let cell = top.cell else { return }
-            stack[stack.count - 1].row?.append(Self.collapse(cell))
-            stack[stack.count - 1].row?.append(contentsOf: [String](repeating: "", count: top.span - 1))
+            // Cells past maxColumns are cut later anyway; capping here stops `colspan` from multiplying the file in memory.
+            let room = max(SheetParser.maxColumns + 1 - (top.row?.count ?? 0), 0)
+            if room > 0 { stack[stack.count - 1].row?.append(Self.collapse(cell)) }
+            stack[stack.count - 1].row?.append(contentsOf: [String](repeating: "", count: min(top.span - 1, max(room - 1, 0))))
             stack[stack.count - 1].cell = nil
             stack[stack.count - 1].span = 1
         }
@@ -876,11 +893,12 @@ private final class SpreadsheetML: NSObject, XMLParserDelegate {
             rowNumber = 0
         case "Row" where inSheet:
             cells = [:]
-            rowNumber = attributes["Index"].flatMap { Int($0) } ?? rowNumber + 1
+            // Out-of-range numbers would overflow the sequential arithmetic (a trap); use the next number instead.
+            rowNumber = attributes["Index"].flatMap { Int($0) }.flatMap { (1...1_048_576).contains($0) ? $0 : nil } ?? rowNumber + 1
             column = 0
         case "Cell" where inSheet:
-            if let index = attributes["Index"].flatMap({ Int($0) }) { column = max(index - 1, 0) }
-            mergeAcross = attributes["MergeAcross"].flatMap { Int($0) } ?? 0
+            if let index = attributes["Index"].flatMap({ Int($0) }), (1...16_384).contains(index) { column = index - 1 }
+            mergeAcross = attributes["MergeAcross"].flatMap { Int($0) }.flatMap { (0...16_384).contains($0) ? $0 : nil } ?? 0
             value = ""
             type = ""
         case "Data" where inSheet:

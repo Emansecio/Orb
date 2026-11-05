@@ -275,7 +275,8 @@ final class SheetParser: NSObject, XMLParserDelegate {
         switch name {
         case "row":
             cells = [:]
-            rowNumber = attributes["r"].flatMap { Int($0) } ?? (rows.last.map { $0.number + 1 } ?? 1)
+            // Out-of-range numbers would overflow the `+ 1` below; fall back to the sequential number instead.
+            rowNumber = attributes["r"].flatMap { Int($0) }.flatMap { (1...1_048_576).contains($0) ? $0 : nil } ?? (rows.last.map { $0.number + 1 } ?? 1)
         case "c":
             column = attributes["r"].flatMap(Self.columnIndex) ?? ((cells.keys.max() ?? -1) + 1)
             type = attributes["t"] ?? ""

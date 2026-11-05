@@ -42,20 +42,21 @@ extension Store {
 
     /// The rows and Orb names of the months from `start` to `end`, read off the calling thread. A file that cannot be
     /// read comes back as a notice (and is set aside by the read itself).
-    func readUsage(from start: Date, to end: Date, calendar: Calendar = .current) async -> (buckets: [UsageBucket], names: [UUID: String], notices: [StoreNotice]) {
+    func readUsage(from start: Date, to end: Date, calendar: Calendar = .current) async -> (buckets: [UsageBucket], names: [UUID: String], notices: [StoreNotice], dropped: Int) {
         let ids = Self.usageMonths(from: start, to: end, calendar: calendar)
         return await withCheckedContinuation { continuation in
             Self.readQueue.async {
-                var buckets: [UsageBucket] = [], names: [UUID: String] = [:], notices: [StoreNotice] = []
+                var buckets: [UsageBucket] = [], names: [UUID: String] = [:], notices: [StoreNotice] = [], dropped = 0
                 for id in ids {
                     let url = usageURL(id)
                     let found = Self.gate.reading(url) { read(UsageMonth.self, from: url, ifUnreadable: "o histórico do mês foi ignorado") }
                     if let notice = found.notice { notices.append(notice) }
                     guard let month = found.value else { continue }
                     buckets += month.buckets
+                    dropped += month.dropped
                     for (key, name) in month.orbNames { if let id = UUID(uuidString: key) { names[id] = name } }
                 }
-                continuation.resume(returning: (buckets, names, notices))
+                continuation.resume(returning: (buckets, names, notices, dropped))
             }
         }
     }

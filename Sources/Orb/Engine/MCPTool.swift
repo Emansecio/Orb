@@ -152,12 +152,18 @@ actor MCPManager {
     private let callTimeout: Duration
     private var locals: LocalConnectorEnvironment?
     private var sweeper: Task<Void, Never>?
+    /// Connectors whose `list_changed` refresh is running, and those told again meanwhile (one more refresh is enough).
+    private var refreshing: Set<UUID> = []
+    private var refreshAgain: Set<UUID> = []
+    private let refreshInterval: Duration
     private var observer: (@Sendable ([UUID: MCPStatus]) -> Void)?
 
     /// `store`: where the catalogs are kept (nil: only in memory, as in tests). `idleLimit`: how long a server may sit
     /// unused; `sweepInterval`: how often that is checked.
     init(store: Store? = nil, shell: ShellEnvironment = .shared, idleLimit: Duration = .seconds(600), sweepInterval: Duration = .seconds(60),
-         locals: LocalConnectorEnvironment? = nil, auth: MCPAuth? = nil, session: URLSession? = nil, callTimeout: Duration = .seconds(60)) {
+         locals: LocalConnectorEnvironment? = nil, auth: MCPAuth? = nil, session: URLSession? = nil, callTimeout: Duration = .seconds(60),
+         refreshInterval: Duration = .seconds(5)) {
+        self.refreshInterval = refreshInterval
         self.store = store
         self.shell = shell
         self.auth = auth
@@ -288,7 +294,7 @@ actor MCPManager {
         await connection.setHandlers(
             toolsChanged: { [weak self, weak connection] in
                 guard let connection else { return }
-                await self?.refreshCatalog(id, from: connection)
+                await self?.catalogChanged(id, from: connection)
             },
             closed: { [weak self, weak connection] in
                 guard let connection else { return }
@@ -332,6 +338,22 @@ actor MCPManager {
         publish()
     }
 
+
+    /// The server said its tools changed. A server that says so on every listing (or floods the notification) would keep
+    /// the app listing, writing the catalog and redrawing forever, so notifications that arrive during a refresh collapse
+    /// into one more, at least `refreshInterval` later.
+    private func catalogChanged(_ id: UUID, from connection: MCPConnection) async {
+        guard !refreshing.contains(id) else { refreshAgain.insert(id); return }
+        refreshing.insert(id)
+        defer { refreshing.remove(id) }
+        repeat {
+            refreshAgain.remove(id)
+            await refreshCatalog(id, from: connection)
+            guard refreshAgain.contains(id) else { return }
+            do { try await Task.sleep(for: refreshInterval) } catch { return }
+        } while refreshAgain.contains(id)
+    }
+
     /// Lists the tools again (the server said they changed, or the user asks for a test) and keeps the new catalog.
     /// Returns how many tools there are.
     @discardableResult
@@ -339,6 +361,7 @@ actor MCPManager {
         guard entries[id]?.connection === connection, let specs = try? await connection.listTools(),
               entries[id]?.connection === connection else { return nil }
         let catalog = ConnectorCatalog(handshake: await connection.handshake, specs: specs, annotations: await connection.toolAnnotations)
+        let changed = entries[id]?.catalog != catalog // an unchanged catalog is not written to disk again
         entries[id]?.catalog = catalog
         switch entries[id]?.status {
         case .ready?, .needsMorePermission?:
@@ -346,7 +369,7 @@ actor MCPManager {
             entries[id]?.status = running
         default: break
         }
-        store?.saveConnectorCatalog(catalog, for: id)
+        if changed { store?.saveConnectorCatalog(catalog, for: id) }
         publish()
         return specs.count
     }

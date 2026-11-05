@@ -142,6 +142,8 @@ struct UsagePricingTests {
         // A version the table lacks is not guessed from the one before it.
         #expect(PriceTable.price(forModel: "claude-opus-4.9") == nil)
         #expect(PriceTable.price(forModel: "gpt-5.7") == nil)
+        // A new version with a family suffix is not the previous version either.
+        #expect(PriceTable.price(forModel: "claude-opus-4.9-thinking") == nil)
         #expect(PriceTable.price(forModel: "modelo-qualquer") == nil)
     }
 

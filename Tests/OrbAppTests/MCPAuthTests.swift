@@ -889,6 +889,23 @@ struct ConnectorLoginModelTests {
         #expect(model.signingIn.isEmpty && model.loginAttempts.isEmpty)
     }
 
+    @Test func deletingAConnectorGivesUpItsLoginWaitingForTheBrowser() async throws {
+        let service = FakeOAuthService()
+        let opened = OSAllocatedUnfairLock(initialState: 0)
+        let root = folder()
+        defer { removeTestFolder(root) }
+        let model = AppModel(store: Store(directory: root), runsBackgroundWork: false, secretVault: MemoryVault(), connectorSession: service.session)
+        model.opensLoginPage = { _ in opened.withLock { $0 += 1 } }
+        let config = connector(service)
+        model.connectors = [config]
+        let login = Task { await model.signIn(connector: config.id) }
+        await waitUntil("the login to wait for the browser") { opened.withLock { $0 } == 1 }
+        model.removeConnector(config.id)
+        guard case .failed(let reason) = await login.value else { Issue.record("expected the login to end"); return }
+        #expect(reason == "Login cancelado.")
+        #expect(model.signingIn.isEmpty && model.loginAttempts.isEmpty)
+    }
+
     @Test func signingInThroughTheModelStartsTheConnectorAndKeepsTheTokenOutOfTheDataFolder() async throws {
         let service = FakeOAuthService()
         let browser = FakeOAuthService.Browser()

@@ -269,6 +269,8 @@ tools = [
     {"name": "die", "description": "Exits", "inputSchema": {"type": "object"}},
 ]
 
+lists = 0
+
 def send(message):
     sys.stdout.write(json.dumps(message) + "\n"); sys.stdout.flush()
 
@@ -279,6 +281,7 @@ for line in sys.stdin:
         send({"jsonrpc": "2.0", "id": id, "result": {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
               "serverInfo": {"name": "gh-fake", "version": "9"}, "instructions": "Use com cuidado."}})
     elif method == "tools/list":
+        lists += 1
         send({"jsonrpc": "2.0", "id": id, "result": {"tools": tools}})
     elif method == "tools/call":
         name, args = message["params"]["name"], message["params"]["arguments"]
@@ -286,9 +289,13 @@ for line in sys.stdin:
             sys.exit(3)
         if name == "slow":
             import time; time.sleep(1.2)
+        if name == "flood":
+            for _ in range(30):
+                send({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
         if name == "grow":
             tools.append({"name": "extra", "description": "New", "inputSchema": {"type": "object"}})
-        send({"jsonrpc": "2.0", "id": id, "result": {"content": [{"type": "text", "text": "ran:%s:%s" % (name, json.dumps(args, sort_keys=True))}]}})
+        text = str(lists) if name == "lists" else "ran:%s:%s" % (name, json.dumps(args, sort_keys=True))
+        send({"jsonrpc": "2.0", "id": id, "result": {"content": [{"type": "text", "text": text}]}})
         if name == "grow":
             send({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
     elif id is not None:
@@ -554,6 +561,18 @@ struct MCPLazyTests {
         _ = try await manager.call(config.id, tool: "grow", arguments: .null)
         await waitUntil("the catalog to follow the notification") { await manager.catalog(config.id)?.tools.count == 7 }
         #expect(await manager.status()[config.id] == .ready(toolCount: 7))
+        await manager.sync([])
+    }
+
+    @Test func aFloodOfToolChangeNotificationsCollapsesIntoFewListings() async throws {
+        let manager = MCPManager(refreshInterval: .milliseconds(50)), config = try gatewayConfig()
+        await manager.sync([config])
+        _ = try await manager.call(config.id, tool: "read", arguments: .null)
+        _ = try await manager.call(config.id, tool: "flood", arguments: .null)
+        func lists() async -> Int { (try? await manager.call(config.id, tool: "lists", arguments: .null)).flatMap { Int($0) } ?? 0 }
+        // The start listed once; the flood adds one refresh and one more for everything that arrived meanwhile.
+        await waitUntil("the refreshes to run") { await lists() >= 3 }
+        #expect(await lists() <= 3)
         await manager.sync([])
     }
 

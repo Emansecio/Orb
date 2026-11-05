@@ -164,6 +164,13 @@ final class OfficeReaderTests {
         #expect(page.contains("2898: 2898") || page.contains(": 28"))
     }
 
+    @Test func anOutOfRangeRowNumberDoesNotOverflowTheNextRow() async throws {
+        let sheet = "<worksheet><sheetData><row r=\"9223372036854775807\"><c r=\"A1\"><v>1</v></c></row><row><c><v>2</v></c></row></sheetData></worksheet>"
+        try zip("hostil.xlsx", ["xl/worksheets/sheet1.xml": sheet])
+        let output = try await workspace.run(ReadFileTool(), ["path": .string("hostil.xlsx")])
+        #expect(output.contains("2"))
+    }
+
     @Test func otherBinaryFormatsGetSpecificAdvice() async throws {
         for (name, needle) in [("a.pages", "iWork"), ("b.numbers", "iWork"), ("c.key", "iWork"), ("e.ppt", "formato antigo"), ("f.zip", "compactado")] {
             try workspace.write(name, Data([0x50, 0x4B, 0x03, 0x04, 0x00, 0x01, 0x02]))
