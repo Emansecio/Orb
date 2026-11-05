@@ -56,10 +56,6 @@ enum SidebarOrder {
     /// "Nova categoria" shows at the end of the Orbs once there are two to sort (or a category already), as "Novo grupo" does.
     static func showsNewCategory(botCount: Int, categoryCount: Int) -> Bool { categoryCount > 0 || botCount >= 2 }
 
-    /// The payload an Orb's row carries while it is dragged, and the Orb it names (nil for any other text).
-    static func dragPayload(_ botID: UUID) -> String { botID.uuidString }
-    static func botID(fromPayload payload: String) -> UUID? { UUID(uuidString: payload) }
-
     /// A name typed for a category: without the spaces around it and at most `nameLimit` long; nil when blank.
     static func name(_ typed: String) -> String? {
         let name = typed.trimmingCharacters(in: .whitespacesAndNewlines)

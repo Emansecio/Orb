@@ -22,11 +22,7 @@ extension AppModel {
     }
 
     /// Shows another of the Orb's conversations in its chat.
-    func openChat(_ chat: UUID, of botID: UUID) {
-        openChat(chat, of: botID, preservingInicioJump: false)
-    }
-
-    func openChat(_ chat: UUID, of botID: UUID, preservingInicioJump: Bool) {
+    func openChat(_ chat: UUID, of botID: UUID, preservingInicioJump: Bool = false) {
         guard bot(botID) != nil, !isResetting, let chats = live(botID).chats, chats.title(of: chat) != nil else { return }
         if !preservingInicioJump, inicioJump?.bot == botID { inicioJump = nil; sessions[botID]?.opening = nil }
         show(chat, of: botID, in: chats, fresh: false)

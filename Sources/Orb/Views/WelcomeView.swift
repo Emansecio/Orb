@@ -128,8 +128,6 @@ enum WelcomeSelection {
 final class WelcomeLedger {
     private(set) var played = false
 
-    init() {}
-
     /// The screen has appeared: its entrance (if it had one) is done.
     func notePlayed() { played = true }
 

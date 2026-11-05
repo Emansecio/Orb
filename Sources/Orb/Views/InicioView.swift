@@ -123,11 +123,7 @@ struct InicioView: View {
 
     @ViewBuilder private var attention: some View {
         let pending = model.pendingApprovals
-        let flagged = model.routines.compactMap { routine -> (Routine, RoutineRun)? in
-            guard routine.goal?.check?.status == .attention,
-                  let run = routine.runs.first(where: { $0.check?.status == .attention }) else { return nil }
-            return (routine, run)
-        }
+        let flagged = flaggedRuns
         if !pending.isEmpty || !flagged.isEmpty {
             section("Precisa de você", count: pending.count + flagged.count) {
                 ForEach(pending) { item in
@@ -137,13 +133,19 @@ struct InicioView: View {
                 }
                 ForEach(flagged, id: \.1.id) { routine, run in
                     row(botID: routine.botID, focus: .attention(run.id), title: run.summary, detail: "Resultado da rotina pede atenção", date: run.date) {
-                        guard model.routines.contains(where: { $0.id == routine.id && $0.runs.contains(where: { $0.id == run.id }) }) else {
-                            unavailable = "Esta execução não está mais no histórico da rotina."; return
-                        }
-                        present(.run(routine.id, run.id), from: .attention(run.id))
+                        openRun(routine.id, run.id, from: .attention(run.id))
                     }
                 }
             }
+        }
+    }
+
+    /// The routines whose goal check asks for attention, each with the run that said so.
+    private var flaggedRuns: [(Routine, RoutineRun)] {
+        model.routines.compactMap { routine in
+            guard routine.goal?.check?.status == .attention,
+                  let run = routine.runs.first(where: { $0.check?.status == .attention }) else { return nil }
+            return (routine, run)
         }
     }
 
@@ -160,10 +162,7 @@ struct InicioView: View {
     }
 
     private var news: some View {
-        let currentAttention = Set(model.routines.compactMap { routine -> UUID? in
-            guard routine.goal?.check?.status == .attention else { return nil }
-            return routine.runs.first(where: { $0.check?.status == .attention })?.id
-        })
+        let currentAttention = Set(flaggedRuns.map(\.1.id))
         let news = InicioNews.folded(events.filter { !currentAttention.contains($0.id) })
         return section("Novidades", count: news.count) {
             if news.isEmpty {
@@ -234,8 +233,7 @@ struct InicioView: View {
                     LiveBotAvatar(botID: botID, orb: bot.orb, size: 32, restsWhenIdle: true)
                 }.buttonStyle(.plain).help("Abrir conversa de \(bot.name)").accessibilityLabel("Abrir conversa de \(bot.name)")
                     .focusable()
-                    .onKeyPress(.return) { model.selection = .bot(botID); return .handled }
-                    .onKeyPress(.space) { model.selection = .bot(botID); return .handled }
+                    .onKeyPress(keys: [.return, .space]) { _ in model.selection = .bot(botID); return .handled }
             }
             VStack(alignment: .leading, spacing: 3) {
                 if showsOrb, let bot = model.bot(botID) {
@@ -243,8 +241,7 @@ struct InicioView: View {
                         .buttonStyle(.plain).font(Typography.small.weight(.semibold)).foregroundStyle(Palette.secondary)
                         .help("Abrir conversa de \(bot.name)")
                         .focusable()
-                        .onKeyPress(.return) { model.selection = .bot(botID); return .handled }
-                        .onKeyPress(.space) { model.selection = .bot(botID); return .handled }
+                        .onKeyPress(keys: [.return, .space]) { _ in model.selection = .bot(botID); return .handled }
                 } else if showsOrb {
                     Text("Orb indisponível").font(Typography.small.weight(.semibold)).foregroundStyle(Palette.secondary)
                 }
@@ -263,8 +260,7 @@ struct InicioView: View {
                     .focusable()
                     .focused($focusedRow, equals: focus)
                     .accessibilityFocused($accessibilityFocusedRow, equals: focus)
-                    .onKeyPress(.return) { action(); return .handled }
-                    .onKeyPress(.space) { action(); return .handled }
+                    .onKeyPress(keys: [.return, .space]) { _ in action(); return .handled }
             }
         }
         .padding(.vertical, 6)
@@ -288,16 +284,22 @@ struct InicioView: View {
             guard model.routines.contains(where: { $0.id == routine && $0.botID == bot }) else {
                 unavailable = "A rotina de origem não está mais disponível."; return
             }
-            if model.routines.first(where: { $0.id == routine })?.runs.contains(where: { $0.id == run }) == true {
-                present(.run(routine, run), from: .news(event.id))
-            } else { unavailable = "Esta execução não está mais no histórico da rotina." }
+            openRun(routine, run, from: .news(event.id))
         }
     }
 
+    private func openRun(_ routine: UUID, _ run: UUID, from focus: InicioRowFocus) {
+        guard model.routines.contains(where: { $0.id == routine && $0.runs.contains(where: { $0.id == run }) }) else {
+            unavailable = "Esta execução não está mais no histórico da rotina."; return
+        }
+        present(.run(routine, run), from: focus)
+    }
+
     private func openWork(_ botID: UUID) {
-        guard let session = model.sessions[botID] else { unavailable = "Este trabalho não está mais em andamento."; return }
+        let gone = "Este trabalho não está mais em andamento."
+        guard let session = model.sessions[botID] else { unavailable = gone; return }
         if session.sideKind == nil || session.sideKind == .routine, let routine = session.routineID {
-            guard model.routines.contains(where: { $0.id == routine && $0.botID == botID }) else { return }
+            guard model.routines.contains(where: { $0.id == routine && $0.botID == botID }) else { unavailable = gone; return }
             present(.conversation(routine), from: .working(botID))
         } else if session.routineID == nil && session.sideKind == nil {
             let chat = session.workingChatID ?? session.chatID
@@ -348,10 +350,11 @@ private struct InicioFollowUpSheet: View {
                     if let checked = followUp.lastChecked {
                         Text("Última verificação: \(RoutineText.stamp(checked))").font(Typography.label).foregroundStyle(Palette.muted)
                     } else { Text("Sem verificação registrada").font(Typography.label).foregroundStyle(Palette.muted) }
-                    if let source = followUp.source { Text("Origem: \(source)").font(Typography.small).foregroundStyle(Palette.muted).textSelection(.enabled) }
-                    if let source = followUp.source, let url = URL(string: source),
-                       ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil {
-                        Link("Ver origem", destination: url).font(Typography.label)
+                    if let source = followUp.source {
+                        Text("Origem: \(source)").font(Typography.small).foregroundStyle(Palette.muted).textSelection(.enabled)
+                        if let url = URL(string: source), ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil {
+                            Link("Ver origem", destination: url).font(Typography.label)
+                        }
                     }
                     Text(followUp.resolved ? "Concluído" : "Em aberto").font(Typography.small).foregroundStyle(Palette.muted)
                 }

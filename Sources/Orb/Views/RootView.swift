@@ -91,9 +91,8 @@ enum DetailPage: Hashable {
         case .routines: .routines
         case .connectors: .connectors
         case .skills: .skills
-        case .bot?: botIDs.isEmpty ? .welcome : .orb
         case .group?: .orb // MARK: MultiOrb (WP6): a page of its own once the group screens exist
-        case nil: botIDs.isEmpty ? .welcome : .orb
+        case .bot, nil: botIDs.isEmpty ? .welcome : .orb
         }
     }
 
@@ -135,7 +134,7 @@ private struct DetailView: View {
                     // form, pickers and switches took about a third of a change). It clears what belongs to one Orb itself.
                     BotInspector(botID: id)
                         .transition(.opacity)
-                } else if let id = selectedGroupID {
+                } else if let id = model.selectedGroupID {
                     // MARK: MultiOrb (WP6): a group's panel in the same column
                     GroupPanel(groupID: id)
                         .id(id)
@@ -143,7 +142,7 @@ private struct DetailView: View {
                 }
             }
             // The two sides of one click (the chat and the panel) change at the same pace.
-            .motion(Motion.crossFade, value: selectedBotID ?? selectedGroupID)
+            .motion(Motion.crossFade, value: selectedBotID ?? model.selectedGroupID)
             .inspectorColumnWidth(min: 244, ideal: 300, max: 420)
         }
     }
@@ -154,9 +153,8 @@ private struct DetailView: View {
     }
 
     // MARK: MultiOrb (WP6)
-    private var selectedGroupID: UUID? { model.selectedGroupID }
     /// The Orb's panel is on screen: the user's choice, on the Orb's page, with an Orb or a group selected.
-    private var panelShows: Bool { model.showInspector && DetailPage.page(for: model.selection, botIDs: model.botIDs) == .orb && (selectedBotID != nil || selectedGroupID != nil) }
+    private var panelShows: Bool { model.showInspector && DetailPage.page(for: model.selection, botIDs: model.botIDs) == .orb && (selectedBotID != nil || model.selectedGroupID != nil) }
 
     @ViewBuilder private var content: some View {
         switch model.selection {

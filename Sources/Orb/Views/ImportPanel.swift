@@ -207,12 +207,8 @@ struct ImportPanel: View {
             guard model.readsRealMac else { return }
             locals = await Task.detached(priority: .utility) { OrbImportReader.detectLocal() }.value
         }
-        .onChange(of: pasted) {
-            readSoon()
-        }
-        .onChange(of: link) {
-            readLinkSoon()
-        }
+        .onChange(of: pasted) { readSoon() }
+        .onChange(of: link) { readLinkSoon() }
         .onChange(of: source) {
             // Each source keeps its own reading: what the other one was doing stops, and its preview is not this one's.
             reading?.cancel()
@@ -278,15 +274,19 @@ struct ImportPanel: View {
                 .motion(Motion.content, value: isReading)
             }
             .sheetTextField()
-            if let error {
-                Text(error)
-                    .font(Typography.label)
-                    .foregroundStyle(Palette.danger)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .transition(.adapted(.rise, reduceMotion: reduceMotion))
-            }
+            errorLine
         }
         .motion(value: error)
+    }
+
+    @ViewBuilder private var errorLine: some View {
+        if let error {
+            Text(error)
+                .font(Typography.label)
+                .foregroundStyle(Palette.danger)
+                .fixedSize(horizontal: false, vertical: true)
+                .transition(.adapted(.rise, reduceMotion: reduceMotion))
+        }
     }
 
     private var promptStep: some View {
@@ -345,13 +345,7 @@ struct ImportPanel: View {
                 }
                 .motion(Motion.content, value: isReading)
             }
-            if let error {
-                Text(error)
-                    .font(Typography.label)
-                    .foregroundStyle(Palette.danger)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .transition(.adapted(.rise, reduceMotion: reduceMotion))
-            }
+            errorLine
             if !locals.isEmpty {
                 VStack(alignment: .leading, spacing: Spacing.xs) {
                     Text("Neste Mac").font(Typography.label.weight(.medium)).foregroundStyle(Palette.secondary)
@@ -438,13 +432,10 @@ struct ImportPanel: View {
         }
         // Another link (or closing the panel) stops the request too, not only the wait for it.
         let outcome = await withTaskCancellationHandler { await reading.value } onCancel: { reading.cancel() }
-        guard !Task.isCancelled else {
-            // Only this reading's own spinner: a newer reading of the same page keeps its.
-            linkReading.end(token)
-            return
-        }
-        isReading = false
         linkReading.end(token)
+        // Only this reading's own spinner goes: a newer reading of the same page keeps its.
+        guard !Task.isCancelled else { return }
+        isReading = false
         switch outcome {
         case .success(let imported):
             error = nil

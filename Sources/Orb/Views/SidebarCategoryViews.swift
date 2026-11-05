@@ -88,7 +88,7 @@ struct SidebarDropDelegate: DropDelegate {
         guard let provider = info.itemProviders(for: [.plainText]).first else { return }
         _ = provider.loadObject(ofClass: NSString.self) { [model] object, _ in
             guard let text = object as? NSString else { return }
-            let botID = SidebarOrder.botID(fromPayload: text as String)
+            let botID = UUID(uuidString: text as String)
             Task { @MainActor in if model.draggedBotID != botID { model.draggedBotID = botID } }
         }
     }
@@ -178,28 +178,7 @@ private struct SidebarCategoryHeader: View {
                     .foregroundStyle(collapsed && holdsSelection ? Palette.ink : Palette.secondary)
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                ZStack {
-                    if collapsed && waiting {
-                        Image(systemName: "exclamationmark.bubble.fill")
-                            .font(Typography.label)
-                            .foregroundStyle(Palette.warn)
-                            .transition(.adapted(.mark, reduceMotion: reduceMotion))
-                    } else if collapsed && unread {
-                        Circle()
-                            .fill(Palette.accentText)
-                            .frame(width: 7, height: 7)
-                            .transition(.adapted(.mark, reduceMotion: reduceMotion))
-                    }
-                }
-                .motion(value: collapsed && (waiting || unread))
-                // The number only stands in for the hidden Orbs: unfolded, the Orbs themselves are there to count.
-                if collapsed {
-                    Text("\(ids.count)")
-                        .font(Typography.small)
-                        .foregroundStyle(Palette.faint)
-                        .monospacedDigit()
-                        .help(CategoryText.orbs(ids.count))
-                }
+                HiddenOrbsMarks(collapsed: collapsed, waiting: waiting, unread: unread, count: ids.count)
             }
             .frame(minHeight: SidebarCategoryLayout.headerContentHeight)
             .hoverFill(isTargeted, in: .rect(cornerRadius: Radius.medium))
@@ -233,11 +212,44 @@ private struct SidebarCategoryHeader: View {
     }
 }
 
+/// What a folded heading shows for the Orbs it hides: the attention mark, then their count. Unfolded, the Orbs
+/// themselves are there to see and count.
+struct HiddenOrbsMarks: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let collapsed: Bool
+    let waiting: Bool
+    let unread: Bool
+    let count: Int
+
+    var body: some View {
+        ZStack {
+            if collapsed && waiting {
+                Image(systemName: "exclamationmark.bubble.fill")
+                    .font(Typography.label)
+                    .foregroundStyle(Palette.warn)
+                    .transition(.adapted(.mark, reduceMotion: reduceMotion))
+            } else if collapsed && unread {
+                Circle()
+                    .fill(Palette.accentText)
+                    .frame(width: 7, height: 7)
+                    .transition(.adapted(.mark, reduceMotion: reduceMotion))
+            }
+        }
+        .motion(value: collapsed && (waiting || unread))
+        if collapsed {
+            Text("\(count)")
+                .font(Typography.small)
+                .foregroundStyle(Palette.faint)
+                .monospacedDigit()
+                .help(CategoryText.orbs(count))
+        }
+    }
+}
+
 /// The name field of a category being made, after the categories: it opens from the "+" of "Orbs", an Orb's
 /// "Mover para → Nova categoria…" and the palette, and shows nothing otherwise.
 struct NewCategoryRow: View {
     @Environment(AppModel.self) private var model
-    let selectionSpace: Namespace.ID
 
     var body: some View {
         if case .new(let moving) = model.categoryNaming {

@@ -59,7 +59,7 @@ struct WelcomeOfferView: View {
         if isBusy {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Text(offer.workingTitle)
+                Text("Conectando…")
                     .font(Typography.label)
                     .foregroundStyle(Palette.secondary)
                 if run.working == .claudeCode {

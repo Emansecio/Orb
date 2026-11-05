@@ -164,16 +164,13 @@ final class GlobalHotKey {
     private var hotKey: EventHotKeyRef?
     private var handler: EventHandlerRef?
 
-    var isEnabled: Bool { UserDefaults.standard.bool(forKey: Self.defaultsKey) }
-
     /// At launch: registers it when the user had turned it on. If another app took the keys meanwhile, the switch
     /// goes back to off, so the menu does not claim a shortcut that does nothing.
     func restore() {
-        if isEnabled, !apply(true) { UserDefaults.standard.set(false, forKey: Self.defaultsKey) }
+        if UserDefaults.standard.bool(forKey: Self.defaultsKey), !apply(true) { UserDefaults.standard.set(false, forKey: Self.defaultsKey) }
     }
 
     /// Turns the shortcut on or off. False when it was asked on and the system refused (another app has it).
-    @discardableResult
     func apply(_ on: Bool) -> Bool {
         if on { return register() }
         unregister()

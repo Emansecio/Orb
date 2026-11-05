@@ -108,7 +108,7 @@ struct SidebarView: View {
 
                 // The name field of a category being made (the "+" of the Orbs, an Orb's "Mover para", the palette).
                 if isNamingNewCategory {
-                    NewCategoryRow(selectionSpace: selectionSpace)
+                    NewCategoryRow()
                         .transition(.adapted(.arrive, reduceMotion: reduceMotion))
                 }
 
@@ -331,28 +331,7 @@ private struct SidebarFoldHeader<Trailing: View>: View {
                         .lineLimit(1)
                     if !sub { chevron }
                     Spacer(minLength: 4)
-                    ZStack {
-                        if collapsed && waiting {
-                            Image(systemName: "exclamationmark.bubble.fill")
-                                .font(Typography.label)
-                                .foregroundStyle(Palette.warn)
-                                .transition(.adapted(.mark, reduceMotion: reduceMotion))
-                        } else if collapsed && unread {
-                            Circle()
-                                .fill(Palette.accentText)
-                                .frame(width: 7, height: 7)
-                                .transition(.adapted(.mark, reduceMotion: reduceMotion))
-                        }
-                    }
-                    .motion(value: collapsed && (waiting || unread))
-                    // The number only stands in for the hidden Orbs: unfolded, the Orbs themselves are there to count.
-                    if collapsed {
-                        Text("\(ids.count)")
-                            .font(Typography.small)
-                            .foregroundStyle(Palette.faint)
-                            .monospacedDigit()
-                            .help(CategoryText.orbs(ids.count))
-                    }
+                    HiddenOrbsMarks(collapsed: collapsed, waiting: waiting, unread: unread, count: ids.count)
                 }
                 .frame(minHeight: SidebarCategoryLayout.headerContentHeight)
                 .hoverFill(isTargeted, in: .rect(cornerRadius: Radius.medium))
@@ -458,7 +437,7 @@ struct SlidingSelectionFill: View {
         if reduceMotion {
             shape.transition(.opacity)
         } else {
-            shape.matchedGeometryEffect(id: SidebarSelection.id, in: space)
+            shape.matchedGeometryEffect(id: "selecao", in: space)
         }
     }
 }
@@ -466,12 +445,6 @@ struct SlidingSelectionFill: View {
 extension EnvironmentValues {
     /// The list of Orbs changed in the update being drawn (the rows are arriving or leaving).
     @Entry fileprivate var sidebarListChanged = false
-}
-
-/// What the sidebar's selection is made of, as plain values the tests can read.
-enum SidebarSelection {
-    /// The id the selected background carries in the namespace.
-    static let id = "selecao"
 }
 
 /// The user's picture and name at the foot of the sidebar, highlighted like a row: it opens "Você" in Ajustes (with
@@ -530,7 +503,7 @@ struct SidebarBotRow: View {
         // The name and the reply under it are cut to one line each: the hover text has the name whole.
         VStack(alignment: .leading, spacing: 0) {
             SidebarRow(isSelected: isSelected, selectionSpace: selectionSpace, paintsSelection: chats == nil || folded, help: live.look.name,
-                       dragPayload: SidebarOrder.dragPayload(botID)) {
+                       dragPayload: botID.uuidString) {
                 model.selection = .bot(botID)
             } content: { isHovering in
                 BotRowContent(row: BotRow(look: live.look, workText: live.shownWork?.headline, shimmers: live.shownWork?.shimmers ?? false, activity: live.activity, isSelected: isSelected,

@@ -242,8 +242,6 @@ struct SidebarCategoryOrganizingTests {
         // Not an Orb, not a category, not an Orb's payload: nothing happens.
         model.placeBot(UUID(), in: category.id, at: 0)
         model.placeBot(ids[0], in: UUID(), at: 0)
-        #expect(SidebarOrder.botID(fromPayload: "um texto qualquer") == nil)
-        #expect(SidebarOrder.botID(fromPayload: SidebarOrder.dragPayload(ids[1])) == ids[1])
         #expect(model.category(category.id)?.botIDs == [ids[1], ids[2]])
         #expect(model.looseBotIDs == [ids[0], ids[3]])
     }

@@ -49,9 +49,6 @@ struct PaletteEntry: Identifiable, Equatable {
 }
 
 enum PaletteSearch {
-    /// Lowercase without accents, so "conversa" finds "Conversá" and "ACOES" finds "Ações".
-    static func normalize(_ text: String) -> String { MemoryText.fold(text) }
-
     /// The entries that match every word typed, best first: a title that starts with the word, then a word of the
     /// title that starts with it, then anywhere in the title, then the subtitle or keywords. Ties keep the order of
     /// the groups and of `entries`. Nothing typed keeps the order of the groups.
@@ -59,14 +56,14 @@ enum PaletteSearch {
         rank(entries, folded: fold(entries), query: query)
     }
 
-    /// The title and the subtitle + keywords of each entry, normalized once, so a keystroke normalizes only the query.
+    /// The title and the subtitle + keywords of each entry, folded once (lowercase, no accents: "ACOES" finds "Ações"), so a keystroke normalizes only the query.
     static func fold(_ entries: [PaletteEntry]) -> [(title: String, rest: String)] {
-        entries.map { (normalize($0.title), normalize([$0.subtitle ?? "", $0.keywords].joined(separator: " "))) }
+        entries.map { (MemoryText.fold($0.title), MemoryText.fold([$0.subtitle ?? "", $0.keywords].joined(separator: " "))) }
     }
 
     /// `rank` with `folded` = `fold(entries)` already made.
     static func rank(_ entries: [PaletteEntry], folded: [(title: String, rest: String)], query: String) -> [PaletteEntry] {
-        let words = normalize(query).split(whereSeparator: \.isWhitespace).map(String.init)
+        let words = MemoryText.fold(query).split(whereSeparator: \.isWhitespace).map(String.init)
         let indexed = entries.enumerated().map { (index: $0.offset, entry: $0.element) }
         guard !words.isEmpty else {
             return indexed.filter { !$0.entry.searchOnly }.sorted { ($0.entry.section, $0.index) < ($1.entry.section, $1.index) }.map(\.entry)
@@ -155,7 +152,7 @@ enum PaletteBuilder {
         }
         for group in groups {
             list.append(PaletteEntry(id: "group-\(group.id)", title: "Grupo: \(group.name)",
-                                     subtitle: group.memberIDs.count == 1 ? "1 Orb" : "\(group.memberIDs.count) Orbs",
+                                     subtitle: CategoryText.orbs(group.memberIDs.count),
                                      symbol: "person.2.fill", section: .groups, action: .group(group.id),
                                      keywords: "grupo equipe orquestrador"))
         }
@@ -260,8 +257,10 @@ struct CommandPalette: View {
         .frame(width: 540, height: 430)
         .background(Palette.chrome)
         .onChange(of: query) { selected = 0 }
-        .onAppear { isFocused = true }
-        .onAppear { build() }
+        .onAppear {
+            isFocused = true
+            build()
+        }
     }
 
     private func hint(_ keys: String, _ text: String) -> some View {

@@ -499,9 +499,10 @@ struct QuickAskApprovalCard: View {
     var body: some View {
         let request = entry.request
         let preview = ApprovalPreview.of(request)
+        let live = model.live(entry.bot.id)
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                BotAvatar(live: model.live(entry.bot.id), size: 18, paused: model.live(entry.bot.id).activity == .idle)
+                BotAvatar(live: live, size: 18, paused: live.activity == .idle)
                 Text(entry.bot.name)
                     .font(Typography.label.weight(.semibold))
                 Text("precisa de você")

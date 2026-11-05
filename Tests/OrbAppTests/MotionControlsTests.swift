@@ -78,10 +78,6 @@ struct MotionControlsTests {
         #expect(Motion.selection(reduceMotion: false, listChanged: false) == Motion.content)
     }
 
-    @Test func theSelectedBackgroundIsOneNamedElement() {
-        #expect(SidebarSelection.id == "selecao")
-    }
-
     // MARK: Send / Stop (§2.5)
 
     @Test func theRoundButtonIsSendWhenTheOrbIsFree() {

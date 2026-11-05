@@ -66,7 +66,6 @@ struct FirstRunOffer: Equatable {
     }
 
     var buttonTitle: String { createsAtlas ? "Usar meu Claude Code e começar" : "Usar meu Claude Code" }
-    var workingTitle: String { "Conectando…" }
 
     var detail: String {
         createsAtlas
