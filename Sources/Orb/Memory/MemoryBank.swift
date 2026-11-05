@@ -1114,6 +1114,9 @@ final class MemoryLibrary: Sendable {
 
     func directory(for orbID: UUID) -> URL { root.appending(path: orbID.uuidString) }
 
+    /// The Orb's bank if something has opened it already (none is made, no folder is created).
+    func openBank(for orbID: UUID) -> MemoryBank? { state.withLock { $0.banks[orbID] } }
+
     /// The Orb's bank. After `delete` or `keep`, a closed bank that writes nothing.
     func bank(for orbID: UUID) -> MemoryBank {
         state.withLock { state in

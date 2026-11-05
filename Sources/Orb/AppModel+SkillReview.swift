@@ -26,10 +26,15 @@ extension AppModel {
         Task { await bank.publishSkills(digests) }
     }
 
-    /// Skills changed (edited, switched off, deleted): refresh every Orb's copy now, so a `recall "/slug"` in a turn
-    /// already running does not read the old text. `publishSkills` writes only when the file would differ.
+    /// Skills changed (edited, switched off, deleted, or only counted a use): refresh the copy of the Orbs whose bank is
+    /// open now, so a `recall "/slug"` in a turn already running does not read the old text. A bank not open has no turn
+    /// reading it, and the next turn publishes anyway: opening fifty banks at every use would cost for nothing.
     func republishSkills() {
-        for bot in bots { publishSkills(for: bot.id) }
+        for bot in bots {
+            guard let bank = memory.openBank(for: bot.id) else { continue }
+            let digests = skills(for: bot.id).map(SkillDigest.init)
+            Task { await bank.publishSkills(digests) }
+        }
     }
 
     // MARK: The review

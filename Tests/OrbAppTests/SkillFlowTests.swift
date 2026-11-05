@@ -414,11 +414,17 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
 
     @Test @MainActor func deletingASkillRepublishesItToTheOrbAtOnce() async {
         let (model, botID) = setUp(CallScript([said("oi")]))
+        let bank = model.memory.bank(for: botID) // open, as during a turn
         model.skills = [Skill(slug: "resumir", name: "Resumir", summary: "", instructions: "Resuma.", orbIDs: [botID])]
-        let bank = model.memory.bank(for: botID)
         await waitUntil("the skill published") { await bank.skillText(named: "/resumir").contains("Resuma.") }
         model.skills = []
         await waitUntil("the skill gone from the Orb's copy") { await bank.skillText(named: "/resumir").hasPrefix("No skill /resumir") }
+    }
+
+    @Test @MainActor func aSkillChangeOpensNoBankOfAnOrbThatIsNotWorking() {
+        let (model, botID) = setUp(CallScript([said("oi")]))
+        model.skills = [Skill(slug: "resumir", name: "Resumir", summary: "", instructions: "Resuma.", orbIDs: [botID])]
+        #expect(model.memory.openBank(for: botID) == nil)
     }
 
     @Test @MainActor func anImprovementKeepsTheSkillAndItsUsesAndScope() async throws {
