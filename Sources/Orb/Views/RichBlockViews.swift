@@ -231,15 +231,8 @@ struct EnlargedBlockSheet: View {
                     .lineLimit(1)
                     .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: Spacing.m)
-                Button("Fechar", systemImage: "xmark") { dismiss() }
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.plain)
+                SheetCloseButton { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Palette.muted)
-                    .frame(width: 24, height: 24)
-                    .contentShape(.rect)
-                    .help("Fechar (Esc)")
             }
             .padding(.horizontal, Spacing.sheetEdge)
             .padding(.top, Spacing.sheetHeaderTop)
@@ -391,7 +384,6 @@ private struct ZoomingPicture: View {
     let request: RichRequest
     @State private var picture: NSImage?
     @State private var problem: String?
-    @State private var zoom: CGFloat = 1
     @State private var command = ZoomCommand()
 
     var body: some View {

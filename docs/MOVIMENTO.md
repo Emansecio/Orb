@@ -279,10 +279,10 @@ Só usa tokens que já existem; o fundo é estático (um gradiente desenhado uma
   com `.opacity` em `Motion.exit` e as ações entram com `.rise` em `Motion.enter`, presas à mudança de estágio, não à lista.
 - **Causa e efeito.** Passar o ponteiro em "Começar com o Atlas" faz o Atlas dar um pulinho (no máximo um a cada 1,5 s).
   Ao conectar o modelo, o Atlas pula e fica `.happy` por 3 s, o prazo do flash da sessão.
-- **Botão principal** (`HeroPillStyle`). Cápsula branca com um halo índigo (sombra de 16 pt, opacidade 0,35); no hover só a opacidade do halo
-  anima (0,5, `Motion.hoverIn`/`hoverOut`); pressionado, escala 0,97 em `Motion.press`.
+- **Botão principal** (`HeroPillStyle`). Cápsula de tinta (`Palette.ink`), sem halo; no hover a opacidade cai de 1 para 0,88
+  (`Motion.hover`); pressionado, escala 0,97 em `Motion.press`.
 - **Reduzir movimento.** Tudo entra junto em `Motion.fade` (0,15 s), sem queda nem pulos. Os Orbs ficam estáticos (o `OrbView`
-  já faz); a comemoração vira só o rosto `.happy` parado por 3 s; o halo do botão não anima; a troca cartão → ações é só opacidade.
+  já faz); a comemoração vira só o rosto `.happy` parado por 3 s; o botão não anima no hover nem ao pressionar; a troca cartão → ações é só opacidade.
 - **VoiceOver.** O herói é uma imagem ("Três Orbs sorrindo: Atlas, de óculos, no meio; Lia, com um laço; Bento, com fones"); a ordem de
   leitura é título, subtítulo, os três pontos, cartão ou botão, alternativa e memórias. Ao conectar o modelo é anunciado "Pronto. Agora
   crie seu primeiro Orb." e o foco vai para o botão principal.
@@ -426,7 +426,7 @@ Orb está trabalhando, continua trabalhando).
 | Folhas | seções em cascata | tudo junto |
 | Chat vazio | Orb cai e amassa, cascata | tudo junto, Orb parado |
 | Rotinas no painel | linha sobe 6 pt, destaque de 2,5 s, vizinhas deslizam | linha só aparece e some por opacidade |
-| Boas-vindas | três Orbs caem em sequência, pontos em cascata, cartão sobe | tudo junto em 0,15 s, Orbs parados, halo fixo |
+| Boas-vindas | três Orbs caem em sequência, pontos em cascata, cartão sobe | tudo junto em 0,15 s, Orbs parados, botão sem animação |
 | Linha de trabalho | frase sobe 4 pt, medidor desliza, contador rola | frase troca por opacidade (0,15 s), sem deslizar nem rolar |
 | Troca de página, aba, categoria | fade cruzado de 0,18 s, destaque que desliza | fade de 0,15 s, destaque que pula |
 | Painel do Orb abrindo e fechando | a coluna desliza em 0,25 s | sem animação |

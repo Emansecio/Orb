@@ -372,7 +372,7 @@ struct ComposerView: View {
         } label: {
             Image(systemName: action.symbol)
                 .contentTransition(.symbolEffect(.replace))
-                .animation(Motion.availability(reduceMotion: reduceMotion), value: action.symbol)
+                .animation(Motion.panel(reduceMotion: reduceMotion), value: action.symbol)
         }
         .buttonStyle(RoundActionStyle())
         .disabled(action != .stop && !canSend)
@@ -719,7 +719,7 @@ private struct RoundActionStyle: ButtonStyle {
             .foregroundStyle(Palette.onInk)
             .frame(width: 28, height: 28)
             .background(Palette.ink.opacity(isEnabled ? 1 : 0.25), in: .circle)
-            .animation(Motion.availability(reduceMotion: reduceMotion), value: isEnabled)
+            .animation(Motion.panel(reduceMotion: reduceMotion), value: isEnabled)
             .scaleEffect(press.scale)
             .opacity(press.opacity)
             .animation(reduceMotion ? nil : Motion.press, value: configuration.isPressed)

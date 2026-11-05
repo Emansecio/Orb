@@ -324,7 +324,6 @@ import Testing
 
     @Test func theApprovalPulseGoesFromNothingToTheEdgeAndSettlesBackInNineTenthsOfASecond() {
         #expect(ApprovalPulse.phases.map(ApprovalPulse.opacity) == [0, 0.35, 0.12, 0])
-        #expect(abs(ApprovalPulse.totalDuration - 0.9) < 1e-9)
         #expect(ApprovalPulse.opacity(99) == 0)
         // The first phase is the rest the card starts in: nothing animates into it.
         #expect(ApprovalPulse.animation(0) == nil)

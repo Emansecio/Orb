@@ -30,13 +30,25 @@ extension View {
                                onClose: onClose, footer: footer()))
     }
 
-    func orbSheet(_ title: String, subtitle: String? = nil, size: SheetSize = .medium) -> some View {
-        orbSheet(title, subtitle: subtitle, size: size) { EmptyView() }
-    }
-
     /// Forms and lists drawn on the app's background instead of the system's grouped one.
     func orbFormBackground() -> some View {
         scrollContentBackground(.hidden).background(Palette.chrome)
+    }
+}
+
+/// The X at the right of a sheet's header (the caller adds the Esc shortcut when nothing else in the sheet owns it).
+struct SheetCloseButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button("Fechar", systemImage: "xmark", action: action)
+            .labelStyle(.iconOnly)
+            .buttonStyle(.plain)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(Palette.muted)
+            .frame(width: 24, height: 24)
+            .contentShape(.rect)
+            .help("Fechar (Esc)")
     }
 }
 
@@ -70,14 +82,7 @@ private struct OrbSheetFrame<Footer: View>: ViewModifier {
                 }
                 if let onClose {
                     Spacer(minLength: 0)
-                    Button("Fechar", systemImage: "xmark", action: onClose)
-                        .labelStyle(.iconOnly)
-                        .buttonStyle(.plain)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Palette.muted)
-                        .frame(width: 24, height: 24)
-                        .contentShape(.rect)
-                        .help("Fechar (Esc)")
+                    SheetCloseButton(action: onClose)
                 }
             }
             .padding(.horizontal, Spacing.sheetEdge)

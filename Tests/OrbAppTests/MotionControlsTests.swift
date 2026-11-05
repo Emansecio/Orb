@@ -143,9 +143,4 @@ struct MotionControlsTests {
         let released = ComposerAction.pressVisual(pressed: false, reduceMotion: true)
         #expect(released.scale == 1 && released.opacity == 1)
     }
-
-    @Test func theButtonFadesWhenItBecomesAvailableAndSwitchesAtOnceUnderReduceMotion() {
-        #expect(Motion.availability(reduceMotion: false) == Motion.content)
-        #expect(Motion.availability(reduceMotion: true) == nil)
-    }
 }

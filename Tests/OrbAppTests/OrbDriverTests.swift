@@ -480,7 +480,7 @@ struct OrbDriverTests {
         final class FlippedDoc: NSView { override var isFlipped: Bool { true } }
         let document = FlippedDoc(frame: NSRect(x: 0, y: 0, width: 120, height: 2000))
         scroll.documentView = document
-        let band = ShimmerBandView(fillsBackground: true)
+        let band = ShimmerBandView()
         band.frame = NSRect(x: 10, y: 1500, width: 100, height: 20)
         document.addSubview(band)
         let win = window(scroll, size: 200)
@@ -513,7 +513,7 @@ struct OrbDriverTests {
 
     @Test func theShimmerStopsWhenHiddenAndResumes() throws {
         try #require(hasScreen)
-        let band = ShimmerBandView(fillsBackground: true)
+        let band = ShimmerBandView()
         band.frame = NSRect(x: 0, y: 0, width: 100, height: 20)
         let content = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 200))
         content.addSubview(band)
@@ -533,7 +533,7 @@ struct OrbDriverTests {
 
     @Test func aRunningCommandBreathesOnlyWhileItIsSeen() throws {
         try #require(hasScreen)
-        let band = ShimmerBandView(fillsBackground: true)
+        let band = ShimmerBandView()
         band.frame = NSRect(x: 0, y: 0, width: 100, height: 20)
         let content = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 200))
         content.addSubview(band)

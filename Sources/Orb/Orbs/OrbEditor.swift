@@ -249,7 +249,6 @@ struct OrbEditor: View {
         return Button("Desfazer", systemImage: "arrow.uturn.backward", action: undo)
             .buttonStyle(GhostStyle())
             .disabled(!canUndo)
-            .opacity(canUndo ? 1 : 0.45)
             .help("Desfaz a última mudança no Orb, inclusive no jeito (⌘Z; ⇧⌘Z refaz)")
     }
 

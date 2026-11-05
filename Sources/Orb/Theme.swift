@@ -200,23 +200,11 @@ enum ControlHeight {
 
 // MARK: Surfaces
 
-struct CardBackground: ViewModifier {
-    var radius: CGFloat = Radius.card
-    var fill: Color = Palette.surface
-    var stroke: Color = Palette.line
-    var lineWidth: CGFloat = 1
-
-    func body(content: Content) -> some View {
-        content
-            .background(fill, in: .rect(cornerRadius: radius))
-            .overlay(RoundedRectangle(cornerRadius: radius).strokeBorder(stroke, lineWidth: lineWidth))
-    }
-}
-
 extension View {
     func card(radius: CGFloat = Radius.card, fill: Color = Palette.surface, stroke: Color = Palette.line,
               lineWidth: CGFloat = 1) -> some View {
-        modifier(CardBackground(radius: radius, fill: fill, stroke: stroke, lineWidth: lineWidth))
+        background(fill, in: .rect(cornerRadius: radius))
+            .overlay(RoundedRectangle(cornerRadius: radius).strokeBorder(stroke, lineWidth: lineWidth))
     }
 
     /// Sweeping highlight across dim text, used for "working" states (steady text under Reduce Motion).
@@ -276,7 +264,7 @@ private struct Shimmer: ViewModifier {
 private struct ShimmerBand: NSViewRepresentable {
     var pulses = false
 
-    func makeNSView(context: Context) -> ShimmerBandView { ShimmerBandView(fillsBackground: true, pulses: pulses) }
+    func makeNSView(context: Context) -> ShimmerBandView { ShimmerBandView(pulses: pulses) }
     func updateNSView(_ view: ShimmerBandView, context: Context) { view.pulses = pulses }
 }
 
@@ -297,12 +285,10 @@ final class ShimmerBandView: NSView {
             updateSweep()
         }
     }
-    private let fillsBackground: Bool
     private weak var clipView: NSClipView?
 
-    init(fillsBackground: Bool, pulses: Bool = false) {
+    init(pulses: Bool = false) {
         self.pulses = pulses
-        self.fillsBackground = fillsBackground
         super.init(frame: .zero)
         wantsLayer = true
         paintFill()
@@ -417,7 +403,6 @@ final class ShimmerBandView: NSView {
 
     /// The dim fill the text takes its color from; a running command's line is a step lighter (it breathes down from it).
     private func paintFill() {
-        guard fillsBackground else { return }
         layer?.backgroundColor = NSColor(pulses ? Palette.muted : Palette.hint).cgColor
     }
 
@@ -492,9 +477,8 @@ struct PrimaryPillStyle: ButtonStyle {
     }
 }
 
-/// The one big call to action of the welcome screen: a white pill with a soft indigo halo behind it. The halo grows
-/// a little on hover (opacity only, so the render server does it); pressed, the pill shrinks to 0.97. Under Reduce
-/// Motion the halo does not animate.
+/// The one big call to action of the welcome screen: an ink capsule that softens to 0.88 opacity on hover (a step of
+/// the surface, no glow); pressed, it shrinks to 0.97. Under Reduce Motion neither the hover nor the press animates.
 struct HeroPillStyle: ButtonStyle {
     @State private var isHovering = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -595,6 +579,7 @@ struct GhostStyle: ButtonStyle {
     var tint: Color?
     @State private var isHovering = false
     @Environment(\.controlSize) private var controlSize
+    @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
         let metrics = PillMetrics.of(controlSize)
@@ -604,8 +589,10 @@ struct GhostStyle: ButtonStyle {
             .foregroundStyle(tint ?? (configuration.role == .destructive ? Palette.danger : Palette.secondary))
             .padding(.horizontal, Spacing.ghostInset)
             .frame(minHeight: metrics.height)
-            .hoverFill(configuration.isPressed || isHovering, pressed: configuration.isPressed, in: .capsule,
+            .hoverFill(configuration.isPressed || (isHovering && isEnabled), pressed: configuration.isPressed, in: .capsule,
                        color: Palette.ghostSelected)
+            // A disabled ghost reads as disabled by itself, so callers need no `.opacity` of their own.
+            .opacity(isEnabled ? 1 : 0.4)
             .contentShape(.capsule)
             .onHover { isHovering = $0 }
     }
