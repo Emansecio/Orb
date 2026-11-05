@@ -20,9 +20,9 @@ enum ImportText {
         "Passa do limite de leitura: os últimos \(count) caracteres ficam de fora."
     }
 
-    /// A file of a folder that passed the size limit.
+    /// A file of a folder left out by the 1 MB the whole folder may take (it alone, or what came before it, passed it).
     static func tooLargeFile(_ name: String) -> String {
-        "\(name) passa de 1 MB e foi ignorado. Para importá-lo, escolha o arquivo sozinho."
+        "\(name) não coube no limite de 1 MB da pasta e foi ignorado. Para importá-lo, escolha o arquivo sozinho."
     }
 
     /// Facts the reading or the 60-fact limit leaves out.
