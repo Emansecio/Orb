@@ -744,6 +744,50 @@ extension AgentEngineTests {
         #expect(failures(events).isEmpty)
     }
 
+    @Test func toolCallsCutOffAtTheLimitInARowEndTheTurnWithANotice() async {
+        let cut = [touchCall, LLMEvent.finished(.maxTokens, nil)]
+        let script = CallScript(Array(repeating: cut, count: 8), whenExhausted: .fim)
+        let events = await run(AgentEngine(), request(script, mode: .auto, runs: Counter(), maxSteps: .max))
+        #expect(await script.received.count == AgentEngine.cutOffCallsLimit)
+        #expect(events.notices == [AgentEngine.cutOffCallsNotice])
+        #expect(failures(events).isEmpty)
+    }
+
+    @Test func aCutOffToolCallBetweenWorkingStepsDoesNotCountTowardTheLimit() async {
+        let cut = [touchCall, LLMEvent.finished(.maxTokens, nil)]
+        let script = CallScript([cut, cut, [touchCall], cut, cut, [.text("Pronto")]], whenExhausted: .fim)
+        let events = await run(AgentEngine(), request(script, mode: .auto, runs: Counter(), maxSteps: .max))
+        #expect(events.notices.isEmpty)
+        #expect(messages(events).last?.content == "Pronto")
+    }
+
+    @Test func anEmptyReplyIsRetriedAgainAfterMoreWorkLaterInTheTurn() async {
+        let script = CallScript([[touchCall], [.finished(.done, nil)], [touchCall], [.finished(.done, nil)], [.text("Pronto")]],
+                                whenExhausted: .fim)
+        let events = await run(AgentEngine(), request(script, mode: .auto, runs: Counter(), maxSteps: .max))
+        #expect(failures(events).isEmpty)
+        #expect(messages(events).last?.content == "Pronto")
+    }
+
+    private func touch(_ id: Int, _ arguments: String) -> [LLMEvent] {
+        [.toolCalls([ToolCallRequest(id: "t\(id)", name: "touch", arguments: arguments)])]
+    }
+
+    @Test func repeatedActionsFarApartDoNotAddUpToTheCirclingAlert() async {
+        // Two notes (calls 3 and 6 of A), a long stretch of different calls, then a third note: not "in circles".
+        var steps: [[LLMEvent]] = (0..<6).map { touch($0, #"{"a":1}"#) }
+        steps += (0..<7).map { touch(100 + $0, #"{"d":\#($0)}"#) }
+        steps += (0..<3).map { touch(200 + $0, #"{"b":1}"#) }
+        steps.append([.text("Pronto")])
+        let apart = await run(AgentEngine(), request(CallScript(steps, whenExhausted: .fim), mode: .auto, runs: Counter(), maxSteps: .max))
+        #expect(!apart.notices.contains(LoopWatch.userNotice))
+        // Three notes in a row is.
+        var loop: [[LLMEvent]] = (0..<9).map { touch($0, #"{"a":1}"#) }
+        loop.append([.text("Pronto")])
+        let together = await run(AgentEngine(), request(CallScript(loop, whenExhausted: .fim), mode: .auto, runs: Counter(), maxSteps: .max))
+        #expect(together.notices.contains(LoopWatch.userNotice))
+    }
+
     @Test func aRefusalEndsAsAFailure() async {
         let script = CallScript([[.text("Não posso ajudar com isso."), .finished(.refusal, nil)]], whenExhausted: .fim)
         let events = await run(AgentEngine(), request(script, mode: .ask, runs: Counter()))

@@ -1038,6 +1038,25 @@ private final class Hooks: GroupTurnHooks {
         await team.settle()
     }
 
+    @Test func timeTheMacSleptDoesNotCountTowardTheWaitsOfARequest() async throws {
+        let valve = TestGate()
+        let team = waitingMiddleTeam(valve)
+        defer { team.cleanUp() }
+        let model = team.model
+        model.send("peça", to: team.atlas.id, fromUser: true)
+        await waitUntil("the middle one to wait") { team.request(from: team.atlas, to: team.pesquisador)?.state == .awaitingChildren }
+        let middle = try #require(team.request(from: team.atlas, to: team.pesquisador))
+        let start = Date.now
+        let later = start.addingTimeInterval(DelegationLimits.workTimeout + 60)
+        // Slept for all of it but a minute: awake time is short, so the sweep leaves the request alone.
+        model.delegation.noteSleep(from: start.addingTimeInterval(-1), to: later.addingTimeInterval(-60))
+        #expect(model.delegation.awake(since: start, now: later) < 120)
+        model.delegation.sweep(now: later)
+        #expect(model.delegation.requests[middle.id]?.state == .awaitingChildren)
+        await valve.open()
+        await team.settle()
+    }
+
     @Test func waitingForWorkThatGoesOnIsNotATimeoutUntilTheCeiling() async throws {
         let valve = TestGate()
         let team = waitingMiddleTeam(valve)

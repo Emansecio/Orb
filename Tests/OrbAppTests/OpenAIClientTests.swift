@@ -551,4 +551,15 @@ extension OpenAIClientTests {
         let request = StubProtocol.requests.withLock { $0["slow-models.test"] }
         #expect(request?.timeoutInterval == ProviderTransport.listTimeout)
     }
+
+    @Test func callsWithoutAnIdGetOnesThatDoNotRepeatAcrossStepsButStayStableWithinOne() throws {
+        let fragment = try #require(JSONValue.parse(#"[{"index":0,"function":{"name":"read_file","arguments":"{}"}}]"#)?.array)
+        var first = ToolCallAccumulator()
+        var second = ToolCallAccumulator()
+        first.ingest(fragment)
+        second.ingest(fragment)
+        let id = try #require(first.requests.first?.id)
+        #expect(first.requests.first?.id == id) // read twice, same id
+        #expect(!id.isEmpty && id != second.requests.first?.id)
+    }
 }

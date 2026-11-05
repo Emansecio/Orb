@@ -179,6 +179,9 @@ actor AgentEngine {
         // theirs: the "continue" after replies cut at the output limit, one more try after an empty reply, and the
         // reminders after a reply that stopped short (`stopReminder`).
         var cutContinues = 0
+        // Replies cut at the output limit with tool calls in a row: they never reach `runCalls`, so `watch` does not
+        // see them, and a model that keeps writing the same giant file would otherwise loop until the user stops it.
+        var cutOffCalls = 0
         var retriedSilence = false
         var reminders = 0
         // The step the task plan was last in front of the model at: the message that opens the turn carries it
@@ -199,6 +202,7 @@ actor AgentEngine {
         var circling = false
         // How many times `watch` spoke this turn: at `LoopWatch.alertAfter` the person is told as well, once.
         var circlingNotes = 0
+        var quietSteps = 0
         // What the calls showed, to check a reply that says the work is done (`CompletionWatch`).
         var completion = CompletionWatch()
         // A `task_plan` call ran in this turn: the plan is this turn's work, not one left from an earlier task.
@@ -346,6 +350,11 @@ actor AgentEngine {
                         let text = call == calls.last && note != nil ? Self.cutOffResult + "\n\n" + (note ?? "") : Self.cutOffResult
                         record(.tool(call.id, text, isError: true), in: &messages, out: out)
                     }
+                    cutOffCalls += 1
+                    if cutOffCalls >= Self.cutOffCallsLimit {
+                        out.yield(.notice(Self.cutOffCallsNotice))
+                        return
+                    }
                     continue
                 case .maxTokens:
                     // A reply with no text (all the budget went to reasoning) is no message: providers reject empty ones.
@@ -437,7 +446,18 @@ actor AgentEngine {
                 if circling {
                     circlingNotes += 1
                     if circlingNotes == LoopWatch.alertAfter { out.yield(.notice(LoopWatch.userNotice)) }
+                    quietSteps = 0
+                } else {
+                    // A note only comes every `repeats` repeats, so a real loop has quiet steps between its notes; a long
+                    // quiet stretch means the turn moved on, and old hiccups must not add up to an alert.
+                    quietSteps += 1
+                    if quietSteps >= 2 * LoopWatch.repeats { circlingNotes = 0 }
                 }
+                // A step that ran calls is progress, so each recovery gets its allowance back for the next hiccup.
+                cutContinues = 0
+                cutOffCalls = 0
+                retriedSilence = false
+                resumedAfterCut = false
                 workedSinceReminder = true
                 try Task.checkCancellation()
             }
@@ -568,6 +588,7 @@ actor AgentEngine {
     static let continueNudge = "continue"
     /// Replies cut at the output limit that are continued in one turn (more would be a model that cannot finish).
     static let cutContinueLimit = 2
+    static let cutOffCallsLimit = 3
     static let silenceNudge = "Your last reply was empty. Reply now: carry on with your tools, or answer in text."
     static let silenceFailure = "O modelo não respondeu."
     static let promiseNudge = "You ended your reply on something you said you would do, without doing it. Do it now with your tools, "
@@ -654,6 +675,7 @@ actor AgentEngine {
     }
 
     /// What the turn says when the model's reply was cut off at its limit (the Orb sighs at the end of such a turn).
+    static let cutOffCallsNotice = "O modelo cortou a mesma chamada de ferramenta no limite de resposta várias vezes seguidas, então parei o turno. Peça uma parte menor de cada vez."
     static let cutShortNotice = "A resposta passou do limite do modelo e foi cortada. Diga “continua” para seguir."
     static let cutOffResult = "Error: your reply hit the output limit while writing this call, so it was NOT run. Split the work into "
         + "smaller steps: write long files in parts (write_file with append: true), change existing files with edit_file, "

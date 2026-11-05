@@ -50,6 +50,23 @@ enum Retry {
     /// The waits before each new try after a usage limit that names no wait of its own (with jitter, see `delay`).
     static let rateLimitBackoff: [TimeInterval] = [5, 15, 30, 60]
 
+    /// Tries in all when the network itself is gone (Wi-Fi switching, a Mac just awake, a proxy restarting): such an outage
+    /// lasts tens of seconds, so the waits (`offlineBackoff`) add up to about two minutes instead of giving up after seconds.
+    static let offlineAttempts = 8
+    static let offlineBackoff: [TimeInterval] = [2, 5, 10, 20, 30, 30, 30]
+
+    private static let offlineCodes: Set<URLError.Code> = [.notConnectedToInternet, .networkConnectionLost, .cannotFindHost,
+                                                           .dnsLookupFailed, .cannotConnectToHost]
+
+    /// The failure says there is no network (not a slow or failing provider).
+    static func isOffline(_ error: Error) -> Bool {
+        switch error {
+        case LLMError.network(let code, _): offlineCodes.contains(URLError.Code(rawValue: code))
+        case let error as URLError: offlineCodes.contains(error.code)
+        default: false
+        }
+    }
+
     /// A usage limit (not about money: waiting does not pay the bill) or an overloaded provider.
     static func isRateLimit(_ error: Error) -> Bool {
         switch error {
@@ -69,6 +86,8 @@ enum Retry {
             own = slowFailureAttempts
         case _ where isRateLimit(error):
             own = rateLimitAttempts
+        case _ where isOffline(error):
+            own = offlineAttempts
         default:
             own = standardAttempts
         }
@@ -78,13 +97,14 @@ enum Retry {
     /// Seconds to wait after `attempt` (1-based) failed: the provider's `Retry-After` when given, else exponential
     /// backoff with jitter, never above `maxBackoff` (except usage limits, which follow `rateLimitBackoff`). nil when the provider asks for more than we will wait.
     /// `rateLimited`: the failure was a usage limit (`isRateLimit`), whose waits are `rateLimitBackoff`.
-    static func delay(afterAttempt attempt: Int, retryAfter: TimeInterval?, jitter: Double, rateLimited: Bool = false) -> TimeInterval? {
+    static func delay(afterAttempt attempt: Int, retryAfter: TimeInterval?, jitter: Double, rateLimited: Bool = false, offline: Bool = false) -> TimeInterval? {
         if let retryAfter {
             // Floor at `baseDelay`: a `Retry-After: 0` (or a date already past) must not retry at once.
             return retryAfter > maxServerDelay ? nil : max(baseDelay, retryAfter)
         }
         let backoff = rateLimited
             ? rateLimitBackoff[min(max(attempt, 1), rateLimitBackoff.count) - 1]
+            : offline ? offlineBackoff[min(max(attempt, 1), offlineBackoff.count) - 1]
             : min(maxBackoff, baseDelay * pow(2, Double(max(attempt, 1) - 1)))
         // "Equal jitter": half fixed, half random, so parallel clients don't retry in lockstep.
         return backoff * (0.5 + 0.5 * min(max(jitter, 0), 1))
@@ -113,7 +133,7 @@ func withRetries<T>(
         } catch {
             guard attempt < Retry.attemptLimit(for: error, maxAttempts: maxAttempts), Retry.isRetryable(error),
                   let seconds = Retry.delay(afterAttempt: attempt, retryAfter: (error as? LLMError)?.retryAfter, jitter: jitter(),
-                                            rateLimited: Retry.isRateLimit(error))
+                                            rateLimited: Retry.isRateLimit(error), offline: Retry.isOffline(error))
             else { throw error }
             onWait(seconds, attempt, error)
             try await sleep(seconds)

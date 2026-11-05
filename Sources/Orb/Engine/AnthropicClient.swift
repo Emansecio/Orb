@@ -308,7 +308,7 @@ struct AnthropicStreamAssembler: AssemblingMapper {
             guard let block = event["content_block"] else { break }
             switch block["type"]?.string {
             case "tool_use":
-                calls[index] = ToolCallRequest(id: block["id"]?.string ?? "call_\(index)", name: block["name"]?.string ?? "",
+                calls[index] = ToolCallRequest(id: block["id"]?.string ?? ToolCallRequest.fallbackID(index: index), name: block["name"]?.string ?? "",
                                                arguments: "")
             case "thinking":
                 thinking[index] = ReasoningPart(kind: .thinking, text: block["thinking"]?.string ?? "",

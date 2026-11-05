@@ -838,29 +838,48 @@ final class DelegationHub: DelegationService {
         refresh(request.envelope.from.id, request.envelope.to.id)
     }
 
+    /// Stretches the Mac slept through. Nobody worked or answered while it slept, so that time must not count toward the
+    /// waits of `sweep`: a request sent in the evening would otherwise be "timed out" the moment the lid opens.
+    private var sleeps: [DateInterval] = []
+
+    func noteSleep(from start: Date, to end: Date) {
+        guard end > start else { return }
+        sleeps.append(DateInterval(start: start, end: end))
+    }
+
+    /// Seconds from `date` to `now` that the Mac was awake for.
+    func awake(since date: Date, now: Date) -> TimeInterval {
+        let slept = sleeps.reduce(0) { total, sleep in
+            let from = max(sleep.start, date), to = min(sleep.end, now)
+            return to > from ? total + to.timeIntervalSince(from) : total
+        }
+        return max(0, now.timeIntervalSince(date) - slept)
+    }
+
     /// Run by the scheduler every 30 seconds: a request that waited too long ends `failed`, and what is old and idle is forgotten.
     /// Waiting for work that goes on (a target busy with a turn, a child still at work) is not waiting too long: only
     /// `workTimeout` ends it. A request at work past `workTimeout` is not ended (turns have no limit): you are told, once,
     /// with a banner that can stop it.
     func sweep(now: Date = .now) {
+        sleeps.removeAll { now.timeIntervalSince($0.end) > DelegationLimits.workTimeout + 3600 }
         for request in requests.values where request.state == .running && !toldStillRunning.contains(request.id) {
-            guard let started = request.startedAt, now.timeIntervalSince(started) > DelegationLimits.workTimeout else { continue }
+            guard let started = request.startedAt, awake(since: started, now: now) > DelegationLimits.workTimeout else { continue }
             toldStillRunning.insert(request.id)
-            model?.notifyAboutTurn(of: request.envelope.to.id, Self.stillRunningNotice(request, after: now.timeIntervalSince(started)))
+            model?.notifyAboutTurn(of: request.envelope.to.id, Self.stillRunningNotice(request, after: awake(since: started, now: now)))
         }
         toldStillRunning = toldStillRunning.filter { requests[$0]?.state == .running }
         for request in requests.values where request.state == .queued {
-            let waited = now.timeIntervalSince(request.envelope.sentAt)
+            let waited = awake(since: request.envelope.sentAt, now: now)
             guard waited > DelegationLimits.requestTimeout else { continue }
             if waited <= DelegationLimits.workTimeout, isInTurn(request.envelope.to.id) { continue }
             fail(request, "Tempo esgotado")
         }
         let answered = Set(inbox.values.flatMap { $0.compactMap(\.servingRequest) })
-        for (id, since) in waitingSince where now.timeIntervalSince(since) > DelegationLimits.requestTimeout {
+        for (id, since) in waitingSince where awake(since: since, now: now) > DelegationLimits.requestTimeout {
             guard let request = requests[id], request.state == .awaitingChildren else { continue }
             if answered.contains(id) { continue }
             let working = request.openChildren.contains { requests[$0].map { Self.isOpen($0.state) } ?? false }
-            if working, now.timeIntervalSince(since) <= DelegationLimits.workTimeout { continue }
+            if working, awake(since: since, now: now) <= DelegationLimits.workTimeout { continue }
             fail(request, "Tempo esgotado")
         }
         let busy = Set(requests.values.filter { Self.isOpen($0.state) }.map(\.envelope.chainID))

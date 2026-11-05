@@ -245,6 +245,10 @@ struct ToolCallRequest: Codable, Hashable, Sendable {
     var name: String
     /// Raw JSON arguments as produced by the model.
     var arguments: String
+
+    /// An id for a call the provider sent without one. Unique per call, because ids repeating across steps ("call_0"
+    /// every time) make the plan replay, the snapshot pruning and the tool digest mistake one call's result for another's.
+    static func fallbackID(index: Int) -> String { "call_\(index)_\(UUID().uuidString.prefix(6))" }
 }
 
 /// A function the model may call.
