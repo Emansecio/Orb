@@ -232,8 +232,6 @@ enum ConversationSearch {
         var hits: [Hit]
         /// There were more matches than `ConversationSearch.maxHits`: the later ones were not collected.
         var isTruncated: Bool
-        /// Items whose text was looked at.
-        var itemsScanned: Int
     }
 
     /// More hits than this are not collected (the count says "1000+"): a one-letter query in a long conversation would
@@ -278,18 +276,16 @@ enum ConversationSearch {
                      checkpoint: () throws -> Void = {}) throws -> Results {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let pattern = SearchPattern(trimmed) else {
-            return Results(query: trimmed, hits: [], isTruncated: false, itemsScanned: 0)
+            return Results(query: trimmed, hits: [], isTruncated: false)
         }
         var searcher = TextSearcher(pattern)
         var hits: [Hit] = []
-        var scanned = 0
         var truncated = false
         for (index, item) in items.enumerated() {
             try checkpoint()
             // The action that sent a message between Orbs has no row (the message's card says it): no hit to scroll to.
             guard let (source, text) = searchable(item), text.utf8.count >= pattern.units.count,
                   !TranscriptFolding.sendsMessage(items, at: index) else { continue }
-            scanned += 1
             let room = maxHits - hits.count
             let ranges = searcher.matches(in: text.unicodeScalars, limit: room + 1)
             for (occurrence, range) in ranges.prefix(room).enumerated() {
@@ -303,7 +299,7 @@ enum ConversationSearch {
                 break
             }
         }
-        return Results(query: trimmed, hits: hits, isTruncated: truncated, itemsScanned: scanned)
+        return Results(query: trimmed, hits: hits, isTruncated: truncated)
     }
 
     // MARK: Snippets
@@ -357,15 +353,9 @@ struct FindCursor: Equatable, Sendable {
     private(set) var count = 0
     private(set) var index: Int?
 
-    init() {}
-
-    init(count: Int, index: Int? = nil) {
+    init(count: Int = 0, index: Int? = nil) {
         self.count = count
         self.index = index.flatMap { (0..<count).contains($0) ? $0 : nil }
-    }
-
-    mutating func reset(count: Int, selecting index: Int?) {
-        self = FindCursor(count: count, index: index)
     }
 
     /// The next result (the first one after the last). Nothing when there are none; the first when none was chosen.
@@ -388,9 +378,6 @@ struct FindCursor: Equatable, Sendable {
         guard (0..<count).contains(index) else { return }
         self.index = index
     }
-
-    /// The first search of a query starts at the newest match: the chat is at its end, and "↑" goes back in time.
-    static func initialIndex(count: Int) -> Int? { count > 0 ? count - 1 : nil }
 
     /// After the conversation changed under a search (a reply finished, a message arrived): the same match again, or the one
     /// that was nearest to it, so the selection does not jump.

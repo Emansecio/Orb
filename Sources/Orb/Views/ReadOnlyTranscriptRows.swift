@@ -50,15 +50,8 @@ struct ReadOnlyTranscriptRows: View {
         switch row {
         case .single(let item):
             AnyView(plain(item))
-        case .events(let kind, let items):
-            AnyView(FoldedThread(items: items, summary: { EventsSummary(kind: kind, items: items, unfolded: $0).alignedWithReplyText() },
-                                 child: { plain($0) }))
-        case .exchange(let items):
-            AnyView(FoldedThread(items: items, summary: { ExchangeSummary(items: items, botID: botID, unfolded: $0).alignedWithReplyText() },
-                                 child: { plain($0) }))
-        case .proposals(let items):
-            AnyView(FoldedThread(items: items, summary: { ProposalsSummary(count: items.count, unfolded: $0).alignedWithReplyText() },
-                                 child: { plain($0) }))
+        case .events, .exchange, .proposals:
+            AnyView(row.foldedThread(botID: botID) { plain($0) })
         case .tools(let items):
             AnyView(ToolGroupRow(items: items, botID: botID, orb: orb, isOpen: openRuns.contains(row.id)) { toggleRun(row.id) })
         case .work(let items, let seconds, let outcome):
@@ -110,5 +103,25 @@ struct ReadOnlyTranscriptRows: View {
 
     private func plain(_ item: TranscriptItem) -> some View {
         TranscriptRow(item: item, botID: botID, orb: orb).equatable()
+    }
+}
+
+@MainActor
+extension TranscriptRowModel {
+    /// A run that folds into one line (events, messages between Orbs, proposals), shared by the chat and the read-only
+    /// transcripts. Other rows draw nothing here.
+    @ViewBuilder
+    func foldedThread<Child: View>(botID: UUID, @ViewBuilder child: @escaping (TranscriptItem) -> Child) -> some View {
+        switch self {
+        case .events(let kind, let items):
+            FoldedThread(items: items, summary: { EventsSummary(kind: kind, items: items, unfolded: $0).alignedWithReplyText() }, child: child)
+        case .exchange(let items):
+            FoldedThread(items: items, summary: { ExchangeSummary(items: items, botID: botID, unfolded: $0).alignedWithReplyText() },
+                         child: child)
+        case .proposals(let items):
+            FoldedThread(items: items, summary: { ProposalsSummary(count: items.count, unfolded: $0).alignedWithReplyText() }, child: child)
+        default:
+            EmptyView()
+        }
     }
 }

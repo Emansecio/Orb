@@ -190,7 +190,7 @@ extension ChatView {
             return
         }
         model.inicioJump = nil
-        find.revealItem(target.item)
+        find.reveal(quoteOf: target.item, words: "")
     }
 }
 
@@ -613,60 +613,57 @@ private struct TranscriptList: View {
         switch row {
         case .single(let item):
             itemRow(item, avatars: avatars, redoID: redoID, dropping: dropping, found: found)
-        case .events(let kind, let items):
-            FoldedThread(items: items, summary: { EventsSummary(kind: kind, items: items, unfolded: $0).alignedWithReplyText() },
-                         child: { plainRow($0) })
-                .modifier(RowEntrance(id: row.id, style: items[0].kind.entrance, isNew: entrances.isNew(row.id), entrances: entrances))
-                .transition(.identity)
-        case .exchange(let items):
-            FoldedThread(items: items, summary: { ExchangeSummary(items: items, botID: look.id, unfolded: $0).alignedWithReplyText() },
-                         child: { plainRow($0) })
-                .modifier(RowEntrance(id: row.id, style: items[0].kind.entrance, isNew: entrances.isNew(row.id), entrances: entrances))
-                .transition(.identity)
-        case .proposals(let items):
-            FoldedThread(items: items, summary: { ProposalsSummary(count: items.count, unfolded: $0).alignedWithReplyText() },
-                         child: { plainRow($0) })
-                .modifier(RowEntrance(id: row.id, style: items[0].kind.entrance, isNew: entrances.isNew(row.id), entrances: entrances))
-                .transition(.identity)
+        case .events, .exchange, .proposals:
+            entering(row, row.foldedThread(botID: look.id) { plainRow($0) })
         case .tools(let items):
             ToolGroupRow(items: items, botID: look.id, orb: look.orb, isOpen: openRuns.contains(row.id) || ToolGroupRow.opensInSnapshots,
                          find: items.contains { $0.id == found?.itemID } ? found : nil) {
-                if openRuns.remove(row.id) == nil { openRuns.insert(row.id) }
+                toggleRun(row.id)
             }
             .equatable()
             .modifier(RowEntrance(id: row.id, style: items[0].kind.entrance, isNew: entrances.isNew(row.id), entrances: entrances))
             .transition(.identity)
         case .work(let items, let seconds, let outcome):
-            let isOpen = openRuns.contains(row.id) || ToolGroupRow.opensInSnapshots
-            WorkGroupRow(items: items, seconds: seconds, outcome: outcome, isOpen: isOpen,
-                         inputs: isOpen ? .init(openRuns: openRuns, openSteps: openSteps, avatars: avatars, redoID: redoID, dropping: dropping,
-                                                find: found, orb: look.orb) : nil) {
-                if openRuns.remove(row.id) == nil { openRuns.insert(row.id) }
-            } content: {
-                activitySteps(TranscriptFolding.activityRows(for: items), in: row.id, avatars: avatars, redoID: redoID,
-                              dropping: dropping, found: found)
-            }
-            .equatable()
-            .transition(.identity)
+            workGroup(items, seconds: seconds, outcome: outcome, steps: TranscriptFolding.activityRows(for: items), owner: row.id,
+                      avatars: avatars, redoID: redoID, dropping: dropping, found: found)
+                .transition(.identity)
         case .activity(let items):
             let parts = TranscriptFolding.activityParts(TranscriptFolding.activityRows(for: items))
-            let isOpen = openRuns.contains(row.id) || ToolGroupRow.opensInSnapshots
             ActivityCard {
                 WorkingLine(look: look, avatarHidden: true, transcript: model.orbTranscript(look.id), compact: true)
                 if !parts.earlier.isEmpty {
-                    WorkGroupRow(items: parts.earlier.flatMap(\.items), seconds: nil, outcome: .answered, isOpen: isOpen,
-                                 inputs: isOpen ? .init(openRuns: openRuns, openSteps: openSteps, avatars: avatars, redoID: redoID,
-                                                        dropping: dropping, find: found, orb: look.orb) : nil) {
-                        if openRuns.remove(row.id) == nil { openRuns.insert(row.id) }
-                    } content: {
-                        activitySteps(parts.earlier, in: row.id, avatars: avatars, redoID: redoID, dropping: dropping, found: found)
-                    }
-                    .equatable()
+                    workGroup(parts.earlier.flatMap(\.items), seconds: nil, outcome: .answered, steps: parts.earlier, owner: row.id,
+                              avatars: avatars, redoID: redoID, dropping: dropping, found: found)
                 }
                 activitySteps(parts.current, in: row.id, avatars: avatars, redoID: redoID, dropping: dropping, found: found)
             }
             .transition(.identity)
         }
+    }
+
+    /// The row's entrance and removal, which the rows of a fold do not have of their own.
+    private func entering(_ row: TranscriptRowModel, _ view: some View) -> some View {
+        view
+            .modifier(RowEntrance(id: row.id, style: row.items[0].kind.entrance, isNew: entrances.isNew(row.id), entrances: entrances))
+            .transition(.identity)
+    }
+
+    private func toggleRun(_ id: UUID) {
+        if openRuns.remove(id) == nil { openRuns.insert(id) }
+    }
+
+    /// The collapsed line of a request's work; opened, it carries the state its steps need to redraw.
+    private func workGroup(_ items: [TranscriptItem], seconds: Int?, outcome: WorkOutcome, steps: [TranscriptRowModel], owner: UUID,
+                           avatars: ReplyAvatars, redoID: UUID?, dropping: Set<UUID>, found: FindFocus?) -> some View {
+        let isOpen = openRuns.contains(owner) || ToolGroupRow.opensInSnapshots
+        return WorkGroupRow(items: items, seconds: seconds, outcome: outcome, isOpen: isOpen,
+                            inputs: isOpen ? .init(openRuns: openRuns, openSteps: openSteps, avatars: avatars, redoID: redoID,
+                                                   dropping: dropping, find: found, orb: look.orb) : nil) {
+            toggleRun(owner)
+        } content: {
+            activitySteps(steps, in: owner, avatars: avatars, redoID: redoID, dropping: dropping, found: found)
+        }
+        .equatable()
     }
 
     @ViewBuilder
@@ -759,7 +756,6 @@ private struct TranscriptList: View {
         proxy.scrollTo(BottomAnchor.id, anchor: .bottom)
     }
 
-    /// The reader asked for the end: at once from far up, as after sending a message, and the chat follows it again.
     /// Brings a message of the reader to the top of the view, opening what a compaction folded if it is there.
     private func goToRequest(_ id: UUID, _ proxy: ScrollViewProxy) {
         followsBottom = false
@@ -777,6 +773,7 @@ private struct TranscriptList: View {
         }
     }
 
+    /// The reader asked for the end: at once from far up, as after sending a message, and the chat follows it again.
     private func returnToEnd(_ proxy: ScrollViewProxy) {
         find.resumeFollowing()
         followsBottom = true

@@ -104,17 +104,10 @@ final class ConversationFind {
         isOpen = false
         showsResults = false
         searchTask?.cancel()
-        flashTask?.cancel()
         searchTask = nil
-        flashTask = nil
-        results = nil
-        cursor = FindCursor()
         isSearching = false
-        focus = nil
-        jump = nil
-        pausesFollowing = false
-        needsJump = false
-        lastJumpItemIndex = nil
+        clearResults()
+        flashTask = nil
     }
 
     /// The person sent a message: the chat goes to the end, as it always does then.
@@ -168,24 +161,22 @@ final class ConversationFind {
 
     private func apply(_ found: ConversationSearch.Results) {
         let previous = currentHit
-        results = found
         isSearching = false
         guard !found.hits.isEmpty else {
-            cursor = FindCursor()
-            focus = nil
-            jump = nil
-            pausesFollowing = false // no hit is on show: the chat follows the end again, as `clearResults` leaves it
-            needsJump = false
-            lastJumpItemIndex = nil
+            // No hit is on show: the chat follows the end again, but the empty result stays for the bar to say so.
+            clearResults()
+            results = found
             announce?("Nenhum resultado")
             return
         }
+        results = found
         if needsJump {
             needsJump = false
-            cursor.reset(count: found.hits.count, selecting: FindCursor.initialIndex(count: found.hits.count))
+            // The first search of a query starts at the newest match: the chat is at its end, and "↑" goes back in time.
+            cursor = FindCursor(count: found.hits.count, index: found.hits.count - 1)
             reveal()
         } else {
-            cursor.reset(count: found.hits.count, selecting: FindCursor.index(keeping: previous, in: found.hits))
+            cursor = FindCursor(count: found.hits.count, index: FindCursor.index(keeping: previous, in: found.hits))
             // The same message stays marked, the new text in it too; no scroll, no wash.
             if let hit = currentHit, focus != nil {
                 focus = FindFocus(itemID: hit.itemID, query: found.query, isFlashing: false)
@@ -252,25 +243,9 @@ final class ConversationFind {
 
     // MARK: Quotes
 
-    /// A direct navigation target is not a search and must not invent a search query.
-    func revealItem(_ itemID: UUID) {
-        jumpTokens += 1
-        jump = FindJump(token: jumpTokens, itemID: itemID, anchorY: 0.3, glides: false)
-        focus = FindFocus(itemID: itemID, query: "", isFlashing: true)
-        pausesFollowing = true
-        flashTask?.cancel()
-        let flash = delays.flash
-        flashTask = Task { [weak self] in
-            try? await Task.sleep(for: flash)
-            guard !Task.isCancelled, let self, focus?.itemID == itemID else { return }
-            focus = nil
-            jump = nil
-            pausesFollowing = false
-        }
-    }
-
-    /// A quote in a message of yours was clicked (`MessageQuote`): the chat goes to the reply it came from, marks the quoted
-    /// words and washes behind the reply for a moment, as a search hit does, with the bar closed. The marks go with the wash,
+    /// A direct jump to a message: a quote of yours was clicked (`MessageQuote`) or a link from the start screen was followed
+    /// (empty `words`, so no search query is invented). The chat goes to the item, marks the words and washes behind it
+    /// for a moment, as a search hit does, with the bar closed. The marks go with the wash,
     /// and the chat follows the end of the conversation again.
     func reveal(quoteOf itemID: UUID, words: String) {
         jumpTokens += 1

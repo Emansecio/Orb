@@ -159,8 +159,8 @@ import Testing
         items[12_345] = bot("aqui está a RARIDADE que procuro")
         items[29_998] = user("outra raridade, no fim")
         let results = try ConversationSearch.scan("raridade", in: items)
+        // The match 2 items from the end is found: the scan went through the whole list.
         #expect(results.hits.map(\.itemIndex) == [12_345, 29_998])
-        #expect(results.itemsScanned == 30_000)
         #expect(!results.isTruncated)
         // What comes back is hits and snippets: nothing the size of the conversation.
         #expect(results.hits.allSatisfy { $0.snippet.text.count < 140 })
@@ -248,8 +248,6 @@ import Testing
     }
 
     @Test func aSearchStartsAtTheNewestHitAndKeepsItsPlaceWhenTheConversationChanges() throws {
-        #expect(FindCursor.initialIndex(count: 12) == 11)
-        #expect(FindCursor.initialIndex(count: 0) == nil)
         let items = [bot("a"), bot("b"), bot("a a"), bot("c")]
         let before = try hits("a", in: items)
         let chosen = before[2] // the second "a" of the third message
