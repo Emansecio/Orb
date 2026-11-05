@@ -465,13 +465,11 @@ struct Store: Sendable {
             }
             var current: Conversation?
             if manager.fileExists(atPath: url.path) {
-                guard let data = try? Data(contentsOf: url),
-                      let read = try? JSONDecoder().decode(Conversation.self, from: data) else { return }
+                guard let read = Self.decodeWithoutLoss(url) else { return }
                 current = read
             }
             let archived = files.compactMap { file -> (URL, Conversation)? in
-                guard let data = try? Data(contentsOf: file),
-                      let conversation = try? JSONDecoder().decode(Conversation.self, from: data) else { return nil }
+                guard let conversation = Self.decodeWithoutLoss(file) else { return nil }
                 return (file, conversation)
             }
             guard !archived.isEmpty else { return }
@@ -484,6 +482,15 @@ struct Store: Sendable {
             }
             if setAside().isEmpty { try? manager.removeItem(at: index) }
         }
+    }
+
+    /// The conversation in `url`, or nil when the file can't be read or any item in it was skipped: merging deletes the
+    /// source files, so a file this version only reads in part stays where it is (`read` keeps its copy and warns).
+    private static func decodeWithoutLoss(_ url: URL) -> Conversation? {
+        guard let data = try? Data(contentsOf: url),
+              let (conversation, skipped) = try? DecodeLoss.measure({ try JSONDecoder().decode(Conversation.self, from: data) }),
+              skipped == 0 else { return nil }
+        return conversation
     }
 
     /// The Orb's folder of conversations: its routines' and its requests' (the Orb is being deleted).
@@ -858,7 +865,8 @@ struct StableKeychainHelper {
         return StableKeychainHelper(executable: path)
     }
 
-    func call(operation: String, account: String, service: String, value: String? = nil) -> Reply? {
+    /// `timeout` bounds the wait: some callers are on the main thread, and a helper that never answers must not freeze the app.
+    func call(operation: String, account: String, service: String, value: String? = nil, timeout: TimeInterval = 20) -> Reply? {
         guard let request = try? JSONEncoder().encode(Request(operation: operation, service: service, account: account, value: value)) else { return nil }
         let process = Process(), input = Pipe(), output = Pipe()
         // A helper may reject its caller and exit before reading: a closed pipe must not terminate the whole Orb.
@@ -869,6 +877,9 @@ struct StableKeychainHelper {
         process.standardError = FileHandle.nullDevice
         do {
             try process.run()
+            let watchdog = DispatchWorkItem { [process] in if process.isRunning { process.terminate() } }
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: watchdog)
+            defer { watchdog.cancel() }
             try input.fileHandleForWriting.write(contentsOf: request)
             try input.fileHandleForWriting.close()
             let response = output.fileHandleForReading.readDataToEndOfFile()
@@ -909,6 +920,24 @@ struct LegacyKeychainLedger {
     }
 }
 
+/// Remembers what `Keychain.get` found. A write bumps the generation, so a read that began before it never caches its
+/// (possibly stale) answer.
+final class KeychainReadCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var entries: [String: String?] = [:]
+    private var generation = 0
+
+    func value(for key: String, load: () -> String?) -> String? {
+        let (hit, started) = lock.withLock { (entries[key], generation) }
+        if let hit { return hit }
+        let found = load()
+        lock.withLock { if generation == started { entries[key] = .some(found) } }
+        return found
+    }
+
+    func invalidate() { lock.withLock { generation += 1; entries.removeAll() } }
+}
+
 /// Secrets in the login Keychain (API keys per provider, sign-in tokens), one item per account name.
 enum Keychain {
     static let service = LegacyMigration.identifier
@@ -919,8 +948,14 @@ enum Keychain {
     /// macOS asks at most once per key and only when it's needed).
     static func get(_ account: String, service: String = Keychain.service) -> String? {
         guard DevRun.allowsKeychain(arguments: CommandLine.arguments) else { return nil }
-        return lookup(account, service: service, items: SystemKeychainItems(), ledger: .current)
+        return readCache.value(for: "\(service)\n\(account)") {
+            lookup(account, service: service, items: SystemKeychainItems(), ledger: .current)
+        }
     }
+
+    /// Every model request reads its key, and in the bundled app each read spawns the helper process: the answer
+    /// (including "no item") is remembered until this process writes or removes an item.
+    static let readCache = KeychainReadCache()
 
     /// OpenBot's item is consulted for an account only until Orb has dealt with it: once it was copied, or once
     /// the user removed or replaced the key in Orb (`write`), the item OpenBot left as a backup stays untouched and
@@ -949,6 +984,7 @@ enum Keychain {
     static func write(_ value: String, account: String, service: String, items: any KeychainItems,
                       ledger: LegacyKeychainLedger?) -> Bool {
         let stored = items.replace(value, account: account, service: service)
+        readCache.invalidate()
         if service == Keychain.service { ledger?.record(account) }
         return stored
     }
@@ -1012,6 +1048,12 @@ private struct Lossy<Element: Decodable>: Decodable {
 }
 
 extension KeyedDecodingContainer {
+    /// The value, or nil when the key is absent; a value that is there but can't be read is nil too, and counts as a loss
+    /// so the Store keeps a copy of the file and tells the user.
+    func recordingLoss<T: Decodable>(_ type: T.Type, forKey key: Key) -> T? {
+        do { return try decodeIfPresent(type, forKey: key) } catch { DecodeLoss.record(); return nil }
+    }
+
     /// A list where an element that can't be read (a case from a newer version, a missing field) is skipped
     /// instead of failing the whole file.
     func lossyArray<T: Decodable>(_ key: Key, default fallback: [T] = []) throws -> [T] {
@@ -1064,9 +1106,11 @@ extension AppState {
         // A bad count never loses the file, nor the good counts beside it.
         struct Count: Decodable {
             var value: Int?
-            init(from decoder: Decoder) throws { value = try? decoder.singleValueContainer().decode(Int.self) }
+            init(from decoder: Decoder) throws { value = try? decoder.singleValueContainer().decode(Int.self)
+                if value == nil { DecodeLoss.record() }
+            }
         }
-        unread = ((try? c.decodeIfPresent([String: Count].self, forKey: .unread)) ?? nil)?.compactMapValues(\.value) ?? [:]
+        unread = c.recordingLoss([String: Count].self, forKey: .unread)?.compactMapValues(\.value) ?? [:]
         // Before the count lived apart from the Orbs it was saved inside each one.
         struct Counted: Decodable {
             var id: UUID
@@ -1084,25 +1128,29 @@ extension AppState {
             unread[orb.id.uuidString] = orb.unread
         }
         // A preview is only a convenience: one that can't be read is dropped, never the file.
-        replies = ((try? c.decodeIfPresent([String: ReplyPreview].self, forKey: .replies)) ?? nil) ?? [:]
+        replies = c.recordingLoss([String: ReplyPreview].self, forKey: .replies) ?? [:]
         contextMemory = try c.value(.contextMemory, default: .balanced)
-        learnedContexts = (try? c.decodeIfPresent([String: LearnedContext].self, forKey: .learnedContexts)) ?? [:]
+        learnedContexts = c.recordingLoss([String: LearnedContext].self, forKey: .learnedContexts) ?? [:]
         do { profile = try c.value(.profile, default: UserProfile()) } catch { DecodeLoss.record() }
         // One damaged correction is dropped alone; the others stay.
         struct Price: Decodable {
             var value: ModelPrice?
-            init(from decoder: Decoder) throws { value = try? decoder.singleValueContainer().decode(ModelPrice.self) }
+            init(from decoder: Decoder) throws { value = try? decoder.singleValueContainer().decode(ModelPrice.self)
+                if value == nil { DecodeLoss.record() }
+            }
         }
-        priceCorrections = ((try? c.decodeIfPresent([String: Price].self, forKey: .priceCorrections)) ?? nil)?.compactMapValues(\.value) ?? [:]
+        priceCorrections = c.recordingLoss([String: Price].self, forKey: .priceCorrections)?.compactMapValues(\.value) ?? [:]
         groups = try c.lossyArray(.groups)
         categories = try c.lossyArray(.categories)
         // An Orb's list that can't be read is dropped alone (its conversations' files stay); the others stay.
         struct Chats: Decodable {
             var value: OrbChats?
-            init(from decoder: Decoder) throws { value = try? decoder.singleValueContainer().decode(OrbChats.self) }
+            init(from decoder: Decoder) throws { value = try? decoder.singleValueContainer().decode(OrbChats.self)
+                if value == nil { DecodeLoss.record() }
+            }
         }
-        chats = ((try? c.decodeIfPresent([String: Chats].self, forKey: .chats)) ?? nil)?.compactMapValues(\.value) ?? [:]
-        inicio = (try? c.decodeIfPresent(InicioHistory.self, forKey: .inicio)) ?? InicioHistory()
+        chats = c.recordingLoss([String: Chats].self, forKey: .chats)?.compactMapValues(\.value) ?? [:]
+        inicio = c.recordingLoss(InicioHistory.self, forKey: .inicio) ?? InicioHistory()
         try migrateSingleProvider(from: decoder)
     }
 

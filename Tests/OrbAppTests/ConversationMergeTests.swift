@@ -149,6 +149,27 @@ import Testing
         #expect(files(botID).count == 1) // the set-aside one waits too
     }
 
+    @Test func aSetAsideChatWithAnItemThisVersionCannotReadIsNotMergedNorDeleted() throws {
+        let store = Store(directory: root)
+        let botID = UUID()
+        store.save(exchange("atual", at: start.addingTimeInterval(2 * day)), for: botID)
+        store.flush()
+        var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(exchange("antiga", at: start))) as? [String: Any])
+        var items = try #require(object["items"] as? [Any])
+        items[0] = ["de": "uma versão mais nova"]
+        object["items"] = items
+        let name = UUID().uuidString
+        try FileManager.default.createDirectory(at: folder(botID), withIntermediateDirectories: true)
+        let damaged = try JSONSerialization.data(withJSONObject: object)
+        try damaged.write(to: folder(botID).appending(path: "\(name).json"))
+
+        store.mergeArchive(of: botID)
+        store.flush()
+        // Nothing was dropped silently: the file stays as it was and the current chat is untouched.
+        #expect(try Data(contentsOf: folder(botID).appending(path: "\(name).json")) == damaged)
+        #expect(texts(try #require(store.readConversation(botID).value)) == ["atual"])
+    }
+
     @Test @MainActor func theAppOpensWithTheEarlierConversationsInTheChat() async throws {
         let store = Store(directory: root)
         let state = AppState.initial

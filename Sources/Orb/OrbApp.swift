@@ -5,14 +5,17 @@ import AppKit
 /// Code CLI (which is only a pipe to the model): no window, and none of the app's AppKit/SwiftUI setup, so `OrbApp.main()`
 /// is never reached; anything else is the app.
 public enum Launcher {
+    /// The developer modes that need the review screens. Without them `DevRun` would still treat the process as a dev run
+    /// (temporary data folder, no Dock icon) and nothing would ever draw or exit, so the release refuses them up front.
+    static let devOnlyFlags = DevRun.flags.filter { $0 != "--render-icon" }
     @MainActor public static func main() {
         if let options = ClaudePipeServer.Options(arguments: CommandLine.arguments) {
             ClaudePipeServer.run(options)
         }
         #if !(DEBUG || ORB_DEV_TOOLS)
         // The review screens are not in this build. Leave before OrbApp exists: no model, no window, no data folder is touched.
-        if CommandLine.arguments.contains(where: ["--snapshot", "--render-orbs"].contains) {
-            let note = "--snapshot e --render-orbs só existem em build de desenvolvimento (swift build) ou num release feito com "
+        if CommandLine.arguments.contains(where: Self.devOnlyFlags.contains) {
+            let note = "--snapshot, --render-orbs, --bench-panels e --bench-scroll só existem em build de desenvolvimento (swift build) ou num release feito com "
                 + "ORB_DEV_TOOLS (swift build -c release -Xswiftc -DORB_DEV_TOOLS).\n"
             FileHandle.standardError.write(Data(note.utf8))
             exit(64)

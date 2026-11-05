@@ -86,6 +86,31 @@ import Testing
         #expect(!items.reads.contains("\(legacy)/openai"))
     }
 
+    @Test func theReadCacheAnswersOnceIncludingAMissingItemUntilAWrite() {
+        let cache = KeychainReadCache()
+        var loads = 0
+        func read(_ answer: String?) -> String? { cache.value(for: "k") { loads += 1; return answer } }
+        #expect(read("a") == "a" && read("b") == "a" && loads == 1)
+        cache.invalidate()
+        #expect(read(nil) == nil && read("c") == nil && loads == 2)
+        cache.invalidate()
+        #expect(read("c") == "c")
+    }
+
+    @Test func aReadThatStartedBeforeAWriteNeverCachesItsStaleAnswer() {
+        let cache = KeychainReadCache()
+        #expect(cache.value(for: "k", load: { cache.invalidate(); return "velha" }) == "velha")
+        #expect(cache.value(for: "k", load: { "nova" }) == "nova")
+    }
+
+    @Test func writingAnItemDropsWhatTheAppRememberedOfIt() {
+        let (items, _, ledger) = setUp()
+        let key = "teste-\(UUID().uuidString)"
+        #expect(Keychain.readCache.value(for: key, load: { "velha" }) == "velha")
+        #expect(Keychain.write("nova", account: "openai", service: own, items: items, ledger: ledger))
+        #expect(Keychain.readCache.value(for: key, load: { "nova" }) == "nova")
+    }
+
     @Test func otherServicesNeverFallBack() {
         let (items, _, ledger) = setUp()
         items.stored["\(legacy)/openai"] = "k"

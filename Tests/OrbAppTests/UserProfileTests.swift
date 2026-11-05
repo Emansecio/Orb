@@ -113,6 +113,22 @@ struct UserProfileStorageTests {
         #expect(broken.value.profile.isEmpty && broken.value.defaultModel == "a/b" && broken.skipped == 1)
     }
 
+    @Test func unreadableChatsPricesCountsAndPreviewsAreCountedAsLost() throws {
+        func lost(_ json: String) throws -> Int {
+            try DecodeLoss.measure { try JSONDecoder().decode(AppState.self, from: Data(json.utf8)) }.skipped
+        }
+        #expect(try lost(#"{"bots":[],"chats":{"a":{"estragado":1}}}"#) == 1)
+        #expect(try lost(#"{"bots":[],"chats":"x"}"#) == 1)
+        #expect(try lost(#"{"bots":[],"priceCorrections":{"a/b":{"input":"caro"}}}"#) == 1)
+        #expect(try lost(#"{"bots":[],"unread":{"a":"muitas"}}"#) == 1)
+        #expect(try lost(#"{"bots":[],"replies":7}"#) == 1)
+        #expect(try lost(#"{"bots":[],"learnedContexts":7}"#) == 1)
+        #expect(try lost(#"{"bots":[],"inicio":7}"#) == 1)
+        // Absent keys and readable values lose nothing.
+        #expect(try lost(#"{"bots":[]}"#) == 0)
+        #expect(try lost(#"{"bots":[],"unread":{"a":3},"chats":{}}"#) == 0)
+    }
+
     @Test @MainActor func theModelSavesItAndReadsItBack() async throws {
         let folder = Folder()
         let model = AppModel(store: Store(directory: folder.url), runsBackgroundWork: false, secretVault: MemoryVault())
