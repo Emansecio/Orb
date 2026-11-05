@@ -261,7 +261,8 @@ enum PriceTable {
         for key in idsByLength where id.hasPrefix(key + "-") {
             let parts = id.dropFirst(key.count + 1).split(separator: "-").map(String.init)
             let isNumber: (String) -> Bool = { $0.allSatisfy(\.isNumber) }
-            if parts.contains(where: { !isNumber($0) }), parts.allSatisfy({ sameFamilySuffixes.contains($0) || isNumber($0) }) { return key }
+            // The first part must be a word: a number right after the key is a newer version (`claude-opus-5-6-thinking`).
+            if parts.first.map({ !isNumber($0) }) == true, parts.allSatisfy({ sameFamilySuffixes.contains($0) || isNumber($0) }) { return key }
         }
         return nil
     }

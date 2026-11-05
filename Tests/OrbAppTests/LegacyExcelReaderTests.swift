@@ -393,6 +393,64 @@ final class LegacyExcelReaderTests {
         for cut in stride(from: 0, to: good.count, by: 997) { _ = try? read(good.prefix(cut)) }
     }
 
+    // MARK: Hostile containers (bytes built in the test, no binary files)
+
+    /// A header-only OLE2 file: signature, sector shift, and room for the fields a hostile file controls.
+    private func hostileHeader(shift: Int = 9, sectors: Int = 1) -> [UInt8] {
+        var bytes = [UInt8](repeating: 0, count: (sectors + 1) << shift)
+        bytes.replaceSubrange(0..<8, with: [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1])
+        bytes.replaceSubrange(0x1E..<0x20, with: le16(shift))
+        bytes.replaceSubrange(0x20..<0x22, with: le16(6))
+        bytes.replaceSubrange(0x4C..<0x4C + 109 * 4, with: [UInt8](repeating: 0xFF, count: 109 * 4))
+        return bytes
+    }
+
+    @Test func aDifatSectorPointingAtItselfIsRefusedQuickly() {
+        var bytes = hostileHeader()
+        bytes.replaceSubrange(0x44..<0x48, with: le32(0))
+        bytes.replaceSubrange(0x48..<0x4C, with: le32(100_000))
+        #expect(failure(Data(bytes))?.contains("corrompido ou truncado") == true)
+    }
+
+    @Test func aSelfReferencingFatChainDoesNotMultiplyTheSector() {
+        var bytes = hostileHeader()
+        bytes.replaceSubrange(0x4C..<0x50, with: le32(0))       // sector 0 is the FAT
+        bytes.replaceSubrange(0x30..<0x34, with: le32(0))       // the directory starts there too
+        #expect(failure(Data(bytes))?.contains("corrompido ou truncado") == true)
+    }
+
+    @Test func aNegativeStreamSizeInA4096ByteFileDoesNotTrap() throws {
+        var bytes = [UInt8](CompoundFixture.workbook(WorkbookFixture.stream(), shift: 12))
+        let directory = (Int(bytes[0x30]) + Int(bytes[0x31]) << 8 + 1) << 12
+        bytes.replaceSubrange(directory + 124..<directory + 128, with: le32(0x8000_0000))
+        _ = try? read(Data(bytes))
+    }
+
+    @Test func anAbsurdMiniSectorSizeIsRefused() {
+        var bytes = [UInt8](CompoundFixture.workbook(WorkbookFixture.stream()))
+        bytes.replaceSubrange(0x20..<0x22, with: le16(63))
+        #expect(failure(Data(bytes))?.contains("corrompido ou truncado") == true)
+    }
+
+    @Test func aHugeColspanIsCappedWhileBuildingTheRow() throws {
+        let cells = String(repeating: "<td colspan=1024>x", count: 20_000)
+        let output = try read(html("<table><tr>\(cells)</tr></table>"))
+        #expect(output.contains("colunas além da"))
+    }
+
+    @Test func outOfRangeSpreadsheetMLNumbersFallBackToTheSequence() throws {
+        let xml = """
+        <Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+         <Worksheet ss:Name="A"><Table>
+          <Row ss:Index="9223372036854775807"><Cell ss:Index="9223372036854775807" ss:MergeAcross="9223372036854775807"><Data ss:Type="String">x</Data></Cell></Row>
+          <Row><Cell><Data ss:Type="String">y</Data></Cell></Row>
+         </Table></Worksheet>
+        </Workbook>
+        """
+        let output = try read(html(xml))
+        #expect(output.contains("y"))
+    }
+
     // MARK: HTML saved as .xls
 
     private func html(_ text: String, encoding: String.Encoding = .utf8) -> Data { text.data(using: encoding)! }

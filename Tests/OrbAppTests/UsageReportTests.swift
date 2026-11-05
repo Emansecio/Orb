@@ -185,6 +185,26 @@ struct UsageReportTests {
 
 @MainActor
 struct UsagePageModelTests {
+    /// The first read sets the unreadable file aside and warns; the second finds nothing. Whichever read is the older one,
+    /// the warning must still reach the person.
+    @Test func aWarningFromAReplacedReadIsNotLost() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "OrbUsageNotice-\(UUID().uuidString)")
+        defer { removeTestFolder(root) }
+        let store = Store(directory: root)
+        store.save(AppState.initial)
+        store.flush()
+        let model = AppModel(store: store, runsBackgroundWork: false)
+        let file = root.appending(path: "uso/\(Store.usageMonthID(of: .now)).json")
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("isto não é json".utf8).write(to: file)
+
+        let page = UsageModel()
+        async let first: Void = page.reload(model: model, period: .today, animation: nil)
+        async let second: Void = page.reload(model: model, period: .today, animation: nil)
+        _ = await (first, second)
+        #expect(model.dataNotices.count == 1)
+    }
+
     @Test func thePageReadsWhatTheTurnsJustUsed() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "OrbUsagePage-\(UUID().uuidString)")
         defer { removeTestFolder(root) }

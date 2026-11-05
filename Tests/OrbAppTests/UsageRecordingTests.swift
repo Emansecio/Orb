@@ -158,6 +158,17 @@ struct UsageStoreTests {
         #expect(failures.all.isEmpty) // nothing is written to it, so nothing fails (and idle conversations keep unloading)
     }
 
+    @Test func rowsThatDidNotFitAreReportedByTheRead() async throws {
+        let store = store()
+        var month = UsageMonth()
+        month.dropped = 7
+        let file = root.appending(path: "uso/2026-10.json")
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(month).write(to: file)
+        let read = await store.readUsage(from: utcDate(2026, 10, 1), to: utcDate(2026, 10, 2), calendar: utcCalendar)
+        #expect(read.dropped == 7)
+    }
+
     @Test func aFileThatCannotBeDecodedIsSetAsideAndTheHistoryStartsAgain() async throws {
         let store = store()
         let file = root.appending(path: "uso/2026-10.json")
