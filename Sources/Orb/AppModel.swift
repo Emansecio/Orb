@@ -1815,11 +1815,13 @@ final class AppModel {
             guard !Task.isCancelled else { return } // stopped before it began
             // The window is worked out off the main thread: on a long conversation it takes a good part of a second.
             let prepared = await preparedHistory(of: session, budget: budget, reserving: reserve, now: sentAt)
-            guard session.isCurrent(turn) else { return } // stopped while it was worked out: the next turn folds instead
+            // The fold is already on the conversation by now (`preparedHistory` keeps it), so even a stopped turn announces it
+            // and saves its notes: the next turn finds nothing left to fold and would never say so.
+            if let report = prepared.compaction { session.announce(report, memoryUpTo: itemsBeforeMessage) }
+            guard session.isCurrent(turn) else { return } // stopped while it was worked out
             let history = prepared.history
             let ledger = session.conversation?.currentLedger
             let chunks = session.conversation?.chunks(inHistory: history) ?? []
-            if let report = prepared.compaction { session.announce(report, memoryUpTo: itemsBeforeMessage) }
             let sentMemories = TurnPreface.relatedLines(in: history)
             // The attachments are read while the memory is gathered (the prompt's inputs need the brief, the files nothing).
             async let files = attachmentTexts.texts(attachments)

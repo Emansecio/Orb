@@ -217,6 +217,8 @@ final class BotSession {
     /// could not be written.
     @ObservationIgnored var memoryWrites: Task<String?, Never>?
     @ObservationIgnored var failedMemoryWrites = 0
+    /// The model's notes of a fold whose page could not be written; the next save takes them (nothing else keeps them).
+    @ObservationIgnored var pendingNotes: [String] = []
     /// Tokens of system prompt and tool specs the engine measured on the last turn (not kept across launches).
     @ObservationIgnored var measuredOverhead: Int?
     /// The model ("provider/model") the running turn uses, for the usage it records.

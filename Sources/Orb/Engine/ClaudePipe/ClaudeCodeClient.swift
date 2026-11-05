@@ -161,7 +161,9 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
         }
         idle?.run.stop(interrupt: false)
         parked.expiry.cancel()
-        if toolChoice == .auto, let found = Self.continuation(of: messages, after: parked.previous, toolIDs: parked.toolIDs) {
+        // A process that died while parked (OOM, a crash, a CLI update) cannot take the results: a new one gets the history.
+        if toolChoice == .auto, !parked.run.process.hasExited,
+           let found = Self.continuation(of: messages, after: parked.previous, toolIDs: parked.toolIDs) {
             return (.resume(parked.run, results: found.results, extras: found.extras), generation)
         }
         parked.run.stop(interrupt: false)
@@ -642,7 +644,7 @@ struct ClaudePipeStepState {
             return record(usage: event["message"]?["usage"])
         case "content_block_start":
             guard let block = event["content_block"], block["type"]?.string == "tool_use" else { return [] }
-            blocks[index] = ToolCallRequest(id: block["id"]?.string ?? "call_\(index)", name: block["name"]?.string ?? "", arguments: "")
+            blocks[index] = ToolCallRequest(id: block["id"]?.string ?? ToolCallRequest.fallbackID(index: index), name: block["name"]?.string ?? "", arguments: "")
         case "content_block_delta":
             let delta = event["delta"]
             switch delta?["type"]?.string {

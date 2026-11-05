@@ -408,6 +408,25 @@ struct ClaudeCodeClientTests {
         #expect(await waitUntil { rig.scratchEntries.isEmpty })
     }
 
+    @Test func aParkedProcessThatDiedStartsANewOneInsteadOfFailingTheTurn() async throws {
+        let rig = try Rig(scenario: "tool")
+        defer { rig.cleanUp() }
+        let client = rig.client()
+        let first: [ChatMessage] = [.system("s"), .user("Leia a.txt")]
+        let call = ToolCallRequest(id: "toolu_0_0", name: "read_file", arguments: #"{"path":"a.txt"}"#)
+        _ = try await collect(client.stream(model: "m", messages: first, tools: [readFile], toolChoice: .auto))
+
+        // The only launch so far is the parked process: its pid is in the name of its log.
+        let names = try FileManager.default.contentsOfDirectory(atPath: rig.logs.path).filter { $0.hasPrefix("launch-") }
+        let pid = try #require(names.first.flatMap { Int32($0.dropFirst("launch-".count).dropLast(".json".count)) })
+        kill(pid, SIGKILL)
+        #expect(await waitUntil { kill(pid, 0) != 0 })
+
+        let second = first + [ChatMessage(role: .assistant, content: "Vou ler. ", toolCalls: [call]), .tool("toolu_0_0", "ok")]
+        _ = try await collect(client.stream(model: "m", messages: second, tools: [readFile], toolChoice: .auto)) // does not throw
+        #expect(rig.launches.count == 2)
+    }
+
     @Test func steeringMessagesGoToTheSameProcessAsUserMessages() async throws {
         let rig = try Rig(scenario: "tool")
         defer { rig.cleanUp() }

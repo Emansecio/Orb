@@ -380,11 +380,16 @@ extension BotSession {
     func saveMemory(ifIdleFor gap: TimeInterval? = nil, upTo end: Int? = nil, notes: [String] = [], summarize: Bool = false) -> Bool {
         let savedBefore = conversation?.memorySavedCount ?? 0
         guard let stretch = pendingStretch(ifIdleFor: gap, upTo: end) else {
-            guard gap == nil, !notes.isEmpty else { return false }
-            persistStretch([], notes: notes)
+            // An idle check with nothing to save leaves the kept notes alone: they wait for a save that can write them.
+            guard gap == nil, !(pendingNotes + notes).isEmpty else { return false }
+            let all = pendingNotes + notes
+            pendingNotes = []
+            persistStretch([], notes: all)
             return true
         }
-        persistStretch(stretch, notes: notes, savedBefore: savedBefore, summarize: summarize)
+        let all = pendingNotes + notes
+        pendingNotes = []
+        persistStretch(stretch, notes: all, savedBefore: savedBefore, summarize: summarize)
         return true
     }
 
@@ -398,10 +403,16 @@ extension BotSession {
         let writer = summarize && notes.isEmpty ? model.sessionNoteWriter(for: id) : nil
         let written = Task.detached(priority: .utility) { [weak self] () -> String? in
             _ = await previous?.value
-            if savedBefore != nil, let failed = await self?.failedMemoryWrites, failed != failures { return nil }
+            if savedBefore != nil, let failed = await self?.failedMemoryWrites, failed != failures {
+                await self?.keepNotes(notes)
+                return nil
+            }
             guard let page = SessionSummary.page(from: stretch, notes: notes) else { return nil }
             let path = await bank.saveSessionPath(page)
-            if path == nil, let savedBefore { await self?.unmarkStretch(back: savedBefore) }
+            if path == nil {
+                if let savedBefore { await self?.unmarkStretch(back: savedBefore) }
+                await self?.keepNotes(notes)
+            }
             return path
         }
         memoryWrites = written
@@ -414,6 +425,11 @@ extension BotSession {
             page.path = path
             if await bank.replaceSession(page) { await model?.refreshMemory(botID) }
         }
+    }
+
+    /// The notes of a page that was not written go back for the next save.
+    func keepNotes(_ notes: [String]) {
+        pendingNotes = notes + pendingNotes
     }
 
     /// The page of a stretch that started at `earlier` was not written: the mark goes back there (never forward, past a

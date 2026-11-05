@@ -4,6 +4,13 @@ import Testing
 
 /// Persistence: unreadable files are kept, never overwritten; decoding skips what it can't read; old tool
 /// outputs are pruned on save; conversations load lazily; drafts and routines behave.
+private final class Counter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    func bump() { lock.withLock { count += 1 } }
+    var value: Int { lock.withLock { count } }
+}
+
 @Suite final class StoreTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbStore-\(UUID().uuidString)")
 
@@ -37,6 +44,34 @@ import Testing
         SaveHealth.noteFailed(root, file: second)
         #expect(!SaveHealth.noteWritten(root, file: first))
         #expect(SaveHealth.noteWritten(root, file: second))
+    }
+
+    @Test func deletingTheOnlyFileThatFailedEndsTheFailure() {
+        var store = Store(directory: root)
+        let gone = UUID(), other = UUID()
+        let recovered = Counter()
+        store.onSaveRecovered = { recovered.bump() }
+        SaveHealth.noteFailed(root, file: stateURL)
+        SaveHealth.noteFailed(root, file: conversationURL(gone)) // never reached the disk: no fileExists to lean on
+        store.deleteConversation(gone)
+        store.flush()
+        #expect(recovered.value == 0) // state.json still fails
+        #expect(SaveHealth.noteWritten(root, file: stateURL)) // and it is the one left
+        SaveHealth.noteFailed(root, file: conversationURL(other))
+        store.deleteConversation(other)
+        store.flush()
+        #expect(recovered.value == 1)
+    }
+
+    @Test func deletingTheArchiveEndsTheFailureOfItsFiles() {
+        var store = Store(directory: root)
+        let bot = UUID()
+        let recovered = Counter()
+        store.onSaveRecovered = { recovered.bump() }
+        SaveHealth.noteFailed(root, file: root.appending(path: "conversations/\(bot.uuidString)/rotina-x.json"))
+        store.deleteArchive(bot)
+        store.flush()
+        #expect(recovered.value == 1)
     }
 
     // MARK: Unreadable files
