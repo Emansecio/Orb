@@ -439,6 +439,62 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
         #expect(model.conversations[id]?.messages.filter { $0.role == .user }.count == 1)
     }
 
+    @Test func cuttingTellsAgainTheOutsideEventsThatTheDroppedMessageHadCarried() {
+        var chat = conversation(["a", "b"])
+        let atlas = OrbRef(id: UUID(), name: "Atlas"), lia = OrbRef(id: UUID(), name: "Lia")
+        let event = OrbEvent(kind: .routineRun, actor: atlas, subject: lia, chainID: UUID())
+        chat.items.insert(TranscriptItem(.event(event)), at: 3) // between "a" and "b"
+        chat.contextHandedAt = Date().addingTimeInterval(60) // "b" carried the block
+        #expect(SinceLastTurn.pending(in: chat.items, since: chat.contextHandedAt).isEmpty)
+        let cut = chat.rewindCut(atItem: chat.items.firstIndex { if case .user("b", _) = $0.kind { true } else { false } }!, skills: [])!
+        chat.rewind(to: cut)
+        #expect(chat.contextHandedAt == nil)
+        #expect(chat.items.contains { if case .event = $0.kind { true } else { false } })
+    }
+
+    @MainActor @Test func redoingMakesTheTaskResumableFromTheNewTurn() async {
+        let (model, id) = model(with: conversation(["a", "b"]))
+        await model.loadedConversation(id)
+        model.sessions[id]?.resumableSince = nil
+        model.sessions[id]?.resumedAfterJobs = 3
+        let before = Date()
+        #expect(model.regenerateLastReply(id))
+        await settle(model, id)
+        #expect((model.sessions[id]?.resumableSince ?? .distantPast) >= before) // a job of the dropped turn started earlier
+        #expect(model.sessions[id]?.resumedAfterJobs == 0)
+    }
+
+    @MainActor @Test func submittingAnEditThatCannotBeSentSaysWhy() async throws {
+        let (model, id) = model(with: conversation(["a", "b", "c"]))
+        await model.loadedConversation(id)
+        let target = try #require(row("a", in: model, id))
+        #expect(model.beginEditing(itemID: target.id, of: id))
+        model.sessions[id]?.routineID = UUID() // a routine took the Orb after the edit began
+        #expect(model.editRefusal(itemID: target.id, of: id) == .routine)
+        #expect(!model.submitEdit("a2", to: id))
+        #expect(model.composerLane(id).error == RewindRefusal.routine.reason)
+    }
+
+    @MainActor @Test func editingASkillRequestCountsItsUseOnce() async throws {
+        let skill = Skill(slug: "relatorio", name: "Relatório", summary: "", instructions: "Faça o relatório.", uses: 1)
+        var chat = Conversation()
+        chat.items = [user("/relatorio da semana"), bot("feito")]
+        chat.messages = [.user(SystemPrompt.expandSkill(in: "/relatorio da semana", skills: [skill])!.prompt),
+                         ChatMessage(role: .assistant, content: "feito")]
+        let (model, id) = model(with: chat)
+        var scoped = skill
+        scoped.orbIDs = [id]
+        model.skills = [scoped]
+        await model.loadedConversation(id)
+
+        #expect(model.beginEditing(itemID: try #require(row("/relatorio da semana", in: model, id)).id, of: id))
+        #expect(model.submitEdit("/relatorio do mês", to: id))
+        await settle(model, id)
+        #expect(model.skills.first?.uses == 1)
+        // Edited into plain words: the first run's use is still taken back (the message is gone).
+        #expect(model.conversations[id]?.messages.filter { $0.role == .user }.count == 1)
+    }
+
     @MainActor @Test func redoingFadesTheRowsThatGoAndThenCuts() async throws {
         let chat = conversation(["a", "b"])
         let (model, id) = model(with: chat)

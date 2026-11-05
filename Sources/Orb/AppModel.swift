@@ -1113,7 +1113,8 @@ final class AppModel {
         modelRefreshFailures[kind] = nil
         updateProvider(kind) {
             // Read inside the update, so a model added by hand while the list was loading is kept.
-            $0.models = kind == .custom ? ModelCatalog.mergingManual(fetched: fetched, previous: $0.models) : fetched
+            // An empty answer from the server is not a list: it would erase the models the Orbs were set to use.
+            if !fetched.isEmpty { $0.models = kind == .custom ? ModelCatalog.mergingManual(fetched: fetched, previous: $0.models) : fetched }
             $0.modelsUpdatedAt = .now
             $0.catalogVersion = ModelCatalog.version
         }

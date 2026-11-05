@@ -151,7 +151,7 @@ extension AnthropicClient {
             var blocks: [JSONValue] = []
             switch message.role {
             case .tool:
-                var result: [String: JSONValue] = ["type": .string("tool_result"), "tool_use_id": .string(message.toolCallID ?? ""),
+                var result: [String: JSONValue] = ["type": .string("tool_result"), "tool_use_id": .string(Self.safeToolID(message.toolCallID ?? "")),
                                                    "content": toolResultContent(message)]
                 if message.isError { result["is_error"] = .bool(true) }
                 if index == stableIndex { result["cache_control"] = ephemeral }
@@ -172,7 +172,7 @@ extension AnthropicClient {
                     let input = JSONValue.parse(call.arguments).flatMap { value -> JSONValue? in
                         if case .object = value { value } else { nil }
                     } ?? .object([:])
-                    blocks.append(.object(["type": .string("tool_use"), "id": .string(call.id), "name": .string(call.name),
+                    blocks.append(.object(["type": .string("tool_use"), "id": .string(Self.safeToolID(call.id)), "name": .string(call.name),
                                            "input": input]))
                 }
             default:
@@ -217,6 +217,19 @@ extension AnthropicClient {
     }
 
     /// The output of a tool: text, or text followed by the pictures it returned.
+    /// The Messages API only takes `^[a-zA-Z0-9_-]+$` as a tool id, and a history from another provider can hold ids like
+    /// `functions.bash:0`. The same mapping on `tool_use.id` and `tool_use_id` keeps each pair matched; an id that is valid
+    /// already is not touched, so the cached prefix stays the same.
+    static func safeToolID(_ id: String) -> String {
+        guard !id.isEmpty else { return "_" }
+        guard id.utf8.contains(where: { !(($0 >= 48 && $0 <= 57) || ($0 >= 65 && $0 <= 90) || ($0 >= 97 && $0 <= 122) || $0 == 45 || $0 == 95) })
+        else { return id }
+        return String(id.unicodeScalars.map { scalar in
+            scalar.isASCII && (scalar.properties.isAlphabetic || ("0"..."9").contains(Character(scalar)) || scalar == "-" || scalar == "_")
+                ? Character(scalar) : "_"
+        })
+    }
+
     private static func toolResultContent(_ message: ChatMessage) -> JSONValue {
         let text = message.content.isEmpty ? "(sem saída)" : message.content
         guard !message.images.isEmpty else { return .string(text) }

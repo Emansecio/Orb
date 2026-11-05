@@ -461,6 +461,24 @@ struct ModelRefreshBackoffTests {
         #expect(calls.count == 4 && model.providers[0].models.map(\.id) == ["llama"])
     }
 
+    @Test @MainActor func anEmptyAnswerDoesNotEraseTheKnownModels() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "OrbModelRefresh-\(UUID().uuidString)")
+        defer { removeTestFolder(root) }
+        let model = AppModel(store: Store(directory: root), runsBackgroundWork: false)
+        model.providers = [ProviderAccount(kind: .ollama)]
+        model.loadModels = { _ in [ProviderModel(id: "llama", name: "llama", format: .chat)] }
+        try await model.refreshModels(.ollama)
+        model.loadModels = { _ in [] }
+        try await model.refreshModels(.ollama)
+        #expect(model.providers[0].models.map(\.id) == ["llama"])
+    }
+
+    @Test func aChatGPTModelThatLeftTheListKeepsSpeakingResponses() {
+        let account = ProviderAccount(kind: .chatgpt)
+        #expect(account.client(for: nil, credentials: { _ in "k" }, conversationID: "abc") is ResponsesClient)
+        #expect(ProviderAccount(kind: .ollama).client(for: nil, credentials: { _ in "k" }, conversationID: "abc") is OpenAIClient)
+    }
+
     @Test @MainActor func aListThatArrivesAfterSigningOutIsNotKept() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "OrbModelRefresh-\(UUID().uuidString)")
         defer { removeTestFolder(root) }
