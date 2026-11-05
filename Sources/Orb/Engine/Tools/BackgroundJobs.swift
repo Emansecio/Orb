@@ -79,17 +79,25 @@ actor BackgroundJobs {
 
     /// How often `watchGroup` looks at whether the job's process group is empty.
     private let watchInterval: Duration
+    /// Ended jobs (and their logs) kept per Orb. Beyond this, only those that ended more than `endedGrace` ago go.
+    private let keptEnded: Int
+    /// A job that just ended stays readable this long whatever the count: the model often asks for the output of a build
+    /// right after it finishes, and a burst of short jobs must not erase the one it is about to read.
+    private let endedGrace: Duration
 
     /// The last three parameters exist for tests. With a long first-output window that ends at the first output,
     /// "the first output is in the result" does not depend on how fast the machine starts a shell; with a short
     /// watch interval, `stop` meets the group watcher between its kill and its final check every time.
     init(directory: URL = FileManager.default.temporaryDirectory.appending(path: "orb-jobs"),
-         firstOutputWindow: Duration = .seconds(1), endsAtFirstOutput: Bool = false, watchInterval: Duration = .seconds(1)) {
+         firstOutputWindow: Duration = .seconds(1), endsAtFirstOutput: Bool = false, watchInterval: Duration = .seconds(1),
+         keptEnded: Int = 20, endedGrace: Duration = .seconds(600)) {
         (changes, changed) = AsyncStream.makeStream(of: UUID.self, bufferingPolicy: .bufferingNewest(100))
         self.directory = directory
         self.firstOutputWindow = firstOutputWindow
         self.endsAtFirstOutput = endsAtFirstOutput
         self.watchInterval = watchInterval
+        self.keptEnded = keptEnded
+        self.endedGrace = endedGrace
     }
 
     deinit { changed.finish() }
@@ -111,6 +119,7 @@ actor BackgroundJobs {
         guard running < Self.maxRunningPerOrb else {
             throw ToolError("Já há \(running) processos em segundo plano rodando. Pare algum com job_stop antes de iniciar outro.")
         }
+        pruneEnded(botID)
         let id = String((lastID[botID] ?? 0) + 1)
         let botDirectory = logFolder(for: botID)
         let log = botDirectory.appending(path: "\(id).log")
@@ -256,6 +265,20 @@ actor BackgroundJobs {
 
     // MARK: Bookkeeping
 
+    /// Drops the oldest ended jobs and their logs (up to ~50 MB each) once an Orb has more than `keptEnded` of them,
+    /// except those that ended within `endedGrace`, so the app does not grow without bound while it stays open.
+    private func pruneEnded(_ botID: UUID) {
+        let ended = (jobs[botID] ?? [:]).filter { !$0.value.snapshot.isActive }
+            .sorted { ($0.value.snapshot.endedAt ?? .distantPast) > ($1.value.snapshot.endedAt ?? .distantPast) }
+        guard ended.count > keptEnded else { return }
+        let cutoff = Date.now.addingTimeInterval(-Double(endedGrace.components.seconds))
+        for (id, job) in ended.dropFirst(keptEnded) where (job.snapshot.endedAt ?? .distantPast) < cutoff {
+            job.logWatch?.cancel()
+            try? FileManager.default.removeItem(atPath: job.snapshot.logPath)
+            jobs[botID]?[id] = nil
+        }
+    }
+
     private func find(_ botID: UUID, _ id: String) throws -> Job {
         guard let job = jobs[botID]?[id] else {
             let known = (jobs[botID] ?? [:]).keys.sorted { (Int($0) ?? 0) < (Int($1) ?? 0) }
@@ -296,11 +319,11 @@ actor BackgroundJobs {
     /// For as long as the job's process group has members: notices when it empties (so its id is never signalled
     /// after it could have been reused) and empties the log when it grows past `maxLogBytes`.
     private func watchGroup(botID: UUID, id: String, pid: pid_t, log: URL) async {
-        var ticks = 0
+        // The size is checked often (one stat) because a chatty job writes hundreds of MB a second: every few
+        // seconds would let the log reach gigabytes before the cap applied.
+        let interval = min(watchInterval, .milliseconds(250))
         while !Task.isCancelled, groupExists(pid) {
-            try? await Task.sleep(for: watchInterval)
-            ticks += 1
-            guard ticks % 10 == 0 else { continue }
+            try? await Task.sleep(for: interval)
             let size = (try? FileManager.default.attributesOfItem(atPath: log.path)[.size] as? Int) ?? 0
             if size > Self.maxLogBytes, let handle = try? FileHandle(forWritingTo: log) {
                 try? handle.truncate(atOffset: 0)

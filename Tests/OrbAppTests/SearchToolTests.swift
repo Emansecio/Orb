@@ -386,6 +386,14 @@ final class SearchToolTests {
         // A pattern with no wildcard at all finds that exact file.
         let exact = lines(try await run(GlobTool(), ["pattern": .string(workspace.url("docs/c.md").path)]))
         #expect(exact.count == 1 && exact[0].hasSuffix("docs/c.md"))
+        // A single-component path is checked, not searched for across its parent (here "/", the whole disk).
+        let began = ContinuousClock.now
+        let folder = try await run(GlobTool(), ["pattern": .string(workspace.url("docs").path)])
+        #expect(folder.contains("pasta") && ContinuousClock.now - began < .seconds(5))
+        let top = try await run(GlobTool(), ["pattern": .string("/tmp")])
+        #expect(top.contains("pasta") && ContinuousClock.now - began < .seconds(5))
+        let missing = try await run(GlobTool(), ["pattern": .string("/orb-nao-existe-\(UUID().uuidString)")])
+        #expect(missing.hasPrefix("Nenhum arquivo combina") && ContinuousClock.now - began < .seconds(5))
         #expect(GlobTool.splitAbsolute("*.txt") == nil)
         #expect(GlobTool.splitAbsolute("src/*.txt") == nil)
         let home = try #require(GlobTool.splitAbsolute("~/Downloads/**/*.pdf"))
