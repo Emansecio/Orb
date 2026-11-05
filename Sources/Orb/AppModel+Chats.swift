@@ -16,6 +16,12 @@ extension AppModel {
             return
         }
         var chats = live(botID).chats ?? OrbChats(first: botID, updated: live(botID).lastReply?.date ?? .now)
+        // A "Nova conversa" nobody wrote in (its title is still the default, and nothing landed in it) is reused: each
+        // ⇧⌘N would otherwise leave one more empty entry in the list for good.
+        if let empty = chats.list.first(where: { $0.title == OrbChats.newTitle && $0.unread != true && $0.id != session.chatID && $0.id != session.workingChatID }) {
+            openChat(empty.id, of: botID, preservingInicioJump: true)
+            return
+        }
         let id = UUID()
         chats.add(id, at: .now)
         show(id, of: botID, in: chats, fresh: true)
@@ -74,6 +80,7 @@ extension AppModel {
         } else {
             setChats(chats, for: botID)
         }
+        chatDrafts[chat] = nil
         store.deleteConversation(botID, chat: chat) // after the write of it leaving, on the same queue
     }
 
@@ -185,7 +192,8 @@ extension AppModel {
                 return
             }
             cancelEditing(botID) // the message being edited is the other conversation's
-            giveBackQueued(botID)
+            giveBackQueued(botID) // into the draft of the conversation they were written for
+            switchDraft(of: botID, from: session.chatID, to: chat)
             session.openChat(chat, fresh: fresh, read: read)
         }
         var chats = chats

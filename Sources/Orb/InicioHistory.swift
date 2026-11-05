@@ -74,6 +74,17 @@ struct InicioHistory: Codable, Equatable, Sendable {
         prune(now: now)
     }
 
+    /// Drops the chat results whose reply left the conversation (a redo or an edit cut it); a routine's run is not touched.
+    @discardableResult
+    mutating func removeChatResults(of items: Set<UUID>) -> Bool {
+        let before = entries.count
+        entries.removeAll { entry in
+            if case .chat(_, _, let item) = entry.origin { return items.contains(item) }
+            return false
+        }
+        return entries.count != before
+    }
+
     mutating func prune(now: Date = .now) {
         entries.removeAll { $0.date < now.addingTimeInterval(-Self.retention) }
         if entries.count > Self.limit { entries.removeFirst(entries.count - Self.limit) }

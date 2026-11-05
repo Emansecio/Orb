@@ -154,13 +154,20 @@ extension AppModel {
         var result: [UUID: ComposerDraft] = [:]
         for bot in bots {
             let lane = sessions[bot.id]?.lane
+            // The composer holds the draft of the conversation on show; the Orb's first conversation has the Orb's id,
+            // so a file written before drafts were per conversation still reads as that conversation's.
+            let shown = sessions[bot.id]?.chatID ?? bot.id
             // An edit under way is not a draft: what the composer held before it is what is kept.
             if let stash = lane?.editing?.stash {
-                if !stash.isEmpty { result[bot.id] = stash }
-                continue
+                if !stash.isEmpty { result[shown] = stash }
+            } else {
+                let draft = ComposerDraft(text: drafts[bot.id] ?? "", files: lane?.files.map(\.url.path) ?? [], pictures: lane?.pictures ?? [])
+                if !draft.isEmpty { result[shown] = draft }
             }
-            let draft = ComposerDraft(text: drafts[bot.id] ?? "", files: lane?.files.map(\.url.path) ?? [], pictures: lane?.pictures ?? [])
-            if !draft.isEmpty { result[bot.id] = draft }
+            // The other conversations' drafts (a deleted one's is not kept).
+            for entry in live(bot.id).chats?.list ?? [] where entry.id != shown {
+                if let draft = chatDrafts[entry.id], !draft.isEmpty { result[entry.id] = draft }
+            }
         }
         // A group's composer has text and pictures, kept under the group's id.
         for group in groups {
@@ -171,11 +178,15 @@ extension AppModel {
     }
 
     /// Takes back what the last launch left in the composers, without the files and pictures that are gone.
-    func restoreDrafts() {
+    func restoreDrafts(chats: [String: OrbChats]) {
         let saved = store.readDrafts()
         savedDrafts = saved
         for bot in bots {
-            guard let draft = saved[bot.id] else { continue }
+            let shown = session(bot.id).chatID
+            for entry in chats[bot.id.uuidString]?.list ?? [] where entry.id != shown {
+                if let draft = saved[entry.id] { chatDrafts[entry.id] = draft }
+            }
+            guard let draft = saved[shown] else { continue }
             if !draft.text.isEmpty { drafts[bot.id] = draft.text }
             let lane = composerLane(bot.id)
             lane.attachExisting(files: draft.files, pictures: draft.pictures)
@@ -193,6 +204,20 @@ extension AppModel {
         guard current != savedDrafts else { return }
         savedDrafts = current
         store.saveDrafts(current)
+    }
+
+    /// The composer follows the conversation: what is typed and attached stays with the one it was written for, and the
+    /// one opened shows its own. Called before the session changes conversation (and after the queue was given back).
+    func switchDraft(of botID: UUID, from left: UUID, to opened: UUID) {
+        let lane = sessions[botID]?.lane
+        let leaving = ComposerDraft(text: drafts[botID] ?? "", files: lane?.files.map(\.url.path) ?? [], pictures: lane?.pictures ?? [])
+        chatDrafts[left] = leaving.isEmpty ? nil : leaving
+        let incoming = chatDrafts.removeValue(forKey: opened) ?? ComposerDraft()
+        setDraft(incoming.text, for: botID)
+        guard lane != nil || !incoming.isEmpty else { return }
+        let target = composerLane(botID)
+        target.attachExisting(files: incoming.files, pictures: incoming.pictures)
+        target.error = nil
     }
 
     /// The composer state of one Orb, made when first asked for (it lives in the Orb's session).
@@ -400,11 +425,17 @@ extension AppModel {
     func settleSteering(_ botID: UUID, succeeded: Bool) {
         guard let lane = sessions[botID]?.lane, !lane.queued.isEmpty else { return }
         let waiting = lane.takeAll()
-        guard succeeded, let message = SteeredMessage.merged(waiting),
+        // `send` expands a /skill only at the start of the text, so a message that calls one cannot be glued after
+        // another: it starts the next turn instead, and goes after this one as a message of its own.
+        let skills = skills(for: botID)
+        let split = waiting.indices.dropFirst().first { SystemPrompt.expandSkill(in: waiting[$0].text, skills: skills) != nil } ?? waiting.endIndex
+        let now = Array(waiting[..<split]), later = Array(waiting[split...])
+        guard succeeded, let message = SteeredMessage.merged(now),
               send(message.text, attachments: message.files, images: message.pictures, to: botID) else {
             giveBack(waiting, to: botID)
             return
         }
+        for next in later { enqueue(next.text, files: next.files, pictures: next.pictures, delivery: .afterTask, to: botID) }
     }
 
     /// What waits in the queue was written for the conversation on show: when another one comes, it goes back to the composer.

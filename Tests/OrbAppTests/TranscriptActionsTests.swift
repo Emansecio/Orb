@@ -313,6 +313,28 @@ import Testing
         #expect(sent.first?.content.contains("Attached files") == false) // not as a path in the text
     }
 
+    @MainActor @Test func retryingARequestThatNeverReachedTheModelSendsItsPictureAsAPicture() async throws {
+        let failed = Conversation(items: [user("veja", ["/placeholder"]), notice("Não deu certo: sem rede")]) // no message: it never got there
+        let (model, id) = model(with: failed)
+        let folder = model.images.folder(for: id)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let photo = folder.appendingPathComponent("foto.png")
+        try Data([0x89]).write(to: photo)
+        let report = root.appendingPathComponent("relatorio.txt")
+        try "x".write(to: report, atomically: true, encoding: .utf8)
+        var chat = failed
+        chat.items = [user("veja", [photo.path, report.path]), notice("Não deu certo: sem rede")]
+        model.session(id).conversation = chat
+
+        #expect(model.retryLastTurn(id))
+        await waitUntil("the Orb to finish") { !model.isWorking(id) && model.turns[id] == nil }
+
+        let sent = try #require(model.conversations[id]?.messages.first { $0.role == .user })
+        #expect(sent.images.map(\.path) == [photo.path])
+        #expect(sent.content.contains(report.lastPathComponent)) // the file still goes as a file
+        #expect(!sent.content.contains("Attached files:\n- \(photo.path)")) // not the picture
+    }
+
     @Test func aStoredSkillMessageIsRecognizedAsTheOneTypedAsASlug() {
         let skill = Skill(slug: "relatorio", name: "Relatório", summary: "", instructions: "Instruções", uses: 0)
         let stored = ChatMessage.user(SystemPrompt.expandSkill(in: "/relatorio x", skills: [skill])!.prompt)

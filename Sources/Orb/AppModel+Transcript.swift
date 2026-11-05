@@ -276,7 +276,12 @@ extension AppModel {
                 }
                 conversation.items.removeSubrange(range)
             }
-            let pictures = removedMessage?.images ?? []
+            var pictures = removedMessage?.images ?? []
+            if removedMessage == nil {
+                // The message never reached the model (setup failed), so no copy says which attachments were pictures:
+                // the ones in the store of pictures are, and they must go again as images, not as file paths.
+                pictures = attachments.compactMap { images.attachment(forStoredPath: $0) }
+            }
             let pictured = Set(pictures.map(\.path))
             let files = attachments.filter { !pictured.contains($0) }.map { URL(fileURLWithPath: $0) }
             if send(text, attachments: files, images: pictures, to: botID, model: model) {

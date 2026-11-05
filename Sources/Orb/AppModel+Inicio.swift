@@ -19,6 +19,11 @@ extension AppModel {
         }
     }
 
+    /// A redo or an edit cut these items off the conversation: the home page must not keep listing their results.
+    func forgetInicioChat(items: [TranscriptItem]) {
+        if inicio.removeChatResults(of: Set(items.map(\.id))) { store.saveInicioJournal(inicio) }
+    }
+
     func recordInicioRoutine(bot: UUID, routine: UUID, run: RoutineRun, outcome: InicioEntry.Outcome, journal: Bool = true) {
         let previous = inicio.nextSequence
         inicio.append(id: run.id, date: run.finishedAt ?? run.date, origin: .routine(bot: bot, routine: routine, run: run.id),

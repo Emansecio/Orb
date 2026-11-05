@@ -698,6 +698,24 @@ struct SteeringEngineTests {
         await waitUntilIdle(model, bot.id)
     }
 
+    @Test @MainActor func aQueuedSkillAfterAnotherMessageStartsItsOwnTurnSoItIsExpanded() async throws {
+        let client = HeldModel()
+        let (model, bot) = setUp(client)
+        var skill = Skill(slug: "resumir", name: "Resumir", summary: "", instructions: "Resuma com cuidado.", uses: 0)
+        skill.orbIDs = [bot.id]
+        model.skills = [skill]
+        let lane = model.composerLane(bot.id)
+        lane.enqueue(steered("revise o texto"))
+        lane.enqueue(steered("/resumir tudo"))
+        model.settleSteering(bot.id, succeeded: true)
+        // Glued after the first, the skill would reach the model as raw text: it waits for a turn of its own.
+        #expect(userTexts(model, bot.id) == ["revise o texto"])
+        #expect(lane.queued.map(\.text) == ["/resumir tudo"] && lane.queued.map(\.delivery) == [.afterTask])
+        await waitUntil("the skill's turn") { model.conversations[bot.id]?.messages.contains { $0.content.contains("Resuma com cuidado.") } == true }
+        await waitUntilIdle(model, bot.id)
+        #expect(lane.queued.isEmpty)
+    }
+
     @Test @MainActor func nothingIsSentWhileAPictureIsStillBeingPrepared() async throws {
         let client = HeldModel()
         let (model, bot) = setUp(client)

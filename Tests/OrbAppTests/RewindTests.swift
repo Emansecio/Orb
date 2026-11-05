@@ -353,6 +353,24 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
         model.transcript(id).first { if case .user(let typed, _) = $0.kind { typed == text } else { false } }
     }
 
+    @MainActor @Test func redoingTakesTheDiscardedReplyOffTheHomePage() async throws {
+        let chat = conversation(["a", "b"])
+        let (model, id) = model(with: chat)
+        await model.loadedConversation(id)
+        let kept = try #require(chat.items.first { if case .bot(let text, _) = $0.kind { text == "resposta a a" } else { false } })
+        let discarded = try #require(chat.items.last)
+        model.recordInicioChat(bot: id, chat: id, item: kept.id, date: .now, text: "resposta a a", succeeded: true)
+        model.recordInicioChat(bot: id, chat: id, item: discarded.id, date: .now, text: "resposta a b", succeeded: true)
+        let routine = UUID()
+        model.inicio.append(id: routine, date: .now, origin: .routine(bot: id, routine: routine, run: routine), outcome: .completed, summary: "rodou")
+
+        #expect(model.regenerateLastReply(id))
+        await settle(model, id)
+
+        let ids = model.inicio.entries.map(\.id)
+        #expect(ids.contains(kept.id) && ids.contains(routine) && !ids.contains(discarded.id))
+    }
+
     @MainActor @Test func redoingDropsTheLastTurnAndSendsTheSameRequestAgain() async throws {
         var chat = conversation(["a", "b"])
         chat.items.insert(tool("Rodando no Terminal", "touch x"), at: 4)

@@ -121,6 +121,8 @@ final class AppModel {
     }
     /// The drafts as last written to `rascunhos.json` (see `saveDraftsIfChanged`).
     @ObservationIgnored var savedDrafts: [UUID: ComposerDraft] = [:]
+    /// The drafts of the conversations not on show, by conversation id (the one on show is in `drafts` and the lane).
+    @ObservationIgnored var chatDrafts: [UUID: ComposerDraft] = [:]
     var showInspector = true
 
     /// Opens or closes the Orb's panel the same way from every path: the column slides in the content curve, and not
@@ -448,7 +450,7 @@ final class AppModel {
             session.isUnloaded = true
             session.chatID = state.chats[bot.id.uuidString]?.active ?? bot.id // the conversation it was showing
         }
-        restoreDrafts()
+        restoreDrafts(chats: state.chats)
         if !readsFirstLater, let first = firstShown {
             let shown = session(first.id)
             let read = store.readConversation(first.id, chat: shown.chatID)

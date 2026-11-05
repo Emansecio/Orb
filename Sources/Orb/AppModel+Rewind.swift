@@ -222,6 +222,7 @@ extension AppModel {
            let at = skills.firstIndex(where: { $0.id == skill.id }), skills[at].uses > 0 {
             skills[at].uses -= 1 // the first run counted it
         }
+        forgetInicioChat(items: Array(before.items[index...]))
         live(botID).scrolled() // the click is yours: the chat follows the new answer
         return true
     }

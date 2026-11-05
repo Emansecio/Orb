@@ -268,6 +268,91 @@ struct OrbChatsListTests {
         #expect(model.live(orb).chats?.active == orb)
     }
 
+    @Test @MainActor func theComposerKeepsADraftPerConversationAndItSurvivesALaunch() async throws {
+        let client = Model()
+        let (model, orb) = setUp(client)
+        #expect(model.send("primeiro assunto", to: orb, fromUser: true))
+        await waitUntilIdle(model, orb)
+        let attached = root.appending(path: "anexo.txt")
+        try Data("x".utf8).write(to: attached)
+
+        model.setDraft("rascunho da primeira", for: orb)
+        model.composerLane(orb).files.append(AttachedFile(url: attached))
+        model.newChat(for: orb)
+        let second = try #require(model.live(orb).chats?.active)
+        #expect(model.drafts[orb, default: ""].isEmpty && model.composerLane(orb).files.isEmpty, "the new conversation starts with an empty composer")
+
+        model.setDraft("rascunho da segunda", for: orb)
+        model.openChat(orb, of: orb)
+        #expect(model.drafts[orb] == "rascunho da primeira" && model.composerLane(orb).files.map(\.url) == [attached])
+        model.openChat(second, of: orb)
+        #expect(model.drafts[orb] == "rascunho da segunda" && model.composerLane(orb).files.isEmpty)
+
+        // Both are on disk, each under its conversation, and come back at the next launch.
+        model.openChat(orb, of: orb)
+        model.saveNow()
+        let saved = Store(directory: root).readDrafts()
+        #expect(saved[orb]?.text == "rascunho da primeira" && saved[orb]?.files == [attached.path] && saved[second]?.text == "rascunho da segunda")
+        let relaunched = launch(client)
+        #expect(relaunched.drafts[orb] == "rascunho da primeira")
+        relaunched.openChat(second, of: orb)
+        #expect(relaunched.drafts[orb] == "rascunho da segunda")
+    }
+
+    @Test @MainActor func aDraftSavedPerOrbBelongsToItsFirstConversation() throws {
+        let (first, orb) = setUp(Model())
+        let store = Store(directory: root)
+        store.saveDrafts([orb: ComposerDraft(text: "de antes")])
+        store.flush()
+        let model = launch(Model())
+        #expect(model.drafts[orb] == "de antes")
+        _ = first
+    }
+
+    @Test @MainActor func deletingAConversationDropsItsDraftAndNotTheOthers() async throws {
+        let client = Model()
+        let (model, orb) = setUp(client)
+        #expect(model.send("primeiro assunto", to: orb, fromUser: true))
+        await waitUntilIdle(model, orb)
+        model.newChat(for: orb)
+        let second = try #require(model.live(orb).chats?.active)
+        model.setDraft("da segunda", for: orb)
+        model.openChat(orb, of: orb)
+        model.setDraft("da primeira", for: orb)
+        model.deleteChat(second, of: orb)
+        #expect(model.drafts[orb] == "da primeira" && model.chatDrafts[second] == nil)
+    }
+
+    @Test @MainActor func messagesQueuedForAConversationGoBackToItsOwnDraftWhenAnotherOpens() async throws {
+        let gate = TestGate()
+        let client = Model(gate: gate)
+        let (model, orb) = setUp(client)
+        #expect(model.send("trabalho longo", to: orb, fromUser: true))
+        await waitUntil("the model call") { await client.calls.count >= 1 }
+        #expect(model.submit("mais uma coisa", to: orb))
+        #expect(model.composerLane(orb).queued.count == 1)
+
+        model.newChat(for: orb)
+        #expect(model.drafts[orb, default: ""].isEmpty, "the new conversation's field is not where the queued message lands")
+        #expect(model.chatDrafts[orb]?.text == "mais uma coisa")
+        model.openChat(orb, of: orb)
+        #expect(model.drafts[orb] == "mais uma coisa")
+        await gate.open()
+        await waitUntilIdle(model, orb)
+    }
+
+    @Test @MainActor func aNewConversationReusesTheEmptyOneInsteadOfPilingThemUp() async throws {
+        let client = Model()
+        let (model, orb) = setUp(client)
+        #expect(model.send("primeiro assunto", to: orb, fromUser: true))
+        await waitUntilIdle(model, orb)
+        model.newChat(for: orb)
+        let empty = try #require(model.live(orb).chats?.active)
+        model.openChat(orb, of: orb)
+        model.newChat(for: orb)
+        #expect(model.live(orb).chats?.list.count == 2 && model.live(orb).chats?.active == empty)
+    }
+
     @Test @MainActor func foldingTheConversationsNeedsAListAndIsKeptWithIt() {
         let (model, orb) = setUp(Model())
         model.setChatsCollapsed(true, for: orb)
