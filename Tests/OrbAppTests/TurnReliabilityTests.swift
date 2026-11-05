@@ -96,6 +96,23 @@ private struct HangsAfterText: LLMClient {
         #expect(model.live(botID).turnSpend == nil)
     }
 
+    @Test @MainActor func theWorkingLinePricesTheTurnAtTheHourOfNowLikeTheUsagePage() async throws {
+        let usage = TokenUsage(input: 400_000, output: 10_000)
+        let script = CallScript([call("recall", #"{"query": "a"}"#, usage: usage), said("fim")], holdsCall: 2)
+        let (model, botID) = setUp(script)
+        model.defaultModel = "custom/deepseek-v4-flash"
+        #expect(model.send("procura", to: botID))
+        await waitUntil("the spend of the first call") { model.live(botID).turnSpend != nil }
+        // Off peak the model is half price: a price without the hour would be the peak one.
+        guard case .paid(let expected) = model.priceBook.cost(of: UsageTotals(usage), model: "custom/deepseek-v4-flash", at: .now) else {
+            Issue.record("not paid"); return
+        }
+        let dollars = try #require(model.live(botID).turnSpend?.dollars)
+        #expect(abs(dollars - expected) < 1e-9)
+        await script.release()
+        await waitUntilIdle(model, botID)
+    }
+
     @Test @MainActor func aTurnGoingInCirclesTellsThePersonOnceAndGoesOn() async {
         let script = CallScript((0..<30).map { _ in call("recall", #"{"query": "deploy"}"#) } + [said("fim")])
         let (model, botID) = setUp(script)

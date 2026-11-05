@@ -471,4 +471,17 @@ struct SidebarCategoryLayoutTests {
         model.focusComposer()
         #expect(model.selection == .group(group))
     }
+
+    @Test @MainActor func aProposedTextGoesToTheOpenGroupsComposerInsteadOfBeingDropped() throws {
+        let world = CategoryWorld()
+        let model = world.model
+        let group = UUID()
+        model.selection = .group(group)
+        let target = try #require(model.draftTargetID)
+        #expect(target == group)
+        model.addToDraft("sugestão", for: target)
+        #expect(model.draftText(group) == "sugestão")
+        model.selection = .inicio
+        #expect(model.draftTargetID == model.commandBotID)
+    }
 }

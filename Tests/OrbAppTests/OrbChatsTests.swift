@@ -413,6 +413,41 @@ struct OrbChatsListTests {
         #expect(model.session(orb).chatID == orb)
     }
 
+    @Test @MainActor func aBannerTapShowsTheConversationTheTurnWaitsIn() async throws {
+        let gate = TestGate()
+        let client = Model(gate: gate)
+        let (model, orb) = setUp(client)
+        #expect(model.send("trabalho longo", to: orb, fromUser: true))
+        await waitUntil("the model call") { await client.calls.count >= 1 }
+        model.newChat(for: orb)
+        #expect(model.session(orb).workingChatID == orb)
+        model.showApprovalOwner(orb)
+        await waitUntil("the working conversation on show") { model.session(orb).chatID == orb }
+        #expect(model.live(orb).chats?.active == orb)
+        await gate.open()
+        await waitUntilIdle(model, orb)
+    }
+
+    @Test @MainActor func theChatOffersTheWayToACardOfAnotherOrbsRequestAndTheBannerIsNotHeldBackForIt() {
+        let (model, orb) = setUp(Model(gate: TestGate()))
+        let session = model.session(orb)
+        model.selection = .bot(orb)
+        model.live(orb).setAwaitingApproval(true)
+        #expect(!model.requestWaitingForYou(orb), "its own card is in the chat")
+        #expect(model.isLookingAtCard(of: orb))
+        session.sideKind = .delegation
+        #expect(model.requestWaitingForYou(orb) && !model.isLookingAtCard(of: orb), "the card is in the request's conversation")
+        session.sideKind = .group
+        #expect(model.requestWaitingForYou(orb))
+        session.sideKind = .routine
+        #expect(!model.requestWaitingForYou(orb), "a routine has its own button")
+        session.sideKind = nil
+        model.selection = .group(UUID())
+        #expect(!model.isLookingAtCard(of: orb), "another group is open: the card is not in sight")
+        model.live(orb).setAwaitingApproval(false)
+        #expect(!model.requestWaitingForYou(orb))
+    }
+
     @Test @MainActor func anOldConversationOpenedDuringATurnIsReadOffTheMainThreadAndTheLastClickWins() async throws {
         let gate = TestGate()
         let client = Model(gate: gate)

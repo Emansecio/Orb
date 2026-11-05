@@ -282,4 +282,39 @@ private func drafting(_ json: String) -> [LLMEvent] {
         let names = await model.store.readUsage(from: .now.addingTimeInterval(-86_400), to: .now.addingTimeInterval(86_400)).names
         #expect(names[WizardRunner.usageOrbID] == "Criação de Orb")
     }
+
+    @MainActor @Test func aCallInFlightWhenTheSheetClosesIsStillFiledAsUsage() async {
+        let (model, runner) = setUp(CallScript())
+        model.clientOverride = { AnnouncesThenHangs(usage: TokenUsage(input: 700, output: 0)) }
+        runner.send("oi")
+        // The first words come after the announcement, in order: once they show, the announcement was read.
+        await waitUntil("the first words") { !runner.liveText.isEmpty }
+        runner.cancel()
+        await waitUntil("the cancelled call's usage in the history") {
+            model.usageLog.flush()
+            model.store.flush()
+            let found = await model.store.readUsage(from: .now.addingTimeInterval(-86_400), to: .now.addingTimeInterval(86_400)).buckets
+            return found.contains { $0.key.source == .creation && $0.totals.input == 700 }
+        }
+    }
+}
+
+/// Announces its input tokens, then writes nothing until it is cancelled (a call the person closes the sheet on).
+private struct AnnouncesThenHangs: LLMClient {
+    var usage: TokenUsage
+    var arrangesPromptCache: Bool { false }
+    var forShortReply: any LLMClient { self }
+    func markingStable(upTo toolCallID: String?) -> any LLMClient { self }
+
+    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                continuation.yield(.usage(usage))
+                continuation.yield(.text("Oi"))
+                while !Task.isCancelled { try? await Task.sleep(for: .milliseconds(10)) }
+                continuation.finish(throwing: CancellationError())
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
 }

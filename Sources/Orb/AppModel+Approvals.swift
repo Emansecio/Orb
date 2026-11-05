@@ -60,6 +60,22 @@ extension AppModel {
         return sessions[botID]?.routineID
     }
 
+    /// The Orb is stopped on a question that came from another Orb or a group: its card is in that request's
+    /// conversation (or the group's screen), not in the chat, so the chat offers a way to it (`showApprovalOwner`).
+    func requestWaitingForYou(_ botID: UUID) -> Bool {
+        guard live(botID).needsYou, let kind = sessions[botID]?.sideKind else { return false }
+        return kind == .delegation || kind == .group
+    }
+
+    /// Whether the user is looking at the card right now: the Orb's own chat (not a side run, whose card is somewhere
+    /// else), or the group screen the member answers in.
+    func isLookingAtCard(of botID: UUID) -> Bool {
+        if case .group(let groupID) = selection { return groupHub.activeGroup(of: botID) == groupID }
+        guard selectedBot?.id == botID else { return false }
+        guard let session = sessions[botID] else { return true }
+        return session.routineID == nil && session.sideKind == nil
+    }
+
     /// What a tap on a banner opens: the Orb's chat, or, for a routine waiting for an answer, its conversation.
     func showApprovalOwner(_ botID: UUID) {
         guard bot(botID) != nil else { return }
@@ -79,6 +95,10 @@ extension AppModel {
         }
         // MARK: end MultiOrb (WP2)
         selection = .bot(botID)
+        // The turn runs on a conversation the user left: the card is there, not in the one on show.
+        if let session = sessions[botID], session.routineID == nil, let working = session.workingChatID {
+            openChat(working, of: botID)
+        }
     }
 
     /// Opens the routine's conversation, where its card is (Rotinas page, conversation sheet).
@@ -105,7 +125,7 @@ extension AppModel {
     /// banner takes the place of the first one (same identifier) instead of piling up.
     private func postBanner(for request: ApprovalRequest, of botID: UUID, waited: Duration? = nil) {
         guard let bot = bot(botID),
-              ApprovalNotifications.shouldPost(appIsActive: NSApp?.isActive ?? false, selectedBotID: selectedBot?.id,
+              ApprovalNotifications.shouldPost(appIsActive: NSApp?.isActive ?? false, selectedBotID: isLookingAtCard(of: botID) ? botID : nil,
                                                botID: botID, enabled: Self.notificationsEnabled),
               ApprovalNotifications.isAvailable else { return }
         var payload = ApprovalNotifications.payload(botName: bot.name, botID: botID, request: request)
