@@ -11,14 +11,15 @@ struct QueuedMessages: View {
     var body: some View {
         let presented = presented
         let lane = model.composerLane(botID)
+        let canSteer = model.canSteer(botID)
         // Its own identity, not the message's: once delivered, the message's id names its row of the transcript, and two
         // children of the same lazy stack with one id make SwiftUI reuse this bubble for that row.
         ForEach(Array(lane.queued.enumerated()), id: \.element.queuedRowID) { index, message in
             // Where it goes is said when it changes along the queue; "Parar e enviar" speaks for the whole queue and shows once,
             // on the last bubble.
-            QueuedBubble(message: message, whenText: whenText(message.delivery), showsState: QueuedMessages.showsState(message.delivery, after: index > 0 ? lane.queued[index - 1].delivery : nil),
-                         canInterrupt: QueuedMessages.canInterrupt(canSteer: model.canSteer(botID), pendingPictures: lane.pendingPictures), needsYou: needsYou,
-                         isLast: message.id == lane.queued.last?.id, canSwitch: model.canSteer(botID),
+            QueuedBubble(message: message, whenText: QueuedMessages.whenText(needsYou: needsYou, delivery: message.delivery), showsState: QueuedMessages.showsState(message.delivery, after: index > 0 ? lane.queued[index - 1].delivery : nil),
+                         canInterrupt: QueuedMessages.canInterrupt(canSteer: canSteer, pendingPictures: lane.pendingPictures), needsYou: needsYou,
+                         isLast: message.id == lane.queued.last?.id, canSwitch: canSteer,
                          edit: { model.unqueue(message.id, botID: botID) },
                          switchMode: { model.switchDelivery(message.id, botID: botID) },
                          interrupt: { model.stopAndSend(botID) })
@@ -35,11 +36,6 @@ struct QueuedMessages: View {
     }
 
     private var needsYou: Bool { model.live(botID).needsYou }
-
-    /// Where it goes and when it will be read (see `whenText(needsYou:delivery:)`).
-    private func whenText(_ delivery: SteeringDelivery) -> String {
-        QueuedMessages.whenText(needsYou: needsYou, delivery: delivery)
-    }
 
     /// A picture still on its way would miss the message that stops the turn (the composer's button waits too).
     nonisolated static func canInterrupt(canSteer: Bool, pendingPictures: Int) -> Bool { canSteer && pendingPictures == 0 }
@@ -176,12 +172,12 @@ private struct QueuedBubble: View {
 
     private var buttons: some View {
         HStack(spacing: 2) {
-            iconButton(.edit, symbol: "pencil", help: "Editar: tira da fila e volta ao campo de mensagem", action: edit)
+            iconButton(.edit, help: "Editar: tira da fila e volta ao campo de mensagem", action: edit)
             if canSwitch {
-                iconButton(.switchMode, symbol: switchSymbol, help: QueuedMessages.switchHelp(from: message.delivery), action: switchMode)
+                iconButton(.switchMode, help: QueuedMessages.switchHelp(from: message.delivery), action: switchMode)
             }
             if showsInterrupt {
-                iconButton(.interrupt, symbol: "arrow.up.circle.fill", tint: Palette.accentText,
+                iconButton(.interrupt, tint: Palette.accentText,
                            help: needsYou
                                ? "Parar e enviar: interrompe o que o Orb está fazendo, recusa o pedido aberto e envia agora"
                                : "Parar e enviar: interrompe o que o Orb está fazendo e envia agora (\(AppShortcut.commandReturn.label))",
@@ -190,11 +186,11 @@ private struct QueuedBubble: View {
         }
     }
 
-    private func iconButton(_ kind: Action, symbol: String, tint: Color = Palette.muted, help: String,
+    private func iconButton(_ kind: Action, tint: Color = Palette.muted, help: String,
                             action: @escaping () -> Void) -> some View {
         Button(action: action) {
             // Lit under the pointer: the gray symbol on the faint circle was the whole of the feedback.
-            Image(systemName: symbol).foregroundStyle(hovered == kind && tint == Palette.muted ? Palette.ink : tint)
+            Image(systemName: hintSymbol(kind)).foregroundStyle(hovered == kind && tint == Palette.muted ? Palette.ink : tint)
         }
         .buttonStyle(CircleGhostStyle(side: 24, fontSize: 12))
         .help(help)

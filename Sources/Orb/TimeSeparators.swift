@@ -7,13 +7,8 @@ enum TimeSeparators {
     /// A silence this long between two rows reads as a new moment of the conversation.
     static let pause: TimeInterval = 15 * 60
 
-    /// The rows a separator goes above, by the id of each, with the time it shows (when its row began). `rows`: each
-    /// row's id and its items' dates, in order.
-    static func breaks(_ rows: [(id: UUID, dates: [Date])], calendar: Calendar = .current) -> [UUID: Date] {
-        breaks(spans: rows.compactMap { row in row.dates.first.map { (row.id, $0, row.dates.max() ?? $0) } }, calendar: calendar)
-    }
-
-    /// The same from each row's id, its first item's date and its latest one (what the chat has at hand for every row).
+    /// The rows a separator goes above, by the id of each, with the time it shows (when its row began). `spans`: each
+    /// row's id, its first item's date and its latest one (what the chat has at hand for every row), in order.
     static func breaks(spans: [(id: UUID, start: Date, end: Date)], calendar: Calendar = .current) -> [UUID: Date] {
         var breaks: [UUID: Date] = [:]
         var last: Date?

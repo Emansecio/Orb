@@ -36,16 +36,7 @@ enum DictationReview {
     static func prompt(_ text: String, context: [ChatMessage], vocabulary: [String]) -> [ChatMessage] {
         var parts: [String] = []
         // The last said ones: a turn of the Orb's is mostly its tools' outputs, which would leave no words to go by.
-        let lines = context.compactMap { message -> String? in
-            let who: String
-            switch message.role {
-            case .user: who = "Person"
-            case .assistant: who = "Assistant"
-            default: return nil
-            }
-            let said = ConversationLedger.clip(message.content.trimmingCharacters(in: .whitespacesAndNewlines), contextCharacters)
-            return said.isEmpty ? nil : "\(who): \(said)"
-        }.suffix(contextMessages)
+        let lines = ConversationLedger.contextLines(context, last: contextMessages, clippedTo: contextCharacters)
         if !lines.isEmpty { parts.append("Last messages of the conversation:\n" + lines.joined(separator: "\n")) }
         if !vocabulary.isEmpty { parts.append("Vocabulary (names that may appear): " + vocabulary.joined(separator: ", ")) }
         parts.append("Dictated text:\n<dictation>\n\(text)\n</dictation>")

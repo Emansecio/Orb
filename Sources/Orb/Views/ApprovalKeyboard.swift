@@ -11,31 +11,24 @@ enum ApprovalShortcut: Equatable {
     static let enterKey: UInt16 = 76
     static let escapeKey: UInt16 = 53
 
-    /// What a key press means for the card, or nil when it is not ours. Esc never counts while the user is editing
-    /// text: it belongs to the field (cancelling an input method's composition, leaving the note). ⌘↩ answers from
-    /// the card's own note field but not while something is typed in the composer (`isTypingInComposer`).
-    static func resolve(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, isEditingText: Bool,
-                        isTypingInComposer: Bool = false) -> ApprovalShortcut? {
+    /// What a key press means for the card, or nil when it is not ours. `responderIsText` &c. describe the window's
+    /// first responder. Esc never counts while the user is editing text: it belongs to the field (cancelling an input
+    /// method's composition, leaving the note). ⌘↩ answers from the card's own note field but not while something is
+    /// typed in the composer (editing a field that is not the note).
+    static func resolve(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, responderIsText: Bool, hasText: Bool,
+                        hasMarkedText: Bool, noteFocused: Bool) -> ApprovalShortcut? {
         // Only the real modifiers count: caps lock, numeric pad and fn (set by arrows and F-keys) are ignored.
         let held = modifiers.intersection([.shift, .control, .option, .command, .help])
+        let editing = isEditing(responderIsText: responderIsText, hasText: hasText, hasMarkedText: hasMarkedText,
+                                noteFocused: noteFocused)
         switch keyCode {
         case returnKey, enterKey:
-            return held == .command && !isTypingInComposer ? .allow : nil
+            return held == .command && !(editing && !noteFocused) ? .allow : nil
         case escapeKey:
-            return held.isEmpty && !isEditingText ? .deny : nil
+            return held.isEmpty && !editing ? .deny : nil
         default:
             return nil
         }
-    }
-
-    /// `resolve` for a key pressed with `responderIsText` &c. describing the window's first responder: the reading every card
-    /// repeated (is a field being edited, is it the composer, then what the key means).
-    static func resolve(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, responderIsText: Bool, hasText: Bool,
-                        hasMarkedText: Bool, noteFocused: Bool) -> ApprovalShortcut? {
-        let editing = isEditing(responderIsText: responderIsText, hasText: hasText, hasMarkedText: hasMarkedText,
-                                noteFocused: noteFocused)
-        return resolve(keyCode: keyCode, modifiers: modifiers, isEditingText: editing,
-                       isTypingInComposer: isTypingInComposer(isEditing: editing, noteFocused: noteFocused))
     }
 
     // MARK: Feedback
@@ -56,9 +49,6 @@ enum ApprovalShortcut: Equatable {
     static func isEditing(responderIsText: Bool, hasText: Bool, hasMarkedText: Bool, noteFocused: Bool) -> Bool {
         noteFocused || (responderIsText && (hasText || hasMarkedText))
     }
-
-    /// Whether the editing is in the main composer: a text field is being edited and it is not the card's note.
-    static func isTypingInComposer(isEditing: Bool, noteFocused: Bool) -> Bool { isEditing && !noteFocused }
 }
 
 // MARK: The cards' shared wiring
