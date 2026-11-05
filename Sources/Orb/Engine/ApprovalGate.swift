@@ -82,7 +82,9 @@ extension ApprovalGate {
         show(card)
         let answer = await wait(for: card.id)
         guard answer.decision != .deny, !Task.isCancelled else { return .declined }
-        return await support.grant(asked)
+        let outcome = await support.grant(asked)
+        if case .failed(let why) = outcome { await support.grantFailed(card.id, why) }
+        return outcome
     }
 }
 

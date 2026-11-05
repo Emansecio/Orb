@@ -622,6 +622,7 @@ actor MemoryBank {
         if !keepingVersions { try? FileManager.default.removeItem(at: directory.appending(path: Self.versionsFolder(of: path))) }
         index?.run("DELETE FROM pages WHERE path = ?", [.text(path)])
         origins[path] = nil
+        mergeShortScan = nil
         return true
     }
 
@@ -652,6 +653,7 @@ actor MemoryBank {
             let present = Set(files.map(\.path))
             for path in known.keys where !present.contains(path) && !unreadable.contains(String(path.prefix { $0 != "/" })) {
                 index.run("DELETE FROM pages WHERE path = ?", [.text(path)])
+                mergeShortScan = nil
             }
         }
     }
@@ -840,6 +842,7 @@ actor MemoryBank {
     }
 
     private func upsert(_ page: MemoryPage, mtime: Double) {
+        mergeShortScan = nil // the candidates depend on origin and compaction, not on the page count alone
         origins[page.path] = (mtime, page.origin)
         let stored = index?.run("""
             INSERT INTO pages(path, kind, title, body, created, updated, compacted, mtime) VALUES (?, ?, ?, ?, ?, ?, ?, ?)

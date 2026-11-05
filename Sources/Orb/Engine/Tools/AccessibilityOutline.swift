@@ -281,7 +281,8 @@ enum UIOutlineBuilder {
         outline.lines = fitted.kept
         for (node, _) in ordered.prefix(fitted.kept.count) {
             // One IPC call per element: asked only for the listed ones, not for every node the walk kept.
-            if node.depth > 0, outline.failure == nil {
+            // Past the walk's deadline or after Parar, a hung app would cost the AX timeout once per element.
+            if node.depth > 0, outline.failure == nil, !AXWork.isCancelled, Date().timeIntervalSince(walk.started) < limits.seconds ?? 4 {
                 node.actionable = !clickActions.isDisjoint(with: node.element.actionNames())
             }
             outline.entries[node.id] = UISnapshot.Entry(rawRole: node.info.rawRole, label: node.info.identity, secure: node.info.secure,

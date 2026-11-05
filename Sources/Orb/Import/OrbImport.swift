@@ -61,6 +61,10 @@ struct OrbImport: Equatable, Sendable {
     var freeText = ""
     /// The marketplace page it was read from (`GrokMarketplace`); empty for everything else.
     var link = ""
+    /// Facts the reading left out because the preview lists at most `ImportLimits.listed` (a folder with long files).
+    var omittedFacts = 0
+    /// Warnings the preview shows as they are: files of a folder that were too large to read.
+    var notes: [String] = []
 
     var isEmpty: Bool { identity == nil && preferences.isEmpty && facts.isEmpty && procedures.isEmpty && skills.isEmpty }
 }
@@ -76,7 +80,8 @@ enum ImportLimits {
     /// What is listed in the preview (the rest is dropped when reading).
     static let listed = 60, listedSkills = 20
     static let skillInstructions = 4_000, skillSummary = 160
-    static let bytes = 1_000_000, fileBytes = 200_000
+    /// One file, chosen alone or inside a folder, and all the files of a folder together.
+    static let bytes = 1_000_000
 }
 
 /// What `OrbImport` writes, after the selection and the limits: the identity text, the memory pages and the skills.
@@ -90,6 +95,8 @@ struct ImportPlan: Equatable, Sendable {
     var identity = ""
     var pages: [Page] = []
     var skills: [ImportSkill] = []
+    /// Checked facts that did not fit in `ImportLimits.facts` and are not written.
+    var droppedFacts = 0
 
     var instructionCount: Int { identity.isEmpty ? 0 : 1 }
     var memoryCount: Int { pages.count }
@@ -117,12 +124,13 @@ extension OrbImport {
     /// facts too; facts stop at 60, procedures at 12 and skills at 5.
     func plan() -> ImportPlan {
         var plan = ImportPlan()
-        var preferences: [ImportPlan.Page] = [], facts: [ImportPlan.Page] = []
+        var preferences: [ImportPlan.Page] = [], facts: [ImportPlan.Page] = [], identityPages: [ImportPlan.Page] = []
         if let identity, identity.isOn {
             plan.identity = MemoryText.clip(identity.text, ImportLimits.identity)
             if identity.text.count > ImportLimits.identity {
                 let pieces = Self.pieces(of: identity.text)
-                facts += pieces.enumerated().map { index, piece in
+                // Own slots: a long identity must not take the places of the facts the person checked.
+                identityPages = pieces.enumerated().map { index, piece in
                     .init(kind: .fato, title: "Instruções completas de \(source)" + (pieces.count > 1 ? " (\(index + 1)/\(pieces.count))" : ""),
                           text: piece)
                 }
@@ -139,7 +147,8 @@ extension OrbImport {
                 facts.append(.init(kind: .fato, title: "", text: item.text))
             }
         }
-        plan.pages = preferences + facts.prefix(ImportLimits.facts)
+        plan.droppedFacts = max(0, facts.count - ImportLimits.facts)
+        plan.pages = preferences + identityPages + facts.prefix(ImportLimits.facts)
             + procedures.filter(\.isOn).prefix(ImportLimits.procedures).map { .init(kind: .procedimento, title: $0.title, text: $0.text) }
         plan.skills = Array(skills.filter(\.isOn).prefix(ImportLimits.skills))
         return plan

@@ -56,6 +56,8 @@ struct NewBotSheet: View {
     @State private var wizard: WizardRunner
     /// What the assistant said the Orb may use, carried over when the person switches to "Formulário" (the form has no switches for it).
     @State private var draftCapabilities: Set<Capability>?
+    /// `OrbDraft.revision` of the draft last carried to the form: a second trip with no new draft must not overwrite what was edited.
+    @State private var carriedRevision = 0
     // MARK: end MultiOrb (WP4)
 
     /// `height`: a fixed sheet height (review snapshots of a short window); by default it follows the window.
@@ -190,7 +192,7 @@ struct NewBotSheet: View {
     @ViewBuilder private var previewPane: some View {
         if creation == .assistant {
             WizardPreviewPane(draft: wizard.draft, look: orb, activity: wizard.activity, flashed: previewFlashed,
-                              onAdjust: passDraftToForm, onBack: wizard.backToChatting,
+                              onAdjust: passDraftToForm, onBack: wizard.backToChatting, canGoBack: wizard.canGoBackToChatting,
                               onDraw: { tab = .look }, onRandom: randomLook)
         } else {
             WizardPreviewPane(draft: formDraft, look: orb, emptyText: "Seu Orb aparece aqui conforme você preenche",
@@ -225,6 +227,9 @@ struct NewBotSheet: View {
          draft.instructions.isEmpty ? identity : draft.instructions)
     }
 
+    /// Whether the draft changed since it was last carried; the first trip always carries (revision 0 is "nothing carried yet").
+    static func carriesDraft(_ draft: OrbDraft, since carriedRevision: Int) -> Bool { draft.revision != carriedRevision }
+
     /// The mode the sheet keeps once opened: the person's choice, else the one it opened in. Without this, `creation` follows
     /// the connection check and swaps the form for the chat (or back) under the person's hands.
     static func pinnedMode(chosen: OrbCreationMode?, opened: OrbCreationMode) -> OrbCreationMode { chosen ?? opened }
@@ -232,10 +237,13 @@ struct NewBotSheet: View {
     private func passDraftToForm() {
         let draft = wizard.draft
         wizard.stopTalking()
-        (name, role, identity) = Self.carried(draft, name: name, role: role, identity: identity)
-        mode = draft.mode // (the look stays the one the person chose)
-        draftCapabilities = draft.capabilities
-        interview = false // the assistant did the interview
+        if Self.carriesDraft(draft, since: carriedRevision) {
+            carriedRevision = draft.revision
+            (name, role, identity) = Self.carried(draft, name: name, role: role, identity: identity)
+            mode = draft.mode // (the look stays the one the person chose)
+            draftCapabilities = draft.capabilities
+            interview = false // the assistant did the interview
+        }
         withAnimation(reduceMotion ? nil : Motion.content) { userMode = .form }
     }
     // MARK: end MultiOrb (WP4)

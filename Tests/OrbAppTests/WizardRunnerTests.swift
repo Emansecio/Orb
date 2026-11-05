@@ -112,6 +112,7 @@ private func drafting(_ json: String) -> [LLMEvent] {
         #expect(runner.hitLimit && botTexts(runner).last == WizardPrompt.closing)
         #expect(runner.draft.name == "Maia" && runner.draft.ready, "the final card shows what there is")
         #expect(!runner.canSend)
+        #expect(!runner.canGoBackToChatting, "the card must not offer a way back that leads nowhere")
     }
 
     @MainActor @Test func theThirtiethMessageClosesTheSession() async {

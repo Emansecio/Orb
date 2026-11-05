@@ -13,6 +13,8 @@ struct WizardPreviewPane: View {
     var emptyText = "Seu Orb aparece aqui conforme vocês conversam"
     let onAdjust: () -> Void
     let onBack: () -> Void
+    /// False at the conversation limit: "Voltar a conversar" would lead nowhere.
+    let canGoBack: Bool
     /// "Personalizar": the Aparência tab.
     let onDraw: () -> Void
     /// "Sortear": a new look, in place.
@@ -20,7 +22,7 @@ struct WizardPreviewPane: View {
 
     /// `flashed`: the parts washed at the start (a review snapshot of the moment a call changed them).
     init(draft: OrbDraft, look: OrbConfig, activity: OrbActivity = .idle, emptyText: String = "Seu Orb aparece aqui conforme vocês conversam",
-         flashed: Set<DraftField> = [], onAdjust: @escaping () -> Void = {}, onBack: @escaping () -> Void = {},
+         flashed: Set<DraftField> = [], onAdjust: @escaping () -> Void = {}, onBack: @escaping () -> Void = {}, canGoBack: Bool = true,
          onDraw: @escaping () -> Void, onRandom: @escaping () -> Void) {
         self.draft = draft
         self.look = look
@@ -28,6 +30,7 @@ struct WizardPreviewPane: View {
         self.emptyText = emptyText
         self.onAdjust = onAdjust
         self.onBack = onBack
+        self.canGoBack = canGoBack
         self.onDraw = onDraw
         self.onRandom = onRandom
         _flashed = State(initialValue: flashed)
@@ -83,7 +86,7 @@ struct WizardPreviewPane: View {
                     .accessibilityHidden(true)
             }
             if draft.ready {
-                WizardReadyCard(draft: draft, adjust: onAdjust, back: onBack)
+                WizardReadyCard(draft: draft, adjust: onAdjust, back: canGoBack ? onBack : nil)
                     .padding(.horizontal, 28)
                     .padding(.bottom, 16)
                     .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 14)))
@@ -317,7 +320,7 @@ struct WizardPreviewPane: View {
 struct WizardReadyCard: View {
     let draft: OrbDraft
     let adjust: () -> Void
-    let back: () -> Void
+    let back: (() -> Void)?
 
     var body: some View {
         // One left edge for the title, the line under it and the buttons: the card's inner padding.
@@ -344,9 +347,11 @@ struct WizardReadyCard: View {
                 Button("Ajustar", action: adjust)
                     .buttonStyle(SecondaryPillStyle())
                     .help("Leva o rascunho para o formulário, para mudar qualquer detalhe")
-                Button("Voltar a conversar", action: back)
-                    .buttonStyle(SecondaryPillStyle())
-                    .help("Continua a conversa com o assistente")
+                if let back {
+                    Button("Voltar a conversar", action: back)
+                        .buttonStyle(SecondaryPillStyle())
+                        .help("Continua a conversa com o assistente")
+                }
             }
         }
         .padding(14)

@@ -346,9 +346,12 @@ actor MCPManager {
         guard !refreshing.contains(id) else { refreshAgain.insert(id); return }
         refreshing.insert(id)
         defer { refreshing.remove(id) }
+        var current = connection
         repeat {
             refreshAgain.remove(id)
-            await refreshCatalog(id, from: connection)
+            // The server may have restarted during the wait: the new notifications come from its new connection.
+            if let now = entries[id]?.connection { current = now }
+            await refreshCatalog(id, from: current)
             guard refreshAgain.contains(id) else { return }
             do { try await Task.sleep(for: refreshInterval) } catch { return }
         } while refreshAgain.contains(id)

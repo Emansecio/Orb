@@ -143,6 +143,19 @@ import Testing
         #expect(model.bot(atlas.id)?.capabilities == [.browser] && model.bot(atlas.id)?.permissionMode == .ask)
     }
 
+    @Test @MainActor func aFolderGoneBeforeLiberarLeavesTheCardAsNotGranted() async throws {
+        let (model, atlas, _) = try setUp()
+        let card = try #require(await openCard(model, atlas))
+        try FileManager.default.removeItem(at: project)
+        model.decide(.once, approvalID: card.id, botID: atlas.id)
+        _ = await waitUntil("the card to say it was not granted") {
+            model.transcript(atlas.id).contains { item in
+                if case .approval(let request) = item.kind { request.id == card.id && request.decision == .deny && request.note != nil } else { false }
+            }
+        }
+        #expect(model.bot(atlas.id)?.capabilities == [.browser])
+    }
+
     @Test @MainActor func stoppingTheOrbCancelsTheCardAndGrantsNothing() async throws {
         let (model, atlas, _) = try setUp()
         let card = try #require(await openCard(model, atlas))
