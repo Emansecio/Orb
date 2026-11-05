@@ -267,12 +267,20 @@ final class DelegationHub: DelegationService {
                 startFolderRun(request, folder: folder)
                 return true
             }
-            let ready = startRun(request, conversation: Conversation(), text: OrbEnvelopeText.request(request.envelope),
+            let ready = startRun(request, conversation: interruptedRun(of: request), text: OrbEnvelopeText.request(request.envelope),
                                  origin: .orb(request.envelope), resuming: false)
             if ready { return true }
         }
         if queues[botID]?.isEmpty == true { queues[botID] = nil }
         return false
+    }
+
+    /// A request redone after the app closed (`resubmit`) goes on in the conversation the interrupted run saved instead of
+    /// overwriting `pedido-<id>.json` with an empty one, so the work already done stays in it.
+    private func interruptedRun(of request: DelegationRequest) -> Conversation {
+        guard let model, request.envelope.text.hasPrefix(Self.resumedPrefix) else { return Conversation() }
+        let read = model.store.readSideConversation(prefix: Store.pedidoPrefix, id: request.envelope.id, for: request.envelope.to.id)
+        return read.value?.closingInterruptedTurn(notice: BotSession.quitSideNotice) ?? Conversation()
     }
 
     /// A group turn opens with the text the group's runtime writes (the thread since the member last spoke, the board), asked
@@ -357,8 +365,8 @@ final class DelegationHub: DelegationService {
             }
             let body = OrbEnvelopeText.request(current.envelope)
             let text = work.map { body + "\n\n" + WorkFolders.memberNote($0, asked: true) } ?? body
-            if !self.startRun(current, conversation: Conversation(), text: text, origin: .orb(current.envelope), resuming: false,
-                              workFolder: work?.url) {
+            if !self.startRun(current, conversation: self.interruptedRun(of: current), text: text, origin: .orb(current.envelope),
+                              resuming: false, workFolder: work?.url) {
                 self.schedulePump(botID)
             }
         }
@@ -1139,7 +1147,10 @@ final class DelegationHub: DelegationService {
         guard let model else { return }
         // Every change of a request passes here: the journal forgets the ones that ended (answered, failed, stopped).
         if model.workJournal.tracksRequests {
-            model.workJournal.syncRequests(open: Set(requests.values.filter { Self.isOpen($0.state) }.map(\.id)))
+            // A reply still in an inbox is kept too: the inbox lives in memory only, so if the app closes before the asker
+            // takes it, the request is redone on reopening instead of the answer being lost.
+            let undelivered = inbox.values.flatMap { $0.compactMap(\.replyTo) }
+            model.workJournal.syncRequests(open: Set(requests.values.filter { Self.isOpen($0.state) }.map(\.id)).union(undelivered))
         }
         for id in Set(ids) {
             guard let live = model.liveBot(id) else { continue }

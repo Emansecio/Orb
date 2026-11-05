@@ -340,9 +340,28 @@ private final class Hooks: GroupTurnHooks {
         await waitUntil("the answer to wait for the asker's turn to end") { model.delegation.inbox[team.atlas.id]?.count == 1 }
         #expect(await team.log.count(by: "Atlas") == calls) // not woken: it is working
         #expect(!team.botTexts(team.atlas).contains("Voltei com a resposta."))
+        // The reply lives in memory only: until it is taken, the request stays in the journal so a quit does not lose it.
+        #expect(model.workJournal.entries.contains { $0.kind == .request })
         await busy.open()
         await team.settle()
         #expect(team.botTexts(team.atlas) == ["Pedi.", "Terminei a outra coisa.", "Voltei com a resposta."])
+        #expect(!model.workJournal.entries.contains { $0.kind == .request })
+    }
+
+    @Test func aRequestRedoneAfterTheAppClosedGoesOnInTheConversationItLeft() async throws {
+        let team = Team { seen in seen.who == "Pesquisador" ? say("Continuei.") : say("ok") }
+        defer { team.cleanUp() }
+        let model = team.model
+        let envelope = OrbEnvelope(kind: .ask, from: OrbRef(team.atlas), to: OrbRef(team.pesquisador), text: "Pesquise.")
+        let before = Conversation(items: [TranscriptItem(.bot(text: "Trabalho de antes.", isStreaming: false))],
+                                  messages: [.user("Pesquise."), ChatMessage(role: .assistant, content: "Trabalho de antes.")])
+        model.store.saveSideConversation(before, prefix: Store.pedidoPrefix, id: envelope.id, for: team.pesquisador.id)
+        #expect(model.delegation.resubmit(envelope))
+        await waitUntil("the redone request to end") { model.delegation.requests[envelope.id]?.state == .replied }
+        await team.settle()
+        let side = try #require(model.store.readSideConversation(prefix: Store.pedidoPrefix, id: envelope.id, for: team.pesquisador.id).value)
+        let texts = side.items.compactMap { item -> String? in if case .bot(let text, _) = item.kind { text } else { nil } }
+        #expect(texts.contains("Trabalho de antes.") && texts.contains("Continuei."))
     }
 
     @Test func aTargetThatAsksInTurnWaitsForItsChildrenAndResumesItsConversation() async throws {
