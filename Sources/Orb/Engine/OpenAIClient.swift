@@ -218,6 +218,8 @@ struct ChatStreamMapper: SSEMapper {
 /// Assembles streamed `delta.tool_calls` fragments: id/name come first, `arguments` arrive in pieces.
 struct ToolCallAccumulator {
     private var calls: [Int: ToolCallRequest] = [:]
+    // Drawn once per stream, so `requests` gives the same fallback ids every time it is read.
+    private let fallbackSalt = UUID().uuidString.prefix(6)
     private static let empty = ToolCallRequest(id: "", name: "", arguments: "")
 
     mutating func ingest(_ fragments: [JSONValue]) {
@@ -253,7 +255,7 @@ struct ToolCallAccumulator {
         calls.sorted { $0.key < $1.key }.compactMap { index, call in
             guard !call.name.isEmpty else { return nil }
             var call = call
-            if call.id.isEmpty { call.id = "call_\(index)" }
+            if call.id.isEmpty { call.id = "call_\(index)_\(fallbackSalt)" }
             return call
         }
     }

@@ -1030,6 +1030,31 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(activity.began.count == activity.ended)
     }
 
+    @Test @MainActor func theMacIsKeptAwakeWhileAnOrdinaryTurnRunsAndLetGoAtItsEnd() async throws {
+        let gate = TestGate()
+        let stub = StubModel(gate: gate)
+        let (model, bot, _) = setUp(stub)
+        let activity = FakeActivity()
+        model.activity = activity
+        model.syncActivities()
+        #expect(activity.open.isEmpty)
+
+        #expect(model.send("oi", to: bot.id, fromUser: true))
+        await waitForModelCalls(stub)
+        #expect(activity.open.map(\.level) == [.running])
+
+        // Stopped at an approval card it waits for you, not for the Mac.
+        model.setAwaitingApproval(true, of: bot.id)
+        #expect(activity.open.isEmpty)
+        model.setAwaitingApproval(false, of: bot.id)
+        #expect(activity.open.map(\.level) == [.running])
+
+        await gate.open()
+        await waitUntilIdle(model, bot.id)
+        #expect(activity.open.isEmpty)
+        #expect(activity.began.count == activity.ended)
+    }
+
     @Test @MainActor func aRoutineStoppedAtAnApprovalCardLetsTheMacSleep() async throws {
         let gate = TestGate()
         let stub = StubModel(gate: gate)

@@ -21,6 +21,24 @@ import Testing
         return names.filter { $0.hasPrefix(prefix) }.sorted().map { url.deletingLastPathComponent().appending(path: $0) }
     }
 
+    // MARK: Save recovery
+
+    @Test func aSmallFileWritingFineDoesNotEndTheFailureOfAnotherFile() {
+        let big = stateURL, small = root.appending(path: "rascunho.json")
+        SaveHealth.noteFailed(root, file: big)
+        #expect(!SaveHealth.noteWritten(root, file: small)) // never failed: says nothing about state.json
+        #expect(SaveHealth.noteWritten(root, file: big)) // the file that failed is the one that recovers
+        #expect(!SaveHealth.noteWritten(root, file: big)) // and only once
+    }
+
+    @Test func theFailureEndsOnlyWhenEveryFileThatFailedWroteAgain() {
+        let first = stateURL, second = conversationURL(UUID())
+        SaveHealth.noteFailed(root, file: first)
+        SaveHealth.noteFailed(root, file: second)
+        #expect(!SaveHealth.noteWritten(root, file: first))
+        #expect(SaveHealth.noteWritten(root, file: second))
+    }
+
     // MARK: Unreadable files
 
     @Test func unreadableStateIsKeptAsATimestampedCopy() throws {

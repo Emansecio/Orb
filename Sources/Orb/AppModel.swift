@@ -841,6 +841,7 @@ final class AppModel {
         live.setStatus(text)
         if live.isWorking != was {
             refreshPresence()
+            syncActivities()
             sessions[botID]?.transcript?.setLive(live.isWorking)
             // What ended during the turn was not told then; the strip no longer has it, so ask for it now.
             if !live.isWorking, jobsEndedWhileWorking[botID] != nil { Task { await showJobs(of: botID) } }
@@ -2481,8 +2482,11 @@ final class AppModel {
     /// the wake notification winning that race: it also holds back while the Mac is known to be asleep, and when the
     /// time since its last pass shows that it slept.
     func runDueRoutines(now: Date = .now) {
+        if let last = lastRoutinePass, now.timeIntervalSince(last) > Self.sleepGap {
+            wokeAt = max(wokeAt ?? now, now)
+            delegation.noteSleep(from: last, to: now) // before the sweep, so the sleep is not counted as waiting
+        }
         delegation.sweep(now: now)
-        if let last = lastRoutinePass, now.timeIntervalSince(last) > Self.sleepGap { wokeAt = max(wokeAt ?? now, now) }
         lastRoutinePass = now
         if let asleepSince {
             if now.timeIntervalSince(asleepSince) < Self.sleepHold { return }

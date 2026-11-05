@@ -699,14 +699,14 @@ struct Store: Sendable {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             guard let data = try content() else { return .skipped }
             try data.write(to: url, options: .atomic)
-            if SaveHealth.noteWritten(directory) { onSaveRecovered?() }
+            if SaveHealth.noteWritten(directory, file: url) { onSaveRecovered?() }
             return .wrote
         } catch {
             NSLog("Orb: não foi possível salvar \(name): \(error)")
             // The note beside a conversation and a connector's catalog are made again (from it, from the next start of
             // the server): not worth alarming anyone.
             if !name.hasSuffix(".meta.json"), url.deletingLastPathComponent().lastPathComponent != "conectores" {
-                SaveHealth.noteFailed(directory)
+                SaveHealth.noteFailed(directory, file: url)
                 onSaveFailure?(StoreNotice(message: "Não foi possível salvar “\(name)”: \(error.localizedDescription). "
                     + "As últimas mudanças podem não estar no disco.", file: url))
             }
@@ -715,15 +715,26 @@ struct Store: Sendable {
     }
 }
 
-/// Whether the last failure reported for a data folder has been followed by a write that worked (see `Store.onSaveRecovered`).
-/// By folder, because the usage log writes through its own copy of the store.
+/// Whether the files that failed to save in a data folder have all been written since (see `Store.onSaveRecovered`).
+/// By folder, because the usage log writes through its own copy of the store, and by file inside it: a small file that
+/// still fits on a full disk writing fine says nothing about `state.json` that keeps failing.
 enum SaveHealth {
     private static let lock = NSLock()
-    nonisolated(unsafe) private static var failing: Set<String> = []
+    nonisolated(unsafe) private static var failing: [String: Set<String>] = [:]
 
-    static func noteFailed(_ directory: URL) { lock.withLock { _ = failing.insert(FileKey.of(directory)) } }
-    /// True when this write is the first after a failure.
-    static func noteWritten(_ directory: URL) -> Bool { lock.withLock { failing.remove(FileKey.of(directory)) != nil } }
+    static func noteFailed(_ directory: URL, file: URL) {
+        lock.withLock { _ = failing[FileKey.of(directory), default: []].insert(FileKey.of(file)) }
+    }
+
+    /// True when this write is the one that clears the last failing file of the folder.
+    static func noteWritten(_ directory: URL, file: URL) -> Bool {
+        lock.withLock {
+            let key = FileKey.of(directory)
+            guard failing[key]?.remove(FileKey.of(file)) != nil, failing[key]?.isEmpty == true else { return false }
+            failing[key] = nil
+            return true
+        }
+    }
 }
 
 /// The data folders that must not be written to any more (see `Store.sealWrites`).

@@ -252,7 +252,8 @@ struct ResponsesStreamAssembler: AssemblingMapper {
             switch item["type"]?.string {
             case "function_call":
                 var call = calls[index] ?? ToolCallRequest(id: "", name: "", arguments: "")
-                call.id = item["call_id"]?.string ?? item["id"]?.string ?? "call_\(index)"
+                call.id = item["call_id"]?.string ?? item["id"]?.string
+                    ?? (call.id.isEmpty ? ToolCallRequest.fallbackID(index: index) : call.id)
                 call.name = item["name"]?.string ?? call.name
                 if let arguments = item["arguments"]?.string, !arguments.isEmpty { call.arguments = arguments }
                 calls[index] = call

@@ -36,10 +36,13 @@ extension AppModel {
     /// card opening or closing). A routine stopped at a card waits for you, not for the Mac: it does not hold it awake.
     func syncActivities() {
         let running = isResetting ? nil : sessions.values.first { $0.routineID != nil && !needsYou($0.id) }?.routineID
-        if let running, runningActivity == nil {
-            let name = routines.first { $0.id == running }?.name ?? ""
-            runningActivity = activity.begin(.running, reason: "Rotina “\(name)” em andamento")
-        } else if running == nil, let token = runningActivity {
+        // Any other turn (a chat, a delegated request, a group's round: all run as a turn of some Orb) holds the Mac awake
+        // the same way, so a long task left running while you step away is not cut short by idle sleep.
+        let working = !isResetting && workingIDs.contains { !needsYou($0) }
+        if running != nil || working, runningActivity == nil {
+            let name = running.flatMap { id in routines.first { $0.id == id }?.name }
+            runningActivity = activity.begin(.running, reason: name.map { "Rotina “\($0)” em andamento" } ?? "Orb trabalhando")
+        } else if running == nil, !working, let token = runningActivity {
             runningActivity = nil
             activity.end(token)
         }

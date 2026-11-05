@@ -86,6 +86,20 @@ struct RetryTests {
         #expect((longest ?? 0) > Retry.maxBackoff)
     }
 
+    @Test func noNetworkIsWaitedOutForAboutTwoMinutesWhileOtherFailuresKeepTheirLimit() async {
+        let offline = URLError(.notConnectedToInternet)
+        #expect(Retry.attemptLimit(for: offline) == Retry.offlineAttempts)
+        #expect(Retry.attemptLimit(for: LLMError.network(code: URLError.dnsLookupFailed.rawValue, message: "")) == Retry.offlineAttempts)
+        #expect(Retry.attemptLimit(for: overloaded) == Retry.standardAttempts)
+        #expect(Retry.attemptLimit(for: URLError(.timedOut)) == Retry.slowFailureAttempts)
+        let outcome = await run(failing: Array(repeating: offline, count: Retry.offlineAttempts - 1), maxAttempts: 99)
+        #expect((try? outcome.result.get()) == "ok")
+        #expect(outcome.sleeps.count == Retry.offlineAttempts - 1)
+        #expect(outcome.sleeps.reduce(0, +) >= 100) // with the longest jitter
+        // A caller that caps the tries still wins.
+        #expect(Retry.attemptLimit(for: offline, maxAttempts: 2) == 2)
+    }
+
     @Test func honorsRetryAfterFromTheProvider() async {
         let limited = LLMError.http(status: 429, message: "slow", retryAfter: 9)
         let outcome = await run(failing: [limited, limited], jitter: 0)
