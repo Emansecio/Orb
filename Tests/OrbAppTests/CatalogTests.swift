@@ -24,6 +24,14 @@ struct CatalogTests {
         #expect(parsed.body == "# PDF Guide\nBody here.")
     }
 
+    @Test func indentedDescriptionAfterAnEmptyKeyIsKeptAndNestedNameDoesNotOverride() {
+        let text = "---\ndescription:\n  Texto longo: com dois-pontos\nname: x\nmetadata:\n  name: outro\n---\nCorpo"
+        let parsed = SkillCatalog.parse(text)
+        #expect(parsed.fields["description"] == "Texto longo: com dois-pontos")
+        #expect(parsed.fields["name"] == "x")
+        #expect(parsed.body == "Corpo")
+    }
+
     @Test func markdownWithoutFrontmatterIsAllBody() {
         let parsed = SkillCatalog.parse("# Só instruções\n")
         #expect(parsed.fields.isEmpty)

@@ -475,6 +475,20 @@ private struct HangsAfterText: LLMClient {
         })
     }
 
+    @Test @MainActor func aBellLeftBeforeTheWatchArmedIsTakenOnceWhenItArms() async throws {
+        let script = CallScript([said("ok")])
+        let (model, botID, _) = routineSetUp(script)
+        let file = try wakeFolder(of: model).appending(path: "Resumo da manhã" + AppModel.wakeSuffix)
+        try "ficou de ontem".write(to: file, atomically: true, encoding: .utf8)
+        model.startWakeWatch()
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+        await model.routineStarted()
+        await waitUntilIdle(model, botID)
+        #expect(await script.calls.count == 1)
+        model.startWakeWatch() // nothing left: arming again rings nothing
+        #expect(model.routines[0].runs.count == 1)
+    }
+
     @Test @MainActor func aSwitchedOffRoutineIgnoresItsBell() async throws {
         let script = CallScript([said("oi")])
         let (model, _, _) = routineSetUp(script)
