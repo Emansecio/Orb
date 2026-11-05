@@ -53,7 +53,6 @@ struct WizardChatView: View {
                 .padding(.vertical, Spacing.l)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .scrollIndicators(.automatic)
             .motion(Motion.enter, value: runner.messages.count)
             .motion(Motion.content, value: runner.isThinking)
             .motion(Motion.content, value: runner.failure)
@@ -150,8 +149,7 @@ struct WizardChatView: View {
 
     private func submit() {
         guard canSendNow else { return }
-        let sent = text
-        if runner.send(sent) { text = "" }
+        if runner.send(text) { text = "" }
     }
 }
 

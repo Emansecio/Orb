@@ -115,7 +115,7 @@ struct ExchangeSheet: View {
                 }
                 .buttonStyle(SecondaryPillStyle())
             } else if let answered = parties.last, onOpenWork != nil || work != nil {
-                Button("Ver o trabalho \(Self.ofThe(answered.name))") { if let onOpenWork { onOpenWork() } else { showsWork = true } }
+                Button("Ver o trabalho \(PortugueseArticle.article(for: answered.name) == "a" ? "da" : "do") \(answered.name)") { if let onOpenWork { onOpenWork() } else { showsWork = true } }
                     .buttonStyle(SecondaryPillStyle())
             }
             Button(Self.backLabel(parties, viewing: viewing)) { dismiss() }
@@ -133,17 +133,7 @@ struct ExchangeSheet: View {
     /// no party to name.
     static func backLabel(_ parties: [OrbRef], viewing: UUID? = nil) -> String {
         let back = parties.first { $0.id == viewing } ?? parties.first
-        return back.map { "Voltar \(toThe($0.name))" } ?? "Voltar"
-    }
-
-    /// "do Pesquisador", "da Lia": the name with its article after "de".
-    static func ofThe(_ name: String) -> String {
-        "\(PortugueseArticle.article(for: name) == "a" ? "da" : "do") \(name)"
-    }
-
-    /// "ao Atlas", "à Lia": the name with its article after "a".
-    static func toThe(_ name: String) -> String {
-        "\(PortugueseArticle.contraction(for: name)) \(name)"
+        return back.map { "Voltar \(PortugueseArticle.contraction(for: $0.name)) \($0.name)" } ?? "Voltar"
     }
 
     /// The message with a placeholder for an empty text, so its bubble is not a blank one.

@@ -508,14 +508,13 @@ struct OrbProposalCard: View {
     // MARK: Answered
 
     private var answeredCard: some View {
-        let shown = proposal
-        let title = (wasCreated ? "Criado: " : "Não criado: ") + shown.name
+        let title = (wasCreated ? "Criado: " : "Não criado: ") + proposal.name
         return VStack(alignment: .leading, spacing: 6) {
             Button {
                 withAnimation(Motion.adapted(Motion.content, reduceMotion: reduceMotion)) { isOpen.toggle() }
             } label: {
                 HStack(spacing: 8) {
-                    BotAvatar(orb: shown.orb, size: 18, animated: false)
+                    BotAvatar(orb: proposal.orb, size: 18, animated: false)
                     Image(systemName: wasCreated ? "checkmark.circle.fill" : "xmark.circle")
                         .font(Typography.small)
                         .foregroundStyle(wasCreated ? Palette.ok : Palette.danger)
@@ -542,7 +541,7 @@ struct OrbProposalCard: View {
             }
             .buttonStyle(.plain)
             .help(isOpen ? "Esconder o pedido" : "Ver o pedido")
-            .accessibilityLabel("\(title). \(creator) propôs, \(shown.role)")
+            .accessibilityLabel("\(title). \(creator) propôs, \(proposal.role)")
             .accessibilityValue(isOpen ? "expandido" : "recolhido")
             .accessibilityHint("Mostra o que foi proposto")
 

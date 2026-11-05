@@ -6,7 +6,7 @@ import QuartzCore
 /// When one orb's next frame is due on a clock that ticks at the fastest orb's rate: an orb that wants 10 fps
 /// on a 30 Hz clock takes every third tick.
 struct OrbFrameClock {
-    private(set) var nextDue = 0.0
+    private var nextDue = 0.0
     private var lastFrame = 0.0
 
     /// A tick can land a hair before the due time (vsync jitter); that still counts.
@@ -165,7 +165,6 @@ final class OrbReturnWatch {
     private let orbs = NSHashTable<OrbAnimationView>.weakObjects()
     private var timer: Timer?
 
-    var count: Int { orbs.allObjects.count }
     var isTimerOn: Bool { timer != nil }
     func contains(_ orb: OrbAnimationView) -> Bool { orbs.contains(orb) }
 

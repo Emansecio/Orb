@@ -40,7 +40,6 @@ struct MentionPicker: View {
     let looks: [BotLook]
     let selected: Int
     let choose: (String) -> Void
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -73,7 +72,6 @@ struct MentionPicker: View {
         .frame(width: 260, alignment: .leading)
         .card(radius: Radius.card, fill: Palette.surface)
         .shadow(color: Shadow.popover, radius: 12, y: 4)
-        .transition(.adapted(.rise, reduceMotion: reduceMotion))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Chamar um Orb")
     }

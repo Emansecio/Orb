@@ -27,7 +27,7 @@ enum OrbInk {
         var lift = 0.0
         while lift <= 1.0 {
             let mixed = mix(core, toward: 0xFFFFFF, by: lift)
-            if contrast(mixed, background) >= minimumContrast { return mixed }
+            if BrandMark.contrast(mixed, background) >= minimumContrast { return mixed }
             lift += 0.02
         }
         return 0xFFFFFF
@@ -40,21 +40,6 @@ enum OrbInk {
             return UInt32((from + (to - from) * amount).rounded())
         }
         return channel(16) << 16 | channel(8) << 8 | channel(0)
-    }
-
-    /// The WCAG relative luminance of an sRGB color.
-    static func luminance(_ hex: UInt32) -> Double {
-        func linear(_ shift: UInt32) -> Double {
-            let value = Double((hex >> shift) & 0xFF) / 255
-            return value <= 0.03928 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
-        }
-        return 0.2126 * linear(16) + 0.7152 * linear(8) + 0.0722 * linear(0)
-    }
-
-    /// The WCAG contrast ratio between two colors (1 ... 21).
-    static func contrast(_ a: UInt32, _ b: UInt32) -> Double {
-        let (light, dark) = (max(luminance(a), luminance(b)), min(luminance(a), luminance(b)))
-        return (light + 0.05) / (dark + 0.05)
     }
 }
 

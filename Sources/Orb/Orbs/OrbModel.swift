@@ -271,7 +271,6 @@ struct OrbPalette: Identifiable, Hashable, Sendable {
     var hair: UInt32?
 
     var core: Color { Color(hex: hexes[1]) }
-    var glow: Color { Color(hex: hexes[3]) }
     var deep: UInt32 { hexes[2] }
     var isLight: Bool { OrbCatalog.lightPalettes.contains(id) }
     /// Contrast of white on the body's core color (WCAG ratio, 1...21).
@@ -450,11 +449,6 @@ enum OrbImages {
         for layer in layers { cache.removeObject(forKey: key(layer.path, side: bitmapSide(for: pixels), tint: layer.tint)) }
     }
 
-    /// Whether every layer is decoded for a drawing `pixels` wide.
-    static func isCached(_ layers: [OrbLayer], pixels: CGFloat) -> Bool {
-        layers.allSatisfy { cached($0.path, pixels: pixels, tint: $0.tint) != nil }
-    }
-
     /// Bitmap with the multiply tint baked in (Core Animation layers can't multiply cheaply). Decodes on the
     /// calling thread when it is not cached: not for the main thread outside tests and snapshots.
     static func cgImage(_ relativePath: String, pixels: CGFloat, tint: UInt32?) -> CGImage? {
@@ -540,9 +534,7 @@ enum OrbImages {
     /// window and the popover find them in the cache. Utility priority and in order of need (the selected
     /// Orb first); nothing waits for it.
     static func prewarmResting(_ configs: [OrbConfig], selected: OrbConfig?, scale: CGFloat) {
-        let resting = { (config: OrbConfig) in
-            config.layers(eyes: OrbActivity.idle.eyes, mouth: OrbActivity.idle.mouth(base: config.mouth), brows: OrbActivity.idle.brows)
-        }
+        let resting = { (config: OrbConfig) in config.layers(for: .idle) }
         let pixels = { (size: CGFloat) in OrbGeometry.imageSide(for: size, scale: scale) * scale }
         let ordered = (selected.map { [$0] } ?? []) + configs.filter { $0 != selected }
         for size in launchSizes.all { for config in ordered { prewarm(resting(config), pixels: pixels(size)) } }
@@ -658,6 +650,11 @@ enum OrbGeometry {
 }
 
 extension OrbConfig {
+    /// The layers an activity shows: its eyes, mouth and brows over the look's own.
+    func layers(for activity: OrbActivity) -> [OrbLayer] {
+        layers(eyes: activity.eyes, mouth: activity.mouth(base: mouth), brows: activity.brows)
+    }
+
     /// Layers back-to-front, with activity overrides for eyes/mouth/brows applied.
     func layers(eyes eyesOverride: String? = nil, mouth mouthOverride: String? = nil,
                 brows browsOverride: String? = nil) -> [OrbLayer] {
@@ -719,7 +716,6 @@ extension OrbConfig {
         case "laco": 0xFF4F8B
         case "fones": 0xE9E6F5
         case "chifres": 0xE0303F
-        case "flor": 0xFFFFFF
         case "orelhas-gato":
             switch autoColors {
             case .original: palette.deep

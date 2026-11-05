@@ -23,9 +23,7 @@ struct EventLineView: View {
                         .foregroundStyle(Palette.muted)
                         .lineLimit(2)
                         .multilineTextAlignment(centered ? .center : .leading)
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(Palette.faint)
+                    EventChevron(name: "chevron.right")
                 }
                 .frame(maxWidth: .infinity, alignment: centered ? .center : .leading)
                 .contentShape(.rect)
@@ -96,9 +94,7 @@ struct EventLineView: View {
                 .multilineTextAlignment(centered ? .center : .leading)
                 .contentTransition(.opacity)
             if opens {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(Palette.faint)
+                EventChevron(name: "chevron.right")
                     .accessibilityHidden(true)
             }
         }
@@ -161,9 +157,7 @@ struct EventsSummary: View {
                 .multilineTextAlignment(.leading)
                 .contentTransition(.opacity)
             // The chevron turns its sign rather than turning: nothing rotates in a row that folds under Reduce Motion.
-            Image(systemName: unfolded ? "chevron.down" : "chevron.right")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(Palette.faint)
+            EventChevron(name: unfolded ? "chevron.down" : "chevron.right")
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("event-line-folded")
@@ -192,9 +186,7 @@ struct RoutineRunLine: View {
                 HStack(spacing: 6) {
                     Text(title ?? event.headline).foregroundStyle(Palette.muted)
                     if let chevron {
-                        Image(systemName: chevron)
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(Palette.faint)
+                        EventChevron(name: chevron)
                     }
                 }
                 if showsNote, let note = event.note, !note.isEmpty {
@@ -261,5 +253,16 @@ struct RoutineRunMessage: View {
             MarkdownChunk(source: run?.report ?? run?.summary ?? event.note ?? event.sentence).equatable()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// The small chevron at the end of the lines that open or fold something.
+private struct EventChevron: View {
+    let name: String
+
+    var body: some View {
+        Image(systemName: name)
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(Palette.faint)
     }
 }

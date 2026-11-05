@@ -226,8 +226,6 @@ private struct OrbChoiceCard: View {
                     .help("Tornar \(look.name) o orquestrador")
                     .accessibilityLabel("Tornar \(look.name) orquestrador")
                 }
-            }
-            if isChosen {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 16))
                     .symbolRenderingMode(.palette)

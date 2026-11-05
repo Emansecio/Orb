@@ -123,7 +123,7 @@ struct OrbFrame: View {
 
     /// The activity's expression; a talking Orb shows an open mouth shape.
     private var layers: [OrbLayer] {
-        let layers = config.layers(eyes: activity.eyes, mouth: activity.mouth(base: config.mouth), brows: activity.brows)
+        let layers = config.layers(for: activity)
         guard activity == .speaking, let open = config.visemeLayers()?[.open] else { return layers }
         return layers.map { $0.kind == .mouth ? open : $0 }
     }
@@ -139,7 +139,7 @@ struct OrbFrame: View {
             .frame(width: size, height: size)
             .overlay {
                 Canvas(rendersAsynchronously: true) { context, _ in
-                    OrbPainter(config: config, activity: activity, layers: drawn, size: size, side: side, scale: scale,
+                    OrbPainter(activity: activity, layers: drawn, size: size, side: side, scale: scale,
                                pose: pose, showsBubble: showsBubble ?? (size >= OrbGeometry.bubbleBox), decodedBatches: batches)
                         .draw(in: &context)
                 }
@@ -166,7 +166,6 @@ struct OrbFrame: View {
 }
 
 private struct OrbPainter {
-    let config: OrbConfig
     let activity: OrbActivity
     let layers: [OrbFrame.Drawn]
     let size: CGFloat
@@ -283,12 +282,6 @@ struct BotAvatar: View {
 }
 
 extension BotAvatar {
-    init(bot: Bot, size: CGFloat = 28, activity: OrbActivity = .idle, animated: Bool = true, paused: Bool = false,
-         poke: Int = 0, interactive: Bool = false) {
-        self.init(orb: bot.orb, size: size, activity: activity, animated: animated, paused: paused, poke: poke,
-                  interactive: interactive)
-    }
-
     /// The Orb as it is now: what it does, how much it celebrates and the cue it was given.
     init(live: BotLive, size: CGFloat, paused: Bool = false) {
         self.init(orb: live.look.orb, size: size, activity: live.activity, celebration: live.celebration, paused: paused,

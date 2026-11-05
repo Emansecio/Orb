@@ -7,10 +7,9 @@ import SwiftUI
 struct MiniOrb: View {
     @Environment(AppModel.self) private var model
     let botID: UUID
-    var size: CGFloat = 16
 
     var body: some View {
-        BotAvatar(orb: model.live(botID).look.orb, size: size, animated: false)
+        BotAvatar(orb: model.live(botID).look.orb, size: 16, animated: false)
             .accessibilityHidden(true)
     }
 }

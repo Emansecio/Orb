@@ -75,9 +75,8 @@ enum OrbActivity: String, CaseIterable, Identifiable, Sendable {
 
     var brows: String? {
         switch self {
-        case .waiting: "preocupadas"
+        case .waiting, .error: "preocupadas"
         case .typing: "retas"
-        case .error: "preocupadas"
         default: nil
         }
     }
@@ -231,9 +230,8 @@ enum OrbActivity: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// `happy`: seconds of the getting-ready squash, and seconds of hopping after it until the biggest celebration has
-    /// calmed down (`OrbCelebration.calm` has each one's).
-    static let happyReady = 0.3, happyCalm = OrbCelebration.big.calm
+    /// `happy`: seconds of the getting-ready squash (`OrbCelebration.calm` has the seconds of hopping after it, per level).
+    static let happyReady = 0.3
 
     /// `happy` as a burst of joy that calms down: a squash to get ready (long enough to show through the blend into the
     /// activity), hops each lower than the last (one only, for a light celebration), then the idle float with a contented

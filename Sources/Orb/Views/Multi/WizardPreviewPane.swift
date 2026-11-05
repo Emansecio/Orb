@@ -57,7 +57,7 @@ struct WizardPreviewPane: View {
                     if hasDraft {
                         identity
                         // What it will get, from the start (the form's own defaults until the assistant says otherwise).
-                        chips(leading: false)
+                        chips()
                         if !draft.instructions.isEmpty { howItWorks.transition(.adapted(.unfold, reduceMotion: reduceMotion)) }
                     } else {
                         Text("\(emptyText)")
@@ -66,7 +66,7 @@ struct WizardPreviewPane: View {
                             .multilineTextAlignment(.center)
                             .padding(.top, 6)
                             .transition(.opacity)
-                        chips(leading: false)
+                        chips()
                     }
                 }
                 .padding(.horizontal, Spacing.sheetEdge)
@@ -245,10 +245,9 @@ struct WizardPreviewPane: View {
         return items
     }
 
-    /// The chips sit centered, under the centered name and role (or the line of copy before there is a draft); `leading`
-    /// is kept for a layout that puts them against the boxes' left edge.
-    private func chips(leading: Bool) -> some View {
-        WizardWrap(spacing: Spacing.xs + Spacing.hairline, alignment: leading ? .leading : .center) {
+    /// The chips sit centered, under the centered name and role (or the line of copy before there is a draft).
+    private func chips() -> some View {
+        WizardWrap(spacing: Spacing.xs + Spacing.hairline, alignment: .center) {
             ForEach(Array(chipItems.enumerated()), id: \.element.id) { index, item in
                 Label(item.title, systemImage: item.symbol)
                     .font(.system(size: 11, weight: .medium))
@@ -263,7 +262,7 @@ struct WizardPreviewPane: View {
         }
         .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: chipItems.map(\.id))
         .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: flashed)
-        .frame(maxWidth: .infinity, alignment: leading ? .leading : .center)
+        .frame(maxWidth: .infinity)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Pode usar: " + chipItems.map(\.title).joined(separator: ", "))
     }

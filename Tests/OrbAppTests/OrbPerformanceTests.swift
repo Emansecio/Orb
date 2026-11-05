@@ -98,9 +98,9 @@ struct OrbPerformanceTests {
         // A size no other test uses, so the cache starts cold.
         let layers = [OrbLayer(kind: .eyes, path: "eyes/pontos", tint: nil), OrbLayer(kind: .hair, path: "hair/topete", tint: 0x336699)]
         #expect(OrbImages.cached("eyes/pontos", pixels: 143, tint: nil) == nil)
-        #expect(!OrbImages.isCached(layers, pixels: 143))
+        #expect(OrbImages.cachedImages(layers, pixels: 143) == nil)
         await OrbImages.load(layers, pixels: 143)
-        #expect(OrbImages.isCached(layers, pixels: 143))
+        #expect(OrbImages.cachedImages(layers, pixels: 143) != nil)
         #expect(OrbImages.cached("hair/topete", pixels: 143, tint: 0x336699)?.width == 143)
     }
 
@@ -171,7 +171,7 @@ struct OrbPerformanceTests {
         let layer = OrbLayer(kind: .eyes, path: "eyes/pontos", tint: nil)
         await OrbImages.load([layer], pixels: 155)
         await OrbImages.load([layer], pixels: 155)
-        #expect(OrbImages.isCached([layer], pixels: 155))
+        #expect(OrbImages.cachedImages([layer], pixels: 155) != nil)
     }
 
     @Test func retintingReusesTheDecodedBitmap() {

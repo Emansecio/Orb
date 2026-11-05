@@ -117,7 +117,7 @@ struct NewGroupRulesTests {
     @Test func everyOrbNameReadsOnTheCanvas() {
         for palette in OrbCatalog.shared.palettes {
             let tint = OrbInk.readableHex(of: palette.hexes[1])
-            #expect(OrbInk.contrast(tint, OrbInk.canvas) >= OrbInk.minimumContrast, "\(palette.id)")
+            #expect(BrandMark.contrast(tint, OrbInk.canvas) >= OrbInk.minimumContrast, "\(palette.id)")
         }
         // A color that already reads is kept as it is; the lift only goes toward white.
         #expect(OrbInk.readableHex(of: 0xFFFFFF) == 0xFFFFFF)
