@@ -48,12 +48,24 @@ extension AppModel {
         return chat != session.workingChatID && !(chat == session.chatID && session.turnTask != nil && session.parkedChat == nil)
     }
 
+    /// The Claude Code session ids of the given conversations (nil is the Orb's first one), read from their files before those
+    /// go: the pool of idle processes is keyed by that id, and only the file of a chat that is not on show still holds it.
+    func gatewaySessionIDs(of botID: UUID, chats: [UUID?]) -> [String] {
+        chats.compactMap { store.readConversation(botID, chat: $0).value?.gatewaySessionID }
+    }
+
     /// Deletes one of the Orb's conversations with its file (what it gave the memory stays there). The one on show gives
     /// way to the newest one left first.
     func deleteChat(_ chat: UUID, of botID: UUID) {
         guard canDeleteChat(chat, of: botID), var chats = live(botID).chats else { return }
         chats.remove(chat)
         let session = session(botID)
+        // Its Claude Code process, if one is idle, would keep the deleted conversation alive (and its session file) until it expires.
+        if ClaudePipeIdlePool.shared.count > 0 {
+            let ids = chat == session.chatID ? [session.conversation?.gatewaySessionID].compactMap { $0 }
+                                             : gatewaySessionIDs(of: botID, chats: [chat])
+            for id in ids { ClaudePipeIdlePool.shared.stop(id) }
+        }
         if chat == session.chatID {
             // Read now, not off the main thread: the one deleted is written as it leaves, before its file goes.
             let next = chats.active

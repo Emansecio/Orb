@@ -425,6 +425,18 @@ struct OrbChatsListTests {
         #expect(userTexts(next, orb) == ["na nova"])
     }
 
+    @Test @MainActor func theClaudeCodeSessionOfAChatNotOnShowIsFoundInItsFile() async throws {
+        let (model, orb) = setUp(Model())
+        let other = UUID()
+        var chat = Conversation()
+        chat.gatewaySessionID = "session-of-other"
+        model.store.save(chat, for: orb, chat: other)
+        model.store.flush()
+        #expect(model.gatewaySessionIDs(of: orb, chats: [other]) == ["session-of-other"])
+        // A chat without a session, or without a file, names none.
+        #expect(model.gatewaySessionIDs(of: orb, chats: [UUID()]) == [])
+    }
+
     @Test @MainActor func deletingTheConversationOnShowOpensTheNewestLeftAndDropsTheList() async throws {
         let client = Model()
         let (model, orb) = setUp(client)

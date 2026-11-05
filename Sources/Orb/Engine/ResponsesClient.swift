@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Client for the OpenAI Responses API (`POST {base}/responses`), used by GPT/Grok-class models that
 /// providers only serve there. Stateless (`store: false`): the full history is sent every turn.
@@ -53,25 +54,33 @@ struct ResponsesClient: LLMClient {
 
     func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
         let provider = baseURL.host() ?? ""
-        // Built once: the same value is encoded for the request and fingerprinted for the cache probe.
-        let body = Self.requestBody(
-            model: model, messages: messages, tools: tools, toolsAsInputItem: toolsAsInputItem,
-            promptCacheKey: sendsCacheKey ? conversationID : nil, provider: provider, toolChoice: toolChoice,
-            maxOutputTokens: maxOutputTokens, effort: reasoningEffort)
+        let probing = sendsCacheKey && CacheProbe.folder != nil
+        // Built inside the transport's off-actor `body` closure (like the other clients), not here: this runs on the
+        // shared engine actor, and encoding plus fingerprinting a long history would delay every other Orb's step.
+        // The fingerprint reuses that one build and is read back when the stream finishes.
+        let fingerprintBox = OSAllocatedUnfairLock<JSONValue?>(initialState: nil)
+        let (cacheKey, cacheID, asItem, maxTokens, effort) = (sendsCacheKey ? conversationID : nil, conversationID,
+                                                              toolsAsInputItem, maxOutputTokens, reasoningEffort)
         let events = ProviderTransport.stream(session: session, credentials: credentials, body: {
-            try WireEncoder.encode(body, trailing: Self.trailingKeys)
+            let body = Self.requestBody(
+                model: model, messages: messages, tools: tools, toolsAsInputItem: asItem,
+                promptCacheKey: cacheKey, provider: provider, toolChoice: toolChoice,
+                maxOutputTokens: maxTokens, effort: effort)
+            if probing { fingerprintBox.withLock { $0 = CacheProbe.fingerprint(of: body) } }
+            return try WireEncoder.encode(body, trailing: Self.trailingKeys)
         }, request: {
             ProviderTransport.authorizedRequest(baseURL.appending(path: "responses"), apiKey: $0, headers: extraHeaders)
         }, mapper: ResponsesStreamAssembler(provider: provider, model: model))
-        guard sendsCacheKey, CacheProbe.folder != nil else { return events }
-        let fingerprint = CacheProbe.fingerprint(of: body), cacheKey = conversationID
+        guard probing else { return events }
         return AsyncThrowingStream { continuation in
             let task = Task {
                 do {
                     for try await event in events {
                         if case .finished(let stop, let usage) = event {
-                            CacheProbe.record(fingerprint: fingerprint, model: model, conversation: cacheKey,
-                                              stop: stop, usage: usage)
+                            if let fingerprint = fingerprintBox.withLock({ $0 }) {
+                                CacheProbe.record(fingerprint: fingerprint, model: model, conversation: cacheID,
+                                                  stop: stop, usage: usage)
+                            }
                         }
                         continuation.yield(event)
                     }

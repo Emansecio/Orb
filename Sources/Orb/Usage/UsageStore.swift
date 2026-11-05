@@ -95,6 +95,7 @@ final class UsageRecorder {
         self.calendar = calendar
         // The per-request cache diagnosis lines live next to the usage rows (`CacheProbe` stays off until here).
         CacheProbe.folder = store.usageFolder
+        if let folder = CacheProbe.folder { Task.detached(priority: .utility) { CacheProbe.prune(in: folder) } }
     }
 
     var hasPending: Bool { !pending.isEmpty }

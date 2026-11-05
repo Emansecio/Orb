@@ -13,6 +13,20 @@ struct CacheProbeTests {
         #expect(CacheProbe.hash("abc") == "e71fa2190541574b")
     }
 
+    @Test func pruneKeepsOnlyThisAndThePreviousMonth() throws {
+        let folder = TempFolder("OrbCacheProbe")
+        let now = Date(timeIntervalSince1970: 1_793_000_000) // 2026-10-26
+        let kept = [CacheProbe.file(in: folder.url, at: now),
+                    CacheProbe.file(in: folder.url, at: Calendar.current.date(byAdding: .month, value: -1, to: now)!),
+                    folder.url.appending(path: "2026-10.jsonl")]
+        let old = CacheProbe.file(in: folder.url, at: Calendar.current.date(byAdding: .month, value: -2, to: now)!)
+        try FileManager.default.createDirectory(at: folder.url, withIntermediateDirectories: true)
+        for url in kept + [old] { try Data("x".utf8).write(to: url) }
+        CacheProbe.prune(in: folder.url, now: now)
+        #expect(kept.allSatisfy { FileManager.default.fileExists(atPath: $0.path) })
+        #expect(!FileManager.default.fileExists(atPath: old.path))
+    }
+
     @Test func theFingerprintTagsEachSegmentWithoutItsText() {
         let body = JSONValue.object([
             "instructions": .string("sistema"),

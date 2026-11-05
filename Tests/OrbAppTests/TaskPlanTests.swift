@@ -237,6 +237,18 @@ struct TaskPlanConversationTests {
         #expect(chat.activePlan != nil)
     }
 
+    @Test func aSuccessfulClearDropsThePlanWhenAbsorbedAndReplayed() {
+        var chat = Conversation()
+        let clear = ChatMessage(role: .assistant, content: "", toolCalls: [
+            ToolCallRequest(id: "c3", name: TaskPlanTool.name, arguments: #"{"action": "clear"}"#)])
+        for message in plannedTask().dropLast(2) + [clear] { chat.absorb(message) }
+        #expect(chat.taskPlan != nil)
+        chat.absorb(.tool("c3", "The plan was cleared."))
+        #expect(chat.taskPlan == nil)
+        #expect(chat.activePlan == nil)
+        #expect(TaskPlan.replay(chat.messages) == nil)
+    }
+
     @Test func aCallThatFailedOrNeverRanLeavesThePlanAlone() {
         var chat = Conversation()
         let messages = plannedTask()

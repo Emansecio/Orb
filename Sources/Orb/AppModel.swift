@@ -1345,7 +1345,13 @@ final class AppModel {
         }
         leaveGroups(botID, name: name) // MultiOrb (WP5): before the Orb is gone, so the groups can say who left
         bots.removeAll { $0.id == botID }
-        if let id = session.conversation?.gatewaySessionID { ClaudePipeIdlePool.shared.stop(id) } // its Claude Code process, if one is idle
+        // Its Claude Code processes, if any is idle: one per conversation, not only the one on show.
+        if ClaudePipeIdlePool.shared.count > 0 {
+            let others = (live(botID).chats?.list.map { Optional($0.id) } ?? []) + [nil]
+            var ids = gatewaySessionIDs(of: botID, chats: others)
+            if let id = session.conversation?.gatewaySessionID { ids.append(id) }
+            for id in ids { ClaudePipeIdlePool.shared.stop(id) }
+        }
         session.close()
         sessions[botID] = nil // with its transcript: whatever still holds the session writes to nothing anyone shows
         store.deleteConversation(botID)

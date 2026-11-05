@@ -204,7 +204,7 @@ struct TaskPlan: Codable, Sendable, Equatable {
         for message in messages {
             for call in message.toolCalls where call.name == TaskPlanTool.name { calls[call.id] = call }
             guard let id = message.toolCallID, let call = calls[id], let arguments = ranArguments(of: call, result: message) else { continue }
-            plan = (try? applying(arguments, to: plan, now: now)) ?? plan
+            plan = applied(arguments, to: plan, now: now)
         }
         return plan
     }
@@ -214,7 +214,13 @@ struct TaskPlan: Codable, Sendable, Equatable {
         guard let id = message.toolCallID,
               let call = history.reversed().lazy.compactMap({ $0.toolCalls.first { $0.id == id } }).first,
               call.name == TaskPlanTool.name, let arguments = ranArguments(of: call, result: message) else { return plan }
-        return (try? applying(arguments, to: plan, now: now)) ?? plan
+        return applied(arguments, to: plan, now: now)
+    }
+
+    /// `applying` returns nil for a successful `clear`; `try?` would flatten that nil into the error case and keep the
+    /// old plan, so the two are told apart here: a call that throws leaves the plan as it was.
+    private static func applied(_ arguments: JSONValue, to plan: TaskPlan?, now: Date) -> TaskPlan? {
+        do { return try applying(arguments, to: plan, now: now) } catch { return plan }
     }
 
     /// Whether `messages` hold a `task_plan` call: a cut that drops one changes the plan.

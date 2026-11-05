@@ -62,6 +62,18 @@ enum CacheProbe {
         Task.detached(priority: .utility) { append(line, to: file) }
     }
 
+    /// Deletes probe files older than the previous month: the probe is always on, so without this the files
+    /// pile up (one line per request, a hash per input item) for a diagnosis nobody reads after a few weeks.
+    static func prune(in folder: URL, now: Date = .now, calendar: Calendar = .current) {
+        let previous = calendar.date(byAdding: .month, value: -1, to: now) ?? now
+        let oldest = file(in: folder, at: previous, calendar: calendar).lastPathComponent
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+        // Month ids are zero-padded `YYYY-MM`, so names compare in date order.
+        for name in names where name.hasPrefix("cache-probe-") && name.hasSuffix(".jsonl") && name < oldest {
+            try? FileManager.default.removeItem(at: folder.appending(path: name))
+        }
+    }
+
     /// `uso/cache-probe-2026-10.jsonl`, like the month files of the usage rows.
     static func file(in folder: URL, at date: Date, calendar: Calendar = .current) -> URL {
         folder.appending(path: "cache-probe-\(Store.usageMonthID(of: date, calendar: calendar)).jsonl")
