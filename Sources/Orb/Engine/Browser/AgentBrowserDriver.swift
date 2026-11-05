@@ -146,8 +146,9 @@ struct AgentBrowserConfig: Sendable, Equatable {
         if let proxy { environment[Self.proxyVariable] = proxy }
         // The live screen's frames (docs/TELA-AO-VIVO.md): the daemon reads these when it starts, and the stream takes no width or
         // quality from a client (measured on 0.39: `?maxWidth=`, `?width=` and `?quality=` change nothing), so they are set here
-        // for every client. At 480 px a frame is 6-36 KB instead of 50 KB and Chrome spends about a quarter of the CPU.
-        environment["AGENT_BROWSER_STREAM_MAX_WIDTH"] = "480"
+        // for every client. 960 px keeps text readable in the large window (`LiveScreenWindow`); measured on an animated page at
+        // 10 fps, Chrome used about 27 % of a core against 16 % at 480 px, and a still page costs nothing (frames come only on change).
+        environment["AGENT_BROWSER_STREAM_MAX_WIDTH"] = "960"
         environment["AGENT_BROWSER_STREAM_QUALITY"] = "60"
         return environment
     }

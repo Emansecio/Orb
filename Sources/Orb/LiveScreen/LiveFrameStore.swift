@@ -50,6 +50,9 @@ final class LiveFrameStore {
     private(set) var isProtected = false
     /// Hidden by the person ("Privado"), for this run of the app.
     var isPrivate = false
+    /// The person took the browser over in the live screen's window: their clicks and keys go to the page, the Orb's tools wait,
+    /// and the window shows the page even when it is protected (the thumbnail never does).
+    private(set) var isUserInControl = false
 
     @ObservationIgnored private(set) var lastFrame: LiveFrame?
     @ObservationIgnored private var frameObservers: [UUID: (LiveFrame) -> Void] = [:]
@@ -85,11 +88,18 @@ final class LiveFrameStore {
     func setProtected(_ isProtected: Bool) {
         guard self.isProtected != isProtected else { return }
         self.isProtected = isProtected
-        if isProtected { lastFrame = nil }
+        if isProtected, !isUserInControl { lastFrame = nil }
+    }
+
+    func setUserInControl(_ controls: Bool) {
+        guard isUserInControl != controls else { return }
+        isUserInControl = controls
+        // Handed back on a protected page: what the person saw is not kept for anyone else.
+        if !controls, isProtected { lastFrame = nil }
     }
 
     func deliver(_ frame: LiveFrame) {
-        guard !isProtected else { return }
+        guard !isProtected || isUserInControl else { return }
         lastFrame = frame
         for observer in frameObservers.values { observer(frame) }
     }

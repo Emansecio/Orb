@@ -500,6 +500,8 @@ final class BrowserHub: Sendable {
     /// Whether the page each Orb last looked at (opened, snapshot, read) asked for the person or had a secret field; a flag, never
     /// the page's text.
     private let sensitivePages = OSAllocatedUnfairLock<Set<UUID>>(initialState: [])
+    /// Whether the person has taken an Orb's browser over in the live screen's window: its tools wait meanwhile.
+    let control = BrowserControl()
 
     init(profilesDirectory: URL?,
          locate: (@Sendable () async -> BrowserStatus)? = nil,

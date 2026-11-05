@@ -26,7 +26,7 @@ de cinco agentes; mock em `docs/mocks/tela-ao-vivo.html`.
 **Etapa 1 — Ver.** Cartão ao vivo no chat, faixa não, Assumir não. Estados: ao vivo, precisa de você (o cartão de
 passagem de hoje, com a nova cara; "Assumir" ainda abre a janela pelo `browse_show`), protegido, erro, terminou. Ampliar
 abre a aba "Tela" no Inspetor (só ver). Toggle em Ajustes → "Mostrar a tela do navegador no chat" (ligado).
-**Etapa 2 — Assumir pela tela.** Na visão ampliada, clique e teclado vão ao Chrome pelo WebSocket; a página não recarrega.
+**Etapa 2 — Assumir pela tela (feita, ver 7).** Na janela ampliada, clique e teclado vão ao Chrome pelo WebSocket; a página não recarrega.
 `browse_show` (janela de verdade) fica de reserva: "Abrir em uma janela" para passkey, captcha que barra clique simulado.
 **Etapa 3 — Faixa** de uma linha acima do compositor quando o cartão sai da tela (mesmo stream, sem segunda conexão).
 
@@ -90,15 +90,30 @@ O WebSocket do agent-browser é local (127.0.0.1), porta efêmera, **sem token**
 ver a página e mandar entrada. É o mesmo nível do CDP que o Chrome já abre. Aceito e documentado; o Orb só conecta com o
 cartão visível e não divulga a porta. Pedir token ao upstream se o agent-browser oferecer depois.
 
-## 7. Etapa 2 em detalhe (Assumir pela tela)
+## 7. Etapa 2 em detalhe (Assumir pela tela) — feita em 2026-11-05
 
-- Trava por sessão: em "Você no controle" o motor recusa `browse_*` do Orb ("o usuário está no controle") na entrada da
-  ferramenta; a ação em curso termina antes.
-- Clique dentro do quadro dá o foco do teclado à página (contorno azul, compositor com placeholder "O teclado está na
-  página"); ⌘ fica com o app; sair: Terminei, clique fora do quadro ou ⌘⎋.
-- Coordenadas: `x_viewport = x_imagem × viewportWidth / larguraDaImagem` (+ rolagem do `metadata`).
-- Teclado: `UCKeyTranslate` para respeitar ABNT2; colar vira `input_keyboard` com o texto.
-- Terminei → o Orb recebe o texto de hoje do `browse_show` ("tire um browse_snapshot novo").
+Decidido com o usuário: a visão ampliada é uma **janela própria** (`LiveScreenWindow`, `WindowGroup` por Orb), não a aba
+do Inspetor, que tem no máximo 420 pt. A aba Tela continua para "Ver última tela".
+
+- Abrir: clique na miniatura ou "Ampliar" no cartão. A janela mostra a página inteira (`resizeAspect`), sem cortar.
+- Assumir: clique na página (esse clique não vai à página, para não apertar nada por engano) ou o botão "Assumir", com a
+  página ao vivo ou protegida. Devolver: "Devolver ao Orb", no cartão ou na janela, ou fechar a janela.
+- Trava: `BrowserControl` (no `BrowserHub`). Enquanto a pessoa controla, toda ferramenta `browse_*` espera na entrada
+  (`BrowseSupport.session`), assim como o `web_search` pelo navegador e o `browse_proxy`. Parar encerra a espera. A
+  ferramenta que esperou não age sobre refs velhas: devolve ao modelo `BrowserControl.handedBack` ("tire um
+  browse_snapshot novo").
+- Entrada: `input_mouse` e `input_keyboard` no mesmo WebSocket do stream (`LiveOutbox`). São as mensagens do painel do
+  próprio agent-browser, conferidas num navegador real em 0.39.1: clique, letra, acento, Backspace, roda e Tab.
+  Coordenadas no viewport, sem somar a rolagem: `x = (ponto − borda da imagem) / largura mostrada × viewportWidth`.
+- Teclado: o texto vem de `NSEvent.characters`, que já aplica o layout (ABNT2, ç, letras com acento). Teclas com nome vão
+  por `keyCode`, e ⌘ fica com o app. ⌘V digita um caractere por tecla, com quebra de linha como Enter e no máximo 20.000
+  caracteres: o stream recusa texto longo numa tecla só e o evento `char` (medido).
+- Privacidade: com a pessoa no controle, a página protegida aparece só na janela. A miniatura fica opaca ("Na janela"),
+  e o quadro não vira "última tela". Ao devolver, o quadro é solto.
+- Resolução: o stream passou de 480 para 960 px, para o texto ficar legível na janela. Medido numa página animada a
+  10 qps: Chrome com ~27 % de um núcleo, contra ~16 % a 480 px. Página parada não custa nada. Vale para navegadores
+  abertos depois da mudança.
+- No "Precisa de você" (login pedido pelo Orb) continua a janela real do `browse_show`, com Terminei e Cancelar.
 
 ## 8. Fora de escopo
 

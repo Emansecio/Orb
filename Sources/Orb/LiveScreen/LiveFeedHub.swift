@@ -24,6 +24,7 @@ final class LiveFeedHub {
         let token: UUID
         let task: Task<Void, Never>
         let inbox: LiveInbox
+        let outbox: LiveOutbox
     }
 
     private struct LastScreen {
@@ -132,6 +133,7 @@ final class LiveFeedHub {
 
     /// The Orb was deleted: its stream and store go.
     func forget(_ botID: UUID) {
+        giveBackControl(botID)
         let wasStreaming = connection?.botID == botID
         if wasStreaming { stopConnection() }
         graceTasks.removeValue(forKey: botID)?.cancel()
@@ -186,6 +188,38 @@ final class LiveFeedHub {
         let entry = lastScreens.remove(at: index)
         lastScreens.append(entry)
         return entry.jpeg
+    }
+
+    // MARK: The person at the wheel
+
+    /// The person takes the Orb's browser over from the live screen's window: the Orb's browser tools wait (`BrowserControl`),
+    /// and the window shows the page and sends it what they click and type (`send`).
+    func takeControl(_ botID: UUID) {
+        let store = store(botID)
+        guard !store.isUserInControl else { return }
+        store.setUserInControl(true)
+        source.setUserControl(true, botID: botID)
+        let wasDropping = protection(botID).dropsFrames
+        _ = protection(botID).setUserControls(true)
+        // A protected page had its frames thrown away: open the stream anew so its replayed frame shows the page now.
+        if wasDropping, connection?.botID == botID { startConnection(botID) }
+    }
+
+    /// Back to the Orb (the button, the window closed, the Orb deleted): its waiting tools go on and look at the page again.
+    func giveBackControl(_ botID: UUID) {
+        guard let store = stores[botID], store.isUserInControl else { return }
+        _ = protection(botID).setUserControls(false)
+        if protection(botID).isProtected { newestJPEG[botID] = nil }
+        store.setUserInControl(false)
+        source.setUserControl(false, botID: botID)
+    }
+
+    /// One message of the person's input (`LiveInput`) to the page, only while they have the browser and its stream is the one
+    /// open. Sent as it comes, never kept or logged; false when there is no connection to send it on.
+    @discardableResult
+    func send(_ message: String, to botID: UUID) -> Bool {
+        guard stores[botID]?.isUserInControl == true, let connection, connection.botID == botID else { return false }
+        return connection.outbox.send(message)
     }
 
     // MARK: Protected pages
@@ -252,10 +286,11 @@ final class LiveFeedHub {
             },
             frame: { [weak self] decoded in self?.streamFrame(decoded, botID: botID, token: token) },
             protectionChanged: { [weak self] in self?.applyProtection(botID) })
+        let outbox = LiveOutbox()
         let runner = LiveStreamRunner(botID: botID, source: source, transport: transport,
-                                      clock: clock, protection: shield, inbox: inbox, decoder: decoder, sink: sink)
+                                      clock: clock, protection: shield, inbox: inbox, decoder: decoder, sink: sink, outbox: outbox)
         let task = Task.detached(priority: .userInitiated) { await runner.run() }
-        connection = Connection(botID: botID, token: token, task: task, inbox: inbox)
+        connection = Connection(botID: botID, token: token, task: task, inbox: inbox, outbox: outbox)
         updatePointerHandler()
         applyProtection(botID)   // an already protected Orb opens with its frame down
     }
@@ -264,6 +299,7 @@ final class LiveFeedHub {
     private func stopConnection() {
         guard let connection else { return }
         connection.inbox.close()
+        connection.outbox.detach()
         connection.task.cancel()
         self.connection = nil
         updatePointerHandler()
@@ -280,10 +316,12 @@ final class LiveFeedHub {
     }
 
     private func streamFrame(_ decoded: LiveDecodedFrame, botID: UUID, token: UUID) {
-        guard connection?.token == token, protections[botID]?.isProtected != true, let store = stores[botID] else { return }
+        let shield = protections[botID]
+        guard connection?.token == token, shield?.dropsFrames != true, let store = stores[botID] else { return }
         framesProcessed += 1
         store.deliver(decoded.frame)
-        if usesOpen.contains(botID) { newestJPEG[botID] = decoded.jpeg }
+        // A protected page the person sees while they have the browser is never kept as a last screen.
+        if usesOpen.contains(botID), shield?.isProtected != true { newestJPEG[botID] = decoded.jpeg }
     }
 
     // MARK: The Orb's pointer

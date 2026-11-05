@@ -20,6 +20,9 @@ enum BrowseSupport {
         guard context.browser.drivesABrowser, let hub = context.browser.hub, let botID = context.botID else {
             throw ToolError("The Orb's browser is not available here. Use web_fetch to read a page and web_search to search.")
         }
+        // The person has the browser (the live screen's window): wait for it back, then look again rather than act on refs
+        // of a page they may have changed.
+        if await hub.control.waitWhileHeld(botID) { throw ToolError(BrowserControl.handedBack) }
         return try await hub.session(botID: botID, mode: context.browser.mode, scope: context.browser.scope)
     }
 

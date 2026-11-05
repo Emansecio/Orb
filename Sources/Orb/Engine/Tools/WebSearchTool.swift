@@ -388,6 +388,8 @@ struct WebSearchTool: AgentTool {
             provider = .duckduckgo
         }
         if context.browser.drivesABrowser, let hub = context.browser.hub, let botID = context.botID {
+            // The person has the browser (the live screen's window): the search waits for it back (it has no refs to go stale).
+            _ = await hub.control.waitWhileHeld(botID)
             let browser = try await hub.session(botID: botID, mode: context.browser.mode)
             return try await Self.searchInBrowser(request, provider: provider, session: browser, note: note, http: session)
         }

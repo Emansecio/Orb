@@ -259,7 +259,7 @@ struct AgentBrowserDriverTests {
 
     @Test func theStreamIsAskedForSmallFramesWhenTheDaemonStarts() {
         let environment = AgentBrowserConfig(executable: "/x", session: "orb-a").extraEnvironment
-        #expect(environment["AGENT_BROWSER_STREAM_MAX_WIDTH"] == "480")
+        #expect(environment["AGENT_BROWSER_STREAM_MAX_WIDTH"] == "960")
         #expect(environment["AGENT_BROWSER_STREAM_QUALITY"] == "60")
     }
 

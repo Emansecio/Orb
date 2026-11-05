@@ -12,6 +12,8 @@ final class LiveScreenLayerView: NSView {
     private let store: LiveFrameStore
     private let botID: UUID
     private let wide: Bool
+    /// The picture is shown whole (the window), not cropped to fill (the card).
+    private let fits: Bool
 
     private let pageLayer = CALayer()
     private let cursorLayer = CALayer()
@@ -55,6 +57,15 @@ final class LiveScreenLayerView: NSView {
     var pointerColor: NSColor {
         didSet { if pointerColor != oldValue { paintPointer() } }
     }
+    /// The person has the browser (the window only): clicks, the wheel and keys go to the page.
+    var isInteractive = false {
+        didSet {
+            guard isInteractive != oldValue else { return }
+            if !isInteractive, window?.firstResponder === self { window?.makeFirstResponder(nil) }
+            updateTrackingAreas()
+            if let shown { apply(shown) }
+        }
+    }
 
     /// For tests: a window that is never on screen answers "visible" (nil: the real answer).
     var visibilityForTests: Bool?
@@ -68,16 +79,17 @@ final class LiveScreenLayerView: NSView {
 
     static let dimmedOpacity: Float = 0.45
 
-    init(hub: LiveFeedHub, botID: UUID, wide: Bool, pointerColor: NSColor) {
+    init(hub: LiveFeedHub, botID: UUID, wide: Bool, fits: Bool = false, pointerColor: NSColor) {
         self.hub = hub
         self.store = hub.store(botID)
         self.botID = botID
         self.wide = wide
+        self.fits = fits
         self.pointerColor = pointerColor
         super.init(frame: .zero)
         wantsLayer = true
         layer?.masksToBounds = true
-        pageLayer.contentsGravity = .resizeAspectFill
+        pageLayer.contentsGravity = fits ? .resizeAspect : .resizeAspectFill
         pageLayer.masksToBounds = true
         layer?.addSublayer(pageLayer)
         buildPointer()
@@ -88,7 +100,8 @@ final class LiveScreenLayerView: NSView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    // A picture to look at lets every click through to the card or the window around it; the page the person drives takes them.
+    override func hitTest(_ point: NSPoint) -> NSView? { isInteractive ? super.hitTest(point) : nil }
 
     // MARK: Pointer layers
 
@@ -152,7 +165,8 @@ final class LiveScreenLayerView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         pageLayer.contents = (isBlurred && !canBlur) ? nil : frame.image
-        pageLayer.opacity = frame.isStale || isDimmed ? Self.dimmedOpacity : 1
+        // The replayed frame is dimmed until a new one comes, except for the person driving: it is the page they are using.
+        pageLayer.opacity = (frame.isStale && !isInteractive) || isDimmed ? Self.dimmedOpacity : 1
         CATransaction.commit()
     }
 
@@ -191,7 +205,7 @@ final class LiveScreenLayerView: NSView {
         guard showsPointer, showsPage, !isBlurred, let shown, bounds.width > 0,
               let top = LiveCursor.point(of: pointer.rect, viewport: shown.viewport, scroll: shown.scroll,
                                          imageSize: CGSize(width: shown.image.width, height: shown.image.height),
-                                         layerSize: bounds.size) else { return }
+                                         layerSize: bounds.size, fits: fits) else { return }
         let target = CGPoint(x: top.x, y: bounds.height - top.y)
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         let from = cursorLayer.presentation()?.position ?? cursorLayer.position
@@ -284,6 +298,8 @@ final class LiveScreenLayerView: NSView {
     }
 
     private var pointerToken: UUID?
+    /// When the last hover went to the page (`mouseMoved`), so they go at a steady pace.
+    var lastMoveSent: TimeInterval = 0
 
     private func unregister() {
         if let frameToken { store.removeObserver(frameToken) }
@@ -359,6 +375,99 @@ final class LiveScreenLayerView: NSView {
     }
 }
 
+// MARK: - The person's input
+
+extension LiveScreenLayerView {
+    override var acceptsFirstResponder: Bool { isInteractive }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { isInteractive }
+
+    /// Where an event is on the page, in its CSS pixels; nil off the picture or before the first one.
+    private func pagePoint(of event: NSEvent) -> CGPoint? {
+        guard let shown else { return nil }
+        let local = convert(event.locationInWindow, from: nil)
+        return LiveInput.pagePoint(CGPoint(x: local.x, y: bounds.height - local.y), layerSize: bounds.size,
+                                   imageSize: CGSize(width: shown.image.width, height: shown.image.height), viewport: shown.viewport)
+    }
+
+    private func sendMouse(_ kind: LiveInput.MouseEvent, _ event: NSEvent, button: LiveInput.MouseButton, clickCount: Int = 0) {
+        guard isInteractive, let point = pagePoint(of: event) else { return }
+        hub.send(LiveInput.mouse(kind, at: point, button: button, clickCount: clickCount, modifiers: event.modifierFlags), to: botID)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard isInteractive else { return super.mouseDown(with: event) }
+        window?.makeFirstResponder(self)
+        sendMouse(.pressed, event, button: .left, clickCount: event.clickCount)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard isInteractive else { return super.mouseUp(with: event) }
+        sendMouse(.released, event, button: .left, clickCount: event.clickCount)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard isInteractive else { return super.mouseDragged(with: event) }
+        sendMouse(.moved, event, button: .left)
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        guard isInteractive else { return super.rightMouseDown(with: event) }
+        window?.makeFirstResponder(self)
+        sendMouse(.pressed, event, button: .right, clickCount: event.clickCount)
+    }
+
+    override func rightMouseUp(with event: NSEvent) {
+        guard isInteractive else { return super.rightMouseUp(with: event) }
+        sendMouse(.released, event, button: .right, clickCount: event.clickCount)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        guard isInteractive else { return super.mouseMoved(with: event) }
+        // Hovering opens menus and shows tips on the page; at most about 30 moves a second go out.
+        let now = event.timestamp
+        guard now - lastMoveSent >= 1.0 / 30 else { return }
+        lastMoveSent = now
+        sendMouse(.moved, event, button: .none)
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        guard isInteractive, let shown, let point = pagePoint(of: event) else { return super.scrollWheel(with: event) }
+        let perPoint = LiveInput.pagePixelsPerPoint(layerSize: bounds.size, imageSize: CGSize(width: shown.image.width, height: shown.image.height),
+                                                    viewport: shown.viewport)
+        let delta = LiveInput.wheelDelta(scrollingDeltaX: event.scrollingDeltaX, scrollingDeltaY: event.scrollingDeltaY,
+                                         precise: event.hasPreciseScrollingDeltas, pixelsPerPoint: perPoint)
+        guard delta.dx != 0 || delta.dy != 0 else { return }
+        hub.send(LiveInput.mouse(.wheel, at: point, button: .none, modifiers: event.modifierFlags, delta: delta), to: botID)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        guard isInteractive,
+              let message = LiveInput.key(down: true, keyCode: event.keyCode, characters: event.characters, modifiers: event.modifierFlags)
+        else { return super.keyDown(with: event) }
+        hub.send(message, to: botID)
+    }
+
+    override func keyUp(with event: NSEvent) {
+        guard isInteractive,
+              let message = LiveInput.key(down: false, keyCode: event.keyCode, characters: event.characters, modifiers: event.modifierFlags)
+        else { return super.keyUp(with: event) }
+        hub.send(message, to: botID)
+    }
+
+    /// ⌘V (Editar → Colar) while the page has the keyboard: the text goes in whole.
+    @objc func paste(_ sender: Any?) {
+        guard isInteractive, let text = NSPasteboard.general.string(forType: .string) else { return }
+        for message in LiveInput.text(text) { hub.send(message, to: botID) }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas where area.owner === self { removeTrackingArea(area) }
+        guard isInteractive else { return }
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect], owner: self))
+    }
+}
+
 extension Motion {
     /// `Motion.fade` in seconds, for the layers (Core Animation takes a duration, not an `Animation`).
     static let fadeDuration: CFTimeInterval = 0.15
@@ -369,6 +478,10 @@ struct LiveScreenSurface: NSViewRepresentable {
     let hub: LiveFeedHub
     let botID: UUID
     var wide = false
+    /// Shown whole, not cropped (the window).
+    var fits = false
+    /// The person has the browser: input goes to the page (the window only).
+    var isInteractive = false
     var showsPage = true
     var isBlurred = false
     var isDimmed = false
@@ -376,7 +489,7 @@ struct LiveScreenSurface: NSViewRepresentable {
     var pointerColor: NSColor
 
     func makeNSView(context: Context) -> LiveScreenLayerView {
-        let view = LiveScreenLayerView(hub: hub, botID: botID, wide: wide, pointerColor: pointerColor)
+        let view = LiveScreenLayerView(hub: hub, botID: botID, wide: wide, fits: fits, pointerColor: pointerColor)
         configure(view)
         return view
     }
@@ -391,5 +504,6 @@ struct LiveScreenSurface: NSViewRepresentable {
         view.isBlurred = isBlurred
         view.isDimmed = isDimmed
         view.showsPointer = showsPointer
+        view.isInteractive = isInteractive
     }
 }

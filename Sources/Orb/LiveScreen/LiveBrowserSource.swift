@@ -20,6 +20,10 @@ struct BrowserHubLiveSource: LiveBrowserSource {
     func setPointerHandler(_ handler: (@Sendable (UUID, LivePointer) -> Void)?, only botID: UUID?) {
         browsers.setPointerHandler(handler, only: botID)
     }
+
+    func setUserControl(_ held: Bool, botID: UUID) {
+        if held { browsers.control.take(botID) } else { browsers.control.giveBack(botID) }
+    }
 }
 
 /// The real transport: a `URLSessionWebSocketTask` to the stream on 127.0.0.1. An ephemeral session per connection, so nothing
@@ -75,5 +79,10 @@ final class URLSessionLiveSocket: LiveSocket, @unchecked Sendable {
     func close() {
         task.cancel(with: .goingAway, reason: nil)
         session.invalidateAndCancel()
+    }
+
+    func write(_ text: String) {
+        // The task keeps the order of what is sent; a send after closing fails, and is let go.
+        task.send(.string(text)) { _ in }
     }
 }

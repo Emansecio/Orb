@@ -205,7 +205,7 @@ struct AgentBrowserSessionGuardTests {
         let environment = config().environment(base: shell)
         #expect(environment["AGENT_BROWSER_PROFILE"] == nil && environment["AGENT_BROWSER_CONFIG"] == nil)
         #expect(environment["AGENT_BROWSER_IDLE_TIMEOUT_MS"] == "1800000", "what the app sets stays")
-        #expect(environment["AGENT_BROWSER_STREAM_MAX_WIDTH"] == "480" && environment["AGENT_BROWSER_STREAM_QUALITY"] == "60",
+        #expect(environment["AGENT_BROWSER_STREAM_MAX_WIDTH"] == "960" && environment["AGENT_BROWSER_STREAM_QUALITY"] == "60",
                 "the live screen's frame size is the app's, not the shell's")
         #expect(environment["HTTPS_PROXY"] == "http://proxy:3128")
     }

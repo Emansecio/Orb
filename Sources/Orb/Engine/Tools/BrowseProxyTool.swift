@@ -51,6 +51,8 @@ struct BrowseProxyTool: BrowseTool {
     /// Reopens the browser with the new proxy and reads the address from the web; with a proxy that does not work, goes back to the
     /// one it had and says so. Every page is opened and read under the browser's lock, in this conversation's tab.
     private func apply(_ proxy: String?, replacing old: String?, hub: BrowserHub, botID: UUID, context: ToolContext) async throws -> String {
+        // The person has the browser (the live screen's window): it is not relaunched under them.
+        _ = await hub.control.waitWhileHeld(botID)
         let scope = context.browser.scope, mode = context.browser.mode
         let (returnTo, others) = await Self.openPages(hub: hub, botID: botID, mode: mode, scope: scope)
         hub.setProxy(proxy, botID: botID)

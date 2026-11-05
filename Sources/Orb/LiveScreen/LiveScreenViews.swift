@@ -24,7 +24,7 @@ struct LiveScreenRow: View {
 }
 
 /// The state's word, with a breathing dot while the page is live: the same chip on the card and on the tab.
-private struct LiveChip: View {
+struct LiveChip: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let chip: String
     let state: LiveCardState
@@ -36,7 +36,8 @@ private struct LiveChip: View {
             }
             Text(chip).font(.system(size: 11, weight: .semibold))
         }
-        .foregroundStyle(state == .needsYou ? Palette.warn : state.pulses ? Palette.ok : Palette.faint)
+        .foregroundStyle(state == .needsYou ? Palette.warn : state == .youControl ? Palette.accentText
+                         : state.pulses ? Palette.ok : Palette.faint)
     }
 }
 
@@ -46,6 +47,7 @@ private struct LiveChip: View {
 /// what the Orb does (caption) and the buttons.
 private struct LiveScreenCard: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.openWindow) private var openWindow
     let view: BrowserViewItem
     let botID: UUID
 
@@ -57,7 +59,7 @@ private struct LiveScreenCard: View {
         // The Orb waits for a hand-off: the card answers it, in the place of the permission card (see `TranscriptRow`).
         let handoff = model.pendingHandoff(of: botID)
         let state = LiveCardState.of(outcome: view.outcome, phase: store.phase, isProtected: store.isProtected,
-                                     isPrivate: store.isPrivate, handoff: handoff != nil)
+                                     isPrivate: store.isPrivate, handoff: handoff != nil, userControls: store.isUserInControl)
         let work = live.shownWork
         let host = LiveScreenText.host(of: store.url) ?? (view.host.isEmpty ? nil : view.host)
         let caption = LiveScreenText.caption(for: state, work: work?.headline, handoffPage: handoff?.command,
@@ -190,6 +192,10 @@ private struct LiveScreenCard: View {
             .buttonStyle(PrimaryPillStyle())
             .help("\(Tip.handoffDone) (\(AppShortcut.commandReturn.label))")
             .accessibilityHint("Atalho: ⌘↩")
+        case .giveBack:
+            Button(short ? "Devolver" : "Devolver ao Orb") { model.liveScreens.giveBackControl(botID) }
+                .buttonStyle(PrimaryPillStyle()).help(Tip.giveBackBrowser)
+                .accessibilityLabel("Devolver ao Orb")
         case .cancel:
             Button { if let handoff { model.decide(.deny, approvalID: handoff.id, botID: botID) } } label: {
                 HStack(spacing: 6) {
@@ -205,11 +211,9 @@ private struct LiveScreenCard: View {
 
     // MARK: Actions
 
-    /// Opens the panel on the "Tela" tab, showing the page live.
+    /// Opens the Orb's browser in a window of its own, live and large, where the person can take it over.
     private func enlarge() {
-        LiveScreenFocus.shared.clear(of: botID)
-        model.setInspector(true)
-        model.request(.showTab(.screen), of: botID)
+        LiveScreenWindow.open(botID, with: openWindow)
     }
 }
 
@@ -341,7 +345,7 @@ struct LiveScreenTab: View {
         let store = model.liveScreens.store(botID)
         let handoff = model.pendingHandoff(of: botID)
         let state = LiveCardState.of(outcome: .running, phase: store.phase, isProtected: store.isProtected,
-                                     isPrivate: store.isPrivate, handoff: handoff != nil)
+                                     isPrivate: store.isPrivate, handoff: handoff != nil, userControls: store.isUserInControl)
         let host = LiveScreenText.host(of: store.url)
         let isIdle = store.phase == .idle && state != .needsYou && state != .protected
         return VStack(alignment: .leading, spacing: 10) {

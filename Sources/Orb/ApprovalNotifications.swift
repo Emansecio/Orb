@@ -240,7 +240,9 @@ enum ApprovalNotifications {
     @MainActor static func bringAppToFront() {
         guard let app = NSApp else { return }
         app.activate()
-        guard let window = app.windows.first(where: { $0.canBecomeMain && !($0 is NSPanel) }) else { return }
+        // The main window, not the window of an Orb's browser (`LiveScreenWindow`), which is only ever opened on purpose.
+        guard let window = app.windows.first(where: { $0.canBecomeMain && !($0 is NSPanel) && !LiveScreenWindow.windows.contains($0) })
+        else { return }
         if window.isMiniaturized { window.deminiaturize(nil) }
         window.makeKeyAndOrderFront(nil)
     }

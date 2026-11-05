@@ -32,6 +32,10 @@ final class FakeLiveSocket: LiveSocket {
 
     var isClosed: Bool { closed.value }
     func send(_ text: String) { continuation.yield(text) }
+    /// What the app wrote to the browser (the person's input).
+    private let writes = LockedBox<[String]>([])
+    var written: [String] { writes.value }
+    func write(_ text: String) { writes.append(text) }
     /// The connection breaks by itself.
     func drop() { continuation.finish(throwing: LiveDropped()) }
 }
@@ -54,6 +58,7 @@ final class FakeLiveSource: LiveBrowserSource {
         var handler: (@Sendable (UUID, LivePointer) -> Void)?
         var handlerOnly: UUID?
         var handlerSets = 0
+        var userControl: [UUID: Bool] = [:]
     }
     private let state = LockedBox(State())
 
@@ -73,6 +78,8 @@ final class FakeLiveSource: LiveBrowserSource {
     func setPointerHandler(_ handler: (@Sendable (UUID, LivePointer) -> Void)?, only botID: UUID?) {
         state.withLock { $0.handler = handler; $0.handlerOnly = botID; $0.handlerSets += 1 }
     }
+    func setUserControl(_ held: Bool, botID: UUID) { state.withLock { $0.userControl[botID] = held } }
+    func userControl(_ botID: UUID) -> Bool? { state.withLock { $0.userControl[botID] } }
 }
 
 /// A clock that only moves when the test says so.

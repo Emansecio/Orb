@@ -2,7 +2,8 @@
 import AppKit
 import SwiftUI
 
-/// Scenes for review: `Orb --snapshot transcript-browser-live|transcript-browser-need|transcript-browser-done|inspector-screen out.png`.
+/// Scenes for review: `Orb --snapshot transcript-browser-live|transcript-browser-need|transcript-browser-done|inspector-screen|
+/// browser-window|browser-window-control|browser-window-protected out.png`.
 /// The store is seeded with a drawn page (no browser runs), so the card, the hand-off and the panel's tab show with a
 /// picture. Dev aid; nothing is saved.
 @MainActor
@@ -50,6 +51,24 @@ enum LiveScreenSnapshots {
     static func tab(model: AppModel, botID: UUID) {
         LiveScreenLayerView.countsOffscreenWindows = true
         seed(model.liveScreens.store(botID), url: "https://checkout.acessosfit.com.br/pagamentos", isProtected: false)
+    }
+
+    /// The browser's window: the Orb driving (`browser-window`), the person in control (`-control`), a login page (`-protected`).
+    static func window(_ screen: String, model: AppModel, botID: UUID) {
+        LiveScreenLayerView.countsOffscreenWindows = true
+        let store = model.liveScreens.store(botID)
+        let isProtected = screen == "browser-window-protected"
+        seed(store, url: isProtected ? "https://checkout.acessosfit.com.br/login" : "https://checkout.acessosfit.com.br/pagamentos",
+             isProtected: isProtected)
+        if screen != "browser-window-control" { model.live(botID).setWork(WorkLine(verb: "Clicando em", target: "Pagamentos")) }
+        // The window's own acquire opens a stream (to no browser) and says "Conectando": the scene is set again once it is up.
+        Task {
+            try? await Task.sleep(for: .milliseconds(300))
+            store.setProtected(isProtected)
+            store.setPhase(.live)
+            if screen == "browser-window-control" { store.setUserInControl(true) }
+            if !isProtected || screen == "browser-window-control" { store.deliver(frame()) }
+        }
     }
 
     private static func seed(_ store: LiveFrameStore, url: String?, isProtected: Bool) {

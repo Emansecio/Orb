@@ -25,6 +25,8 @@ enum LiveCardState: Equatable, Sendable {
     case protected
     /// Hidden by the person ("Privado"): blurred.
     case privateView
+    /// The person took the browser over in the window: the thumbnail does not show the page (the window does).
+    case youControl
     /// Another Orb's screen is the one streaming now.
     case paused
     /// The browser went away or the stream broke.
@@ -36,14 +38,15 @@ enum LiveCardState: Equatable, Sendable {
     enum Veil: Equatable, Sendable { case none, blur, opaque }
 
     /// A button of the card's third line.
-    enum Button: Equatable, Sendable { case enlarge, stop, hide, reveal, done, cancel }
+    enum Button: Equatable, Sendable { case enlarge, stop, hide, reveal, done, cancel, giveBack }
 
     /// Most urgent first: the hand-off, then a protected page, the person's own "Privado" (a broken stream still shows its last
     /// frame, so it hides that too), a broken stream, and last what the stream says.
     static func of(outcome: BrowserViewItem.Outcome, phase: LiveFrameStore.Phase, isProtected: Bool, isPrivate: Bool,
-                   handoff: Bool) -> LiveCardState {
+                   handoff: Bool, userControls: Bool = false) -> LiveCardState {
         guard outcome == .running else { return .ended }
         if handoff { return .needsYou }
+        if userControls { return .youControl }
         if isProtected { return .protected }
         if isPrivate { return .privateView }
         if phase == .failed { return .failed }
@@ -57,7 +60,7 @@ enum LiveCardState: Equatable, Sendable {
 
     var veil: Veil {
         switch self {
-        case .needsYou, .protected: .opaque
+        case .needsYou, .protected, .youControl: .opaque
         case .privateView: .blur
         default: .none
         }
@@ -78,6 +81,7 @@ enum LiveCardState: Equatable, Sendable {
         case .live, .privateView: "Ao vivo"
         case .connecting: "Conectando"
         case .needsYou: "Precisa de você"
+        case .youControl: "Você no controle"
         case .paused: "Pausado"
         case .protected, .failed, .ended: nil
         }
@@ -93,6 +97,7 @@ enum LiveCardState: Equatable, Sendable {
         case .needsYou: [.done, .cancel]
         case .protected: [.enlarge]
         case .privateView: [.reveal, .stop]
+        case .youControl: [.enlarge, .giveBack]
         case .failed, .ended: []
         }
     }
@@ -177,6 +182,7 @@ enum LiveScreenText {
             ["Escrevendo…", "Pensando…"].contains(work ?? "") ? "Visualização do navegador" : (work ?? "Abrindo o navegador…")
         case .connecting: work ?? "Abrindo o navegador…"
         case .needsYou: handoffCaption(page: handoffPage ?? "")
+        case .youControl: "O Orb espera você devolver o navegador"
         case .protected: "Conteúdo protegido"
         case .paused: "Pausado: outro Orb está na tela"
         case .failed: lastAction.map { "O navegador fechou · última ação: \($0)" } ?? "O navegador fechou"
@@ -189,6 +195,7 @@ enum LiveScreenText {
         switch state {
         case .needsYou: handoffVeil(page: handoffPage ?? "")
         case .privateView: "Privado"
+        case .youControl: "Na janela"
         default: "Protegido"
         }
     }
@@ -203,6 +210,7 @@ enum LiveScreenText {
         case .protected: "Conteúdo protegido"
         case .failed: "O navegador fechou"
         case .paused: "Tela pausada"
+        case .youControl: "Você está no controle do navegador"
         case .live, .connecting, .privateView, .ended: nil
         }
     }
@@ -215,16 +223,18 @@ enum LiveCursor {
     static let boxIsPageRelative = false
 
     /// The point, from the layer's top left, where the middle of `box` is drawn when the picture (`imageSize` in pixels) fills
-    /// a layer of `layerSize` the way `resizeAspectFill` does. nil when the picture has no usable viewport. Clamped to the
-    /// layer: a box outside the viewport leaves the pointer at the nearest edge.
-    static func point(of box: CGRect, viewport: CGSize, scroll: CGPoint, imageSize: CGSize, layerSize: CGSize) -> CGPoint? {
+    /// a layer of `layerSize` the way `resizeAspectFill` does (`fits`: whole, as `resizeAspect` does, in the window). nil when
+    /// the picture has no usable viewport. Clamped to the layer: a box outside the viewport leaves the pointer at the nearest edge.
+    static func point(of box: CGRect, viewport: CGSize, scroll: CGPoint, imageSize: CGSize, layerSize: CGSize,
+                      fits: Bool = false) -> CGPoint? {
         guard viewport.width > 0, viewport.height > 0, imageSize.width > 0, imageSize.height > 0,
               layerSize.width > 0, layerSize.height > 0 else { return nil }
         let inViewport = CGPoint(x: box.midX - (boxIsPageRelative ? scroll.x : 0),
                                  y: box.midY - (boxIsPageRelative ? scroll.y : 0))
         let onImage = CGPoint(x: inViewport.x * imageSize.width / viewport.width,
                               y: inViewport.y * imageSize.height / viewport.height)
-        let scale = max(layerSize.width / imageSize.width, layerSize.height / imageSize.height)
+        let widthScale = layerSize.width / imageSize.width, heightScale = layerSize.height / imageSize.height
+        let scale = fits ? min(widthScale, heightScale) : max(widthScale, heightScale)
         let shown = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
         let x = (layerSize.width - shown.width) / 2 + onImage.x * scale
         let y = (layerSize.height - shown.height) / 2 + onImage.y * scale

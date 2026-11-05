@@ -19,6 +19,12 @@ protocol LiveBrowserSource: Sendable {
     func pageLooksSensitive(botID: UUID) -> Bool
     /// Told about every place the Orb `only` is about to act on, from any thread; nil stops the telling (nobody is looking).
     func setPointerHandler(_ handler: (@Sendable (UUID, LivePointer) -> Void)?, only botID: UUID?)
+    /// The person took the Orb's browser over in the live screen's window (true), or handed it back: the Orb's tools wait meanwhile.
+    func setUserControl(_ held: Bool, botID: UUID)
+}
+
+extension LiveBrowserSource {
+    func setUserControl(_ held: Bool, botID: UUID) {}
 }
 
 /// One open connection to a stream.
@@ -27,6 +33,29 @@ protocol LiveSocket: Sendable {
     func messages() -> AsyncThrowingStream<String, Error>
     /// Closes now; safe from any thread and more than once.
     func close()
+    /// Writes one text message to the browser (the person's click or key, `LiveInput`); in order, dropped once closed. Never logged.
+    func write(_ text: String)
+}
+
+extension LiveSocket {
+    func write(_ text: String) {}
+}
+
+/// The connection that is open now, for the person's input to go out on: the receiving task puts its socket here while it is
+/// connected and takes it away when the connection ends, so input never waits for a reconnection (it is dropped instead).
+final class LiveOutbox: Sendable {
+    private let socket = OSAllocatedUnfairLock<(any LiveSocket)?>(initialState: nil)
+
+    func attach(_ socket: any LiveSocket) { self.socket.withLock { $0 = socket } }
+    func detach() { socket.withLock { $0 = nil } }
+
+    /// False when no connection is open (the input is lost, as a click on a frozen picture would be).
+    @discardableResult
+    func send(_ text: String) -> Bool {
+        guard let socket = socket.withLock({ $0 }) else { return false }
+        socket.write(text)
+        return true
+    }
 }
 
 protocol LiveTransport: Sendable {
@@ -144,13 +173,27 @@ final class LiveProtection: Sendable {
         var sensitive = false
         var addressSensitive = false
         var handoff = false
+        /// The person took the browser over: they see the page to use it, whatever it shows (only in the window, never kept).
+        var userControls = false
         var issued = 0
         var applied = 0
         var protected: Bool { sensitive || addressSensitive || handoff }
+        var dropsFrames: Bool { protected && !userControls }
     }
     private let state = OSAllocatedUnfairLock(initialState: State())
 
     var isProtected: Bool { state.withLock { $0.protected } }
+    /// Frames are thrown away before they are decoded: a protected page, unless the person has the browser.
+    var dropsFrames: Bool { state.withLock { $0.dropsFrames } }
+
+    /// True when that changed whether frames are thrown away.
+    func setUserControls(_ controls: Bool) -> Bool {
+        state.withLock { state in
+            let before = state.dropsFrames
+            state.userControls = controls
+            return before != state.dropsFrames
+        }
+    }
 
     /// Asks the browser side; true when that changed whether the page is protected. Two checks at once cannot undo each other:
     /// the one asked later wins, even if it answers first.
@@ -240,6 +283,8 @@ struct LiveStreamRunner: Sendable {
     let inbox: LiveInbox
     let decoder: LiveFrameDecoder
     let sink: LiveStreamSink
+    /// Where the open socket is left for the person's input.
+    var outbox = LiveOutbox()
 
     static let maxFps = 10
     /// The pauses before each retry of a connection that failed or dropped; after them, `failed`.
@@ -276,6 +321,7 @@ struct LiveStreamRunner: Sendable {
             }
 
             let socket = transport.open(port: port, maxFps: Self.maxFps)
+            outbox.attach(socket)
             let started = ContinuousClock.now
             var run = Run()
             await withTaskCancellationHandler {
@@ -288,6 +334,7 @@ struct LiveStreamRunner: Sendable {
             } onCancel: {
                 socket.close()
             }
+            outbox.detach()
             socket.close()
             if Task.isCancelled { return }
 
@@ -329,7 +376,7 @@ struct LiveStreamRunner: Sendable {
             await sink.phase(.live)
         }
         // A protected page's frame is thrown away without even being parsed.
-        if protection.isProtected, text.prefix(64).contains("\"frame\"") {
+        if protection.dropsFrames, text.prefix(64).contains("\"frame\"") {
             run.frames += 1
             return
         }
@@ -338,7 +385,7 @@ struct LiveStreamRunner: Sendable {
         case "frame":
             run.frames += 1
             if run.frames % Self.checkEvery == 0 { await refreshSensitivity() }
-            guard !protection.isProtected, let base64 = message.data, !base64.isEmpty else { return }
+            guard !protection.dropsFrames, let base64 = message.data, !base64.isEmpty else { return }
             // The viewport is the `status` one: the frame metadata's deviceHeight does not match the image (measured, 720 vs 633).
             let viewport = run.viewport.width > 0 ? run.viewport : message.viewport
             let raw = LiveRawFrame(base64: base64, viewport: viewport, scroll: message.scroll,
@@ -365,7 +412,7 @@ struct LiveStreamRunner: Sendable {
         let inbox = inbox, decoder = decoder, sink = sink, protection = protection
         Task.detached(priority: .utility) {
             while let raw = inbox.take() {
-                guard !protection.isProtected, let decoded = decoder(raw), !inbox.isClosed else { continue }
+                guard !protection.dropsFrames, let decoded = decoder(raw), !inbox.isClosed else { continue }
                 await sink.frame(decoded)
             }
         }

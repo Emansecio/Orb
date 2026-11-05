@@ -58,6 +58,17 @@ struct OrbApp: App {
         .defaultSize(width: 1280, height: 820)
         .commands { AppCommands(model: model) }
 
+        // The Orb's browser, large, where the person can take it over (opened from the live screen's card, one per Orb).
+        WindowGroup("Navegador do Orb", id: LiveScreenWindow.id, for: UUID.self) { $botID in
+            if let botID {
+                LiveScreenWindow(botID: botID)
+                    .environment(model)
+                    .resetShield(model)
+                    .preferredColorScheme(.dark)
+            }
+        }
+        .defaultSize(width: 1040, height: 700)
+
         Settings {
             SettingsView()
                 .environment(model)
@@ -346,6 +357,12 @@ enum Snapshot {
                 if screen == "inspector-screen" { LiveScreenSnapshots.tab(model: model, botID: bot.id) }
                 return BotInspector(botID: bot.id, tab: InspectorTab.allCases.first { screen == "inspector-" + $0.rawValue } ?? .general)
                     .frame(width: Snapshot.paneWidth(360))
+            })
+        case "browser-window", "browser-window-control", "browser-window-protected":
+            // The Orb's browser in its own window: the Orb driving, the person in control, a protected page.
+            AnyView(model.bots.first.map { bot in
+                LiveScreenSnapshots.window(screen, model: model, botID: bot.id)
+                return LiveScreenWindow(botID: bot.id)
             })
         case "memory-sheet": AnyView(model.bots.first.map { MemorySheet(botID: $0.id, name: $0.name) })
         case "rich-sheet-diagram": AnyView(EnlargedBlockSheet(block: .diagram(source: "flowchart LR\n A[Pedido] --> B{Tem estoque?}\n B -- sim --> C[Separar]")))
