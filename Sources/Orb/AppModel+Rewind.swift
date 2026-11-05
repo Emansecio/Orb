@@ -12,6 +12,9 @@ private struct RewindRequest {
     var pictures: [ImageAttachment]
     /// The request counted a skill's use already (sending it again must not count it twice).
     var repeatsSkillUse: Bool
+    /// The words of the message that was sent the first time: the skill use to take back is theirs, since an edit may
+    /// no longer be a `/skill` (or may be another one).
+    var countedText: String
 }
 
 extension AppModel {
@@ -121,10 +124,11 @@ extension AppModel {
         guard editRefusal(itemID: itemID, of: botID) == nil, let conversation = sessions[botID]?.conversation,
               let index = conversation.items.firstIndex(where: { $0.id == itemID }),
               let request = rewindRequest(of: index, in: conversation, botID: botID, keepingMissingFiles: false,
-                                          repeatsSkillUse: false) else { return false }
+                                          repeatsSkillUse: true) else { return false }
         cancelEditing(botID) // another message was being edited: its stash goes back first
         let stash = ComposerDraft(text: drafts[botID] ?? "", files: lane.files.map(\.url.path), pictures: lane.pictures)
-        lane.editing = MessageEdit(itemID: itemID, stash: stash, originalPictures: Set(request.pictures.map(\.path)))
+        lane.editing = MessageEdit(itemID: itemID, stash: stash, originalPictures: Set(request.pictures.map(\.path)),
+                                 originalText: request.text)
         lane.files = request.files.map { AttachedFile(url: $0) }
         lane.pictures = request.pictures
         lane.error = nil
@@ -160,13 +164,18 @@ extension AppModel {
         case .missing?: // the conversation changed under the edit
             cancelEditing(botID)
             return false
-        default: return false
+        case let refusal?:
+            // Said aloud too: the edit is still in the composer and nothing else would tell why Return does nothing.
+            lane.error = refusal.reason
+            announceForAccessibility(refusal.reason)
+            return false
         }
         let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard lane.pendingPictures == 0, !typed.isEmpty || lane.hasAttachments, hasUsableModel(botID),
               let conversation = sessions[botID]?.conversation,
               let index = conversation.items.firstIndex(where: { $0.id == edit.itemID }) else { return false }
-        let request = RewindRequest(text: typed, files: lane.files.map(\.url), pictures: lane.pictures, repeatsSkillUse: false)
+        let request = RewindRequest(text: typed, files: lane.files.map(\.url), pictures: lane.pictures, repeatsSkillUse: true,
+                                     countedText: edit.originalText)
         let tail = Set(conversation.items[(index + 1)...].map(\.id))
         return rewind(botID, itemID: edit.itemID, tail: tail, request: request, animated: animated,
                       stillWanted: { [weak self] in self?.sessions[botID]?.lane?.editing?.itemID == edit.itemID },
@@ -218,10 +227,14 @@ extension AppModel {
             scheduleConversationSave(botID, delay: 0.3)
             return false
         }
-        if request.repeatsSkillUse, let skill = SystemPrompt.expandSkill(in: request.text, skills: skills(for: botID))?.skill,
+        if request.repeatsSkillUse, let skill = SystemPrompt.expandSkill(in: request.countedText, skills: skills(for: botID))?.skill,
            let at = skills.firstIndex(where: { $0.id == skill.id }), skills[at].uses > 0 {
             skills[at].uses -= 1 // the first run counted it
         }
+        // A process the discarded part started is not part of this conversation any more: it must not wake the Orb when
+        // it ends (only jobs started from here count), and a task stopped before is resumable again with the new turn.
+        session.resumableSince = .now
+        session.resumedAfterJobs = 0
         forgetInicioChat(items: Array(before.items[index...]))
         live(botID).scrolled() // the click is yours: the chat follows the new answer
         return true
@@ -247,7 +260,8 @@ extension AppModel {
         }
         // A name with no folder is an attachment from before paths were kept: there is nothing to attach again.
         let files = attachments.filter { !pictured.contains($0) && $0.hasPrefix("/") && isThere($0) }
-        return RewindRequest(text: text, files: files.map { URL(fileURLWithPath: $0) }, pictures: pictures, repeatsSkillUse: repeatsSkillUse)
+        return RewindRequest(text: text, files: files.map { URL(fileURLWithPath: $0) }, pictures: pictures, repeatsSkillUse: repeatsSkillUse,
+                              countedText: text)
     }
 
     private func restore(_ draft: ComposerDraft, in lane: ComposerLane, of botID: UUID) {

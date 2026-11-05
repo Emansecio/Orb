@@ -485,8 +485,9 @@ extension ProviderAccount {
         if kind == .opencodeZen || kind == .opencodeGo { headers["x-opencode-session"] = conversationID }
         // xAI keeps its prompt cache per server: the conversation id sends every request of a conversation to the same one.
         if kind == .xai { headers["x-grok-conv-id"] = conversationID }
-        // Without a listed model a custom gateway still speaks the format chosen for it, not always chat.
-        switch model?.format ?? (kind == .custom ? format : .chat) {
+        // Without a listed model (it left the list since the Orb chose it) a custom gateway still speaks the format
+        // chosen for it, and ChatGPT only speaks Responses: falling to chat would fail every turn with no explanation.
+        switch model?.format ?? (kind == .custom ? format : kind == .chatgpt ? .responses : .chat) {
         case .chat:
             return OpenAIClient(baseURL: base, credentials: credentials, extraHeaders: headers, conversationID: conversationID)
         case .messages:

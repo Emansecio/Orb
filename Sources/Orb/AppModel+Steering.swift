@@ -48,6 +48,8 @@ struct MessageEdit: Equatable, Sendable {
     var itemID: UUID
     var stash: ComposerDraft
     var originalPictures: Set<String>
+    /// The message's words as sent the first time (the skill use they counted is taken back when the edit is sent).
+    var originalText: String = ""
 }
 
 /// What one Orb's composer holds that is not text: files and pictures to send, an attachment error, and the

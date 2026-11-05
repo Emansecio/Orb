@@ -291,6 +291,9 @@ extension Conversation {
         // The snapshot of the folder may have been in a message that left: it is sent again with the next one.
         workspaceHash = nil
         workspaceSeen = nil
+        // The block of outside events was in a message that may have left: the lines before the cut are told again
+        // with the next one (a cursor past them would hide them for good).
+        contextHandedAt = nil
     }
 }
 
