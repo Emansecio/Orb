@@ -26,6 +26,12 @@ enum OrbScopeText {
         }
     }
 
+    /// "Só alguns" with nobody ticked, or only Orbs that no longer exist.
+    static func choosesNoOrb(_ orbIDs: Set<UUID>?, bots: [Bot]) -> Bool {
+        guard let orbIDs else { return false }
+        return !bots.contains { orbIDs.contains($0.id) }
+    }
+
     /// The warning under "Usar com" when choosing an Orb would also give it connectors it does not have yet.
     static func extraAccess(_ items: [(bot: Bot, connectors: [String])]) -> String? {
         guard !items.isEmpty else { return nil }

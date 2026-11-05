@@ -965,6 +965,12 @@ extension Skill {
     /// An Orb may propose a better version of it: written by you or learned, not shipped with the app or installed from the catalog.
     var isImprovable: Bool { source == nil || source == Self.learnedSource }
 
+    /// Installed from the public catalog: has a source that is neither the app's, an Orb's nor an import's.
+    var isFromCatalog: Bool {
+        guard let source else { return false }
+        return source != Self.builtInSource && source != Self.learnedSource && source != Self.importedSource
+    }
+
     /// A slug from free text: lowercase letters, digits and dashes.
     static func slugify(_ text: String) -> String {
         String(text.lowercased().folding(options: .diacriticInsensitive, locale: nil)

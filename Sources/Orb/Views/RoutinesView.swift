@@ -196,10 +196,8 @@ private struct RoutinesEmptyState: View {
         .frame(maxWidth: .infinity)
         .padding(.top, 40)
     }
-}
 
-extension RoutinesEmptyState {
-    @ViewBuilder fileprivate func templateCards(width: CGFloat?) -> some View {
+    @ViewBuilder private func templateCards(width: CGFloat?) -> some View {
         ForEach(RoutineTemplate.all) { template in
             TemplateCard(template: template, start: start) { onTemplate(template) }
                 .frame(width: width)
@@ -325,10 +323,11 @@ private struct RoutineCard: View {
                 NextRunLine(routine: routine)
             }
             if let goal = routine.goal { GoalProgressView(goal: goal) }
-            if !routine.followUps.filter({ !$0.resolved }).isEmpty {
+            let openFollowUps = routine.followUps.filter { !$0.resolved }
+            if !openFollowUps.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Acompanhamentos em aberto").font(Typography.label.weight(.semibold))
-                    ForEach(routine.followUps.filter { !$0.resolved }) { item in
+                    ForEach(openFollowUps) { item in
                         HStack(alignment: .top) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(item.subject).font(Typography.label.weight(.medium))
@@ -696,7 +695,7 @@ struct RoutineRunSheet: View {
 
     private func footer(run: RoutineRun) -> some View {
         SheetFooterBar {
-            Button("Copiar", systemImage: "doc.on.doc") { copy(run) }
+            Button("Copiar", systemImage: "doc.on.doc") { Clipboard.copy(run.report ?? run.summary) }
                 .buttonStyle(GhostStyle())
                 .help(Tip.copyReport)
                 .hangsOnLeadingEdge()
@@ -723,10 +722,6 @@ struct RoutineRunSheet: View {
                 .keyboardShortcut(.cancelAction)
         }
         .labelStyle(FixedIconLabelStyle())
-    }
-
-    private func copy(_ run: RoutineRun) {
-        Clipboard.copy(run.report ?? run.summary)
     }
 
     /// The report file of the run inside the Orb's folder, if it is still there.

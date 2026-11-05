@@ -45,7 +45,6 @@ struct ConnectorGalleryView: View {
     /// A new service opens its setup; one that is installed goes to the Instalados tab, where it is managed, unless it
     /// needs attention: that opens it to fix, as the card says.
     private func open(_ service: ConnectorService, status: ServiceStatus) {
-        if status == .soon { return }
         let installed = ConnectorGallery.installed(service, in: model.connectors)
         if let installed, status == .connected || status == .off {
             showInstalled(installed.id)

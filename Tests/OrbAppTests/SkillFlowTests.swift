@@ -465,6 +465,18 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
         }
         #expect(note("anthropics/skills/pdf") == "Veio de anthropics/skills. A edição fica só neste Mac.")
         #expect(note(nil) == nil && note(Skill.builtInSource) == nil && note(Skill.learnedSource) == nil)
+        #expect(note(Skill.importedSource) == nil)
+    }
+
+    @Test func anImportedSkillIsNotTreatedAsFromTheCatalog() {
+        func skill(_ source: String?) -> Skill { Skill(slug: "a", name: "A", summary: "", instructions: "x", source: source) }
+        #expect(skill("anthropics/skills/pdf").isFromCatalog)
+        #expect(!skill(nil).isFromCatalog && !skill(Skill.builtInSource).isFromCatalog
+                && !skill(Skill.learnedSource).isFromCatalog && !skill(Skill.importedSource).isFromCatalog)
+        let imported = SkillDeleteCopy.message(for: skill(Skill.importedSource))
+        #expect(imported == "As instruções que vieram do outro assistente serão apagadas. Não dá para desfazer.")
+        #expect(SkillBadge.origin(of: Skill.importedSource) == "Importada")
+        #expect(SkillBadge.origin(of: "anthropics/skills/pdf") == "anthropics/skills")
     }
 
     @Test func aPreviewThatCouldNotLoadSaysItInPlainWords() {

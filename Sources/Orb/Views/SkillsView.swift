@@ -129,7 +129,8 @@ private struct InstalledSkills: View {
         let visible = $model.skills.filter { InstalledSkillFilter.matches($0.wrappedValue, query: activeQuery) }
         ScrollView {
             VStack(spacing: 8) {
-                if showsFilter { filterField }
+                // The same field as the catalog's search (without its ⌘F button: the tab bar owns the shortcut).
+                if showsFilter { SearchBox(label: "Filtrar skills instaladas", text: $query, isFocused: filterFocused).padding(.bottom, 4) }
                 if !pending.isEmpty { pendingReview }
                 if visible.isEmpty, !model.skills.isEmpty {
                     ContentUnavailableView.search(text: activeQuery)
@@ -175,12 +176,6 @@ private struct InstalledSkills: View {
         }
     }
 
-    /// The same field as the catalog's search (without its ⌘F button: the tab bar owns the shortcut).
-    private var filterField: some View {
-        SearchBox(label: "Filtrar skills instaladas", text: $query, isFocused: filterFocused)
-            .padding(.bottom, 4)
-    }
-
     /// The skills the Orbs learned and proposed, from every Orb: nothing is saved until you read it and say so.
     private var pendingReview: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -223,6 +218,7 @@ enum SkillDeleteCopy {
         switch skill.source {
         case nil: "As instruções que você escreveu serão apagadas. Não dá para desfazer."
         case Skill.learnedSource?: "As instruções que o Orb aprendeu e você aprovou serão apagadas. Não dá para desfazer."
+        case Skill.importedSource?: "As instruções que vieram do outro assistente serão apagadas. Não dá para desfazer."
         case Skill.builtInSource?: "Ela vem com o app e não volta sozinha depois de apagada. Você pode escrever outra com o mesmo comando."
         default: "Você pode instalar de novo pelo catálogo depois."
         }
@@ -235,12 +231,14 @@ enum SkillBadge {
     static func learned(by orb: String?) -> String { orb.map { "Aprendida por \($0)" } ?? "Aprendida" }
 
     /// "owner/repo" of a catalog skill's source.
-    static func origin(of source: String) -> String { source.split(separator: "/").prefix(2).joined(separator: "/") }
+    static func origin(of source: String) -> String {
+        source == Skill.importedSource ? "Importada" : source.split(separator: "/").prefix(2).joined(separator: "/")
+    }
 
     /// What the editor says of a skill that came from the catalog: the copy on this Mac is its own from the first edit.
     /// nil for yours, the app's and the ones an Orb learned.
     static func catalogNote(for skill: Skill) -> String? {
-        guard let source = skill.source, source != Skill.builtInSource, source != Skill.learnedSource else { return nil }
+        guard skill.isFromCatalog, let source = skill.source else { return nil }
         return "Veio de \(origin(of: source)). A edição fica só neste Mac."
     }
 }
@@ -261,7 +259,7 @@ private struct InstalledSkillRow: View {
         layout {
             // A click anywhere on this part opens the editor; the copy button here and the controls beside it keep their own.
             HStack(alignment: .center, spacing: Spacing.m) {
-                CatalogIcon(symbol: skill.source == nil || skill.source == Skill.builtInSource || skill.source == Skill.learnedSource ? "wand.and.stars" : "shippingbox")
+                CatalogIcon(symbol: skill.isFromCatalog ? "shippingbox" : "wand.and.stars")
                     .opacity(dimmed)
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
@@ -299,7 +297,7 @@ private struct InstalledSkillRow: View {
                         } else if skill.source == Skill.learnedSource {
                             CatalogBadge(text: SkillBadge.learned(by: model.bots.first { $0.id == skill.learnedBy }?.name), symbol: "sparkles")
                         } else if let source = skill.source {
-                            CatalogBadge(text: SkillBadge.origin(of: source), symbol: "shippingbox")
+                            CatalogBadge(text: SkillBadge.origin(of: source), symbol: skill.isFromCatalog ? "shippingbox" : "wand.and.stars")
                         } else {
                             CatalogBadge(text: "Criada por você", symbol: "person")
                         }

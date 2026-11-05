@@ -7,7 +7,7 @@ import SwiftUI
 /// The catalog with what the gallery needs from it worked out once, when the list loads: the folded text each search
 /// looks through and the category chips. Folding every bot's text and counting categories on each keystroke is work
 /// the list does not change.
-struct MarketplaceIndex: Equatable {
+struct MarketplaceIndex {
     let bots: [MarketplaceBot]
     let categories: [String]
     /// Parallel to `bots`.
@@ -47,7 +47,7 @@ struct MarketplaceGallery: View {
     /// The list a `--snapshot` draws, without the network.
     @MainActor static var preloaded: [MarketplaceBot]?
 
-    private enum Load: Equatable {
+    private enum Load {
         case loading
         case failed(String)
         case loaded(MarketplaceIndex)
@@ -92,7 +92,7 @@ struct MarketplaceGallery: View {
         let bots = index.bots
         let shown = index.filter(query: query, category: category)
         return VStack(alignment: .leading, spacing: 10) {
-            searchField
+            SearchBox(label: "Buscar bot", prompt: "Buscar por nome, assunto ou autor", text: $query, isFocused: $isSearching)
             categoryChips(index.categories)
             ScrollView {
                 LazyVStack(spacing: 2) {
@@ -123,10 +123,6 @@ struct MarketplaceGallery: View {
                     .help(Tip.importOpenMarketplace)
             }
         }
-    }
-
-    private var searchField: some View {
-        SearchBox(label: "Buscar bot", prompt: "Buscar por nome, assunto ou autor", text: $query, isFocused: $isSearching)
     }
 
     private func categoryChips(_ categories: [String]) -> some View {
