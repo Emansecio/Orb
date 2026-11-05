@@ -215,6 +215,8 @@ enum UIOutlineBuilder {
         let element: any AccessibilityElement
         var frame: CGRect?
         var actionable = false
+        /// Depth in the window's tree (dropped ancestors count), unlike the printed indentation.
+        var depth = 0
         var children: [Node] = []
         let matches: Bool
         /// It matches the query, or something under it does.
@@ -278,6 +280,10 @@ enum UIOutlineBuilder {
         if fitted.omitted > 0 { outline.cuts.insert(.characters) }
         outline.lines = fitted.kept
         for (node, _) in ordered.prefix(fitted.kept.count) {
+            // One IPC call per element: asked only for the listed ones, not for every node the walk kept.
+            if node.depth > 0, outline.failure == nil {
+                node.actionable = !clickActions.isDisjoint(with: node.element.actionNames())
+            }
             outline.entries[node.id] = UISnapshot.Entry(rawRole: node.info.rawRole, label: node.info.identity, secure: node.info.secure,
                                                         frame: node.frame, actionable: node.actionable, identifier: node.info.identifier)
             outline.elements[node.id] = node.element
@@ -342,11 +348,9 @@ enum UIOutlineBuilder {
         if dropped { return children }
         let node = Node(id: id, info: info, element: element, matches: matches)
         node.frame = frame
+        node.depth = depth
         node.children = children
         node.keep = node.matches || children.contains(where: \.keep)
-        if node.keep, depth > 0, walk.failure == nil {
-            node.actionable = !clickActions.isDisjoint(with: element.actionNames())
-        }
         return [node]
     }
 

@@ -2410,7 +2410,11 @@ struct UIActTool: AgentTool {
             let state = before(target)
             let textRoles: Set<String> = ["field", "textarea", "searchfield", "combobox"]
             guard target.element.isSettable("AXValue") else {
-                guard textRoles.contains(target.live.role), !request.stealsFocus else {
+                // An editable field in an app that steals focus is a takeover case, not a read-only one.
+                if textRoles.contains(target.live.role), request.stealsFocus {
+                    throw needsScreen("escrever em \(target.name)", because: "\(app.name) vem para a frente sozinho quando recebe foco")
+                }
+                guard textRoles.contains(target.live.role) else {
                     throw missing(target, "receber um valor (não é um campo editável)", target.element.actionNames())
                 }
                 return Acted(summary: value.isEmpty ? "Limpei \(target.name) (\(target.id))." : "Escrevi em \(target.name) (\(target.id)).",
@@ -2421,7 +2425,10 @@ struct UIActTool: AgentTool {
             try target.element.setValue(newValue, for: "AXValue")
             // Fields driven by a page's script ignore AXValue: then the text is typed.
             if case .string(let wanted) = newValue, !target.live.secure, textRoles.contains(target.live.role),
-               let back = target.element.attribute("AXValue")?.string, back != wanted, !request.stealsFocus {
+               let back = target.element.attribute("AXValue")?.string, back != wanted {
+                if request.stealsFocus {
+                    throw needsScreen("escrever em \(target.name)", because: "o campo ignorou o valor por Acessibilidade e \(app.name) vem para a frente sozinho quando recebe foco")
+                }
                 return Acted(summary: value.isEmpty ? "Limpei \(target.name) (\(target.id))." : "Escrevi em \(target.name) (\(target.id)).",
                              target: target.element, before: state,
                              input: .text(value, target: target.element, replace: true), inputWhat: "escrever em \(target.name)",
@@ -2987,7 +2994,8 @@ struct UIActTool: AgentTool {
                     case .setValue:
                         moves.append(.click(try center(step.reference, step.point), Clicking()))
                         moves.append(.key(KeyStroke(.character("a"), modifiers: .command)))
-                        moves.append(.type(step.value ?? ""))
+                        // Typing "" sends nothing, so an empty value deletes the selection instead.
+                        if let value = step.value, !value.isEmpty { moves.append(.type(value)) } else { moves.append(.key(KeyStroke(.named(.delete)))) }
                     case .key:
                         if step.reference != nil { moves.append(.click(try center(step.reference, step.point), Clicking())) }
                         moves += step.keys.map(Move.key)

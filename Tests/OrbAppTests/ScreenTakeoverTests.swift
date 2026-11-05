@@ -341,6 +341,38 @@ struct ScreenTakeoverTests {
         #expect(String(decoding: chunks.flatMap { $0 }, as: UTF16.self) == text)
     }
 
+    @Test func newlinesAndTabsAreTypedAsRealReturnAndTabKeys() async throws {
+        let rig = TakeoverRig()
+        _ = try await rig.takeOver { hand in try await hand.type("oi\n\tfim") }
+        let returnKey = KeyStroke.Named.return.virtualKey, tabKey = KeyStroke.Named.tab.virtualKey
+        #expect(rig.world.poster.events == [
+            .text(Array("oi".utf16)),
+            .key(returnKey, down: true, []), .key(returnKey, down: false, []),
+            .key(tabKey, down: true, []), .key(tabKey, down: false, []),
+            .text(Array("fim".utf16)),
+        ])
+    }
+
+    @Test func aLongDragDoesNotAskForTheFrontAppAtEveryPoint() async throws {
+        let rig = TakeoverRig(stepLimit: .seconds(2))
+        rig.world.poster.delay = .milliseconds(2)
+        let path = (0..<100).map { CGPoint(x: CGFloat($0), y: 0) }
+        _ = try await rig.takeOver { hand in try await hand.drag(along: path, modifiers: []) }
+        #expect(rig.world.frontmostCalls < 40, "\(rig.world.frontmostCalls) asks for 100 points")
+    }
+
+    @Test func aDragStillNoticesWhenAnotherAppTakesTheFront() async throws {
+        let rig = TakeoverRig()
+        let world = rig.world
+        rig.world.poster.delay = .milliseconds(2)
+        rig.world.poster.afterEvent = { count, _ in if count == 10 { world.setFront(10, name: "Safari") } }
+        let path = (0..<400).map { CGPoint(x: CGFloat($0), y: 0) }
+        await #expect(throws: TakeoverFailure.lostFront("Notas")) {
+            _ = try await rig.takeOver { hand in try await hand.drag(along: path, modifiers: []) }
+        }
+        #expect(rig.world.poster.events.count < 100, "stopped within a few points, not at the end")
+    }
+
     @Test func aKeyTheLayoutLacksIsRefused() async throws {
         let rig = TakeoverRig()
         await #expect(throws: TakeoverFailure.unknownKey("ç")) {
@@ -549,6 +581,8 @@ struct ScreenTakeoverTests {
 
     @Test func ifAnotherAppTakesTheFrontNothingMoreIsSentAndTheButtonIsReleased() async throws {
         let rig = TakeoverRig()
+        // Points look at the front app every 50 ms, so the drag has to last longer than that for the change to be seen.
+        rig.world.poster.delay = .milliseconds(10)
         // Right after the button goes down, something else comes to the front.
         rig.world.poster.afterEvent = { count, world in if count == 4 { world.setFront(30, name: "Outro") } }
         await #expect(throws: TakeoverFailure.lostFront("Notas")) {

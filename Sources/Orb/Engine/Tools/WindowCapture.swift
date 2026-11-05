@@ -19,6 +19,8 @@ actor AsyncGate {
     private var waiters: [CheckedContinuation<Void, Never>] = []
     /// The most that ever ran together (for tests).
     private(set) var peak = 0
+    var isBusy: Bool { running > 0 }
+    var waitingCount: Int { waiters.count }
 
     init(limit: Int) {
         self.limit = max(1, limit)

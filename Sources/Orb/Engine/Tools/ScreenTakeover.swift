@@ -130,8 +130,6 @@ protocol TakeoverIndicator: Sendable {
 final class LiveTakeoverHand: TakeoverHand, @unchecked Sendable {
     /// How far (points) the real cursor may be from where the hand put it.
     static let driftTolerance: CGFloat = 3
-    /// Longest chunk typed as one event, in UTF-16 units.
-    static let typeChunk = 20
 
     private let platform: any TakeoverPlatform
     private let poster: any TakeoverEventPoster
@@ -167,10 +165,18 @@ final class LiveTakeoverHand: TakeoverHand, @unchecked Sendable {
         if now >= stepDeadline { throw TakeoverFailure.stepTimeout }
     }
 
-    private func tick(_ stepDeadline: ContinuousClock.Instant) throws {
+    /// How often the points of a drag look at the front app. Asking is a window-list call plus an Accessibility one, which a
+    /// 600-point stroke would pay per point and run out of the takeover's time; the button was pressed on a checked app, and
+    /// a drag goes to the window it started in.
+    static let dragFrontInterval: Duration = .milliseconds(50)
+    private var lastFrontCheck: ContinuousClock.Instant?
+
+    private func tick(_ stepDeadline: ContinuousClock.Instant, frontEvery interval: Duration? = nil) throws {
         try Task.checkCancellation()
         try checkTime(stepDeadline)
         try checkCursor()
+        if let interval, let last = lock.withLock({ lastFrontCheck }), ContinuousClock.now - last < interval { return }
+        lock.withLock { lastFrontCheck = .now }
         // Real input goes to whatever is in front: if it is not the app, nothing is sent.
         if let front = platform.frontmost(), front.pid != target.pid { throw TakeoverFailure.lostFront(target.name) }
     }
@@ -258,25 +264,24 @@ final class LiveTakeoverHand: TakeoverHand, @unchecked Sendable {
     }
 
     func type(_ text: String) async throws {
-        var chunk: [UInt16] = []
-        func flush(last: Bool) async throws {
-            guard !chunk.isEmpty else { return }
-            // The step limit is for one chunk (one event and its wait), not for the whole text: a long text must not hit it
-            // halfway and be left half typed. The limit of the whole takeover still holds. A slow chunk stops the ones after
-            // it; after the last one the text is whole, and calling it a failure would make the model type it again.
-            let deadline = begin()
-            try tick(deadline)
-            poster.text(chunk)
-            chunk.removeAll(keepingCapacity: true)
-            try await Task.sleep(for: .milliseconds(4))
-            if !last { try checkTime(deadline) }
+        // Newlines and tabs are real Return and Tab presses, as in the background path: sent as text, a single-line field
+        // or a chat box would not see an Enter.
+        let segments = SyntheticEventBuilder.segments(of: text)
+        for (index, segment) in segments.enumerated() {
+            switch segment {
+            case .key(let named):
+                try await key(KeyStroke(.named(named)))
+            case .text(let piece, _):
+                // The step limit is for one chunk (one event and its wait), not for the whole text: a long text must not hit
+                // it halfway and be left half typed. The limit of the whole takeover still holds. A slow chunk stops the ones
+                // after it; after the last one the text is whole, and calling it a failure would make the model type it again.
+                let deadline = begin()
+                try tick(deadline)
+                poster.text(Array(piece.utf16))
+                try await Task.sleep(for: .milliseconds(4))
+                if index < segments.count - 1 { try checkTime(deadline) }
+            }
         }
-        for character in text {
-            let units = Array(String(character).utf16)
-            if chunk.count + units.count > Self.typeChunk { try await flush(last: false) }
-            chunk += units
-        }
-        try await flush(last: true)
     }
 
     func key(_ stroke: KeyStroke) async throws {
@@ -313,7 +318,7 @@ final class LiveTakeoverHand: TakeoverHand, @unchecked Sendable {
                 // The step limit is for one move: a stroke of hundreds of points would otherwise run out of it halfway. The
                 // limit of the whole takeover still holds.
                 deadline = begin()
-                try tick(deadline)
+                try tick(deadline, frontEvery: Self.dragFrontInterval)
                 try await place(point, .dragged, button: .left, deadline: deadline, modifiers: modifiers)
                 last = point
                 try await pauseBriefly()

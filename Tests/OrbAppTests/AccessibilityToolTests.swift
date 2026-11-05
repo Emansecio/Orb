@@ -77,6 +77,19 @@ struct UIOutlineTests {
         #expect(outline.entries["w2.5"] == nil && outline.entries["w2.5.1"] == nil)
     }
 
+    @Test func actionsAreAskedOnlyOfTheElementsThatAreListed() {
+        let buttons = (1...50).map { _ in fake("AXButton", title: "B", actions: ["AXPress"]) }
+        let window = fake("AXWindow", buttons)
+        var limits = UIOutlineLimits()
+        limits.maxLines = 10
+        let outline = UIOutlineBuilder.outline(of: window, prefix: "w1", query: nil, limits: limits)
+        #expect(outline.entries.count == 10)
+        #expect(outline.entries["w1.1"]?.actionable == true)
+        #expect(outline.entries["w1"]?.actionable == false, "the window root is never asked")
+        // One read per element for the walk; the action list is the extra call, only for the 9 listed children.
+        #expect(buttons.map(\.roundTrips).reduce(0, +) == 50 + 9)
+    }
+
     @Test func aPasswordFieldIsNeverReadAndIsMarkedHidden() throws {
         let window = sampleWindow()
         let secure = window.children[2]

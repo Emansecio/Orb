@@ -292,6 +292,42 @@ struct WindowCaptureTests {
 // MARK: - The screenshot tool
 
 struct ScreenshotToolTests {
+    private let shots = TempFolder("OrbShots", creating: true)
+
+    @Test func aFullDisplayReadWaitsForTheVisionGateLikeAWindowDoes() async throws {
+        let file = shots.appending("display.png")
+        try Fixtures.png(text: "HELLO WORLD").write(to: file)
+        let gate = TestGate()
+        let holder = Task { try await ScreenshotTool.visionGate.run { await gate.wait() } }
+        // Let the holder own the gate before the read asks for it.
+        await waitUntil("the gate to be taken") { await ScreenshotTool.visionGate.isBusy }
+        let read = Task { try await ScreenshotTool.recognizeDisplay(file) }
+        await waitUntil("the read to queue behind the one holding Vision") { await ScreenshotTool.visionGate.waitingCount == 1 }
+        await gate.open()
+        try await holder.value
+        let text = try await read.value
+        #expect(text.uppercased().contains("HELLO"))
+    }
+
+    @Test func newFileKeepsOnlyTheNewestCapturesAndDropsOldOnes() throws {
+        let folder = shots.appending("keep")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let total = ScreenshotTool.maxFiles + 5
+        for index in 0..<total {
+            let url = folder.appending(path: "shot-\(index).png")
+            try Data([1]).write(to: url)
+            // Higher index = newer, all within the last day.
+            try FileManager.default.setAttributes([.modificationDate: Date.now.addingTimeInterval(-Double(total - index) * 10)], ofItemAtPath: url.path)
+        }
+        let ancient = folder.appending(path: "ancient.png")
+        try Data([1]).write(to: ancient)
+        try FileManager.default.setAttributes([.modificationDate: Date.now.addingTimeInterval(-90_000)], ofItemAtPath: ancient.path)
+        _ = try ScreenshotTool.newFile(in: folder, extension: "png")
+        let left = try FileManager.default.contentsOfDirectory(atPath: folder.path)
+        #expect(left.count == ScreenshotTool.maxFiles)
+        #expect(!left.contains("ancient.png") && !left.contains("shot-0.png") && left.contains("shot-\(total - 1).png"))
+    }
+
     private let windowFrame = CGRect(x: 100, y: 50, width: 400, height: 300)
     private let editor = AccessibilityApp(name: "Editor", bundleID: "com.example.editor", pid: 100)
 
