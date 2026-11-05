@@ -123,11 +123,6 @@ enum TranscriptLayout {
     static let actionsReserve: CGFloat = 90
     /// The least space kept at the left of a user bubble, so a short line does not touch the right edge.
     static let bubbleSpacer: CGFloat = 120
-    /// Rows under a tool line's symbol (a path, a detail): the symbol's column (14) plus its gap to the line (8).
-    static let detailIndent: CGFloat = 22
-    /// The symbol column of a tool line, from which `detailIndent` is derived (not `Spacing.iconColumn`, which belongs
-    /// to sidebars and forms).
-    static let toolIconColumn: CGFloat = 14
     /// How far an empty chat pushes its first block down: the same for the spinner of a loading one.
     static let emptyStateTop: CGFloat = 72
 }
