@@ -64,8 +64,12 @@ extension AppModel {
         if case .bot(let id) = selection { id } else { nil }
     }
 
-    /// The Orb the commands act on: the open one, or the first when a workspace page is open.
-    var commandBotID: UUID? { selectedBotID ?? botIDs.first }
+    /// The Orb the commands act on: the open one, or the first when a workspace page is open. With a group open there is
+    /// none: the commands would act on an Orb that is not on screen (and swap the group for it), so they wait.
+    var commandBotID: UUID? {
+        if case .group? = selection { return nil }
+        return selectedBotID ?? botIDs.first
+    }
 
     /// Sheets of the editors (identity, memory, routine, skill, connector, appearance…) that are open.
     var openSheets: Int { openSheetTokens.count }

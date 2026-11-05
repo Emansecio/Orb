@@ -450,4 +450,25 @@ struct SidebarCategoryLayoutTests {
         let orbNameEdge: CGFloat = 8 + 30 + 8
         #expect(SidebarCategoryLayout.titleInset == orbNameEdge)
     }
+
+    @Test @MainActor func previousOrbFromAPageGoesToTheLastOne() throws {
+        let world = CategoryWorld()
+        let model = world.model
+        model.selection = .inicio
+        model.selectAdjacentBot(offset: -1)
+        #expect(model.selection == .bot(try #require(model.sidebarBotIDs.last)))
+        model.selection = .inicio
+        model.selectAdjacentBot(offset: 1)
+        #expect(model.selection == .bot(try #require(model.sidebarBotIDs.first)))
+    }
+
+    @Test @MainActor func commandsDoNotJumpToAnOrbWhileAGroupIsOpen() {
+        let world = CategoryWorld()
+        let model = world.model
+        let group = UUID()
+        model.selection = .group(group)
+        #expect(model.commandBotID == nil)
+        model.focusComposer()
+        #expect(model.selection == .group(group))
+    }
 }

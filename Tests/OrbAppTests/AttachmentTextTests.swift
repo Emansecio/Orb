@@ -123,4 +123,10 @@ final class AttachmentTextTests {
         #expect(cache.cached([url])[url] == nil) // another size: not the text that was read
         #expect(await cache.texts([url])[url].flatMap(text) == "# Segunda versão")
     }
+
+    @Test func aFolderIsLeftToTheTools() throws {
+        let folder = root.appending(path: "pasta.dados")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        #expect(AttachmentText.extract(folder) == .unread)
+    }
 }

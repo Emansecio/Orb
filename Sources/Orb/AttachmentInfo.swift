@@ -105,9 +105,11 @@ struct AttachmentInfo: Equatable, Sendable {
     static func read(_ path: String) -> AttachmentInfo {
         var info = quick(path: path)
         guard info.state == .ok else { return info }
-        let values = try? URL(fileURLWithPath: path).resolvingSymlinksInPath().resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+        let values = try? URL(fileURLWithPath: path).resolvingSymlinksInPath().resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isDirectoryKey])
         if values?.isRegularFile == true {
             info.size = values?.fileSize
+        } else if values?.isDirectory == true {
+            // A folder or package dropped on the chat is a valid attachment (the tools list it); it has no size to show.
         } else {
             info.state = .missing
         }

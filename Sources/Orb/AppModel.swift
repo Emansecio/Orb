@@ -605,7 +605,10 @@ final class AppModel {
                 self?.backgroundRelief?.cancel()
                 self?.backgroundRelief = Task {
                     try? await Task.sleep(for: .seconds(30))
-                    if !Task.isCancelled { MemoryRelief.soon() }
+                    guard !Task.isCancelled else { return }
+                    // Away for a while (app hidden, window closed, another app in front): the microphone closes, keeping the text.
+                    if self?.dictation.botID != nil { await self?.dictation.finish() }
+                    MemoryRelief.soon()
                 }
             }
         }
@@ -1404,7 +1407,8 @@ final class AppModel {
         // The order the sidebar shows (loose Orbs, then the categories), the same one ⌘1…⌘9 count by.
         let order = sidebarBotIDs
         guard !order.isEmpty else { return }
-        let current = selectedBot.flatMap { bot in order.firstIndex(of: bot.id) } ?? -offset
+        // From a page or a group, "next" goes to the first Orb and "previous" to the last.
+        let current = selectedBot.flatMap { bot in order.firstIndex(of: bot.id) } ?? (offset < 0 ? 0 : -1)
         let next = (current + offset + order.count) % order.count
         selection = .bot(order[next])
     }
@@ -2470,7 +2474,10 @@ final class AppModel {
         return routines.first(where: { $0.id == routineID })?.name
     }
 
-    func systemWillSleep(at date: Date = .now) { asleepSince = date }
+    func systemWillSleep(at date: Date = .now) {
+        asleepSince = date
+        if dictation.botID != nil { Task { await dictation.finish() } } // the microphone must not stay open through sleep
+    }
 
     func systemDidWake(at date: Date = .now) {
         asleepSince = nil

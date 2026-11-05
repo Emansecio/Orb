@@ -71,7 +71,7 @@ extension RootView {
     fileprivate func fixSelection() {
         // MARK: MultiOrb (WP6): a group that was deleted is no selection; the first Orb takes its place.
         if case .group(let id)? = model.selection, !model.groups.contains(where: { $0.id == id }) {
-            model.selection = model.botIDs.first.map { .bot($0) }
+            model.selection = model.sidebarBotIDs.first.map { .bot($0) }
         }
         let fixed = WelcomeSelection.resolved(model.selection, botIDs: model.botIDs)
         if fixed != model.selection { model.selection = fixed }
