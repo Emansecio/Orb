@@ -496,3 +496,46 @@ struct GroupPromptIsSideEffectFreeTests {
         #expect(!after.contains("Contexto antigo do grupo"))
     }
 }
+
+struct GroupHuntFixesTests {
+    @Test @MainActor func theBoardShowsWhatAMemberSavedAsSoonAsItsTurnEnds() async {
+        let world = GroupWorld()
+        let first = await startOrchestratorTurn(world)
+        #expect(world.model.groupBoard(world.groupID).items.isEmpty)
+        // `group_remember` writes straight to the bank during the turn; nobody asks the panel to refresh.
+        _ = await world.model.memory.groupBank(for: world.groupID).remember("Tom direto.", kind: .preferencia, title: "Tom")
+        world.fake.finish(first, reply: "Anotei.")
+        await waitUntil("the board to follow") { !world.model.groupBoard(world.groupID).items.isEmpty }
+    }
+
+    @Test @MainActor func theUnreadCountSurvivesAnUnloadedThreadAndARelaunch() {
+        let world = GroupWorld()
+        world.hub.addUnread(world.groupID)
+        world.hub.addUnread(world.groupID)
+        world.model.groupSessions[world.groupID] = nil // the thread idled out of memory
+        world.hub.addUnread(world.groupID)
+        #expect(world.live.unread == 3, "the count does not fall back to 1")
+        #expect(world.model.group(world.groupID)?.unread == 3)
+        world.model.groupLives[world.groupID] = nil // a fresh start reads it from the group
+        #expect(world.model.groupLive(world.groupID).unread == 3)
+        world.hub.markRead(world.groupID)
+        #expect(world.model.group(world.groupID)?.unread == 0 && world.live.unread == 0)
+    }
+
+    @Test func aGroupSavedBeforeTheCountStillOpens() throws {
+        let json = #"{"id":"5F7E1D3A-0000-4000-8000-000000000001","name":"G","memberIDs":[],"orchestratorID":"5F7E1D3A-0000-4000-8000-000000000002"}"#
+        #expect(try JSONDecoder().decode(OrbGroup.self, from: Data(json.utf8)).unread == 0)
+    }
+
+    @Test @MainActor func aGroupNameNeverRepeatsAnOrbOrAnotherGroup() {
+        let world = GroupWorld()
+        let ids = world.bots.map(\.id)
+        #expect(world.model.createGroup(name: "lançamento", members: ids)?.name == "lançamento 2")
+        #expect(world.model.createGroup(name: "Atlas", members: ids)?.name == "Atlas 2", "an Orb's name is taken too")
+        let id = world.groupID
+        world.model.renameGroup(id, to: "LANCAMENTO 2")
+        #expect(world.model.group(id)?.name == "LANCAMENTO 2 2")
+        world.model.renameGroup(id, to: "Lançamento")
+        #expect(world.model.group(id)?.name == "Lançamento", "its own name is not a repeat")
+    }
+}

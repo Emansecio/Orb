@@ -257,7 +257,9 @@ final class DelegationHub: DelegationService {
                 continue
             }
             guard model.bot(botID) != nil else { fail(request, "Esse Orb foi apagado"); continue }
-            if request.envelope.groupID != nil {
+            if let groupID = request.envelope.groupID {
+                // A member removed while its request waited (busy, queued) must not speak for the group any more.
+                guard model.group(groupID)?.memberIDs.contains(botID) == true else { fail(request, "Esse Orb saiu do grupo"); continue }
                 startGroupRun(request)
                 return true
             }
@@ -680,6 +682,9 @@ final class DelegationHub: DelegationService {
     func cancelChain(_ id: UUID, by reason: CancelReason) {
         guard let model else { return }
         var chain = chainStates[id] ?? ChainState(origin: .group(id), originBot: UUID(), groupID: nil)
+        // A stopped ask can be redone at once: its repeat keys no longer mean "already on the way".
+        forgetRepeats(of: chain)
+        chain.recent = [:]
         let open = requests.values.filter { $0.envelope.chainID == id && Self.isOpen($0.state) }
             .sorted(by: Self.older)
         let hadInbox = inbox.values.contains { $0.contains { $0.chainID == id } }
@@ -727,7 +732,8 @@ final class DelegationHub: DelegationService {
         }
         for botID in touched { schedulePump(botID) }
         // A group's chain stopped by the person from elsewhere (the Parar of whoever waits for it) stops the group.
-        if reason == .user, chain.groupID != nil, !alreadyCancelled { groupHooks?.chainStopped(id) }
+        // Not while quitting: the run must stay in the journal and resume, not be written as stopped by the person.
+        if reason == .user, !isShuttingDown, chain.groupID != nil, !alreadyCancelled { groupHooks?.chainStopped(id) }
         settleWaitingRoutines()
     }
 
@@ -754,6 +760,7 @@ final class DelegationHub: DelegationService {
         let affected = requests.values.filter { Self.isOpen($0.state) && ($0.envelope.to.id == id || $0.envelope.from.id == id) }
             .sorted(by: Self.older)
         var running: [UUID] = []
+        var groupChains: [UUID] = []
         for request in affected {
             let envelope = request.envelope
             let was = request.state
@@ -770,6 +777,7 @@ final class DelegationHub: DelegationService {
                 if was != .running, envelope.groupID != nil { groupHooks?.turnFinished(failed, reply: nil, outcome: .failed) }
             } else {
                 // The asker is gone: nobody wants the work.
+                if envelope.groupID != nil, envelope.fromChat { groupChains.append(envelope.chainID) }
                 requests[envelope.id]?.state = .cancelled
                 requests[envelope.id]?.finishedAt = .now
                 queues[envelope.to.id]?.removeAll { $0 == envelope.id }
@@ -782,6 +790,9 @@ final class DelegationHub: DelegationService {
         }
         inbox[id] = nil
         queues[id] = nil
+        // A request the group took from this Orb's chat has no one left to answer: the whole group request stops (and says so
+        // in its thread), instead of only the orchestrator's turn while the members go on.
+        for chain in Set(groupChains) { cancelChain(chain, by: .user) }
         for botID in running { model?.session(botID).stop(startsQueuedRoutines: false) }
         for (routineID, wait) in waitingRoutines where wait.botID == id { waitingRoutines[routineID] = nil }
         refresh(Array(Set(affected.flatMap { [$0.envelope.from.id, $0.envelope.to.id] })))
@@ -799,8 +810,22 @@ final class DelegationHub: DelegationService {
         write(conversation, kind: envelope.groupID != nil ? .group : .delegation, runID: envelope.groupID ?? id, for: envelope.to.id)
     }
 
+    /// Drops the duplicate-window records of requests that will not answer (failed or stopped), so the same ask can be redone.
+    private func forgetRepeats(of chain: ChainState) {
+        guard !chain.recent.isEmpty else { return }
+        for key in chain.recent.keys { recentFromChat[chain.originBot]?[key] = nil }
+    }
+
+    private func forgetRepeat(_ request: DelegationRequest) {
+        let envelope = request.envelope
+        let key = DelegationRules.repeatKey(to: envelope.to.id, text: envelope.text)
+        chainStates[envelope.chainID]?.recent[key] = nil
+        recentFromChat[envelope.from.id]?[key] = nil
+    }
+
     /// A request that cannot go on (the target cannot start, time ran out): it ends `failed` and its asker is told.
     private func fail(_ request: DelegationRequest, _ reason: String) {
+        forgetRepeat(request)
         var failed = request
         failed.state = .failed
         failed.finishedAt = .now

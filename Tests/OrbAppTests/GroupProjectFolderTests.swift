@@ -99,6 +99,46 @@ private let gitReady = WorkFolders.Git.make() != nil
         }
     }
 
+    @Test(.enabled(if: gitReady)) @MainActor func stoppingTheGroupRemovesTheWorktreesWhoseBranchIsMerged() async throws {
+        try await makeRepo()
+        let script = CallScript([[.text("Li tudo."), .finished(.done, nil)]], holdsCall: 1)
+        let (model, group, _, _) = try setUp(script)
+        model.postUserMessage("@Revisor confira o projeto", to: group.id)
+        let work = root.appending("trabalho")
+        _ = await waitUntil("the worktree to exist") {
+            let projects = (try? FileManager.default.contentsOfDirectory(atPath: work.path)) ?? []
+            return !projects.isEmpty && model.groupHub.run(group.id) != nil
+        }
+        model.stopGroup(group.id)
+        await script.release()
+        _ = await waitUntil("the worktree to go") {
+            let projects = (try? FileManager.default.contentsOfDirectory(atPath: work.path)) ?? []
+            return projects.isEmpty
+        }
+        let branches = await WorkFolders.Git.make()?.run(["branch", "--format=%(refname:short)"], in: project)
+        #expect(branches?.text.contains("orb/") == false)
+    }
+
+    @Test(.enabled(if: gitReady)) @MainActor func deletingTheGroupRemovesTheWorktreesToo() async throws {
+        try await makeRepo()
+        let script = CallScript([[.text("Li tudo."), .finished(.done, nil)]], holdsCall: 1)
+        let (model, group, _, _) = try setUp(script)
+        model.postUserMessage("@Revisor confira o projeto", to: group.id)
+        let work = root.appending("trabalho")
+        _ = await waitUntil("the worktree to exist") {
+            let projects = (try? FileManager.default.contentsOfDirectory(atPath: work.path)) ?? []
+            return !projects.isEmpty && model.groupHub.run(group.id) != nil
+        }
+        model.deleteGroup(group.id)
+        await script.release()
+        _ = await waitUntil("the worktree to go") {
+            let projects = (try? FileManager.default.contentsOfDirectory(atPath: work.path)) ?? []
+            return projects.isEmpty
+        }
+        let branches = await WorkFolders.Git.make()?.run(["branch", "--format=%(refname:short)"], in: project)
+        #expect(branches?.text.contains("orb/") == false)
+    }
+
     @Test(.enabled(if: gitReady)) @MainActor func aMemberThatLeavesNothingToMergeLosesItsWorktreeWhenTheRequestEnds() async throws {
         try await makeRepo()
         let script = CallScript([[.text("Li tudo, nada a mudar."), .finished(.done, nil)]])

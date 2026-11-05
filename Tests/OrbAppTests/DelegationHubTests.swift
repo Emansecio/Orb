@@ -1993,6 +1993,94 @@ private actor Names {
         #expect(!team.events(team.atlas).contains { $0.kind == .chainStopped })
         #expect(team.model.groupSession(group.id)?.items.contains { if case .event(let event) = $0.kind { event.kind == .groupStopped } else { false } } == true)
     }
+
+    // MARK: Bug hunt fixes
+
+    @Test func anAskThatWasStoppedCanBeRepeatedAtOnce() async throws {
+        let valve = TestGate()
+        let team = Team { _ in
+            await valve.wait()
+            return say("Ok.")
+        }
+        defer { team.cleanUp() }
+        let hub = team.model.delegation
+        let first = try hub.submit(from: team.atlas.id, to: "Pesquisador", text: "Pesquise", kind: .ask, messageID: UUID(), groupID: nil)
+        #expect(throws: DelegationRefusal.duplicate) {
+            try hub.submit(from: team.atlas.id, to: "Pesquisador", text: "Pesquise", kind: .ask, messageID: UUID(), groupID: nil)
+        }
+        hub.cancelChain(first.chainID, by: .user)
+        _ = try hub.submit(from: team.atlas.id, to: "Pesquisador", text: "Pesquise", kind: .ask, messageID: UUID(), groupID: nil)
+        await valve.open()
+        await team.settle()
+    }
+
+    @Test func quittingWithAGroupRunningDoesNotWriteThatThePersonStoppedIt() async throws {
+        let valve = TestGate()
+        let team = Team { seen in
+            if seen.who == "Atlas" { await valve.wait() }
+            return say("Ok.")
+        }
+        defer { team.cleanUp() }
+        let group = group(team)
+        team.model.postUserMessage("Preparar o lançamento", to: group.id)
+        await waitUntil("the orchestrator to work") { team.model.isWorking(team.atlas.id) }
+        team.model.stopTurnsForQuit()
+        await valve.open()
+        await team.settle()
+        #expect(!groupEvents(team, group).contains(.groupStopped))
+    }
+
+    @Test func aMemberTakenOutWhileItsGroupRequestWaitsInTheQueueNeverSpeaks() async throws {
+        let valve = TestGate()
+        let team = Team { seen in
+            switch seen.who {
+            case "Atlas":
+                if seen.toolResult != nil || seen.user.contains("<orb_reply") { return say("Fim.") }
+                return orbsCall("ask", to: "Revisor", "Revise o texto.")
+            case "Revisor":
+                if seen.user.hasSuffix("oi") { await valve.wait() }
+                return say("Texto revisado.")
+            default: return say("Ok.")
+            }
+        }
+        defer { team.cleanUp() }
+        let group = group(team)
+        team.model.send("oi", to: team.revisor.id, fromUser: true)
+        await waitUntil("the reviewer to be busy") { team.model.isWorking(team.revisor.id) }
+        team.model.postUserMessage("Preparar o lançamento", to: group.id)
+        await waitUntil("the request to be queued") {
+            team.model.delegation.requests.values.contains { $0.envelope.to.id == team.revisor.id && $0.envelope.groupID != nil }
+        }
+        #expect(team.model.removeMember(team.revisor.id, from: group.id))
+        await valve.open()
+        await team.settle()
+        let reviewer = await team.log.calls(by: "Revisor")
+        #expect(reviewer.count == 1, "only its own turn ran: \(reviewer.map(\.user))")
+    }
+
+    @Test func deletingTheOrbThatAskedItsGroupFromTheChatStopsTheWholeRequest() async throws {
+        let valve = TestGate()
+        let team = Team { seen in
+            switch seen.who {
+            case "Pesquisador":
+                if seen.toolResult != nil { return say("Pedi.") }
+                return orbsCall("ask", to: "Lançamento", "Levantem o mercado.")
+            case "Atlas":
+                await valve.wait()
+                return say("Ok.")
+            default: return say("Ok.")
+            }
+        }
+        defer { team.cleanUp() }
+        let group = group(team)
+        team.model.send("peça ao grupo", to: team.pesquisador.id, fromUser: true)
+        await waitUntil("the orchestrator to work") { team.model.isWorking(team.atlas.id) && team.model.groupHub.run(group.id) != nil }
+        _ = team.model.deleteBot(team.pesquisador.id)
+        #expect(team.model.groupHub.run(group.id) == nil)
+        #expect(groupEvents(team, group).filter { $0 == .groupStopped }.count == 1)
+        await valve.open()
+        await team.settle()
+    }
 }
 
 // MARK: An Orb with more than one conversation (OrbChats)

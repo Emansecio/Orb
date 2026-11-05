@@ -218,6 +218,8 @@ final class GroupHub: GroupTurnHooks {
     func turnFinished(_ request: DelegationRequest, reply: String?, outcome: OrbEnvelope.ReplyStatus) {
         guard let (group, run) = lookup(request), let session = model?.groupSession(group.id) else { return }
         let member = request.envelope.to.id
+        // Members write to the board (`group_remember`) during their turn: an open "Quadro" tab shows it when the turn ends.
+        if let model { Task { await model.refreshGroupBoard(group.id) } }
         let fromUser = isFromUser(request, in: run)
         let interim = request.state == .awaitingChildren || !request.openChildren.isEmpty
         personImages[request.envelope.id] = nil // the turn is over (or was cancelled before it began)
@@ -307,7 +309,7 @@ final class GroupHub: GroupTurnHooks {
     /// "Parar grupo" and ⌘.: everything the group is doing stops.
     func stopGroup(_ groupID: UUID) { terminate(groupID, by: .user) }
 
-    private func terminate(_ groupID: UUID, by reason: CancelReason, writesEvent: Bool = true) {
+    private func terminate(_ groupID: UUID, by reason: CancelReason, writesEvent: Bool = true, group removed: OrbGroup? = nil) {
         guard let model, let run = activeRun(groupID) else { return }
         let members = Set(run.running.map(\.member)).union(activeTurns.filter { $0.value.runID == run.id }.keys)
         runs[groupID]?.phase = .stopped
@@ -325,6 +327,11 @@ final class GroupHub: GroupTurnHooks {
         }
         if writesEvent {
             model.groupSession(groupID)?.append(.event(OrbEvent(kind: .groupStopped, chainID: run.id, groupID: groupID)))
+        }
+        // Same rule as a finished request: what is merged goes, the rest stays and is reported. A group already taken out of
+        // the list (dissolved) is passed in, because its project folder is no longer readable from the model.
+        if let owner = removed ?? model.group(groupID) {
+            cleanUpWorkFolders(of: owner, run: run.id, session: writesEvent ? model.groupSession(groupID) : nil)
         }
         runs[groupID] = nil
         refreshLive(groupID)
@@ -400,8 +407,8 @@ final class GroupHub: GroupTurnHooks {
 
     /// A group is deleted, dissolved or its member removed while its request is going: it ends without a trace in the thread
     /// (the thread goes with the group), or with the "parou" line if the group stays.
-    func forget(_ groupID: UUID, writesEvent: Bool) {
-        terminate(groupID, by: .user, writesEvent: writesEvent)
+    func forget(_ groupID: UUID, writesEvent: Bool, group: OrbGroup? = nil) {
+        terminate(groupID, by: .user, writesEvent: writesEvent, group: group)
         runs[groupID] = nil
         consumed[groupID] = nil
         lastNotice[groupID] = nil
@@ -447,13 +454,17 @@ final class GroupHub: GroupTurnHooks {
     func addUnread(_ groupID: UUID) {
         guard let model, !isFocused(groupID), let session = model.groupSession(groupID) else { return }
         session.addUnread()
-        model.groupLive(groupID).setUnread(session.unread)
+        // The live count, not the session's: a thread unloaded after idling comes back with 0 and would take the dot backwards.
+        let live = model.groupLive(groupID)
+        live.setUnread(live.unread + 1)
+        model.setGroupUnread(live.unread, of: groupID)
     }
 
     func markRead(_ groupID: UUID) {
         guard let model else { return }
         model.groupSessions[groupID]?.clearUnread()
         model.groupLives[groupID]?.setUnread(0)
+        model.setGroupUnread(0, of: groupID)
     }
 
     /// A banner, only while the app is not in front and not more than once in `noticeInterval` per group.

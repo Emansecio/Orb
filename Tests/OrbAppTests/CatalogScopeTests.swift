@@ -364,6 +364,41 @@ struct ConnectorTemplateTests {
         #expect(server.inputs.last?.prefix == "")
         #expect(server.config.secretKeys == ["Authorization"])
     }
+
+    @Test func aDockerServerGetsItsVariablesIntoTheContainer() throws {
+        let json = try #require(JSONValue.parse("""
+        {"name": "com.example/box",
+         "packages": [{"registryType": "oci", "identifier": "example/box", "version": "1.2",
+                       "transport": {"type": "stdio"},
+                       "environmentVariables": [{"name": "API_KEY", "isSecret": true, "isRequired": true},
+                                                {"name": "--evil", "description": "not a variable name"}]}]}
+        """))
+        let server = try #require(MCPRegistry.server(from: json))
+        #expect(server.config.command == "docker")
+        // `-e NAME` makes docker copy the value from its own environment, where the connector puts it.
+        #expect(server.config.arguments == ["run", "-i", "--rm", "-e", "API_KEY", "example/box:1.2"])
+        #expect(server.config.environment["API_KEY"] != nil)
+    }
+
+    @Test func connectorNamesAreUniqueToTheModel() {
+        let github = MCPServerConfig(name: "GitHub", command: "x")
+        let other = MCPServerConfig(name: "Filesystem", command: "x")
+        #expect(ConnectorGateway.uniqueName("github", among: [github, other]) == "github (2)")
+        #expect(ConnectorGateway.uniqueName("GitHub", among: [github, other], excluding: github.id) == "GitHub", "editing keeps its own name")
+        #expect(ConnectorGateway.uniqueName("Git-Hub", among: [github]) == "Git-Hub", "different once the model's name is built")
+        let two = MCPServerConfig(name: "GitHub (2)", command: "x")
+        #expect(ConnectorGateway.uniqueName("GitHub", among: [github, two]) == "GitHub (3)")
+    }
+
+    @Test func connectorsSavedWithARepeatedNameAreKeptAllAndRenamed() throws {
+        let first = MCPServerConfig(name: "Filesystem", command: "a")
+        let second = MCPServerConfig(name: "Filesystem", command: "b")
+        let third = MCPServerConfig(name: "filesystem", command: "c")
+        let fixed = ConnectorGateway.renamingRepeats([first, second, third])
+        #expect(fixed.map(\.id) == [first.id, second.id, third.id])
+        #expect(fixed.map(\.name) == ["Filesystem", "Filesystem (2)", "filesystem (3)"])
+        #expect(try ConnectorGateway.connector(named: "Filesystem (2)", in: fixed).command == "b")
+    }
 }
 
 struct SkillSlugTests {

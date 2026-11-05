@@ -12,6 +12,8 @@ struct OrbGroup: Identifiable, Codable, Sendable, Equatable {
     var createdAt = Date.now
     /// The repository or folder the members share ("" = none). In a git repository each member works in its own worktree.
     var projectFolder = ""
+    /// Messages the person has not seen: kept here so the dot in the sidebar survives a relaunch and an unloaded thread.
+    var unread = 0
 
     /// How many Orbs a group has.
     static let memberLimits = 2...8
@@ -42,6 +44,7 @@ extension OrbGroup {
         policy = (try? c.decodeIfPresent(GroupPolicy.self, forKey: .policy)) ?? GroupPolicy()
         createdAt = try c.value(.createdAt, default: Date.now)
         projectFolder = try c.value(.projectFolder, default: "")
+        unread = try c.value(.unread, default: 0)
     }
 }
 

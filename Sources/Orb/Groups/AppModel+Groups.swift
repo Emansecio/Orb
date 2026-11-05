@@ -17,6 +17,7 @@ extension AppModel {
     func groupLive(_ id: UUID) -> GroupLive {
         if let live = groupLives[id] { return live }
         let live = GroupLive(id: id)
+        live.setUnread(group(id)?.unread ?? 0)
         groupLives[id] = live
         return live
     }
@@ -99,7 +100,7 @@ extension AppModel {
         var seen = Set<UUID>()
         let ids = members.filter { bot($0) != nil && seen.insert($0).inserted }
         guard OrbGroup.memberLimits.contains(ids.count) else { return nil }
-        let title = Self.groupTitle(name, fallback: ids.compactMap { bot($0)?.name })
+        let title = uniqueGroupName(Self.groupTitle(name, fallback: ids.compactMap { bot($0)?.name }))
         let group = OrbGroup(name: title, memberIDs: ids, orchestratorID: orchestrator.flatMap { ids.contains($0) ? $0 : nil } ?? ids[0],
                              policy: policy, projectFolder: projectFolder)
         groups.append(group)
@@ -124,10 +125,31 @@ extension AppModel {
         return typed.isEmpty ? GroupPresence.list(names) : String(typed.prefix(80))
     }
 
+    func setGroupUnread(_ count: Int, of id: UUID) {
+        guard let index = groups.firstIndex(where: { $0.id == id }), groups[index].unread != count else { return }
+        groups[index].unread = count
+    }
+
+    /// `title` itself, or with " 2", " 3"... when an Orb or another group already has that name (accents and case aside): the
+    /// chat reaches a group by its name, so a repeat would leave one of the two out of reach.
+    func uniqueGroupName(_ title: String, excluding id: UUID? = nil) -> String {
+        let taken = Set(bots.map { DelegationRules.fold($0.name) } + groups.filter { $0.id != id }.map { DelegationRules.fold($0.name) })
+        var candidate = title
+        var number = 2
+        while taken.contains(DelegationRules.fold(candidate)) {
+            let suffix = " \(number)"
+            candidate = String(title.prefix(80 - suffix.count)) + suffix
+            number += 1
+        }
+        return candidate
+    }
+
     func renameGroup(_ id: UUID, to name: String) {
-        let title = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty, let index = groups.firstIndex(where: { $0.id == id }), groups[index].name != String(title.prefix(80)) else { return }
-        groups[index].name = String(title.prefix(80))
+        let typed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !typed.isEmpty, let index = groups.firstIndex(where: { $0.id == id }) else { return }
+        let title = uniqueGroupName(String(typed.prefix(80)), excluding: id)
+        guard groups[index].name != title else { return }
+        groups[index].name = title
     }
 
     /// Adds an Orb to the group (up to 8). False when it cannot join.
@@ -219,7 +241,7 @@ extension AppModel {
 
     /// A group that cannot go on: the Orbs that remain are told in their chats and everything of the group goes.
     private func dissolve(_ group: OrbGroup, remaining: [UUID]) {
-        groupHub.forget(group.id, writesEvent: false)
+        groupHub.forget(group.id, writesEvent: false, group: group)
         let note = "O grupo \(group.name) foi desfeito: ficou com menos de 2 Orbs."
         for id in remaining {
             appendToChat(.event(OrbEvent(kind: .unknown, subject: orbRef(id), detail: note, groupID: group.id)), of: id)

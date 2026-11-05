@@ -21,6 +21,7 @@ extension AppModel {
             return connectors[index]
         }
         var config = kind.config
+        config.name = ConnectorGateway.uniqueName(config.name, among: connectors)
         config.orbIDs = orbIDs
         config.anyAccount = anyAccount
         connectors.append(config)
