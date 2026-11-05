@@ -28,6 +28,9 @@ extension AppModel {
         source.setCancelHandler { @Sendable in close(descriptor) }
         source.resume()
         wakeWatch = source
+        // A file left there before the watch armed is a valid signal too; take it now, once, rather than at the next
+        // unrelated event in the folder (a random hour).
+        scanWakeFolder()
     }
 
     /// Files waiting in `wake/`: each is consumed (a bad name is dropped once, not on every pass) and rings its

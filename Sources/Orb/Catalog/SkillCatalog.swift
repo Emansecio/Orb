@@ -205,12 +205,14 @@ actor SkillCatalog {
         var fields: [String: String] = [:]
         var key: String?
         for line in lines[1..<end] {
-            if let current = key, line.hasPrefix(" ") || line.hasPrefix("\t") {
+            if line.hasPrefix(" ") || line.hasPrefix("\t") {
+                // Indented text belongs to the open block; with no open key (or a nested map) it is not a top-level field.
+                guard let current = key else { continue }
                 let piece = line.trimmingCharacters(in: .whitespaces)
                 fields[current] = [fields[current] ?? "", piece].filter { !$0.isEmpty }.joined(separator: " ")
                 continue
             }
-            let parts = line.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+            let parts = line.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
             guard parts.count == 2, !parts[0].isEmpty else { key = nil; continue }
             key = parts[0]
             var value = parts[1]

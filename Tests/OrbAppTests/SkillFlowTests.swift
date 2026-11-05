@@ -402,6 +402,25 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
         #expect(await model.skillDraft("publicar-site", from: botID) == nil)
     }
 
+    @Test @MainActor func aProposalForASwitchedOffSkillImprovesItInsteadOfMakingACopy() async throws {
+        let (model, botID) = setUp(CallScript([said("oi")]))
+        let mine = Skill(slug: "publicar-site", name: "Meu deploy", summary: "antigo", instructions: "antigas", isEnabled: false,
+                         source: Skill.learnedSource, orbIDs: [botID])
+        model.skills.append(mine)
+        await propose(SkillSamples.good, in: model, botID)
+        let draft = try #require(await model.skillDraft("publicar-site", from: botID))
+        #expect(draft.isUpdate && draft.skill.id == mine.id && draft.skill.slug == "publicar-site")
+    }
+
+    @Test @MainActor func deletingASkillRepublishesItToTheOrbAtOnce() async {
+        let (model, botID) = setUp(CallScript([said("oi")]))
+        model.skills = [Skill(slug: "resumir", name: "Resumir", summary: "", instructions: "Resuma.", orbIDs: [botID])]
+        let bank = model.memory.bank(for: botID)
+        await waitUntil("the skill published") { await bank.skillText(named: "/resumir").contains("Resuma.") }
+        model.skills = []
+        await waitUntil("the skill gone from the Orb's copy") { await bank.skillText(named: "/resumir").hasPrefix("No skill /resumir") }
+    }
+
     @Test @MainActor func anImprovementKeepsTheSkillAndItsUsesAndScope() async throws {
         let (model, botID) = setUp(CallScript([said("oi")]))
         let other = UUID()

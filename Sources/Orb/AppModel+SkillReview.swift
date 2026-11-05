@@ -26,6 +26,12 @@ extension AppModel {
         Task { await bank.publishSkills(digests) }
     }
 
+    /// Skills changed (edited, switched off, deleted): refresh every Orb's copy now, so a `recall "/slug"` in a turn
+    /// already running does not read the old text. `publishSkills` writes only when the file would differ.
+    func republishSkills() {
+        for bot in bots { publishSkills(for: bot.id) }
+    }
+
     // MARK: The review
 
     /// Ajustes → Orbs: the Orbs review their work and propose skills (on unless turned off).
@@ -130,7 +136,9 @@ extension AppModel {
     private func skillDraft(_ proposal: SkillProposal, from botID: UUID) -> SkillDraft {
         let slug = proposal.slug
         let orb = bot(botID)?.name ?? "O Orb"
-        if var current = skills(for: botID).first(where: { $0.slug == slug && $0.isImprovable }) {
+        // Switched-off skills count too: the Orb never saw it listed, so it may propose the same command again, and a
+        // "slug-2" next to the disabled one would not be the improvement it meant.
+        if var current = skills.first(where: { $0.slug == slug && $0.isImprovable && $0.isAvailable(to: botID) }) {
             current.summary = proposal.summary
             current.instructions = proposal.instructions
             return SkillDraft(skill: current, slug: slug, botID: botID, orbName: orb, isUpdate: true)

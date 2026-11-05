@@ -9,7 +9,7 @@ final class AppModel {
 
     var bots: [Bot] { didSet { scheduleStateSave(); syncLives(); normalizeGroups(); normalizeCategories(); normalizeSkills() } }
     var routines: [Routine] { didSet { scheduleStateSave(); queueFollowsEdits(from: oldValue); syncActivities() } }
-    var skills: [Skill] { didSet { scheduleStateSave() } }
+    var skills: [Skill] { didSet { scheduleStateSave(); republishSkills() } }
     var connectors: [MCPServerConfig] { didSet { scheduleStateSave(); syncConnectors() } }
     /// Providers the user set up, with their last fetched model lists.
     var providers: [ProviderAccount] { didSet { scheduleStateSave() } }
