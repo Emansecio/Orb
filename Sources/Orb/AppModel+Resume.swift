@@ -77,7 +77,7 @@ extension AppModel {
         guard let session = groupSession(groupID) else { return workJournal.dropGroupRun(groupID) } // the group is gone
         let lost = session.items.compactMap { item -> String? in
             // The thread marks the assignments that were open as lost when it is read (`installGroupSession`).
-            guard case .orbMessage(let post) = item.kind, post.direction == .post, post.state == .lost, post.kind != .reply,
+            guard case .orbMessage(let post) = item.kind, post.direction == .post, (post.state == .lost || post.state == .cancelled), post.kind != .reply,
                   post.chainID == entry.runID else { return nil }
             return "\(post.to?.name ?? "?"): " + MemoryText.clip(MemoryText.flatten(post.text), 100)
         }

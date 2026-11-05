@@ -221,7 +221,10 @@ final class GroupHub: GroupTurnHooks {
         // Members write to the board (`group_remember`) during their turn: an open "Quadro" tab shows it when the turn ends.
         if let model { Task { await model.refreshGroupBoard(group.id) } }
         let fromUser = isFromUser(request, in: run)
-        let interim = request.state == .awaitingChildren || !request.openChildren.isEmpty
+        // A cancelled or failed request is terminal even with open children (their chain was cancelled or they are gone):
+        // treating it as interim would leave the run "working" forever.
+        let interim = outcome != .cancelled && outcome != .failed
+            && (request.state == .awaitingChildren || !request.openChildren.isEmpty)
         personImages[request.envelope.id] = nil // the turn is over (or was cancelled before it began)
         personTexts[request.envelope.id] = nil
         pendingMark[request.envelope.id] = nil
@@ -321,9 +324,12 @@ final class GroupHub: GroupTurnHooks {
         }
         runs[groupID]?.asked = [:]
         delegation.cancelChain(run.id, by: reason)
+        // Only this run's turn is stopped: `model.stop` would cancel every chain of the member, including another group's.
+        // `cancelChain` above already stopped the sessions running this chain's requests.
         for member in members {
+            let ownsTurn = activeTurns[member]?.runID == run.id
             activeTurns[member] = nil
-            model.stop(member, startsQueuedRoutines: false)
+            if ownsTurn { model.session(member).stop(startsQueuedRoutines: false) }
         }
         if writesEvent {
             model.groupSession(groupID)?.append(.event(OrbEvent(kind: .groupStopped, chainID: run.id, groupID: groupID)))
