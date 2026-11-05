@@ -1368,9 +1368,9 @@ private struct WorkingLine: View {
                     Button("Mostrar o plano") { showsPlan = true }
                 }
             }
-            if model.routineWaitingForYou(look.id) != nil {
-                // The card is in the routine's conversation, not in this chat.
-                Button("Ver pedido") { model.showRoutineRequest(of: look.id) }
+            if model.routineWaitingForYou(look.id) != nil || model.requestWaitingForYou(look.id) {
+                // The card is in the routine's or the request's conversation (or the group's screen), not in this chat.
+                Button("Ver pedido") { model.showApprovalOwner(look.id) }
                     .buttonStyle(.link)
                     .font(Typography.label)
                     .lineLimit(1)

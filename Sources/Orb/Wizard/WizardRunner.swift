@@ -244,8 +244,25 @@ final class WizardRunner {
     private func consume(_ events: AsyncStream<TurnEvent>, usedModel: String) async {
         var failed = false
         var reachedStepLimit = false
+        // The call the engine announced and did not finish: closing the sheet stops it, but the provider still bills it.
+        var unfinished: TokenUsage?
+        var streamed = 0
         for await event in events {
-            guard !Task.isCancelled, !isFinished else { return }
+            // Usage is kept even after the sheet closed (a cancelled call reports its use on the way out).
+            switch event {
+            case .requestUsage(let used):
+                unfinished = nil
+                record(UsageTotals(used), model: usedModel)
+                continue
+            case .pendingUsage(let used):
+                unfinished = used
+                streamed = 0
+                continue
+            case .text(let delta):
+                streamed += delta.count
+            default: break
+            }
+            guard !Task.isCancelled, !isFinished else { continue }
             switch event {
             case .text(let delta):
                 pendingText += delta
@@ -254,8 +271,8 @@ final class WizardRunner {
                 flushLiveText()
             case .message(let message):
                 history.append(message)
-            case .requestUsage(let used):
-                record(UsageTotals(used), model: usedModel)
+            case .requestUsage:
+                break // recorded above
             case .usage:
                 break // the turn's running sum: every call is recorded once, as `.requestUsage` arrives
             case .failed(let message):
@@ -267,6 +284,7 @@ final class WizardRunner {
                 break
             }
         }
+        if let unfinished { record(UsageTotals(unfinished.withOutput(atLeastCharacters: streamed)), model: usedModel) }
         guard !Task.isCancelled, !isFinished else { return }
         isThinking = false
         turn = nil

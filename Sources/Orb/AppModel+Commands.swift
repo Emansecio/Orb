@@ -71,6 +71,13 @@ extension AppModel {
         return selectedBotID ?? botIDs.first
     }
 
+    /// Whose composer a proposed text goes to: the open group's (its draft is kept under the group id, like an Orb's),
+    /// else the Orb the commands act on.
+    var draftTargetID: UUID? {
+        if case .group(let id)? = selection { return id }
+        return commandBotID
+    }
+
     /// Sheets of the editors (identity, memory, routine, skill, connector, appearance…) that are open.
     var openSheets: Int { openSheetTokens.count }
 

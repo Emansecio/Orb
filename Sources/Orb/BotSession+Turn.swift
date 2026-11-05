@@ -371,7 +371,7 @@ extension BotSession {
     /// What `total` cost at the provider's prices, when the turn's model is billed by use and its price is known.
     private func spentDollars(_ total: TokenUsage) -> Double? {
         guard let model, let label = usageLabel else { return nil }
-        if case .paid(let dollars) = model.priceBook.cost(of: UsageTotals(total), model: label.model) { return dollars }
+        if case .paid(let dollars) = model.priceBook.cost(of: UsageTotals(total), model: label.model, at: .now) { return dollars }
         return nil
     }
 

@@ -340,7 +340,9 @@ private struct LivePageView: View {
                 .buttonStyle(GhostStyle())
                 .help(Tip.ignoreProposals)
                 Button("Pôr na mensagem") {
-                    if let id = model.commandBotID { model.addToDraft(text, for: id) }
+                    // Keep the proposal when there is nowhere to put it.
+                    guard let id = model.draftTargetID else { return }
+                    model.addToDraft(text, for: id)
                     dismiss()
                 }
                 .buttonStyle(PrimaryPillStyle())
