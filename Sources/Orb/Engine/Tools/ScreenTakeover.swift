@@ -140,9 +140,13 @@ final class LiveTakeoverHand: TakeoverHand, @unchecked Sendable {
     private let lock = NSLock()
     private var expected: CGPoint
     private var drift = false
+    private var typed = 0
 
     /// Whether a drift stopped the takeover.
     var userMovedMouse: Bool { lock.withLock { drift } }
+
+    /// Characters of the current `type` call already sent (a Return or Tab counts as one), for the error of a text left half typed.
+    var typedCharacters: Int { lock.withLock { typed } }
 
     init(platform: any TakeoverPlatform, poster: any TakeoverEventPoster, target: AccessibilityApp, startedAt cursor: CGPoint, overallDeadline: ContinuousClock.Instant,
          stepLimit: Duration = .seconds(2), pause: Duration = .milliseconds(8)) {
@@ -267,17 +271,20 @@ final class LiveTakeoverHand: TakeoverHand, @unchecked Sendable {
         // Newlines and tabs are real Return and Tab presses, as in the background path: sent as text, a single-line field
         // or a chat box would not see an Enter.
         let segments = SyntheticEventBuilder.segments(of: text)
+        lock.withLock { typed = 0 }
         for (index, segment) in segments.enumerated() {
             switch segment {
             case .key(let named):
                 try await key(KeyStroke(.named(named)))
-            case .text(let piece, _):
+                lock.withLock { typed += 1 }
+            case .text(let piece, let characters):
                 // The step limit is for one chunk (one event and its wait), not for the whole text: a long text must not hit
                 // it halfway and be left half typed. The limit of the whole takeover still holds. A slow chunk stops the ones
                 // after it; after the last one the text is whole, and calling it a failure would make the model type it again.
                 let deadline = begin()
                 try tick(deadline)
                 poster.text(Array(piece.utf16))
+                lock.withLock { typed += characters }
                 try await Task.sleep(for: .milliseconds(4))
                 if index < segments.count - 1 { try checkTime(deadline) }
             }

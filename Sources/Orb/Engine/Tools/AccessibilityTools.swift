@@ -2950,10 +2950,12 @@ struct UIActTool: AgentTool {
         var drops: [Int: DropTarget] = [:]
         for (index, step) in steps.enumerated() { drops[index] = try await dropTarget(for: step, app: app, bot: bot, approved: approved) }
         let ends = drops
-        let (moves, window, before) = try await UIAccess.mapped(app) {
-            try await sessions.run(app, within: sessions.deadlines.action) { () throws -> ([Move], (any AccessibilityElement)?, UIState) in
+        let (moves, owners, window, before) = try await UIAccess.mapped(app) {
+            try await sessions.run(app, within: sessions.deadlines.action) { () throws -> ([Move], [Int], (any AccessibilityElement)?, UIState) in
                 let root = system.root(of: app)
                 var moves: [Move] = []
+                // Which step each flattened move came from, so a failure can say which step it stopped in.
+                var owners: [Int] = []
                 var window: (any AccessibilityElement)?
                 func center(_ reference: String?, _ pixel: CGPoint?) throws -> CGPoint {
                     if let pixel {
@@ -3002,20 +3004,35 @@ struct UIActTool: AgentTool {
                     case .scroll, .increment, .decrement, .pickMenu:
                         throw ToolError("\(step.action.rawValue) funciona em segundo plano; repita sem takeover.")
                     }
+                    while owners.count < moves.count { owners.append(index) }
                 }
-                return (moves, window, UIState.capture(root: root, target: nil))
+                return (moves, owners, window, UIState.capture(root: root, target: nil))
             }
         }
         let report = try await system.screen.takeOver(app, window: window, limit: .seconds(10)) { hand in
-            for move in moves {
+            for (position, move) in moves.enumerated() {
                 try Task.checkCancellation()
-                switch move {
-                case .click(let point, let click):
-                    try await hand.click(at: point, button: click.button, count: click.count, modifiers: click.modifiers)
-                case .hover(let point): try await hand.move(to: point)
-                case .type(let text): try await hand.type(text)
-                case .key(let stroke): try await hand.key(stroke)
-                case .drag(let points, let modifiers): try await hand.drag(along: points, modifiers: modifiers)
+                do {
+                    switch move {
+                    case .click(let point, let click):
+                        try await hand.click(at: point, button: click.button, count: click.count, modifiers: click.modifiers)
+                    case .hover(let point): try await hand.move(to: point)
+                    case .type(let text): try await hand.type(text)
+                    case .key(let stroke): try await hand.key(stroke)
+                    case .drag(let points, let modifiers): try await hand.drag(along: points, modifiers: modifiers)
+                    }
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    // The takeover is one call, so without this the model would not know how far it got and would repeat
+                    // the clicks and the text that already landed.
+                    let number = owners[position] + 1
+                    var text = "Stopped at step \(number) of \(steps.count) (\(steps[owners[position]].action.rawValue)): \(error.localizedDescription) "
+                        + (number > 1 ? "Steps 1-\(number - 1) were done." : "No earlier step was done.")
+                    if case .type(let typed) = move, let live = hand as? LiveTakeoverHand {
+                        text += " Typed \(live.typedCharacters) of \(typed.count) characters of this step; do not retype them."
+                    }
+                    throw ToolError(text)
                 }
             }
         }

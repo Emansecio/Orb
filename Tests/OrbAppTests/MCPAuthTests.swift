@@ -607,6 +607,22 @@ struct MCPRenewalTests {
         #expect(quiet.requests.isEmpty && vault.get(ConnectorSecrets.oauthAccount(id: id)) == nil)
     }
 
+    @Test func aLoginOnlyCoversTheAddressItsResourceCovers() async throws {
+        let service = FakeOAuthService()
+        let vault = MemoryVault()
+        let id = UUID()
+        try seed(vault, id, service) // resource: https://<host>/mcp
+        let auth = MCPAuth(vault: vault, session: service.session)
+        #expect(await auth.covers(id, url: URL(string: service.mcpURL)!))
+        #expect(await auth.covers(id, url: URL(string: service.mcpURL + "/v2/")!))
+        #expect(await !auth.covers(id, url: URL(string: "https://other.example.com/mcp")!))
+        #expect(await !auth.covers(id, url: URL(string: "http://\(service.mcpHost)/mcp")!))
+        #expect(await !auth.covers(id, url: URL(string: "https://\(service.mcpHost):8443/mcp")!))
+        #expect(await !auth.covers(id, url: URL(string: "https://\(service.mcpHost)/mcpx")!))
+        // No login at all, or one without a resource, does not block anything.
+        #expect(await auth.covers(UUID(), url: URL(string: "https://other.example.com/mcp")!))
+    }
+
     @Test func signingOutKeepsTheClientButNoToken() async throws {
         let service = FakeOAuthService()
         let vault = MemoryVault()

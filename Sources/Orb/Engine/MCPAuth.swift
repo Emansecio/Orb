@@ -200,6 +200,14 @@ actor MCPAuth {
 
     func isSignedIn(_ id: UUID) -> Bool { credential(id)?.hasToken == true }
 
+    /// Whether the saved login is for this address: its `resource` is the address or a parent of it (Slack names the host,
+    /// so a path change under it keeps the login). A login without a resource (older ones) is kept.
+    func covers(_ id: UUID, url: URL) -> Bool {
+        guard let resource = credential(id)?.resource else { return true }
+        let broad = Self.canonical(resource), own = Self.canonical(url)
+        return own == broad || own.hasPrefix(broad + "/")
+    }
+
     /// A valid access token, renewed shortly before it ends; nil when there is no login. `forceRefresh` is for a token the
     /// server just refused: if another caller renewed a moment ago, that fresh token is returned instead.
     /// Throws `MCPAuthRequired` when the login can no longer be renewed.

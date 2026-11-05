@@ -509,21 +509,33 @@ final class FakeTakeoverHand: TakeoverHand, @unchecked Sendable {
     private var log: [Action] = []
     var actions: [Action] { lock.withLock { log } }
 
-    private func record(_ action: Action) { lock.withLock { log.append(action) } }
-    func click(at point: CGPoint, button: MouseButton, count: Int) async throws { record(.click(point, button: button, count: count)) }
-    func type(_ text: String) async throws { record(.type(text)) }
-    func key(_ stroke: KeyStroke) async throws { record(.key(stroke)) }
-    func drag(from start: CGPoint, to end: CGPoint) async throws { record(.drag(from: start, to: end)) }
+    /// Once this many actions went through, the next one throws `stepTimeout` instead of being recorded.
+    var failAfter: Int? {
+        get { lock.withLock { failAfterCount } }
+        set { lock.withLock { failAfterCount = newValue } }
+    }
+    private var failAfterCount: Int?
+
+    private func record(_ action: Action) throws {
+        try lock.withLock {
+            if let limit = failAfterCount, log.count >= limit { throw TakeoverFailure.stepTimeout }
+            log.append(action)
+        }
+    }
+    func click(at point: CGPoint, button: MouseButton, count: Int) async throws { try record(.click(point, button: button, count: count)) }
+    func type(_ text: String) async throws { try record(.type(text)) }
+    func key(_ stroke: KeyStroke) async throws { try record(.key(stroke)) }
+    func drag(from start: CGPoint, to end: CGPoint) async throws { try record(.drag(from: start, to: end)) }
 
     /// A plain click keeps being recorded as before; only what the older call cannot carry is recorded as itself.
     func click(at point: CGPoint, button: MouseButton, count: Int, modifiers: KeyStroke.Modifiers) async throws {
         if modifiers.isEmpty, count <= 2 { return try await click(at: point, button: button, count: count) }
-        record(.clickHeld(point, button: button, count: count, modifiers: modifiers))
+        try record(.clickHeld(point, button: button, count: count, modifiers: modifiers))
     }
 
-    func move(to point: CGPoint) async throws { record(.move(point)) }
+    func move(to point: CGPoint) async throws { try record(.move(point)) }
 
-    func drag(along points: [CGPoint], modifiers: KeyStroke.Modifiers) async throws { record(.dragAlong(points, modifiers: modifiers)) }
+    func drag(along points: [CGPoint], modifiers: KeyStroke.Modifiers) async throws { try record(.dragAlong(points, modifiers: modifiers)) }
 }
 
 /// Records taking the screen and giving it back, also when the body throws or the task is cancelled.

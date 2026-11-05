@@ -150,6 +150,20 @@ struct AccessibilityLadderTests {
         #expect(button.performed.isEmpty)
     }
 
+    @Test func aTakeoverThatStopsHalfwayNamesTheStepItStoppedIn() async throws {
+        let first = framed(fakeButton("Um"), CGRect(x: 200, y: 200, width: 100, height: 40))
+        let second = framed(fakeButton("Dois"), CGRect(x: 200, y: 300, width: 100, height: 40))
+        let third = framed(fakeButton("Tres"), CGRect(x: 200, y: 400, width: 100, height: 40))
+        let bench = Bench(windows: [framed(fake("AXWindow", title: "A", [first, second, third]), windowFrame)])
+        try await bench.read()
+        bench.system.screenOwner.hand.failAfter = 1
+        let steps: [JSONValue] = ["w1.1", "w1.2", "w1.3"].map { .object(["action": .string("press"), "id": .string($0)]) }
+        let message = await failureMessage { try await bench.act(["steps": .array(steps), "takeover": .bool(true)]) }
+        #expect(message.contains("Stopped at step 2 of 3"))
+        #expect(message.contains("Steps 1-1 were done"))
+        #expect(bench.system.screenOwner.hand.actions.count == 1)
+    }
+
     @Test func takeoverSetValueWithAnEmptyValueDeletesTheSelectedText() async throws {
         let field = framed(fake("AXTextField", title: "Nome"), CGRect(x: 200, y: 200, width: 100, height: 40))
         let bench = Bench(windows: [framed(fake("AXWindow", title: "A", [field]), windowFrame)])

@@ -1325,7 +1325,13 @@ struct ConnectorEditor: View {
         signInTask = Task { @MainActor in
             if !secret.isEmpty { await model.connectorAuth.setClientSecret(secret, clientID: clientID, for: id) }
             // A new login, or a new app to sign in with; otherwise the one it has is used.
-            let signedIn = await model.connectorAuth.isSignedIn(id)
+            var signedIn = await model.connectorAuth.isSignedIn(id)
+            // A login belongs to the server it was made with: the address now points elsewhere, so the old token must not be
+            // sent to it. Signing out makes the card ask for a new login.
+            if signedIn, wantsLogin, let url = URL(string: config.url), await !model.connectorAuth.covers(id, url: url) {
+                await model.signOut(connector: id)
+                signedIn = false
+            }
             if wantsLogin, appChanged || !signedIn { return await signIn(id) }
             let status = await model.connectAndWait(id)
             if case .needsSignIn? = status { return await signIn(id) } // the server asked for a login the form did not know about
