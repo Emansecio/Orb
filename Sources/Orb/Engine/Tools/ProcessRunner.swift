@@ -90,7 +90,9 @@ enum ProcessRunner {
         }
 
         let watchdog = Task {
-            do { try await Task.sleep(for: timeout) } catch { return false }
+            // The suspending clock stops while the Mac sleeps, as the command does: a lid closed for twenty minutes must
+            // not end a 120 s command as timed out the moment it wakes, after it ran for thirty.
+            do { try await Task.sleep(for: timeout, clock: .suspending) } catch { return false }
             terminateGroup(pid)
             return true
         }

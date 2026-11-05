@@ -1998,6 +1998,17 @@ extension AgentEngineTests {
         #expect(!PlanReminder.asksToStop("para a pasta X, use Y") && !PlanReminder.asksToStop("parar o servidor antes de subir"))
     }
 
+    @Test func aMessageAskingToStopHoldsBackThePromiseNudgeToo() async {
+        let queue = SteeringQueue()
+        var turn = planTurn(CallScript([], whenExhausted: .fim), tools: [SayingTouchTool(queue: queue, text: "pode parar", at: 1, runs: Counter())])
+        // A reply that sounds like a promise would get "do it now": after "pode parar" it ends the turn.
+        let script = CallScript([[setPlan], [touch(1)], [.text("Vou adaptar o script agora.")], [.text("nunca pedido")]], whenExhausted: .fim)
+        turn.client = CallScriptModel(script: script)
+        turn.steering = queue
+        _ = await run(AgentEngine(), turn)
+        #expect(await script.received.count == 3)
+    }
+
     @Test func thePlanReminderSharesTheAllowanceOfTheOtherReminders() async {
         // Two promises use the allowance: the plan's reminder does not come on top.
         let promises = CallScript([[setPlan], [touch(1)], [.text("Vou adaptar o script agora.")], [touch(2)], [.text("Vou conferir de novo.")],

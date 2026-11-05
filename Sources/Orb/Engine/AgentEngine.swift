@@ -419,7 +419,9 @@ actor AgentEngine {
                     // per request (`PlanReminder`).
                     if !isLastStep, request.onlyTools == nil, reminders < Self.reminderLimit(unattended: request.unattended),
                        reminders == 0 || workedSinceReminder {
-                        let earlier = Self.stopReminder(said, workedBefore: step > 1, unattended: request.unattended) ?? completion.reminder(for: said)
+                        // The user asked to stop: no reminder sends the model back to work, a promise or an unproven "done" included.
+                        let earlier = stopAsked ? nil
+                            : Self.stopReminder(said, workedBefore: step > 1, unattended: request.unattended) ?? completion.reminder(for: said)
                         // Only for a plan of this task (changed in this turn, or the paused one it picks up), and not
                         // when the reply asks the user something: then the user is the one to answer.
                         let skipsPlan = earlier != nil || remindedOfPlan || stopAsked || !(planTouched || picksUpTask)
