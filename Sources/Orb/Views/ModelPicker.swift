@@ -100,10 +100,6 @@ enum ModelSearch {
         choices.reduce(0) { $0 + $1.models.count } > longListAbove
     }
 
-    static func matches(_ model: ProviderModel, _ query: String) -> Bool {
-        matches(model, words: words(query))
-    }
-
     /// The words of a query, split once for a whole list.
     static func words(_ query: String) -> [Substring] { query.split(whereSeparator: \.isWhitespace) }
 
@@ -118,6 +114,20 @@ enum ModelSearch {
     static func submitted(_ shown: [(account: ProviderAccount, models: [ProviderModel])], query: String, allowsDefault: Bool) -> String? {
         if query.trimmingCharacters(in: .whitespaces).isEmpty { return allowsDefault ? "" : nil }
         return shown.first.flatMap { choice in choice.models.first.map { ModelRef(provider: choice.account.kind, model: $0.id).text } }
+    }
+}
+
+/// A line of the model list that says why it is empty.
+struct ModelListNote: View {
+    let text: LocalizedStringKey
+    let padding: CGFloat
+
+    var body: some View {
+        Text(text)
+            .font(Typography.label)
+            .foregroundStyle(Palette.muted)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, padding)
     }
 }
 
@@ -194,11 +204,7 @@ private struct ModelChooser: View {
                             }
                         }
                         if shown.isEmpty {
-                            Text("Nenhum modelo encontrado.")
-                                .font(Typography.label)
-                                .foregroundStyle(Palette.muted)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 24)
+                            ModelListNote(text: "Nenhum modelo encontrado.", padding: 24)
                         }
                     }
                 }

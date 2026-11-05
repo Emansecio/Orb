@@ -39,9 +39,10 @@ enum SkillSearch {
             if words.count == 1, skill.slug.compare(words[0], options: .caseInsensitive) == .orderedSame { return -1 }
             var total = 0
             for word in words {
+                // A word that starts the slug or the name costs nothing.
                 if skill.slug.range(of: word, options: options.union(.anchored)) != nil
                     || skill.name.range(of: word, options: options.union(.anchored)) != nil {
-                    total += 0
+                    continue
                 } else if skill.slug.range(of: word, options: options) != nil || skill.name.range(of: word, options: options) != nil {
                     total += 1
                 } else if skill.summary.range(of: word, options: options) != nil {
@@ -133,7 +134,7 @@ enum AttachmentKind {
 // MARK: Models
 
 /// The models picked most recently in any Orb, newest first, kept across launches.
-struct RecentModels: Equatable {
+struct RecentModels {
     static let limit = 3
     private static let key = "orb.recentModels"
 
@@ -151,14 +152,12 @@ struct RecentModels: Equatable {
         ids = Array(([id] + ids.filter { $0 != id }).prefix(Self.limit))
         defaults.set(ids, forKey: Self.key)
     }
-
-    static func == (lhs: RecentModels, rhs: RecentModels) -> Bool { lhs.ids == rhs.ids }
 }
 
 /// The rows of the composer's model list for a typed search: what to show, grouped. Kept apart from the view so the
 /// grouping is testable and the list is built once per keystroke, not per row.
-struct ModelListing: Equatable {
-    struct Group: Equatable {
+struct ModelListing {
+    struct Group {
         var provider: ProviderKind
         var models: [ProviderModel]
     }
@@ -166,10 +165,6 @@ struct ModelListing: Equatable {
     /// Recently used models that are still available (only when nothing is typed).
     var recents: [(ref: String, name: String, provider: String)]
     var groups: [Group]
-
-    static func == (lhs: ModelListing, rhs: ModelListing) -> Bool {
-        lhs.groups == rhs.groups && lhs.recents.map(\.ref) == rhs.recents.map(\.ref)
-    }
 
     init(choices: [(account: ProviderAccount, models: [ProviderModel])], recents: [String], query: String) {
         let typed = !query.trimmingCharacters(in: .whitespaces).isEmpty

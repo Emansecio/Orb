@@ -102,32 +102,26 @@ struct ImageTile: View {
             .opacity(info.state == .missing ? 0.55 : 1)
             .attachmentActions(path: path, all: all, info: info, label: label + (info.state == .missing ? ", arquivo ausente" : ""),
                                help: info.state == .ok ? Tip.previewImage : Tip.missingAttachment)
-            .task(id: path) {
-                let loaded = await AttachmentInfo.load(path: path)
-                guard !Task.isCancelled else { return }
-                info = loaded
-            }
+            .loadInfo(of: path, into: $info)
     }
 }
 
-/// A file: the icon of its type, its name and "PDF · 2,1 MB". `note` goes after that ("novo", "alterado").
+/// A file: the icon of its type, its name and "PDF · 2,1 MB".
 struct FileCard: View {
     enum Style { case regular, compact }
 
     let path: String
     let all: [String]
     var style = Style.regular
-    var note: String?
     /// Taller than the style's own height, to line up with what stands beside it (the composer's pictures are 56 pt).
     var minHeight: CGFloat?
     @State private var info: AttachmentInfo
     @State private var isHovering = false
 
-    init(path: String, all: [String], style: Style = .regular, note: String? = nil, minHeight: CGFloat? = nil) {
+    init(path: String, all: [String], style: Style = .regular, minHeight: CGFloat? = nil) {
         self.path = path
         self.all = all
         self.style = style
-        self.note = note
         self.minHeight = minHeight
         _info = State(initialValue: AttachmentInfo.cachedOrQuick(path))
     }
@@ -147,9 +141,8 @@ struct FileCard: View {
                     .foregroundStyle(Palette.ink)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                let caption = [info.caption, info.state == .ok ? note : nil].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
-                if !caption.isEmpty {
-                    Text(caption)
+                if !info.caption.isEmpty {
+                    Text(info.caption)
                         .font(Typography.small)
                         .foregroundStyle(Palette.muted)
                         .lineLimit(1)
@@ -167,11 +160,7 @@ struct FileCard: View {
         .onHover { isHovering = $0 }
         .attachmentActions(path: path, all: all, info: info, label: TranscriptSpeech.attachment(info),
                                help: info.state == .ok ? Tip.previewAttachment : Tip.missingAttachment)
-        .task(id: path) {
-            let loaded = await AttachmentInfo.load(path: path)
-            guard !Task.isCancelled else { return }
-            info = loaded
-        }
+        .loadInfo(of: path, into: $info)
     }
 }
 
@@ -210,7 +199,7 @@ struct ProducedFilesView: View {
     }
 
     private static func isPicture(_ file: ProducedFile) -> Bool {
-        file.path.hasPrefix("/") && ImageProcessing.isImageFile(URL(fileURLWithPath: file.path))
+        ImageProcessing.isImage(path: file.path)
     }
 
     /// "3 arquivos novos", "1 arquivo alterado", "3 arquivos (2 novos, 1 alterado)".
@@ -293,11 +282,7 @@ private struct FileNameLink: View {
             .clickablePointer(isOK)
             .attachmentActions(path: path, all: all, info: info, label: title ?? TranscriptSpeech.attachment(info),
                                help: isOK ? Tip.previewAttachment : Tip.missingAttachment)
-            .task(id: path) {
-                let loaded = await AttachmentInfo.load(path: path)
-                guard !Task.isCancelled else { return }
-                info = loaded
-            }
+            .loadInfo(of: path, into: $info)
     }
 }
 
@@ -367,11 +352,22 @@ extension ToolCall {
     /// picture written to a file is a result, not a capture.
     var capturedPictures: [ProducedFile] {
         guard kind == .computer || kind == .browser else { return [] }
-        return (files ?? []).filter { $0.path.hasPrefix("/") && ImageProcessing.isImageFile(URL(fileURLWithPath: $0.path)) }
+        return (files ?? []).filter { ImageProcessing.isImage(path: $0.path) }
     }
 }
 
 // MARK: - Actions
+
+extension View {
+    /// Fills `info` with the file's size and whether it is still there, off the main thread, again when `path` changes.
+    fileprivate func loadInfo(of path: String, into info: Binding<AttachmentInfo>) -> some View {
+        task(id: path) {
+            let loaded = await AttachmentInfo.load(path: path)
+            guard !Task.isCancelled else { return }
+            info.wrappedValue = loaded
+        }
+    }
+}
 
 extension View {
     /// Click = Quick Look on `all` (starting here), a menu with Abrir, Mostrar no Finder, Copiar and Copiar caminho, and the

@@ -120,7 +120,6 @@ struct ContextReading: Equatable, Sendable {
     var botID: UUID
     var fill: ContextFill
     var windowIsStated: Bool
-    var messageCount: Int
     /// Your requests in the conversation, and the ones the summary stands for.
     var requestCount: Int
     var foldedRequests: Int
@@ -136,7 +135,7 @@ struct ContextReading: Equatable, Sendable {
         guard let budget = input.budget,
               let fill = ContextMeter.fill(of: conversation, budget: budget, isCancelled: { Task.isCancelled }) else { return nil }
         return ContextReading(botID: input.botID,
-                              fill: fill, windowIsStated: input.windowIsStated, messageCount: conversation.messages.count,
+                              fill: fill, windowIsStated: input.windowIsStated,
                               requestCount: conversation.requestCount(in: 0..<conversation.messages.count),
                               foldedRequests: conversation.requestCount(in: 0..<conversation.coveredMessageCount),
                               memory: input.memory, cacheHit: input.usage?.cacheHitRatio)
@@ -153,9 +152,6 @@ struct ContextReading: Equatable, Sendable {
     }
 
     var tone: ContextTone { ContextTone(share: fraction) }
-
-    /// Messages the summary has swallowed so far.
-    var foldedMessages: Int { fill.foldedMessages }
 
     /// Whether "Compactar agora" has anything to do.
     var canCompact: Bool { fill.compaction != nil }

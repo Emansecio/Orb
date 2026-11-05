@@ -13,7 +13,7 @@ struct LiveScreenRow: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             if view.outcome == .running {
-                LiveScreenCard(itemID: itemID, view: view, botID: botID).transition(.opacity)
+                LiveScreenCard(view: view, botID: botID).transition(.opacity)
             } else {
                 LiveScreenClosedLine(itemID: itemID, view: view, botID: botID).transition(.opacity)
             }
@@ -23,14 +23,29 @@ struct LiveScreenRow: View {
     }
 }
 
+/// The state's word, with a breathing dot while the page is live: the same chip on the card and on the tab.
+private struct LiveChip: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let chip: String
+    let state: LiveCardState
+
+    var body: some View {
+        HStack(spacing: 5) {
+            if state.pulses {
+                BreathingDot(color: Palette.ok, breathes: !reduceMotion).frame(width: 6, height: 6).accessibilityHidden(true)
+            }
+            Text(chip).font(.system(size: 11, weight: .semibold))
+        }
+        .foregroundStyle(state == .needsYou ? Palette.warn : state.pulses ? Palette.ok : Palette.faint)
+    }
+}
+
 // MARK: - The card
 
 /// 92 pt tall in every state, so the chat never jumps: the page on the left, on the right what it is (chip and host),
 /// what the Orb does (caption) and the buttons.
 private struct LiveScreenCard: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    let itemID: UUID
     let view: BrowserViewItem
     let botID: UUID
 
@@ -111,13 +126,7 @@ private struct LiveScreenCard: View {
     private func chipLine(_ state: LiveCardState, host: String?) -> some View {
         HStack(spacing: 8) {
             if let chip = state.chip {
-                HStack(spacing: 5) {
-                    if state.pulses {
-                        BreathingDot(color: Palette.ok, breathes: !reduceMotion).frame(width: 6, height: 6).accessibilityHidden(true)
-                    }
-                    Text(chip).font(.system(size: 11, weight: .semibold))
-                }
-                .foregroundStyle(chipColor(state))
+                LiveChip(chip: chip, state: state)
             }
             if let host {
                 Text(host).lineLimit(1).truncationMode(.middle)
@@ -126,14 +135,6 @@ private struct LiveScreenCard: View {
         .font(Typography.small)
         .foregroundStyle(Palette.faint)
         .motion(Motion.content, value: state)
-    }
-
-    private func chipColor(_ state: LiveCardState) -> Color {
-        switch state {
-        case .live, .privateView: Palette.ok
-        case .needsYou: Palette.warn
-        default: Palette.faint
-        }
     }
 
     private func captionLine(_ caption: String) -> some View {
@@ -301,7 +302,6 @@ final class LiveScreenFocus {
 /// The panel's "Tela" tab: the Orb's page, live and larger (or the last page of a use that ended, when asked for).
 struct LiveScreenTab: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let botID: UUID
     @AppStorage(LiveScreenSetting.key) private var showsScreen = true
     @State private var lastImage: NSImage?
@@ -347,15 +347,8 @@ struct LiveScreenTab: View {
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 if let chip = isIdle ? nil : state.chip {
-                    HStack(spacing: 5) {
-                        if state.pulses {
-                            BreathingDot(color: Palette.ok, breathes: !reduceMotion).frame(width: 6, height: 6).accessibilityHidden(true)
-                        }
-                        Text(chip).font(.system(size: 11, weight: .semibold))
-                    }
                     // The state keeps its word whole at 244 pt ("Conectan / do"), as the pills do; the host is what gets cut.
-                    .fixedSize()
-                    .foregroundStyle(state == .needsYou ? Palette.warn : state.pulses ? Palette.ok : Palette.faint)
+                    LiveChip(chip: chip, state: state).fixedSize()
                 }
                 if let host { Text(host).font(Typography.small).foregroundStyle(Palette.faint).lineLimit(1).truncationMode(.middle) }
                 Spacer(minLength: 0)

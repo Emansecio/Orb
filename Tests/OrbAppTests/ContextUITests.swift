@@ -164,7 +164,7 @@ struct ContextReadingTests {
         folded.summary = "Resumo do começo."
         folded.summaryCoveredCount = 6
         let reading = try #require(ContextReading.make(input(folded)))
-        #expect(reading.foldedMessages == 6)
+        #expect(reading.fill.foldedMessages == 6)
         // The words count your requests (one per two messages here), not the model's messages.
         #expect(reading.requestCount == 6 && reading.foldedRequests == 3)
         #expect(ContextWords.kept(totalRequests: reading.requestCount, foldedRequests: reading.foldedRequests)
@@ -176,7 +176,7 @@ struct ContextReadingTests {
         chat.messages.insert(contentsOf: [ChatMessage(role: .assistant, content: "", toolCalls: [ToolCallRequest(id: "c", name: "read_file", arguments: "{}")]),
                                           .tool("c", "ok")], at: 1)
         let reading = try #require(ContextReading.make(input(chat)))
-        #expect(reading.messageCount == 6 && reading.requestCount == 2)
+        #expect(reading.requestCount == 2)
     }
 
     @Test func aSingleHugeRequestHasNothingToCompact() throws {
@@ -240,7 +240,7 @@ struct ContextModelTests {
         let input = try #require(model.contextInput(for: id))
         #expect(input.windowIsStated)
         #expect(input.budget?.window == 32_000)
-        #expect(ContextReading.make(input)?.messageCount == 4)
+        #expect(ContextReading.make(input) != nil)
     }
 
     @Test func noModelMeansNoReading() throws {
@@ -322,7 +322,7 @@ struct ContextModelTests {
         #expect(result.tokensAfter < result.tokensBefore)
         let afterInput = try #require(model.contextInput(for: id))
         let after = try #require(ContextReading.make(afterInput))
-        #expect(after.foldedMessages > 0)
+        #expect(after.fill.foldedMessages > 0)
         #expect(after.fill.usedTokens < before.fill.usedTokens)
     }
 

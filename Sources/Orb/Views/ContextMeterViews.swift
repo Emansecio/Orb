@@ -78,7 +78,7 @@ struct ContextGaugeDriver: View {
 struct ContextRing: View {
     let fraction: Double
     let tone: ContextTone
-    var size: CGFloat = 16
+    private static let size: CGFloat = 16
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -90,8 +90,8 @@ struct ContextRing: View {
                 .fill(tone.color)
                 .padding(2.5)
         }
-        .frame(width: size - 2, height: size - 2)
-        .frame(width: size, height: size)
+        .frame(width: Self.size - 2, height: Self.size - 2)
+        .frame(width: Self.size, height: Self.size)
         .animation(Motion.panel(reduceMotion: reduceMotion), value: fraction)
         .accessibilityHidden(true)
     }
