@@ -186,6 +186,7 @@ extension BotSession {
     func startRoutineRun(_ routineID: UUID, conversation own: Conversation, at started: Date, kind: SideRunKind? = nil,
                          chain: ChainContext? = nil, serving: UUID? = nil) {
         cancelChunkNote() // the note being written is about the chat that is parked now
+        chunkAttempts = [:] // the counts are by message index: another conversation must not inherit them
         model?.cancelEditing(id) // the edit belongs to the chat that is parked now
         let chat = conversation ?? Conversation()
         saveTask?.cancel()
@@ -229,6 +230,7 @@ extension BotSession {
     /// chat cannot wait for it.
     func openChat(_ target: UUID, fresh: Bool = false, read: StoreRead<Conversation>? = nil) {
         guard target != chatID else { return }
+        chunkAttempts = [:] // the counts are by message index: another conversation must not inherit them
         if !pendingChanges.isEmpty { ensureLoaded() } // what the hub changed belongs to the conversation being left
         transcript?.swapped() // the chat cross-fades to the other one
         func other() -> Conversation { fresh ? Conversation() : chat(from: read ?? model?.store.readConversation(id, chat: target)) }
@@ -271,6 +273,7 @@ extension BotSession {
     func workElsewhere(_ chat: UUID, read: StoreRead<Conversation>) {
         guard chat != chatID, turnTask == nil, routineID == nil, parkedChat == nil, !isUnloaded, let shown = conversation else { return }
         cancelChunkNote() // the note being written is about the one on show
+        chunkAttempts = [:] // the counts are by message index: another conversation must not inherit them
         memoryIdle?.cancel() // its stretch waits for the next idle moment after the turn
         memoryIdle = nil
         saveTask?.cancel()
@@ -292,6 +295,7 @@ extension BotSession {
         saveTask = nil
         isDirty = false
         cancelChunkNote()
+        chunkAttempts = [:] // the counts are by message index: another conversation must not inherit them
         leave(&left, as: working)
         workingChatID = nil
         conversation = parkedChat ?? Conversation()

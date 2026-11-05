@@ -19,6 +19,13 @@ struct StableKeychainHelperTests {
         #expect(reply?.ok == true && reply?.value == "teste")
     }
 
+    @Test func aHelperThatNeverAnswersIsGivenUpOn() throws {
+        let fake = try helper("sleep 30")
+        let started = Date()
+        #expect(fake.call(operation: "read", account: "test", service: "app.orb.mac", timeout: 0.5) == nil)
+        #expect(Date().timeIntervalSince(started) < 10)
+    }
+
     @Test func aFailedHelperNeverPretendsTheOperationWorked() throws {
         let fake = try helper("cat >/dev/null; exit 1")
         #expect(fake.call(operation: "read", account: "test", service: "app.orb.mac")?.ok != true)

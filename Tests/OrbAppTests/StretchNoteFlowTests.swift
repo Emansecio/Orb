@@ -228,6 +228,22 @@ final class StretchNoteFlowTests {
         #expect(!(model.conversations[botID]?.messages.isEmpty ?? true))
     }
 
+    @Test func theAttemptsAtAStretchBelongToTheConversationNotToTheOrb() async throws {
+        let (model, botID, asked) = try setUp(answer: .fails)
+        await warmUp(model, botID)
+        try grow(to: 0.75, model, botID)
+        model.writesStretchNotes = true
+        for attempt in 1...ChunkSummarizer.maxAttempts {
+            model.writeStretchNote(of: botID)
+            await waitUntil("attempt \(attempt) to end") { model.session(botID).chunkTask == nil }
+        }
+        #expect(!model.session(botID).chunkAttempts.isEmpty)
+        // Another conversation has other messages at the same indexes: it starts with no failures on record.
+        model.newChat(for: botID)
+        #expect(model.session(botID).chunkAttempts.isEmpty)
+        #expect(await asked.notes.count == ChunkSummarizer.maxAttempts)
+    }
+
     @Test func theNoteIsDroppedWhenTheOrbGoes() async throws {
         let (other, otherBot, otherAsked) = try setUp(answer: .hangs)
         await warmUp(other, otherBot)

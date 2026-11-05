@@ -934,7 +934,7 @@ extension Skill {
         isEnabled = try c.value(.isEnabled, default: true)
         source = try c.decodeIfPresent(String.self, forKey: .source).map { $0 == Self.legacyBuiltInSource ? Self.builtInSource : $0 }
         folderURL = try c.decodeIfPresent(URL.self, forKey: .folderURL)
-        orbIDs = (try? c.decodeIfPresent(Set<UUID>.self, forKey: .orbIDs)) ?? []
+        orbIDs = c.recordingLoss(Set<UUID>.self, forKey: .orbIDs) ?? []
         learnedBy = (try? c.decodeIfPresent(UUID.self, forKey: .learnedBy)) ?? nil
     }
 

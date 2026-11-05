@@ -5,6 +5,25 @@ import Testing
 /// `state.json` read again while the app runs: by hand ("Recarregar ajustes do disco", `reloadStateFromDisk`) or by
 /// the file watcher (`checkStateFile`), which ignores the app's own writes — their `FileFingerprint` is kept by the
 /// save's callback — and reloads only what was written from outside.
+/// A model that never answers and tells when the request around it is dropped.
+private struct HangingModel: LLMClient {
+    let started: TestFlag, dropped: TestFlag
+
+    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
+        AsyncThrowingStream { continuation in
+            started.raise()
+            continuation.onTermination = { _ in dropped.raise() }
+        }
+    }
+}
+
+private final class TestFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    var isRaised: Bool { lock.withLock { value } }
+    func raise() { lock.withLock { value = true } }
+}
+
 @Suite(.serialized) final class StateReloadTests {
     let folder = TempFolder("OrbStateReload", creating: true, sealing: "state.json")
 
@@ -118,6 +137,26 @@ import Testing
         #expect(model.selection == .bot(edited.bots[0].id)) // the selected Orb is gone: back to the top of the sidebar
         #expect(model.sessions[atlas] == nil)
         #expect(model.lastSelectedBotID == edited.bots[0].id) // the Orb it fell back to is the one the user is on now
+    }
+
+    @Test @MainActor func anOrbTheFileNoLongerHasStopsItsRunningTurn() async throws {
+        let model = model()
+        let atlas = model.bots[0].id
+        model.providers = [ProviderAccount(kind: .custom)]
+        model.defaultModel = "custom/modelo"
+        let (started, dropped) = (TestFlag(), TestFlag())
+        model.clientOverride = { HangingModel(started: started, dropped: dropped) }
+        #expect(model.send("oi", to: atlas))
+        #expect(await waitUntil("the model to be asked") { started.isRaised })
+
+        var edited = AppState.initial
+        edited.bots = [Bot(name: "Rex", role: "", orb: OrbConfig())]
+        try write(edited)
+        model.reloadStateFromDisk()
+
+        #expect(await waitUntil("the file's state applied") { model.bots.map(\.name) == ["Rex"] })
+        // No session is left to show or stop that turn, so it must not outlive the Orb.
+        #expect(await waitUntil("the orphan turn to be cancelled") { dropped.isRaised })
     }
 
     @Test @MainActor func theAppsOwnWriteIsNotReadAgain() async {

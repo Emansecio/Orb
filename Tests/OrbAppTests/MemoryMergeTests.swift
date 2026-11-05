@@ -131,6 +131,22 @@ import Testing
         #expect(model.live(botID).memory.items.map(\.title) == ["Servidor de produção"])
     }
 
+    @Test @MainActor func comingBackToTheAppShowsWhatChangedInTheMemoryAndSkipsReadingItWhenNothingDid() async throws {
+        let model = AppModel(store: Store(directory: root.appending(path: "data")), runsBackgroundWork: false)
+        let botID = model.createBot(name: "Atlas", role: "Teste", orb: OrbConfig(), model: "", mode: .ask, identity: "",
+                                    interview: false, folder: .home).id
+        let bank = model.memory.bank(for: botID)
+        let date = start
+        await bank.write(MemoryPage(path: "fatos/a.md", kind: .fato, title: "a", body: server1, created: date, updated: date, origin: .orb))
+        await model.refreshMemory(botID)
+        model.selection = .bot(botID)
+        model.appDidBecomeActive()
+        #expect(model.live(botID).memory.items.map(\.title) == ["a"])
+        await bank.write(MemoryPage(path: "fatos/b.md", kind: .fato, title: "b", body: server2, created: date, updated: date, origin: .orb))
+        model.appDidBecomeActive()
+        await waitUntil("the new page to show") { model.live(botID).memory.items.count == 2 }
+    }
+
     @Test func theNoticeOffersToMergeOnlyWhileTheProposalWaits() {
         let notice = NoticeAction.memoryMergePrefix + " 4 páginas parecidas viram 2: “A”, “B”."
         #expect(NoticeAction.actions(for: notice) == [.mergeMemory, .openMemory])

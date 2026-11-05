@@ -46,6 +46,12 @@ import Testing
         #expect(folder([], environment: ["ORB_DATA_DIR": ""]) == .standard(support.appending(path: "Orb")))
     }
 
+    @Test func aReleaseRefusesEveryDeveloperModeButTheIconOne() {
+        // A flag DevRun honours that the release does not refuse would leave an invisible process with a temporary data folder.
+        #expect(Set(Launcher.devOnlyFlags) == Set(DevRun.flags).subtracting(["--render-icon"]))
+        #expect(Launcher.devOnlyFlags.contains("--bench-panels") && Launcher.devOnlyFlags.contains("--bench-scroll"))
+    }
+
     @Test func theKeychainIsOutOfReachOnlyInDeveloperModes() {
         #expect(DevRun.allowsKeychain(arguments: ["Orb"]))
         for flag in DevRun.flags { #expect(!DevRun.allowsKeychain(arguments: ["Orb", flag, "x"])) }

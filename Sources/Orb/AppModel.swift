@@ -1361,7 +1361,7 @@ final class AppModel {
         case .bot(let id):
             orbTranscript(id).readerReturned(unread: live(id).unread)
             setUnread(0, for: id)
-            Task { await refreshMemory(id) } // picks up pages edited by hand meanwhile
+            Task { await refreshMemory(id, onlyIfChanged: true) } // picks up pages edited by hand meanwhile, without reading every page when none changed
         case .group(let id):
             groupHub.markRead(id) // what a member said while the app was behind
         default:
@@ -2662,6 +2662,7 @@ final class AppModel {
         // Orbs the file no longer has: what they had in memory goes with them (nothing of theirs is deleted on
         // disk — only `state.json` changed). An unsaved conversation is written first.
         for id in sessions.keys.filter({ !botIDs.contains($0) }) {
+            stop(id, startsQueuedRoutines: false) // a turn left running would go on with no session to show or stop it
             sessions[id]?.write()
             sessions[id]?.close()
             sessions[id] = nil
