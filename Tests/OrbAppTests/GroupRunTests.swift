@@ -336,6 +336,41 @@ struct GroupStopTests {
         #expect(world.items.count == items)
     }
 
+    @Test @MainActor func aCancelledOrchestratorWithOpenChildrenClosesTheRun() async throws {
+        let world = GroupWorld()
+        let first = await startOrchestratorTurn(world)
+        let chain = first.envelope.chainID
+        _ = try world.fake.ask(from: world.atlas.id, to: world.pesquisador.id, text: "pesquise", parent: first)
+        world.fake.finish(first, reply: "Delego.")
+        #expect(world.fake.request(first.envelope.id).state == .awaitingChildren)
+        // The chain is given up: every open request is cancelled and the orchestrator ends cancelled with its child still listed.
+        world.fake.cancelChain(chain, by: .gaveUp)
+        world.fake.finish(first, reply: nil, outcome: .cancelled)
+        await world.waitForFinish()
+        #expect(world.live.runState == .idle)
+        // A new message opens a new run.
+        #expect(world.model.postUserMessage("De novo", to: world.groupID))
+        #expect(world.hub.run(world.groupID) != nil)
+    }
+
+    @Test @MainActor func stoppingOneGroupLeavesTheSameMembersWorkInTheOtherUntouched() async throws {
+        let world = GroupWorld()
+        let other = try #require(world.model.createGroup(name: "Outro", members: [world.atlas.id, world.revisor.id], policy: GroupPolicy()))
+        // The Revisor is in a turn of the first group, and the other group's orchestrator queues something for it.
+        world.model.postUserMessage("@revisor revise", to: world.groupID)
+        let mine = world.lastGroupTurn
+        await world.fake.start(mine)
+        world.model.postUserMessage("@revisor outra coisa", to: other.id)
+        let theirs = world.lastGroupTurn
+        #expect(theirs.envelope.groupID == other.id)
+
+        world.model.stopGroup(world.groupID)
+        #expect(world.hub.run(world.groupID) == nil)
+        #expect(world.hub.run(other.id) != nil, "the other group keeps running")
+        #expect(world.fake.request(theirs.envelope.id).state != .cancelled)
+        #expect(!world.fake.cancelled.contains { $0.chain == theirs.envelope.chainID })
+    }
+
     @Test @MainActor func commandPeriodStopsTheOpenGroup() async {
         let world = GroupWorld()
         world.model.selection = .group(world.groupID)

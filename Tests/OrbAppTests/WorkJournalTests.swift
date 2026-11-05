@@ -332,6 +332,30 @@ import Testing
         #expect(onDiskOf(world.store).entries.isEmpty)
     }
 
+    @Test @MainActor func anAssignmentCancelledByTheCloseIsStillReportedAsLostOnResume() async throws {
+        let world = GroupWorld()
+        world.model.postUserMessage("Lancem o produto", to: world.groupID)
+        let run = try #require(world.hub.activeRun(world.groupID))
+        // `stopTurnsForQuit` cancels the chain, so the thread is saved with the assignment `.cancelled`, not `.open`.
+        world.session.append(.orbMessage(OrbMessageItem(direction: .post, kind: .ask, state: .cancelled, from: OrbRef(world.atlas),
+                                                        to: OrbRef(world.pesquisador), text: "Levante os preços", requestID: UUID(),
+                                                        chainID: run.id, groupID: world.groupID)))
+        world.model.stopTurnsForQuit()
+        world.model.saveNow()
+        world.store.flush()
+
+        let again = AppModel(store: world.store, runsBackgroundWork: false)
+        let fake = FakeDelegationService()
+        let hub = GroupHub(model: again, delegation: fake)
+        hub.settle = .zero
+        again.groupHub = hub
+        for bot in again.bots { fake.names[bot.id] = bot.name }
+        await again.resumeInterruptedWork()?.value
+
+        let turn = try #require(fake.groupTurns.first)
+        #expect(turn.envelope.text.contains("Assignments marked lost: Pesquisador: Levante os preços."))
+    }
+
     private func onDiskOf(_ store: Store) -> WorkJournalFile {
         store.flush()
         return store.readWorkJournal().value ?? WorkJournalFile()
