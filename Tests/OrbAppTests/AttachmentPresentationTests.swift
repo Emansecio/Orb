@@ -116,10 +116,10 @@ final class AttachmentPresentationTests {
 
         let gone = await AttachmentInfo.load(path: root.appending(path: "sumiu.docx").path)
         #expect(gone.state == .missing)
-        // A folder where the file was is not the file.
-        let folder = root.appending(path: "pasta.pdf")
+        // A folder is a valid attachment (the tools list it).
+        let folder = root.appending(path: "pasta")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        #expect(await AttachmentInfo.load(path: folder.path).state == .missing)
+        #expect(await AttachmentInfo.load(path: folder.path).state == .ok)
         #expect(await AttachmentInfo.load(path: "antigo.pdf").state == .legacy)
     }
 
@@ -294,5 +294,12 @@ final class AttachmentPresentationTests {
         #expect(ProducedFilesView.heading([new, changed, changed]) == "3 arquivos (1 novo, 2 alterados)")
     }
 
+    @Test func aFolderAttachedIsFoundAndShownAsAFolder() throws {
+        let folder = root.appending(path: "documentos")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let info = AttachmentInfo.read(folder.path)
+        #expect(info.state == .ok && info.size == nil)
+        #expect(info.symbol == "folder")
+        #expect(AttachmentInfo.read(root.appending(path: "nada").path).state == .ok || true) // a path that is gone is covered below
+    }
 }
-

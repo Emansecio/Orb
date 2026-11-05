@@ -519,4 +519,9 @@ struct ComposerSupportTests {
         #expect(window.makeFirstResponder(nil))
         #expect(!NewLineKey.insert(in: window))
     }
+
+    @Test func aSkillPickedFromThePlusMenuGoesInFrontOfWhatWasTyped() {
+        #expect(AppModel.draft(inserting: "resumir", into: "resuma este texto") == "/resumir resuma este texto")
+        #expect(AppModel.draft(inserting: "resumir", into: "/outra texto") == "/resumir texto")
+    }
 }

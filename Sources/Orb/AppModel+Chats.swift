@@ -17,14 +17,25 @@ extension AppModel {
         }
         var chats = live(botID).chats ?? OrbChats(first: botID, updated: live(botID).lastReply?.date ?? .now)
         // A "Nova conversa" nobody wrote in (its title is still the default, and nothing landed in it) is reused: each
-        // ⇧⌘N would otherwise leave one more empty entry in the list for good.
-        if let empty = chats.list.first(where: { $0.title == OrbChats.newTitle && $0.unread != true && $0.id != session.chatID && $0.id != session.workingChatID }) {
+        // ⇧⌘N would otherwise leave one more empty entry in the list for good. The title alone does not prove it is
+        // empty (an attachment-only message or a routine's line leaves it untouched), so the saved file is checked too.
+        if let empty = chats.list.first(where: {
+            $0.title == OrbChats.newTitle && $0.unread != true && $0.id != session.chatID && $0.id != session.workingChatID
+                && isChatEmptyOnDisk($0.id, of: botID)
+        }) {
             openChat(empty.id, of: botID, preservingInicioJump: true)
             return
         }
         let id = UUID()
         chats.add(id, at: .now)
         show(id, of: botID, in: chats, fresh: true)
+    }
+
+    /// Whether the conversation holds no item at all in what was saved (a chat that was never saved is empty).
+    private func isChatEmptyOnDisk(_ chat: UUID, of botID: UUID) -> Bool {
+        let first = chat == botID ? nil : chat
+        if let meta = store.readMeta(botID, chat: first) { return meta.itemCount == 0 }
+        return store.readConversation(botID, chat: first).value?.items.isEmpty ?? false
     }
 
     /// Shows another of the Orb's conversations in its chat.

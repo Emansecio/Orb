@@ -209,6 +209,8 @@ extension AppModel {
     /// The composer follows the conversation: what is typed and attached stays with the one it was written for, and the
     /// one opened shows its own. Called before the session changes conversation (and after the queue was given back).
     func switchDraft(of botID: UUID, from left: UUID, to opened: UUID) {
+        // The microphone belongs to the conversation it started in: its text would land in the one opened.
+        if dictation.botID == botID { dictation.cancel() }
         let lane = sessions[botID]?.lane
         let leaving = ComposerDraft(text: drafts[botID] ?? "", files: lane?.files.map(\.url.path) ?? [], pictures: lane?.pictures ?? [])
         chatDrafts[left] = leaving.isEmpty ? nil : leaving

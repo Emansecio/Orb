@@ -602,4 +602,51 @@ struct OrbChatsListTests {
         await waitUntilIdle(model, orb)
         #expect(!told(try #require(await client.calls.seen.last)), "a new conversation starts clean")
     }
+
+    @Test @MainActor func openingAnotherConversationClosesTheDictationOfTheOrb() async throws {
+        let (model, orb) = setUp(Model())
+        #expect(model.send("primeiro assunto", to: orb, fromUser: true))
+        await waitUntilIdle(model, orb)
+        model.newChat(for: orb)
+        let second = try #require(model.live(orb).chats?.active)
+        model.dictation.pose(.listening, for: orb)
+        model.openChat(orb, of: orb)
+        #expect(model.dictation.botID == nil, "what is said next must not land in the conversation opened")
+        #expect(model.live(orb).chats?.active == orb && second != orb)
+    }
+
+    @Test @MainActor func aPictureStillBeingPreparedStaysWithTheConversationItWasAttachedIn() async throws {
+        let (model, orb) = setUp(Model())
+        #expect(model.send("primeiro assunto", to: orb, fromUser: true))
+        await waitUntilIdle(model, orb)
+        let first = orb
+        let gate = TestGate()
+        let picture = ImageAttachment(path: "/tmp/a.png", mediaType: "image/png", width: 1, height: 1)
+        model.attachPicture(to: orb) { _, _ in await gate.wait(); return picture }
+        model.newChat(for: orb)
+        await gate.open()
+        #expect(await waitUntil("the picture arrived") { model.composerLane(orb).pendingPictures == 0 })
+        #expect(model.composerLane(orb).pictures.isEmpty, "the new conversation's strip stays clean")
+        #expect(model.chatDrafts[first]?.pictures == [picture])
+    }
+
+    @Test @MainActor func aNewConversationIsNotReusedOnceAnythingLandedInIt() async throws {
+        let client = Model()
+        let (model, orb) = setUp(client)
+        #expect(model.send("primeiro assunto", to: orb, fromUser: true))
+        await waitUntilIdle(model, orb)
+        model.newChat(for: orb)
+        let used = try #require(model.live(orb).chats?.active)
+        // An attachment-only message leaves the title as "Nova conversa".
+        let file = root.appending(path: "anexo.txt")
+        try Data("x".utf8).write(to: file)
+        #expect(model.send("", attachments: [file], to: orb, fromUser: true))
+        await waitUntilIdle(model, orb)
+        #expect(model.live(orb).chats?.title(of: used) == OrbChats.newTitle)
+        model.openChat(orb, of: orb)
+        await model.loadedConversation(orb)
+        model.newChat(for: orb)
+        #expect(model.live(orb).chats?.active != used, "the conversation with a message is not handed out as a new one")
+        #expect(model.live(orb).chats?.list.count == 3)
+    }
 }

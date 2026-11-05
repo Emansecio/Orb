@@ -46,6 +46,8 @@ enum AttachmentText {
                 return .text(try OfficeReader.text(at: url), kind: "documento .\(url.pathExtension.lowercased()) convertido em texto")
             }
             guard !ImageProcessing.isImageFile(url), !DocumentReader.isImage(url) else { return .unread }
+            // A folder has no text to read here; opening it as a file would only fail.
+            if (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true { return .unread }
             // Only as much as could be sent (UTF-8 at most 4 bytes a character), so a long log is not read whole; a
             // read cut short ends at its last whole line, never inside a character.
             let handle = try FileHandle(forReadingFrom: url)

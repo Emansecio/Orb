@@ -105,7 +105,12 @@ enum ElapsedFormat {
 enum AttachmentKind {
     /// An SF Symbol for a file by its type: documents, spreadsheets, PDFs, archives, audio, video, code.
     static func symbol(for url: URL) -> String {
-        guard let type = UTType(filenameExtension: url.pathExtension.lowercased()) else { return "doc" }
+        let type = UTType(filenameExtension: url.pathExtension.lowercased())
+        // A folder (or a package with no known type) is attached by path like a file; it is not a document.
+        if (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true, type == nil || type?.conforms(to: .folder) == true {
+            return "folder"
+        }
+        guard let type else { return "doc" }
         if type.conforms(to: .pdf) { return "doc.richtext" }
         if type.conforms(to: .spreadsheet) || type.conforms(to: .commaSeparatedText) || type.conforms(to: .tabSeparatedText) {
             return "tablecells"

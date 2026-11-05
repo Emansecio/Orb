@@ -332,7 +332,7 @@ struct ComposerView: View {
         let action = ComposerAction.current(isWorking: situation.live.isWorking, canSend: canSend, waitsOnChain: waitsOnChain)
         let secondaryStop = action.showsSecondaryStop(waitsOnChain: waitsOnChain)
         return HStack(spacing: Spacing.hairline) {
-            ComposerPlusMenu(botID: botID, attach: { isImporting = true }) { insert("/\($0) ") }
+            ComposerPlusMenu(botID: botID, attach: { isImporting = true }) { draft.wrappedValue = AppModel.draft(inserting: $0, into: draft.wrappedValue); isFocused = true }
             PermissionChip(botID: botID, compact: isCompact) { isFocused = true }
             Spacer(minLength: 8)
             ContextMeterChip(botID: botID, gauge: gauge, compact: isCompact)
@@ -547,12 +547,6 @@ struct ComposerView: View {
     /// Sends the edited message: it takes the place of the original and the rows after it fade out.
     private func submitEdit() {
         model.submitEdit(draft.wrappedValue, to: botID, animated: true)
-    }
-
-    private func insert(_ token: String) {
-        let current = draft.wrappedValue
-        draft.wrappedValue = current.isEmpty || current.hasSuffix(" ") ? current + token : current + " " + token
-        isFocused = true
     }
 }
 

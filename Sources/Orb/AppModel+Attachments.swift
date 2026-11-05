@@ -35,11 +35,20 @@ extension AppModel {
         }
         let store = images
         let place = lane.reservePicture()
-        Task {
+        let chat = sessions[owner]?.chatID // nil for a group: it has one composer
+        Task { [weak self] in
             var loaded: ImageAttachment?
             do { loaded = try await load(store, owner) }
             catch { lane.error = error.localizedDescription }
-            lane.pictureArrived(place, loaded)
+            // The conversation changed while it was prepared: the picture belongs to the one it was attached in.
+            if let self, let chat, let loaded, let now = sessions[owner]?.chatID, now != chat {
+                var draft = chatDrafts[chat] ?? ComposerDraft()
+                draft.pictures.append(loaded)
+                chatDrafts[chat] = draft
+                lane.pictureArrived(place, nil)
+            } else {
+                lane.pictureArrived(place, loaded)
+            }
         }
     }
 
@@ -48,7 +57,8 @@ extension AppModel {
     static func takePastedPictures(files attach: ([URL]) -> Void, picture: (Data) -> Void) -> Bool {
         let board = NSPasteboard.general
         let files = (board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
-        if files.contains(where: ImageProcessing.isImageFile) {
+        // Any copied file attaches, as when dropped (a PDF copied in Finder would otherwise paste only its name).
+        if !files.isEmpty {
             attach(files)
             return true
         }

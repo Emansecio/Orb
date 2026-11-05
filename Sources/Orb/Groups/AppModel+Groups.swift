@@ -260,7 +260,7 @@ extension AppModel {
         store.deleteGroupConversation(group: group.id)
         memory.deleteGroup(group.id)
         for member in group.memberIDs { store.deleteGroupSideConversation(group: group.id, for: member) }
-        if selection == .group(group.id) { selection = bots.first.map { .bot($0.id) } }
+        if selection == .group(group.id) { selection = sidebarBotIDs.first.map { .bot($0) } }
     }
 
     // MARK: Talking to a group
