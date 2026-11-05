@@ -78,6 +78,9 @@ final class AppModel {
     /// The routine each Orb is reading its conversation for before starting it (at most one per Orb): a second
     /// request waits for that one.
     @ObservationIgnored private var startingRoutines: [UUID: UUID] = [:]
+    /// The ids of the background processes that ended while their Orb worked, per Orb: told in the chat when the turn ends
+    /// (`showJobs`), because by then they are no longer in the strip.
+    @ObservationIgnored private var jobsEndedWhileWorking: [UUID: [String]] = [:]
     /// The `wake/` folder's file-system source: the doorbell outside processes ring (see `RoutineWake`). Started in
     /// the real app only — a developer run or a test never watches the folder.
     @ObservationIgnored var wakeWatch: DispatchSourceFileSystemObject?
@@ -480,6 +483,9 @@ final class AppModel {
         self.store.onSaveFailure = { [weak self] notice in
             Task { @MainActor in self?.reportSaveFailure(notice) }
         }
+        self.store.onSaveRecovered = { [weak self] in
+            Task { @MainActor in self?.didReportSaveFailure = false }
+        }
         self.store.onNotice = { [weak self] notice in
             Task { @MainActor in
                 guard let self else { return }
@@ -548,6 +554,7 @@ final class AppModel {
                 await self?.refreshConnections()
                 while !Task.isCancelled {
                     self?.runDueRoutines()
+                    self?.retrySavesAfterFailure()
                     self?.saveDraftsIfChanged()
                     self?.startModelRefresh() // apart: a provider that does not answer must not hold up the routines
                     await self?.unloadIdleConversations()
@@ -614,12 +621,22 @@ final class AppModel {
         // The write already cleared the session's "unsaved" mark; memory holds the only copy, so quitting writes it again.
         // A run's conversation already finished is not the session's (the chat is back): `unsavedRoutineConversations` has it.
         if let file = notice.file, let session = sessions.values.first(where: { store.isConversationFile(file, of: $0.id) }),
-           session.conversation != nil, session.routineID != nil || !Store.isSideConversationName(file.lastPathComponent) {
+           session.conversation != nil, session.routineID != nil || !Store.isSideConversationName(file.lastPathComponent)
+               || file.lastPathComponent.hasPrefix(Store.conversaPrefix + "-") { // an Orb's own later conversation is not a side run
             session.isDirty = true
         }
         guard !didReportSaveFailure else { return } // once: a full disk would otherwise repeat on every save
         didReportSaveFailure = true
         dataNotices.append(Self.described(notice, bots: bots, routines: routines))
+    }
+
+    /// After a failed save nothing else writes what stayed unsaved until it changes again: the scheduler writes it again
+    /// (the state has no "unsaved" mark, so it goes every time). The first write that works ends the failure state
+    /// (`Store.onSaveRecovered`); one that fails again is not reported twice.
+    func retrySavesAfterFailure() {
+        guard didReportSaveFailure else { return }
+        scheduleStateSave()
+        for session in sessions.values where session.isDirty { session.scheduleSave(delay: 0) }
     }
 
     /// The notice with its file named for the user: what the file holds (a conversation, the app's settings) instead
@@ -825,6 +842,8 @@ final class AppModel {
         if live.isWorking != was {
             refreshPresence()
             sessions[botID]?.transcript?.setLive(live.isWorking)
+            // What ended during the turn was not told then; the strip no longer has it, so ask for it now.
+            if !live.isWorking, jobsEndedWhileWorking[botID] != nil { Task { await showJobs(of: botID) } }
         }
     }
 
@@ -2015,9 +2034,14 @@ final class AppModel {
         let all = await jobs.list(botID: botID)
         let live = live(botID)
         var resumeAfter: String?
-        if !isWorking(botID) {
-            for shown in live.jobs {
-                guard let job = all.first(where: { $0.id == shown.id }), !job.isActive, job.state != .stopped else { continue }
+        if isWorking(botID) {
+            let ended = live.jobs.filter { shown in all.first { $0.id == shown.id }.map { !$0.isActive && $0.state != .stopped } ?? false }
+            if !ended.isEmpty { jobsEndedWhileWorking[botID, default: []] += ended.map(\.id) }
+        } else {
+            var shownIDs = live.jobs.map(\.id)
+            for id in jobsEndedWhileWorking.removeValue(forKey: botID) ?? [] where !shownIDs.contains(id) { shownIDs.append(id) }
+            for id in shownIDs {
+                guard let job = all.first(where: { $0.id == id }), !job.isActive, job.state != .stopped else { continue }
                 let notice = NoticeAction.jobEnded(job)
                 appendToChat(.notice(notice), of: botID) // the latest conversation, where the task you last asked for is
                 if resumesByItself(after: job, of: botID) { resumeAfter = notice }
@@ -2091,17 +2115,25 @@ final class AppModel {
     /// A run has a conversation of its own (`conversations/<Orb>/routine-<routine>.json`): the chat narrates it while
     /// it runs (`BotSession.shownItems`) and gets one line when it ends. `manual` (the card's button, the tool's "run")
     /// skips the precheck: asking to run now means running now.
-    func runRoutine(_ routineID: UUID, manual: Bool = false, wakeNote: String? = nil) {
+    /// `queuesIfRunning`: a ring from outside (`RoutineWake`) that finds the routine running waits for its end, once: nothing
+    /// rings again, unlike the schedule, whose next slot covers the one dropped.
+    func runRoutine(_ routineID: UUID, manual: Bool = false, wakeNote: String? = nil, queuesIfRunning: Bool = false) {
         guard !isResetting, let routine = routines.first(where: { $0.id == routineID }), bot(routine.botID) != nil else { return }
         if sessions[routine.botID]?.isUnloaded == true { // its chat is read off the main thread first
             Task {
                 await loadedConversation(routine.botID)
                 ensureLoaded(routine.botID)
-                runRoutine(routineID, manual: manual, wakeNote: wakeNote)
+                runRoutine(routineID, manual: manual, wakeNote: wakeNote, queuesIfRunning: queuesIfRunning)
             }
             return
         }
-        guard sessions[routine.botID]?.routineID != routineID, !startingRoutines.values.contains(routineID) else { return }
+        guard sessions[routine.botID]?.routineID != routineID, !startingRoutines.values.contains(routineID) else {
+            if queuesIfRunning, !queuedRoutines.contains(routineID) {
+                queuedRoutines.append(routineID)
+                if let wakeNote { queuedWakeNotes[routineID] = wakeNote }
+            }
+            return
+        }
         // A run waiting for other Orbs' answers is still this routine's run: the next one waits for it to end.
         guard !delegation.isWaiting(routine: routineID) else { return }
         guard !queuedRoutines.contains(routineID) else {
@@ -2180,6 +2212,11 @@ final class AppModel {
             }
             let read = await store.readRoutineConversationAsync(routine: routine.id, for: botID)
             startingRoutines[botID] = nil
+            // Paused while the precheck or the read was under way (up to 90 s): "off" means off for a scheduled run too.
+            if gated, routines.first(where: { $0.id == routine.id })?.isEnabled == false {
+                if !isResetting, bot(botID) != nil, sessions[botID]?.turnTask == nil { startNextQueuedWork(for: botID) }
+                return
+            }
             beginRoutine(routine.id, of: botID, read: read, wakeNote: wakeNote)
             // It did not run (nothing to send, the routine or the Orb gone meanwhile): what waits for the Orb goes on now,
             // as after a turn, instead of waiting for the next message.
@@ -2193,6 +2230,7 @@ final class AppModel {
         guard let index = routines.firstIndex(where: { $0.id == routineID }) else { return }
         routines[index].lastRun = skipped
         routines[index].lastResult = summary
+        routines[index].closeIfOnceIsDone()
         recordRun(RoutineRun(date: skipped, finishedAt: skipped, succeeded: true, summary: summary), routineID: routineID, skipped: true)
     }
 
@@ -2236,6 +2274,7 @@ final class AppModel {
         session.unparkChat()
         let reason = hasPrompt ? "Não rodou: conecte um modelo em Ajustes." : "Não rodou: a rotina está sem instruções."
         routines[index].lastResult = reason
+        routines[index].closeIfOnceIsDone()
         recordRun(RoutineRun(date: started, finishedAt: started, succeeded: false, summary: reason), routineID: routine.id)
     }
 
@@ -2374,7 +2413,7 @@ final class AppModel {
             if routines[index].nextRun <= finished, !testRunBeforeMoment { routines[index].lastRun = finished }
             // A task for one moment is done once that moment has run (a test run before it is not): it stays in the
             // list, switched off, with its history.
-            if case .once = routines[index].schedule, routines[index].nextRun == .distantFuture { routines[index].isEnabled = false }
+            routines[index].closeIfOnceIsDone()
         }
         recordRun(run, routineID: routineID)
         let outcome: OrbEvent.Outcome = !succeeded ? .failed : run.check?.status == .done ? .goalReached
@@ -2655,7 +2694,8 @@ final class AppModel {
         if let notice = read.notice {
             addNotice(Self.described(notice, bots: read.value?.bots ?? bots, routines: read.value?.routines ?? routines))
         }
-        guard let state = read.value else { return }
+        // Unreadable and set aside: memory is right and the disk has no `state.json` now, so it is written again.
+        guard let state = read.value else { scheduleStateSave(); return }
         skills = state.skills
         routines = state.routines
         connectors = connectorSecrets.resolve(state.connectors)

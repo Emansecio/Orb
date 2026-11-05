@@ -105,6 +105,7 @@ final class UsageRecorder {
     func adoptCallbacks(of other: Store) {
         store.onSaveFailure = other.onSaveFailure
         store.onNotice = other.onNotice
+        store.onSaveRecovered = other.onSaveRecovered
     }
 
     /// Counts a use of `model` by the Orb `orb`, in the hour it happened. Nothing is recorded for an empty use.

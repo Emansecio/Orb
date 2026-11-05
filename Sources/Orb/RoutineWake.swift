@@ -56,6 +56,6 @@ extension AppModel {
         let routine = UUID(uuidString: key).flatMap { id in routines.first { $0.id == id } }
             ?? routines.first { $0.name.localizedCaseInsensitiveCompare(key) == .orderedSame }
         guard let routine, routine.isEnabled else { return }
-        runRoutine(routine.id, wakeNote: note)
+        runRoutine(routine.id, wakeNote: note, queuesIfRunning: true)
     }
 }

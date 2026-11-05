@@ -71,6 +71,21 @@ import Testing
         #expect(told.count == 1 && told.first?.hasPrefix(NoticeAction.jobEndedPrefix) == true)
     }
 
+    @Test @MainActor func aJobThatEndsWhileTheOrbWorksIsToldWhenTheTurnEnds() async throws {
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let (model, botID) = makeModel()
+        try await start("until [ -e go ]; do sleep 0.1; done", in: model, for: botID)
+        await wait { model.live(botID).jobs.count == 1 }
+        model.setStatus("Pensando", of: botID) // the turn goes on
+        FileManager.default.createFile(atPath: root.appending(path: "go").path, contents: nil)
+        await wait { model.live(botID).jobs.isEmpty }
+        #expect(notices(model, botID).isEmpty, "during the turn it says nothing")
+
+        model.setStatus(nil, of: botID) // the turn ends
+        await wait { !notices(model, botID).isEmpty }
+        #expect(notices(model, botID).count == 1 && notices(model, botID).first?.hasPrefix(NoticeAction.jobEndedPrefix) == true)
+    }
+
     @Test @MainActor func aProcessOfTheTaskYouAskedForLetsTheOrbGoOnByItself() {
         let (model, botID) = makeModel()
         let session = model.session(botID)

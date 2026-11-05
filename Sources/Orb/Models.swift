@@ -693,6 +693,12 @@ struct Routine: Identifiable, Codable, Sendable {
 
     private static let missedSlotScan = 2_000
 
+    /// A task for one moment is done once that moment has been counted as a run (ran, was excused or could not run); it
+    /// stays in the list, switched off, instead of "on" with nothing to wait for.
+    mutating func closeIfOnceIsDone() {
+        if case .once = schedule, nextRun == .distantFuture { isEnabled = false }
+    }
+
     /// Turning a routine back on counts from now: its old `lastRun` would make it due right away.
     mutating func setEnabled(_ enabled: Bool, now: Date = .now) {
         if enabled && !isEnabled { lastRun = now }

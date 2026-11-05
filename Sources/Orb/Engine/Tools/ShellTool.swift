@@ -230,7 +230,7 @@ struct JobOutputTool: AgentTool {
             let all = await jobs.list(botID: botID)
             guard !all.isEmpty else { return "Nenhum processo em segundo plano." }
             // Running ones all show; of the finished ones only the latest few (the list is by id, oldest first).
-            let finished = all.filter { !$0.isRunning }
+            let finished = all.filter { !$0.isActive } // one that left a process running still counts against the limit: its id stays
             let hidden = Set(finished.dropLast(Self.finishedShown).map(\.id))
             var text = all.filter { !hidden.contains($0.id) }
                 .map { "\($0.id)  \($0.statusText)  \($0.command)  (em \($0.directory))" }.joined(separator: "\n")
