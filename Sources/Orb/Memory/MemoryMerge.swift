@@ -168,8 +168,10 @@ extension MemoryBank {
         guard pendingMerge(now: now).isEmpty else { return nil }
         let floor = max(MemoryMerge.threshold, (mergeProposal()?.askedCount ?? 0) + MemoryMerge.step)
         prepare(now: now)
-        guard count([.fato, .procedimento]) >= floor else { return nil }
+        let indexed = count([.fato, .procedimento])
+        guard indexed >= floor, mergeShortScan?.indexed != indexed || mergeShortScan?.floor != floor else { return nil }
         let candidates = mergeCandidates(now: now)
+        mergeShortScan = candidates.count >= floor ? nil : (indexed, floor)
         return candidates.count >= floor ? candidates : nil
     }
 

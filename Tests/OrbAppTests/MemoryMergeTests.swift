@@ -70,6 +70,19 @@ import Testing
                                     origin: origin))
     }
 
+    @Test func pagesOfYoursInTheIndexDoNotMakeEveryTurnReadThemAgain() async {
+        let bank = MemoryBank(directory: root.appending(path: "orb"))
+        for index in 0..<(MemoryMerge.threshold + 5) { await page(bank, "sua-\(index)", "Assunto \(index) importado.", origin: .voce) }
+        for index in 0..<3 { await page(bank, "nota-\(index)", "Assunto \(index) do Orb.") }
+        #expect(await bank.mergeDue(now: start) == nil)
+        #expect(await bank.mergeShortScan != nil, "the short scan is remembered: the next turn does not read the bodies again")
+        #expect(await bank.mergeDue(now: start) == nil)
+        // Pages more change the count: it is looked at again, and the Orb's own pages reach the floor.
+        for index in 3..<(MemoryMerge.threshold + 1) { await page(bank, "nota-\(index)", "Assunto \(index) do Orb.") }
+        #expect(await bank.mergeDue(now: start)?.count == MemoryMerge.threshold + 1)
+        #expect(await bank.mergeShortScan == nil)
+    }
+
     @Test func aProposalIsDueEveryStepAndAppliedOnlyOnPagesThatDidNotChange() async throws {
         let bank = MemoryBank(directory: root.appending(path: "orb"))
         for index in 0..<(MemoryMerge.threshold - 1) { await page(bank, "nota-\(index)", "Assunto \(index) sem relação.") }

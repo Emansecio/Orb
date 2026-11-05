@@ -642,6 +642,8 @@ final class BrowserHub: Sendable {
     /// A conversation of the Orb is over (a routine's run, a request from another Orb): its tab is closed and its view forgotten.
     func endScope(botID: UUID, scope: String) async {
         scoped.withLock { _ = $0[botID]?.removeValue(forKey: scope) }
+        // Reference labels are keyed by scope too; without this every routine run leaves its labels behind until the Orb's browser closes.
+        clearLabels(botID: botID, scope: scope)
         await existingSession(botID: botID)?.endScope(scope)
     }
 
@@ -814,7 +816,9 @@ final class BrowserHub: Sendable {
         _ = group.wait(timeout: .now() + timeout + 1)
     }
 
-    func closeAll() async {
+    /// `orbs`: the Orbs of this app, when the caller knows them; only their sessions are closed then (another build on the same Mac
+    /// has Orbs of its own). `nil` closes every `orb-` session.
+    func closeAll(orbs: Set<UUID>? = nil) async {
         let all = sessions.withLock { sessions -> [BrowserSession] in
             defer { sessions = [:] }
             return Array(sessions.values)
@@ -822,7 +826,8 @@ final class BrowserHub: Sendable {
         labels.withLock { $0 = [:] }
         sensitivePages.withLock { $0 = [] }
         for session in all { try? await session.driver.close() }
-        await closeRunning(where: { _ in true }, skipping: Set(all.map(Self.name(of:))))
+        let prefixes = orbs.map { $0.map(AgentBrowserConfig.botPrefix) }
+        await closeRunning(where: { name in prefixes?.contains { name.hasPrefix($0) } ?? true }, skipping: Set(all.map(Self.name(of:))))
     }
 
     /// Deletes what the Orb's browser kept (profile folders), when the Orb is deleted. Its browsers are closed first, and waited

@@ -155,16 +155,30 @@ extension MemoryBank {
         try? FileManager.default.createDirectory(at: archive.deletingLastPathComponent(), withIntermediateDirectories: true)
         guard (try? Data(text.utf8).write(to: archive, options: .atomic)) != nil else { return false }
 
-        if let body = identity()?.body, !old.notes.isEmpty {
+        let oldIdentity = identity()?.body
+        if let body = oldIdentity, !old.notes.isEmpty {
             guard setIdentity(Self.replacingIdentityNotes(in: body, with: new.notes), now: now) else { return false }
         }
         for page in consolidablePreferences(now: now) { forget(page.path, keepingVersions: true) }
-        let written = new.preferences.map { remember($0, kind: .preferencia, now: now) }
+        let written = writePreferences(new.preferences, now: now)
         guard !written.contains(.failed) else {
-            for preference in old.preferences { remember(preference, kind: .preferencia, now: now) }
+            // Put everything back, the notes too: left changed, the caller would see the pinned memory differ from what it
+            // sent and retry the paid call at every turn.
+            writePreferences(old.preferences, now: now)
+            if let oldIdentity, !old.notes.isEmpty { _ = setIdentity(oldIdentity, now: now) }
             return false
         }
         return true
+    }
+
+    /// Writes `preferences` (oldest first) one second apart, the newest at `now`: the file keeps `updated` in whole seconds, and
+    /// pages with the same one would come back in the order of their paths, not the order the model gave them. Backwards from
+    /// `now`, so none lands in the future.
+    @discardableResult
+    private func writePreferences(_ preferences: [String], now: Date) -> [RememberOutcome] {
+        preferences.enumerated().map { index, text in
+            remember(text, kind: .preferencia, now: now.addingTimeInterval(-Double(preferences.count - 1 - index)))
+        }
     }
 
     /// The lines of the identity's notes list (`- …`), as `remember` writes them under `identityNotesHeader`.
