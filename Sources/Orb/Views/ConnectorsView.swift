@@ -1277,6 +1277,7 @@ struct ConnectorEditor: View {
 
     private func save() {
         config = ConnectorEditing.normalized(config)
+        config.name = ConnectorGateway.uniqueName(config.name, among: model.connectors, excluding: config.id)
         let pairs = values.map { row -> (String, String) in
             let key = row.key.trimmingCharacters(in: .whitespaces)
             var value = row.value

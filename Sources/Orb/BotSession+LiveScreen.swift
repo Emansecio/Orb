@@ -45,6 +45,9 @@ extension BotSession {
     func closeBrowserView(_ outcome: BrowserViewItem.Outcome) {
         guard let itemID = browserViewID, let model else { return }
         browserViewID = nil
+        // The turn's card goes with the view, and `syncHandoffPending` no longer runs without it: a hand-off card left open
+        // (Parar) would keep the page "protected" and drop every frame of later turns.
+        model.liveScreens.setHandoffPending(id, false)
         // Not the address of a protected page (a reset link, a code in the path): the line is saved with the conversation.
         let frames = model.liveScreens.store(id)
         let path = frames.isProtected ? nil : LiveScreenText.path(of: frames.url)

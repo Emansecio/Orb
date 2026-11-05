@@ -116,7 +116,11 @@ struct MCPRegistry: Sendable {
             return ("uvx", [version.isEmpty ? identifier : "\(identifier)==\(version)"] + extra)
         case "oci":
             let image = identifier.contains(":") || version.isEmpty ? identifier : "\(identifier):\(version)"
-            return ("docker", ["run", "-i", "--rm"] + arguments(package["runtimeArguments"]) + [image] + extra)
+            // The variables the user fills in live in the `docker` process, which does not hand them to the container on its own:
+            // `-e NAME` (no value) makes docker copy each one from its own environment.
+            let passed = (package["environmentVariables"]?.array ?? []).compactMap { input(from: $0)?.name }
+                .filter { isEnvironmentName($0) }.flatMap { ["-e", $0] }
+            return ("docker", ["run", "-i", "--rm"] + arguments(package["runtimeArguments"]) + passed + [image] + extra)
         default:
             return nil
         }
@@ -129,6 +133,11 @@ struct MCPRegistry: Sendable {
             if argument["type"]?.string == "named", let name = argument["name"]?.string { return [name, value] }
             return [value]
         }
+    }
+
+    private static func isEnvironmentName(_ name: String) -> Bool {
+        guard let first = name.unicodeScalars.first, first == "_" || (first.isASCII && CharacterSet.letters.contains(first)) else { return false }
+        return name.unicodeScalars.allSatisfy { $0 == "_" || ($0.isASCII && CharacterSet.alphanumerics.contains($0)) }
     }
 
     private static func input(from json: JSONValue) -> RegistryServer.Input? {

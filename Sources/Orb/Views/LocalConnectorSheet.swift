@@ -226,6 +226,8 @@ struct LocalConnectorSheet: View {
     private func install(anyAccount: Bool = false) async {
         phase = .working
         let config = model.installLocalConnector(kind, orbIDs: orbIDs, anyAccount: anyAccount)
+        // Switched off in the card: the scope is saved and it stays off (starting it would only report "está desligado").
+        guard config.isEnabled else { return dismiss() }
         switch await model.connectAndWait(config.id) {
         case .ready(let count)?:
             phase = .done(count)

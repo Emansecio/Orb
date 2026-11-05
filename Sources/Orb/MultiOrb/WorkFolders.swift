@@ -42,7 +42,7 @@ enum WorkFolders {
         let topURL = URL(fileURLWithPath: top)
         let relative = relativePath(of: project, in: topURL)
         let short = shortID(run)
-        let memberSlug = slug(member)
+        let memberSlug = memberSlug(member)
         let branch = "\(branchPrefix)\(memberSlug)/\(short)"
         let parent = root.appending(path: "\(slug(project.lastPathComponent))-\(hash(project.path))", directoryHint: .isDirectory)
         let folder = parent.appending(path: "\(memberSlug)-\(short)", directoryHint: .isDirectory)
@@ -233,6 +233,16 @@ enum WorkFolders {
         let trimmed = String(result.trimmingCharacters(in: CharacterSet(charactersIn: "-")).prefix(24))
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
         return trimmed.isEmpty ? "orb" : trimmed
+    }
+
+    /// `slug` of a member's name, made unique when the slug lost information (a name in another alphabet, an emoji, or one cut
+    /// at 24 characters): two such members must not share one worktree. Plain names keep their old folder, so a resumed run finds it.
+    static func memberSlug(_ name: String) -> String {
+        let base = slug(name)
+        let folded = name.folding(options: [.diacriticInsensitive], locale: .init(identifier: "en_US_POSIX"))
+        let lossy = folded.unicodeScalars.contains { !$0.isASCII } || base.count >= 24
+        guard lossy else { return base }
+        return base.prefix(19).trimmingCharacters(in: CharacterSet(charactersIn: "-")) + "-" + String(hash(name).prefix(4))
     }
 
     /// FNV-1a of the project's path, 8 hex digits: two projects with the same folder name get different folders.

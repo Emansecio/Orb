@@ -414,7 +414,7 @@ final class AppModel {
         bots = state.bots
         routines = state.routines
         skills = state.skills
-        connectors = secrets.resolve(state.connectors)
+        connectors = ConnectorGateway.renamingRepeats(secrets.resolve(state.connectors))
         providers = state.providers
         defaultModel = state.defaultModel
         contextMemory = state.contextMemory
@@ -2698,7 +2698,7 @@ final class AppModel {
         guard let state = read.value else { scheduleStateSave(); return }
         skills = state.skills
         routines = state.routines
-        connectors = connectorSecrets.resolve(state.connectors)
+        connectors = ConnectorGateway.renamingRepeats(connectorSecrets.resolve(state.connectors))
         providers = state.providers
         defaultModel = state.defaultModel
         contextMemory = state.contextMemory

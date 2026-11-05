@@ -232,6 +232,22 @@ struct BrowserHandoffEngineTests {
         #expect(!model.needsYou(botID))
     }
 
+    @Test @MainActor func stoppingDuringTheHandoffLeavesTheNextPageUnprotected() async {
+        let model = model()
+        let botID = model.bots[0].id
+        let rig = LiveRig()
+        model.liveScreens = rig.hub
+        rig.source.setBrowser(botID, generation: 1, port: 4001)
+        rig.hub.acquire(botID)
+        #expect(await rig.opened(1))
+        let session = model.session(botID)
+        session.browserViewID = UUID()
+        model.liveScreens.setHandoffPending(botID, true)
+        #expect(model.liveScreens.store(botID).isProtected)
+        session.closeBrowserView(.stopped) // what Parar does, before it answers the card
+        #expect(!model.liveScreens.store(botID).isProtected, "the flag would drop every frame of later turns")
+    }
+
     @Test func theRecordOfAnOrdinaryCardKeepsItsWords() {
         var card = ApprovalRequest(toolName: "run_command", title: "Rodando", command: "ls", reason: "")
         card.decision = .once

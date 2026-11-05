@@ -57,6 +57,16 @@ struct WorkFolderNamesTests {
         #expect(WorkFolders.slug(String(repeating: "a", count: 80)).count == 24)
     }
 
+    @Test func namesThatLoseInformationInTheSlugStayApart() {
+        #expect(WorkFolders.memberSlug("Atlas") == "atlas", "a plain name keeps its folder")
+        #expect(WorkFolders.memberSlug("🔎") != WorkFolders.memberSlug("✍️"))
+        #expect(WorkFolders.memberSlug("日本語") != WorkFolders.memberSlug("中文"))
+        let long = String(repeating: "a", count: 30)
+        #expect(WorkFolders.memberSlug(long + "1") != WorkFolders.memberSlug(long + "2"))
+        #expect(WorkFolders.memberSlug("Revisão") == "revisao", "accents fold, nothing is lost")
+        #expect(WorkFolders.memberSlug("🔎").hasPrefix("orb-"))
+    }
+
     @Test func theHashTellsTwoFoldersWithTheSameNameApart() {
         #expect(WorkFolders.hash("/a/app") != WorkFolders.hash("/b/app"))
         #expect(WorkFolders.hash("/a/app") == WorkFolders.hash("/a/app"))

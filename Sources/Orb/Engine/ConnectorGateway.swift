@@ -92,13 +92,39 @@ enum ConnectorGateway {
 
     // MARK: Resolving
 
+    /// What the model's name for a connector is reduced to: two connectors with the same key are one to the model.
+    static func nameKey(_ text: String) -> String {
+        String(text.lowercased().unicodeScalars.map { $0.isASCII && CharacterSet.alphanumerics.contains($0) ? Character($0) : "_" })
+    }
+
+    /// `name`, or with " (2)", " (3)"... when another connector (not `id`) already has it: the model names a connector, so a
+    /// repeat would leave one of the two out of reach.
+    static func uniqueName(_ name: String, among connectors: [MCPServerConfig], excluding id: UUID? = nil) -> String {
+        let taken = Set(connectors.filter { $0.id != id }.map { nameKey($0.name) })
+        var candidate = name
+        var number = 2
+        while taken.contains(nameKey(candidate)) {
+            candidate = "\(name) (\(number))"
+            number += 1
+        }
+        return candidate
+    }
+
+    /// Connectors saved with a repeated name (before it was refused) keep all of them: the later ones get a number.
+    static func renamingRepeats(_ connectors: [MCPServerConfig]) -> [MCPServerConfig] {
+        var result: [MCPServerConfig] = []
+        for var connector in connectors {
+            connector.name = uniqueName(connector.name, among: result, excluding: connector.id)
+            result.append(connector)
+        }
+        return result
+    }
+
     /// The connector named `name` among `connectors`: the exact name, or the same once the characters a model name
     /// cannot hold are ignored (`GitHub` for `github`).
     static func connector(named name: String, in connectors: [MCPServerConfig]) throws -> MCPServerConfig {
         let wanted = name.trimmingCharacters(in: .whitespaces)
-        func key(_ text: String) -> String {
-            String(text.lowercased().unicodeScalars.map { $0.isASCII && CharacterSet.alphanumerics.contains($0) ? Character($0) : "_" })
-        }
+        let key = nameKey
         if let found = connectors.first(where: { $0.name == wanted }) ?? connectors.first(where: { key($0.name) == key(wanted) }) {
             return found
         }
