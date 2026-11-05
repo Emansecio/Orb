@@ -40,10 +40,11 @@ extension AppModel {
     }
 
     /// An Orb already has this name (accents and case aside): the new Orb's folder then gets another name.
-    func isOrbNameTaken(_ name: String) -> Bool {
+    /// `excluding`: the Orb being renamed, which may keep its own name (or change its case).
+    func isOrbNameTaken(_ name: String, excluding: UUID? = nil) -> Bool {
         let fold = { (text: String) in text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil) }
         let wanted = fold(OrbProposal.clippedName(name))
-        return bots.contains { fold($0.name) == wanted }
+        return bots.contains { $0.id != excluding && fold($0.name) == wanted }
     }
 
     /// Creates the Orb the person accepted, as the card holds it, and answers for the model. The Orb gets its own folder and no

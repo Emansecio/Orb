@@ -168,11 +168,12 @@ extension AppModel {
         update(botID) { $0.workingDirectory = OrbFolder.storedPath(folder) }
     }
 
-    /// Renames the Orb. Its folder stays where it is. A name with only blanks is refused (false).
+    /// Renames the Orb. Its folder stays where it is. A name with only blanks, or another Orb's name, is refused (false):
+    /// delegation finds Orbs by name, so two with the same one could not be told apart.
     @discardableResult
     func rename(_ botID: UUID, to name: String) -> Bool {
         let name = Self.clippedName(name)
-        guard !name.isEmpty, bot(botID) != nil else { return false }
+        guard !name.isEmpty, bot(botID) != nil, !isOrbNameTaken(name, excluding: botID) else { return false }
         update(botID) { $0.name = name }
         return true
     }

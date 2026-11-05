@@ -1057,6 +1057,21 @@ private actor PermissionBox {
     func set(mode: PermissionMode) { state.mode = mode }
     func set(rules: [PermissionRule]) { state.rules = rules }
     func add(_ rule: PermissionRule) { state.rules.append(rule) }
+    func set(capabilities: Set<Capability>) { state.capabilities = capabilities }
+}
+
+/// Like `TouchTool`, but offered only with "Terminal e arquivos".
+private struct TerminalTouchTool: AgentTool {
+    let runs: Counter
+    var spec: ToolSpec { ToolSpec(name: "touch", description: "Touches a file", parameters: .schema([:])) }
+    var kind: ToolCall.Kind { .file }
+    var capability: Capability? { .terminal }
+    func risk(_ arguments: JSONValue) -> ToolRisk { .sensitive }
+    func summary(_ arguments: JSONValue) -> (title: String, detail: String) { ("Tocando", "arquivo") }
+    func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
+        await runs.increment()
+        return "ok"
+    }
 }
 
 struct AgentEngineGatingTests {
@@ -1104,6 +1119,47 @@ struct AgentEngineGatingTests {
         #expect(finished.first?.0 == started.first && finished.first?.1 == .failed)
         #expect(await runs.value == 0)
         #expect(toolMessages(events).first?.contains("read-only") == true)
+    }
+
+    @Test func aToolTurnedOffMidTurnDoesNotRun() async {
+        let runs = Counter()
+        let box = PermissionBox(mode: .auto)
+        await box.set(capabilities: [.browser])
+        let events = await drive(AgentEngine(), request(CallScriptModel(script: CallScript([[touchCall], [.text("Ok")]], whenExhausted: .fim)), box: box,
+                                                        tools: [TerminalTouchTool(runs: runs)]), onApproval: { _ in })
+        #expect(await runs.value == 0)
+        #expect(toolMessages(events).first?.contains("turned off") == true)
+    }
+
+    @Test func aToolStillOnRuns() async {
+        let runs = Counter()
+        let box = PermissionBox(mode: .auto)
+        await box.set(capabilities: [.terminal])
+        _ = await drive(AgentEngine(), request(CallScriptModel(script: CallScript([[touchCall], [.text("Ok")]], whenExhausted: .fim)), box: box,
+                                               tools: [TerminalTouchTool(runs: runs)]), onApproval: { _ in })
+        #expect(await runs.value == 1)
+    }
+
+    @Test func turningTheSwitchOffWhileACardIsOpenStopsTheToolAfterAllow() async {
+        let runs = Counter()
+        let box = PermissionBox(mode: .ask)
+        await box.set(capabilities: [.terminal])
+        let engine = AgentEngine()
+        let events = await drive(engine, request(CallScriptModel(script: CallScript([[touchCall], [.text("Ok")]], whenExhausted: .fim)), box: box,
+                                                 tools: [TerminalTouchTool(runs: runs)])) { approval in
+            await box.set(capabilities: [])
+            await engine.gate.resolve(approvalID: approval.id, decision: .once)
+        }
+        #expect(await runs.value == 0)
+        #expect(toolMessages(events).first?.contains("turned off") == true)
+    }
+
+    @Test func aConnectorRemovedFromTheOrbIsNotCalled() {
+        let id = UUID()
+        let tool = MCPTool(serverName: "S", remote: ToolSpec(name: "t", description: "", parameters: .schema([:])), serverID: id, manager: MCPManager())
+        #expect(PermissionState(mode: .auto, rules: [], connectors: []).turnedOff(tool))
+        #expect(PermissionState(mode: .auto, rules: [], connectors: [id]).turnedOff(tool) == false)
+        #expect(PermissionState(mode: .auto, rules: []).turnedOff(tool) == false)
     }
 
     @Test func switchingToReadOnlyWhileACardIsOpenDeniesIt() async {

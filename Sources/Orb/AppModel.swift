@@ -1272,7 +1272,10 @@ final class AppModel {
     /// The mode and "Sempre permitir" rules of an Orb as they are now; the engines read this at every tool call,
     /// so a change (or a revoked grant) applies to the turn already running.
     func permissionState(of botID: UUID) -> PermissionState? {
-        effectiveBot(botID).map { PermissionState(mode: $0.permissionMode, rules: $0.permissionRules) }
+        effectiveBot(botID).map {
+            PermissionState(mode: $0.permissionMode, rules: $0.permissionRules, capabilities: $0.capabilities,
+                            connectors: Set(connectors(for: botID).map(\.id)))
+        }
     }
 
     /// The permission mode the running routine asked for, if it asked for one.
@@ -2178,7 +2181,7 @@ final class AppModel {
     func isRoutineQueued(_ routineID: UUID) -> Bool { queuedRoutines.contains(routineID) }
 
     /// The routine already has its run: running, being started, waiting in the queue or for other Orbs' answers.
-    private func isRoutineHeld(_ routineID: UUID) -> Bool {
+    func isRoutineHeld(_ routineID: UUID) -> Bool {
         queuedRoutines.contains(routineID) || startingRoutines.values.contains(routineID) || isRoutineRunning(routineID)
             || delegation.isWaiting(routine: routineID)
     }
@@ -2195,6 +2198,15 @@ final class AppModel {
         let read = await store.readRoutineConversationAsync(routine: routineID, for: routine.botID)
         addNotice(Self.labeled(read.notice, for: bot(routine.botID)))
         return read.value?.items ?? []
+    }
+
+    /// Hands the routine's conversation (its last runs) to the Orb it moves to. False, with nothing moved, while the routine
+    /// is queued or running: the run writes to the old Orb's folder, and moving under it could lose the conversation.
+    func moveRoutineConversation(_ routineID: UUID, from oldBot: UUID, to newBot: UUID) -> Bool {
+        guard !isRoutineHeld(routineID) else { return false }
+        if let unsaved = unsavedRoutineConversations[routineID] { unsavedRoutineConversations[routineID] = (newBot, unsaved.conversation) }
+        store.moveRoutineConversation(routine: routineID, from: oldBot, to: newBot)
+        return true
     }
 
     func deleteRoutine(_ routineID: UUID) {

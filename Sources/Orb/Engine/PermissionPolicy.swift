@@ -163,6 +163,20 @@ extension PermissionRule {
 struct PermissionState: Sendable, Equatable {
     var mode: PermissionMode
     var rules: [PermissionRule]
+    /// The Orb's "Pode usar" switches and the connectors it gets, as they are now; nil when the source does not know them.
+    /// The tool list of a turn is fixed at its start (changing it would break the provider's cache), so the engine checks
+    /// the call against these instead: turning a switch off stops the tool on its next call.
+    var capabilities: Set<Capability>? = nil
+    var connectors: Set<UUID>? = nil
+
+    /// Whether the user turned the tool off since the turn began.
+    func turnedOff(_ tool: any AgentTool) -> Bool {
+        if let capabilities, !tool.isOffered(for: capabilities) { return true }
+        if let connectors, let mcp = tool as? MCPTool, !connectors.contains(mcp.serverID) { return true }
+        return false
+    }
+
+    static let turnedOffMessage = "Error: this tool was turned off for this Orb."
 }
 
 typealias PermissionSource = @Sendable () async -> PermissionState

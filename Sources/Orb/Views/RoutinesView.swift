@@ -843,6 +843,8 @@ struct RoutineEditor: View {
     /// Empty: the Mac's own time zone.
     @State private var cronTimeZone = ""
     @State private var showsAdvanced = false
+    /// Why the Orb could not be changed on save (the routine is running).
+    @State private var moveProblem: String?
     @State private var runsNow = false
     @State private var isConfirmingDelete = false
     /// The "Meta" section, apart from `routine.goal` so switching it off and on keeps what was typed.
@@ -924,6 +926,10 @@ struct RoutineEditor: View {
                 TextField("Nome", text: $routine.name, prompt: Text("Opcional. Ex.: Resumo da manhã"))
                 Picker("Orb", selection: $routine.botID) {
                     ForEach(model.bots) { Text($0.name).tag($0.id) }
+                }
+                .onChange(of: routine.botID) { moveProblem = nil }
+                if let moveProblem {
+                    Text(moveProblem).font(Typography.label).foregroundStyle(Palette.warn)
                 }
             }
             if let bot, RoutineText.waitsForAnswer(orbMode: bot.permissionMode, routineMode: routine.permissionMode) {
@@ -1160,6 +1166,11 @@ struct RoutineEditor: View {
                 routine.goal?.updatedAt = current.goal?.updatedAt
             }
             if routine.schedule == current.schedule { routine.lastRun = current.lastRun }
+            if routine.botID != current.botID,
+               !model.moveRoutineConversation(routine.id, from: current.botID, to: routine.botID) {
+                moveProblem = "Esta rotina está rodando ou na fila. Espere terminar para trocar o Orb."
+                return
+            }
             model.routines[index] = routine
         } else if isNew {
             model.routines.append(routine)

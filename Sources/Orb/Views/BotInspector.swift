@@ -1062,7 +1062,7 @@ private struct InspectorHeader: View {
     }
 
     private func commitName(reporting: Bool = true) {
-        let problem = NameCheck.problem(name)
+        let problem = NameCheck.problem(name) ?? (model.isOrbNameTaken(name, excluding: bot.id) ? "Já existe um Orb com esse nome" : nil)
         if !model.rename(bot.id, to: name) { name = bot.name }
         else if let current = model.bot(bot.id) { name = current.name }
         guard reporting, let problem else { return }
