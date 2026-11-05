@@ -681,6 +681,20 @@ struct ScreenTakeoverTests {
         #expect(rig.world.front?.pid == 10)
     }
 
+    @Test func theHandCountsTheCharactersAlreadyTypedWhenATextStopsHalfway() async throws {
+        let rig = TakeoverRig(stepLimit: .milliseconds(80))
+        rig.world.poster.delay = .milliseconds(150)
+        let hand = TakeoverBox()
+        await #expect(throws: TakeoverFailure.stepTimeout) {
+            _ = try await rig.takeOver { live in
+                hand.value = live as? LiveTakeoverHand
+                try await live.type(String(repeating: "x", count: 4_000))
+            }
+        }
+        let typed = try #require(hand.value).typedCharacters
+        #expect(typed > 0 && typed < 4_000)
+    }
+
     @Test func aSlowLastChunkIsNotCalledAFailureOnceTheTextIsWhole() async throws {
         // The only chunk takes longer than the step limit, but it went out whole: failing now would make the model type it again.
         let rig = TakeoverRig(stepLimit: .milliseconds(80))
@@ -738,3 +752,6 @@ final class TakeoverCursorSeen: @unchecked Sendable {
     var value: CGPoint? { lock.withLock { stored } }
     func set(_ value: CGPoint?) { lock.withLock { stored = value } }
 }
+
+/// Carries the hand out of the takeover body for the check after it.
+private final class TakeoverBox: @unchecked Sendable { var value: LiveTakeoverHand? }
