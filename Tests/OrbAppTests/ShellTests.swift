@@ -603,6 +603,20 @@ final class BackgroundJobsTests {
         #expect(listing.hasSuffix("(+2 encerrados)"))
     }
 
+    @Test func jobOutputKeepsTheIdOfAnEndedJobThatStillHoldsProcesses() async throws {
+        let (leaver, _) = try await start("sleep 300 & echo child=$!")
+        let child = try #require(numbers(in: try await output(of: leaver, containing: "child=")).first)
+        await waitForJob(leaver.id, "finished with a child left") { $0.state != .running && $0.leftoverRunning }
+        for number in 1...6 { _ = try await start("echo feito\(number)") } // more than the listing keeps of the finished ones
+        await waitForJob("7", "finished") { !$0.isRunning }
+        let context = ToolContext(workingDirectory: directory, botID: bot, jobs: jobs)
+        let listing = try await JobOutputTool().run(.object([:]), context: context)
+        #expect(listing.contains("\(leaver.id)  "), "the id is what job_stop needs: \(listing)")
+
+        _ = try await jobs.stop(botID: bot, id: leaver.id)
+        #expect(await isGone(child))
+    }
+
     private func numbers(in output: String) -> [pid_t] {
         output.split(separator: "\n").compactMap { pid_t($0.split(separator: "=").last ?? "") }
     }
@@ -879,5 +893,14 @@ final class BackgroundJobsTests {
         try "a\nb\n".write(to: small, atomically: true, encoding: .utf8)
         #expect(BackgroundJobs.tail(of: small, lines: 5) == "a\nb")
         #expect(BackgroundJobs.tail(of: small, lines: 1) == "b")
+    }
+
+    @Test func tailCutsLinesOfALogWithWindowsLineEndings() throws {
+        let log = directory.appending(path: "crlf.log")
+        try "a\r\nb\r\nc\r\n".write(to: log, atomically: true, encoding: .utf8)
+        #expect(BackgroundJobs.tail(of: log, lines: 2) == "b\nc")
+        let mixed = directory.appending(path: "mixed.log")
+        try "a\nb\r\nc".write(to: mixed, atomically: true, encoding: .utf8)
+        #expect(BackgroundJobs.tail(of: mixed, lines: 2) == "b\nc")
     }
 }

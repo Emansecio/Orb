@@ -518,6 +518,24 @@ private struct HangsAfterText: LLMClient {
         })
     }
 
+    @Test @MainActor func aBellThatRingsWhileTheRoutineRunsQueuesOneRunForAfterIt() async throws {
+        let script = CallScript([said("primeira"), said("segunda")], holdsCall: 1)
+        let (model, botID, routineID) = routineSetUp(script)
+        model.runRoutine(routineID)
+        await waitUntil("the routine's call") { await script.calls.count == 1 }
+        let folder = try wakeFolder(of: model)
+        for _ in 0..<2 { // two rings while it runs still make one run
+            try "chegou mensagem".write(to: folder.appending(path: "Resumo da manhã" + AppModel.wakeSuffix), atomically: true, encoding: .utf8)
+            model.scanWakeFolder()
+        }
+        #expect(model.queuedRoutines == [routineID])
+        await script.release()
+        await waitUntil("the second run") { await script.calls.count == 2 }
+        await waitUntilIdle(model, botID)
+        #expect(model.routines[0].runs.count == 2)
+        #expect(model.queuedRoutines.isEmpty)
+    }
+
     // MARK: P2-5: ⌘. reaches the tools, and the tools have a time limit
 
     /// Waits for `seconds` without ever looking at cancellation (a framework that never answers).

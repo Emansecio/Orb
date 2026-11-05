@@ -360,8 +360,10 @@ actor BackgroundJobs {
         guard (try? handle.seek(toOffset: offset)) != nil, let data = try? handle.readToEnd() else { return "" }
         // Reading from the middle of the file may start inside a character or a line.
         var text = String(decoding: data.drop { $0 & 0xC0 == 0x80 }, as: UTF8.self)
-        if offset > 0, let newline = text.firstIndex(of: "\n") { text = String(text[text.index(after: newline)...]) }
-        var all = text.split(separator: "\n", omittingEmptySubsequences: false)
+        // "\r\n" is one Character in Swift, not "\n": a log from a Windows-style tool would never split on "\n" alone.
+        let isBreak: (Character) -> Bool = { $0 == "\n" || $0 == "\r\n" }
+        if offset > 0, let newline = text.firstIndex(where: isBreak) { text = String(text[text.index(after: newline)...]) }
+        var all = text.split(omittingEmptySubsequences: false, whereSeparator: isBreak)
         if all.last == "" { all.removeLast() }
         let result = all.suffix(lines).joined(separator: "\n")
         return result.count > maxCharacters ? "[... início omitido ...]\n" + result.suffix(maxCharacters) : result

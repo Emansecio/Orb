@@ -86,6 +86,9 @@ struct Store: Sendable {
     let directory: URL
     /// Called (on the store's queue) when a write fails; the app turns it into a message for the user.
     var onSaveFailure: (@Sendable (StoreNotice) -> Void)?
+    /// Called (on the store's queue) by the first write that succeeds after a failure was reported, so the app can
+    /// report the next failure again and go back to letting conversations go.
+    var onSaveRecovered: (@Sendable () -> Void)?
     /// Called (on the store's queue) with something worth telling that is not a failed write: a usage file that was
     /// read with items left out, or set aside. Nothing was lost by saving, so it must not count as a save failure.
     var onNotice: (@Sendable (StoreNotice) -> Void)?
@@ -696,18 +699,31 @@ struct Store: Sendable {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             guard let data = try content() else { return .skipped }
             try data.write(to: url, options: .atomic)
+            if SaveHealth.noteWritten(directory) { onSaveRecovered?() }
             return .wrote
         } catch {
             NSLog("Orb: não foi possível salvar \(name): \(error)")
             // The note beside a conversation and a connector's catalog are made again (from it, from the next start of
             // the server): not worth alarming anyone.
             if !name.hasSuffix(".meta.json"), url.deletingLastPathComponent().lastPathComponent != "conectores" {
+                SaveHealth.noteFailed(directory)
                 onSaveFailure?(StoreNotice(message: "Não foi possível salvar “\(name)”: \(error.localizedDescription). "
                     + "As últimas mudanças podem não estar no disco.", file: url))
             }
             return .failed
         }
     }
+}
+
+/// Whether the last failure reported for a data folder has been followed by a write that worked (see `Store.onSaveRecovered`).
+/// By folder, because the usage log writes through its own copy of the store.
+enum SaveHealth {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var failing: Set<String> = []
+
+    static func noteFailed(_ directory: URL) { lock.withLock { _ = failing.insert(FileKey.of(directory)) } }
+    /// True when this write is the first after a failure.
+    static func noteWritten(_ directory: URL) -> Bool { lock.withLock { failing.remove(FileKey.of(directory)) != nil } }
 }
 
 /// The data folders that must not be written to any more (see `Store.sealWrites`).

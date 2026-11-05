@@ -544,6 +544,46 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(saved.lastResult == run.summary)
     }
 
+    @Test @MainActor func aTaskForOneMomentThatTheCheckExcusedIsSwitchedOffNotLeftOnWithNothingToWaitFor() async throws {
+        let stub = StubModel()
+        let (model, bot, routine) = setUp(stub)
+        model.routines[0].schedule = .once(.now.addingTimeInterval(-60))
+        model.routines[0].precheck = RoutinePrecheck(command: ["/bin/sh", "-c", #"echo '{"skip": true, "reason": "nada a fazer"}'"#])
+        model.runRoutine(routine.id)
+        await model.routineStarted()
+        await waitUntilIdle(model, bot.id)
+
+        #expect(await stub.calls.count == 0)
+        #expect(model.routines[0].runs.count == 1)
+        #expect(!model.routines[0].isEnabled, "the moment was counted: nothing is left to wait for")
+    }
+
+    @Test @MainActor func aTaskForOneMomentThatCouldNotRunForWantOfAModelIsSwitchedOff() async throws {
+        let (model, bot, routine) = setUp()
+        model.providers = []
+        model.routines[0].schedule = .once(.now.addingTimeInterval(-60))
+        model.runRoutine(routine.id)
+        await model.routineStarted()
+        await waitUntilIdle(model, bot.id)
+
+        #expect(model.routines[0].runs.first?.succeeded == false)
+        #expect(!model.routines[0].isEnabled)
+    }
+
+    @Test @MainActor func aRoutinePausedWhileItsPrecheckRanDoesNotRun() async throws {
+        let stub = StubModel()
+        let (model, bot, routine) = setUp(stub)
+        model.routines[0].precheck = RoutinePrecheck(command: ["/bin/sh", "-c", "sleep 0.3"]) // no verdict: the run would go on
+        model.runRoutine(routine.id)
+        model.routines[0].isEnabled = false // paused while the check is under way
+        await model.routineStarted()
+        await waitUntilIdle(model, bot.id)
+
+        #expect(await stub.calls.count == 0)
+        #expect(model.routines[0].runs.isEmpty)
+        #expect(model.session(bot.id).routineID == nil)
+    }
+
     @Test @MainActor func aPrecheckWithNoVerdictRunsTheRoutine() async throws {
         let stub = StubModel()
         let (model, bot, routine) = setUp(stub)

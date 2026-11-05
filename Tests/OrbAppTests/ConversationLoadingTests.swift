@@ -193,6 +193,77 @@ import Testing
         #expect(saved.items.contains { if case .notice(let text) = $0.kind { text == "última resposta" } else { false } })
     }
 
+    @Test @MainActor func anOrbsOwnLaterConversationThatFailedToSaveIsWrittenAgainOnQuit() async throws {
+        let bots = try orbs(count: 1)
+        let model = launch(async: false)
+        let id = bots[0].id
+        await model.loadedConversation(id)
+        model.newChat(for: id)
+        let chat = try #require(model.live(id).chats?.active)
+
+        let folder = root.appending(path: "conversations")
+        try FileManager.default.removeItem(at: folder)
+        try Data().write(to: folder)
+
+        model.append(.notice("resposta da segunda"), to: id)
+        model.sessions[id]?.scheduleSave(delay: 0)
+        model.store.flush()
+        await waitUntil("the save failure to be reported") { model.dataNotices.count == 1 }
+        await waitUntil("the session to be marked unsaved again") { model.sessions[id]?.isDirty == true }
+
+        try FileManager.default.removeItem(at: folder)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        model.saveNow()
+        let saved = try #require(Store(directory: root).readConversation(id, chat: chat).value)
+        #expect(saved.items.contains { if case .notice(let text) = $0.kind { text == "resposta da segunda" } else { false } })
+    }
+
+    @Test @MainActor func aSaveThatWorksAfterAFailureEndsItAndTheSchedulerWritesAgainWhatStayedUnsaved() async throws {
+        let bots = try orbs(count: 1)
+        let model = launch(async: false)
+        model.conversationKeepAlive = .zero
+        let id = bots[0].id
+        await model.loadedConversation(id)
+
+        let folder = root.appending(path: "conversations")
+        try FileManager.default.removeItem(at: folder)
+        try Data().write(to: folder)
+        model.append(.notice("durante a falha"), to: id)
+        model.sessions[id]?.scheduleSave(delay: 0)
+        model.store.flush()
+        await waitUntil("the failure to be reported") { model.dataNotices.count == 1 && model.didReportSaveFailure }
+        await model.unloadIdleConversations()
+        #expect(model.sessions[id]?.conversation != nil, "memory may be the only copy: nothing is let go")
+
+        // Space is back; nothing changes in the conversation, and the scheduler's pass writes it.
+        try FileManager.default.removeItem(at: folder)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        model.retrySavesAfterFailure()
+        await waitUntil("the failure state to end") { !model.didReportSaveFailure }
+        let saved = try #require(Store(directory: root).readConversation(id).value)
+        #expect(saved.items.contains { if case .notice(let text) = $0.kind { text == "durante a falha" } else { false } })
+
+        // A later failure is told again.
+        try FileManager.default.removeItem(at: folder)
+        try Data().write(to: folder)
+        model.append(.notice("outra falha"), to: id)
+        model.sessions[id]?.scheduleSave(delay: 0)
+        model.store.flush()
+        await waitUntil("the second failure to be reported") { model.dataNotices.count == 2 }
+    }
+
+    @Test @MainActor func aStateFileSetAsideAfterAnOutsideChangeIsWrittenAgainFromMemory() async throws {
+        let bots = try orbs(count: 1)
+        let model = launch(async: false)
+        model.store.flush()
+        try Data("{ não é json".utf8).write(to: model.store.stateURL)
+        model.reloadStateFromDisk()
+        await waitUntil("the file to be written again") {
+            model.store.flush()
+            return Store(directory: root).readState().value?.bots.map(\.id) == bots.map(\.id)
+        }
+    }
+
     @Test @MainActor func aTurnInterruptedByAQuitIsClosedWhenTheConversationArrives() async throws {
         let bots = try orbs(count: 1)
         var conversation = Conversation()
