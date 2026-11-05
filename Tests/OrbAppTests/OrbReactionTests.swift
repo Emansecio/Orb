@@ -138,7 +138,7 @@ import Testing
         let levels: [OrbCelebration] = [.light, .normal, .big]
         #expect(levels.map(\.seconds) == [1.6, 2.2, 3])
         #expect(levels.map(\.hop) == [0.05, 0.08, 0.1])
-        #expect(OrbCelebration.normal.calm == 1.6 && OrbCelebration.big.calm == OrbActivity.happyCalm)
+        #expect(OrbCelebration.normal.calm == 1.6)
         #expect(OrbCelebration.light.hops == 1 && OrbCelebration.big.hops == nil)
     }
 

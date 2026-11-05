@@ -8,10 +8,9 @@ struct GroupComposer: View {
     let groupID: UUID
     /// The pictures waiting to be sent, and the warning about the last one that failed. Kept by the app per group, like the text.
     let lane: ComposerLane
-    /// The names of the members: what a mention can call.
-    let names: [String]
-    /// The members as the picker draws them (avatar and role); `names` is what the mention rules work on.
+    /// The members as the picker draws them (avatar and role); the mention rules work on their names.
     let looks: [BotLook]
+    private var names: [String] { looks.map(\.name) }
     /// The draft: kept by the app per group, so it is still there after a visit to another conversation.
     @Binding var text: String
     /// Sends the message with the lane's pictures; false when it was not sent, and then text and pictures stay.

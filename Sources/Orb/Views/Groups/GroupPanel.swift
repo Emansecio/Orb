@@ -3,7 +3,6 @@ import SwiftUI
 /// The panel of a group (the inspector column, as the Orb's panel is): Membros, Quadro and Ajustes.
 struct GroupPanel: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let groupID: UUID
     @State private var tab = GroupPanelTab.members
     /// "Renomear…" in the sidebar asked for the name field: the Ajustes tab takes it once it is on screen.
@@ -32,7 +31,7 @@ struct GroupPanel: View {
                 .id(tab)
                 .transition(.pageSwap)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .motion(Motion.adapted(Motion.crossFade, reduceMotion: reduceMotion), value: tab)
+                .motion(Motion.crossFade, value: tab)
             }
             .frame(maxHeight: .infinity, alignment: .top)
             .background(Palette.chrome)
@@ -214,7 +213,11 @@ private struct GroupBoardTab: View {
         GroupBoardView(memory: model.groupBoard(groupID),
                        setObjective: { model.setGroupObjective(groupID, to: $0) },
                        remember: { model.rememberGroupAgreement(groupID, text: $0) },
-                       forget: { model.forgetGroupNote($0, of: groupID) },
+                       forget: {
+                           model.forgetGroupNote($0, of: groupID)
+                           // The row just disappears; nothing else tells VoiceOver that there is a way back.
+                           model.announceForAccessibility("Esqueceu “\(MemoryText.clip($0.title, 60))”. Para desfazer, use o botão Desfazer, por \(GroupBoardView.undoSeconds) segundos.")
+                       },
                        restore: { model.restoreGroupNote($0, of: groupID) })
             .id(model.groupBoard(groupID).identity) // the objective field starts from the board once it is read
             .task { await model.refreshGroupBoard(groupID) }

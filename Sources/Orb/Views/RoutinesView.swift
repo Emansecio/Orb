@@ -46,7 +46,7 @@ struct RoutinesView: View {
                             VStack(alignment: .leading, spacing: Spacing.m) {
                                 if owners.count > 1 {
                                     HStack(spacing: 8) {
-                                        BotAvatar(bot: bot, size: 22, activity: .idle, animated: false)
+                                        BotAvatar(orb: bot.orb, size: 22, animated: false)
                                         Text(bot.name)
                                             .font(.system(size: 14, weight: .semibold))
                                             .lineLimit(1)

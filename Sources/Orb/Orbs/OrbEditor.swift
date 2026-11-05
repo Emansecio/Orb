@@ -478,6 +478,19 @@ struct OrbEditor: View {
     }
 }
 
+private extension View {
+    /// The look the editor's choices share (option thumbnails, temperament rows). The chosen one keeps its own fill, which
+    /// changes with the press curve; hover is the shared fade (in 0.10 s, out 0.22 s), colors only, so it stays under
+    /// Reduce Motion too.
+    func selectableCell(isSelected: Bool, isHovering: Bool) -> some View {
+        background { RoundedRectangle(cornerRadius: Radius.card).fill(Palette.ghostSelected).opacity(isSelected ? 1 : 0) }
+            .hoverFill(isHovering && !isSelected, in: .rect(cornerRadius: Radius.card))
+            .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(isSelected ? Palette.lineStrong : .clear))
+            .animation(Motion.press, value: isSelected)
+            .contentShape(.rect)
+    }
+}
+
 private struct OptionCell: View {
     /// What the thumbnail shows: the whole Orb (colors), a close-up of the face (eyes, mouth…), or the head with
     /// room above it (hair, hats).
@@ -513,13 +526,7 @@ private struct OptionCell: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 6)
-            // The chosen one keeps its own fill, which changes with the press curve; hover is the shared fade (in 0.10 s,
-            // out 0.22 s), colors only, so it stays under Reduce Motion too.
-            .background { RoundedRectangle(cornerRadius: Radius.card).fill(Palette.ghostSelected).opacity(isSelected ? 1 : 0) }
-            .hoverFill(isHovering && !isSelected, in: .rect(cornerRadius: Radius.card))
-            .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(isSelected ? Palette.lineStrong : .clear))
-            .animation(Motion.press, value: isSelected)
-            .contentShape(.rect)
+            .selectableCell(isSelected: isSelected, isHovering: isHovering)
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
@@ -579,13 +586,7 @@ private struct TemperamentRow: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
-            // The chosen one keeps its own fill, which changes with the press curve; hover is the shared fade (in 0.10 s,
-            // out 0.22 s), colors only, so it stays under Reduce Motion too.
-            .background { RoundedRectangle(cornerRadius: Radius.card).fill(Palette.ghostSelected).opacity(isSelected ? 1 : 0) }
-            .hoverFill(isHovering && !isSelected, in: .rect(cornerRadius: Radius.card))
-            .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(isSelected ? Palette.lineStrong : .clear))
-            .animation(Motion.press, value: isSelected)
-            .contentShape(.rect)
+            .selectableCell(isSelected: isSelected, isHovering: isHovering)
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }

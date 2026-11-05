@@ -108,7 +108,6 @@ struct GroupBoardView: View {
             }
         }
         .animation(Motion.content, value: forgotten?.id)
-        .onChange(of: memory.identity) { objective = memory.identity }
         // Leaving the field (another tab, the panel closed, another group) keeps what was typed, as the group's name does.
         .onChange(of: isObjectiveFocused) { old, new in if old && !new { commitObjective() } }
         .onDisappear { commitObjective() }

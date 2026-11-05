@@ -5,7 +5,7 @@ enum GroupRowText {
     /// The second line: what the group does ("Pesquisador está escrevendo…"), or "3 Orbs".
     static func secondLine(presence: String?, orbCount: Int) -> String {
         if let presence { return presence }
-        return orbCount == 1 ? "1 Orb" : "\(orbCount) Orbs"
+        return CategoryText.orbs(orbCount)
     }
 
     /// The one mark at the right of the row. Waiting for you shows none: the second line turns amber (and VoiceOver says
@@ -19,7 +19,7 @@ enum GroupRowText {
 
     /// What VoiceOver reads for the row: "Lançamento, grupo, 3 Orbs, não lido, trabalhando".
     static func accessibilityLabel(name: String, orbCount: Int, unread: Int, working: Bool, waiting: Bool) -> String {
-        var parts = [name, "grupo", orbCount == 1 ? "1 Orb" : "\(orbCount) Orbs"]
+        var parts = [name, "grupo", CategoryText.orbs(orbCount)]
         if waiting { parts.append("precisa de você") }
         if unread > 0 { parts.append("não lido") }
         if working { parts.append("trabalhando") }

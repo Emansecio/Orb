@@ -70,7 +70,7 @@ extension OrbDriverTests {
             #expect(view.placedLayerCount > 0)
             #expect(layers(view, .body).first?.bounds.width == side, "\(size) pt")
             // ...until the new ones arrive.
-            await waitUntil("the layers at \(size) pt") { OrbImages.isCached(view.placedLayersForTesting.map(\.layer), pixels: side * scale) }
+            await waitUntil("the layers at \(size) pt") { OrbImages.cachedImages(view.placedLayersForTesting.map(\.layer), pixels: side * scale) != nil }
             // ...and then they replace the old ones.
             await waitUntil("the new layers to be swapped in") { layers(view, .body).first !== before }
             #expect(layers(view, .body).first?.bounds.width == side)
@@ -88,7 +88,7 @@ extension OrbDriverTests {
         defer { closePlacement(win) }
         await waitUntil("the first layers") { view.placedLayerCount > 0 }
         let narrow = OrbGeometry.imageSide(for: 29, scale: win.backingScaleFactor) * win.backingScaleFactor
-        await waitUntil("the talking mouth shapes") { OrbImages.isCached(Array(look.visemeLayers()!.values), pixels: narrow) }
+        await waitUntil("the talking mouth shapes") { OrbImages.cachedImages(Array(look.visemeLayers()!.values), pixels: narrow) != nil }
         var time = CACurrentMediaTime()
         func step(_ frames: Int) {
             for _ in 0..<frames {

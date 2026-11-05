@@ -79,7 +79,7 @@ private struct GroupConversation: View {
             GroupThreadView(group: group, transcript: session.transcript)
             GroupApprovalBar(live: live)
             GroupPresenceBar(group: group, live: live)
-            GroupComposer(groupID: group.id, lane: model.groupLane(group.id), names: looks.map(\.name), looks: looks,
+            GroupComposer(groupID: group.id, lane: model.groupLane(group.id), looks: looks,
                           text: Binding(get: { model.draftText(group.id) },
                                         set: { model.setDraft($0, for: group.id) })) { message in
                 model.postUserMessage(message, to: group.id)

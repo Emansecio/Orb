@@ -20,7 +20,7 @@ struct GroupHeader: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Palette.ink)
                 .lineLimit(1)
-            Text(orbCount == 1 ? "· 1 Orb" : "· \(orbCount) Orbs")
+            Text("· \(CategoryText.orbs(orbCount))")
                 .font(Typography.label)
                 .foregroundStyle(Palette.faint)
                 .lineLimit(1)
