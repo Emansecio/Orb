@@ -36,14 +36,16 @@ extension AppModel {
         let action = arguments["action"]?.string ?? ""
         // Two open items about one client are two states of it, and a run would act on either: the older ones go first.
         RoutineFollowUp.collapse(&routines[index].followUps)
+        RoutineFollowUp.pruneResolved(&routines[index].followUps)
         if action == "list" {
             let open = routines[index].followUps.filter { !$0.resolved }.sorted { $0.updatedAt > $1.updatedAt }
-            return open.isEmpty ? "Nenhum acompanhamento aberto." : open.map {
+            return open.isEmpty ? "Nenhum acompanhamento aberto." : open.prefix(RoutineFollowUp.listLimit).map {
                 "\($0.id.uuidString) | \($0.subject) | \($0.channel) | \($0.nextStep)"
                     + ($0.lastAction.map { " | Última ação: " + $0 } ?? "")
                     + ($0.source.map { " | Fonte: " + $0 } ?? "")
                     + ($0.lastChecked.map { " | Verificado: " + $0.formatted(.iso8601) } ?? "")
             }.joined(separator: "\n")
+                + (open.count > RoutineFollowUp.listLimit ? "\n+\(open.count - RoutineFollowUp.listLimit) abertos; resolva para ver" : "")
         }
         func field(_ name: String) -> String? {
             let value = arguments[name]?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -92,6 +94,18 @@ extension AppModel {
 }
 
 extension RoutineFollowUp {
+    /// What `list` hands the model, and how many resolved items a routine keeps: both grow with the routine's life otherwise.
+    static let listLimit = 50
+    static let resolvedKept = 200
+
+    /// Drops the oldest resolved items beyond `resolvedKept`; open ones are never touched.
+    static func pruneResolved(_ items: inout [RoutineFollowUp]) {
+        let resolved = items.filter(\.resolved)
+        guard resolved.count > resolvedKept else { return }
+        let drop = Set(resolved.sorted { $0.updatedAt > $1.updatedAt }.dropFirst(resolvedKept).map(\.id))
+        items.removeAll { drop.contains($0.id) }
+    }
+
     /// Who the item is about: the one phone number or e-mail of its channel ("WhatsApp 5511…"). Not its subject, where a
     /// batch names one lead among others ("Toques de 30/10 (gra, lead 5531…, Fabiana)"). nil when there is none, or more.
     var contact: String? {

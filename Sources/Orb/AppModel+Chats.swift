@@ -58,6 +58,7 @@ extension AppModel {
     /// way to the newest one left first.
     func deleteChat(_ chat: UUID, of botID: UUID) {
         guard canDeleteChat(chat, of: botID), var chats = live(botID).chats else { return }
+        delegation.cancelChains(startedIn: chat, of: botID) // its "stopped" line lands in the conversation that is going away
         chats.remove(chat)
         let session = session(botID)
         // Its Claude Code process, if one is idle, would keep the deleted conversation alive (and its session file) until it expires.

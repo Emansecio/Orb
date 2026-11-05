@@ -53,7 +53,7 @@ extension RoutinePrecheck {
             do { try process.run() } catch { return .run }
             let deadline = Date.now.addingTimeInterval(timeout)
             while process.isRunning && Date.now < deadline { usleep(50_000) }
-            if process.isRunning { process.terminate() }
+            if process.isRunning { Self.stop(process) }
             process.waitUntilExit()
             // The verdict may still be in flight when the process exits: give the handler a beat, then drain.
             usleep(100_000)
@@ -61,6 +61,15 @@ extension RoutinePrecheck {
             pipe.fileHandleForReading.readabilityHandler = nil
             return verdict(stdout: output.text, exit: process.terminationStatus)
         }.value
+    }
+
+    /// SIGTERM, then SIGKILL after a grace period: a script that traps or ignores TERM would otherwise leave
+    /// `waitUntilExit` (and the routine start waiting on it) blocked for good.
+    static func stop(_ process: Process, grace: TimeInterval = 2) {
+        process.terminate()
+        let deadline = Date.now.addingTimeInterval(grace)
+        while process.isRunning && Date.now < deadline { usleep(20_000) }
+        if process.isRunning { kill(process.processIdentifier, SIGKILL) }
     }
 
     /// Accumulates the check's stdout; past the limit the process is killed (its output was already no verdict).

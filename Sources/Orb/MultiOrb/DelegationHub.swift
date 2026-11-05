@@ -69,6 +69,10 @@ final class DelegationHub: DelegationService {
     /// The folder a request's turns work in when it is not the Orb's own (a worktree, or a group's project folder); it outlives
     /// the first turn so the turn that resumes the request after its children answered works in the same place.
     private var workFolders: [UUID: URL] = [:]
+    /// The project of each request that works in a worktree of its own (`ask` with a `folder`), until the worktree is cleaned up.
+    private var folderRuns: [UUID: URL] = [:]
+    /// When each sender last asked each target the same text from its own chat (no chain to hold it), pruned on write.
+    private var recentFromChat: [UUID: [String: Date]] = [:]
 
     /// Some request between Orbs is open (not a group's: groups do not depend on the switch).
     var hasActiveChains: Bool { requests.values.contains { Self.isOpen($0.state) && $0.envelope.groupID == nil } || inbox.values.contains { !$0.isEmpty } }
@@ -100,9 +104,11 @@ final class DelegationHub: DelegationService {
             input.waitingInPath = Set(context.path.filter { waiting($0, inChain: context.chainID) })
         }
         // The repeat needs the target, which the rules resolve: resolve it the same way here.
-        if let target = DelegationRules.resolve(name, among: orbs), let context, let state = chainStates[context.chainID] {
+        if let target = DelegationRules.resolve(name, among: orbs) {
             let key = DelegationRules.repeatKey(to: target.id, text: text)
-            if let when = state.recent[key], now.timeIntervalSince(when) < DelegationRules.duplicateWindow { input.recentSameText = true }
+            // Outside a chain (the Orb's own chat) every ask opens a new chain, so the sender keeps its own record.
+            let when = context.map { chainStates[$0.chainID]?.recent[key] } ?? recentFromChat[from]?[key]
+            if let when, now.timeIntervalSince(when) < DelegationRules.duplicateWindow { input.recentSameText = true }
         }
         let plan = try DelegationRules.validate(input)
         // MARK: MultiOrb (WP5): a request inside a group's chain also answers to the group's policy.
@@ -111,7 +117,12 @@ final class DelegationHub: DelegationService {
         // MARK: end MultiOrb (WP5)
 
         var chain = chainStates[plan.chainID] ?? newChain(startedBy: sender, session: session, groupID: groupID ?? context?.groupID)
-        chain.recent[DelegationRules.repeatKey(to: plan.target.id, text: plan.text)] = now
+        let repeatKey = DelegationRules.repeatKey(to: plan.target.id, text: plan.text)
+        chain.recent[repeatKey] = now
+        if context == nil {
+            recentFromChat[from, default: [:]][repeatKey] = now
+            recentFromChat[from] = recentFromChat[from]?.filter { now.timeIntervalSince($0.value) < DelegationRules.duplicateWindow }
+        }
         chain.touched = now
         chainStates[plan.chainID] = chain
         seenMessageIDs.append(messageID)
@@ -331,6 +342,8 @@ final class DelegationHub: DelegationService {
                                                  root: WorkFolders.root(in: model.store.directory))
             }
             self.starting.remove(botID)
+            // Registered before any early return: a request cancelled meanwhile still leaves its worktree to be cleaned.
+            if work?.branch != nil { self.folderRuns[request.id] = project }
             guard let current = self.requests[request.id], current.state == .queued else { return self.schedulePump(botID) }
             if self.chainStates[current.envelope.chainID]?.cancelled == true {
                 self.requests[current.id]?.state = .cancelled
@@ -718,6 +731,14 @@ final class DelegationHub: DelegationService {
         settleWaitingRoutines()
     }
 
+    /// A conversation of the Orb was deleted: what it asked of other Orbs stops, so the answers do not wake some other
+    /// conversation (`chatOrLatest`) with a subject the person threw away.
+    func cancelChains(startedIn chat: UUID, of botID: UUID) {
+        for (id, state) in chainStates where state.originBot == botID && state.chat == chat && !state.cancelled && state.groupID == nil {
+            cancelChain(id, by: .user)
+        }
+    }
+
     /// Stops every chain (the switch of Ajustes was turned off, or the app is being reset). A group's chains do not depend on the
     /// switch, so they stay unless `includingGroups`.
     func cancelAll(by reason: CancelReason, includingGroups: Bool = false) {
@@ -823,6 +844,26 @@ final class DelegationHub: DelegationService {
             chainStates[id] = nil
         }
         pruneRequests()
+        cleanUpEndedFolderRuns()
+    }
+
+    /// A request that ended by any path (answered, cancelled, failed, timed out, target deleted) lets go of its folder and its
+    /// worktree, like a group's run does: what is already in the project's HEAD is removed, the rest stays and the asker is told.
+    func cleanUpEndedFolderRuns() {
+        workFolders = workFolders.filter { requests[$0.key].map { Self.isOpen($0.state) } ?? false }
+        guard let model else { return }
+        let root = WorkFolders.root(in: model.store.directory)
+        for (id, project) in folderRuns where !(requests[id].map { Self.isOpen($0.state) } ?? false) {
+            folderRuns[id] = nil
+            let asker = requests[id]?.envelope.from.id
+            Task { @MainActor [weak model] in
+                let report = await WorkFolders.cleanUp(project: project, run: id, root: root)
+                guard let asker, !report.kept.isEmpty, let model else { return }
+                let lines = report.kept.map { "\($0.branch) (\($0.path))" }.joined(separator: "; ")
+                model.appendToChat(.notice("Ficaram ramos de trabalho sem merge em \(project.lastPathComponent): \(lines). "
+                    + "Junte com git merge ou apague com git worktree remove."), of: asker)
+            }
+        }
     }
 
     /// The banner of a request still at work after `elapsed` seconds.
