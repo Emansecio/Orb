@@ -481,6 +481,7 @@ struct SidebarCategoryLayoutTests {
         #expect(target == group)
         model.addToDraft("sugestão", for: target)
         #expect(model.draftText(group) == "sugestão")
+        #expect(model.selection == .group(group)) // the group stays open: no focus request selects it as an Orb
         model.selection = .inicio
         #expect(model.draftTargetID == model.commandBotID)
     }

@@ -348,7 +348,8 @@ extension AppModel {
     func addToDraft(_ text: String, for botID: UUID) {
         let before = draftText(botID)
         setDraft(before.isEmpty ? text : before + "\n" + text, for: botID)
-        request(.focusComposer, of: botID)
+        // A group's draft is kept under its id too, but a request for it would select it as an Orb and leave the group.
+        if bot(botID) != nil { request(.focusComposer, of: botID) }
     }
 
     /// "Citar": the words selected in a reply go to the start of the Orb's draft as a quote (`MessageQuote`), and the

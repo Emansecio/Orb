@@ -29,16 +29,17 @@ extension AppModel {
         source.resume()
         wakeWatch = source
         // A file left there before the watch armed is a valid signal too; take it now, once, rather than at the next
-        // unrelated event in the folder (a random hour).
-        scanWakeFolder()
+        // unrelated event in the folder (a random hour). Without re-arming: a `wake` that is a file, not a folder, would
+        // otherwise arm and scan again forever.
+        scanWakeFolder(rearming: false)
     }
 
     /// Files waiting in `wake/`: each is consumed (a bad name is dropped once, not on every pass) and rings its
     /// routine. The watch calls this on arrivals; a test calls it by hand after dropping its file.
-    func scanWakeFolder() {
+    func scanWakeFolder(rearming: Bool = true) {
         guard !isResetting else { return }
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: wakeFolderURL.path) else {
-            startWakeWatch() // the folder went away (the data folder was remade): make it and re-arm the watch
+            if rearming { startWakeWatch() } // the folder went away (the data folder was remade): make it and re-arm the watch
             return
         }
         for name in names.sorted() where name.hasSuffix(Self.wakeSuffix) {

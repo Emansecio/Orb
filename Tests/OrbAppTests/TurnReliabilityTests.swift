@@ -506,6 +506,16 @@ private struct HangsAfterText: LLMClient {
         #expect(model.routines[0].runs.count == 1)
     }
 
+    @Test @MainActor func aWakeThatIsAFileArmsOnceInsteadOfForever() throws {
+        let (model, _, _) = routineSetUp(CallScript([said("ok")]))
+        let path = URL(fileURLWithPath: model.wakeFolderURL.path)
+        try? FileManager.default.removeItem(at: path)
+        try Data().write(to: path)
+        model.startWakeWatch() // the folder cannot be made nor listed: it returns (it used to recurse until the stack ran out)
+        model.scanWakeFolder()
+        #expect(model.routines[0].runs.isEmpty)
+    }
+
     @Test @MainActor func aSwitchedOffRoutineIgnoresItsBell() async throws {
         let script = CallScript([said("oi")])
         let (model, _, _) = routineSetUp(script)
