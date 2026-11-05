@@ -150,6 +150,56 @@ struct AccessibilityLadderTests {
         #expect(button.performed.isEmpty)
     }
 
+    @Test func takeoverSetValueWithAnEmptyValueDeletesTheSelectedText() async throws {
+        let field = framed(fake("AXTextField", title: "Nome"), CGRect(x: 200, y: 200, width: 100, height: 40))
+        let bench = Bench(windows: [framed(fake("AXWindow", title: "A", [field]), windowFrame)])
+        try await bench.read()
+        var call: [String: JSONValue] = ["action": .string("set_value"), "id": .string("w1.1"), "value": .string(""), "takeover": .bool(true)]
+        _ = try await bench.act(call)
+        let actions = bench.system.screenOwner.hand.actions
+        #expect(actions.contains(.key(KeyStroke(.named(.delete)))) && !actions.contains(.type("")))
+        // A non-empty value still types over the selection.
+        call["value"] = .string("oi")
+        _ = try await bench.act(call)
+        #expect(bench.system.screenOwner.hand.actions.contains(.type("oi")))
+    }
+
+    @Test func setValueOnAnEditableFieldOfAFocusStealingAppAsksForTheScreenInsteadOfDenyingEditing() async throws {
+        let button = fakeButton("Abrir")
+        let field = fake("AXTextField", title: "Nome")
+        let bench = Bench(windows: [fake("AXWindow", title: "A", [button, field])])
+        let safari = fakeApp(windows: [])
+        safari.settable = ["AXFrontmost"]
+        bench.system.roots[200] = safari
+        bench.system.frontmost = 200
+        let system = bench.system
+        button.onPerform = { _ in system.frontmost = 100 }
+        try await bench.read()
+        _ = try await bench.act(["action": .string("press"), "id": .string("w1.1")])
+        system.frontmost = 200
+        let message = await failureMessage { try await bench.act(["action": .string("set_value"), "id": .string("w1.2"), "value": .string("x")]) }
+        #expect(message.hasPrefix(UIActTool.takeoverMarker) && !message.contains("não é um campo editável"))
+    }
+
+    @Test func setValueIgnoredByTheFieldOfAFocusStealingAppAsksForTheScreenInsteadOfClaimingSuccess() async throws {
+        let button = fakeButton("Abrir")
+        let field = fake("AXTextField", title: "Nome", value: .string("velho"))
+        field.settable = ["AXValue"]
+        field.onSet = { name, _ in if name == "AXValue" { field.attrs["AXValue"] = .string("velho") } }
+        let bench = Bench(windows: [fake("AXWindow", title: "A", [button, field])])
+        let safari = fakeApp(windows: [])
+        safari.settable = ["AXFrontmost"]
+        bench.system.roots[200] = safari
+        bench.system.frontmost = 200
+        let system = bench.system
+        button.onPerform = { _ in system.frontmost = 100 }
+        try await bench.read()
+        _ = try await bench.act(["action": .string("press"), "id": .string("w1.1")])
+        system.frontmost = 200
+        let message = await failureMessage { try await bench.act(["action": .string("set_value"), "id": .string("w1.2"), "value": .string("novo")]) }
+        #expect(message.hasPrefix(UIActTool.takeoverMarker) && message.contains("ignorou o valor"))
+    }
+
     @Test func typeSendsTheTextInChunksToTheFocusedField() async throws {
         let field = fake("AXTextField", title: "Nome")
         field.settable = ["AXFocused"]

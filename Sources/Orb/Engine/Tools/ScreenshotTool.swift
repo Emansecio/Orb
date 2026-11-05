@@ -161,9 +161,7 @@ struct ScreenshotTool: AgentTool {
         var ocrFailed = false
         if wantsText {
             do {
-                text = try await withDeadline(Self.ocrDeadline, "a leitura do texto da imagem") {
-                    try await TextRecognizer.recognizeWithTables(imageAt: file)
-                }
+                text = try await Self.recognizeDisplay(file)
             } catch { ocrFailed = true }
         }
         var report = "Captura salva em \(file.path) (\(size.width)×\(size.height) px)."
@@ -464,7 +462,16 @@ struct ScreenshotTool: AgentTool {
     }
 
     /// Vision for one picture at a time per process: it is heavy.
-    private static let visionGate = AsyncGate(limit: 1)
+    static let visionGate = AsyncGate(limit: 1)
+
+    /// A full display through the same one-at-a-time gate as windows: two 5K accurate passes at once only fight for the CPU.
+    static func recognizeDisplay(_ file: URL) async throws -> String {
+        try await visionGate.run {
+            try await withDeadline(ocrDeadline, "a leitura do texto da imagem") {
+                try await TextRecognizer.recognizeWithTables(imageAt: file)
+            }
+        }
+    }
 
     /// Vision that never answers lets go of the gate after `ocrDeadline` (the picture is still returned, without its text).
     private static func recognize(_ image: CGImage) async throws -> (lines: [OCRLine], tables: String?) {
@@ -495,6 +502,7 @@ struct ScreenshotTool: AgentTool {
     /// bookkeeping, so it happens at most every `cleanupInterval`.
     private static let lastCleanup = OSAllocatedUnfairLock(initialState: [String: ContinuousClock.Instant]())
     static let cleanupInterval: Duration = .seconds(600)
+    static let maxFiles = 100
 
     /// A fresh path in a temp folder, clearing captures older than a day (now and then) so they don't pile up.
     static func newFile(in folder: URL, extension ext: String, now: ContinuousClock.Instant = .now) throws -> URL {
@@ -506,9 +514,11 @@ struct ScreenshotTool: AgentTool {
         }
         if due {
             let cutoff = Date.now.addingTimeInterval(-86_400)
-            let old = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
-            for url in old where ((try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .now) < cutoff {
-                try? FileManager.default.removeItem(at: url)
+            let found = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+            let dated = found.map { ($0, (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .now) }
+            // Older than a day goes, and so does anything past the newest `maxFiles`: full-screen PNGs are several MB each.
+            for (index, entry) in dated.sorted(by: { $0.1 > $1.1 }).enumerated() where entry.1 < cutoff || index >= maxFiles {
+                try? FileManager.default.removeItem(at: entry.0)
             }
         }
         return folder.appending(path: "screenshot-\(UUID().uuidString.prefix(8)).\(ext)")
