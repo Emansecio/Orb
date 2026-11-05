@@ -43,7 +43,7 @@ enum AttachmentLayout {
         var images: [String] = []
         var files: [String] = []
         for path in paths {
-            if path.hasPrefix("/"), ImageProcessing.isImageFile(URL(fileURLWithPath: path)) {
+            if ImageProcessing.isImage(path: path) {
                 images.append(path)
             } else {
                 files.append(path)

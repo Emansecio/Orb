@@ -4,12 +4,12 @@ import Testing
 @testable import Orb
 
 struct ComposerSupportTests {
-    @Test func aFileAloneIsSomethingToSendAndWhileWorkingItQueuesInsteadOfStopping() {
-        #expect(ComposerAction.hasContent(hasText: false, pictures: 0, files: 1))
-        #expect(ComposerAction.hasContent(hasText: false, pictures: 1, files: 0))
-        #expect(!ComposerAction.hasContent(hasText: false, pictures: 0, files: 0))
-        let canSend = ComposerAction.canSend(hasContent: ComposerAction.hasContent(hasText: false, pictures: 0, files: 1),
-                                             isWorking: true, canQueue: true, pendingPictures: 0)
+    @Test @MainActor func aFileAloneIsSomethingToSendAndWhileWorkingItQueuesInsteadOfStopping() {
+        let lane = ComposerLane()
+        #expect(!lane.hasAttachments)
+        lane.files = [AttachedFile(url: URL(fileURLWithPath: "/tmp/a.txt"))]
+        #expect(lane.hasAttachments)
+        let canSend = ComposerAction.canSend(hasContent: lane.hasAttachments, isWorking: true, canQueue: true, pendingPictures: 0)
         #expect(ComposerAction.current(isWorking: true, canSend: canSend) == .queue)
     }
 

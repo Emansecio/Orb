@@ -44,7 +44,8 @@ struct ComposerView: View {
     private var isWorking: Bool { model.live(botID).isWorking }
     /// Stops at the first character that is not a blank: no copy of a long pasted draft, however often the body asks.
     private var hasText: Bool { draft.wrappedValue.contains { !$0.isWhitespace } }
-    private var hasContent: Bool { ComposerAction.hasContent(hasText: hasText, pictures: lane.pictures.count, files: lane.files.count) }
+    /// There is something to send: text, or an attachment of any kind (a file alone is a message: "veja isto").
+    private var hasContent: Bool { hasText || lane.hasAttachments }
     /// A message can be sent: any time the Orb is free, and while it works on your chat (it is queued). Not while a
     /// picture is still being prepared: it would miss this message and ride along with the next one.
     private var canSend: Bool {
@@ -58,7 +59,7 @@ struct ComposerView: View {
         let lane = lane
         let situation = Situation(live: model.live(botID), workingChat: model.workingChatTitle(botID),
                                   routineName: model.runningRoutineName(botID), holdsRoutine: model.holdsRoutine(botID))
-        let hintText = hint(lane, situation)
+        let hintText = hint(situation)
         VStack(spacing: 0) {
             card(lane, hint: hintText, situation)
             Text(hintText)
@@ -169,7 +170,7 @@ struct ComposerView: View {
                     .foregroundStyle(Palette.ink)
                     .focused($isFocused)
                     // The line under the card is hidden from VoiceOver (it would be read twice); the keys it names are said here.
-                    .accessibilityHint(ComposerHint.spoken(hintText.isEmpty && showsIdleKeys(lane, isWorking: situation.live.isWorking) ? ComposerHint.idleKeys : hintText))
+                    .accessibilityHint(ComposerHint.spoken(hintText.isEmpty && showsIdleKeys(isWorking: situation.live.isWorking) ? ComposerHint.idleKeys : hintText))
                     .onSubmit { send() }
                     .onKeyPress(.upArrow) { moveSlash(-1) }
                     .onKeyPress(.downArrow) { moveSlash(1) }
@@ -262,7 +263,7 @@ struct ComposerView: View {
     }
 
     /// The line under the card: how the keys work, shown only when it helps and nothing else is being said.
-    private func hint(_ lane: ComposerLane, _ situation: Situation) -> String {
+    private func hint(_ situation: Situation) -> String {
         if let dictating = DictationButton.hint(model.dictation, botID: botID) { return dictating }
         if isQueueing, hasContent {
             return ComposerHint.queueing(needsYou: situation.live.needsYou,
@@ -280,8 +281,8 @@ struct ComposerView: View {
     }
 
     /// An empty, free field with the focus: VoiceOver says how the keys work, which the line under the card no longer does.
-    private func showsIdleKeys(_ lane: ComposerLane, isWorking: Bool) -> Bool {
-        isFocused && !isWorking && !isEditing && !hasContent && !lane.hasAttachments
+    private func showsIdleKeys(isWorking: Bool) -> Bool {
+        isFocused && !isWorking && !isEditing && !hasContent
     }
 
     // MARK: Attachments
@@ -641,17 +642,16 @@ struct PictureChip: View {
 /// gets the round hover fill the other composer buttons have; VoiceOver hears which attachment it removes.
 struct RemoveButton: View {
     let label: String
-    let symbol: String
-    var size: CGFloat = 24
     let action: () -> Void
+    private static let size: CGFloat = 24
     @State private var isHovering = false
 
     var body: some View {
-        Button(label, systemImage: symbol, action: action)
+        Button(label, systemImage: "xmark.circle.fill", action: action)
             .labelStyle(.iconOnly)
             .buttonStyle(.plain)
             .help(Tip.removeAttachment)
-            .frame(width: size, height: size)
+            .frame(width: Self.size, height: Self.size)
             // The fill is a little smaller than the target, so the strip's edges never clip it.
             .hoverFill(isHovering, in: .circle, color: Palette.ghostSelected)
             .contentShape(.circle)
@@ -670,7 +670,7 @@ extension View {
     /// used to sit; every attachment chip shares it so they cannot drift apart.
     func removable(label: String, action: @escaping () -> Void) -> some View {
         overlay(alignment: .topTrailing) {
-            RemoveButton(label: label, symbol: "xmark.circle.fill", action: action)
+            RemoveButton(label: label, action: action)
                 .foregroundStyle(Palette.ink, Palette.canvas)
                 .offset(x: RemoveButtonInset.overlap, y: -RemoveButtonInset.overlap)
         }
@@ -742,9 +742,6 @@ enum ComposerAction: Equatable {
         guard pressed else { return (1, 1) }
         return reduceMotion ? (1, 0.8) : (pressedScale, 1)
     }
-
-    /// There is something to send: text, or an attachment of any kind (a file alone is a message: "veja isto").
-    static func hasContent(hasText: Bool, pictures: Int, files: Int) -> Bool { hasText || pictures > 0 || files > 0 }
 
     /// A message can be sent: something is written, the Orb is free or the message can wait in the queue (it works on your
     /// chat or runs a routine, `AppModel.canQueue`), and no picture is still being prepared.

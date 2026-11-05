@@ -270,11 +270,16 @@ final class LiveScreenLayerView: NSView {
                 hub.acquire(botID, wide: wide)
             }
         } else {
-            unregister()
-            if isAcquired {
-                isAcquired = false
-                hub.release(botID, wide: wide)
-            }
+            letGo()
+        }
+    }
+
+    /// Stops listening and gives the feed back (what `refresh` does when the view leaves the screen).
+    private func letGo() {
+        unregister()
+        if isAcquired {
+            isAcquired = false
+            hub.release(botID, wide: wide)
         }
     }
 
@@ -290,11 +295,7 @@ final class LiveScreenLayerView: NSView {
     /// Called when SwiftUI takes the view away: everything is let go at once.
     func detach() {
         wasWanted = false
-        unregister()
-        if isAcquired {
-            isAcquired = false
-            hub.release(botID, wide: wide)
-        }
+        letGo()
     }
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {

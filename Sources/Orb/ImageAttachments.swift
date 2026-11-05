@@ -56,6 +56,11 @@ enum ImageProcessing {
         return readable.contains { type.conforms(to: $0) }
     }
 
+    /// `isImageFile` for an absolute path; a bare name (older conversations kept only that) is never a picture.
+    static func isImage(path: String) -> Bool {
+        path.hasPrefix("/") && isImageFile(URL(fileURLWithPath: path))
+    }
+
     private static let readable: [UTType] = {
         let identifiers = CGImageSourceCopyTypeIdentifiers() as? [String] ?? []
         return identifiers.compactMap { UTType($0) }.filter { $0 != .image }
@@ -151,15 +156,6 @@ enum ImageProcessing {
 struct ImageStore: Sendable {
     let directory: URL
 
-    init(directory: URL) {
-        self.directory = directory
-    }
-
-    /// The store inside the app's data folder (`Store.directory`).
-    init(dataFolder: URL) {
-        self.init(directory: dataFolder.appending(path: "anexos"))
-    }
-
     func folder(for botID: UUID) -> URL { directory.appending(path: botID.uuidString) }
 
     /// Reads, shrinks and saves the picture at `url`. Throws `ImageAttachmentError` (too big, not a picture).
@@ -228,6 +224,11 @@ struct ImageStore: Sendable {
 // MARK: - Pictures nothing points at
 
 extension ImageStore {
+    /// The store inside the app's data folder (`Store.directory`).
+    init(dataFolder: URL) {
+        self.init(directory: dataFolder.appending(path: "anexos"))
+    }
+
     /// How long a picture nothing points at is kept: a picture just attached or captured is not in a saved file yet.
     static let orphanAge: TimeInterval = 7 * 24 * 3600
 

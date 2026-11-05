@@ -606,7 +606,8 @@ struct ModelSearchTests {
                                            ProviderModel(id: "openai/gpt-5", name: "GPT-5", format: .chat)]),
             (account: xai, models: [ProviderModel(id: "grok-4", name: "Grok 4", format: .chat)]),
         ]
-        return all.map { (account: $0.account, models: $0.models.filter { ModelSearch.matches($0, query) }) }.filter { !$0.models.isEmpty }
+        let words = ModelSearch.words(query)
+        return all.map { (account: $0.account, models: $0.models.filter { ModelSearch.matches($0, words: words) }) }.filter { !$0.models.isEmpty }
     }
 
     @Test func returnPicksTheFirstModelShown() {

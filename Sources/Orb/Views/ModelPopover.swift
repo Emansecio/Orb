@@ -50,17 +50,9 @@ struct ModelPopover: View {
                         }
                     }
                     if listing.groups.isEmpty && isSearch {
-                        Text("Nenhum modelo encontrado.")
-                            .font(Typography.label)
-                            .foregroundStyle(Palette.muted)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 24)
+                        ModelListNote(text: "Nenhum modelo encontrado.", padding: 24)
                     } else if listing.groups.isEmpty {
-                        Text("Conecte um provedor para escolher modelos.")
-                            .font(Typography.label)
-                            .foregroundStyle(Palette.muted)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
+                        ModelListNote(text: "Conecte um provedor para escolher modelos.", padding: 16)
                             .transition(.quiet)
                     }
                 }
