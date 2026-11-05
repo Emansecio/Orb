@@ -291,7 +291,10 @@ enum FileWriter {
                 try data.write(to: target, options: .atomic)
             } catch {
                 // Atomic replacement needs a writable folder; a writable file in a read-only one can still be updated.
-                guard manager.isWritableFile(atPath: target.path) else { throw error }
+                // Only then: writing in place truncates first, so after any other failure (a full disk) the old content
+                // would be lost along with the new.
+                guard manager.isWritableFile(atPath: target.path),
+                      !manager.isWritableFile(atPath: target.deletingLastPathComponent().path) else { throw error }
                 try data.write(to: target)
             }
             if let permissions { try? manager.setAttributes([.posixPermissions: permissions], ofItemAtPath: target.path) }

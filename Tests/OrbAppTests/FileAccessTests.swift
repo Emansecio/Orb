@@ -63,6 +63,16 @@ final class FileAccessTests {
         #expect(message.contains("Sem permissão para gravar em") && message.contains("ro/novo.txt"), Comment(rawValue: message))
     }
 
+    @Test func aWritableFileInAReadOnlyFolderIsStillUpdatedInPlace() async throws {
+        try FileManager.default.createDirectory(at: workspace.url("ro2"), withIntermediateDirectories: true)
+        try workspace.write("ro2/notas.txt", "velho\n")
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: workspace.url("ro2").path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: workspace.url("ro2").path) }
+        // The atomic swap needs the folder; the in-place write is kept for exactly this case (and only for it).
+        _ = try await workspace.run(WriteFileTool(), ["path": .string("ro2/notas.txt"), "content": .string("novo")])
+        #expect(try workspace.readText("ro2/notas.txt") == "novo")
+    }
+
     @Test func errorsThatAreNotAboutPermissionPassThrough() throws {
         struct Other: Error {}
         #expect(FileAccess.denial(Other(), path: "/x", writing: false) == nil)
