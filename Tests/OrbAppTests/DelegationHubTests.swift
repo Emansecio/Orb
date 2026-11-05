@@ -808,6 +808,72 @@ private final class Hooks: GroupTurnHooks {
         await team.settle()
     }
 
+    @Test func theSameAskFromTheOwnChatTwiceIsOneRequest() async throws {
+        let team = Team { _ in say("x") }
+        defer { team.cleanUp() }
+        let hub = team.model.delegation
+        _ = try hub.submit(from: team.atlas.id, to: "Pesquisador", text: "Pesquise", kind: .ask, messageID: UUID(), groupID: nil)
+        #expect(throws: DelegationRefusal.duplicate) {
+            try hub.submit(from: team.atlas.id, to: "Pesquisador", text: "Pesquise", kind: .ask, messageID: UUID(), groupID: nil)
+        }
+        // Another target, or another sender, is not a repeat.
+        _ = try hub.submit(from: team.atlas.id, to: "Revisor", text: "Pesquise", kind: .ask, messageID: UUID(), groupID: nil)
+        _ = try hub.submit(from: team.revisor.id, to: "Pesquisador", text: "Pesquise", kind: .ask, messageID: UUID(), groupID: nil)
+        await team.settle()
+    }
+
+    @Test func deletingTheChatThatAskedStopsWhatItAskedAndTouchesNoOtherChain() async throws {
+        let valve = TestGate()
+        let team = Team { seen in
+            if seen.who == "Pesquisador" { await valve.wait() }
+            return say("Ok.")
+        }
+        defer { team.cleanUp() }
+        let hub = team.model.delegation
+        let envelope = try hub.submit(from: team.atlas.id, to: "Pesquisador", text: "Pesquise", kind: .ask, messageID: UUID(), groupID: nil)
+        let chain = try #require(hub.chainStates[envelope.chainID])
+        let chat = try #require(chain.chat)
+        hub.cancelChains(startedIn: UUID(), of: team.atlas.id)
+        #expect(hub.chainStates[envelope.chainID]?.cancelled == false, "another conversation's chain is not touched")
+        hub.cancelChains(startedIn: chat, of: team.atlas.id)
+        #expect(hub.chainStates[envelope.chainID]?.cancelled == true)
+        await valve.open()
+        await team.settle()
+    }
+
+    @Test func aGroupObjectiveTooLongToSaveSaysSoInsteadOfVanishing() async throws {
+        let team = Team { _ in say("x") }
+        defer { team.cleanUp() }
+        let model = team.model
+        let long = String(repeating: "a", count: MemoryBank.identityMaximumLength + 1)
+        _ = try #require(model.createGroup(name: "Estúdio", members: [team.atlas.id, team.pesquisador.id], objective: long))
+        await waitUntil("the notice about the objective") { model.dataNotices.contains { $0.message.contains("objetivo do grupo") } }
+    }
+
+    @Test func aFolderRequestLeavesNoWorktreeBehindWhenItEnds() async throws {
+        guard let git = WorkFolders.Git.make() else { return }
+        let team = Team { _ in say("Feito.") }
+        defer { team.cleanUp() }
+        let project = team.root.appending(path: "projeto")
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        try "um\n".write(to: project.appending(path: "a.txt"), atomically: true, encoding: .utf8)
+        let identity = ["-c", "user.name=Teste", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"]
+        for step in [["init", "-b", "main"], ["add", "-A"], ["commit", "-m", "primeiro"]] {
+            let result = await git.run(identity + step, in: project)
+            #expect(result.succeeded, "git \(step.joined(separator: " ")): \(result.text)")
+        }
+        let hub = team.model.delegation
+        _ = try hub.submit(from: team.atlas.id, to: "Pesquisador", text: "Mexa no projeto", kind: .ask, messageID: UUID(),
+                           groupID: nil, folder: project.path)
+        await team.settle()
+        func worktrees() async -> Int {
+            await git.run(["worktree", "list", "--porcelain"], in: project).text.split(separator: "\n").filter { $0.hasPrefix("worktree ") }.count
+        }
+        #expect(await worktrees() == 2, "the request worked in a worktree of its own")
+        hub.sweep()
+        await waitUntil("the worktree to be removed") { await worktrees() == 1 }
+    }
+
     // MARK: Stopping
 
     @Test func stoppingTheIdleAskerCancelsTheWholeChain() async throws {
@@ -1987,7 +2053,7 @@ private actor Names {
         #expect(model.live(atlas).chats?.list.first { $0.id == atlas }?.unread == nil, "opening it reads it")
     }
 
-    @Test func theAnswerOfAConversationDeletedMeanwhileGoesToTheLatest() async throws {
+    @Test func theRequestOfAConversationDeletedMeanwhileIsStoppedAndItsAnswerWakesNoOtherChat() async throws {
         let gate = TestGate()
         let team = team(gate)
         defer { team.cleanUp() }
@@ -2000,8 +2066,8 @@ private actor Names {
         await gate.open()
         await team.settle()
         #expect(model.session(atlas).chatID == new)
-        #expect(team.botTexts(team.atlas) == ["O Pesquisador achou 42."])
-        #expect(team.orbMessages(team.atlas).map(\.direction) == [.reply])
+        #expect(team.botTexts(team.atlas).isEmpty, "the answer to a discarded subject wakes no other conversation")
+        #expect(team.orbMessages(team.atlas).allSatisfy { $0.direction != .reply })
         model.store.flush()
         #expect(model.store.readConversation(atlas).value == nil, "nothing writes the deleted one back")
     }

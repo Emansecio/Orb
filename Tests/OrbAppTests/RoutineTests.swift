@@ -382,6 +382,43 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(model.routines[0].followUps[0].resolved)
     }
 
+    @Test @MainActor func listHandsTheModelOnlyTheNewestOpenItemsAndSaysHowManyAreLeft() throws {
+        let (model, bot, routine) = setUp()
+        model.session(bot.id).routineID = routine.id
+        let total = RoutineFollowUp.listLimit + 7
+        for number in 0..<total { _ = try save("Lead \(number)", channel: "Caixa \(number)", in: model, routine, bot) }
+        let list = try model.changeFollowUp(.object(["action": .string("list")]), routineID: routine.id, botID: bot.id)
+        #expect(list.split(separator: "\n").count == RoutineFollowUp.listLimit + 1)
+        #expect(list.hasSuffix("+7 abertos; resolva para ver"))
+        #expect(model.routines[0].followUps.count == total, "open items are never dropped")
+    }
+
+    @Test func oldResolvedItemsBeyondTheLimitAreDroppedAndOpenOnesStay() {
+        var items = (0..<RoutineFollowUp.resolvedKept + 5).map { number -> RoutineFollowUp in
+            var item = RoutineFollowUp(subject: "R\(number)", channel: "c\(number)", nextStep: "x")
+            item.resolved = true
+            item.updatedAt = Date(timeIntervalSince1970: Double(number))
+            return item
+        }
+        items.append(RoutineFollowUp(subject: "Aberto", channel: "c", nextStep: "x"))
+        RoutineFollowUp.pruneResolved(&items)
+        #expect(items.filter(\.resolved).count == RoutineFollowUp.resolvedKept)
+        #expect(!items.contains { $0.subject == "R0" } && items.contains { $0.subject == "R204" })
+        #expect(items.contains { $0.subject == "Aberto" })
+    }
+
+    @Test func aPrecheckThatIgnoresTermIsKilledInsteadOfBlockingForever() async throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", "trap '' TERM; while :; do :; done"]
+        try process.run()
+        try await Task.sleep(for: .milliseconds(200)) // let the shell install its trap
+        let started = Date.now
+        await Task.detached { RoutinePrecheck.stop(process, grace: 0.3); process.waitUntilExit() }.value
+        #expect(!process.isRunning)
+        #expect(Date.now.timeIntervalSince(started) < 10)
+    }
+
     @MainActor private func save(_ subject: String, channel: String, next: String = "Aguardar", in model: AppModel, _ routine: Routine,
                       _ bot: Bot) throws -> String {
         try model.changeFollowUp(.object(["action": .string("save"), "subject": .string(subject), "channel": .string(channel),

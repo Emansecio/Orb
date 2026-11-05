@@ -112,8 +112,8 @@ extension AppModel {
         if let creator { appendToChat(.event(created), of: creator) }
         let goal = objective.trimmingCharacters(in: .whitespacesAndNewlines)
         if !goal.isEmpty {
-            let bank = memory.groupBank(for: group.id)
-            Task { await bank.setIdentity(goal) }
+            // Same path as the panel: a refused or failed write (too long, folder not writable) says so instead of vanishing.
+            Task { await saveGroupObjective(goal, of: group.id) }
         }
         return group
     }

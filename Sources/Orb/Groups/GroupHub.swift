@@ -30,6 +30,9 @@ final class GroupHub: GroupTurnHooks {
     private(set) var activeTurns: [UUID: ActiveTurn] = [:]
     /// Where each member's last turn in each group left the thread, so the next turn is handed only what came after.
     private var consumed: [UUID: [UUID: Int]] = [:]
+    /// Where the thread stood when a request's preface was written, by request. It becomes `consumed` only when the turn
+    /// really begins: a turn put back in the queue (the Orb was taken meanwhile) writes its preface again from the same point.
+    private var pendingMark: [UUID: Int] = [:]
     /// The person's messages a turn not yet started answers, by request (more than one when they wrote again before it began:
     /// `enqueue`). Its preface leaves them out of the thread.
     private var personTexts: [UUID: [String]] = [:]
@@ -172,13 +175,12 @@ final class GroupHub: GroupTurnHooks {
 
     func prompt(for request: DelegationRequest, member: UUID) async -> String {
         guard let (group, run) = lookup(request), let model, let session = model.groupSession(group.id) else { return "" }
-        noteActive(member, request: request, group: group.id, run: run.id)
         let fromUser = isFromUser(request, in: run)
         postAssignment(request, fromUser: fromUser, group: group, run: run)
         let from = min(consumed[group.id]?[member] ?? 0, session.items.count)
         let slice = session.items[from...]
-        consumed[group.id, default: [:]][member] = session.items.count
-        let asked = personTexts.removeValue(forKey: request.envelope.id) ?? [request.envelope.text]
+        pendingMark[request.envelope.id] = session.items.count
+        let asked = personTexts[request.envelope.id] ?? [request.envelope.text]
         let thread = GroupThread.lines(from: slice, member: member, request: request.envelope.id,
                                        userTexts: fromUser ? asked.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } : [])
         let board = await GroupBoard.brief(bank: model.memory.groupBank(for: group.id), message: request.envelope.text)
@@ -203,6 +205,7 @@ final class GroupHub: GroupTurnHooks {
         let member = request.envelope.to.id
         postAssignment(request, fromUser: isFromUser(request, in: run), group: group, run: run)
         noteActive(member, request: request, group: group.id, run: run.id)
+        if let mark = pendingMark.removeValue(forKey: request.envelope.id) { consumed[group.id, default: [:]][member] = mark }
         update(group.id) { run in
             run.turnsUsed += 1
             run.running.removeAll { $0.request == request.envelope.id }
@@ -218,6 +221,8 @@ final class GroupHub: GroupTurnHooks {
         let fromUser = isFromUser(request, in: run)
         let interim = request.state == .awaitingChildren || !request.openChildren.isEmpty
         personImages[request.envelope.id] = nil // the turn is over (or was cancelled before it began)
+        personTexts[request.envelope.id] = nil
+        pendingMark[request.envelope.id] = nil
         if activeTurns[member]?.requestID == request.envelope.id { activeTurns[member] = nil }
         update(group.id) { run in
             run.running.removeAll { $0.request == request.envelope.id }
@@ -310,6 +315,7 @@ final class GroupHub: GroupTurnHooks {
         for id in run.asked.keys {
             personTexts[id] = nil
             personImages[id] = nil
+            pendingMark[id] = nil
         }
         runs[groupID]?.asked = [:]
         delegation.cancelChain(run.id, by: reason)

@@ -475,3 +475,24 @@ struct GroupPresenceLineTests {
                 == "Lia e Teo esperam você")
     }
 }
+
+struct GroupPromptIsSideEffectFreeTests {
+    // A turn put back in the queue (the Orb was taken while its preface was written) asks for the preface again: the first
+    // one must not have spent the thread, nor marked the member as in a turn that has not begun.
+    @Test @MainActor func aPrefaceAskedTwiceBeforeTheTurnBeginsReadsTheSameThread() async throws {
+        let world = GroupWorld()
+        world.model.postUserMessage("Contexto antigo do grupo", to: world.groupID)
+        world.model.postUserMessage("@revisor olha esse texto", to: world.groupID)
+        let turn = try #require(world.fake.groupTurns.first { $0.envelope.to.id == world.revisor.id })
+        let first = await world.hub.prompt(for: turn, member: world.revisor.id)
+        #expect(world.hub.activeTurns[world.revisor.id] == nil, "no turn is running yet")
+        let second = await world.hub.prompt(for: turn, member: world.revisor.id)
+        #expect(first.contains("Contexto antigo do grupo"))
+        #expect(second == first)
+        // Once the turn begins the thread is spent: the next preface starts after it.
+        world.hub.turnStarted(turn)
+        #expect(world.hub.activeTurns[world.revisor.id]?.requestID == turn.envelope.id)
+        let after = await world.hub.prompt(for: turn, member: world.revisor.id)
+        #expect(!after.contains("Contexto antigo do grupo"))
+    }
+}
