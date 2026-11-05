@@ -86,15 +86,15 @@ import Testing
         #expect(!items.reads.contains("\(legacy)/openai"))
     }
 
-    @Test func theReadCacheAnswersOnceIncludingAMissingItemUntilAWrite() {
+    @Test func theReadCacheAnswersOnceUntilAWriteAndNeverKeepsAMissingItem() {
         let cache = KeychainReadCache()
         var loads = 0
         func read(_ answer: String?) -> String? { cache.value(for: "k") { loads += 1; return answer } }
         #expect(read("a") == "a" && read("b") == "a" && loads == 1)
         cache.invalidate()
-        #expect(read(nil) == nil && read("c") == nil && loads == 2)
-        cache.invalidate()
-        #expect(read("c") == "c")
+        // A nil may be a failed read: it is asked again next time.
+        #expect(read(nil) == nil && read("c") == "c" && loads == 3)
+        #expect(read("d") == "c" && loads == 3)
     }
 
     @Test func aReadThatStartedBeforeAWriteNeverCachesItsStaleAnswer() {

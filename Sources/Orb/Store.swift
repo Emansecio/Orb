@@ -921,17 +921,18 @@ struct LegacyKeychainLedger {
 }
 
 /// Remembers what `Keychain.get` found. A write bumps the generation, so a read that began before it never caches its
-/// (possibly stale) answer.
+/// (possibly stale) answer. Only found values are kept: a nil can be a failed read (the helper timed out, the app was
+/// rebuilt while open), and caching it would leave the Orb without its key until the app is reopened.
 final class KeychainReadCache: @unchecked Sendable {
     private let lock = NSLock()
-    private var entries: [String: String?] = [:]
+    private var entries: [String: String] = [:]
     private var generation = 0
 
     func value(for key: String, load: () -> String?) -> String? {
         let (hit, started) = lock.withLock { (entries[key], generation) }
         if let hit { return hit }
         let found = load()
-        lock.withLock { if generation == started { entries[key] = .some(found) } }
+        if let found { lock.withLock { if generation == started { entries[key] = found } } }
         return found
     }
 
