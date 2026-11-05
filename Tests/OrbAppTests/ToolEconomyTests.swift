@@ -151,9 +151,10 @@ struct ToolSpecEconomyTests {
         let terminalOnly = ToolBox.offered(for: [.terminal], accessibilityGranted: false)
         #expect(terminalOnly.map(\.spec.name) == ToolBox.offered(for: [.terminal], accessibilityGranted: true).map(\.spec.name))
         #expect(!terminalOnly.contains { $0.capability == .computerUse })
-        // The tools that need no capability (memory, scheduling, open, notify, the task plan) are always there.
+        // The tools that need no capability (memory, scheduling, open, notify, the task plan, installing a connector) are
+        // always there.
         let none = ToolBox.offered(for: [], accessibilityGranted: true).map(\.spec.name)
-        let always: Set = ["open", "notify", "remember", "recall", "schedule", "task_plan"]
+        let always: Set = ["open", "notify", "remember", "recall", "schedule", "task_plan", ConnectorInstallTool.name]
         #expect(Set(none) == always && none.count == always.count)
     }
 
@@ -171,12 +172,20 @@ struct ToolSpecEconomyTests {
         #expect(specChars(ToolBox.multiOrbTools + [AskUserTool()]) <= 4_200)
     }
 
+    /// `connector_install` goes with every request of a watched turn (so an Orb without connectors can get its first one).
+    /// Measured at 679 (2026-11-05).
+    @Test func theConnectorInstallSpecStaysShort() {
+        let now = specChars([ConnectorInstallTool()])
+        #expect(now <= 700, "\(now) characters")
+    }
+
     /// A run nobody watches (a routine, a request from another Orb, a group's turn) can only list and pause tasks: `schedule`
-    /// is offered there in a short form (about 330 characters, against 1,476), and nothing else changes in the list.
+    /// is offered there in a short form (about 330 characters, against 1,476), and `connector_install` is not offered (its
+    /// card would wait for nobody); nothing else changes in the list.
     @Test func aRunNobodyWatchesGetsTheShortScheduleTool() throws {
         let full = ToolBox.offered(for: everything, accessibilityGranted: true)
         let side = ToolBox.offered(for: everything, accessibilityGranted: true, multi: MultiOrbOffering(sideRun: true))
-        #expect(side.map(\.spec.name) == full.map(\.spec.name))
+        #expect(side.map(\.spec.name) == full.map(\.spec.name).filter { $0 != ConnectorInstallTool.name })
         let fullSchedule = try #require(full.first { $0.spec.name == "schedule" })
         let shortSchedule = try #require(side.first { $0.spec.name == "schedule" })
         #expect(specChars([shortSchedule]) < 400 && specChars([fullSchedule]) > 1_400)

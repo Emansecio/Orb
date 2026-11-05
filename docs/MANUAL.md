@@ -766,6 +766,15 @@ tem a **Galeria**, os **Instalados** e **Explorar**.
   página de sessão guarda só que o conector foi usado. O Claude Code não vê os conectores: o `claude` roda só com o servidor mínimo do cano
   (`--strict-mcp-config`), então os conectores do claude.ai e os servidores do `~/.claude.json` não entram, e os do Orb passam pela política do Orb como
   com qualquer modelo.
+- **O Orb instala sozinho.** Peça no chat ("instala o conector football-docs", com o link ou o comando do README) ou deixe o
+  Orb perceber que a tarefa precisa de um: ele mostra um cartão de aprovação com o comando que vai rodar (ou o endereço do
+  servidor remoto), e esse cartão aparece sempre, até no Automático, porque instala e roda um programa da internet. Aprovado, o
+  conector entra em *Instalados* na hora, com "Conectando…" e depois "Pronto", a chave **Conectores** do Orb liga e ele já usa
+  as ferramentas na mesma tarefa (um Orb que estava com a chave desligada passa a usá-las a partir da próxima mensagem). Fica só
+  para esse Orb, a menos que você peça para todos; se o mesmo servidor já estiver instalado, ele só é liberado para o Orb. Um
+  conector que não sobe é retirado, e o Orb conta o erro. Chaves que ele receber vão para o Keychain como as do formulário. Em
+  rotinas e pedidos de outro Orb ele não instala nada (ninguém está olhando para aprovar). No formulário, *Argumentos* também
+  aceita a linha como no terminal (`-y football-docs`), com aspas para o que tem espaço.
 - **Chaves e tokens** dos conectores (inclusive o login, conta `mcp.<id>.oauth`) ficam no **Keychain**, não no arquivo de dados;
   apagar o conector ou redefinir o Orb apaga também o login.
 - **Skills** são instruções reutilizáveis no formato aberto `SKILL.md`. *Explorar* busca no catálogo [Skills.sh](https://skills.sh)

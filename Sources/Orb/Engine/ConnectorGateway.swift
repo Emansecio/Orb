@@ -22,17 +22,20 @@ enum ConnectorGateway {
     /// Longest description of a tool in the listing.
     static let descriptionLimit = 300
 
-    /// The two tools, for the connectors the Orb may use; none when there are none.
-    static func tools(for connectors: [MCPServerConfig], manager: MCPManager) -> [any AgentTool] {
-        guard !connectors.isEmpty else { return [] }
-        return [ConnectorToolsTool(connectors: connectors, manager: manager),
-                ConnectorCallTool(connectors: connectors, manager: manager)]
+    /// The two tools, for the connectors the Orb may use; none when there are none, unless the turn has a `roster` a
+    /// connector installed during it can join.
+    static func tools(for connectors: [MCPServerConfig], manager: MCPManager, roster: ConnectorRoster? = nil) -> [any AgentTool] {
+        guard !connectors.isEmpty || roster != nil else { return [] }
+        let roster = roster ?? ConnectorRoster(connectors)
+        return [ConnectorToolsTool(connectors: connectors, manager: manager, roster: roster),
+                ConnectorCallTool(connectors: connectors, manager: manager, roster: roster)]
     }
 
     // MARK: Index
 
     /// "- GitHub: Ler repositórios e issues." per connector, sorted by name, so the same connectors always give the same text.
     static func index(for connectors: [MCPServerConfig]) -> String {
+        guard !connectors.isEmpty else { return "(none yet: connector_install adds one)" }
         let sorted = connectors.sorted { ($0.name.lowercased(), $0.id.uuidString) < ($1.name.lowercased(), $1.id.uuidString) }
         var lines = sorted.prefix(indexLines).map(line(for:))
         if sorted.count > indexLines {
@@ -182,12 +185,14 @@ enum ConnectorGateway {
 
 /// `connector_tools`: the tools of one connector and their arguments.
 struct ConnectorToolsTool: AgentTool {
-    let connectors: [MCPServerConfig]
+    let roster: ConnectorRoster
     let manager: MCPManager
     let spec: ToolSpec
+    /// The ones the turn began with and any installed since.
+    var connectors: [MCPServerConfig] { roster.connectors }
 
-    init(connectors: [MCPServerConfig], manager: MCPManager) {
-        self.connectors = connectors
+    init(connectors: [MCPServerConfig], manager: MCPManager, roster: ConnectorRoster? = nil) {
+        self.roster = roster ?? ConnectorRoster(connectors)
         self.manager = manager
         spec = ToolSpec(
             name: ConnectorGateway.toolsName,
@@ -233,8 +238,14 @@ struct ConnectorToolsTool: AgentTool {
 /// `connector_call`: runs one tool of a connector. The engine replaces the call by the tool's own before it runs, so
 /// `run` only happens when that failed, and then says why.
 struct ConnectorCallTool: AgentTool {
-    let connectors: [MCPServerConfig]
+    let roster: ConnectorRoster
     let manager: MCPManager
+    var connectors: [MCPServerConfig] { roster.connectors }
+
+    init(connectors: [MCPServerConfig], manager: MCPManager, roster: ConnectorRoster? = nil) {
+        self.roster = roster ?? ConnectorRoster(connectors)
+        self.manager = manager
+    }
     let spec = ToolSpec(
         name: ConnectorGateway.callName,
         description: "Runs one tool of a connector listed in connector_tools.",

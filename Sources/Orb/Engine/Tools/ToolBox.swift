@@ -22,7 +22,8 @@ enum ToolBox {
         }
         // A run nobody watches can only list and pause tasks: it is told so in a few words instead of the whole tool.
         let tools = multi.sideRun ? base.map { $0.spec.name == "schedule" ? ScheduleTool(sideRun: true) : $0 } : base
-        return tools + (multi.askUser ? [AskUserTool()] : []) + (multi.access ? [AccessTool()] : []) + multiOrbTools.filter { tool in
+        // Installing a connector needs the person at the card: never in a run nobody watches.
+        return tools + (multi.sideRun ? [] : [ConnectorInstallTool()]) + (multi.askUser ? [AskUserTool()] : []) + (multi.access ? [AccessTool()] : []) + multiOrbTools.filter { tool in
             switch tool.spec.name {
             case "orbs": multi.orbs
             case OrbProposeTool.name: multi.propose

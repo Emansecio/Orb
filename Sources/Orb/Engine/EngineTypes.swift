@@ -610,6 +610,10 @@ struct ToolContext: Sendable {
     var release: CommandRelease?
     /// What `schedule` asks of the app on this Orb's behalf; nil where the app offers no scheduling (some tests).
     var schedule: ScheduleHandler?
+    /// What `connector_install` asks of the app; nil where the app offers no installing (side runs, tests).
+    var installConnector: ConnectorInstallHandler?
+    /// The connectors this turn reaches through `connector_call`, which a connector installed mid-turn joins.
+    var connectorRoster: ConnectorRoster?
     /// The current routine's persistent follow-ups; absent in ordinary chat and other side work.
     var followUps: ScheduleHandler?
     /// The user's Terminal environment that commands run in.

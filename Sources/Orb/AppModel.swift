@@ -1893,9 +1893,16 @@ final class AppModel {
                                         multi: multi)
             if context.followUps != nil { tools.append(RoutineFollowUpTool()) }
             // The connectors' own tools do not travel with the request: the model lists and calls them through two fixed ones.
-            if bot.capabilities.contains(.connectors), !allowedConnectors.isEmpty {
+            // `connector_install` adds to the roster, so a connector installed in this turn is callable before it ends.
+            let roster = ConnectorRoster(allowedConnectors)
+            context.connectorRoster = roster
+            if !multi.sideRun {
+                context.installConnector = connectorInstallHandler(for: bot.id, usableNow: bot.capabilities.contains(.connectors))
+            }
+            // With none yet, the two still go where `connector_install` is offered: the list cannot change mid-turn.
+            if bot.capabilities.contains(.connectors), !allowedConnectors.isEmpty || context.installConnector != nil {
                 await connectorSync?.value // one added a moment ago is known to `mcp` before the model may name it
-                tools += ConnectorGateway.tools(for: allowedConnectors, manager: mcp)
+                tools += ConnectorGateway.tools(for: allowedConnectors, manager: mcp, roster: roster)
             }
             guard session.isCurrent(turn) else { return }
             // Recorded when the prompt with the snapshot is stored (see `apply`), not before.

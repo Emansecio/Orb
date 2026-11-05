@@ -247,4 +247,63 @@ enum ConnectorArguments {
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
         return index < lines.count ? String(lines[index]).trimmingCharacters(in: .whitespaces) : ""
     }
+
+    /// The program and its arguments as the server will run, from what was typed: one argument per line, but also the way a
+    /// README writes it. A command with spaces ("npx -y football-docs") is split when it is not a file that exists, and a line
+    /// that starts with a dash and has spaces ("-y football-docs", "--port 8080") is split too, quotes kept together as a
+    /// shell does. Any other line stays whole, so a path with spaces in it ("/Users/ana/Meus Documentos") is one argument.
+    static func parse(command: String, arguments: [String],
+                      fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) -> (command: String, arguments: [String]) {
+        var program = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        var leading: [String] = []
+        if program.contains(where: \.isWhitespace), !fileExists((program as NSString).expandingTildeInPath) {
+            let words = shellWords(program)
+            program = words.first ?? ""
+            leading = Array(words.dropFirst())
+        }
+        let rest = arguments.flatMap { line -> [String] in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { return [] }
+            return trimmed.hasPrefix("-") && trimmed.contains(where: \.isWhitespace) ? shellWords(trimmed) : [trimmed]
+        }
+        return (program, leading + rest)
+    }
+
+    /// Words as a shell splits them: on spaces, with what is inside quotes kept whole and a backslash keeping the next character.
+    static func shellWords(_ text: String) -> [String] {
+        var words: [String] = []
+        var current = ""
+        var quote: Character?
+        var hasWord = false
+        var escaped = false
+        for character in text {
+            if escaped {
+                current.append(character)
+                escaped = false
+                continue
+            }
+            if character == "\\", quote != "'" {
+                escaped = true
+                hasWord = true
+                continue
+            }
+            if let open = quote {
+                if character == open { quote = nil } else { current.append(character) }
+                continue
+            }
+            if character == "\"" || character == "'" {
+                quote = character
+                hasWord = true
+            } else if character.isWhitespace {
+                if hasWord { words.append(current) }
+                current = ""
+                hasWord = false
+            } else {
+                current.append(character)
+                hasWord = true
+            }
+        }
+        if hasWord { words.append(current) }
+        return words
+    }
 }

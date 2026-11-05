@@ -102,7 +102,7 @@ enum PromptParts {
         case .terminal: "no shell commands and no tools to read, write or search files"
         case .browser: "no fetching or searching web pages, and no opening web pages just to read them"
         case .computerUse: "no AppleScript, Shortcuts, clipboard, screenshots or control of apps"
-        case .connectors: "no connector (MCP) tools"
+        case .connectors: "no MCP tools except connector_install"
         }
     }
 

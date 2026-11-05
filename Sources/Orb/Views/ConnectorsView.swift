@@ -1144,7 +1144,7 @@ struct ConnectorEditor: View {
         } }
         if isRemote && draft.guide != .slack { loginApp }
         if !isRemote {
-            Section("Argumentos (um por linha)") {
+            Section("Argumentos (um por linha, ou como no terminal)") {
                 PlaceholderTextEditor(placeholder: "-y\n@exemplo/servidor", text: $arguments, minHeight: 60)
                     .font(.body.monospaced())
             }
@@ -1295,7 +1295,10 @@ struct ConnectorEditor: View {
         } else {
             config.url = ""
             config.headers = [:]
-            config.arguments = arguments.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            // Written the way a README does ("-y football-docs" on one line, or the whole "npx -y …" as the command) runs too.
+            let parsed = ConnectorArguments.parse(command: config.command, arguments: arguments.components(separatedBy: "\n"))
+            config.command = parsed.command
+            config.arguments = parsed.arguments
             config.environment = dictionary
         }
         config.secretKeys = Set((isRemote ? config.headers : config.environment).keys.filter(isSecret))
