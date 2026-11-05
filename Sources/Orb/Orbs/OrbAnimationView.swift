@@ -153,7 +153,7 @@ final class OrbAnimationView: NSView {
     var isCueBlinking: Bool { cueBlinkStart != nil }
     var currentJumpForTesting: OrbJump? { jump?.kind }
     var currentFlourishForTesting: OrbFlourish? { flourishes.current }
-    var shownForTesting: (activity: OrbActivity, celebration: OrbCelebration) { (crossover.shown, crossover.shownStyle) }
+    var shownForTesting: (activity: OrbActivity, celebration: OrbCelebration) { (shown, crossover.shownStyle) }
     /// For tests: the rhythm the blinks and saccades run at.
     var rhythmForTesting: [Double] {
         [blinker.gap.lowerBound, blinker.gap.upperBound, blinker.skew, blinker.doubleChance, saccades.reach, saccades.hold]
@@ -192,6 +192,7 @@ final class OrbAnimationView: NSView {
     private var bodyClock = 0.0
     /// Activity on screen (the bot's, or `happy` for a moment after a click) and the one it is blending from.
     private var crossover = OrbActivityBlend()
+    private var shown: OrbActivity { crossover.shown }
     private static let transition = OrbActivityBlend.duration
     private var hoverPoint: CGPoint?
     private var hoverGate = HoverGate()
@@ -295,7 +296,7 @@ final class OrbAnimationView: NSView {
     /// Hands the temperament's rhythm to the motion helpers; `showcase` plays its signature flourish.
     private func applyTemperament(showcase: Bool) {
         traits = config.temperament.traits
-        blinker.gap = crossover.shown.blinkGap(traits.blinkGap)
+        blinker.gap = shown.blinkGap(traits.blinkGap)
         blinker.doubleChance = traits.doubleBlink
         blinker.skew = traits.blinkSkew
         saccades.reach = traits.saccadeReach
@@ -344,15 +345,15 @@ final class OrbAnimationView: NSView {
         // How big the joy is: the turn's own celebration, or only the smile of a click.
         let style = target == .happy ? (activity == .happy ? celebration : .smile) : OrbCelebration.big
         // A tool ending and another starting a moment later: keep the pose of the first through the gap.
-        target = hold.resolve(wanted: target, shown: crossover.shown, at: time, applies: window != nil && !isResting)
-        guard target != crossover.shown || (target == .happy && style != crossover.shownStyle) else { return }
-        let sameFace = target.hasSameFace(as: crossover.shown, mouth: config.mouth)
+        target = hold.resolve(wanted: target, shown: shown, at: time, applies: window != nil && !isResting)
+        guard target != shown || (target == .happy && style != crossover.shownStyle) else { return }
+        let sameFace = target.hasSameFace(as: shown, mouth: config.mouth)
         if window == nil {
             // Not on screen yet: start in the right state instead of animating into it.
             crossover.jump(to: target, celebration: style)
             bubbleIn.value = target.bubble == nil ? 0 : 1
         } else {
-            let calmer = target.energy <= crossover.shown.energy
+            let calmer = target.energy <= shown.energy
             crossover.change(to: target, at: time, body: bodyClock + phase, traits: traits, celebration: style)
             // At rest nothing moves, so a kick would pile up and burst out on resume. Nor does it where no frames run
             // (a hidden window, an orb scrolled away): the spring only moves in frames, so a long task would stack
@@ -364,11 +365,11 @@ final class OrbAnimationView: NSView {
             if !sameFace { liven(at: time) }
         }
         updateBlinkFactor()
-        blinker.gap = crossover.shown.blinkGap(traits.blinkGap)
+        blinker.gap = shown.blinkGap(traits.blinkGap)
         // A resting orb runs no frames to move its bubble or open its mouth: it gets the new rest pose right here.
         let resting = window != nil && isResting
         if resting {
-            bubbleIn.value = crossover.shown.bubble == nil || !showsBubble ? 0 : 1
+            bubbleIn.value = shown.bubble == nil || !showsBubble ? 0 : 1
             lastPose = restPose
         }
         if !sameFace {
@@ -403,7 +404,7 @@ final class OrbAnimationView: NSView {
     /// last time the eyes could have changed (the activity or the look), not worked out at every frame.
     private var blinkFactor = 1.0
 
-    private func updateBlinkFactor() { blinkFactor = Blinker.factor(eyes: crossover.shown.eyes ?? config.eyes) }
+    private func updateBlinkFactor() { blinkFactor = Blinker.factor(eyes: shown.eyes ?? config.eyes) }
 
     /// Builds the layer tree for the current config, activity and size. Only on screen: bitmaps depend on the
     /// window's backing scale, and `viewDidMoveToWindow` builds everything once the orb gets one.
@@ -415,7 +416,7 @@ final class OrbAnimationView: NSView {
         guard window != nil else { return }
         let scale = backingScale, side = side
         let resize = resize || needsResize || scale != builtScale
-        let layers = config.layers(for: crossover.shown)
+        let layers = config.layers(for: shown)
         let waited = decoded != nil
         var images = decoded ?? [:]
         imageRequest += 1
@@ -498,7 +499,7 @@ final class OrbAnimationView: NSView {
             freshLayers = true
         }
 
-        if let text = crossover.shown.bubble, showsBubble, text != shownBubble {
+        if let text = shown.bubble, showsBubble, text != shownBubble {
             // A new symbol replacing a visible one pops in instead of just swapping.
             if shownBubble != nil, bubbleIn.value > 0.5 { bubbleIn.value = 0.55 }
             shownBubble = text
@@ -701,7 +702,7 @@ final class OrbAnimationView: NSView {
         jump = nil
         glanceStart = nil
         cueBlinkStart = nil
-        bubbleIn.value = crossover.shown.bubble == nil || !showsBubble ? 0 : 1
+        bubbleIn.value = shown.bubble == nil || !showsBubble ? 0 : 1
         lastPose = restPose
         apply(lastPose)
     }
@@ -783,7 +784,7 @@ final class OrbAnimationView: NSView {
             motionRate = wanted
         }
         let blending = time - crossover.start < Self.transition
-        var floor = max(crossover.shown.minFrameRate(elapsed: time - crossover.start, size: size, celebration: crossover.shownStyle),
+        var floor = max(shown.minFrameRate(elapsed: time - crossover.start, size: size, celebration: crossover.shownStyle),
                         blending ? crossover.previous.minFrameRate(elapsed: time - crossover.previousStart, size: size,
                                                          celebration: crossover.previousStyle) : 0)
         // Blinks need 30 fps to show their shape; eyes that are closed already have none.
@@ -811,11 +812,11 @@ final class OrbAnimationView: NSView {
     /// mouth stays open, as the static orb draws it).
     private var restPose: OrbPose {
         var pose = OrbPose.rest
-        if crossover.shown.bubble == nil || !showsBubble {
+        if shown.bubble == nil || !showsBubble {
             pose.bubbleOpacity = 0
             pose.bubbleScale = 0.4
         }
-        if crossover.shown == .speaking, config.mouth != "nenhuma", crossover.shown.mouth(base: config.mouth) == nil { pose.viseme = .open }
+        if shown == .speaking, config.mouth != "nenhuma", shown.mouth(base: config.mouth) == nil { pose.viseme = .open }
         return pose
     }
 
@@ -852,7 +853,7 @@ final class OrbAnimationView: NSView {
 
         // Flourishes: the temperament's spontaneous moves (only while idle and left alone) and its showcase.
         _ = flourishes.update(at: time, kinds: traits.flourishes, gap: traits.flourishGap,
-                              allowed: crossover.shown == .idle && hoverPoint == nil && jump == nil, using: &rng)
+                              allowed: shown == .idle && hoverPoint == nil && jump == nil, using: &rng)
         let flourish = flourishes.current.map { $0.offset(at: flourishes.elapsed(at: time)) } ?? OrbFlourish.Offset()
         pose.lift += flourish.lift * traits.jump
         pose.squash += flourish.squash
@@ -862,8 +863,8 @@ final class OrbAnimationView: NSView {
 
         // Gaze: the activity's pattern plus idle saccades, blended across activity changes, then the pointer
         // and any flourish. Wide glances sometimes come with a blink, as people's do.
-        let from = crossover.previous.gaze(at: t), to = crossover.shown.gaze(at: t)
-        let wander = OrbMath.mix(crossover.previous.wander, crossover.shown.wander, blend)
+        let from = crossover.previous.gaze(at: t), to = shown.gaze(at: t)
+        let wander = OrbMath.mix(crossover.previous.wander, shown.wander, blend)
         if saccades.update(at: time, using: &rng), saccades.isGlance, wander > 0.5,
            Double.random(in: 0..<1, using: &rng) < 0.35 {
             blinker.trigger(at: time)
@@ -892,7 +893,7 @@ final class OrbAnimationView: NSView {
         pose.blink = max(blinker.amount(at: time, using: &rng) * blinkFactor, flourish.squint)
         speak(&pose, at: time, dt: dt)
 
-        bubbleIn.step(toward: crossover.shown.bubble != nil && showsBubble ? 1 : 0, dt: dt, response: 0.35, damping: 0.6)
+        bubbleIn.step(toward: shown.bubble != nil && showsBubble ? 1 : 0, dt: dt, response: 0.35, damping: 0.6)
         let appear = max(0, bubbleIn.value)
         pose.bubbleScale = 0.4 + 0.6 * appear
         pose.bubbleOpacity = min(1, appear) * (0.8 + 0.2 * sin(t * 2.4))
@@ -903,7 +904,7 @@ final class OrbAnimationView: NSView {
     /// Talking: syllable-paced mouth shapes with a springy jaw. When talking stops the mouth closes, then the
     /// regular mouth comes back. Shapes only replace the bot's own mouth (not an activity's expression).
     private func speak(_ pose: inout OrbPose, at time: Double, dt: Double) {
-        let speaking = crossover.shown == .speaking
+        let speaking = shown == .speaking
         if speaking {
             _ = syllables.update(at: time, rate: traits.syllableRate, using: &rng)
         } else if syllables.shape != .rest {
@@ -911,7 +912,7 @@ final class OrbAnimationView: NSView {
         }
         jaw.step(toward: speaking ? syllables.shape.opening : 0, dt: dt, response: 0.09, damping: 0.7)
         pose.talk = jaw.value
-        let ownMouth = config.mouth != "nenhuma" && crossover.shown.mouth(base: config.mouth) == nil
+        let ownMouth = config.mouth != "nenhuma" && shown.mouth(base: config.mouth) == nil
         if ownMouth && (speaking || abs(jaw.value) > 0.03) { pose.viseme = syllables.shape }
     }
 
