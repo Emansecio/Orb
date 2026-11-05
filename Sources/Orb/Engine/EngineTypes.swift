@@ -764,6 +764,7 @@ struct MCPServerConfig: Codable, Hashable, Identifiable, Sendable {
     /// A connector that runs inside the app instead of a server (`LocalConnectorKind` raw value): Google Agenda, Lembretes,
     /// Gmail. It has no command and no URL.
     var local: String?
+    var localKind: LocalConnectorKind? { local.flatMap(LocalConnectorKind.init(rawValue:)) }
     /// The person connected Google Agenda knowing no calendar account is named Google or Gmail (a Workspace account is named by
     /// its address): the card then stops asking for a Google account.
     var anyAccount = false

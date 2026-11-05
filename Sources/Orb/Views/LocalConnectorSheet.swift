@@ -23,6 +23,8 @@ struct LocalConnectorSheet: View {
     @State private var phase = Phase.intro
     @State private var orbIDs: Set<UUID>?
     @State private var didLoad = false
+    /// Closing the sheet cancels it, so a permission granted afterwards does not install a connector nobody is looking at.
+    @State private var connecting: Task<Void, Never>?
 
     private var installed: MCPServerConfig? { model.installedLocalConnector(kind) }
 
@@ -31,6 +33,7 @@ struct LocalConnectorSheet: View {
             .orbSheet(installed == nil ? "Conectar \(kind.title)" : kind.title, subtitle: kind.summary, size: .medium,
                       icon: ConnectorGallery.services.first { $0.localKind == kind }?.mark) { footer }
             .onAppear(perform: load)
+            .onDisappear { connecting?.cancel() }
             .animateChanges(of: phase)
             .onChange(of: phase) { announce(phase) }
     }
@@ -60,7 +63,18 @@ struct LocalConnectorSheet: View {
         case .attention(let state):
             attention(state)
         case .done(let count):
-            result(symbol: "checkmark.circle.fill", tint: Palette.ok, title: "Conectado", detail: ConnectorStatusText.toolsAvailable(count))
+            VStack(spacing: Spacing.m) {
+                Image(systemName: "checkmark.circle.fill").font(.system(size: 34)).foregroundStyle(Palette.ok)
+                Text("Conectado").font(.system(size: 15, weight: .semibold))
+                Text(ConnectorStatusText.toolsAvailable(count))
+                    .font(Typography.label)
+                    .foregroundStyle(Palette.muted)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 380)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.vertical, Spacing.xxl)
+            .accessibilityElement(children: .combine)
         }
     }
 
@@ -152,21 +166,6 @@ struct LocalConnectorSheet: View {
         return URL(string: "x-apple.systempreferences:com.apple.preference.security?\(name)") ?? MacPrivacyPane.automation.url
     }
 
-    private func result(symbol: String, tint: Color, title: String, detail: String) -> some View {
-        VStack(spacing: Spacing.m) {
-            Image(systemName: symbol).font(.system(size: 34)).foregroundStyle(tint)
-            Text(title).font(.system(size: 15, weight: .semibold))
-            Text(detail)
-                .font(Typography.label)
-                .foregroundStyle(Palette.muted)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 380)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.vertical, Spacing.xxl)
-        .accessibilityElement(children: .combine)
-    }
-
     // MARK: Footer
 
     @ViewBuilder private var footer: some View {
@@ -189,10 +188,7 @@ struct LocalConnectorSheet: View {
         }
     }
 
-    private var chosenNoOrb: Bool {
-        guard let orbIDs else { return false }
-        return !model.bots.contains { orbIDs.contains($0.id) }
-    }
+    private var chosenNoOrb: Bool { OrbScopeText.choosesNoOrb(orbIDs, bots: model.bots) }
 
     private func announce(_ phase: Phase) {
         switch phase {
@@ -213,8 +209,10 @@ struct LocalConnectorSheet: View {
 
     private func connect() {
         phase = .working
-        Task { @MainActor in
+        connecting?.cancel()
+        connecting = Task { @MainActor in
             let state = await model.localSetup.connect(kind, anyAccount: installed?.anyAccount ?? false)
+            guard !Task.isCancelled else { return }
             switch state {
             case .ready, .unchecked:
                 await install()

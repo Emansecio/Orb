@@ -132,7 +132,7 @@ private struct InstalledConnectors: View {
                             ConnectorCard(connector: $connector, status: model.connectorStatus[connector.id],
                                           usedBy: usedBy(connector), attention: attention(connector),
                                           isHighlighted: highlighted == connector.id, onEdit: {
-                                if let kind = connector.local.flatMap(LocalConnectorKind.init(rawValue:)) {
+                                if let kind = connector.localKind {
                                     settingUp = kind
                                 } else {
                                     editing = ConnectorDraft(editing: connector)
@@ -191,7 +191,7 @@ private struct InstalledConnectors: View {
 
     /// What a connector of this Mac lacks (a permission, the Google account), for its card.
     private func attention(_ connector: MCPServerConfig) -> String? {
-        guard connector.isEnabled, let kind = connector.local.flatMap(LocalConnectorKind.init(rawValue:)),
+        guard connector.isEnabled, let kind = connector.localKind,
               let state = model.localStates[kind], state.needsAttention else { return nil }
         return state.message
     }
@@ -676,9 +676,11 @@ private struct ExploreConnectors: View {
                                      retry: { Task { await search() } })
                         .transition(.opacity)
                 } else {
-                    grid(results) { server in
-                        RegistryServerCard(server: server, isInstalled: model.installedConnector(server.id) != nil) {
-                            editing = ConnectorDraft(server: server)
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), spacing: Spacing.cardSpacing, alignment: .top)], spacing: Spacing.cardSpacing) {
+                        ForEach(results) { server in
+                            RegistryServerCard(server: server, isInstalled: model.installedConnector(server.id) != nil) {
+                                editing = ConnectorDraft(server: server)
+                            }
                         }
                     }
                     .transition(.opacity)
@@ -694,12 +696,6 @@ private struct ExploreConnectors: View {
             try? await Task.sleep(for: .milliseconds(450))
             guard !Task.isCancelled else { return }
             await search()
-        }
-    }
-
-    private func grid<Item: Identifiable, Card: View>(_ items: [Item], @ViewBuilder card: @escaping (Item) -> Card) -> some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), spacing: Spacing.cardSpacing, alignment: .top)], spacing: Spacing.cardSpacing) {
-            ForEach(items) { card($0) }
         }
     }
 
@@ -823,7 +819,6 @@ struct ConnectorEditor: View {
     @State private var isChoosingFolder = false
 
     private var isNew: Bool { openedAsNew ?? !model.connectors.contains { $0.id == draft.config.id } }
-    private var isGuided: Bool { draft.isGuided }
     private var missingRequired: [String] {
         guard !signsInWithApp else { return [] }
         return draft.inputs.filter(\.isRequired).map(\.name).filter { name in
@@ -835,11 +830,7 @@ struct ConnectorEditor: View {
     /// The connector enters with the person's account: the primary button signs in.
     private var signsIn: Bool { isRemote && config.oauth != nil && !(draft.guide == .slack && pastesToken) }
     private var clientIDMissing: Bool { signsInWithApp && clientID.trimmingCharacters(in: .whitespaces).isEmpty }
-    /// "Só alguns" with nobody ticked, or only Orbs that no longer exist.
-    private var chosenNoOrb: Bool {
-        guard let orbIDs else { return false }
-        return !model.bots.contains { orbIDs.contains($0.id) }
-    }
+    private var chosenNoOrb: Bool { OrbScopeText.choosesNoOrb(orbIDs, bots: model.bots) }
     /// The Orbs that already get this connector, so only the Orbs added now have their "Conectores" switch turned on.
     private var alreadyUsing: Set<UUID> {
         model.connectors.first { $0.id == config.id }.map { $0.orbIDs ?? Set(model.bots.map(\.id)) } ?? []
@@ -974,7 +965,7 @@ struct ConnectorEditor: View {
 
     private var form: some View {
         VStack(spacing: 0) {
-            if isGuided && (draft.isOfficial || draft.helpURL != nil || isRemote) {
+            if draft.isGuided && (draft.isOfficial || draft.helpURL != nil || isRemote) {
                 HStack(spacing: 8) {
                     if draft.isOfficial { CatalogBadge(text: "Oficial", symbol: "checkmark.seal.fill", tint: Palette.accentText) }
                     if isRemote { CatalogBadge(text: "Remoto", symbol: "cloud") }
@@ -988,7 +979,7 @@ struct ConnectorEditor: View {
                 .padding(.bottom, 4)
             }
             Form {
-                if isGuided {
+                if draft.isGuided {
                     if signsIn && draft.guide != .slack { loginSection }
                     if draft.guide == .slack { slackGuide }
                     if config.source != nil && !draft.isOfficial {
@@ -1038,7 +1029,7 @@ struct ConnectorEditor: View {
                         }
                     }
                 } }
-                if isGuided {
+                if draft.isGuided {
                     Section {
                         DisclosureGroup("Avançado", isExpanded: $showsAdvanced) { advancedFields }
                     }
@@ -1129,14 +1120,14 @@ struct ConnectorEditor: View {
     @ViewBuilder private func inputFields(_ rows: [KeyValueRow]) -> some View {
         ForEach(rows) { row in
             KeyValueField(row: KeyValueRow.binding(in: $values, id: row.id, fallback: row), input: inputsByName[row.key],
-                          secretNames: config.secretKeys) {}
+                          isSecret: isSecret(row.key)) {}
         }
     }
 
     @ViewBuilder private var advancedFields: some View {
         Section {
             TextField("Nome", text: $config.name, prompt: Text("ex.: Meu servidor"))
-            if config.source == nil && !isGuided {
+            if config.source == nil && !draft.isGuided {
                 Picker("Tipo", selection: $isRemote) {
                     Text("Local (comando)").tag(false)
                     Text("Remoto (URL)").tag(true)
@@ -1161,7 +1152,7 @@ struct ConnectorEditor: View {
         Section {
             ForEach(values.filter { inputsByName[$0.key] == nil }) { row in
                 KeyValueField(row: KeyValueRow.binding(in: $values, id: row.id, fallback: row), input: nil,
-                              secretNames: config.secretKeys) {
+                              isSecret: isSecret(row.key)) {
                     values.removeAll { $0.id == row.id }
                 }
             }
@@ -1415,12 +1406,9 @@ struct KeyValueRow: Identifiable {
 private struct KeyValueField: View {
     @Binding var row: KeyValueRow
     let input: RegistryServer.Input?
-    let secretNames: Set<String>
+    /// Decided by the editor (`isSecret(_:)`), so the rule lives in one place.
+    let isSecret: Bool
     let onRemove: () -> Void
-
-    private var isSecret: Bool {
-        input?.isSecret == true || secretNames.contains(row.key) || ConnectorSecrets.looksSecret(row.key)
-    }
 
     private var isAuthorizationHeader: Bool { row.key == "Authorization" && input?.prefix.isEmpty == false }
 
