@@ -417,6 +417,7 @@ private struct HangsAfterText: LLMClient {
         await waitUntilIdle(model, botID)
         let banner = model.lastBanner
         #expect(banner?.title == model.bot(botID)?.name)
+        #expect(banner?.botID == botID) // a tap opens the Orb whose routine failed
         #expect(banner?.body.hasPrefix("A rotina “Resumo da manhã” não terminou: ") == true)
         #expect(banner?.body.contains("Não deu certo") == false)
         #expect(banner?.body.contains("modelo desconhecido") == true)

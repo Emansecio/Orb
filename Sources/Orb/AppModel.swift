@@ -2432,7 +2432,7 @@ final class AppModel {
             run.summary = Conversation.clipped(why ?? "Não terminou.", to: RoutineRun.summaryLimit)
             // Nobody watched it fail: the banner says so, as one that worked brings its report (you stopped it yourself: none).
             if !userStopped, RoutineRun.isNews(failure: run.summary, afterLast: routine.runs.first) {
-                notify(bot.name, RoutineRun.failureBanner(routine: routine.name, why: run.summary))
+                notify(about: bot.id, bot.name, RoutineRun.failureBanner(routine: routine.name, why: run.summary))
             }
         }
         if let index = routines.firstIndex(where: { $0.id == routineID }) {
@@ -2655,20 +2655,21 @@ final class AppModel {
     }
 
     /// The last banner the app meant to post (whether or not the settings and focus let it out), for the tests.
-    @ObservationIgnored private(set) var lastBanner: (title: String, body: String)?
+    @ObservationIgnored private(set) var lastBanner: (title: String, body: String, botID: UUID)?
 
-    /// Posts a banner when the app is in the background (bundled app only).
-    func notify(_ title: String, _ body: String) {
-        lastBanner = (title, body)
+    /// Posts a banner about an Orb when the app is in the background (bundled app only). It carries the Orb, so a tap
+    /// opens that Orb rather than whichever one was selected.
+    func notify(about botID: UUID, _ title: String, _ body: String) {
+        lastBanner = (title, body, botID)
         guard !(NSApp?.isActive ?? false), Self.notificationsEnabled, ApprovalNotifications.isAvailable else { return }
-        let content = ApprovalNotifications.plainContent(title: title, body: body)
+        let content = ApprovalNotifications.orbContent(botID: botID, title: title, body: body)
         Task { await ApprovalNotifications.send(content) }
     }
 
     /// A banner about the Orb's running turn going wrong by itself (in circles, on for hours), with "Parar": posted when
     /// you are not looking at that Orb (the app is behind other windows, or another Orb or group is open). A tap opens the Orb.
     func notifyAboutTurn(of botID: UUID, _ body: String) {
-        if let bot = bot(botID) { lastBanner = (bot.name, body) }
+        if let bot = bot(botID) { lastBanner = (bot.name, body, botID) }
         guard let bot = bot(botID), ApprovalNotifications.isAvailable,
               ApprovalNotifications.shouldPost(appIsActive: NSApp?.isActive ?? false, selectedBotID: selectedBotID, botID: botID,
                                                enabled: Self.notificationsEnabled) else { return }

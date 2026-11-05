@@ -110,6 +110,15 @@ struct ApprovalNotificationTests {
         #expect(ApprovalNotifications.route(actionIdentifier: UNNotificationDefaultActionIdentifier, userInfo: [:]) == .open(botID: nil))
     }
 
+    @Test func aTurnOrRoutineBannerOpensItsOwnOrb() {
+        // The banner for a finished turn or a failed routine carries its Orb, so a tap opens that one, not the selected one.
+        let bot = UUID()
+        let content = ApprovalNotifications.orbContent(botID: bot, title: "Ada", body: "Pronto.")
+        #expect(content.title == "Ada" && content.body == "Pronto.")
+        #expect(ApprovalNotifications.route(actionIdentifier: UNNotificationDefaultActionIdentifier, userInfo: content.userInfo)
+                == .open(botID: bot))
+    }
+
     @Test func anythingElseIsIgnoredAndNeverAllows() {
         let bot = UUID(), approval = UUID()
         #expect(ApprovalNotifications.route(actionIdentifier: UNNotificationDismissActionIdentifier, userInfo: info(bot, approval)) == .ignore)

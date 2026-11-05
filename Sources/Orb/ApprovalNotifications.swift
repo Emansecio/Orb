@@ -177,6 +177,13 @@ enum ApprovalNotifications {
         return content
     }
 
+    /// A plain banner about one Orb: a tap opens it (`route` reads the Orb back from `botKey`).
+    static func orbContent(botID: UUID, title: String, body: String) -> UNMutableNotificationContent {
+        let content = plainContent(title: title, body: body)
+        content.userInfo = [botKey: botID.uuidString]
+        return content
+    }
+
     /// Takes down every approval banner still in the Notification Center: the ones left by a run that closed or
     /// crashed, whose buttons would answer nothing. Called when the app starts.
     static func clearStale() {
