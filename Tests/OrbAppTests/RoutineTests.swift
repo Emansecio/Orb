@@ -466,6 +466,21 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(RoutineFollowUp(subject: "x", channel: "WhatsApp 5521975331585 e 5561920000000", nextStep: "").contact == nil)
     }
 
+    /// An app left open for days trims the saved tool outputs once a day, not only when it opens.
+    @Test @MainActor func theSavedToolOutputsAreTrimmedAgainADayLater() async throws {
+        let (model, bot, _) = setUp()
+        let folder = model.outputsDirectory.appending(path: bot.id.uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let old = folder.appending(path: "velha.txt")
+        try Data("x".utf8).write(to: old)
+        try FileManager.default.setAttributes([.modificationDate: Date.now.addingTimeInterval(-20 * 86_400)], ofItemAtPath: old.path)
+
+        model.cleanUpOutputsIfDue(now: .now.addingTimeInterval(3_600)) // the launch has just trimmed: not yet
+        #expect(FileManager.default.fileExists(atPath: old.path))
+        model.cleanUpOutputsIfDue(now: .now.addingTimeInterval(AppModel.outputsCleanupInterval + 60))
+        await waitUntil("the old output to be removed") { !FileManager.default.fileExists(atPath: old.path) }
+    }
+
     /// The scheduler opens the app at 02:49 on a routine every 30 minutes from 8 to 22 whose last run was at 22:22: the 22:30
     /// slot is skipped, in the history, and the schedule goes on at 08:00.
     @Test @MainActor func aSlotMissedOutsideItsHoursIsSkippedNotRunAtNight() throws {

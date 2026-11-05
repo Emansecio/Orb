@@ -321,6 +321,9 @@ final class AppModel {
     @ObservationIgnored private var asleepSince: Date?
     /// When the scheduler last looked at the routines: a long gap since then means the Mac slept in between.
     @ObservationIgnored private var lastRoutinePass: Date?
+    /// When the saved tool outputs were last trimmed (the launch does it once): an app left open for days trims them again.
+    @ObservationIgnored private var lastOutputsCleanup = Date()
+    nonisolated static let outputsCleanupInterval: TimeInterval = 24 * 3_600
     /// How long after waking the routines hold back: Wi-Fi and DNS are usually back by then.
     nonisolated static let wakeSettleTime: TimeInterval = 45
     /// A gap between two passes of the scheduler (30 s apart) beyond which the Mac must have slept.
@@ -556,6 +559,7 @@ final class AppModel {
                     self?.runDueRoutines()
                     self?.retrySavesAfterFailure()
                     self?.saveDraftsIfChanged()
+                    self?.cleanUpOutputsIfDue()
                     self?.startModelRefresh() // apart: a provider that does not answer must not hold up the routines
                     await self?.unloadIdleConversations()
                     self?.unloadIdleGroupSessions()
@@ -2482,6 +2486,15 @@ final class AppModel {
     func systemDidWake(at date: Date = .now) {
         asleepSince = nil
         wokeAt = date
+    }
+
+    /// Trims `saidas/` to its age and size limits once a day: without it they only applied at launch, and fifty Orbs
+    /// running for days would fill the disk up to their combined cap and past it.
+    func cleanUpOutputsIfDue(now: Date = .now) {
+        guard now.timeIntervalSince(lastOutputsCleanup) >= Self.outputsCleanupInterval else { return }
+        lastOutputsCleanup = now
+        let outputs = outputsDirectory
+        Task.detached(priority: .utility) { _ = ToolOutputCap.cleanUp(directory: outputs) }
     }
 
     /// Starts the routines that came due. Right after the Mac wakes it holds back: the scheduler's timer fires at once,
