@@ -937,22 +937,35 @@ struct LegacyKeychainLedger {
 }
 
 /// Remembers what `Keychain.get` found. A write bumps the generation, so a read that began before it never caches its
-/// (possibly stale) answer. Only found values are kept: a nil can be a failed read (the helper timed out, the app was
-/// rebuilt while open), and caching it would leave the Orb without its key until the app is reopened.
+/// (possibly stale) answer. A found value is kept until a write; a nil only for `missLifetime`: it can be a failed read
+/// (the helper timed out, the app was rebuilt while open), which must not leave the Orb without its key for good, but a
+/// provider with no key must not spawn the helper (and wait on it) at every request either.
 final class KeychainReadCache: @unchecked Sendable {
     private let lock = NSLock()
-    private var entries: [String: String] = [:]
+    private var found: [String: String] = [:]
+    private var missed: [String: ContinuousClock.Instant] = [:]
     private var generation = 0
+    private let missLifetime: Duration
+    private let now: @Sendable () -> ContinuousClock.Instant
 
-    func value(for key: String, load: () -> String?) -> String? {
-        let (hit, started) = lock.withLock { (entries[key], generation) }
-        if let hit { return hit }
-        let found = load()
-        if let found { lock.withLock { if generation == started { entries[key] = found } } }
-        return found
+    init(missLifetime: Duration = .seconds(60), now: @escaping @Sendable () -> ContinuousClock.Instant = { .now }) {
+        self.missLifetime = missLifetime
+        self.now = now
     }
 
-    func invalidate() { lock.withLock { generation += 1; entries.removeAll() } }
+    func value(for key: String, load: () -> String?) -> String? {
+        let (hit, missedAt, started) = lock.withLock { (found[key], missed[key], generation) }
+        if let hit { return hit }
+        if let missedAt, now() - missedAt < missLifetime { return nil }
+        let value = load()
+        lock.withLock {
+            guard generation == started else { return }
+            if let value { found[key] = value; missed[key] = nil } else { missed[key] = now() }
+        }
+        return value
+    }
+
+    func invalidate() { lock.withLock { generation += 1; found.removeAll(); missed.removeAll() } }
 }
 
 /// Secrets in the login Keychain (API keys per provider, sign-in tokens), one item per account name.

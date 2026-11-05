@@ -86,14 +86,17 @@ import Testing
         #expect(!items.reads.contains("\(legacy)/openai"))
     }
 
-    @Test func theReadCacheAnswersOnceUntilAWriteAndNeverKeepsAMissingItem() {
-        let cache = KeychainReadCache()
+    @Test func theReadCacheKeepsAFoundValueUntilAWriteAndAMissingOneOnlyForAWhile() {
+        let clock = TestClock()
+        let cache = KeychainReadCache(missLifetime: .seconds(60), now: { clock.now })
         var loads = 0
         func read(_ answer: String?) -> String? { cache.value(for: "k") { loads += 1; return answer } }
         #expect(read("a") == "a" && read("b") == "a" && loads == 1)
         cache.invalidate()
-        // A nil may be a failed read: it is asked again next time.
-        #expect(read(nil) == nil && read("c") == "c" && loads == 3)
+        // A nil may be a failed read: kept for a minute (no helper at every request), then asked again.
+        #expect(read(nil) == nil && read("c") == nil && loads == 2)
+        clock.advance(by: .seconds(61))
+        #expect(read("c") == "c" && loads == 3)
         #expect(read("d") == "c" && loads == 3)
     }
 
@@ -129,4 +132,12 @@ import Testing
         #expect(Keychain.lookup("openai", service: own, items: Locked(), ledger: ledger) == "k") // it still works now
         #expect(!ledger.handled("openai"))
     }
+}
+
+/// A clock the test moves by hand.
+private final class TestClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var instant = ContinuousClock.now
+    var now: ContinuousClock.Instant { lock.withLock { instant } }
+    func advance(by duration: Duration) { lock.withLock { instant = instant.advanced(by: duration) } }
 }
