@@ -618,6 +618,7 @@ struct MCPRenewalTests {
         #expect(await !auth.covers(id, url: URL(string: "https://other.example.com/mcp")!))
         #expect(await !auth.covers(id, url: URL(string: "http://\(service.mcpHost)/mcp")!))
         #expect(await !auth.covers(id, url: URL(string: "https://\(service.mcpHost):8443/mcp")!))
+        #expect(await auth.covers(id, url: URL(string: "https://\(service.mcpHost):443/mcp")!)) // the same address, port written out
         #expect(await !auth.covers(id, url: URL(string: "https://\(service.mcpHost)/mcpx")!))
         // No login at all, or one without a resource, does not block anything.
         #expect(await auth.covers(UUID(), url: URL(string: "https://other.example.com/mcp")!))

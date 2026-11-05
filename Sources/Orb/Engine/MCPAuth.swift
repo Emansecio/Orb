@@ -600,7 +600,10 @@ actor MCPAuth {
     }
 
     private static func origin(of url: URL) -> String {
-        "\(url.scheme?.lowercased() ?? "https")://\((url.host(percentEncoded: true) ?? "").lowercased())\(url.port.map { ":\($0)" } ?? "")"
+        let scheme = url.scheme?.lowercased() ?? "https"
+        // The scheme's own port is the same address written out: ":443" must not count as another server.
+        let port = url.port.flatMap { ($0 == 443 && scheme == "https") || ($0 == 80 && scheme == "http") ? nil : $0 }
+        return "\(scheme)://\((url.host(percentEncoded: true) ?? "").lowercased())\(port.map { ":\($0)" } ?? "")"
     }
 
     /// The identifier of a server for the `resource` parameter (RFC 8707): the address without query, fragment or final slash.

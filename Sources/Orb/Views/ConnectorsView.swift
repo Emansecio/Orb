@@ -1314,8 +1314,13 @@ struct ConnectorEditor: View {
 
         let id = config.id, secret = clientSecret.trimmingCharacters(in: .whitespaces)
         guard config.isEnabled else {
-            // A disabled connector still keeps the secret that was typed.
-            if !secret.isEmpty { Task { await model.connectorAuth.setClientSecret(secret, clientID: clientID, for: id) } }
+            // A disabled connector still keeps the secret that was typed, and drops a login made for another address
+            // (switched on later, it would send that server's token to the new one).
+            let address = config.url
+            Task {
+                if !secret.isEmpty { await model.connectorAuth.setClientSecret(secret, clientID: clientID, for: id) }
+                _ = await signOutIfMoved(id, to: address)
+            }
             dismiss()
             return
         }
@@ -1326,12 +1331,7 @@ struct ConnectorEditor: View {
             if !secret.isEmpty { await model.connectorAuth.setClientSecret(secret, clientID: clientID, for: id) }
             // A new login, or a new app to sign in with; otherwise the one it has is used.
             var signedIn = await model.connectorAuth.isSignedIn(id)
-            // A login belongs to the server it was made with: the address now points elsewhere, so the old token must not be
-            // sent to it. Signing out makes the card ask for a new login.
-            if signedIn, wantsLogin, let url = URL(string: config.url), await !model.connectorAuth.covers(id, url: url) {
-                await model.signOut(connector: id)
-                signedIn = false
-            }
+            if signedIn, wantsLogin, await signOutIfMoved(id, to: config.url) { signedIn = false }
             if wantsLogin, appChanged || !signedIn { return await signIn(id) }
             let status = await model.connectAndWait(id)
             if case .needsSignIn? = status { return await signIn(id) } // the server asked for a login the form did not know about
@@ -1344,6 +1344,15 @@ struct ConnectorEditor: View {
     }
 
     /// Opens the browser for the login and waits for the way back; then the connector is started.
+    /// A login belongs to the server it was made with: when the address now points elsewhere, the old token must not be
+    /// sent to it. Signing out makes the card ask for a new login. True when it signed out.
+    private func signOutIfMoved(_ id: UUID, to address: String) async -> Bool {
+        guard await model.connectorAuth.isSignedIn(id), let url = URL(string: address),
+              await !model.connectorAuth.covers(id, url: url) else { return false }
+        await model.signOut(connector: id)
+        return true
+    }
+
     private func signIn(_ id: UUID) async {
         phase = .signingIn
         switch await model.signIn(connector: id) {
