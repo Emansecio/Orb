@@ -2458,7 +2458,9 @@ final class AppModel {
     /// Returns the ids of the runs dropped.
     static func trimRuns(_ runs: inout [RoutineRun]) -> Set<UUID> {
         var dropped: Set<UUID> = []
-        let keep = [runs.first { $0.report != nil }?.id, runs.first { $0.check?.status == .attention }?.id]
+        // The flag counts only while it is the latest check: a later check that cleared it frees the old run.
+        let lastCheck = runs.first { $0.check != nil }
+        let keep = [runs.first { $0.report != nil }?.id, lastCheck?.check?.status == .attention ? lastCheck?.id : nil]
         while runs.count > Routine.keptRuns, let at = runs.lastIndex(where: { !keep.contains($0.id) }) {
             dropped.insert(runs.remove(at: at).id)
         }

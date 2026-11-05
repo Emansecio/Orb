@@ -325,6 +325,11 @@ import Testing
         #expect(runs.first { $0.report != nil }?.id == flagged.id)
         var few = [run(), run()]
         #expect(AppModel.trimRuns(&few).isEmpty)
+        // A later check that cleared the flag frees the old flagged run: it goes like any other.
+        let cleared = run(report: "r3", check: GoalCheck(progress: 40, status: .onTrack))
+        var later = [cleared] + (0..<Routine.keptRuns).map { _ in run() } + [flagged]
+        _ = AppModel.trimRuns(&later)
+        #expect(!later.contains { $0.id == flagged.id } && later.contains { $0.id == cleared.id })
     }
 
     @Test func aStoppedRunIsReadAsStoppedNotAsAFailure() {
