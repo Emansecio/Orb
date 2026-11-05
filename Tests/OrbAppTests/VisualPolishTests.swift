@@ -3,11 +3,11 @@ import SwiftUI
 import Testing
 @testable import Orb
 
-@Suite(.serialized) @MainActor
-struct VisualPolishTests {
-    let root = TempFolder("OrbVisualPolish")
-
+/// Part of `OrbDriverTests` so it runs serialized with it: its window puts avatars on screen, and those tests count
+/// the orbs of the one shared driver (in a suite of its own the two ran side by side and those counts went wrong).
+extension OrbDriverTests {
     @Test func choosingAGroupDoesNotKeepIdleAvatarsRenderingForever() async throws {
+        let root = TempFolder("OrbVisualPolish")
         _ = NSApplication.shared
         try #require(NSScreen.main != nil)
         let previous = OrbView.animateInactive
