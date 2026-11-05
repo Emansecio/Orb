@@ -76,6 +76,23 @@ extension AppModel {
         return session.routineID == nil && session.sideKind == nil
     }
 
+    enum PendingOpening { case opened, answered, chatGone }
+
+    /// Takes you to the card of approval `approval`: its message in the chat it was raised in, or, for a routine, a
+    /// delegation or a group, the place `showApprovalOwner` knows. Shared by the home page and the menu bar panel.
+    func openPending(_ botID: UUID, approval: UUID) -> PendingOpening {
+        guard isPending(approval, of: botID), let session = sessions[botID] else { return .answered }
+        if session.routineID == nil, let chat = session.conversationChat,
+           let item = session.conversation?.items.first(where: {
+               if case .approval(let request) = $0.kind { return request.id == approval && request.decision == nil }
+               return false
+           }) {
+            return openInicioChat(bot: botID, chat: chat, item: item.id) ? .opened : .chatGone
+        }
+        showApprovalOwner(botID)
+        return .opened
+    }
+
     /// What a tap on a banner opens: the Orb's chat, or, for a routine waiting for an answer, its conversation.
     func showApprovalOwner(_ botID: UUID) {
         guard bot(botID) != nil else { return }

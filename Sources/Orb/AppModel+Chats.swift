@@ -92,6 +92,7 @@ extension AppModel {
             setChats(chats, for: botID)
         }
         chatDrafts[chat] = nil
+        forgetInicio { if case .chat(_, let origin, _) = $0.origin { return origin == chat } else { return false } }
         store.deleteConversation(botID, chat: chat) // after the write of it leaving, on the same queue
     }
 

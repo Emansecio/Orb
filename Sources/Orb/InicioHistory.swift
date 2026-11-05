@@ -85,6 +85,14 @@ struct InicioHistory: Codable, Equatable, Sendable {
         return entries.count != before
     }
 
+    /// Drops the entries whose Orb, conversation, routine or run is gone, so no row is left that opens nothing.
+    @discardableResult
+    mutating func removeEntries(where gone: (InicioEntry) -> Bool) -> Bool {
+        let before = entries.count
+        entries.removeAll(where: gone)
+        return entries.count != before
+    }
+
     mutating func prune(now: Date = .now) {
         entries.removeAll { $0.date < now.addingTimeInterval(-Self.retention) }
         if entries.count > Self.limit { entries.removeFirst(entries.count - Self.limit) }

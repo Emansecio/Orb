@@ -1375,8 +1375,15 @@ final class AppModel {
             let folder = library.directory(for: botID)
             Task.detached(priority: .utility) { try? FileManager.default.removeItem(at: folder) }
         }
+        for chat in live(botID).chats?.list.map(\.id) ?? [] { chatDrafts[chat] = nil } // read before the Orb is gone
         leaveGroups(botID, name: name) // MultiOrb (WP5): before the Orb is gone, so the groups can say who left
-        bots.removeAll { $0.id == botID }
+        bots.removeAll { $0.id == botID } // `normalizeSkills` takes it out of the skills' scopes
+        // A connector scoped to this Orb keeps its (maybe now empty) scope, like one with no Orb picked.
+        for index in connectors.indices where connectors[index].orbIDs?.contains(botID) == true { connectors[index].orbIDs?.remove(botID) }
+        forgetInicio { $0.botID == botID }
+        for routine in ownRoutines { queuedWakeNotes[routine] = nil }
+        drafts[botID] = nil
+        InspectorTabMemory.remember(.general, for: botID) // .general is stored as no key at all
         // Its Claude Code processes, if any is idle: one per conversation, not only the one on show.
         if ClaudePipeIdlePool.shared.count > 0 {
             let others = (live(botID).chats?.list.map { Optional($0.id) } ?? []) + [nil]
@@ -2196,6 +2203,7 @@ final class AppModel {
         routines.removeAll { $0.id == routineID }
         unsavedRoutineConversations[routineID] = nil
         queuedWakeNotes.removeValue(forKey: routineID)
+        forgetInicio { if case .routine(_, let routine, _) = $0.origin { return routine == routineID } else { return false } }
         delegation.forgetWaitingRoutine(routineID)
         if sessions[routine.botID]?.routineID == routineID { stop(routine.botID) }
         store.deleteRoutineConversation(routine: routineID, for: routine.botID)
@@ -2445,10 +2453,26 @@ final class AppModel {
         }
     }
 
+    /// Keeps `Routine.keptRuns` runs, newest first. Skipped slots (a frequent precheck) must not push out the last
+    /// real report (the next run's "previous report") or the run that flagged the goal: those two survive the cut.
+    /// Returns the ids of the runs dropped.
+    static func trimRuns(_ runs: inout [RoutineRun]) -> Set<UUID> {
+        var dropped: Set<UUID> = []
+        let keep = [runs.first { $0.report != nil }?.id, runs.first { $0.check?.status == .attention }?.id]
+        while runs.count > Routine.keptRuns, let at = runs.lastIndex(where: { !keep.contains($0.id) }) {
+            dropped.insert(runs.remove(at: at).id)
+        }
+        return dropped
+    }
+
     private func recordRun(_ run: RoutineRun, routineID: UUID, skipped: Bool = false) {
         guard let index = routines.firstIndex(where: { $0.id == routineID }) else { return }
         routines[index].runs.insert(run, at: 0)
-        if routines[index].runs.count > Routine.keptRuns { routines[index].runs.removeLast(routines[index].runs.count - Routine.keptRuns) }
+        let dropped = Self.trimRuns(&routines[index].runs)
+        if !dropped.isEmpty { forgetInicio { entry in
+            if case .routine(_, _, let run) = entry.origin { return dropped.contains(run) }
+            return false
+        } }
         let outcome: InicioEntry.Outcome = skipped ? .skipped : !run.succeeded ? .failed : run.check?.status == .attention ? .attention : .completed
         recordInicioRoutine(bot: routines[index].botID, routine: routineID, run: run, outcome: outcome)
     }

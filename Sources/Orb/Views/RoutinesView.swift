@@ -607,7 +607,7 @@ private struct RunLine: View {
         .buttonStyle(RunLineStyle())
         .help(Tip.openRunReport)
         .padding(.horizontal, -(Spacing.xs + Spacing.hairline))
-        .accessibilityLabel("\(run.succeeded ? "Deu certo" : "Não deu certo"), \(RoutineText.stamp(run.date)). \(run.summary)"
+        .accessibilityLabel("\(RoutineText.outcome(run)), \(RoutineText.stamp(run.date)). \(run.summary)"
                             + (run.check.map { ". " + $0.spokenLabel } ?? ""))
         .accessibilityHint("Abre o relatório desta execução")
     }
@@ -651,7 +651,7 @@ struct RoutineRunSheet: View {
     @ViewBuilder private var sheet: some View {
         if let routine, let run {
             let title = "\(routine.name) · \(RoutineText.stamp(run.date))"
-            let how = run.succeeded ? "Deu certo" : "Não deu certo"
+            let how = RoutineText.outcome(run)
             ScrollView {
                 reportContent(run)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }

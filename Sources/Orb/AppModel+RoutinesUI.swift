@@ -132,6 +132,9 @@ extension AppModel {
 // MARK: - Words
 
 enum RoutineText {
+    /// How a run is read aloud and titled: a run you stopped is not a failure (the icon already tells them apart).
+    static func outcome(_ run: RoutineRun) -> String { run.wasStopped ? "Parada" : run.succeeded ? "Deu certo" : "Não deu certo" }
+
     /// The name a routine gets when you leave it empty: the first words of what it does ("Resuma meus e-mails…").
     static func defaultName(fromPrompt prompt: String, words: Int = 4) -> String {
         let parts = prompt.split(whereSeparator: \.isWhitespace).prefix(words)

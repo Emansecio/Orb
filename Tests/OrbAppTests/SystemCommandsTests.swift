@@ -305,10 +305,10 @@ import Testing
         #expect(action(working: true, steer: false) == .blocked) // a routine holds the Orb
         #expect(action(working: false, text: false) == .nothing && action(working: true, steer: true, text: false) == .nothing)
         #expect(action(working: false, ready: false) == .nothing)
-        #expect(QuickAskSend.blockedNote(name: "Atlas") == "Atlas está rodando uma rotina. Envie quando terminar.")
+        #expect(QuickAskSend.blockedNote(name: "Atlas") == "Atlas está ocupado com outro trabalho. Envie quando terminar.")
         #expect(QuickAskSend.hint(isWorking: false, canSteer: false).hasPrefix("↩ envia"))
         #expect(QuickAskSend.hint(isWorking: true, canSteer: true).hasPrefix("↩ envia agora"))
-        #expect(QuickAskSend.hint(isWorking: true, canSteer: false).hasPrefix("Rotina rodando"))
+        #expect(QuickAskSend.hint(isWorking: true, canSteer: false).hasPrefix("Orb ocupado"))
     }
 
     @Test func theMenuBarPanelDoesNotSwitchTheScreenUnderAnOpenSheet() {

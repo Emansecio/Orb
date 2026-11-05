@@ -315,19 +315,10 @@ struct InicioView: View {
     }
 
     private func openPending(_ botID: UUID, approval: UUID) {
-        guard model.isPending(approval, of: botID), let session = model.sessions[botID] else {
-            unavailable = "Este pedido já não está aguardando resposta."; return
-        }
-        if session.routineID == nil, let chat = session.conversationChat,
-           let item = session.conversation?.items.first(where: {
-               if case .approval(let request) = $0.kind { return request.id == approval && request.decision == nil }
-               return false
-           }) {
-            if !model.openInicioChat(bot: botID, chat: chat, item: item.id) {
-                unavailable = "A conversa deste pedido não está mais disponível."
-            }
-        } else {
-            model.showApprovalOwner(botID)
+        switch model.openPending(botID, approval: approval) {
+        case .opened: break
+        case .answered: unavailable = "Este pedido já não está aguardando resposta."
+        case .chatGone: unavailable = "A conversa deste pedido não está mais disponível."
         }
     }
 }

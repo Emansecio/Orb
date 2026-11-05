@@ -298,4 +298,94 @@ import Testing
         model.openChat(bot.id, of: bot.id)
         #expect(model.inicioJump == nil)
     }
+
+    @Test func removeEntriesDropsOnlyWhatMatches() {
+        let bot = UUID(), other = UUID(), chat = UUID(), item = UUID(), run = UUID()
+        var history = InicioHistory()
+        history.append(id: item, date: .now, origin: .chat(bot: bot, chat: chat, item: item), outcome: .completed, summary: "a")
+        history.append(id: run, date: .now, origin: .routine(bot: other, routine: UUID(), run: run), outcome: .completed, summary: "b")
+        #expect(history.removeEntries { $0.botID == UUID() } == false)
+        #expect(history.removeEntries { $0.botID == bot })
+        #expect(history.entries.map(\.id) == [run])
+    }
+
+    @Test @MainActor func trimmingRunsKeepsTheLastRealReportAndTheFlaggedRunAgainstSkippedOnes() {
+        func run(report: String? = nil, check: GoalCheck? = nil) -> RoutineRun {
+            RoutineRun(date: .now, succeeded: true, summary: "x", report: report, check: check)
+        }
+        let flagged = run(report: "r2", check: GoalCheck(progress: 10, status: .attention))
+        let real = run(report: "r1")
+        // Newest first: many skipped slots, then a real run that flagged the goal, then an older real one.
+        var runs = (0..<Routine.keptRuns + 3).map { _ in run() } + [flagged, real]
+        let dropped = AppModel.trimRuns(&runs)
+        #expect(runs.count == Routine.keptRuns)
+        #expect(runs.contains { $0.id == flagged.id })
+        #expect(dropped.count == 5 && !dropped.contains(flagged.id))
+        // The newest report is the flagged one; it is what the next prompt is built from.
+        #expect(runs.first { $0.report != nil }?.id == flagged.id)
+        var few = [run(), run()]
+        #expect(AppModel.trimRuns(&few).isEmpty)
+    }
+
+    @Test func aStoppedRunIsReadAsStoppedNotAsAFailure() {
+        let stopped = RoutineRun(date: .now, succeeded: false, summary: BotSession.stoppedNotice)
+        #expect(RoutineText.outcome(stopped) == "Parada")
+        #expect(RoutineText.outcome(RoutineRun(date: .now, succeeded: false, summary: "erro")) == "Não deu certo")
+        #expect(RoutineText.outcome(RoutineRun(date: .now, succeeded: true, summary: "ok")) == "Deu certo")
+    }
+
+    @Test @MainActor func deletingAChatAnOrbOrARoutineTakesTheirRowsOffTheHomePage() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "OrbInicio-\(UUID().uuidString)")
+        defer { removeTestFolder(root) }
+        let store = Store(directory: root)
+        var state = AppState.initial
+        state.bots.append(Bot(name: "Rex", role: "Código", orb: OrbConfig()))
+        store.save(state)
+        store.flush()
+        let model = AppModel(store: store, runsBackgroundWork: false)
+        let luna = model.bots[0], rex = model.bots[1]
+        let keptChat = UUID(), goneChat = UUID(), routineID = UUID()
+        var chats = OrbChats(first: luna.id, updated: .now)
+        chats.add(keptChat, at: .now)
+        chats.add(goneChat, at: .now)
+        model.setChats(chats, for: luna.id)
+        let kept = UUID(), gone = UUID(), ofRoutine = UUID(), ofRex = UUID()
+        model.recordInicioChat(bot: luna.id, chat: keptChat, item: kept, date: .now, text: "fica", succeeded: true)
+        model.recordInicioChat(bot: luna.id, chat: goneChat, item: gone, date: .now, text: "sai", succeeded: true)
+        model.recordInicioChat(bot: rex.id, chat: rex.id, item: ofRex, date: .now, text: "do Rex", succeeded: true)
+        model.recordInicioRoutine(bot: luna.id, routine: routineID, run: RoutineRun(id: ofRoutine, date: .now, succeeded: true, summary: "r"), outcome: .completed)
+
+        model.deleteChat(goneChat, of: luna.id)
+        #expect(Set(model.inicio.entries.map(\.id)) == [kept, ofRex, ofRoutine])
+
+        model.routines = [Routine(name: "R", botID: luna.id, prompt: "p", schedule: .everyHours(1))]
+        model.routines[0].id = routineID
+        model.deleteRoutine(routineID)
+        #expect(Set(model.inicio.entries.map(\.id)) == [kept, ofRex])
+
+        model.deleteBot(rex.id)
+        #expect(model.inicio.entries.map(\.id) == [kept])
+    }
+
+    @Test @MainActor func deletingAnOrbTakesItOutOfConnectorScopesAndDropsItsLeftovers() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "OrbInicio-\(UUID().uuidString)")
+        defer { removeTestFolder(root) }
+        let store = Store(directory: root)
+        var state = AppState.initial
+        state.bots.append(Bot(name: "Rex", role: "Código", orb: OrbConfig()))
+        store.save(state)
+        store.flush()
+        let model = AppModel(store: store, runsBackgroundWork: false)
+        let luna = model.bots[0].id, rex = model.bots[1].id
+        model.connectors = [MCPServerConfig(name: "so-rex", orbIDs: [rex]), MCPServerConfig(name: "ambos", orbIDs: [luna, rex]),
+                            MCPServerConfig(name: "todos", orbIDs: nil)]
+        model.skills = [Skill(slug: "a", name: "A", summary: "s", instructions: "x", orbIDs: [rex])]
+        model.drafts[rex] = "rascunho"
+        model.deleteBot(rex)
+        #expect(model.connectors[0].orbIDs == [])
+        #expect(model.connectors[1].orbIDs == [luna])
+        #expect(model.connectors[2].orbIDs == nil)
+        #expect(model.skills.count == 1 && model.skills[0].orbIDs.isEmpty)
+        #expect(model.drafts[rex] == nil)
+    }
 }

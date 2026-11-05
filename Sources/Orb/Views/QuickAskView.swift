@@ -126,7 +126,7 @@ enum QuickAskSend: Equatable {
         return canSteer ? .queue : .blocked
     }
 
-    static func blockedNote(name: String) -> String { "\(name) está rodando uma rotina. Envie quando terminar." }
+    static func blockedNote(name: String) -> String { "\(name) está ocupado com outro trabalho. Envie quando terminar." }
 
     static let checkingNote = "Verificando as conexões. Tente de novo em instantes."
 
@@ -142,7 +142,7 @@ enum QuickAskSend: Equatable {
     static func hint(isWorking: Bool, canSteer: Bool) -> String {
         let newLine = "\(CommandName.newLineKeys) nova linha"
         if !isWorking { return "↩ envia · \(newLine)" }
-        guard canSteer else { return "Rotina rodando · \(newLine)" }
+        guard canSteer else { return "Orb ocupado · \(newLine)" }
         return "↩ envia agora · \(newLine)"
     }
 }
@@ -480,7 +480,8 @@ private struct PendingApprovalsSection: View {
         VStack(alignment: .leading, spacing: 10) {
             ForEach(pending) { entry in
                 QuickAskApprovalCard(entry: entry, openApp: {
-                    model.selection = QuickAskSend.selection(after: entry.bot.id, current: model.selection, hasOpenSheet: model.hasOpenSheet)
+                    // A sheet of the main window stays (switching the screen would close it with what was typed in it).
+                    if !model.hasOpenSheet { _ = model.openPending(entry.bot.id, approval: entry.request.id) }
                     openApp()
                 })
                 .transition(.quiet)

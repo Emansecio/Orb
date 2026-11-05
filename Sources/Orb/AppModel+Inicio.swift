@@ -24,6 +24,11 @@ extension AppModel {
         if inicio.removeChatResults(of: Set(items.map(\.id))) { store.saveInicioJournal(inicio) }
     }
 
+    /// An Orb, a conversation, a routine or some runs are gone: their rows leave the home page and the journal.
+    func forgetInicio(where gone: (InicioEntry) -> Bool) {
+        if inicio.removeEntries(where: gone) { store.saveInicioJournal(inicio) }
+    }
+
     func recordInicioRoutine(bot: UUID, routine: UUID, run: RoutineRun, outcome: InicioEntry.Outcome, journal: Bool = true) {
         let previous = inicio.nextSequence
         inicio.append(id: run.id, date: run.finishedAt ?? run.date, origin: .routine(bot: bot, routine: routine, run: run.id),
