@@ -116,7 +116,7 @@ final class LiveText {
 /// What the chat view of one Orb shows of its conversation. An object of its own, so a view reading it is redrawn
 /// only when this Orb's items change, not when any conversation does. The Orb's `BotSession` makes and feeds it.
 @MainActor @Observable
-final class OrbTranscript {
+final class OrbTranscript: WritesOnlyChanges {
     /// The user's chat. The reply still being streamed is in it as it was when it began; its text is a `LiveText`.
     /// Its readers are told of every new array, without comparing it with the last one element by element (as a stored
     /// property of an observable class would, at the length of the chat for each action of the Orb): `show` only takes
@@ -155,8 +155,7 @@ final class OrbTranscript {
 
     /// Shows `plan`; the same plan again changes nothing, so the line is not redrawn for every message of the turn.
     func showPlan(_ plan: TaskPlan?) {
-        guard plan != self.plan else { return }
-        self.plan = plan
+        assign(\.plan, to: plan)
     }
 
     /// Each message of the reader, for the rail beside the chat (`RequestRail`).
@@ -179,7 +178,7 @@ final class OrbTranscript {
         // A reply still being written counts as unseen: it is what the reader comes back for.
         seenLast = storedItems.last { item in if case .bot(_, true) = item.kind { false } else { true } }?.id
         marksNew = false
-        if newFrom != nil { newFrom = nil }
+        assign(\.newFrom, to: nil)
     }
 
     /// The reader came back, with `unread` turns finished while away. Marked here or, when the conversation is still being
@@ -195,7 +194,7 @@ final class OrbTranscript {
         guard marksNew else { return }
         let first = NewItems.first(after: seenLast, in: storedItems)
         let row = first.flatMap { id in storedRows?.first { $0.items.contains { $0.id == id } }?.id ?? id }
-        if row != newFrom { newFrom = row }
+        assign(\.newFrom, to: row)
     }
 
     /// The chat is now another conversation (call before `show`).
@@ -204,7 +203,7 @@ final class OrbTranscript {
         seenLast = nil
         isAway = false
         marksNew = false
-        if newFrom != nil { newFrom = nil }
+        assign(\.newFrom, to: nil)
     }
 
     /// A request runs in this chat: its activity block keeps the current words and pending cards visible until it ends.
@@ -240,17 +239,17 @@ final class OrbTranscript {
         let fold = CompactedFold.of(items)
         let rows = TranscriptFolding.foldedRows(items, boundary: fold.count, liveTail: isLive)
         withMutation(keyPath: \.rows) { storedRows = rows }
-        if fold != self.fold { self.fold = fold }
+        assign(\.fold, to: fold)
         let breaks = TimeSeparators.breaks(spans: rows.map { $0.map { ($0.id, $0.span.start, $0.span.end) } }
                                            ?? items.map { ($0.id, $0.date, $0.date) })
-        if breaks != timeBreaks { timeBreaks = breaks }
+        assign(\.timeBreaks, to: breaks)
         let avatars = ReplyAvatars(items)
-        if avatars != self.avatars { self.avatars = avatars }
+        assign(\.avatars, to: avatars)
         let redo = RewindRows.redoTarget(in: items, isWorking: false)
-        if redo != redoCandidate { redoCandidate = redo }
+        assign(\.redoCandidate, to: redo)
         markNew()
         let marks = RequestMark.of(items)
-        if marks != requests { requests = marks }
+        assign(\.requests, to: marks)
         var trails = TurnTrail.of(items, isLive: isLive)
         if let rows, !trails.isEmpty {
             for row in rows {
@@ -259,14 +258,14 @@ final class OrbTranscript {
                 }
             }
         }
-        if trails != self.trails { self.trails = trails }
+        assign(\.trails, to: trails)
         guard let rows, fold.count > 0 else {
-            if foldedRows != 0 { foldedRows = 0 }
+            assign(\.foldedRows, to: 0)
             return
         }
         let folded = Set(items[..<fold.count].lazy.map(\.id))
         let count = rows.prefix { row in row.items.allSatisfy { folded.contains($0.id) } }.count
-        if count != foldedRows { foldedRows = count }
+        assign(\.foldedRows, to: count)
     }
 }
 
@@ -329,17 +328,18 @@ struct TurnTrail: Equatable {
     }
 
     private mutating func note(_ call: ToolCall) {
-        guard call.state == .done, call.title == "Lendo página" || call.title == "Agendando tarefa" || call.title == "Criando um grupo"
-                || call.title.hasPrefix("Guardando na memória") else { return }
+        guard call.state == .done else { return }
         let detail = call.detail.trimmingCharacters(in: .whitespacesAndNewlines)
-        if call.title == "Lendo página" {
+        switch call.title {
+        case "Lendo página":
             if let host = Self.host(of: detail), !host.isEmpty, !sources.contains(detail) { sources.append(detail) }
-        } else if call.title == "Agendando tarefa", let name = detail.split(separator: "”").first?.dropFirst(), detail.hasPrefix("“") {
-            changes.append(.routine(String(name)))
-        } else if call.title.hasPrefix("Guardando na memória") {
-            changes.append(.memory(String(detail.prefix(80))))
-        } else if call.title == "Criando um grupo" {
+        case "Agendando tarefa":
+            if let name = detail.split(separator: "”").first?.dropFirst(), detail.hasPrefix("“") { changes.append(.routine(String(name))) }
+        case "Criando um grupo":
             changes.append(.group(detail))
+        case let title where title.hasPrefix("Guardando na memória"):
+            changes.append(.memory(String(detail.prefix(80))))
+        default: break
         }
     }
 

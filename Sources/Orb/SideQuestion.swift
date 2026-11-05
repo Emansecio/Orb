@@ -21,16 +21,7 @@ enum SideQuestion {
     """
 
     static func prompt(_ question: String, context: [ChatMessage]) -> [ChatMessage] {
-        let lines = context.compactMap { message -> String? in
-            let who: String
-            switch message.role {
-            case .user: who = "Person"
-            case .assistant: who = "Assistant"
-            default: return nil
-            }
-            let said = ConversationLedger.clip(message.content.trimmingCharacters(in: .whitespacesAndNewlines), contextCharacters)
-            return said.isEmpty ? nil : "\(who): \(said)"
-        }.suffix(contextMessages)
+        let lines = ConversationLedger.contextLines(context, last: contextMessages, clippedTo: contextCharacters)
         return [ChatMessage(role: .system, content: system),
                 ChatMessage(role: .user, content: "<conversation>\n\(lines.joined(separator: "\n"))\n</conversation>\n\nQuestion: \(question)")]
     }

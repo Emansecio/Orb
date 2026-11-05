@@ -441,6 +441,21 @@ struct ConversationLedger: Codable, Sendable, Equatable {
 
     static func clip(_ text: String, _ limit: Int) -> String { MemoryText.clip(MemoryText.flatten(text), limit) }
 
+    /// The last `last` spoken messages as "Person: ..." / "Assistant: ..." lines, each clipped; tool turns and empty ones are skipped.
+    static func contextLines(_ messages: [ChatMessage], last: Int, clippedTo limit: Int) -> [String] {
+        let lines = messages.compactMap { message -> String? in
+            let who: String
+            switch message.role {
+            case .user: who = "Person"
+            case .assistant: who = "Assistant"
+            default: return nil
+            }
+            let said = clip(message.content.trimmingCharacters(in: .whitespacesAndNewlines), limit)
+            return said.isEmpty ? nil : "\(who): \(said)"
+        }
+        return Array(lines.suffix(last))
+    }
+
     /// A long text kept by its start and its last third (a request often ends with what must not be done).
     static func clipEnds(_ text: String, _ limit: Int) -> String {
         let flat = MemoryText.flatten(text)

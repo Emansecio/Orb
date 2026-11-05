@@ -339,8 +339,6 @@ extension AppModel {
 }
 
 extension AppModel {
-    /// "Citar": the words selected in a reply go to the start of the Orb's draft as a quote (`MessageQuote`), and the
-    /// cursor to the message box, to write about them.
     /// Puts a text someone else proposed in the composer, after what is written there. Sending stays with the person.
     func addToDraft(_ text: String, for botID: UUID) {
         let before = draftText(botID)
@@ -348,6 +346,8 @@ extension AppModel {
         request(.focusComposer, of: botID)
     }
 
+    /// "Citar": the words selected in a reply go to the start of the Orb's draft as a quote (`MessageQuote`), and the
+    /// cursor to the message box, to write about them.
     func quote(_ text: String, for botID: UUID) {
         let draft = MessageQuote.draft(quoting: text, before: draftText(botID))
         guard draft != draftText(botID) else { return }

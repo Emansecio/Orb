@@ -12,18 +12,18 @@ struct TimeSeparatorsTests {
 
     @Test func theFirstRowANewDayAndAPauseBeginAMoment() {
         let ids = (0..<6).map { _ in UUID() }
-        let rows: [(id: UUID, dates: [Date])] = [
-            (ids[0], [date(12, 9, 0)]),
-            (ids[1], [date(12, 9, 5)]),                   // five minutes later: same moment
-            (ids[2], [date(12, 9, 10), date(12, 9, 40)]), // a run of actions that lasted half an hour
-            (ids[3], [date(12, 9, 50)]),                  // ten minutes after the run ended: same moment
-            (ids[4], [date(12, 10, 10)]),                 // twenty minutes of silence
-            (ids[5], [date(13, 0, 2)]),                   // past midnight, however close
+        let rows: [(id: UUID, start: Date, end: Date)] = [
+            (ids[0], date(12, 9, 0), date(12, 9, 0)),
+            (ids[1], date(12, 9, 5), date(12, 9, 5)),                   // five minutes later: same moment
+            (ids[2], date(12, 9, 10), date(12, 9, 40)), // a run of actions that lasted half an hour
+            (ids[3], date(12, 9, 50), date(12, 9, 50)),                  // ten minutes after the run ended: same moment
+            (ids[4], date(12, 10, 10), date(12, 10, 10)),                 // twenty minutes of silence
+            (ids[5], date(13, 0, 2), date(13, 0, 2)),                   // past midnight, however close
         ]
-        let breaks = TimeSeparators.breaks(rows, calendar: calendar)
+        let breaks = TimeSeparators.breaks(spans: rows, calendar: calendar)
         #expect(Set(breaks.keys) == [ids[0], ids[4], ids[5]])
         #expect(breaks[ids[4]] == date(12, 10, 10))
-        #expect(TimeSeparators.breaks([], calendar: calendar).isEmpty)
+        #expect(TimeSeparators.breaks(spans: [], calendar: calendar).isEmpty)
     }
 
     @Test func theLabelSaysTheDayAsAPersonWould() {

@@ -128,39 +128,46 @@ struct ApprovalNotificationTests {
 
     // MARK: Keyboard
 
+    /// Where the keyboard focus is: nowhere editable (an empty composer counts too), text typed in the composer,
+    /// or the card's own note field.
+    private enum Focus { case none, typingInComposer, note }
+
+    private func press(_ code: UInt16, _ mods: NSEvent.ModifierFlags, _ focus: Focus = .none) -> ApprovalShortcut? {
+        ApprovalShortcut.resolve(keyCode: code, modifiers: mods, responderIsText: focus != .none, hasText: focus != .none,
+                                 hasMarkedText: false, noteFocused: focus == .note)
+    }
+
     @Test func commandReturnAllowsAndEscapeDenies() {
-        #expect(ApprovalShortcut.resolve(keyCode: ApprovalShortcut.returnKey, modifiers: .command, isEditingText: false) == .allow)
-        #expect(ApprovalShortcut.resolve(keyCode: ApprovalShortcut.enterKey, modifiers: .command, isEditingText: false) == .allow)
-        #expect(ApprovalShortcut.resolve(keyCode: ApprovalShortcut.escapeKey, modifiers: [], isEditingText: false) == .deny)
+        #expect(press(ApprovalShortcut.returnKey, .command) == .allow)
+        #expect(press(ApprovalShortcut.enterKey, .command) == .allow)
+        #expect(press(ApprovalShortcut.escapeKey, []) == .deny)
     }
 
     @Test func otherKeysAndOtherModifiersAreNotOurs() {
-        #expect(ApprovalShortcut.resolve(keyCode: ApprovalShortcut.returnKey, modifiers: [], isEditingText: false) == nil)
-        #expect(ApprovalShortcut.resolve(keyCode: ApprovalShortcut.returnKey, modifiers: [.command, .shift], isEditingText: false) == nil)
-        #expect(ApprovalShortcut.resolve(keyCode: ApprovalShortcut.escapeKey, modifiers: .command, isEditingText: false) == nil)
-        #expect(ApprovalShortcut.resolve(keyCode: 0, modifiers: .command, isEditingText: false) == nil)
+        #expect(press(ApprovalShortcut.returnKey, []) == nil)
+        #expect(press(ApprovalShortcut.returnKey, [.command, .shift]) == nil)
+        #expect(press(ApprovalShortcut.escapeKey, .command) == nil)
+        #expect(press(0, .command) == nil)
+        // Caps lock, numeric pad and fn are not real modifiers.
+        #expect(press(ApprovalShortcut.returnKey, [.command, .capsLock, .function, .numericPad]) == .allow)
+        #expect(press(ApprovalShortcut.escapeKey, [.capsLock, .function]) == .deny)
     }
 
     @Test func escapeBelongsToATextFieldBeingEdited() {
-        #expect(ApprovalShortcut.resolve(keyCode: ApprovalShortcut.escapeKey, modifiers: [], isEditingText: true) == nil)
+        #expect(press(ApprovalShortcut.escapeKey, [], .note) == nil)
+        #expect(press(ApprovalShortcut.escapeKey, [], .typingInComposer) == nil)
         // ⌘↩ answers the card from its note field (editing, but not in the composer).
-        #expect(ApprovalShortcut.resolve(keyCode: ApprovalShortcut.returnKey, modifiers: .command, isEditingText: true) == .allow)
+        #expect(press(ApprovalShortcut.returnKey, .command, .note) == .allow)
     }
 
     /// With text in the main composer ⌘↩ means "stop and send" (the stop refuses the card): the card does not take it.
     @Test func commandReturnTypedInTheComposerIsNotAnAllow() {
-        for key in [ApprovalShortcut.returnKey, ApprovalShortcut.enterKey] {
-            #expect(ApprovalShortcut.resolve(keyCode: key, modifiers: .command, isEditingText: true, isTypingInComposer: true) == nil)
+        for code in [ApprovalShortcut.returnKey, ApprovalShortcut.enterKey] {
+            #expect(press(code, .command, .typingInComposer) == nil)
         }
         // An empty or unfocused composer is not typing: ⌘↩ allows, and so it does from the card's note.
-        #expect(ApprovalShortcut.resolve(keyCode: ApprovalShortcut.returnKey, modifiers: .command, isEditingText: false, isTypingInComposer: false) == .allow)
-        #expect(ApprovalShortcut.resolve(keyCode: ApprovalShortcut.returnKey, modifiers: .command, isEditingText: true, isTypingInComposer: false) == .allow)
-        // Esc is unaffected by it.
-        #expect(ApprovalShortcut.resolve(keyCode: ApprovalShortcut.escapeKey, modifiers: [], isEditingText: false, isTypingInComposer: true) == .deny)
-        // Typing in the composer is editing a field that is not the note.
-        #expect(ApprovalShortcut.isTypingInComposer(isEditing: true, noteFocused: false))
-        #expect(!ApprovalShortcut.isTypingInComposer(isEditing: true, noteFocused: true))
-        #expect(!ApprovalShortcut.isTypingInComposer(isEditing: false, noteFocused: false))
+        #expect(press(ApprovalShortcut.returnKey, .command, .none) == .allow)
+        #expect(press(ApprovalShortcut.returnKey, .command, .note) == .allow)
     }
 
     /// The reading of the window's first responder every card shares (`approvalKeys`): the three cases that decide the keys.
