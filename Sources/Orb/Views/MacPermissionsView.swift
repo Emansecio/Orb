@@ -553,10 +553,20 @@ struct OpenPrivacySettingsButton: View {
         let checker = MacPermissionChecker.live
         if let kind = await problem.permissionKind(checker), kind.canBeAskedNow,
            await checker.status(ofInBackground: kind).canShowSystemPrompt {
-            _ = await checker.requestInBackground(kind)
-            return // macOS showed its own dialog, which offers System Settings when it needs it
+            let started = ContinuousClock.now
+            let answer = await checker.requestInBackground(kind)
+            if !Self.needsPane(kind: kind, answer: answer, elapsed: ContinuousClock.now - started) { return }
+            // macOS answered without a dialog (it asks only once per app): System Settings is the way left.
         }
         problem.pane.open()
+    }
+
+    /// Whether the request left the person without a dialog to answer. A dialog blocks until it is answered; an answer in
+    /// under a second means macOS did not show one (it never asks twice), and Screen Recording answers at once even when
+    /// it does, so there the pane opens whenever it is not granted.
+    static func needsPane(kind: MacPermissionKind, answer: MacPermissionStatus, elapsed: Duration) -> Bool {
+        if answer == .granted { return false }
+        return kind == .screenRecording || elapsed < .seconds(1)
     }
 }
 

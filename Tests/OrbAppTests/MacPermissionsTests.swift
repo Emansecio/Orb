@@ -634,4 +634,13 @@ struct MacPermissionsModelTests {
         #expect(model.status(of: .screenRecording) == .granted)
         #expect(model.awaitsRelaunch.isEmpty)
     }
+
+    @Test func permitirOpensTheSettingsWhenMacOSShowedNoDialog() {
+        // Answered at once and not granted: macOS asks only once, so System Settings is the way left.
+        #expect(OpenPrivacySettingsButton.needsPane(kind: .accessibility, answer: .notGranted, elapsed: .milliseconds(5)))
+        #expect(OpenPrivacySettingsButton.needsPane(kind: .screenRecording, answer: .notGranted, elapsed: .seconds(30)))
+        // A dialog the person answered (slow) or a grant: nothing more to open.
+        #expect(!OpenPrivacySettingsButton.needsPane(kind: .accessibility, answer: .notGranted, elapsed: .seconds(8)))
+        #expect(!OpenPrivacySettingsButton.needsPane(kind: .screenRecording, answer: .granted, elapsed: .milliseconds(5)))
+    }
 }

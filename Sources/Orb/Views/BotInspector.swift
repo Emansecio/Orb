@@ -1403,7 +1403,8 @@ private struct IdentityEditor: View {
 
     private var footerMessage: String? {
         if excess > 0 { return "Muito longo: tire \(excess) caracteres para salvar." }
-        return failed ? "Não foi possível salvar (talvez falte espaço no disco). O texto continua aqui." : nil
+        if failed { return "Não foi possível salvar (talvez falte espaço no disco). O texto continua aqui." }
+        return MemoryBank.identityTrimNote(count: text.count)
     }
 
     var body: some View {

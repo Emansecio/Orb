@@ -306,7 +306,8 @@ private struct ProviderRow: View {
     private func commitURL() {
         guard let draft = urlDraft else { return }
         urlDraft = nil
-        if draft != account?.baseURL { model.updateProvider(kind) { $0.baseURL = draft } }
+        let url = GatewayForm.storedURL(draft)
+        if url != account?.baseURL { model.updateProvider(kind) { $0.baseURL = url } }
     }
 
     @ViewBuilder private var signInRow: some View {

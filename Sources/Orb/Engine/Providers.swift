@@ -347,7 +347,7 @@ enum ModelCatalog {
     /// The API also lists embeddings, audio, image and moderation models; keep the ones that chat.
     static func openAIModels(_ ids: [String]) -> [ProviderModel] {
         let excluded = ["embedding", "tts", "whisper", "transcribe", "dall-e", "image", "audio", "realtime", "moderation",
-                        "search", "davinci", "babbage", "sora", "computer-use"]
+                        "search", "davinci", "babbage", "sora", "computer-use", "instruct"]
         return ids.filter { id in
             (id.hasPrefix("gpt-") || id.hasPrefix("o") || id.hasPrefix("chatgpt") || id.contains("codex"))
                 && !excluded.contains { id.contains($0) }

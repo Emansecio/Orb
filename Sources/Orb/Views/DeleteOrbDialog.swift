@@ -10,10 +10,12 @@ struct DeleteOrbSummary: Equatable {
     var groupCount: Int = 0
     /// The names of the groups it is one of the two Orbs of: those are undone, with their conversation and board.
     var undoneGroups: [String] = []
+    /// How many conversations the Orb has: all of them go (the folder under `conversations/` is removed).
+    var chatCount: Int = 1
 
     /// "A conversa, 2 rotinas e a participação em 2 grupos vão embora."
     var goes: String {
-        var parts = ["a conversa"]
+        var parts = [chatCount > 1 ? "as \(chatCount) conversas" : "a conversa"]
         if routineCount == 1 { parts.append("1 rotina") } else if routineCount > 1 { parts.append("\(routineCount) rotinas") }
         // MARK: MultiOrb (WP6): it also leaves the groups it is in ("também sai de N grupos").
         // The groups it undoes get their own line (`undone`); here only the ones that go on without it.
@@ -60,13 +62,13 @@ struct DeleteOrbSummary: Equatable {
 
 extension DeleteOrbSummary {
     @MainActor
-    init(bot: Bot, routineCount: Int, groups: [OrbGroup] = [], home: String = NSHomeDirectory()) {
+    init(bot: Bot, routineCount: Int, groups: [OrbGroup] = [], chatCount: Int = 1, home: String = NSHomeDirectory()) {
         let shown = bot.workingDirectory.isEmpty ? nil : OrbFolder.display(bot.workingURL, home: home)
         let joined = groups.filter { $0.memberIDs.contains(bot.id) }
         // The same rule as leaving a group (`AppModel.leave`): at the smallest size the group is undone.
         let undone = joined.filter { $0.memberIDs.count <= OrbGroup.memberLimits.lowerBound }.map(\.name)
         self.init(name: bot.name, routineCount: routineCount, folder: shown == "~" ? nil : shown,
-                  groupCount: joined.count, undoneGroups: undone)
+                  groupCount: joined.count, undoneGroups: undone, chatCount: chatCount)
     }
 }
 
@@ -113,7 +115,8 @@ struct DeleteOrbSheet: View {
 
     var body: some View {
         if let bot = model.bot(botID) {
-            let summary = DeleteOrbSummary(bot: bot, routineCount: model.routines(for: botID).count, groups: model.groups)
+            let summary = DeleteOrbSummary(bot: bot, routineCount: model.routines(for: botID).count, groups: model.groups,
+                                       chatCount: model.live(botID).chats?.list.count ?? 1)
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: Spacing.m) {
                     SummaryLine(.goes, summary.goes)
