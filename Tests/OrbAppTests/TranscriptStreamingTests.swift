@@ -216,6 +216,16 @@ import Testing
         #expect(model.liveText(for: UUID(), of: first) == nil)
     }
 
+    @MainActor @Test func aFirstFlushEndingInABlankLineKeepsItForTheNextParagraph() async throws {
+        let (model, first, _) = twoOrbs()
+        model.apply(.text("Aqui está:\n\n"), to: first) // the model paused right after the blank line
+        model.flushText(first)
+        model.apply(.text("- a"), to: first)
+        model.apply(.notice("terminou"), to: first)
+        let items = model.transcript(first)
+        #expect(botText(items[items.count - 2]) == "Aqui está:\n\n- a")
+    }
+
     @MainActor @Test func closingAReplyPutsTheWholeTextInTheItem() async throws {
         let (model, first, _) = twoOrbs()
         model.apply(.text("\n\n  Olá"), to: first) // newlines before the first word are dropped

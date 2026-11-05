@@ -612,7 +612,8 @@ extension BotSession {
             }
             return
         }
-        let item = TranscriptItem(.bot(text: delta.trimmingCharacters(in: .newlines), isStreaming: true))
+        // Only the leading blank lines go: a first flush ending in "\n\n" keeps them, or the next paragraph would stick to it.
+        let item = TranscriptItem(.bot(text: String(delta.drop(while: \.isNewline)), isStreaming: true))
         if case .bot(let text, _) = item.kind { liveText = LiveText(itemID: item.id, text: text) } // before the row exists
         mutateItems { $0.append(item) }
     }
