@@ -465,10 +465,8 @@ extension ToolCall {
     /// Whether the call is a command run in the Terminal (its detail is the command, its output `ShellTool`'s).
     var isCommand: Bool { Self.commandTitles[title] != nil }
 
-    /// The title and the detail the line leaves out, for when it opens (nil: the line says it all).
-    var hiddenDetail: (title: String, detail: String)? { hiddenDetail(given: lineWords) }
-
-    /// The same, for a caller that already has the line's words (`lineWords` is built from the detail each time it is read).
+    /// The title and the detail the line leaves out, for when it opens (nil: the line says it all). Takes the line's
+    /// words because `lineWords` is built from the detail each time it is read.
     func hiddenDetail(given words: LineWords) -> (title: String, detail: String)? {
         guard words.hidesDetail, !detail.isEmpty else { return nil }
         return (title, detail)

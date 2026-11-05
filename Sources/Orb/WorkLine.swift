@@ -243,8 +243,7 @@ enum WorkPhrase {
     /// "github.com" for "https://www.github.com/x/y"; what is not a URL stays as it is.
     static func host(of address: String?) -> String? {
         guard let address else { return nil }
-        guard let host = URL(string: address)?.host(percentEncoded: false), !host.isEmpty else { return address }
-        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+        return LiveScreenText.host(of: address) ?? address
     }
 }
 

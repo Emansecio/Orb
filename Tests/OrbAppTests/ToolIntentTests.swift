@@ -162,13 +162,10 @@ struct ToolIntentTests {
         #expect(shell("x", .failed, intent: "Ler o histórico").lineWords.main == "Leu o histórico")
         // The title and the command stay for when the line opens.
         let call = shell("python3 - <<'EOF'", intent: "Ler o histórico")
-        #expect(call.hiddenDetail?.title == "Rodando no Terminal" && call.hiddenDetail?.detail == "python3 - <<'EOF'")
+        #expect(call.hiddenDetail(given: call.lineWords)?.title == "Rodando no Terminal" && call.hiddenDetail(given: call.lineWords)?.detail == "python3 - <<'EOF'")
     }
 
-    @Test func theHiddenDetailGivenTheLineWordsIsTheSameAsReadingThemAgain() {
-        let call = shell("python3 - <<'EOF'", intent: "Ler o histórico")
-        let given = call.hiddenDetail(given: call.lineWords)
-        #expect(given?.title == call.hiddenDetail?.title && given?.detail == call.hiddenDetail?.detail)
+    @Test func theHiddenDetailIsNilWhenTheLineSaysItAll() {
         // Nothing hidden: a line that says it all, or a call with no detail.
         let search = ToolCall(kind: .shell, title: "Pesquisando", detail: "swiftui shimmer", state: .done)
         #expect(search.hiddenDetail(given: search.lineWords) == nil)
@@ -212,7 +209,7 @@ struct ToolIntentTests {
         let read = ToolCall(kind: .file, title: "Lendo arquivo", detail: "/Users/x/README.md", state: .done)
         #expect(read.lineWords == ToolCall.LineWords(main: "Leu", code: "README.md", hidesDetail: true))
         // The whole path is kept for when the line opens.
-        #expect(read.hiddenDetail?.detail == "/Users/x/README.md")
+        #expect(read.hiddenDetail(given: read.lineWords)?.detail == "/Users/x/README.md")
         var running = read
         running.state = .running
         #expect(running.lineWords.main == "Lendo")
@@ -314,7 +311,6 @@ struct ToolIntentTests {
         // How many there were is on the hover, not in the words: no "e mais 4" beside "6 ações".
         #expect(variants == ["Leu o histórico dos três chats e conferiu se a vaga do Marcus já saiu",
                              "Leu o histórico dos três chats"])
-        #expect(ToolTally.line(calls) == variants[0])
         #expect(ToolTally.countNote(calls) == "6 ações")
     }
 

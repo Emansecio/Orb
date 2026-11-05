@@ -70,7 +70,7 @@ struct PlanCard: View {
                             .font(Typography.small)
                             .foregroundStyle(Palette.muted)
                             .accessibilityHidden(true)
-                        Text(TaskPlanRing.isTended(plan) ? "Plano \(plan.doneCount)/\(plan.steps.count)" : "Plano")
+                        Text(TaskPlanRing.title(plan))
                             .font(Typography.label.weight(.medium).monospacedDigit())
                             .foregroundStyle(Palette.secondary)
                         Spacer(minLength: 8)

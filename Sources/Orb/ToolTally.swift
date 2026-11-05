@@ -44,7 +44,7 @@ enum ToolTally {
     static let namedLimit = 3
 
     /// "Rodou 7 comandos, leu 1 arquivo e fez 2 buscas". An action of a kind not named comes last as "outras".
-    static func summary(_ calls: [ToolCall], capitalized: Bool = true) -> String {
+    static func summary(_ calls: [ToolCall]) -> String {
         var order: [Act] = []
         var counts: [Act: Int] = [:]
         for call in calls {
@@ -61,7 +61,7 @@ enum ToolTally {
         let rest = order.dropFirst(namedLimit).reduce(0) { $0 + counts[$1]! }
         if rest > 0 { parts.append("mais \(rest) \(rest == 1 ? "ação" : "ações")") }
         let line = PortugueseList.join(parts)
-        return capitalized ? line.prefix(1).uppercased() + line.dropFirst() : line
+        return line.prefix(1).uppercased() + line.dropFirst()
     }
 
     /// "fez 2 outras ações", after kinds that were named.
@@ -118,10 +118,6 @@ enum ToolTally {
 
     /// The folded line of a run in the Orb's browser leads with the site it is on, the last one it opened ("gympass.com ·
     /// Abriu 1 página, clicou 3 vezes e preencheu 2 campos"); any other run is its `summary`, or what its actions were for.
-    static func line(_ calls: [ToolCall]) -> String {
-        lineVariants(calls)[0]
-    }
-
     /// A step leads with its purpose, falling back to the Orb's own progress message. Never call a failed action done.
     static func stepVariants(_ items: [TranscriptItem]) -> [String] {
         let calls = items.compactMap { if case .tool(let call) = $0.kind { call } else { nil } }

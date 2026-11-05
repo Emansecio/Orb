@@ -13,11 +13,10 @@ struct TaskPlanRing: View {
 
     var body: some View {
         if let plan = transcript.plan {
-            let tended = Self.isTended(plan)
             Button { showsSteps.toggle() } label: {
                 HStack(spacing: 5) {
                     ring(plan)
-                    Text(tended ? "Plano \(plan.doneCount)/\(plan.steps.count)" : "Plano")
+                    Text(Self.title(plan))
                         .font(Typography.label.monospacedDigit())
                         .foregroundStyle(Palette.secondary)
                         .contentTransition(reduceMotion ? .opacity : .numericText()) // digits do not roll under Reduce Motion
@@ -61,6 +60,11 @@ struct TaskPlanRing: View {
         }
         .frame(width: 10, height: 10)
         .accessibilityHidden(true)
+    }
+
+    /// "Plano 2/5" once the model marks steps, a bare "Plano" before.
+    nonisolated static func title(_ plan: TaskPlan) -> String {
+        isTended(plan) ? "Plano \(plan.doneCount)/\(plan.steps.count)" : "Plano"
     }
 
     /// Whether the model marks the steps as it goes: one of them is done, in progress or blocked.
