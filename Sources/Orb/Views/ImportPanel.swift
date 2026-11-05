@@ -20,6 +20,16 @@ enum ImportText {
         "Passa do limite de leitura: os últimos \(count) caracteres ficam de fora."
     }
 
+    /// A file of a folder that passed the size limit.
+    static func tooLargeFile(_ name: String) -> String {
+        "\(name) passa de 1 MB e foi ignorado. Para importá-lo, escolha o arquivo sozinho."
+    }
+
+    /// Facts the reading or the 60-fact limit leaves out.
+    static func omittedFacts(_ count: Int) -> String {
+        count == 1 ? "1 lembrança passa do limite de 60 e fica de fora." : "\(count) lembranças passam do limite de 60 e ficam de fora."
+    }
+
     /// The VoiceOver line once a reading is done.
     static func announcement(_ imported: OrbImport) -> String {
         let counts = imported.plan().summary
@@ -521,6 +531,10 @@ private struct ImportPreview: View, Equatable {
                 Text(plan.isEmpty ? ImportText.nothingChecked : "Vai importar: \(plan.summary)")
                     .font(Typography.label)
                     .foregroundStyle(Palette.faint)
+                // What the limits cut must show here, so the preview says what will be written.
+                let cut = imported.omittedFacts + plan.droppedFacts
+                if cut > 0 { Text(ImportText.omittedFacts(cut)).font(Typography.small).foregroundStyle(Palette.warn) }
+                ForEach(imported.notes, id: \.self) { Text($0).font(Typography.small).foregroundStyle(Palette.warn) }
             }
             if imported.isFreeText {
                 Picker("Isto é", selection: Binding(get: { imported.asInstructions }, set: { kind in MainActor.assumeIsolated { onKind(kind) } })) {

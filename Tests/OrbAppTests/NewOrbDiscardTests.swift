@@ -52,6 +52,17 @@ import Testing
         #expect(carried.0 == "Lia" && carried.1 == "Agenda" && carried.2 == "Você é a Lia.")
     }
 
+    @Test func aSecondTripToTheFormDoesNotOverwriteWhatWasEdited() {
+        var draft = OrbDraft()
+        draft.name = "Lia"
+        draft.revision = 2
+        #expect(NewBotSheet.carriesDraft(draft, since: 0))
+        // Same draft again: the form's own edits stay. A newer draft carries.
+        #expect(!NewBotSheet.carriesDraft(draft, since: 2))
+        draft.revision = 3
+        #expect(NewBotSheet.carriesDraft(draft, since: 2))
+    }
+
     @Test func theSheetKeepsTheModeItOpenedIn() {
         #expect(NewBotSheet.pinnedMode(chosen: nil, opened: .form) == .form)
         #expect(NewBotSheet.pinnedMode(chosen: .assistant, opened: .form) == .assistant)

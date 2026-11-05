@@ -101,6 +101,8 @@ struct ExchangePartiesTests {
         let atlas = OrbRef(id: UUID(), name: "Atlas"), researcher = OrbRef(id: UUID(), name: "Pesquisador")
         let event = OrbEvent(kind: .delegationReceived, actor: atlas, subject: researcher, chainID: UUID())
         #expect(ExchangeSource.parties(of: [], event: event) == [atlas, researcher])
+        #expect(ExchangeSheet.emptyText(parties: []) == "Nada foi trocado ainda.")
+        #expect(ExchangeSheet.emptyText(parties: [atlas, researcher]) == "Esta troca está em outra conversa de Atlas.")
         #expect(ExchangeSheet.backLabel([]) == "Voltar")
         #expect(ExchangeSheet.backLabel([atlas]) == "Voltar ao Atlas")
         // Opened from the chat of the Orb that was asked, the button goes back to that chat, not the asker's.

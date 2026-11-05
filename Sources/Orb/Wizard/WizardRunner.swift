@@ -129,6 +129,9 @@ final class WizardRunner {
         dropTurnMessages()
     }
 
+    /// "Voltar a conversar" only makes sense while the conversation can go on: at the limit the field stays off for good.
+    var canGoBackToChatting: Bool { !hitLimit }
+
     /// "Voltar a conversar" on the final card.
     func backToChatting() {
         draft.ready = false

@@ -28,13 +28,20 @@ struct ExchangeSheet: View {
         messages.lazy.compactMap(\.groupID).first { id in model.group(id) != nil }
     }
 
+    /// Parties without messages come from the event line: the exchange exists but is not in the conversation that is open
+    /// (the asker's other chat, or a deleted one), which is not the same as nothing having been exchanged.
+    static func emptyText(parties: [OrbRef]) -> String {
+        guard let asker = parties.first else { return "Nada foi trocado ainda." }
+        return "Esta troca está em outra conversa de \(asker.name)."
+    }
+
     var body: some View {
         let title = parties.map(\.name).joined(separator: " e ")
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 header
                 if messages.isEmpty {
-                    Text("Nada foi trocado ainda.")
+                    Text(Self.emptyText(parties: parties))
                         .font(Typography.text)
                         .foregroundStyle(Palette.faint)
                         .frame(maxWidth: .infinity)

@@ -471,6 +471,46 @@ import Testing
         #expect(plan.skills.count == ImportLimits.skills)
     }
 
+    @Test func aLongIdentityDoesNotTakeThePlacesOfTheCheckedFacts() throws {
+        var found = try OrbImportReader.read(text: "## Como funciona\n\(instructions(characters: 5_000))")
+        found.facts = (1...60).map { ImportItem("Fato \($0)") }
+        let plan = found.plan()
+        #expect(plan.pages.filter { $0.kind == .fato && $0.title.isEmpty }.count == 60)
+        #expect(plan.pages.count == 63 && plan.droppedFacts == 0)
+        found.facts = (1...65).map { ImportItem("Fato \($0)") }
+        #expect(found.plan().droppedFacts == 5)
+    }
+
+    @Test func aFolderFileBetween200KBAnd1MBIsReadAndTheOneOverTheLimitIsWarnedAbout() throws {
+        let folder = root.appending(path: "pasta-grande")
+        try write("Você é direto.", to: "SOUL.md", in: folder)
+        try write(String(repeating: "Gosta de café.\n\n", count: 17_000), to: "MEMORY.md", in: folder) // ~270 KB
+        let found = try OrbImportReader.read(folder: folder)
+        #expect(found.facts.count == ImportLimits.listed && found.omittedFacts > 0 && found.notes.isEmpty)
+        #expect(found.plan().pages.count == ImportLimits.facts)
+
+        let over = root.appending(path: "pasta-enorme")
+        try write("Você é direto.", to: "SOUL.md", in: over)
+        try write(String(repeating: "a", count: ImportLimits.bytes + 10), to: "USER.md", in: over)
+        let skipped = try OrbImportReader.read(folder: over)
+        #expect(skipped.notes == [ImportText.tooLargeFile("USER.md")])
+        // Nothing else to read: the size is the reason it fails.
+        let alone = root.appending(path: "so-enorme")
+        try write(String(repeating: "a", count: ImportLimits.bytes + 10), to: "MEMORY.md", in: alone)
+        #expect(throws: ImportFailure.tooLarge) { try OrbImportReader.read(folder: alone) }
+    }
+
+    @Test func aByteOrderMarkAndWindowsLineEndingsAreIgnored() throws {
+        let card = try OrbImportReader.read(text: "\u{FEFF}" + #"{"name":"Lia","description":"Uma amiga atenta."}"#)
+        #expect(card.name == "Lia")
+        let text = "Mora em Recife\ncom o gato\n\nGosta de café\n"
+        let unix = try OrbImportReader.read(text: text), windows = try OrbImportReader.read(text: text.replacingOccurrences(of: "\n", with: "\r\n"))
+        #expect(windows.facts.map(\.text) == unix.facts.map(\.text) && !windows.facts.contains { $0.text.contains("\r") })
+        let folder = root.appending(path: "pasta-crlf")
+        try write("Mora em Recife\r\ncom o gato\r\n\r\nGosta de café\r\n", to: "MEMORY.md", in: folder)
+        #expect(try OrbImportReader.read(folder: folder).facts.count == 2)
+    }
+
     @Test func theAnnouncementNeverHasAnEmptySentence() {
         var found = OrbImport(source: "ChatGPT")
         #expect(ImportText.announcement(found) == "Li a importação. Nada marcado para importar. Confira a prévia.")

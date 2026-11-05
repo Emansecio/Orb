@@ -1324,6 +1324,18 @@ struct AccessibilityBudgetTests {
         #expect(outline.cuts.contains(.visited) && outline.lines.count == 400)
     }
 
+    @Test func theActionLookupsStayWithinTheWalksDeadline() {
+        let buttons = (1...20).map { fakeButton("Botão \($0)") }
+        for button in buttons { button.stall = .milliseconds(10) }
+        let window = fake("AXWindow", title: "A", buttons)
+        var limits = UIOutlineLimits()
+        limits.seconds = 0.05
+        let outline = UIOutlineBuilder.outline(of: window, prefix: "w1", query: nil, limits: limits)
+        #expect(outline.cuts.contains(.time) && !outline.entries.isEmpty)
+        // One read each; the deadline had passed, so no element was asked for its actions on top of that.
+        #expect(buttons.allSatisfy { $0.roundTrips <= 1 })
+    }
+
     @Test func theOutlineStopsAtFourteenThousandCharacters() {
         let long = String(repeating: "x", count: 70)
         let window = fake("AXWindow", title: "A", (1...400).map { fakeButton("\(long) \($0)") })

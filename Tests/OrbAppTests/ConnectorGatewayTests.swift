@@ -576,6 +576,18 @@ struct MCPLazyTests {
         await manager.sync([])
     }
 
+    @Test func aCoalescedRefreshUsesTheConnectionThatIsLiveAfterTheWait() async throws {
+        let manager = MCPManager(refreshInterval: .milliseconds(600)), config = try gatewayConfig()
+        await manager.sync([config])
+        _ = try await manager.call(config.id, tool: "flood", arguments: .null) // refresh now, one more after the wait
+        // The server restarts during the wait.
+        await #expect(throws: ToolError.self) { try await manager.call(config.id, tool: "die", arguments: .null) }
+        func lists() async -> Int { (try? await manager.call(config.id, tool: "lists", arguments: .null)).flatMap { Int($0) } ?? 0 }
+        // The new server listed once at its start; the refresh that was waiting must list it again.
+        await waitUntil("the waiting refresh to reach the new connection") { await lists() >= 2 }
+        await manager.sync([])
+    }
+
     @Test func theCatalogIsWrittenReadAndForgotten() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "lazy-\(UUID().uuidString)")
         defer { removeTestFolder(root) }

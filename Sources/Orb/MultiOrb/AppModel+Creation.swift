@@ -85,8 +85,8 @@ extension AppModel {
             : .createdEdited(name: bot.name, folder: folder, summary: changes)
     }
 
-    /// The card said "Criar" but the Orb could not be made: its record says so instead of "Criado".
-    private func markNotCreated(_ approvalID: UUID, of botID: UUID, reason: String) {
+    /// The card said "Criar" (or "Liberar") but nothing came of it: its record says so instead of "Criado".
+    func markNotCreated(_ approvalID: UUID, of botID: UUID, reason: String) {
         session(botID).mutateItems { items in
             for index in items.indices {
                 if case .approval(var request) = items[index].kind, request.id == approvalID {

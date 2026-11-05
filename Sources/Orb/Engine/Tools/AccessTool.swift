@@ -137,6 +137,8 @@ struct AccessSupport: Sendable {
     var home = FileManager.default.homeDirectoryForCurrentUser
     /// Applies the request to the Orb after "Liberar".
     var grant: @Sendable (AccessRequest) async -> AccessOutcome = { _ in .failed("The app could not change the access now.") }
+    /// Called with the card's id when `grant` failed, so the card does not stay as "Liberado" for something nothing granted.
+    var grantFailed: @Sendable (UUID, String) async -> Void = { _, _ in }
 }
 
 /// How the person answered the access card, for the model that asked.

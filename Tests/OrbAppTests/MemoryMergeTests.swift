@@ -83,6 +83,18 @@ import Testing
         #expect(await bank.mergeShortScan == nil)
     }
 
+    @Test func swappingAPageOfYoursForOneOfTheOrbsWithTheSameCountScansAgain() async {
+        let bank = MemoryBank(directory: root.appending(path: "orb"))
+        for index in 0..<(MemoryMerge.threshold - 1) { await page(bank, "nota-\(index)", "Assunto \(index) do Orb.") }
+        await page(bank, "minha", "Escrita por você.", origin: .voce)
+        #expect(await bank.mergeDue(now: start) == nil)
+        #expect(await bank.mergeShortScan != nil)
+        // Same number of pages in the index, but now all of them are candidates.
+        #expect(await bank.forget("fatos/minha.md"))
+        await page(bank, "outra", "Assunto outro do Orb.")
+        #expect(await bank.mergeDue(now: start)?.count == MemoryMerge.threshold)
+    }
+
     @Test func aProposalIsDueEveryStepAndAppliedOnlyOnPagesThatDidNotChange() async throws {
         let bank = MemoryBank(directory: root.appending(path: "orb"))
         for index in 0..<(MemoryMerge.threshold - 1) { await page(bank, "nota-\(index)", "Assunto \(index) sem relação.") }

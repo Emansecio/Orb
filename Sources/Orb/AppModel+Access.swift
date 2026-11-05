@@ -9,6 +9,9 @@ extension AppModel {
                              grant: { [weak self] request in
                                  guard let self else { return .failed("O app está fechando.") }
                                  return await self.grantAccess(request, to: botID)
+                             },
+                             grantFailed: { [weak self] cardID, _ in
+                                 await self?.markNotCreated(cardID, of: botID, reason: "Não liberado: a pasta não existe mais")
                              })
     }
 

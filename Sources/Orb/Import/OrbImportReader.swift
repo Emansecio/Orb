@@ -32,7 +32,7 @@ enum OrbImportReader {
 
     /// `asInstructions` settles free text the preview asked about; nil guesses from how it starts.
     static func read(text: String, asInstructions: Bool? = nil) throws -> OrbImport {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = normalized(text).trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count <= ImportLimits.bytes else { throw ImportFailure.tooLarge }
         guard trimmed.contains(where: \.isLetter), !trimmed.contains("\0") else { throw ImportFailure.unrecognized }
         let bare = unfenced(trimmed)
@@ -40,6 +40,12 @@ enum OrbImportReader {
         let start = MemoryText.fold(String(trimmed.prefix(2_000)))
         if ["<!doctype", "<html", "<body"].contains(where: start.contains) { throw ImportFailure.unrecognized }
         return readCard(trimmed) ?? readFreeText(trimmed, asInstructions: asInstructions)
+    }
+
+    /// A BOM (Notepad) is not whitespace and would hide the "{" of a card; CRLF would split no paragraph and leave a "\r" in lines.
+    static func normalized(_ text: String) -> String {
+        let clean = text.replacingOccurrences(of: "\r\n", with: "\n")
+        return clean.first == "\u{FEFF}" ? String(clean.dropFirst()) : clean
     }
 
     /// The text inside a code fence that wraps all of it (a JSON card copied from a chat); other text as it is.
@@ -60,7 +66,8 @@ enum OrbImportReader {
         guard (values?.fileSize ?? 0) <= ImportLimits.bytes else { throw ImportFailure.tooLarge }
         guard let data = try? Data(contentsOf: url) else { throw ImportFailure.unrecognized }
         if data.starts(with: [0x89, 0x50, 0x4E, 0x47]) { throw ImportFailure.pngCard }
-        guard let text = String(data: data, encoding: .utf8) else { throw ImportFailure.unrecognized }
+        guard let raw = String(data: data, encoding: .utf8) else { throw ImportFailure.unrecognized }
+        let text = normalized(raw)
         if singleFiles.contains(url.lastPathComponent), let found = try? build(Contents(files: [url.lastPathComponent: text]),
                                                                               source: "Arquivo \(url.lastPathComponent)") {
             return found
@@ -84,6 +91,7 @@ enum OrbImportReader {
         }
         contents.bundled = bundledNames(manifest: reader.text("skills/.bundled_manifest"), hub: reader.text("skills/.hub/lock.json"))
         contents.skills = reader.skills(skipping: contents.bundled)
+        contents.tooLarge = reader.tooLarge
         let isOpenClaw = reader.root.lastPathComponent == "workspace" || contents.files["IDENTITY.md"] != nil
         return try build(contents, source: isOpenClaw ? "OpenClaw" : "Hermes")
     }
@@ -104,6 +112,8 @@ enum OrbImportReader {
         var skills: [(directory: String, text: String)] = []
         /// Skills that came with the app or from a hub: not the person's own.
         var bundled: Set<String> = []
+        /// Names of the files that were too large to read.
+        var tooLarge: [String] = []
     }
 
     private static func build(_ contents: Contents, source: String) throws -> OrbImport {
@@ -116,9 +126,13 @@ enum OrbImportReader {
             if ["role", "papel", "vibe"].contains(key) { found.role = ImportSanitizer.line(value, limit: 120) }
         }
         for file in ["USER.md", "MEMORY.md"] {
-            found.facts += items(entries(files[file] ?? "", byParagraph: true))
+            let all = entries(files[file] ?? "", byParagraph: true)
+            found.omittedFacts += max(0, all.count - ImportLimits.listed)
+            found.facts += items(all)
         }
+        found.omittedFacts += max(0, found.facts.count - ImportLimits.listed)
         found.facts = Array(found.facts.prefix(ImportLimits.listed))
+        found.notes = contents.tooLarge.map { ImportText.tooLargeFile($0) }
         if let agents = files["AGENTS.md"] {
             let body = ImportSanitizer.block(agents, limit: MemoryBank.maximumLength)
             if !body.isEmpty { found.procedures = [ImportItem(body, title: "Regras de operação (AGENTS.md)")] }
@@ -128,7 +142,7 @@ enum OrbImportReader {
             guard !contents.bundled.contains(fields["name"] ?? "") else { return nil }
             return skill(title: fields["name"] ?? directory, summary: fields["description"] ?? "", body: body)
         })
-        guard !found.isEmpty || !found.name.isEmpty else { throw ImportFailure.unrecognized }
+        guard !found.isEmpty || !found.name.isEmpty else { throw contents.tooLarge.isEmpty ? ImportFailure.unrecognized : ImportFailure.tooLarge }
         return found
     }
 
@@ -148,6 +162,8 @@ enum OrbImportReader {
     private struct FolderReader {
         let root: URL
         var remaining = ImportLimits.bytes
+        /// Regular files that were left out for their size (a file chosen alone has the same 1 MB ceiling).
+        var tooLarge: [String] = []
 
         func hasFolder(_ name: String) -> Bool {
             let values = try? root.appending(path: name, directoryHint: .isDirectory).resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
@@ -159,11 +175,15 @@ enum OrbImportReader {
         mutating func text(at url: URL) -> String? {
             guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]),
                   values.isSymbolicLink != true, values.isRegularFile == true,
-                  let size = values.fileSize, size <= ImportLimits.fileBytes, size <= remaining,
-                  url.resolvingSymlinksInPath().path.hasPrefix(root.path + "/"),
-                  let data = try? Data(contentsOf: url), let text = String(data: data, encoding: .utf8) else { return nil }
+                  let size = values.fileSize,
+                  url.resolvingSymlinksInPath().path.hasPrefix(root.path + "/") else { return nil }
+            guard size <= remaining else {
+                tooLarge.append(url.lastPathComponent)
+                return nil
+            }
+            guard let data = try? Data(contentsOf: url), let text = String(data: data, encoding: .utf8) else { return nil }
             remaining -= size
-            return text
+            return OrbImportReader.normalized(text)
         }
 
         /// The `SKILL.md` of each folder under `skills/` (three levels at most, the first twenty), by the folder's name;
