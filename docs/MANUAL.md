@@ -755,7 +755,8 @@ tem a **Galeria**, os **Instalados** e **Explorar**.
   *Instalados* mostra **Pronto** (desligado, liga quando precisar), **Em uso**, **Conectando…**, **Não conectou** ou **Desativado**. O botão **Testar** do cartão ("Conectou: 12 ferramentas em 0,8 s"; se falhar, o motivo fica no cartão até a próxima ação) fica ao lado do
   menu, que tem **Ver ferramentas…** (com "Só leitura" e "Destrutiva"),
   **Editar…** e **Apagar…**. Uma falha traz "Tentar de novo".
-- **Quem usa.** Cada conector e cada skill tem **"Usar com"**: todos os Orbs (padrão) ou só os que você marcar. O Orb também
+- **Quem usa.** Cada conector tem **"Usar com"**: todos os Orbs (padrão) ou só os que você marcar. Uma skill sempre nomeia os
+  seus Orbs (não há "todos", e um Orb novo não as recebe sozinho): marque cada um. O Orb também
   precisa estar com a chave **Conectores** ligada (marcar o Orb em "Usar com" liga sozinho). Uma ferramenta de conector pede
   aprovação como as demais, a menos que o servidor a anuncie como somente leitura. Uma que **envia, publica ou apaga** (pelo
   nome: send, post, reply, forward, share, publish, delete, remove, trash, archive, schedule, invite, transfer) pergunta até no

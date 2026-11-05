@@ -11,7 +11,8 @@ Três ideias dirigem tudo:
    de qualquer jeito, veja "Dobrar quando é de graça"), e aí desce de uma vez até a metade dele, em vez de ceder uma mensagem
    por vez. O esqueleto do resumo é feito por regras; a nota do modelo sobre o trecho, escrita antes em segundo plano, vai
    ao lado dele quando existe.
-2. **O que é esquecido não se perde.** As mensagens ficam inteiras no disco (só a *cópia enviada* encolhe), o resumo é um
+2. **O que é esquecido não se perde.** As mensagens ficam no disco (só a *cópia enviada* encolhe; no disco, as saídas de ferramenta anteriores à
+   penúltima mensagem sua são aparadas a 4.000 caracteres; uma saída de mais de 30.000 fica inteira em `saidas/`), o resumo é um
    registro estruturado que mantém o pedido original, e o trecho vai para a memória do Orb antes de sair da janela.
 3. **Quem usa não decide nada.** Não há pergunta de "compactar ou começar uma nova": o Orb sabe a hora e o jeito.
 
