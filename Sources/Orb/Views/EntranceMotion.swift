@@ -157,8 +157,6 @@ final class TranscriptEntrances {
     private var hasSeen = false
     private var wasLoading = false
 
-    init() {}
-
     /// `shown`: items already on screen in another form (a queued message becoming the real one), which arrive without
     /// coming in again.
     @discardableResult
@@ -308,8 +306,6 @@ enum ScrollMotion {
 final class PresentedOrbs: @unchecked Sendable {
     private var ids: Set<UUID> = []
 
-    init() {}
-
     @MainActor func contains(_ id: UUID) -> Bool { ids.contains(id) }
 
     /// Whether this is the first time `id` was recorded.
@@ -347,8 +343,6 @@ enum ApprovalPulse {
         let curve = Animation.easeInOut(duration: durations[phase])
         return phase == 1 ? curve.delay(lead) : curve
     }
-
-    static var totalDuration: Double { durations.reduce(0, +) }
 
     /// Whether the card pulses: only a card that arrived while the chat was open, and never under Reduce Motion.
     static func pulses(isNew: Bool, reduceMotion: Bool) -> Bool { isNew && !reduceMotion }

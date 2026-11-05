@@ -30,11 +30,6 @@ extension Motion {
         reduceMotion || listChanged ? nil : content
     }
 
-    /// A control that becomes available or not (the send button when there is text): its opacity moves with the
-    /// content curve, or at once under Reduce Motion.
-    static func availability(reduceMotion: Bool) -> Animation? {
-        reduceMotion ? nil : content
-    }
 }
 
 extension View {

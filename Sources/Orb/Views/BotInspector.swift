@@ -170,7 +170,6 @@ struct BotInspector: View {
                         .buttonStyle(GhostStyle())
                         .hangsOnLeadingEdge()
                         .disabled(!hasChanged)
-                        .opacity(hasChanged ? 1 : 0.4)
                         .help("Volta à aparência de quando esta janela abriu")
                         Spacer()
                         Button("Pronto") { isEditingOrb = false }

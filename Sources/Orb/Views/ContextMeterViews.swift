@@ -92,7 +92,7 @@ struct ContextRing: View {
         }
         .frame(width: size - 2, height: size - 2)
         .frame(width: size, height: size)
-        .animation(Motion.availability(reduceMotion: reduceMotion), value: fraction)
+        .animation(Motion.panel(reduceMotion: reduceMotion), value: fraction)
         .accessibilityHidden(true)
     }
 

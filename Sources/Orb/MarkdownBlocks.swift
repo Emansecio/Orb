@@ -239,9 +239,10 @@ enum MarkdownBlocks {
     /// block streams as code and swaps once, when it is whole.
     private static func richBlock(language: String?, source: String) -> MarkdownBlock? {
         guard let language, !source.isEmpty else { return nil }
-        if language.lowercased() == "page" { return source.utf8.count <= PageSandbox.maxHTML ? .page(html: source) : nil }
+        let kind = language.lowercased()
+        if kind == "page" { return source.utf8.count <= PageSandbox.maxHTML ? .page(html: source) : nil }
         guard source.utf8.count <= richSourceLimit else { return nil }
-        switch language.lowercased() {
+        switch kind {
         case "chart": return ChartSpec.parse(source).map { .chart($0, source: source) }
         case "mermaid", "mmd": return .diagram(source: source)
         case "math", "latex", "tex", "katex": return .math(tex: source)
@@ -471,6 +472,6 @@ enum MarkdownBlocks {
 
     private static func isSeparatorCell(_ cell: String) -> Bool {
         let core = cell.trimmingCharacters(in: CharacterSet(charactersIn: ":"))
-        return core.count >= 1 && core.allSatisfy { $0 == "-" } && cell.contains("-")
+        return !core.isEmpty && core.allSatisfy { $0 == "-" }
     }
 }

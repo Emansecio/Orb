@@ -4,7 +4,7 @@ import Foundation
 /// `{"type":"bar","title":"…","labels":["Jan","Fev"],"series":[{"name":"2026","values":[3,5]}]}`, or `"values":[3,5]` for one
 /// series. Read once, with the block; whatever is not a chart this app can draw is nil, and the fence stays code.
 struct ChartSpec: Equatable, Sendable {
-    enum Kind: String, Sendable, CaseIterable { case bar, line, area, pie }
+    enum Kind: String, Sendable { case bar, line, area, pie }
 
     struct Series: Equatable, Sendable {
         var name: String

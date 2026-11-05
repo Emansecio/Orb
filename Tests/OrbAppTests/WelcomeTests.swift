@@ -487,7 +487,6 @@ extension WelcomeTests {
     @Test func theShortcutIsTheMenusCommandAndDoesNotNeedTheButton() {
         // ⌘N is the app menu's command (OrbApp), not a button of the list: its label stays in the catalog and the tips.
         #expect(AppShortcut.newBot.label == "⌘N")
-        #expect(Tip.newBot().contains("⌘N"))
         #expect(Tip.createOrbSheet().contains("⌘N"))
     }
 }

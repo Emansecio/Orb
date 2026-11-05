@@ -326,7 +326,6 @@ enum Tip {
 
     // MARK: With a key
 
-    static func newBot() -> String { "Cria um novo Orb (\(AppShortcut.newBot.label))" }
     static let newOrbOrCategory = "Cria um Orb ou uma categoria"
     static func newGroup() -> String { "Junta Orbs para trabalharem juntos num pedido (\(AppShortcut.newGroup.label))" }
     static func settings() -> String { "Abre os Ajustes (\(AppShortcut.settings.label))" }
@@ -381,7 +380,7 @@ enum Tip {
          autoColor, routineTemplate, openRunReport, exploreSkills, showProviderDetails, hideProviderDetails,
          previewActivity("pensando"),
          findResults, findClose, findInConversation(), findNext(), findPrevious(),
-         newBot(), newOrbOrCategory, newGroup(), settings(), inspector(isShowing: true), inspector(isShowing: false),
+         newOrbOrCategory, newGroup(), settings(), inspector(isShowing: true), inspector(isShowing: false),
          pickAnswer, quoteSelection, goToQuote, answerInApp, skipQuestion,
          grantAccess, declineAccess, accessInApp,
          importSource, importOpenMarketplace,
