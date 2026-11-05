@@ -129,7 +129,7 @@ enum ProviderStatus: Equatable {
         case .noModels: "Conectado · sem modelos"
         case .unverified: "Ainda não verificado"
         case .ready(let count, let updated):
-            [count == 1 ? "1 modelo" : "\(count) modelos", updated.map { "atualizado " + Self.relative($0, now: now) }]
+            [count == 1 ? "1 modelo" : "\(count) modelos", updated.map { "atualizado " + RelativeTime.text($0, now: now) }]
                 .compactMap { $0 }.joined(separator: " · ")
         }
     }
@@ -159,14 +159,6 @@ enum ProviderStatus: Equatable {
         default: false
         }
     }
-
-    var isReady: Bool {
-        if case .ready = self { return true }
-        return false
-    }
-
-    /// "há 2 h" (abbreviated, pt-BR).
-    static func relative(_ date: Date, now: Date = .now) -> String { RelativeTime.text(date, now: now) }
 }
 
 /// Why the last model refresh failed.

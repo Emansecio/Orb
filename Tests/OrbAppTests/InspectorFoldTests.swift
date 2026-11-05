@@ -47,12 +47,9 @@ struct InspectorFoldTests {
         #expect(ModelCardSummary.warning(mode: .bypass, unavailableNote: "Sem conexão") == "Sem conexão")
     }
 
-    @Test func onlyAModelThatCannotAnswerHoldsTheCardOpen() {
-        #expect(ModelCardSummary.hasProblem(unavailableNote: "Claude Code está desligado em Ajustes → Modelos."))
-        #expect(!ModelCardSummary.hasProblem(unavailableNote: nil))
+    @Test func bypassAloneIsAMarkOnTheClosedRow() {
         // "Sem pedir permissão" is a choice: a mark on the closed row, not a reason to open the card.
-        let bypassOnly = ModelCardSummary.warning(mode: .bypass, unavailableNote: nil)
-        #expect(bypassOnly != nil && !ModelCardSummary.hasProblem(unavailableNote: nil))
+        #expect(ModelCardSummary.warning(mode: .bypass, unavailableNote: nil) == ModelCardSummary.bypassLine)
     }
 
     @Test func theClosedRowNamesTheChosenModelThenTheDefaultThenPadrao() {

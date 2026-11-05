@@ -84,24 +84,12 @@ struct SettingsView: View {
 
     var body: some View {
         TabView(selection: $tab) {
-            GeneralSettings()
-                .tabItem { Label(SettingsTab.general.title, systemImage: SettingsTab.general.symbol) }
-                .tag(SettingsTab.general)
-            OrbsSettings()
-                .tabItem { Label(SettingsTab.orbs.title, systemImage: SettingsTab.orbs.symbol) }
-                .tag(SettingsTab.orbs)
-            ProviderSettings()
-                .tabItem { Label(SettingsTab.models.title, systemImage: SettingsTab.models.symbol) }
-                .tag(SettingsTab.models)
-            BrowserSettings()
-                .tabItem { Label(SettingsTab.browser.title, systemImage: SettingsTab.browser.symbol) }
-                .tag(SettingsTab.browser)
-            UsageSettings()
-                .tabItem { Label(SettingsTab.usage.title, systemImage: SettingsTab.usage.symbol) }
-                .tag(SettingsTab.usage)
-            MacPermissionsView()
-                .tabItem { Label(SettingsTab.permissions.title, systemImage: SettingsTab.permissions.symbol) }
-                .tag(SettingsTab.permissions)
+            settingsTab(.general) { GeneralSettings() }
+            settingsTab(.orbs) { OrbsSettings() }
+            settingsTab(.models) { ProviderSettings() }
+            settingsTab(.browser) { BrowserSettings() }
+            settingsTab(.usage) { UsageSettings() }
+            settingsTab(.permissions) { MacPermissionsView() }
         }
         .frame(width: 640, height: tab.height)
         .onAppear {
@@ -114,6 +102,12 @@ struct SettingsView: View {
             request = ""
         }
         .onChange(of: tab) { storedTab = tab.rawValue }
+    }
+
+    private func settingsTab(_ tab: SettingsTab, @ViewBuilder content: () -> some View) -> some View {
+        content()
+            .tabItem { Label(tab.title, systemImage: tab.symbol) }
+            .tag(tab)
     }
 }
 
@@ -493,7 +487,6 @@ enum SettingsSnapshots {
         case "settings-models": (tab, content) = (.models, AnyView(ProviderSettings()))
         case "settings-perms": (tab, content) = (.permissions, AnyView(MacPermissionsView()))
         case "settings-perms-tested", "settings-perms-stale": (tab, content) = (.permissions, AnyView(MacPermissionsView(sample: permissionsSample(screen))))
-        case let name where name.hasPrefix("settings-usage"): return nil // `UsageSnapshots` draws it (it needs the model)
         default: return nil
         }
         return AnyView(content
@@ -566,8 +559,7 @@ struct InlineLinkNote<Detail: View>: View {
             .contentShape(.rect)
             .onTapGesture { isOpen = true }
             .focusable()
-            .onKeyPress(.return) { isOpen = true; return .handled }
-            .onKeyPress(.space) { isOpen = true; return .handled }
+            .onKeyPress(keys: [.return, .space]) { _ in isOpen = true; return .handled }
             .accessibilityAddTraits(.isButton)
             .accessibilityHint(hint)
             .accessibilityAction { isOpen = true }

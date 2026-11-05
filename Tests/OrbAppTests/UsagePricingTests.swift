@@ -346,12 +346,12 @@ struct UsagePriceCorrectionTests {
         let saturday = Date(timeIntervalSince1970: 1_792_238_400)
         #expect(!PriceTable.isDeepSeekPeak(saturday))
         #expect(PriceTable.price(forModel: "deepseek-v4-pro", at: saturday) != base)
-        let baseline = try #require(PriceDraft.baseline(for: "openrouter/deepseek/deepseek-v4-pro", in: book))
+        let baseline = try #require(book.price(for: "openrouter/deepseek/deepseek-v4-pro"))
         #expect(baseline.price == base && baseline.source == .table)
         #expect(PriceDraft(baseline.price).input == UsageFormat.priceText(base.input))
         // A Gemini Flash whose price doubles in 2027.
         let gemini = try #require(PriceTable.price(forModel: "gemini-3.6-flash"))
-        #expect(PriceDraft.baseline(for: "openrouter/google/gemini-3.6-flash", in: book)?.price == gemini)
+        #expect(book.price(for: "openrouter/google/gemini-3.6-flash")?.price == gemini)
     }
 
     @Test func correctingAPriceSavesItAndRestoringRemovesIt() async throws {

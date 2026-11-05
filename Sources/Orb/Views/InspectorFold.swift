@@ -86,14 +86,8 @@ struct FoldHeader<ClosedSummary: View>: View {
     }
 }
 
-/// What a folding part shows when it opens: rows of a `Form`, so it only fades in and out, and the table takes its new
-/// height at once (MOVIMENTO.md, pattern H): animating it would animate every row of the table.
-private struct FoldContent: ViewModifier {
-    func body(content: Content) -> some View {
-        content.transition(.quiet)
-    }
-}
-
 extension View {
-    func foldContent() -> some View { modifier(FoldContent()) }
+    /// What a folding part shows when it opens: rows of a `Form`, so it only fades in and out, and the table takes its new
+    /// height at once (MOVIMENTO.md, pattern H): animating it would animate every row of the table.
+    func foldContent() -> some View { transition(.quiet) }
 }

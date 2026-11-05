@@ -33,14 +33,6 @@ enum BrowserPickerCopy {
         var action: Action?
         /// What happens meanwhile, said a step quieter than the problem itself (nil when there is none to name).
         var consequence: String?
-
-        var symbol: String {
-            switch tone {
-            case .ready: "checkmark.circle.fill"
-            case .warning: "exclamationmark.triangle.fill"
-            case .neutral: "circle.dotted"
-            }
-        }
     }
 
     /// The pickers show while the Orb has "Navegar na web".
@@ -292,20 +284,16 @@ struct BrowserPickerRows: View {
                 set: { model.setSearchProvider($0, for: botID) })
     }
 
+    /// Only warnings get here (`problemLine`): the other tones are left out of the panel.
     private func statusLine(_ line: BrowserPickerCopy.Line) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Label {
                 Text(line.text)
             } icon: {
-                // Looking is work in progress, not a state: the app's own spinner (after its short delay), never an empty circle.
-                if line.tone == .neutral {
-                    DelayedSpinner().scaleEffect(0.6).frame(width: 14, height: 14)
-                } else {
-                    Image(systemName: line.symbol)
-                }
+                Image(systemName: "exclamationmark.triangle.fill")
             }
             .font(Typography.small)
-            .foregroundStyle(line.tone == .warning ? Palette.warn : line.tone == .ready ? Palette.ok : Palette.muted)
+            .foregroundStyle(Palette.warn)
             .fixedSize(horizontal: false, vertical: true)
             .textSwap(line.text)
             if let consequence = line.consequence {

@@ -173,7 +173,7 @@ struct NewBotSheet: View {
     private var tabPicker: some View {
         // The pill switch of the catalog pages. "Criar conversando | Formulário" below is its quiet form (gray, no icons):
         // the same kind of switch, and still a level under this one.
-        PillTabs(selection: Binding(get: { tab }, set: { tab = $0 }),
+        PillTabs(selection: $tab,
                  items: NewOrbTab.allCases.map { .init(value: $0, title: $0.title, symbol: $0.symbol) })
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .contain)

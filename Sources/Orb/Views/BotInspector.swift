@@ -207,10 +207,16 @@ struct BotInspector: View {
         takeRequests()
     }
 
+    /// Opens the appearance editor at a height that fits the window as it is now, not as it was at the last open.
+    private func openLookEditor() {
+        editorHeight = NewBotSheetLayout.height(preferred: 720)
+        isEditingOrb = true
+    }
+
     /// What a command asked of this panel: the appearance editor ("Personalizar…"), or a tab ("Gerenciar" in the
     /// permissions chip opens "Pasta e acessos", where the grants are).
     private func takeRequests() {
-        if model.takeChatRequest(.editLook, of: botID) { isEditingOrb = true }
+        if model.takeChatRequest(.editLook, of: botID) { openLookEditor() }
         if model.takeChatRequest(.renameOrb, of: botID) {
             tab = .general
             isFocusingName = true
@@ -258,10 +264,7 @@ struct BotInspector: View {
                         .transition(.pageSwap)
                 }
                 .motion(Motion.crossFade, value: bot.id)
-                Button("Personalizar…") {
-                    editorHeight = NewBotSheetLayout.height(preferred: 720)
-                    isEditingOrb = true
-                }
+                Button("Personalizar…") { openLookEditor() }
                 .buttonStyle(QuietTextStyle())
                 .font(Typography.small)
                 .fixedSize()
@@ -300,7 +303,7 @@ struct BotInspector: View {
         let info = model.modelInfo(forModel: bot.model)
         let unavailable = model.modelUnavailableNote(bot.model)
         let modelIsOpen = InspectorFold.isOpen(stored: modelFoldOpen,
-                                               hasProblem: ModelCardSummary.hasProblem(unavailableNote: unavailable))
+                                               hasProblem: unavailable != nil)
         let browserHasProblem = BrowserPickerCopy.hasProblem(capabilities: bot.capabilities, status: browserStatus,
                                                              provider: bot.searchProvider, hasKey: searchKey)
         let capabilitiesAreOpen = InspectorFold.isOpen(stored: capabilitiesFoldOpen, hasProblem: browserHasProblem)
@@ -1279,13 +1282,9 @@ private struct RoutineNextLine: View {
                 .font(Typography.label)
                 .foregroundStyle(Palette.secondary)
             }
-        } else if RoutineText.isConcluded(routine) {
-            // One mark per state: the glyph and the switch already say it is off, so the line is only the word.
-            Text("Concluída")
-                .font(Typography.label)
-                .foregroundStyle(Palette.muted)
         } else {
-            Text("Pausada")
+            // One mark per state: the glyph and the switch already say it is off, so the line is only the word.
+            Text(RoutineText.isConcluded(routine) ? "Concluída" : "Pausada")
                 .font(Typography.label)
                 .foregroundStyle(Palette.muted)
         }

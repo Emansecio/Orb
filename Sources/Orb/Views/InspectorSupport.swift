@@ -121,9 +121,6 @@ enum ModelCardSummary {
         return mode == .bypass ? bypassLine : nil
     }
 
-    /// Only a model that cannot answer is a problem that holds the card open; "Sem pedir permissão" is a choice, so it
-    /// stays a mark on the closed row.
-    static func hasProblem(unavailableNote: String?) -> Bool { unavailableNote != nil }
 }
 
 /// The closed "Pode usar" row: one small icon for each thing the Orb may use, dimmed for what is off.
@@ -184,7 +181,6 @@ enum MemoryGroups {
         let matching = words.isEmpty ? eligible : eligible.filter { matches($0, words, cache: cache) }
         if words.isEmpty { cache?.clear() }
         return kinds.compactMap { kind in
-            guard only == nil || only == kind else { return nil }
             let inKind = matching.filter { $0.kind == kind }
             return inKind.isEmpty ? nil : MemoryGroup(kind: kind, items: inKind)
         }
@@ -192,7 +188,7 @@ enum MemoryGroups {
 
     static func matches(_ item: MemorySnapshot.Item, _ words: [String], cache: FoldedTextCache? = nil) -> Bool {
         guard !words.isEmpty else { return true }
-        let haystack = cache?.folded(item) ?? SearchText.fold(item.title + " " + item.body)
+        let haystack = cache?.folded(item) ?? MemoryText.fold(item.title + " " + item.body)
         return words.allSatisfy { haystack.contains($0) }
     }
 
@@ -216,7 +212,7 @@ final class FoldedTextCache {
 
     func folded(_ item: MemorySnapshot.Item) -> String {
         if let entry = entries[item.path], entry.item == item { return entry.folded }
-        let folded = SearchText.fold(item.title + " " + item.body)
+        let folded = MemoryText.fold(item.title + " " + item.body)
         entries[item.path] = (item, folded)
         return folded
     }
@@ -228,10 +224,8 @@ final class FoldedTextCache {
 }
 
 enum SearchText {
-    static func fold(_ text: String) -> String { MemoryText.fold(text) }
-
     static func words(_ query: String) -> [String] {
-        fold(query).split { !$0.isLetter && !$0.isNumber }.map(String.init)
+        MemoryText.fold(query).split { !$0.isLetter && !$0.isNumber }.map(String.init)
     }
 }
 

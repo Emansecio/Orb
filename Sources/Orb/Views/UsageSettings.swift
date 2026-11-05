@@ -18,14 +18,17 @@ enum UsageFormat {
     /// "3,5 mil tokens", "1,8 milhão de tokens".
     static func tokens(_ count: Int) -> String {
         let said = ContextWords.approx(count)
-        return said + (said.hasSuffix("lhão") || said.hasSuffix("lhões") ? " de tokens" : " tokens")
+        return said + (isMillions(said) ? " de tokens" : " tokens")
     }
+
+    /// "milhão"/"milhões" take "de" before the noun.
+    private static func isMillions(_ words: String) -> Bool { words.hasSuffix("lhão") || words.hasSuffix("lhões") }
 
     /// "48 mil novos · 520 mil do cache": the new content apart from what the cache gave back; the cache part is left out when zero.
     static func tokens(new: Int, cached: Int) -> String {
         func said(_ count: Int) -> String {
             let words = ContextWords.approx(count)
-            return words.hasSuffix("lhão") || words.hasSuffix("lhões") ? words + " de" : words
+            return isMillions(words) ? words + " de" : words
         }
         let fresh = said(new) + (new == 1 ? " novo" : " novos")
         guard cached > 0 else { return fresh }
@@ -82,19 +85,19 @@ final class UsageModel {
 struct UsageSettings: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @AppStorage("usagePeriod") private var storedPeriod = UsagePeriod.week.rawValue
-    @AppStorage("usageChartBy") private var chartBy = UsageChartBy.orb.rawValue
+    // A stored value that is no longer a case falls back to the default.
+    @AppStorage("usagePeriod") private var period = UsagePeriod.week
+    @AppStorage("usageChartBy") private var chartBy = UsageChartBy.orb
     @State private var usage = UsageModel()
     @State private var editingPrice: String?
 
-    private var period: UsagePeriod { UsagePeriod(rawValue: storedPeriod) ?? .week }
     private var animation: Animation? { reduceMotion ? nil : Motion.content }
 
     var body: some View {
         Form {
             Section {
-                Picker("Período", selection: $storedPeriod) {
-                    ForEach(UsagePeriod.allCases) { Text($0.title).tag($0.rawValue) }
+                Picker("Período", selection: $period) {
+                    ForEach(UsagePeriod.allCases) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -115,7 +118,7 @@ struct UsageSettings: View {
         }
         .formStyle(.grouped)
         .orbFormBackground()
-        .task(id: storedPeriod) { await reload() }
+        .task(id: period) { await reload() }
         .onChange(of: model.priceCorrections) { Task { await reload() } }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in Task { await reload() } }
     }
@@ -178,7 +181,7 @@ struct UsageSettings: View {
     }
 
     private func chartSection(_ report: UsageReport) -> some View {
-        let byOrb = chartBy == UsageChartBy.orb.rawValue
+        let byOrb = chartBy == .orb
         let series = byOrb ? report.orbSeries : report.modelSeries
         let points = byOrb ? report.orbPoints : report.modelPoints
         let colors = series.enumerated().map { seriesColor($0.element, index: $0.offset, byOrb: byOrb) }
@@ -186,7 +189,7 @@ struct UsageSettings: View {
         let end = Calendar.current.dateInterval(of: unit, for: report.interval.end)?.end ?? report.interval.end
         return Section {
             Picker("Cores por", selection: $chartBy) {
-                ForEach(UsageChartBy.allCases) { Text($0.title).tag($0.rawValue) }
+                ForEach(UsageChartBy.allCases) { Text($0.title).tag($0) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -392,12 +395,6 @@ private struct UsageRowView: View {
 struct PriceDraft: Equatable {
     var input = "", cacheRead = "", cacheWrite = "", output = ""
 
-    /// The price the editor starts from: the table's own, without the factor of the hour (DeepSeek's half off-peak, Google's
-    /// raise in 2027). What is saved becomes a fixed correction for all the usage, so it must not carry one moment's factor.
-    static func baseline(for modelID: String, in book: PriceBook) -> (price: ModelPrice, source: PriceSource)? {
-        book.price(for: modelID)
-    }
-
     init(_ price: ModelPrice?) {
         guard let price else { return }
         input = UsageFormat.priceText(price.input)
@@ -436,7 +433,9 @@ private struct PriceEditor: View {
     private static let width: CGFloat = 320
     private static let fieldWidth: CGFloat = 110
 
-    private var current: (price: ModelPrice, source: PriceSource)? { PriceDraft.baseline(for: modelID, in: model.priceBook) }
+    /// The price the editor starts from: the table's own, without the factor of the hour (`price(for:)` has no date here).
+    /// What is saved becomes a fixed correction for all the usage, so it must not carry one moment's factor.
+    private var current: (price: ModelPrice, source: PriceSource)? { model.priceBook.price(for: modelID) }
     private var typed: ModelPrice? { draft.price(replacing: current?.price) }
 
     var body: some View {

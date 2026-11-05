@@ -125,11 +125,11 @@ private struct BrowserComponentRowView: View {
                 .font(.caption)
                 .foregroundStyle(Palette.danger)
                 .fixedSize(horizontal: false, vertical: true)
-        case .installing:
+        case .installing(let progress):
             HStack(spacing: Spacing.s) {
                 Text(row.statusText).font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                if let progress = installingProgress, progress.componentFraction != nil {
+                if progress.componentFraction != nil {
                     Text("\(Int(((progress.fraction ?? 0) * 100).rounded()))%").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 }
             }
@@ -143,10 +143,6 @@ private struct BrowserComponentRowView: View {
                 .font(.caption)
                 .foregroundStyle(Palette.muted)
         }
-    }
-
-    private var installingProgress: BrowserInstallProgress? {
-        if case .installing(let progress) = row.phase { progress } else { nil }
     }
 }
 

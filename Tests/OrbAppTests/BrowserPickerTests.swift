@@ -44,7 +44,6 @@ struct BrowserPickerCopyTests {
         let named = BrowserPickerCopy.browserLine(status: missing("agent-browser"), orbName: "Atlas")
         #expect(named.consequence == "Até lá, Atlas só lê páginas simples.")
         #expect(BrowserPickerCopy.Action.installBrowser.title == "Instalar em Ajustes")
-        #expect(line.symbol == "exclamationmark.triangle.fill")
         // While it is being looked for there is no verdict yet.
         let checking = BrowserPickerCopy.browserLine(status: nil)
         #expect(checking.tone == .neutral && checking.action == nil)

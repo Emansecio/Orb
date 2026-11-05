@@ -82,6 +82,11 @@ struct ProviderPresentationTests {
                             lastError: error, isChecking: checking)
     }
 
+    private func isReady(_ status: ProviderStatus) -> Bool {
+        if case .ready = status { return true }
+        return false
+    }
+
     @Test func everyProviderIsInExactlyOneGroupAndTheGroupsKeepTheirOrder() {
         let all = ProviderGroup.allCases.flatMap(\.kinds)
         #expect(Set(all) == Set(ProviderKind.allCases))
@@ -101,18 +106,18 @@ struct ProviderPresentationTests {
         #expect(status(.lmstudio, error: .unreachable) == .offline(host: "localhost:1234"))
         #expect(status(.ollama) == .noModels, "an answer with no models is said so, not 'Conectado' alone")
         #expect(status(.ollama, checking: true) == .checking)
-        #expect(status(.ollama, models: 3).isReady)
+        #expect(isReady(status(.ollama, models: 3)))
     }
 
     @Test func aGatewayIsUnverifiedUntilItAnswers() {
         #expect(status(.custom, url: "https://gw.example/v1") == .unverified)
-        #expect(status(.custom, models: 2, url: "https://gw.example/v1").isReady)
+        #expect(isReady(status(.custom, models: 2, url: "https://gw.example/v1")))
         #expect(status(.custom, url: "https://gw.example/v1", error: .other("HTTP 401")) == .failed("HTTP 401"))
     }
 
     @Test func aFailureAfterModelsWereLoadedIsStillShown() {
         #expect(status(.xai, models: 4, connected: true, error: .other("chave inválida")) == .failed("chave inválida"))
-        #expect(status(.xai, models: 4, connected: true).isReady)
+        #expect(isReady(status(.xai, models: 4, connected: true)))
         #expect(status(.xai, models: 4, connected: true, enabled: false) == .disabled)
     }
 

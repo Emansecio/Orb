@@ -59,15 +59,6 @@ struct ResetOrbSheet: View {
         }
     }
 
-    /// Why the reset did not run.
-    static func message(for refusal: ResetGuard.Refusal) -> String {
-        switch refusal {
-        case .developerRun: "Não dá para redefinir neste modo de desenvolvedor."
-        case .unsafeFolder: "Esta pasta de dados não pode ser redefinida com segurança."
-        case .notAppData: "Esta pasta de dados não parece ser do Orb, então nada foi apagado."
-        }
-    }
-
     private func ask() {
         let options = ResetOptions(memories: memories, leavesProviders: leavesProviders)
         Task {
@@ -76,13 +67,16 @@ struct ResetOrbSheet: View {
             problem = nil
             isRunning = true
             switch await model.resetEverything(options) {
-            case .done:
-                break // the app is quitting
+            case .done, .alreadyRunning:
+                break // done: the app is quitting
             case .refused(let refusal):
                 isRunning = false
-                problem = ResetOrbSheet.message(for: refusal)
-            case .alreadyRunning:
-                break
+                // Why the reset did not run.
+                problem = switch refusal {
+                case .developerRun: "Não dá para redefinir neste modo de desenvolvedor."
+                case .unsafeFolder: "Esta pasta de dados não pode ser redefinida com segurança."
+                case .notAppData: "Esta pasta de dados não parece ser do Orb, então nada foi apagado."
+                }
             }
         }
     }

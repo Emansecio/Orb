@@ -305,14 +305,9 @@ struct MacPermissionsView: View {
     /// False for a `--snapshot` sample, whose rows are fixed.
     private let readsTheSystem: Bool
 
-    init() {
-        _model = State(initialValue: MacPermissionsModel())
-        readsTheSystem = true
-    }
-
-    init(sample: MacPermissionsModel) {
-        _model = State(initialValue: sample)
-        readsTheSystem = false
+    init(sample: MacPermissionsModel? = nil) {
+        _model = State(initialValue: sample ?? MacPermissionsModel())
+        readsTheSystem = sample == nil
     }
 
     var body: some View {
