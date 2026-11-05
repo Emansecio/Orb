@@ -56,7 +56,7 @@ enum Retry {
     static let offlineBackoff: [TimeInterval] = [2, 5, 10, 20, 30, 30, 30]
 
     private static let offlineCodes: Set<URLError.Code> = [.notConnectedToInternet, .networkConnectionLost, .cannotFindHost,
-                                                           .dnsLookupFailed, .cannotConnectToHost]
+                                                           .dnsLookupFailed]
 
     /// The failure says there is no network (not a slow or failing provider).
     static func isOffline(_ error: Error) -> Bool {

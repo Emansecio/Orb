@@ -90,6 +90,8 @@ struct RetryTests {
         let offline = URLError(.notConnectedToInternet)
         #expect(Retry.attemptLimit(for: offline) == Retry.offlineAttempts)
         #expect(Retry.attemptLimit(for: LLMError.network(code: URLError.dnsLookupFailed.rawValue, message: "")) == Retry.offlineAttempts)
+        // A refused connection means the network is there and the server is off (a stopped Ollama): fail fast.
+        #expect(Retry.attemptLimit(for: URLError(.cannotConnectToHost)) != Retry.offlineAttempts)
         #expect(Retry.attemptLimit(for: overloaded) == Retry.standardAttempts)
         #expect(Retry.attemptLimit(for: URLError(.timedOut)) == Retry.slowFailureAttempts)
         let outcome = await run(failing: Array(repeating: offline, count: Retry.offlineAttempts - 1), maxAttempts: 99)

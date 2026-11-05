@@ -367,6 +367,11 @@ struct Store: Sendable {
         queue.async { encoders.remove(url) }
     }
 
+    /// Deleting a file ends any failed save of it (see `SaveHealth.forget`).
+    private func forgetFailure(of url: URL) {
+        if SaveHealth.forget(directory, under: url) { onSaveRecovered?() }
+    }
+
     func deleteConversation(_ botID: UUID, chat: UUID? = nil) {
         let url = conversationURL(botID, chat), note = metaURL(botID, chat)
         enqueue(touching: [url, note]) {
@@ -374,6 +379,7 @@ struct Store: Sendable {
             try? FileManager.default.removeItem(at: url)
             try? FileManager.default.removeItem(at: note)
             encoders.remove(url)
+            forgetFailure(of: url)
         }
     }
 
@@ -425,6 +431,7 @@ struct Store: Sendable {
             Self.gate.waitForReaders(of: url)
             try? FileManager.default.removeItem(at: url)
             encoders.remove(url)
+            forgetFailure(of: url)
         }
     }
 
@@ -505,6 +512,7 @@ struct Store: Sendable {
                 Self.gate.waitForReaders(of: folder.appendingPathComponent(name))
             }
             try? FileManager.default.removeItem(at: folder)
+            forgetFailure(of: folder)
         }
     }
 
@@ -555,6 +563,7 @@ struct Store: Sendable {
             Self.gate.waitForReaders(of: url)
             try? FileManager.default.removeItem(at: url)
             encoders.remove(url)
+            forgetFailure(of: url)
         }
     }
 
@@ -697,7 +706,10 @@ struct Store: Sendable {
         Self.gate.waitForReaders(of: url)
         do {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            guard let data = try content() else { return .skipped }
+            guard let data = try content() else {
+                forgetFailure(of: url) // nothing to write: this file cannot be failing
+                return .skipped
+            }
             try data.write(to: url, options: .atomic)
             if SaveHealth.noteWritten(directory, file: url) { onSaveRecovered?() }
             return .wrote
@@ -724,6 +736,20 @@ enum SaveHealth {
 
     static func noteFailed(_ directory: URL, file: URL) {
         lock.withLock { _ = failing[FileKey.of(directory), default: []].insert(FileKey.of(file)) }
+    }
+
+    /// A file (or a folder's files) that was deleted or has nothing to write cannot fail any more; without this a
+    /// deleted conversation whose save had failed keeps the warning up until the app restarts. Not `fileExists`: a new
+    /// file whose first write failed never existed on disk. True when it clears the last failing file of the folder.
+    static func forget(_ directory: URL, under url: URL) -> Bool {
+        lock.withLock {
+            let key = FileKey.of(directory), root = FileKey.of(url)
+            guard let before = failing[key] else { return false }
+            let left = before.filter { $0 != root && !$0.hasPrefix(root + "/") }
+            guard left.count < before.count else { return false }
+            failing[key] = left.isEmpty ? nil : left
+            return left.isEmpty
+        }
     }
 
     /// True when this write is the one that clears the last failing file of the folder.

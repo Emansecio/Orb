@@ -83,6 +83,22 @@ import Testing
         #expect(session.conversation?.memorySavedCount == 0)
     }
 
+    @Test func theNotesOfAFoldWhosePageFailedAreKeptForTheNextSave() async {
+        let (model, session) = setUp()
+        model.memory.bank(for: session.id).close() // no page can be written
+        session.append(.user(text: "vamos planejar a viagem", attachments: []))
+        session.append(.bot(text: "Combinado: saímos sexta.", isStreaming: false))
+        #expect(session.saveMemory(notes: ["nota da dobra"])) // stretch and notes on one page
+        #expect(await waitUntil("the notes come back") { session.pendingNotes == ["nota da dobra"] })
+        // Notes alone (the stretch was saved already): they are kept too, and an idle check does not take them.
+        session.pendingNotes = []
+        #expect(!session.saveMemory(ifIdleFor: 60))
+        #expect(session.saveMemory(notes: ["outra nota"]))
+        #expect(await waitUntil("the notes come back") { session.pendingNotes == ["outra nota"] })
+        #expect(!session.saveMemory(ifIdleFor: 60))
+        #expect(session.pendingNotes == ["outra nota"])
+    }
+
     /// A later stretch marked before the earlier page failed does not leave the earlier one behind the mark.
     @Test func aFailedEarlierPageIsTakenAgainWithTheStretchesMarkedSince() async {
         let (model, session) = setUp()
