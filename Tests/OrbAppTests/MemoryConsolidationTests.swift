@@ -103,6 +103,39 @@ import Testing
         #expect(text.contains("Hoje pediu um resumo da reunião") && text.contains("Gosta de respostas curtas"))
     }
 
+    @Test func theOrderOfTheNewPreferencesSurvivesTheRewriteAndNoneLandsInTheFuture() async {
+        let bank = MemoryBank(directory: root.appending(path: "orb"))
+        let old = ["Respostas curtas", "Respostas longas", "Respostas médias"]
+        for (offset, preference) in old.enumerated() { await bank.remember(preference, kind: .preferencia, now: start.addingTimeInterval(Double(offset))) }
+        let pinned = await bank.pinnedForConsolidation()
+        // Out of alphabetical order on purpose: with one shared `updated`, paths (slugs) would decide.
+        let new = MemoryConsolidation.Pinned(preferences: ["Zebra gosta de listas", "Cobra gosta de tabelas", "Abelha gosta de prosa"])
+        let now = start.addingTimeInterval(60)
+        #expect(await bank.applyConsolidation(new, replacing: pinned, now: now))
+        #expect(await bank.pinnedForConsolidation(now: now).preferences == new.preferences)
+        let newest = await bank.consolidablePreferences(now: now).first
+        #expect(newest?.date == now, "the last one keeps `now`; the older ones go back from it")
+    }
+
+    @Test func aFailedWriteBringsTheNotesBackToo() async throws {
+        let dir = root.appending(path: "orb")
+        let bank = MemoryBank(directory: dir)
+        await bank.ensureIdentity(notes: "Sou o Atlas.", interview: false, now: start)
+        for (offset, note) in original.notes.enumerated() { await bank.remember(note, kind: .identidade, now: start.addingTimeInterval(Double(offset))) }
+        for (offset, preference) in original.preferences.enumerated() {
+            await bank.remember(preference, kind: .preferencia, now: start.addingTimeInterval(Double(10 + offset)))
+        }
+        let pinned = await bank.pinnedForConsolidation()
+        let identityBefore = await bank.identity()?.body
+        // A file where the preferences folder was: no preference page can be written any more.
+        let folder = dir.appending(path: "preferencias")
+        try FileManager.default.removeItem(at: folder)
+        try Data().write(to: folder)
+        let new = MemoryConsolidation.Pinned(notes: ["Responder sempre em português do Brasil"], preferences: ["Prefere respostas longas e detalhadas"])
+        #expect(await !bank.applyConsolidation(new, replacing: pinned, now: start.addingTimeInterval(60)))
+        #expect(await bank.identity()?.body == identityBefore, "the notes are back too, not only the preferences")
+    }
+
     @Test func aClosedBankWritesNoArchive() async {
         let bank = MemoryBank(directory: root.appending(path: "orb"))
         for (offset, preference) in ["Respostas curtas", "Respostas longas", "Respostas médias"].enumerated() {

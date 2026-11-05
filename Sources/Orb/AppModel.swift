@@ -262,8 +262,10 @@ final class AppModel {
         let installer = BrowserInstaller(layout: BrowserInstallLayout(root: root))
         return BrowserSetup(installer: installer, status: { [weak self] in
             await self?.browserHub.status() ?? BrowserStatus()
-        }, closeBrowsers: { [weak self] in await self?.browserHub.closeAll() })
+        }, closeBrowsers: { [weak self] in await self?.closeBrowsersOfOrbs() })
     }()
+    /// Closes the browsers of this app's Orbs only (another build on the same Mac has Orbs, and browsers, of its own).
+    private func closeBrowsersOfOrbs() async { await browserHub.closeAll(orbs: Set(bots.map(\.id))) }
     /// What the models are used for, kept by the hour (`uso/` in the data folder); see `recordUsage`.
     @ObservationIgnored let usageLog: UsageRecorder
     /// Every Orb's own memory bank (`memoria/<id>/` in the data folder).
