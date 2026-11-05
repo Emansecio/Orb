@@ -7,8 +7,8 @@ Tudo o que o app faz, tela por tela. A apresentação e a instalação estão no
 
 ## Primeiro uso: conectar um modelo
 
-Na primeira abertura já existe um Orb, o **Atlas**. Sem modelo conectado, o chat mostra o cartão "Vamos preparar Atlas"
-com os caminhos mais curtos (se você escrever antes, o texto fica no campo e o cartão pisca):
+Na primeira abertura ainda não existe Orb: a janela mostra a tela de boas-vindas (veja abaixo), onde criar o **Atlas** é um
+clique. Criado o Atlas, sem modelo conectado, o chat mostra o cartão "Vamos preparar Atlas" com os caminhos mais curtos (se você escrever antes, o texto fica no campo e o cartão pisca):
 
 | Opção | O que faz |
 |---|---|

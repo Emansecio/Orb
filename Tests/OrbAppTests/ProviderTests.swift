@@ -531,4 +531,13 @@ struct ModelRefreshBackoffTests {
         await model.refreshAllModels(now: now.addingTimeInterval(6 * 3600 + 1))
         #expect(calls.count == 2)
     }
+
+    @Test func completionOnlyModelsAreNotListedAsChat() {
+        #expect(ModelCatalog.openAIModels(["gpt-3.5-turbo-instruct", "gpt-5"]).map(\.id) == ["gpt-5"])
+    }
+
+    @Test func theStoredBaseURLHasNoSpacesAtTheEnds() {
+        #expect(GatewayForm.storedURL(" http://localhost:11434/v1 \n") == "http://localhost:11434/v1")
+        #expect(GatewayForm.urlState(GatewayForm.storedURL("http://localhost:11434/v1 ")) == .valid)
+    }
 }

@@ -192,6 +192,10 @@ enum ProviderCheck {
 enum GatewayForm {
     enum URLState: Equatable { case empty, invalid, valid }
 
+    /// What is stored for the typed URL: `urlState` validates the trimmed text, so the stored one must be trimmed too
+    /// (a trailing space would reach the request as `%20`).
+    static func storedURL(_ text: String) -> String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+
     static func urlState(_ text: String) -> URLState {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return .empty }

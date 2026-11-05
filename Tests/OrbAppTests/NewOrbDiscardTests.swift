@@ -42,4 +42,24 @@ import Testing
         #expect(WizardChatView.placeholder(hitLimit: false, canCreate: false, failed: true) == "Clique em Tentar de novo")
         #expect(WizardChatView.placeholder(hitLimit: false, canCreate: false, failed: false) == "Responda aqui…")
     }
+
+    // The assistant's draft is not lost on the way to the form, and the mode does not follow the connection check.
+    @Test func theDraftFillsTheFormButKeepsWhatItLeftEmpty() {
+        var draft = OrbDraft()
+        draft.name = "Lia"
+        draft.instructions = "Você é a Lia."
+        let carried = NewBotSheet.carried(draft, name: "x", role: "Agenda", identity: "")
+        #expect(carried.0 == "Lia" && carried.1 == "Agenda" && carried.2 == "Você é a Lia.")
+    }
+
+    @Test func theSheetKeepsTheModeItOpenedIn() {
+        #expect(NewBotSheet.pinnedMode(chosen: nil, opened: .form) == .form)
+        #expect(NewBotSheet.pinnedMode(chosen: .assistant, opened: .form) == .assistant)
+    }
+
+    @Test func longIdentityNotesSayHowMuchReachesTheModel() {
+        #expect(MemoryBank.identityTrimNote(count: MemoryBank.identityShare) == nil)
+        let note = MemoryBank.identityTrimNote(count: MemoryBank.identityShare + 1)
+        #expect(note?.contains("\(MemoryBank.identityShare.formatted())") == true)
+    }
 }

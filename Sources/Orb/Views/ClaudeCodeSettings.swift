@@ -8,6 +8,8 @@ struct ClaudeCodeAccountRow: View {
     @Environment(\.openURL) private var openURL
     @State private var hasChecked = false
     @State private var isWorking = false
+    /// The sign-in waiting on the browser, so "Cancelar" and closing Ajustes can stop the CLI's login.
+    @State private var signInTask: Task<Void, Never>?
     @State private var error: String?
     @State private var isConfirmingSignOut = false
 
@@ -35,8 +37,14 @@ struct ClaudeCodeAccountRow: View {
                 }
             } else {
                 line("person.crop.circle.badge.questionmark", Palette.muted, "Entre na sua conta Claude (Pro ou Max)") {
+                    if isWorking {
+                        Button("Cancelar") { signInTask?.cancel() }
+                            .buttonStyle(GhostStyle())
+                            .controlSize(.small)
+                            .help(Tip.stopConnecting)
+                    }
                     Button(isWorking ? "Aguardando o navegador…" : "Entrar") {
-                        run { try await model.signIn(.claudeCode) }
+                        signInTask = run { try await model.signIn(.claudeCode) }
                     }
                     .help(Tip.signInClaudeCode)
                     .disabled(isWorking)
@@ -55,6 +63,8 @@ struct ClaudeCodeAccountRow: View {
         } message: {
             Text("Isso desconecta o Claude Code neste Mac, inclusive no Terminal.")
         }
+        // Closing Ajustes gives the sign-in up: otherwise the CLI keeps waiting for the browser for minutes.
+        .onDisappear { signInTask?.cancel() }
         .task {
             await model.refreshConnections()
             hasChecked = true
@@ -79,11 +89,14 @@ struct ClaudeCodeAccountRow: View {
         }
     }
 
-    private func run(_ work: @escaping @MainActor () async throws -> Void) {
+    @discardableResult
+    private func run(_ work: @escaping @MainActor () async throws -> Void) -> Task<Void, Never> {
         isWorking = true
         error = nil
-        Task {
-            do { try await work() } catch { self.error = error.localizedDescription }
+        return Task {
+            do { try await work() } catch where ProviderHealth.isCancellation(error) {
+                // Cancelled by the person: nothing to report.
+            } catch { self.error = error.localizedDescription }
             isWorking = false
         }
     }

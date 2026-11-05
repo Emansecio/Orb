@@ -219,12 +219,20 @@ struct NewBotSheet: View {
     }
 
     /// "Formulário" in the mode picker (and the final card's "Ajustar"): the draft fills the form's fields and the form is shown.
+    /// The form fields after the assistant's draft is carried over: what the draft left empty keeps what was typed.
+    static func carried(_ draft: OrbDraft, name: String, role: String, identity: String) -> (String, String, String) {
+        (draft.name.isEmpty ? name : draft.name, draft.role.isEmpty ? role : draft.role,
+         draft.instructions.isEmpty ? identity : draft.instructions)
+    }
+
+    /// The mode the sheet keeps once opened: the person's choice, else the one it opened in. Without this, `creation` follows
+    /// the connection check and swaps the form for the chat (or back) under the person's hands.
+    static func pinnedMode(chosen: OrbCreationMode?, opened: OrbCreationMode) -> OrbCreationMode { chosen ?? opened }
+
     private func passDraftToForm() {
         let draft = wizard.draft
         wizard.stopTalking()
-        if !draft.name.isEmpty { name = draft.name }
-        if !draft.role.isEmpty { role = draft.role }
-        if !draft.instructions.isEmpty { identity = draft.instructions }
+        (name, role, identity) = Self.carried(draft, name: name, role: role, identity: identity)
         mode = draft.mode // (the look stays the one the person chose)
         draftCapabilities = draft.capabilities
         interview = false // the assistant did the interview
@@ -269,7 +277,10 @@ struct NewBotSheet: View {
         } message: {
             Text(pendingLoss ?? "")
         }
-        .task { isNameFocused = creation == .form }
+        .task {
+            userMode = Self.pinnedMode(chosen: userMode, opened: creation)
+            isNameFocused = creation == .form
+        }
         .task {
             let memories = model.memory.root
             let found = await Task.detached(priority: .userInitiated) { KeptMemories.list(in: memories) }.value
@@ -357,6 +368,9 @@ struct NewBotSheet: View {
                     TextField("Como funciona", text: $identity,
                               prompt: Text("Ex.: Seja direto e me lembre de fazer pausas"), axis: .vertical)
                         .lineLimit(3...6)
+                    if let note = MemoryBank.identityTrimNote(count: identity.count) {
+                        Text(note).capabilityCaption()
+                    }
                     if let draftCapabilities { // MultiOrb (WP4)
                         Text("Do assistente: " + (draftCapabilities.isEmpty ? "sem ferramentas extras"
                                                   : OrbDraft.offeredCapabilities.filter(draftCapabilities.contains).map(\.label).joined(separator: ", ")))
@@ -442,6 +456,9 @@ struct NewBotSheet: View {
     /// back to the form. Nothing is created yet.
     private func useImport() {
         guard let draft, !draft.plan().isEmpty else { return }
+        // The assistant's draft (name, instructions, mode, what it may use) goes to the form first; the import then only
+        // fills what is still empty, and the form is what `pendingLoss` watches.
+        if creation == .assistant { passDraftToForm() }
         if !keptChoice.isEmpty { // the memory goes first, so what it gave does not hide what the import gives
             let old = chosenMemory
             keptChoice = ""
@@ -451,10 +468,6 @@ struct NewBotSheet: View {
         importFill = ImportFill(giving: draft, name: &name, role: &role)
         imported = draft
         isImporting = false
-        if creation == .assistant { // the import shows (and is created) in the form
-            wizard.stopTalking()
-            userMode = .form
-        }
     }
 
     /// "Remover": the import goes, and the name and role it filled in go with it unless they were changed since.

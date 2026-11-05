@@ -996,6 +996,7 @@ final class AppModel {
             _ = try await ChatGPTAuth.shared.signIn { url in await MainActor.run { _ = NSWorkspace.shared.open(url) } }
         case .claudeCode:
             try await ClaudeCode.shared.login()
+            try Task.checkCancellation() // "Cancelar" ends the CLI's login quietly: that is not a connection
         default:
             return
         }
@@ -2510,7 +2511,9 @@ final class AppModel {
     @discardableResult
     func install(_ document: SkillDocument, from entry: CatalogSkill) -> Skill? {
         if let existing = installedSkill(entry.id) { return existing }
-        return addSkill(slug: Skill.slugify(entry.skillId), name: document.name, summary: document.description,
+        // `cleanSlug`, as the editor and `recall` read it: `slugify` alone leaves doubled or trailing dashes that `/slug` never finds.
+        let slug = Skill.cleanSlug(entry.skillId)
+        return addSkill(slug: slug.isEmpty ? "skill" : slug, name: document.name, summary: document.description,
                         instructions: document.instructions, source: entry.id, folderURL: document.folderURL,
                         orbIDs: defaultScopeForNewSkill())
     }

@@ -227,4 +227,10 @@ struct GroupTextsTests {
         #expect(GroupObjectiveEdit.commit(draft: "  ", current: "Lançar o site") == "") // cleared: the objective goes
         #expect(GroupObjectiveEdit.commit(draft: "", current: "") == nil)
     }
+
+    @Test func deletingAnOrbWithSeveralChatsSaysAllOfThemGo() {
+        let many = DeleteOrbSummary(name: "Lia", routineCount: 2, folder: nil, chatCount: 3)
+        #expect(many.goes == "As 3 conversas e 2 rotinas vão embora.")
+        #expect(DeleteOrbSummary(name: "Lia", routineCount: 0, folder: nil, chatCount: 1).goes == "A conversa vai embora.")
+    }
 }

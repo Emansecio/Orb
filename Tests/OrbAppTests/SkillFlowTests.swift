@@ -56,6 +56,18 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
         #expect(await bank.skillText(named: "/resumir").contains("Resuma em 5 tópicos."))
     }
 
+    @Test @MainActor func aCatalogSkillIsInstalledUnderTheSlugRecallReads() {
+        let (model, botID) = setUp(CallScript([said("oi")]))
+        let entry = CatalogSkill(id: "o/r/foo__bar.", repo: "o/r", skillId: "foo__bar.", name: "foo", installs: 0)
+        let document = SkillDocument(name: "foo", description: "d", instructions: "Faça foo.", folderURL: root)
+        let skill = model.install(document, from: entry)
+        #expect(skill?.slug == "foo-bar")
+        if let skill { model.skills = [skill]; model.skills[0].orbIDs = [botID] }
+        #expect(SystemPrompt.expandSkill(in: "/foo-bar x", skills: model.skills) != nil)
+        let blank = CatalogSkill(id: "o/r/--", repo: "o/r", skillId: "--", name: "x", installs: 0)
+        #expect(model.install(document, from: blank)?.slug == "skill")
+    }
+
     // MARK: The review
 
     /// One model answer that asks for `count` recalls at once: one step, however many calls.

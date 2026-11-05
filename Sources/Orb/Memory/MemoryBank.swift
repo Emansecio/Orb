@@ -134,6 +134,10 @@ actor MemoryBank {
     /// Longest identity notes you can save from the editor. The notes grow past `maximumLength` as the Orb adds
     /// what it learns, so saving them must not cut the end (the brief already trims long ones by itself).
     static let identityMaximumLength = 12_000
+    /// Said where the notes are written: past `identityShare` the brief cuts the middle, so the model never reads it.
+    static func identityTrimNote(count: Int) -> String? {
+        count > identityShare ? "Só \(identityShare.formatted()) caracteres vão ao modelo em cada conversa; o meio do texto é cortado." : nil
+    }
 
     init(directory: URL) {
         self.directory = directory
