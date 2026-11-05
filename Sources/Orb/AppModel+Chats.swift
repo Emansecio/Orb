@@ -105,7 +105,8 @@ extension AppModel {
     /// You wrote in the Orb's chat: its conversation goes to the top of the list, and a new one takes its title from it.
     func chatGotMessage(_ text: String, of botID: UUID) {
         guard var chats = live(botID).chats, let session = sessions[botID], session.routineID == nil else { return }
-        chats.wrote(text, in: session.chatID, at: .now)
+        // The message lands in the conversation the turn works on, which may not be the one on show (a resumed task).
+        chats.wrote(text, in: session.workingChatID ?? session.chatID, at: .now)
         setChats(chats, for: botID)
     }
 

@@ -367,6 +367,23 @@ struct OrbChatsListTests {
         #expect(model.live(orb).chats?.collapsed == nil, "open again, the file stops naming it")
     }
 
+    @Test @MainActor func aMessageForTheTurnElsewhereCreditsItsOwnConversationNotTheOneOnShow() async throws {
+        let gate = TestGate()
+        let client = Model(gate: gate)
+        let (model, orb) = setUp(client)
+        #expect(model.send("trabalho longo", to: orb, fromUser: true))
+        await waitUntil("the model call") { await client.calls.count >= 1 }
+        model.newChat(for: orb)
+        let new = try #require(model.live(orb).chats?.active)
+        // As a resumed task's "continue" does: the words go to the conversation the turn works on.
+        model.chatGotMessage("continue a tarefa", of: orb)
+        let chats = try #require(model.live(orb).chats)
+        #expect(chats.list.first?.id == orb)
+        #expect(chats.title(of: new) == OrbChats.newTitle, "the one on show keeps its name")
+        await gate.open()
+        await waitUntilIdle(model, orb)
+    }
+
     @Test @MainActor func openingAnotherConversationDuringATurnLetsItEndInItsOwnAndWhatYouWriteWaits() async throws {
         let gate = TestGate()
         let client = Model(gate: gate)

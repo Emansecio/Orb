@@ -173,7 +173,9 @@ extension AppModel {
     @discardableResult
     func rename(_ botID: UUID, to name: String) -> Bool {
         let name = Self.clippedName(name)
-        guard !name.isEmpty, bot(botID) != nil, !isOrbNameTaken(name, excluding: botID) else { return false }
+        guard !name.isEmpty, let current = bot(botID) else { return false }
+        // Keeping the name it has is never refused: two older Orbs may share one, and leaving the field must not warn.
+        guard name == current.name || !isOrbNameTaken(name, excluding: botID) else { return false }
         update(botID) { $0.name = name }
         return true
     }

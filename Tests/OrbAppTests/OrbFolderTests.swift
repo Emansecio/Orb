@@ -297,6 +297,9 @@ struct OrbFolderStateTests {
         #expect(model.bot(second.id)?.name != "Júpiter")
         // Its own name (in another case) is not "taken".
         #expect(model.rename(first.id, to: "JÚPITER"))
+        // Two older Orbs sharing a name: each keeps its own without a refusal (leaving the field renames to the same).
+        model.update(second.id) { $0.name = "JÚPITER" }
+        #expect(model.rename(second.id, to: "JÚPITER"))
     }
 
     @Test @MainActor func aVeryLongNameIsCut() {
