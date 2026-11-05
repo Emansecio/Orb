@@ -30,7 +30,7 @@ struct RunCommandTool: AgentTool {
     func risk(_ arguments: JSONValue) -> ToolRisk { .sensitive }
 
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) {
-        (arguments["background"]?.bool == true ? "Rodando em segundo plano" : "Rodando no Terminal",
+        (arguments.flag("background") ? "Rodando em segundo plano" : "Rodando no Terminal",
          arguments["command"]?.string ?? "")
     }
 
@@ -73,7 +73,7 @@ struct RunCommandTool: AgentTool {
         let shell = await context.shell.resolved()
         try Task.checkCancellation() // reading the login shell takes seconds the first time: stopped meanwhile, nothing starts
 
-        if arguments["background"]?.bool == true {
+        if arguments.flag("background") {
             return ToolResult(text: try await startInBackground(command, directory: directory, shell: shell, context: context))
         }
         let seconds = arguments.integer("timeout_seconds", default: Self.defaultTimeout, in: 1...Self.maxTimeout)

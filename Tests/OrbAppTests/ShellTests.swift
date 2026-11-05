@@ -496,6 +496,13 @@ final class RunCommandTests {
         #expect(!FileManager.default.fileExists(atPath: directory.appending(path: "rodou").path))
     }
 
+    @Test func backgroundTextFlagStartsAJobLikeTheBooleanOne() async throws {
+        // Models often send "true" as text; the permission policy already read it as background.
+        let started = try await run("echo ready; sleep 60", ["background": .string("true")])
+        #expect(started.contains("Processo em segundo plano 1: rodando"))
+        _ = try await JobStopTool().run(.object(["id": .string("1")]), context: context)
+    }
+
     @Test func jobToolsNeedAnOrb() async throws {
         let bare = ToolContext(workingDirectory: directory)
         await #expect(throws: ToolError.self) { try await JobOutputTool().run(.object([:]), context: bare) }
@@ -625,6 +632,43 @@ final class BackgroundJobsTests {
             return found.map(matches) ?? false
         }
         return found
+    }
+
+    @Test func aLogPastTheCapIsEmptiedWithinTheTickAndNotTenSecondsLater() async throws {
+        let fast = BackgroundJobs(directory: directory.appending(path: "cap")) // default 1 s interval; the old check came every 10 s
+        defer { fast.killAllNow() }
+        // Writes past the cap and then stays alive writing a little, so the watcher has a group to look at.
+        let (job, _) = try await fast.start(
+            botID: bot, command: "head -c \(BackgroundJobs.maxLogBytes + 1_000_000) /dev/zero; sleep 60", directory: directory,
+            shell: "/bin/zsh", environment: basicEnvironment)
+        await waitUntil("the oversized log to be emptied") {
+            let size = (try? FileManager.default.attributesOfItem(atPath: job.logPath)[.size] as? Int) ?? 0
+            return size < BackgroundJobs.maxLogBytes
+        }
+    }
+
+    @Test func oldEndedJobsAndTheirLogsArePrunedButRecentOnesStayReadable() async throws {
+        let pruning = BackgroundJobs(directory: directory.appending(path: "prune"), keptEnded: 1, endedGrace: .seconds(0))
+        let graceful = BackgroundJobs(directory: directory.appending(path: "grace"), keptEnded: 1, endedGrace: .seconds(600))
+        defer { pruning.killAllNow(); graceful.killAllNow() }
+        for registry in [pruning, graceful] {
+            for number in 1...3 {
+                let (job, _) = try await registry.start(botID: bot, command: "echo n\(number)", directory: directory,
+                                                        shell: "/bin/zsh", environment: basicEnvironment)
+                await waitUntil("job \(job.id) to end") { await registry.list(botID: bot).first { $0.id == job.id }?.state != .running }
+                try await Task.sleep(for: .milliseconds(20)) // distinct end times
+            }
+        }
+        // Starting a fourth prunes the ended ones past the newest, together with their logs.
+        let (fourth, _) = try await pruning.start(botID: bot, command: "sleep 60", directory: directory, shell: "/bin/zsh", environment: basicEnvironment)
+        let kept = await pruning.list(botID: bot).map(\.id)
+        #expect(kept == ["3", fourth.id])
+        #expect(!FileManager.default.fileExists(atPath: directory.appending(path: "prune/\(bot.uuidString)/1.log").path))
+
+        // Inside the grace window nothing goes, whatever the count.
+        _ = try await graceful.start(botID: bot, command: "sleep 60", directory: directory, shell: "/bin/zsh", environment: basicEnvironment)
+        #expect(await graceful.list(botID: bot).count == 4)
+        #expect(try await graceful.output(botID: bot, id: "1", lines: 5).text.contains("n1"))
     }
 
     @Test func startReportsTheFirstOutputAndKeepsRunning() async throws {

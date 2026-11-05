@@ -450,76 +450,79 @@ struct ListDirectoryTool: AgentTool {
         let pattern = try arguments.nonEmptyString("pattern").map { try GlobPattern($0) }
         let maxEntries = arguments.integer("limit", default: Self.defaultEntries, in: 1...Self.maxEntries)
 
-        var lines: [String] = []
-        var total = 0
-        var unreadable = 0
-        // A deep walk only needs to know there is more: it stops counting at the cap or when the time is up.
-        let deadline = ContinuousClock.now + Self.countTimeBudget
-        var countStopped = false
+        // The walk and the sorts block: off the cooperative pool, so Stop and other Orbs are not held up by a huge folder.
+        return try await runDetached {
+            var lines: [String] = []
+            var total = 0
+            var unreadable = 0
+            // A deep walk only needs to know there is more: it stops counting at the cap or when the time is up.
+            let deadline = ContinuousClock.now + Self.countTimeBudget
+            var countStopped = false
 
-        func list(_ directory: URL, prefix: String, level: Int) throws {
-            let keys: [URLResourceKey] = [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey, .contentModificationDateKey]
-            let entries: [URL]
-            do {
-                entries = try FileManager.default.contentsOfDirectory(
-                    at: directory.resolvingLinkChain, includingPropertiesForKeys: keys, options: showHidden ? [] : .skipsHiddenFiles)
-            } catch {
-                // The folder that was asked for must not read as empty when it cannot be read; a subfolder that
-                // cannot be read is skipped and mentioned at the end.
-                guard level > 1 else {
-                    throw ToolError("Não consegui ler \(directory.path) (sem permissão ou pasta protegida pelo macOS).")
-                }
-                unreadable += 1
-                return
-            }
-            for entry in entries.sorted(by: { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }) {
-                try Task.checkCancellation() // a wide tree is still being counted when the user stops
-                if total >= Self.countCap || ContinuousClock.now > deadline {
-                    countStopped = true
+            func list(_ directory: URL, prefix: String, level: Int) throws {
+                let keys: [URLResourceKey] = [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey, .contentModificationDateKey]
+                let entries: [URL]
+                do {
+                    entries = try FileManager.default.contentsOfDirectory(
+                        at: directory.resolvingLinkChain, includingPropertiesForKeys: keys, options: showHidden ? [] : .skipsHiddenFiles)
+                } catch {
+                    // The folder that was asked for must not read as empty when it cannot be read; a subfolder that
+                    // cannot be read is skipped and mentioned at the end.
+                    guard level > 1 else {
+                        throw ToolError("Não consegui ler \(directory.path) (sem permissão ou pasta protegida pelo macOS).")
+                    }
+                    unreadable += 1
                     return
                 }
-                let values = try? entry.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey, .contentModificationDateKey])
-                // A link to a folder reports isDirectory false; follow it to see what it points at.
-                let isFolder = values?.isDirectory == true || (values?.isSymbolicLink == true && entry.isExistingDirectory)
-                let name = entry.lastPathComponent
-                if pattern?.matches(name: name) ?? true {
-                    total += 1
-                    if lines.count < maxEntries {
-                        // Dates are most of a line's length and rarely matter for a tree: they come with a single level.
-                        let date = depth == 1 ? values?.contentModificationDate.map { LocalDates.text($0) } : nil
-                        let details: String
-                        if isFolder {
-                            details = date ?? ""
-                        } else {
-                            let size = AttachmentKind.fileSize(Int64(values?.fileSize ?? 0))
-                            details = [size, date].compactMap { $0 }.joined(separator: ", ")
+                for entry in entries.sorted(by: { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }) {
+                    try Task.checkCancellation() // a wide tree is still being counted when the user stops
+                    if total >= Self.countCap || ContinuousClock.now > deadline {
+                        countStopped = true
+                        return
+                    }
+                    let values = try? entry.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey, .contentModificationDateKey])
+                    // A link to a folder reports isDirectory false; follow it to see what it points at.
+                    let isFolder = values?.isDirectory == true || (values?.isSymbolicLink == true && entry.isExistingDirectory)
+                    let name = entry.lastPathComponent
+                    if pattern?.matches(name: name) ?? true {
+                        total += 1
+                        if lines.count < maxEntries {
+                            // Dates are most of a line's length and rarely matter for a tree: they come with a single level.
+                            let date = depth == 1 ? values?.contentModificationDate.map { LocalDates.text($0) } : nil
+                            let details: String
+                            if isFolder {
+                                details = date ?? ""
+                            } else {
+                                let size = AttachmentKind.fileSize(Int64(values?.fileSize ?? 0))
+                                details = [size, date].compactMap { $0 }.joined(separator: ", ")
+                            }
+                            lines.append(prefix + name + (isFolder ? "/" : "") + (details.isEmpty ? "" : "  (\(details))"))
                         }
-                        lines.append(prefix + name + (isFolder ? "/" : "") + (details.isEmpty ? "" : "  (\(details))"))
+                    }
+                    if isFolder, level < depth, values?.isSymbolicLink != true, !FileWalker.skippedDirectories.contains(name) {
+                        try list(entry, prefix: prefix + name + "/", level: level + 1)
                     }
                 }
-                if isFolder, level < depth, values?.isSymbolicLink != true, !FileWalker.skippedDirectories.contains(name) {
-                    try list(entry, prefix: prefix + name + "/", level: level + 1)
-                }
             }
-        }
-        try list(url, prefix: "", level: 1)
+            try list(url, prefix: "", level: 1)
 
-        let skipped = unreadable == 0 ? "" : "\n[\(unreadable) subpasta\(unreadable == 1 ? "" : "s") sem permissão de leitura não \(unreadable == 1 ? "foi listada" : "foram listadas")]"
-        guard total > 0 else {
-            return (pattern == nil ? "\(url.path) está vazia." : "Nenhuma entrada de \(url.path) combina com o padrão.") + skipped
+            let skipped = unreadable == 0 ? "" : "\n[\(unreadable) subpasta\(unreadable == 1 ? "" : "s") sem permissão de leitura não \(unreadable == 1 ? "foi listada" : "foram listadas")]"
+            guard total > 0 else {
+                return (pattern == nil ? "\(url.path) está vazia." : "Nenhuma entrada de \(url.path) combina com o padrão.") + skipped
+            }
+            let fitted = ToolOutputBudget.fit(lines)
+            lines = fitted.kept
+            let more = total - lines.count
+            if more > 0, countStopped {
+                let count = total >= Self.countCap ? "5.000" : String(total)
+                lines.append("[... mais de \(count) itens; use pattern ou um subcaminho ...]")
+            } else if more > 0 {
+                // `limit` only helps when it was the limit that cut the list; a list cut by the character budget has no use for it.
+                let how = fitted.omitted > 0 ? "use pattern ou um subcaminho" : "use pattern, um subcaminho ou limit (máx. \(Self.maxEntries))"
+                lines.append("[... mais \(more) itens; \(how) ...]")
+            }
+            return url.path + "\n" + lines.joined(separator: "\n") + skipped
         }
-        let fitted = ToolOutputBudget.fit(lines)
-        lines = fitted.kept
-        let more = total - lines.count
-        if more > 0, countStopped {
-            let count = total >= Self.countCap ? "5.000" : String(total)
-            lines.append("[... mais de \(count) itens; use pattern ou um subcaminho ...]")
-        } else if more > 0 {
-            // `limit` only helps when it was the limit that cut the list; a list cut by the character budget has no use for it.
-            let how = fitted.omitted > 0 ? "use pattern ou um subcaminho" : "use pattern, um subcaminho ou limit (máx. \(Self.maxEntries))"
-            lines.append("[... mais \(more) itens; \(how) ...]")
-        }
-        return url.path + "\n" + lines.joined(separator: "\n") + skipped
     }
 }
 

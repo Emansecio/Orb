@@ -579,6 +579,15 @@ struct GlobTool: AgentTool {
         // "/tmp/*.txt" or "~/Downloads/**/*.pdf": the folder part before the first wildcard is the search folder.
         let split = Self.splitAbsolute(requested)
         let patternText = split?.pattern ?? requested
+        // A path with no wildcard names one thing: check it instead of walking its parent ("/tmp" would walk "/" for 20 s).
+        if let split, !requested.contains(where: { "*?[{".contains($0) }) {
+            let exact = URL(fileURLWithPath: (requested as NSString).expandingTildeInPath).standardizedFileURL
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: exact.path, isDirectory: &isDirectory) else {
+                return "Nenhum arquivo combina com \"\(split.pattern)\" em \(split.folder)."
+            }
+            return isDirectory.boolValue ? exact.path + "/ (é uma pasta; use list_directory)" : exact.path
+        }
         let root = split.map { URL(fileURLWithPath: $0.folder) }
             ?? arguments.nonEmptyString("path").map(context.url(for:)) ?? context.workingDirectory
         let pattern = try GlobPattern(patternText, anchored: split != nil)

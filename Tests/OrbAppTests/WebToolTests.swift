@@ -96,6 +96,13 @@ final class WebToolTests {
         #expect(output.contains("Links começando com / são deste site (https://links.test)."))
     }
 
+    @Test func fetchClipsAHugeTitleInTheHeader() async throws {
+        let output = try await fetch("title.test", html("<title>\(String(repeating: "t", count: 100_000))</title><body><p>corpo</p></body>"))
+        // The header repeats on every continuation, so its title line stays short (the page text is paged by max_chars).
+        let line = try #require(output.split(separator: "\n").first { $0.hasPrefix("Título:") })
+        #expect(line.count < 400)
+    }
+
     @Test func fetchHonorsMetaCharsetAndHeaderCharset() async throws {
         let latin = try #require("<html><head><meta charset=\"iso-8859-1\"><title>Café</title></head><body>coração açúcar</body></html>".data(using: .isoLatin1))
         let sniffed = try await fetch("meta.test", .init(headers: ["Content-Type": "text/html"], body: latin))

@@ -168,7 +168,7 @@ struct WebFetchTool: AgentTool {
             let page = try await runDetached { [data] in
                 HTMLText.convert(WebText.decode(data, headerCharset: charset, sniffMeta: true), baseURL: finalURL)
             }
-            if let title = page.title, !title.isEmpty { header += "\nTítulo: \(title)" }
+            if let title = page.title, !title.isEmpty { header += "\nTítulo: \(title.clipped(to: 300))" }
             if page.hasSiteLinks, let origin = Self.origin(of: finalURL) { header += "\nLinks começando com / são deste site (\(origin))." }
             text = page.text
             if page.needsJavaScript { text += (text.isEmpty ? "" : "\n\n") + HTMLText.javaScriptNote }
