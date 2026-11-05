@@ -51,6 +51,33 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
 
     private var store: Store { Store(directory: root) }
 
+    @Test @MainActor func movingARoutineToAnotherOrbMovesItsConversation() async {
+        let (model, first, routine) = setUp()
+        let target = UUID()
+        store.saveRoutineConversation(chatWith("antiga"), routine: routine.id, for: first.id)
+        store.flush()
+        #expect(model.moveRoutineConversation(routine.id, from: first.id, to: target))
+        model.store.flush()
+        #expect(store.readRoutineConversation(routine: routine.id, for: first.id).value == nil)
+        #expect(store.readRoutineConversation(routine: routine.id, for: target).value?.items.count == 2)
+    }
+
+    @Test @MainActor func movingARunningRoutineIsRefusedAndLosesNothing() async {
+        let gate = TestGate()
+        let (model, first, routine) = setUp(StubModel(gate: gate))
+        store.saveRoutineConversation(chatWith("antiga"), routine: routine.id, for: first.id)
+        store.flush()
+        #expect(model.send("pergunta", to: first.id))
+        model.runRoutine(routine.id) // queued behind the question
+        await model.routineStarted()
+        #expect(model.isRoutineQueued(routine.id))
+        #expect(!model.moveRoutineConversation(routine.id, from: first.id, to: UUID()))
+        model.store.flush()
+        #expect(store.readRoutineConversation(routine: routine.id, for: first.id).value?.items.count == 2)
+        await gate.open()
+        await waitUntilIdle(model, first.id)
+    }
+
     private func chatWith(_ said: String = "oi") -> Conversation {
         Conversation(items: [TranscriptItem(.user(text: said, attachments: [])), TranscriptItem(.bot(text: "olá", isStreaming: false))],
                      messages: [.user(said), ChatMessage(role: .assistant, content: "olá")])

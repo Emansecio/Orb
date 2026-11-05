@@ -979,6 +979,8 @@ actor AgentEngine {
 
         // The mode and rules as they are at this moment: the user may have changed them while the Orb worked.
         let live = await request.currentPermissions()
+        if live.turnedOff(tool) { return Self.block(tool, summary, arguments, PermissionState.turnedOffMessage, out,
+                                                                     shown: "Bloqueado: essa permissão foi desligada para este Orb.") }
         let permission = PermissionPolicy.call(for: tool, arguments: arguments, context: request.context)
         var verdict = PermissionPolicy.evaluate(mode: live.mode, call: permission, rules: live.rules, turnGrants: allowed,
                                                 workspace: request.context.workingDirectory)
@@ -1022,6 +1024,9 @@ actor AgentEngine {
             }
         }
 
+        // The card may have waited a long time: the switch is read again before running.
+        if await request.currentPermissions().turnedOff(tool) { return Self.block(tool, summary, arguments, PermissionState.turnedOffMessage, out,
+                                                                     shown: "Bloqueado: essa permissão foi desligada para este Orb.") }
         let started = ToolCall(kind: tool.kind, title: summary.title, detail: summary.detail, intent: tool.intent(arguments))
         out.yield(.toolStarted(started))
         out.yield(.status(summary.title))
@@ -1137,10 +1142,11 @@ actor AgentEngine {
 
     /// A call refused by the mode: the row shows it as started and failed (so the Orb is not left "running" it).
     private static func block(_ tool: any AgentTool, _ summary: (title: String, detail: String), _ arguments: JSONValue, _ message: String,
-                              _ out: AsyncStream<TurnEvent>.Continuation) -> ToolOutcome {
+                              _ out: AsyncStream<TurnEvent>.Continuation,
+                              shown: String = "Bloqueado: o Orb está em modo Só leitura.") -> ToolOutcome {
         let blocked = ToolCall(kind: tool.kind, title: summary.title, detail: summary.detail, intent: tool.intent(arguments))
         out.yield(.toolStarted(blocked))
-        out.yield(.toolFinished(id: blocked.id, state: .failed, output: "Bloqueado: o Orb está em modo Só leitura."))
+        out.yield(.toolFinished(id: blocked.id, state: .failed, output: shown))
         return ToolOutcome(message, isError: true)
     }
 

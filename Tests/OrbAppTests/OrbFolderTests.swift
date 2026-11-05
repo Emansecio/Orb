@@ -289,6 +289,16 @@ struct OrbFolderStateTests {
         #expect(model.bot(bot.id)?.workingURL.isExistingDirectory == true)
     }
 
+    @Test @MainActor func renamingToAnotherOrbsNameIsRefused() {
+        let model = makeModel()
+        let first = create(model), second = create(model)
+        #expect(model.rename(first.id, to: "Júpiter"))
+        #expect(!model.rename(second.id, to: " jupiter "))
+        #expect(model.bot(second.id)?.name != "Júpiter")
+        // Its own name (in another case) is not "taken".
+        #expect(model.rename(first.id, to: "JÚPITER"))
+    }
+
     @Test @MainActor func aVeryLongNameIsCut() {
         let model = makeModel()
         let bot = create(model)

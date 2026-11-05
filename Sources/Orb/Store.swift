@@ -573,6 +573,22 @@ struct Store: Sendable {
         deleteSideConversation(prefix: Self.grupoPrefix, id: groupID, for: botID)
     }
 
+    /// Moves a routine's conversation to another Orb's folder (the routine changed Orb), after the writes already queued.
+    func moveRoutineConversation(routine routineID: UUID, from oldBot: UUID, to newBot: UUID) {
+        let source = sideConversationURL(oldBot, Self.routinePrefix, routineID)
+        let target = sideConversationURL(newBot, Self.routinePrefix, routineID)
+        enqueue(touching: [source, target]) {
+            guard FileManager.default.fileExists(atPath: source.path) else { return }
+            Self.gate.waitForReaders(of: source)
+            try? FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? FileManager.default.removeItem(at: target)
+            try? FileManager.default.moveItem(at: source, to: target)
+            encoders.remove(source)
+            encoders.remove(target)
+            forgetFailure(of: source)
+        }
+    }
+
     func deleteRoutineConversation(routine routineID: UUID, for botID: UUID) {
         deleteSideConversation(prefix: Self.routinePrefix, id: routineID, for: botID)
     }
