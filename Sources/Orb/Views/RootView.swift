@@ -117,6 +117,7 @@ private struct DetailView: View {
                 .id(page)
                 .transition(page.transition)
         }
+        .belowToolbar()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.canvas)
         // The panel as it is on screen, not the user's choice: coming back to the Orb's page brings a column to trim too.
@@ -143,6 +144,7 @@ private struct DetailView: View {
             }
             // The two sides of one click (the chat and the panel) change at the same pace.
             .motion(Motion.crossFade, value: selectedBotID ?? model.selectedGroupID)
+            .belowToolbar()
             .inspectorColumnWidth(min: 244, ideal: 300, max: 420)
         }
     }
@@ -186,6 +188,16 @@ private struct DetailView: View {
             }
         }
     }
+}
+
+extension View {
+    /// Stops a page's scrolling at the toolbar's lower edge instead of under it. A scroll view running under the bar
+    /// takes its AppKit views along (the replies' text, selectable text, text fields), and each one of them that passes
+    /// behind the bar cuts a hole in the area the window is dragged by: the window would not move from the middle of the
+    /// bar, where the conversation's text was. The bar is opaque (`toolbarBackground`), so nothing showed under it. Any
+    /// padding at the top keeps the scroll view out of the bar's safe area, which a zero one does not; 1 pt is the
+    /// least, in the page's own color.
+    func belowToolbar() -> some View { padding(.top, 1) }
 }
 
 /// Tells the width of the window it is in: once it is in the window, then each time the window is resized to another width.
