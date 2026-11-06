@@ -32,15 +32,9 @@ enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Two heights, not one per tab: a window that changed at each click jumped under the pointer (SwiftUI does not
-    /// animate the Settings window's frame), so only the tabs whose content is short get the lower one (Modelos and Acesso
-    /// ao Mac were mostly empty at 720). A taller tab scrolls inside it, as its `Form` already does.
-    var height: CGFloat {
-        switch self {
-        case .models, .permissions: 600
-        case .general, .orbs, .browser, .usage: 720
-        }
-    }
+    /// One height for every tab: a window that grew and shrank at each click jumped under the pointer (SwiftUI does not
+    /// animate the Settings window's frame). A taller tab scrolls inside it, as its `Form` already does.
+    var height: CGFloat { 720 }
 }
 
 /// Opens Ajustes on a given tab: from the first-use card, a failed tool, a provider error.
