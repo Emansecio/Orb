@@ -167,8 +167,8 @@ final class OrbAnimationView: NSView {
     private var lastTime: Double?
     private var head = SpringPoint()     // turns the whole face, unhurried
     private var eyes = SpringPoint()     // quick saccades, leading the head
-    private var loose = SpringPoint()    // hair and hats trailing the head and body
-    private var swing = Spring()         // hair and hats swinging behind the body's tilt
+    private var loose = SpringPoint()    // hair and headphones trailing the head and body
+    private var swing = Spring()         // hair and headphones swinging behind the body's tilt
     /// The swing the loose layers were last rotated to (infinity: not yet, e.g. new layers).
     private var appliedSwing = Double.infinity
     /// Layers were just (re)built: everything is placed once, even what never moves (the body).
@@ -235,7 +235,7 @@ final class OrbAnimationView: NSView {
         ground.colors = OrbShadow.stops.map { NSColor.black.withAlphaComponent($0).cgColor } + [NSColor.clear.cgColor]
         bubble.alignmentMode = .center
         bubble.masksToBounds = true
-        // Nearly opaque, so it reads as in front of the orb: the bow and the hat brim sit right behind it.
+        // Nearly opaque, so it reads as in front of the orb: hair and headphones sit right behind it.
         bubble.backgroundColor = NSColor(Palette.chrome).withAlphaComponent(OrbGeometry.bubbleFill).cgColor
         bubble.borderColor = NSColor.white.withAlphaComponent(0.2).cgColor
         bubble.borderWidth = 0.5
@@ -882,7 +882,7 @@ final class OrbAnimationView: NSView {
         lean.step(toward: pointer.lean, dt: dt, response: 0.5 * springs, damping: 0.8)
         pose.tilt += 7 * lean.value
 
-        // Hair and hats trail the head turn and the body's bounce, with a little overshoot.
+        // Hair and headphones trail the head turn and the body's bounce, with a little overshoot.
         pose.hairLag = OrbSprings.hairLag(&loose, anchor: OrbSprings.hairAnchor(look: pose.look, lift: pose.lift), dt: dt)
         // ...and swing behind the body's tilt, overshooting a little as it settles.
         pose.hairSwing = OrbSprings.hairSwing(&swing, tilt: pose.tilt, dt: dt)

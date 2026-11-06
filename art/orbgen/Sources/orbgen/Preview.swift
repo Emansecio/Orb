@@ -36,7 +36,7 @@ enum Preview {
                 guard let image = canvas.cgImage() else { continue }
                 // One palette: hairs flow left to right in rows of three.
                 let (x, y) = columns.count == 1 ? (row % 3, row / 3) : (column, row)
-                // The layer frame holds everything (hats, tails), so draw it whole, cropping only the empty bottom.
+                // The layer frame holds everything (hair, tails), so draw it whole, cropping only the empty bottom.
                 let rect = CGRect(x: x * tile - tile / 8, y: height - (y + 1) * tile - tile / 3, width: tile * 5 / 4, height: tile * 5 / 4)
                 context.draw(image, in: rect)
             }

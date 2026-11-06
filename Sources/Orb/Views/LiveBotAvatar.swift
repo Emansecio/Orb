@@ -16,7 +16,7 @@ struct LiveBotAvatar: View {
     /// Lives only while it has something to do: working, celebrating, watching you type. Once the Orb is idle it
     /// settles into the resting pose and stops, so a reply that stays on screen costs nothing.
     var restsWhenIdle = false
-    /// Off for the Orb on a stage with room around it (the empty chat): a big hair or hat keeps its full size there.
+    /// Off for the Orb on a stage with room around it (the empty chat): a big hair keeps its full size there.
     var fits = true
     /// Lives for a few seconds (its entrance, the pointer on it, work), then settles and rests (`SettlingOrb`).
     var settles = false

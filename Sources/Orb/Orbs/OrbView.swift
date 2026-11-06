@@ -33,7 +33,7 @@ struct OrbView: View {
     /// How big its joy is while `activity` is `happy`.
     var celebration = OrbCelebration.big
     var interactive = false
-    /// Shrinks a look that reaches past the box (an afro, a top hat) until all of it fits (`OrbFootprint`): for
+    /// Shrinks a look that reaches past the box (an afro, headphones) until all of it fits (`OrbFootprint`): for
     /// avatars set among other things. The Orb on a stage with room around it leaves it off.
     var fits = false
     /// What VoiceOver says (default: "Orb" and what it is doing).
@@ -74,7 +74,7 @@ struct OrbView: View {
 }
 
 /// Draws one frame of the Orb from its layers in a single Canvas (no per-frame layout work).
-/// The canvas is an overlay larger than `size`, so hats, halos and glow can overflow the avatar box.
+/// The canvas is an overlay larger than `size`, so hair, headphones and glow can overflow the avatar box.
 struct OrbFrame: View {
     let config: OrbConfig
     let activity: OrbActivity
@@ -272,7 +272,7 @@ struct BotAvatar: View {
     var glance = 0
     var cue = OrbCueSignal()
     var interactive = false
-    /// On by default: an avatar sits among other things, so a big hair or hat shrinks to fit (`OrbView.fits`).
+    /// On by default: an avatar sits among other things, so a big hair shrinks to fit (`OrbView.fits`).
     var fits = true
 
     var body: some View {

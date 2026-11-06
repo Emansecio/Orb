@@ -15,11 +15,11 @@ camadas são feitas e como acrescentar uma opção nova.
 ## 1. Como o app usa a arte
 
 ```
-art/orbs.py + art/orbkit/          Blender 5.2: traços planos (olhos, bocas, sobrancelhas, bigodes,
+art/orbs.py + art/orbkit/          Blender 5.2: traços planos (olhos, bocas, sobrancelhas,
         │  orbs.py layers          visemas, acessórios) -> art/orbgen/flat
         ▼
 art/orbgen (Swift, CPU)            orbgen all: corpo iluminado (18 cores), cabelos por campos de distância
-        │                          (+ -brilho e -chapeu), traços assentados com sombra de contato, options.json
+        │                          (+ -brilho), traços assentados com sombra de contato, options.json
         ▼
 Sources/Orb/Resources/Orbs/     PNGs de 640 px em camadas (corpo, traços, cabelo, acessórios, visemas) + options.json (~4 MB)
         │  scripts/bundle.sh copia para Orb.app/Contents/Resources/Orbs
@@ -48,19 +48,14 @@ Os ids e rótulos vêm de `options.json` (gerado junto com as imagens); a tabela
 | Visemas (`visemes`, só para falar) | 4 | fala-a (aberta), fala-o (redonda), fala-e (larga), fala-m (fechada) |
 | Sobrancelhas (`brows`) | 5 | nenhuma, retas, arqueadas, bravas, preocupadas |
 | Bochechas (`cheeks`) | 4 | nenhuma, blush, sardas, coracoes |
-| Bigode (`mustache`) | 6 | nenhum, classico, enrolado, fino, chevron, cavanhaque |
 | Cabelo (`hair`) | 13 | nenhum, franja, ondulado, cachos, black-power, coque, rabo-de-cavalo, chiquinhas, topete, espetado, moicano, tufinho, antena |
-| Acessórios (`accessories`, vários) | 15 | oculos-redondos, oculos-quadrados, oculos-sol, monoculo, chapeu-festa, bone, gorro, cartola, coroa, laco, fones, aureola, chifres, orelhas-gato, flor |
+| Acessórios (`accessories`, vários) | 5 | oculos-redondos, oculos-quadrados, oculos-sol, monoculo, fones |
 | Jeito (`temperament`) | 5 | calmo, equilibrado, animado, timido, curioso (ver 3a) |
 
-Cores livres (sRGB) para **cabelo**, **bigode** e **acessórios tingíveis** (boné, gorro, laço,
-fones, chifres, flor, orelhas de gato). `nil` = cor automática: o cabelo usa a cor desenhada para a paleta
-(`"hair"` em cada cor do options.json; um tom mais fundo do corpo que ainda aparece no fundo escuro), o bigode
-acompanha a cor de cabelo escolhida (senão é branco, e da cor do cabelo nos corpos claros: `OrbPalette.isPale`, branco
-com contraste abaixo de 2,2:1 sobre o corpo, uma linha longe de todas as paletas, entre menta 2,35 e pêssego 2,08), os
-fones são brancos, as orelhas de gato têm a cor do corpo sobre cabelo (senão a do cabelo) e cada outro acessório
-tem o seu padrão. **Orbs salvos antes disso não mudam de cor:** `OrbConfig.autoColors` é `.original` para um
-visual sem essa chave (cabelo em tom escuro do `deep`, bigode branco, orelhas no `deep`) e `.designed` para os
+Cores livres (sRGB) para o **cabelo** e os **fones** (o único acessório tingível). `nil` = cor automática: o cabelo
+usa a cor desenhada para a paleta (`"hair"` em cada cor do options.json; um tom mais fundo do corpo que ainda aparece
+no fundo escuro) e os fones são brancos. **Orbs salvos antes disso não mudam de cor:** `OrbConfig.autoColors` é
+`.original` para um visual sem essa chave (cabelo em tom escuro do `deep`) e `.designed` para os
 novos; só os fones ficaram brancos para todos (os escuros sumiam no fundo). Atenção: uma versão anterior do app que
 regravar o estado não conhece a chave e a descarta, então esses Orbs voltam às cores `.original` (nada se perde além
 disso; escolher uma cor no editor fixa a cor de vez).
@@ -68,9 +63,13 @@ O editor oferece cores com nome (`OrbSwatch`: Preto, Castanho, Ruivo, Loiro, Pla
 
 **Cabelo em duas camadas.** `hair/<id>` é branco e sombreado (luz, oclusão, textura de fios) e o app o multiplica
 pela cor; `hair/<id>-brilho` vem por cima sem tinta: a faixa de brilho dos fios, o aro de luz, elásticos e a
-sombra que o cabelo faz na testa. As duas são camadas soltas (balançam juntas). **Chapéus:** com boné, gorro,
-cartola, coroa ou chapéu de festa (`"hats"` no options.json), os estilos altos usam `hair/<id>-chapeu`
-(coque, topete e moicano penteados para trás, sem nada atravessando o chapéu).
+sombra que o cabelo faz na testa. As duas são camadas soltas (balançam juntas).
+
+**Bigode e acessórios de cabeça saíram (2026-11).** O bigode e os acessórios usados na cabeça (chapéu de festa, boné,
+gorro, cartola, coroa, laço, auréola, chifrinhos, orelhas de gato e flor) não existem mais, nem os cabelos
+`-chapeu` feitos para ficar sob os chapéus. Ao ler um visual salvo, `OrbConfig` descarta esses acessórios
+(`OrbConfig.removedAccessories`) e ignora as chaves `mustache` e `mustacheColor`: todo Orb deixa de usá-los e,
+gravado de novo, não os leva mais.
 
 **Ids antigos e de versões mais novas.** Os ids ficam salvos como vieram; só ao desenhar (`layers()`) um id que o
 catálogo não conhece vira o padrão (acessórios desconhecidos não são desenhados) e um id renomeado vira o sucessor
@@ -91,21 +90,21 @@ orb.hair = "tufinho"; orb.accessories = ["laco"]; orb.accentColor = 0xFF4F8B
   barra lateral também tem "Personalizar…" (`AppModel.showLookEditor`).
 - O editor (`OrbEditor`) tem um palco ao vivo de 144 pt com holofote neutro (clicável, com prévia de
   cada atividade), categorias em três grupos (**Corpo**: Cor, Jeito; **Rosto**: Olhos, Boca, Sobrancelhas,
-  Bochechas, Bigode; **Estilo**: Cabelo, Acessórios), miniaturas que enquadram o que mudam (close do rosto para
-  os traços, cabeça com espaço em cima para cabelo e chapéus; animam ao passar o mouse), cores com nome (anel
-  visível em cores claras e escuras, cor personalizada aparece como amostra, bigode pode ser branco),
-  **Sortear** (sorteio harmonioso que mantém o jeito, `OrbConfig.random(using:)`, sem antena sob chapéu, cartola
-  afundada no black power nem tufinho atravessando boné, gorro ou coroa), **Pular** e **Desfazer** pelo gerenciador de desfazer da janela
+  Bochechas; **Estilo**: Cabelo, Acessórios), miniaturas que enquadram o que mudam (close do rosto para
+  os traços, cabeça com espaço em cima para o cabelo; animam ao passar o mouse), cores com nome (anel
+  visível em cores claras e escuras, cor personalizada aparece como amostra),
+  **Sortear** (sorteio harmonioso que mantém o jeito, `OrbConfig.random(using:)`), **Pular** e **Desfazer** pelo gerenciador de desfazer da janela
   (`OrbEditUndo`: ⌘Z, ⇧⌘Z e Editar ▸ Desfazer). As categorias quebram em duas linhas quando o editor é estreito.
   O VoiceOver lê o visual inteiro do palco (`OrbConfig.summary`).
 - **Palco compacto** (folha Novo Orb, ou o editor com menos de 680 pt de altura): Orb de 112 pt, Sortear,
-  Desfazer e Pular no alto, ao lado da cabeça (onde nem chapéu nem pulo chegam), a prévia de atividade num menu no
+  Desfazer e Pular no alto, ao lado da cabeça (onde nem cabelo nem pulo chegam), a prévia de atividade num menu no
   canto de baixo, sem o nome (o formulário ao lado já mostra) e as categorias numa linha de ícones (a escolhida com o
   nome). Assim as opções ficam com ~180 pt na folha de 520 pt e ~360 pt na de 700 pt.
 - **Espaço para o Orb** (`OrbStageRoom`): o palco deixa 0,82 do tamanho do Orb em cima e 0,2 embaixo. Pulos que se
   somam (um clique durante o pulinho do jeito ou os pulos do Feliz) são suavizados abaixo de um teto (subida 0,19,
-  esticada 0,06; um pulo normal fica igual), e um teste mede nos PNGs o chapéu mais alto no ponto mais alto possível
-  (teto, crescimento do hover, cabelo atrasado, inclinação): 0,817 com o chapéu de festa.
+  esticada 0,06; um pulo normal fica igual), e um teste mede nos PNGs o cabelo ou acessório mais alto no ponto mais
+  alto possível (teto, crescimento do hover, cabelo atrasado, inclinação). O espaço foi medido com os chapéus
+  (0,817 com o chapéu de festa), que saíram: hoje sobra folga.
 
 ## 3. Atividades: o Orb mostra o que está fazendo
 
@@ -273,11 +272,11 @@ Tudo em [`Orbs/OrbMotion.swift`](../Sources/Orb/Orbs/OrbMotion.swift) (funções
   misturaria o corpo, que se move, com uma foto parada dele. Só um Orb que aparece ou muda de tamanho funde inteiro.
   Uma troca que chega no meio de outra parte do corpo que estava na tela naquele instante (`OrbActivityBlend`),
   não da atividade que pesava pouco: ferramentas rápidas entre dois pensamentos não dão salto.
-- **Movimento secundário**: cabelo e acessórios de cabeça (não os óculos, `OrbLayer.isLoose`) atrasam um
+- **Movimento secundário**: cabelo e fones (não os óculos, `OrbLayer.isLoose`) atrasam um
   pouco nas viradas e nos pulos e **giram atrás da inclinação do corpo** em torno do alto da cabeça
-  (`OrbGeometry.crownLine`), como cabelo pendurado: rabo de cavalo, chiquinhas e chapéus balançam (mola com sobra,
+  (`OrbGeometry.crownLine`), como cabelo pendurado: rabo de cavalo, chiquinhas e fones balançam (mola com sobra,
   até 3°, `OrbSprings`); o pouso do pulo vira uma mola subamortecida (amassa, estica, assenta).
-- **Respiração**: elevação 0,018 (ω 1,3, ~4,8 s), amassado 0,016 (~3,1 s); o cabelo e os chapéus voltam com amortecimento 0,5.
+- **Respiração**: elevação 0,018 (ω 1,3, ~4,8 s), amassado 0,016 (~3,1 s); o cabelo e os fones voltam com amortecimento 0,5.
 - **Parado**: além da respiração e da flutuação, um balanço de ~1° com período de ~11 s, fora de fase com os
   dois, então o Orb nunca parece estar em loop (lento demais para mudar a taxa de quadros).
 - **Reações de uma vez** (`OrbActivity.motion(at:elapsed:celebration:)`): `happy` usa o tempo desde que começou: o primeiro
@@ -291,9 +290,9 @@ Tudo em [`Orbs/OrbMotion.swift`](../Sources/Orb/Orbs/OrbMotion.swift) (funções
   Nos pulinhos de `waiting`/`happy` o amassado no chão passa suave para o esticado no ar (`bounce`).
 - **Balão** entra e sai com escala e opacidade em mola, em vez de aparecer de uma vez. Trocar de símbolo com
   ele aberto (… → ?) dá um pulinho de escala em vez de só trocar o texto. O fundo é quase opaco (cor do chrome,
-  `OrbGeometry.bubbleFill`), para o laço e a aba dos chapéus não aparecerem através dele. Um Orb em repouso
+  `OrbGeometry.bubbleFill`), para o cabelo e os fones não aparecerem através dele. Um Orb em repouso
   (janela inativa) recebe o balão e a boca da nova atividade na hora, sem esperar quadros. Quem decide se há balão é a
-  caixa do avatar (a partir de `OrbGeometry.bubbleBox`, 26 pt), não o Orb: um black power ou uma cartola encolhem o
+  caixa do avatar (a partir de `OrbGeometry.bubbleBox`, 26 pt), não o Orb: um black power ou os fones encolhem o
   Orb dentro dos 30 pt da barra lateral (`OrbFootprint`), e o `?` de "precisa de você" continua aparecendo.
 - **Pausar e voltar sem salto**: um Orb animado que deve ficar quieto (`OrbView(paused:)`, ou janela inativa)
   não é mais trocado pelo `OrbFrame` estático: ele desliza até a pose de repouso (a mesma do estático, mola de
@@ -527,7 +526,7 @@ os Orbs numa janela própria sem borda, `alphaValue = 0`, `ignoresMouseEvents = 
 ## 8. Arte
 
 As camadas, as opções e os geradores (`art/orbgen` em Swift para o corpo, os cabelos e o assentamento dos traços;
-o Blender para os traços planos; como acrescentar um penteado, um chapéu ou um acessório; o manifesto `options.json`)
+o Blender para os traços planos; como acrescentar um penteado ou um acessório; o manifesto `options.json`)
 estão descritos em [art/README.md](../art/README.md). O app só depende do que sai de lá: os PNGs em
 `Sources/Orb/Resources/Orbs/` e o `options.json` com os ids, rótulos e cores. Acrescentar uma opção nova não exige mexer em
 Swift, exceto quando ela precisa de uma cor padrão (`OrbConfig.autoAccentColor(_:palette:)`) ou de uma ordem de camadas diferente

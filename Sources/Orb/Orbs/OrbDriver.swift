@@ -67,7 +67,7 @@ enum OrbLinkRate {
 
 /// Whether an orb is worth animating inside a scroll view.
 enum OrbVisibility {
-    /// `orb` and `viewport` are in the same coordinates. The orb's layers (hats, glow) reach past its frame by
+    /// `orb` and `viewport` are in the same coordinates. The orb's layers (hair, glow) reach past its frame by
     /// about its size, hence `margin`. An empty viewport means the scroll view is not laid out yet: visible.
     static func isVisible(orb: CGRect, in viewport: CGRect, margin: CGFloat) -> Bool {
         viewport.isEmpty || viewport.intersects(orb.insetBy(dx: -margin, dy: -margin))

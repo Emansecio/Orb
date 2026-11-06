@@ -211,28 +211,6 @@ def metal(hex_value, roughness=0.22):
     return material
 
 
-def knit(hex_value):
-    material = bpy.data.materials.new("Knit")
-    material.use_nodes = True
-    nodes, links = material.node_tree.nodes, material.node_tree.links
-    bsdf = nodes["Principled BSDF"]
-    bsdf.inputs["Base Color"].default_value = linear(hex_value)
-    bsdf.inputs["Roughness"].default_value = 0.9
-    bsdf.inputs["Sheen Weight"].default_value = 0.7
-    bsdf.inputs["Emission Color"].default_value = linear(hex_value)
-    bsdf.inputs["Emission Strength"].default_value = 0.12
-    # Rib texture via bump
-    wave = nodes.new("ShaderNodeTexWave")
-    wave.wave_type = "BANDS"
-    wave.bands_direction = "X"
-    wave.inputs["Scale"].default_value = 28
-    bump = nodes.new("ShaderNodeBump")
-    bump.inputs["Strength"].default_value = 0.35
-    links.new(wave.outputs["Fac"], bump.inputs["Height"])
-    links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
-    return material
-
-
 def glass(tint=0xFFFFFF, darkness=0.0):
     material = bpy.data.materials.new("Glass")
     material.use_nodes = True
@@ -244,37 +222,6 @@ def glass(tint=0xFFFFFF, darkness=0.0):
     bsdf.inputs["Coat Weight"].default_value = 1.0
     if darkness:
         bsdf.inputs["Base Color"].default_value = linear(0x101016)
-    return material
-
-
-def striped(hex_a, hex_b, scale=9.0):
-    """Two-color bands along the object's Z (party hats, candy)."""
-    material = bpy.data.materials.new("Stripes")
-    material.use_nodes = True
-    nodes, links = material.node_tree.nodes, material.node_tree.links
-    bsdf = nodes["Principled BSDF"]
-    coords = nodes.new("ShaderNodeTexCoord")
-    separate = nodes.new("ShaderNodeSeparateXYZ")
-    math_node = nodes.new("ShaderNodeMath")
-    math_node.operation = "MULTIPLY"
-    math_node.inputs[1].default_value = scale
-    frac = nodes.new("ShaderNodeMath")
-    frac.operation = "FRACT"
-    step = nodes.new("ShaderNodeMath")
-    step.operation = "GREATER_THAN"
-    step.inputs[1].default_value = 0.5
-    mix = nodes.new("ShaderNodeMix")
-    mix.data_type = "RGBA"
-    mix.inputs["A"].default_value = linear(hex_a)
-    mix.inputs["B"].default_value = linear(hex_b)
-    links.new(coords.outputs["Object"], separate.inputs["Vector"])
-    links.new(separate.outputs["Z"], math_node.inputs[0])
-    links.new(math_node.outputs[0], frac.inputs[0])
-    links.new(frac.outputs[0], step.inputs[0])
-    links.new(step.outputs[0], mix.inputs["Factor"])
-    links.new(mix.outputs["Result"], bsdf.inputs["Base Color"])
-    bsdf.inputs["Roughness"].default_value = 0.35
-    bsdf.inputs["Coat Weight"].default_value = 0.6
     return material
 
 
@@ -336,22 +283,6 @@ def sphere(radius, location, material, scale=(1, 1, 1), segments=48):
     obj = smooth_last(material)
     obj.scale = scale
     return obj
-
-
-def dome(radius, z_cut, location, material, scale=(1, 1, 1)):
-    """Upper part of a sphere above local z_cut (caps, beanies)."""
-    import bmesh
-    bpy.ops.mesh.primitive_uv_sphere_add(segments=96, ring_count=48, radius=radius, location=location)
-    obj = bpy.context.active_object
-    mesh = bmesh.new()
-    mesh.from_mesh(obj.data)
-    bmesh.ops.delete(mesh, geom=[v for v in mesh.verts if v.co.z < z_cut], context="VERTS")
-    mesh.to_mesh(obj.data)
-    mesh.free()
-    obj.scale = scale
-    solidify = obj.modifiers.new("Solidify", "SOLIDIFY")
-    solidify.thickness = 0.03
-    return smooth_last(material)
 
 
 def capsule(radius, half_length, depth, material, segments=48):

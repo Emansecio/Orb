@@ -83,10 +83,9 @@ struct OrbFootprintTests {
         #expect(fit.offset.height > 0)
     }
 
-    @Test func aTallHatCounts() {
-        var hat = OrbConfig(color: "cereja")
-        hat.accessories = ["cartola"]
-        #expect(OrbFootprint.fit(hat).scale < 1)
-        #expect(OrbFootprint.fit(hat).offset.height > 0)
+    @Test func wideHeadphonesCount() {
+        var headphones = OrbConfig(color: "cereja")
+        headphones.accessories = ["fones"]
+        #expect(OrbFootprint.fit(headphones).scale < 1)
     }
 }

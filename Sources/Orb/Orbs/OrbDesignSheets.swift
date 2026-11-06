@@ -6,7 +6,7 @@ import AppKit
 /// `Orb --render-orbs out.png <sheet>`. Without a sheet name, `--render-orbs` writes the Orbs × activities sheet.
 @MainActor
 enum OrbDesignSheet {
-    static let names = ["cabelos", "cabelo-padrao", "cabelo-acessorio", "acessorios", "olhos", "bocas", "detalhes", "cores", "tamanhos", "quadros", "reacoes", "polimento", "icone"]
+    static let names = ["cabelos", "cabelo-padrao", "acessorios", "olhos", "bocas", "detalhes", "cores", "tamanhos", "quadros", "reacoes", "polimento", "icone"]
 
     /// Writes the sheet `name` (one of `names`); false for an unknown name.
     @discardableResult
@@ -14,7 +14,6 @@ enum OrbDesignSheet {
         switch name {
         case "cabelos": hair(to: url)
         case "cabelo-padrao": defaultHair(to: url)
-        case "cabelo-acessorio": hairWithAccessories(to: url)
         case "acessorios": accessories(to: url)
         case "olhos": category(.eyes, to: url)
         case "bocas": category(.mouth, to: url)
@@ -32,7 +31,7 @@ enum OrbDesignSheet {
 
     // MARK: Sheets
 
-    /// Every hair style × palettes and custom hair colors, plus a hair + hat combination column.
+    /// Every hair style × palettes and custom hair colors.
     private static func hair(to url: URL) {
         let base = OrbConfig(color: "indigo", eyes: "pilulas", mouth: "sorriso")
         let columns: [(String, (inout OrbConfig) -> Void)] = [
@@ -66,15 +65,6 @@ enum OrbDesignSheet {
         write(grid(columns: palettes.map(\.label), rows: rows, size: 64), to: url)
     }
 
-    /// How each hair style wears the head accessories (hats sit on the hair, ears and bows over it).
-    private static func hairWithAccessories(to url: URL) {
-        let worn = ["cartola", "bone", "gorro", "chapeu-festa", "coroa", "fones", "orelhas-gato", "laco", "aureola", "chifres"]
-        let rows = OrbCatalog.shared.options(.hair).filter { $0.id != "nenhum" }.map { option in
-            (option.label, worn.map { OrbConfig(color: "ceu", eyes: "pilulas", mouth: "sorriso", hair: option.id, accessories: [$0]) })
-        }
-        write(grid(columns: worn.map { OrbCatalog.shared.label(.accessories, $0) }, rows: rows, size: 64), to: url)
-    }
-
     private static func accessories(to url: URL) {
         let palettes = ["indigo", "rosa", "menta", "sol", "perola", "grafite"]
         let rows = OrbCatalog.shared.options(.accessories).map { option in
@@ -99,12 +89,12 @@ enum OrbDesignSheet {
         write(grid(columns: palettes.map { OrbCatalog.shared.palette($0).label }, rows: rows, size: 84), to: url)
     }
 
-    /// Brows, cheeks and mustaches.
+    /// Brows and cheeks.
     private static func details(to url: URL) {
         var rows: [(String, [OrbConfig])] = []
         let palettes = ["indigo", "rosa", "sol", "perola"]
-        for category in [OrbCategory.brows, .cheeks, .mustache] {
-            for option in OrbCatalog.shared.options(category) where !["nenhuma", "nenhum"].contains(option.id) {
+        for category in [OrbCategory.brows, .cheeks] {
+            for option in OrbCatalog.shared.options(category) where option.id != "nenhuma" {
                 rows.append(("\(category.label): \(option.label)", palettes.map { palette in
                     var config = OrbConfig(color: palette, eyes: "pilulas", mouth: "sorriso")
                     config.set(category, option.id)

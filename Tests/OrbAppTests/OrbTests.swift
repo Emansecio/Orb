@@ -256,9 +256,9 @@ struct OrbTests {
     // MARK: Config
 
     @Test func configsSavedBeforeTemperamentsStillLoad() throws {
-        let json = #"{"color":"rosa","eyes":"ovais","mouth":"sorriso","accessories":["laco"],"accentColor":16732043}"#
+        let json = #"{"color":"rosa","eyes":"ovais","mouth":"sorriso","accessories":["fones"],"accentColor":16732043}"#
         let config = try JSONDecoder().decode(OrbConfig.self, from: Data(json.utf8))
-        #expect(config.color == "rosa" && config.eyes == "ovais" && config.accessories == ["laco"])
+        #expect(config.color == "rosa" && config.eyes == "ovais" && config.accessories == ["fones"])
         #expect(config.accentColor == 0xFF4F8B && config.hairColor == nil)
         #expect(config.brows == "nenhuma" && config.temperament == .equilibrado)
 
@@ -512,7 +512,7 @@ struct OrbTests {
 
     @Test func looseLayersExcludeEyewear() {
         #expect(OrbLayer(kind: .hair, path: "hair/topete", tint: nil).isLoose)
-        #expect(OrbLayer(kind: .accessory, path: "accessories/cartola", tint: nil).isLoose)
+        #expect(OrbLayer(kind: .accessory, path: "accessories/fones", tint: nil).isLoose)
         #expect(!OrbLayer(kind: .accessory, path: "accessories/oculos-redondos", tint: nil).isLoose)
         #expect(!OrbLayer(kind: .eyes, path: "eyes/pilulas", tint: nil).isLoose)
     }

@@ -12,15 +12,13 @@ enum Manifest {
         "noite": 0x3B45B8, "grafite": 0x3A4560, "perola": 0x6F6490,
     ]
 
-    static let hats = ["bone", "cartola", "chapeu-festa", "coroa", "gorro"]
-
     static func update(resources: URL) throws {
         let url = resources.appendingPathComponent("options.json")
         guard let data = try? Data(contentsOf: url), let text = String(data: data, encoding: .utf8),
               var json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw ArtError.read(url.path) }
         json["hair"] = HairStyle.manifest.map { ["id": $0.id, "label": $0.label] }
-        // Accessories worn on top of the head: with one of them, styles that have a `-chapeu` layer use it.
-        json["hats"] = hats
+        // The hats left the catalog (2026-11), and with them the hair squeezed under them.
+        json["hats"] = nil
         if let colors = json["color"] as? [[String: Any]] {
             json["color"] = colors.map { entry in
                 var entry = entry

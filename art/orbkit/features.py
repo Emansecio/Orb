@@ -1,4 +1,4 @@
-"""Orb customization catalog: palettes, eyes, mouths, brows, cheeks, mustaches, hair and accessories.
+"""Orb customization catalog: palettes, eyes, mouths, brows, cheeks, hair and accessories.
 
 Every option is (id, Portuguese label, builder). Builders receive a Ctx and add objects to the scene.
 The same ids are exported to the app (options.json, in the app) so the editor and the renders stay in sync.
@@ -11,7 +11,7 @@ from mathutils import Vector
 from . import core
 import bpy
 
-from .core import (capsule, cone, cylinder, dome, flat_shape, frame_on, glow, heart_points, knit, metal, on_surface,
+from .core import (capsule, cone, cylinder, flat_shape, frame_on, glow, heart_points, metal, on_surface,
                    plastic, sphere, star_points, surface, torus, tube)
 
 # ---------------------------------------------------------------------------
@@ -59,7 +59,7 @@ class Ctx:
             self.feature = glow(feature_hex, 1.0)
         self.ink = plastic(0x2B0F2E, roughness=0.35, coat=0.6, subsurface=0)
         self.tongue = plastic(0xFF7A9C, roughness=0.4, coat=0.4)
-        self.mouth_z = -0.16 if config.get("mustache", "nenhum") != "nenhum" else -0.1
+        self.mouth_z = -0.1
 
     def deep(self, emission=0.4):
         return plastic(self.palette[2], roughness=0.3, coat=0.8, emission=emission)
@@ -348,63 +348,6 @@ CHEEKS = [
 ]
 
 # ---------------------------------------------------------------------------
-# Mustaches
-
-
-def _mustache_material(ctx):
-    color = ctx.config.get("mustache_color", 0xF4F2FF)
-    bright = sum((color >> s) & 0xFF for s in (16, 8, 0)) > 380
-    return plastic(color, roughness=0.65, coat=0.15, emission=0.55 if bright else 0.0)
-
-
-MUSTACHE_Z = -0.06
-
-
-def mustache_classico(ctx):
-    material = _mustache_material(ctx)
-    for side in (-1, 1):
-        pts = [(0.0, MUSTACHE_Z + 0.015), (0.09 * side, MUSTACHE_Z), (0.18 * side, MUSTACHE_Z - 0.03), (0.26 * side, MUSTACHE_Z - 0.035)]
-        tube(pts, [1.0, 1.0, 0.8, 0.45], material, bevel=0.06, orb=ctx.orb, lift=0.045)
-
-
-def mustache_enrolado(ctx):
-    material = _mustache_material(ctx)
-    for side in (-1, 1):
-        pts = [(0.0, MUSTACHE_Z + 0.0), (0.11 * side, MUSTACHE_Z - 0.025), (0.22 * side, MUSTACHE_Z - 0.035),
-               (0.29 * side, MUSTACHE_Z + 0.015), (0.27 * side, MUSTACHE_Z + 0.045), (0.23 * side, MUSTACHE_Z + 0.03)]
-        tube(pts, [1.0, 0.95, 0.8, 0.6, 0.45, 0.35], material, bevel=0.045, orb=ctx.orb, lift=0.035)
-
-
-def mustache_fino(ctx):
-    material = _mustache_material(ctx)
-    for side in (-1, 1):
-        pts = [(0.025 * side, MUSTACHE_Z + 0.01), (0.12 * side, MUSTACHE_Z + 0.0), (0.21 * side, MUSTACHE_Z + 0.02)]
-        tube(pts, [1.0, 0.85, 0.45], material, bevel=0.034, orb=ctx.orb, lift=0.03)
-
-
-def mustache_chevron(ctx):
-    material = _mustache_material(ctx)
-    pts = [(-0.17, MUSTACHE_Z - 0.01), (-0.08, MUSTACHE_Z + 0.01), (0.0, MUSTACHE_Z + 0.015), (0.08, MUSTACHE_Z + 0.01),
-           (0.17, MUSTACHE_Z - 0.01)]
-    tube(pts, [0.6, 1.0, 1.0, 1.0, 0.6], material, bevel=0.06, orb=ctx.orb, lift=0.05)
-
-
-def mustache_cavanhaque(ctx):
-    material = _mustache_material(ctx)
-    z = ctx.mouth_z - 0.08
-    tube([(0.0, z), (0.0, z - 0.06), (0.0, z - 0.12)], [1.0, 0.8, 0.35], material, bevel=0.05, orb=ctx.orb, lift=0.04)
-
-
-MUSTACHES = [
-    ("nenhum", "Nenhum", None),
-    ("classico", "Clássico", mustache_classico),
-    ("enrolado", "Enrolado", mustache_enrolado),
-    ("fino", "Fino", mustache_fino),
-    ("chevron", "Escovinha", mustache_chevron),
-    ("cavanhaque", "Cavanhaque", mustache_cavanhaque),
-]
-
-# ---------------------------------------------------------------------------
 # Hair (world coordinates; crown at z ≈ 0.97, face toward -Y)
 
 
@@ -546,50 +489,6 @@ def acc_monoculo(ctx):
          gold, bevel=0.008)
 
 
-def acc_chapeu_festa(ctx):
-    hat = cone(0.32, 0.0, 0.62, (0.12, 0.0, 1.18), core.striped(0xFFD24D, 0xFF5A7A, scale=8), rotation=(0, 0.28, 0))
-    sphere(0.075, (0.2, 0.0, 1.48), plastic(0xFFFFFF, roughness=0.9, coat=0.0))
-    torus(0.3, 0.03, (0.04, 0.0, 0.9), plastic(0xFF5A7A), rotation=(0, 0.28, 0))
-
-
-def acc_bone(ctx):
-    color = ctx.config.get("accent_color", 0xFF5A3D)
-    material = plastic(color, roughness=0.45, coat=0.3)
-    dome(1.035, 0.5, (0, 0, 0), material)
-    brim = cylinder(0.5, 0.03, (0, -0.95, 0.5), material, rotation=(-0.22, 0, 0))
-    brim.scale = (1.0, 0.7, 1.0)
-    sphere(0.06, (0, 0, 1.04), material)
-
-
-def acc_gorro(ctx):
-    color = ctx.config.get("accent_color", 0xFF6B4A)
-    material = knit(color)
-    dome(1.05, 0.44, (0, 0, 0), material)
-    torus(0.92, 0.1, (0, 0, 0.45), material)
-    sphere(0.2, (0, 0, 1.13), knit(0xFFFFFF))
-
-
-def acc_coroa(ctx):
-    gold = metal(0xF2C14E, 0.18)
-    cylinder(0.42, 0.2, (0, 0, 0.98), gold)
-    for i in range(5):
-        angle = 2 * math.pi * i / 5 + math.pi / 2
-        cone(0.09, 0.0, 0.22, (0.42 * math.cos(angle) * 0.95, 0.42 * math.sin(angle) * 0.95, 1.18), gold)
-    for i, hex_value in enumerate((0xFF3B5C, 0x3BB8FF, 0x5CFF8A)):
-        angle = -math.pi / 2 + (i - 1) * 0.6
-        sphere(0.045, (0.43 * math.cos(angle), 0.43 * math.sin(angle), 0.98), glow(hex_value, 1.5))
-
-
-def acc_laco(ctx):
-    color = ctx.config.get("accent_color", 0xFF4F8B)
-    material = plastic(color, roughness=0.35, coat=0.7)
-    center = Vector((0.52, -0.42, 0.78))
-    for side in (-1, 1):
-        lobe = cone(0.13, 0.02, 0.24, center + Vector((0.11 * side, 0, 0)), material, rotation=(0, -side * math.pi / 2, 0))
-        lobe.scale = (1.0, 0.55, 1.0)
-    sphere(0.06, center + Vector((0, -0.02, 0)), material)
-
-
 def acc_fones(ctx):
     color = ctx.config.get("accent_color", 0x2B2B36)
     shell = plastic(color, roughness=0.3, coat=0.8, subsurface=0)
@@ -600,62 +499,12 @@ def acc_fones(ctx):
         torus(0.19, 0.06, (0.95 * side, 0.0, 0.05), plastic(0x55556A, roughness=0.8, coat=0), rotation=(0, math.pi / 2, 0))
 
 
-def acc_aureola(ctx):
-    torus(0.42, 0.04, (0, 0.05, 1.32), glow(0xFFE27A, 3.0))
-
-
-def acc_chifres(ctx):
-    material = plastic(ctx.config.get("accent_color", 0xE0303F), roughness=0.3, coat=0.8)
-    for side in (-1, 1):
-        cone(0.1, 0.0, 0.32, (0.4 * side, 0.0, 0.98), material, rotation=(0, 0.45 * side, 0))
-
-
-def acc_orelhas_gato(ctx):
-    accent = ctx.config.get("accent_color")
-    material = plastic(accent, roughness=0.3, coat=0.8, emission=0.35) if accent is not None else ctx.deep(0.35)
-    inner = plastic(0xFF9CC2, roughness=0.5, coat=0.3, emission=0.3)
-    for side in (-1, 1):
-        ear = cone(0.24, 0.02, 0.36, (0.5 * side, 0.0, 0.92), material, rotation=(0, 0.42 * side, 0))
-        ear.scale = (1.0, 0.45, 1.0)
-        pad = cone(0.15, 0.01, 0.24, (0.48 * side, -0.07, 0.9), inner, rotation=(0, 0.42 * side, 0))
-        pad.scale = (1.0, 0.25, 1.0)
-
-
-def acc_flor(ctx):
-    petals = plastic(ctx.config.get("accent_color", 0xFFFFFF), roughness=0.4, coat=0.5, emission=0.2)
-    center = Vector((-0.55, -0.5, 0.68))
-    normal = center.normalized()
-    for i in range(6):
-        angle = 2 * math.pi * i / 6
-        offset = Vector((math.cos(angle) * 0.1, 0, math.sin(angle) * 0.1))
-        petal = sphere(0.075, center + offset, petals, scale=(1.0, 0.45, 1.0))
-        petal.rotation_euler = normal.to_track_quat("Y", "Z").to_euler()
-    sphere(0.05, center + normal * 0.03, plastic(0xFFC83D, roughness=0.4, coat=0.5, emission=0.4))
-
-
-def acc_cartola(ctx):
-    black = plastic(0x17151D, roughness=0.35, coat=0.5, subsurface=0)
-    cylinder(0.36, 0.52, (0, 0.04, 1.2), black)
-    cylinder(0.62, 0.03, (0, 0.04, 0.93), black)
-    cylinder(0.365, 0.09, (0, 0.04, 1.0), plastic(0xD93A4A, roughness=0.4, coat=0.4))
-
-
 ACCESSORIES = [
     ("oculos-redondos", "Óculos redondos", acc_oculos_redondos),
     ("oculos-quadrados", "Óculos quadrados", acc_oculos_quadrados),
     ("oculos-sol", "Óculos de sol", acc_oculos_sol),
     ("monoculo", "Monóculo", acc_monoculo),
-    ("chapeu-festa", "Chapéu de festa", acc_chapeu_festa),
-    ("bone", "Boné", acc_bone),
-    ("gorro", "Gorro", acc_gorro),
-    ("cartola", "Cartola", acc_cartola),
-    ("coroa", "Coroa", acc_coroa),
-    ("laco", "Laço", acc_laco),
     ("fones", "Fones", acc_fones),
-    ("aureola", "Auréola", acc_aureola),
-    ("chifres", "Chifrinhos", acc_chifres),
-    ("orelhas-gato", "Orelhas de gato", acc_orelhas_gato),
-    ("flor", "Flor", acc_flor),
 ]
 
 CATEGORIES = {
@@ -664,18 +513,13 @@ CATEGORIES = {
     "mouth": MOUTHS,
     "brows": BROWS,
     "cheeks": CHEEKS,
-    "mustache": MUSTACHES,
     "hair": HAIR,
     "accessories": ACCESSORIES,
 }
 
 
-FEATURE_SCALE = {
-    "hair": 1.35,
-    "laco": 1.6, "flor": 2.0, "chifres": 1.45, "orelhas-gato": 1.25, "chapeu-festa": 1.25, "coroa": 1.1,
-}
-PIVOTS = {"hair": (0, 0, 0.96), "laco": (0.52, -0.42, 0.78), "flor": (-0.55, -0.5, 0.68), "chifres": (0, 0, 0.95),
-          "orelhas-gato": (0, 0, 0.9), "chapeu-festa": (0.05, 0, 0.92), "coroa": (0, 0, 0.92)}
+FEATURE_SCALE = {"hair": 1.35}
+PIVOTS = {"hair": (0, 0, 0.96)}
 
 
 def _scaled(builder, ctx, key):
@@ -706,7 +550,7 @@ def build_features(ctx, only=None):
         _scaled(lookup["visemes"][config["viseme"]], ctx, "visemes")
     lookup["eyes"][config.get("eyes", "pilulas")](ctx)
     for category, default in (("mouth", "nenhuma"), ("brows", "nenhuma"), ("cheeks", "nenhuma"),
-                              ("mustache", "nenhum"), ("hair", "nenhum")):
+                              ("hair", "nenhum")):
         builder = lookup[category].get(config.get(category, default))
         if builder:
             _scaled(builder, ctx, category)

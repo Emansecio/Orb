@@ -118,7 +118,7 @@ extension OrbProposal {
         var config = OrbConfig.random()
         guard let value, case .object = value else { return config }
         let singles: [(String, OrbCategory)] = [("color", .color), ("eyes", .eyes), ("mouth", .mouth), ("brows", .brows),
-                                                ("cheeks", .cheeks), ("mustache", .mustache), ("hair", .hair)]
+                                                ("cheeks", .cheeks), ("hair", .hair)]
         for (key, category) in singles {
             guard let id = value[key]?.string, catalog.ids(category).contains(id) else { continue }
             config.set(category, id)

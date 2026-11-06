@@ -3,10 +3,10 @@
 Esferas acetinadas (vinil de toque macio) com luz de objeto 3D: difusa, sombra de forma, aro fosco fino e um lustro largo, sem reflexo nem brilho saindo pela base; o brilho dos fios do cabelo é um terço do antigo (`HairRenderer.satin`). A arte das camadas vem de duas ferramentas:
 
 - **`orbgen/`** (Swift, CPU, reproduzível): o **corpo** iluminado de cada cor, os **cabelos** (campos de
-  distância, com camada `-brilho` sem tinta e versão `-chapeu`), o **assentamento** dos traços planos (sombra de
+  distância, com camada `-brilho` sem tinta), o **assentamento** dos traços planos (sombra de
   contato) e as entradas de `options.json` que são dele. Não precisa de Blender.
 - **Blender (Cycles)** por script (`orbs.py`): os **traços planos** (olhos, bocas, sobrancelhas, bochechas,
-  bigodes, visemas, acessórios), gravados em `orbgen/flat/`.
+  visemas, acessórios), gravados em `orbgen/flat/`.
 
 O gel brilhante de antes foi calibrado com `reference/orb-ref.png`; o acetinado (2026-10) troca o reflexo, o ponto de luz e a luz da base por luz difusa e um lustro baixo (`Body.swift`).
 
@@ -34,7 +34,7 @@ $B -b --python art/orbs.py -- personas
 # Traços planos para o orbgen assentar (corpo e cabelo são do orbgen e ficam de fora)
 $B -b --python art/orbs.py -- layers [--category eyes]   # -> art/orbgen/flat (+ options.json do app)
 
-# Manifesto com ids e rótulos para o editor do app (mantém cabelo, chapéus e cores de cabelo do orbgen)
+# Manifesto com ids e rótulos para o editor do app (mantém cabelo e cores de cabelo do orbgen)
 $B -b --python art/orbs.py -- manifest      # -> options.json do app
 ```
 
@@ -49,11 +49,11 @@ Cada render gera um PNG transparente (para o app) e as prévias `-dark` e `-ligh
 | Boca (`mouth`) | 10 | Nenhuma, Sorriso, Sorrisão, Surpresa, Neutra, Gatinho :3, Língua, Dentinho, Triste, Assobio |
 | Sobrancelhas (`brows`) | 5 | Nenhuma, Retas, Arqueadas, Bravas, Preocupadas |
 | Bochechas (`cheeks`) | 4 | Nenhuma, Rosadas, Sardas, Coraçõezinhos |
-| Bigode (`mustache`) | 6 | Nenhum, Clássico, Enrolado, Fino, Escovinha, Cavanhaque |
 | Cabelo (`hair`, orbgen) | 13 | Nenhum, Franja, Ondulado, Cachinhos, Black power, Coque, Rabo de cavalo, Maria-chiquinha, Topete, Espetado, Moicano, Tufinho, Antena |
-| Acessórios (`accessories`, vários) | 15 | Óculos redondos / quadrados / de sol, Monóculo, Chapéu de festa, Boné, Gorro, Cartola, Coroa, Laço, Fones, Auréola, Chifrinhos, Orelhas de gato, Flor |
+| Acessórios (`accessories`, vários) | 5 | Óculos redondos / quadrados / de sol, Monóculo, Fones |
 
-Cores extras opcionais: `feature_color` (olhos e boca), `mustache_color`, `hair_color` e `accent_color` (boné, gorro, laço, fones, chifres, flor).
+Cores extras opcionais: `feature_color` (olhos e boca), `hair_color` e `accent_color` (fones).
+O bigode e os acessórios de cabeça (chapéus, laço, auréola, chifrinhos, orelhas de gato, flor) saíram em 2026-11.
 As cores claras (Pérola e Algodão-doce) trocam os olhos e a boca para escuros automaticamente.
 
 ## Visemas (boca falando)

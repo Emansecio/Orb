@@ -281,12 +281,12 @@ enum OrbSheet {
     static func render(to url: URL) {
         let activities: [OrbActivity] = [.idle, .speaking, .thinking, .typing, .searching, .waiting, .happy, .error, .sleepy]
         let orbs = AppState.initial.bots.map(\.orb) + [
-            OrbConfig(color: "rosa", eyes: "ovais", cheeks: "blush", hair: "tufinho", accessories: ["laco"]),
-            OrbConfig(color: "grafite", eyes: "pilulas", brows: "retas", mustache: "classico", accessories: ["fones"]),
-            OrbConfig(color: "menta", eyes: "felizes", mouth: "sorriso", cheeks: "sardas", accessories: ["flor"]),
-            OrbConfig(color: "sol", eyes: "pontos", mouth: "sorrisao", mustache: "enrolado", mustacheColor: 0x5A3B22),
-            OrbConfig(color: "noite", eyes: "pilulas", hair: "topete", accessories: ["cartola"]),
-            OrbConfig(color: "perola", eyes: "pilulas", cheeks: "blush", accessories: ["aureola"]),
+            OrbConfig(color: "rosa", eyes: "ovais", cheeks: "blush", hair: "tufinho"),
+            OrbConfig(color: "grafite", eyes: "pilulas", brows: "retas", accessories: ["fones"]),
+            OrbConfig(color: "menta", eyes: "felizes", mouth: "sorriso", cheeks: "sardas", accessories: ["oculos-redondos"]),
+            OrbConfig(color: "sol", eyes: "pontos", mouth: "sorrisao", hair: "espetado"),
+            OrbConfig(color: "noite", eyes: "pilulas", hair: "topete", accessories: ["oculos-sol"]),
+            OrbConfig(color: "perola", eyes: "pilulas", cheeks: "blush", accessories: ["monoculo"]),
         ]
         let sheet = VStack(alignment: .leading, spacing: 22) {
             HStack(spacing: 20) {
@@ -392,9 +392,9 @@ enum Snapshot {
         case "menubar-icons": AnyView(SystemSnapshots.menuBarIcons())
         case "editor": AnyView(OrbEditor(config: .constant(AppState.initial.bots[0].orb), name: "Atlas", category: .temperament))
         case let screen where screen.hasPrefix("editor-"):
-            // `editor-hair`, `editor-eyes`…: the editor on one category, with a look that has hair and a hat.
+            // `editor-hair`, `editor-eyes`…: the editor on one category, with a look that has hair and headphones.
             AnyView(OrbEditor(config: .constant(OrbConfig(color: "rosa", eyes: "ovais", mouth: "sorriso", cheeks: "blush",
-                                                          hair: "chiquinhas", accessories: ["laco"])),
+                                                          hair: "chiquinhas", accessories: ["fones"])),
                               name: "Lia", category: OrbCategory(rawValue: String(screen.dropFirst(7))) ?? .color)
                 .frame(width: 540))
         case let name where name.hasPrefix("transcript"):

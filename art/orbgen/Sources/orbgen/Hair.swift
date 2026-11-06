@@ -221,17 +221,8 @@ extension HairStyle {
             d = smin(d, smin(knot, sdCapsule(p, V3(0, 1.0, -0.06), V3(0, 1.18, -0.08), 0.15), 0.05), 0.07)
             return d
         }, accents: [Accent(distance: scrunchie, color: ribbon)],
-        lower: V3(-1.15, 0, -1.15), upper: V3(1.15, 1.66, 1.15), flow: flow, gloss: 0.34, relax: 0.85,
-        underHat: { pulledBack(id: "coque", line: line) })
+        lower: V3(-1.15, 0, -1.15), upper: V3(1.15, 1.66, 1.15), flow: flow, gloss: 0.34, relax: 0.85)
     }()
-
-    /// Hair pulled back under a hat: just the smooth cap, strands running to the nape.
-    private static func pulledBack(id: String, line: Hairline) -> HairStyle {
-        let flow = Flow.radial(V3(0, 0.75, -0.75))
-        return HairStyle(id: id, label: "", hair: { p in
-            cap(p, line: line, thickness: 0.065, edge: 0.014, crown: 0.02) + clumps(p, flow: flow, count: 20, depth: 0.007)
-        }, lower: V3(-1.15, 0, -1.15), upper: V3(1.15, 1.2, 1.15), flow: flow, gloss: 0.34, relax: 0.85)
-    }
 
     // A high ponytail swinging out to one side.
     static let rabo: HairStyle = {
@@ -291,8 +282,7 @@ extension HairStyle {
             let back = sdEllipsoid(p, V3(0.0, 0.98, -0.1), V3(0.62, 0.26, 0.55))
             d = smin(d, smin(smin(mass, back, 0.15), swoosh.distance(p), 0.08), 0.1)
             return d + clumps(p, flow: flow, count: 14, depth: 0.008)
-        }, lower: V3(-1.15, 0, -1.15), upper: V3(1.15, 1.62, 1.2), flow: flow, gloss: 0.42, relax: 0.85,
-        underHat: { pulledBack(id: "topete", line: line) })
+        }, lower: V3(-1.15, 0, -1.15), upper: V3(1.15, 1.62, 1.2), flow: flow, gloss: 0.42, relax: 0.85)
     }()
 
     // Anime-style spikes all around, with a few pointing down over the forehead.
@@ -340,13 +330,7 @@ extension HairStyle {
             var d = smax((Head.distance(V3(p.x * 3, p.y, p.z)) - 0.1) / 3, line.height(atan2(p.x, p.z)) - p.y, 0.12)
             for (base, tip, radius) in all { d = smin(d, sdRoundCone(p, base, tip, radius, 0.03), 0.08) }
             return d
-        }, lower: V3(-0.75, 0.3, -1.4), upper: V3(0.75, 1.8, 1.2), flow: .sagittal, gloss: 0.34, relax: 0.8,
-        underHat: {
-            // Only the strip shows under a hat; the crest is flattened by it.
-            HairStyle(id: "moicano", label: "", hair: { p in
-                smax((Head.distance(V3(p.x * 3, p.y, p.z)) - 0.1) / 3, line.height(atan2(p.x, p.z)) - p.y, 0.12)
-            }, lower: V3(-0.5, 0.3, -1.3), upper: V3(0.5, 1.2, 1.2), flow: .sagittal, gloss: 0.34, relax: 0.8)
-        })
+        }, lower: V3(-0.75, 0.3, -1.4), upper: V3(0.75, 1.8, 1.2), flow: .sagittal, gloss: 0.34, relax: 0.8)
     }()
 
     // A single cartoon curl on top, with a little strand beside it.

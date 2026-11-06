@@ -5,7 +5,7 @@ import Foundation
 struct OrbProposeTool: AgentTool {
     static let name = "orb_propose"
     static let instructionsLimit = 1_500
-    static let looks = ["color", "eyes", "mouth", "brows", "cheeks", "mustache", "hair", "accessories"]
+    static let looks = ["color", "eyes", "mouth", "brows", "cheeks", "hair", "accessories"]
 
     let spec = ToolSpec(
         name: OrbProposeTool.name,

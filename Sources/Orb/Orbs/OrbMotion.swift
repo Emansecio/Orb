@@ -9,7 +9,7 @@ struct OrbPose: Equatable {
     var look = CGPoint.zero
     /// Extra eye offset while the eyes lead the head during a saccade.
     var eyeLead = CGPoint.zero
-    /// Offset of loose layers (hair, hats) trailing the head and body.
+    /// Offset of loose layers (hair, headphones) trailing the head and body.
     var hairLag = CGPoint.zero
     /// Extra rotation (degrees) of loose layers swinging behind the body's tilt.
     var hairSwing = 0.0
@@ -79,25 +79,25 @@ struct OrbPose: Equatable {
 enum OrbSprings {
     /// The head turning toward where the eyes look.
     static let head = (response: 0.4, damping: 0.9)
-    /// Hair and hats trailing the head and body (position), and swinging behind the body's tilt (rotation).
+    /// Hair and headphones trailing the head and body (position), and swinging behind the body's tilt (rotation).
     static let loose = (response: 0.28, damping: 0.5)
     static let swing = (response: 0.3, damping: 0.5)
     /// Largest trailing offset (fraction of the orb) and swing (degrees).
     static let maxLag = 0.02, maxSwing = 3.0
 
-    /// What hair and hats follow: where the head looks and the body's lift (fractions of the orb).
+    /// What hair and headphones follow: where the head looks and the body's lift (fractions of the orb).
     static func hairAnchor(look: CGPoint, lift: Double) -> CGPoint {
         CGPoint(x: look.x * 0.05, y: look.y * 0.05 + lift)
     }
 
-    /// Steps the trailing spring toward `anchor` and returns how far hair and hats lag behind it (at most `maxLag`),
+    /// Steps the trailing spring toward `anchor` and returns how far hair and headphones lag behind it (at most `maxLag`),
     /// with a little overshoot. The live orb and the review sheets both call this, so the sheets show the real motion.
     static func hairLag(_ loose: inout SpringPoint, anchor: CGPoint, dt: Double) -> CGPoint {
         loose.step(toward: anchor, dt: dt, response: Self.loose.response, damping: Self.loose.damping)
         return CGPoint(x: max(-maxLag, min(maxLag, loose.value.x - anchor.x)), y: max(-maxLag, min(maxLag, loose.value.y - anchor.y)))
     }
 
-    /// Steps the swing spring toward the body's `tilt` and returns how many degrees hair and hats swing behind it
+    /// Steps the swing spring toward the body's `tilt` and returns how many degrees hair and headphones swing behind it
     /// (at most `maxSwing`), overshooting a little as it settles.
     static func hairSwing(_ swing: inout Spring, tilt: Double, dt: Double) -> Double {
         swing.step(toward: tilt, dt: dt, response: Self.swing.response, damping: Self.swing.damping)
@@ -107,8 +107,9 @@ enum OrbSprings {
 
 /// How far a live Orb reaches above its size box, so a stage can leave room for it (fractions of its size). Lifts
 /// from hops, the click jump and the temperament's flourishes can stack (a click during a hop), so the body's lift
-/// and stretch are eased under caps (`limit`) instead of adding up past them. With the tallest hat (~0.39 above the
-/// box at rest), the caps, the hover growth and the hair's trailing, `headroomFraction` is enough (`OrbDesignTests`).
+/// and stretch are eased under caps (`limit`) instead of adding up past them. With the tallest hair (~0.35 above the
+/// box at rest; the hats that left the catalog reached ~0.39), the caps, the hover growth and the hair's trailing,
+/// `headroomFraction` is enough (`OrbDesignTests`).
 enum OrbStageRoom {
     static let maxLift = 0.19, liftKnee = 0.15
     static let maxStretch = 0.06, stretchKnee = 0.045

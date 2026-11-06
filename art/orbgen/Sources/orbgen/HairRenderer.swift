@@ -66,8 +66,6 @@ struct HairStyle: Sendable {
     var gloss = 0.32
     /// Step scale for fields that aren't exact distances (displacement, noise).
     var relax = 0.9
-    /// The style squeezed under a hat (no bun or crest poking through it), rendered as `<id>-chapeu`.
-    var underHat: (@Sendable () -> HairStyle)?
 }
 
 /// Ray-marches a hair style over the head (orthographic, looking down -z) into two layers:

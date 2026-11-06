@@ -95,7 +95,7 @@ nome, como te chamar e o texto em cada conversa (assim eles sabem como te chamar
 - **Opções avançadas**: as permissões (veja abaixo), "Como funciona" (as instruções dele, que vão em toda conversa) e
   "Na primeira conversa, me fazer perguntas" (ligado por padrão: o Orb conhece você).
 - O **editor de aparência** ao lado: Cor (18), Jeito (calmo, equilibrado, animado, tímido, curioso: como ele se mexe e reage
-  ao mouse, não o que faz), Olhos, Boca, Sobrancelhas, Bochechas, Bigode, Cabelo e Acessórios (vários ao mesmo tempo), com
+  ao mouse, não o que faz), Olhos, Boca, Sobrancelhas, Bochechas, Cabelo e Acessórios (óculos, monóculo e fones, vários ao mesmo tempo), com
   **Sortear**. Os olhos seguem o cursor; o Orb mostra o que está fazendo (pensando, digitando no terminal, lendo, precisando de
   você, feliz ao terminar) e "fala" enquanto a resposta chega.
 

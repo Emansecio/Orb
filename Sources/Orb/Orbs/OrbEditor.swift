@@ -34,12 +34,12 @@ struct OrbEditor: View {
 
     /// Categories grouped the way people think about a character.
     private static let bodyGroup: (title: String, categories: [OrbCategory]) = ("Corpo", [.color, .temperament])
-    private static let faceGroup: (title: String, categories: [OrbCategory]) = ("Rosto", [.eyes, .mouth, .brows, .cheeks, .mustache])
+    private static let faceGroup: (title: String, categories: [OrbCategory]) = ("Rosto", [.eyes, .mouth, .brows, .cheeks])
     private static let styleGroup: (title: String, categories: [OrbCategory]) = ("Estilo", [.hair, .accessories])
 
-    /// The stage's Orb (regular and compact), and the room it needs: hats and hair reach ~0.39 of its size above
-    /// it, and a hop with a stretch adds ~0.3 more (lively temperaments jump 1.4× higher); below it, its shadow and
-    /// glow. Both are proportional to the Orb (`OrbStageRoom`).
+    /// The stage's Orb (regular and compact), and the room it needs: the tallest hair reaches ~0.35 of its size above
+    /// it (the room was sized for the hats, ~0.39), and a hop with a stretch adds ~0.3 more (lively temperaments jump
+    /// 1.4× higher); below it, its shadow and glow. Both are proportional to the Orb (`OrbStageRoom`).
     nonisolated static let stageOrb: CGFloat = 144, compactStageOrb: CGFloat = 112
     /// Editors shorter than this get the compact stage (the regular one leaves the options too little room).
     nonisolated static let compactBelow: CGFloat = 680
@@ -137,7 +137,7 @@ struct OrbEditor: View {
                 .padding(.top, OrbStageRoom.headroom(for: orb))
                 .padding(.bottom, OrbStageRoom.footroom(for: orb))
                 .frame(maxWidth: .infinity)
-                // Compact: the buttons sit up beside the head, where nothing of the Orb reaches (hats and hops stay
+                // Compact: the buttons sit up beside the head, where nothing of the Orb reaches (hair and hops stay
                 // within the middle column).
                 .overlay(alignment: .top) {
                     if compact {
@@ -455,11 +455,6 @@ struct OrbEditor: View {
                        automatic: config.autoHairColor(OrbCatalog.shared.palette(config.color))) { tint in
                 edit(hop: false) { $0.hairColor = tint }
             }
-        case .mustache where config.mustache != "nenhum":
-            TintPicker(title: "Cor do bigode", value: config.mustacheColor, swatches: OrbSwatch.mustache,
-                       automatic: config.autoMustacheColor(OrbCatalog.shared.palette(config.color))) { tint in
-                edit(hop: false) { $0.mustacheColor = tint }
-            }
         case .accessories where config.accessories.contains(where: OrbCatalog.shared.tintedAccessories.contains):
             TintPicker(title: "Cor dos acessórios", value: config.accentColor, swatches: OrbSwatch.accent, automatic: nil) { tint in
                 edit(hop: false) { $0.accentColor = tint }
@@ -493,13 +488,13 @@ private extension View {
 
 private struct OptionCell: View {
     /// What the thumbnail shows: the whole Orb (colors), a close-up of the face (eyes, mouth…), or the head with
-    /// room above it (hair, hats).
+    /// room above it (hair, headphones).
     enum Framing {
         case whole, face, head
 
         init(_ category: OrbCategory) {
             switch category {
-            case .eyes, .mouth, .brows, .cheeks, .mustache: self = .face
+            case .eyes, .mouth, .brows, .cheeks: self = .face
             case .hair, .accessories: self = .head
             case .color, .temperament: self = .whole
             }
@@ -540,7 +535,7 @@ private struct OptionCell: View {
         case .whole:
             OrbView(config: preview, size: 46, animated: isHovering, followsPointer: false)
         case .head:
-            // Hair and hats reach about half an orb above the head.
+            // Hair reaches about half an orb above the head.
             OrbView(config: preview, size: 44, animated: isHovering, followsPointer: false)
                 .offset(y: 10)
         case .face:

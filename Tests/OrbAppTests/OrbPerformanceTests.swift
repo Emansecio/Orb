@@ -145,11 +145,11 @@ struct OrbPerformanceTests {
 
     @Test func glassesMoveWithTheEyes() {
         let glasses = OrbLayer(kind: .accessory, path: "accessories/oculos-redondos", tint: nil)
-        let hat = OrbLayer(kind: .accessory, path: "accessories/cartola", tint: nil)
+        let headphones = OrbLayer(kind: .accessory, path: "accessories/fones", tint: nil)
         #expect(glasses.depth == OrbLayer(kind: .eyes, path: "eyes/pontos", tint: nil).depth)
         #expect(!glasses.isLoose)
-        #expect(hat.depth < glasses.depth)
-        #expect(hat.isLoose)
+        #expect(headphones.depth < glasses.depth)
+        #expect(headphones.isLoose)
     }
 
     @Test func loadingCompletesOnTheMainActor() async {

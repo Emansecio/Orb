@@ -79,9 +79,8 @@ def contact_sheet(paths, out, columns=6):
 
 CATALOG_BASE = {"color": "indigo", "eyes": "pilulas"}
 CATALOG_OVERRIDES = {
-    # Show mustaches/hair/brows on a neutral face, accessories on a smiling one
+    # Show hair/brows on a neutral face, accessories on a smiling one
     "mouth": {},
-    "mustache": {"mouth": "sorriso"},
     "accessories": {"mouth": "sorriso"},
 }
 
@@ -110,27 +109,20 @@ def catalog(category, samples, size):
 
 
 PERSONAS = [
-    ("professor", "Professor", {"color": "chocolate", "eyes": "pontos", "brows": "arqueadas", "mustache": "classico",
-                                "mouth": "sorriso", "accessories": ["oculos-redondos"]}),
+    ("professor", "Professor", {"color": "chocolate", "eyes": "pontos", "brows": "arqueadas", "mouth": "sorriso",
+                                "accessories": ["oculos-redondos"]}),
     ("dj", "DJ", {"color": "aurora", "eyes": "fendas", "mouth": "neutra", "accessories": ["fones", "oculos-sol"]}),
-    ("princesa", "Realeza", {"color": "rosa", "eyes": "grandes", "cheeks": "blush", "mouth": "sorriso", "accessories": ["coroa"]}),
-    ("festa", "Festeiro", {"color": "sol", "eyes": "felizes", "mouth": "sorrisao", "cheeks": "blush",
-                           "accessories": ["chapeu-festa"]}),
-    ("gato", "Gatinho", {"color": "lavanda", "eyes": "ovais", "mouth": "gatinho", "cheeks": "coracoes",
-                         "accessories": ["orelhas-gato"]}),
-    ("capeta", "Travesso", {"color": "cereja", "eyes": "bravos", "brows": "bravas", "mouth": "dentinho",
-                            "accessories": ["chifres"]}),
-    ("anjo", "Anjinho", {"color": "perola", "eyes": "sono", "mouth": "sorriso", "cheeks": "blush", "accessories": ["aureola"]}),
-    ("cavalheiro", "Cavalheiro", {"color": "noite", "eyes": "pilulas", "mustache": "enrolado",
-                                  "accessories": ["cartola", "monoculo"]}),
-    ("skater", "Skatista", {"color": "lima", "eyes": "piscadela", "mouth": "lingua", "cheeks": "sardas",
-                            "accessories": ["bone"]}),
-    ("inverno", "Inverno", {"color": "ceu", "eyes": "pontos", "mouth": "assobio", "cheeks": "blush", "accessories": ["gorro"]}),
+    ("princesa", "Realeza", {"color": "rosa", "eyes": "grandes", "cheeks": "blush", "mouth": "sorriso", "hair": "coque"}),
+    ("festa", "Festeiro", {"color": "sol", "eyes": "felizes", "mouth": "sorrisao", "cheeks": "blush", "hair": "black-power"}),
+    ("gato", "Gatinho", {"color": "lavanda", "eyes": "ovais", "mouth": "gatinho", "cheeks": "coracoes"}),
+    ("capeta", "Travesso", {"color": "cereja", "eyes": "bravos", "brows": "bravas", "mouth": "dentinho", "hair": "espetado"}),
+    ("anjo", "Anjinho", {"color": "perola", "eyes": "sono", "mouth": "sorriso", "cheeks": "blush", "hair": "cachos"}),
+    ("cavalheiro", "Cavalheiro", {"color": "noite", "eyes": "pilulas", "hair": "topete", "accessories": ["monoculo"]}),
+    ("skater", "Skatista", {"color": "lima", "eyes": "piscadela", "mouth": "lingua", "cheeks": "sardas", "hair": "franja"}),
+    ("inverno", "Inverno", {"color": "ceu", "eyes": "pontos", "mouth": "assobio", "cheeks": "blush", "accessories": ["fones"]}),
     ("rock", "Roqueiro", {"color": "grafite", "eyes": "estrelas", "mouth": "sorrisao", "hair": "moicano"}),
-    ("jardim", "Jardineira", {"color": "menta", "eyes": "coracoes", "mouth": "sorriso", "hair": "franja",
-                              "accessories": ["flor"]}),
+    ("jardim", "Jardineira", {"color": "menta", "eyes": "coracoes", "mouth": "sorriso", "hair": "chiquinhas"}),
 ]
-
 
 def personas(samples, size):
     out_dir = os.path.join(ART, "renders", "personas")
@@ -145,8 +137,8 @@ def personas(samples, size):
 
 
 # Layers whose material is rendered white and tinted in the app (multiply)
-TINTED = {"hair", "mustache"}
-TINTED_ACCESSORIES = {"bone", "gorro", "laco", "fones", "chifres", "flor", "orelhas-gato"}
+TINTED = {"hair"}
+TINTED_ACCESSORIES = {"fones"}
 VARIANT_CATEGORIES = {"eyes", "mouth", "brows"}   # light (glowing) + dark (for light palettes)
 LAYER_CATEGORIES = [name for name in features.CATEGORIES if name != "color"] + ["visemes"]   # visemes: like mouth
 
@@ -187,8 +179,6 @@ def layers(samples, size, out, only_category=None):
                 config = {"color": color}
                 if category == "hair":
                     config["hair_color"] = 0xFFFFFF
-                if category == "mustache":
-                    config["mustache_color"] = 0xFFFFFF
                 if category == "accessories" and option_id in TINTED_ACCESSORIES:
                     config["accent_color"] = 0xFFFFFF
                 render_scene(config, os.path.join(out, category, f"{option_id}{suffix}.png"), only=(category, option_id))
@@ -202,15 +192,14 @@ def manifest(path=None):
             for name, options in features.CATEGORIES.items()}
     data["color"] = [{"id": pid, "label": label, "hex": [f"#{c:06X}" for c in colors]}
                      for pid, label, colors in features.PALETTES]
-    # Keep what orbgen owns: the hair styles, each palette's default hair color and the hats list.
+    # Keep what orbgen owns: the hair styles and each palette's default hair color.
     path = path or os.path.join(RESOURCES, "options.json")
     previous_path = path
     if os.path.exists(previous_path):
         with open(previous_path, encoding="utf-8") as handle:
             previous = json.load(handle)
-        for key in ("hair", "hats"):
-            if key in previous:
-                data[key] = previous[key]
+        if "hair" in previous:
+            data["hair"] = previous["hair"]
         hair_colors = {entry["id"]: entry["hair"] for entry in previous.get("color", []) if "hair" in entry}
         for entry in data["color"]:
             if entry["id"] in hair_colors:

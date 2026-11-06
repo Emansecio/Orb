@@ -4,7 +4,7 @@ import Testing
 @testable import Orb
 
 /// Where the live orb puts its layers when it is rebuilt: the body (placed only then) and the loose layers (hair and
-/// hats, rotated only when their swing changes), with real views in a real window. Part of `OrbDriverTests` so it runs
+/// headphones, rotated only when their swing changes), with real views in a real window. Part of `OrbDriverTests` so it runs
 /// serialized with it: every orb on a screen shares one driver, and those tests count its orbs.
 extension OrbDriverTests {
     private func placementWindow(_ content: NSView) -> NSWindow {
@@ -397,14 +397,14 @@ extension OrbDriverTests {
             time += 1.0 / 30
             view.stepIfDue(at: time)
         }
-        // A bow joins the loose layers: a rebuild in the middle of the swing.
-        view.configure(config: OrbConfig(hair: "rabo-de-cavalo", accessories: ["laco"]), activity: .happy, size: 64,
+        // Headphones join the loose layers: a rebuild in the middle of the swing.
+        view.configure(config: OrbConfig(hair: "rabo-de-cavalo", accessories: ["fones"]), activity: .happy, size: 64,
                        followsPointer: false, interactive: false, live: true)
-        await waitUntil("the bow placed") { !layers(view, .accessory).isEmpty }
+        await waitUntil("the headphones placed") { !layers(view, .accessory).isEmpty }
         time += 1.0 / 30
         view.stepIfDue(at: time)
         let loose = view.placedLayersForTesting.filter { $0.layer.isLoose }.map(\.view)
-        #expect(loose.count == 3)   // hair, its shine, the bow
+        #expect(loose.count == 3)   // hair, its shine, the headphones
         let crown = 1 - OrbGeometry.crownLine
         #expect(loose.allSatisfy { abs($0.anchorPoint.y - crown) < 1e-9 && $0.anchorPoint.x == 0.5 })
         let first = try #require(loose.first).transform

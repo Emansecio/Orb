@@ -13,12 +13,10 @@ struct OrbConfig: Hashable, Codable, Sendable {
     var mouth = "nenhuma"
     var brows = "nenhuma"
     var cheeks = "nenhuma"
-    var mustache = "nenhum"
     var hair = "nenhum"
     var accessories: [String] = []
     /// Optional tints (sRGB hex). nil = automatic default.
     var hairColor: UInt32?
-    var mustacheColor: UInt32?
     var accentColor: UInt32?
     /// Personality: how the Orb moves and reacts (not how it looks).
     var temperament = OrbTemperament.equilibrado
@@ -26,8 +24,8 @@ struct OrbConfig: Hashable, Codable, Sendable {
     var autoColors = OrbAutoColors.designed
 
     /// A random look that hangs together (new Orbs and the editor's "Sortear"): friendly expressions are much
-    /// likelier than the ones activities borrow (dizzy, angry, sleepy, sad), brows and mustaches are occasional, there
-    /// is at most one accessory, and the hair keeps the palette's own color most of the time (otherwise a natural one).
+    /// likelier than the ones activities borrow (dizzy, angry, sleepy, sad), brows are occasional, there is at most
+    /// one accessory, and the hair keeps the palette's own color most of the time (otherwise a natural one).
     static func random() -> OrbConfig {
         var rng = SystemRandomNumberGenerator()
         return random(using: &rng)
@@ -56,30 +54,15 @@ struct OrbConfig: Hashable, Codable, Sendable {
                                      "dentinho": 0.8, "neutra": 0.5, "assobio": 0.3])
         config.brows = pick(.brows, ["nenhuma": 6, "retas": 1, "arqueadas": 2])
         config.cheeks = pick(.cheeks, ["nenhuma": 4, "blush": 3, "sardas": 1.5, "coracoes": 0.8])
-        config.mustache = pick(.mustache, ["nenhum": 9], other: 0.35)
         config.hair = pick(.hair, ["nenhum": 3], other: 0.7)
         if config.hair != "nenhum", Double.random(in: 0..<1, using: &rng) < 0.35 {
             config.hairColor = OrbSwatch.naturalHair.randomElement(using: &rng)?.hex
         }
         if Double.random(in: 0..<1, using: &rng) < 0.45 {
-            // Nothing that fights the hair (an antenna under a hat, a top hat sinking into an afro).
-            let clashing = Set(catalog.ids(.accessories).filter { !Self.goesWith(hair: config.hair, accessory: $0) })
-            let accessory = pick(.accessories, Dictionary(uniqueKeysWithValues: clashing.map { ($0, 0) }), other: 1)
-            if !accessory.isEmpty, !clashing.contains(accessory) { config.accessories = [accessory] }
+            let accessory = pick(.accessories, [:], other: 1)
+            if !accessory.isEmpty { config.accessories = [accessory] }
         }
         return config
-    }
-
-    /// Whether a random look may pair this hair with this accessory (people can still choose any pair).
-    static func goesWith(hair: String, accessory: String) -> Bool {
-        let hats = OrbCatalog.shared.hats
-        switch hair {
-        case "antena": return !hats.contains(accessory)
-        case "black-power": return !["cartola", "coroa", "chapeu-festa"].contains(accessory)
-        // Its sprout has no hat version: it would cross the cap and the beanie's pompom and sit behind the crown.
-        case "tufinho": return !["bone", "gorro", "coroa"].contains(accessory)
-        default: return true
-        }
     }
 
     /// Spoken description of the look (VoiceOver), e.g. "Índigo, olhos Pílulas, boca Sorriso, cabelo Franja, Laço".
@@ -89,7 +72,6 @@ struct OrbConfig: Hashable, Codable, Sendable {
         if mouth != "nenhuma" { parts.append("boca \(catalog.label(.mouth, mouth))") }
         if brows != "nenhuma" { parts.append("sobrancelhas \(catalog.label(.brows, brows))") }
         if cheeks != "nenhuma" { parts.append("bochechas \(catalog.label(.cheeks, cheeks))") }
-        if mustache != "nenhum" { parts.append("bigode \(catalog.label(.mustache, mustache))") }
         if hair != "nenhum" { parts.append("cabelo \(catalog.label(.hair, hair))") }
         parts += accessories.map { catalog.label(.accessories, $0) }
         return parts.joined(separator: ", ")
@@ -103,7 +85,6 @@ struct OrbConfig: Hashable, Codable, Sendable {
         case .mouth: mouth
         case .brows: brows
         case .cheeks: cheeks
-        case .mustache: mustache
         case .hair: hair
         case .accessories: accessories.first ?? ""
         }
@@ -117,7 +98,6 @@ struct OrbConfig: Hashable, Codable, Sendable {
         case .mouth: mouth = id
         case .brows: brows = id
         case .cheeks: cheeks = id
-        case .mustache: mustache = id
         case .hair: hair = id
         case .accessories:
             if let index = accessories.firstIndex(of: id) { accessories.remove(at: index) } else { accessories.append(id) }
@@ -125,9 +105,9 @@ struct OrbConfig: Hashable, Codable, Sendable {
     }
 }
 
-/// Which automatic colors a look gets for the tints left nil (`hairColor`, `mustacheColor`, `accentColor`).
+/// Which automatic colors a look gets for the tints left nil (`hairColor`, `accentColor`).
 /// Orbs saved before the designed defaults keep the colors they always had (`original`: hair a darker shade of the
-/// body's deep color, a white mustache, cat ears in the deep color); everything made since gets the `designed` ones.
+/// body's deep color); everything made since gets the `designed` ones.
 /// Saved with the look, so an Orb never changes color by itself; headphones are white in both (dark ones vanished).
 enum OrbAutoColors: Int, Codable, Sendable {
     case original = 1, designed = 2
@@ -144,11 +124,10 @@ extension OrbConfig {
         mouth = try c.value(.mouth, default: fallback.mouth)
         brows = try c.value(.brows, default: fallback.brows)
         cheeks = try c.value(.cheeks, default: fallback.cheeks)
-        mustache = try c.value(.mustache, default: fallback.mustache)
         hair = try c.value(.hair, default: fallback.hair)
-        accessories = try c.value(.accessories, default: [])
+        // Head-worn accessories left the catalog (2026-11): a saved look sheds them, as it does the mustache key.
+        accessories = try c.value(.accessories, default: [String]()).filter { !Self.removedAccessories.contains($0) }
         hairColor = try c.decodeIfPresent(UInt32.self, forKey: .hairColor)
-        mustacheColor = try c.decodeIfPresent(UInt32.self, forKey: .mustacheColor)
         accentColor = try c.decodeIfPresent(UInt32.self, forKey: .accentColor)
         temperament = try c.value(.temperament, default: fallback.temperament)
         // Saved before the key existed: the original automatic colors. A value from a newer build: the designed ones.
@@ -159,6 +138,11 @@ extension OrbConfig {
     /// option leaves `options.json` (e.g. `.hair: ["old-id": "new-id"]`); other unknown ids fall back to the default.
     /// (The hair redesign kept every earlier id, so nothing needs mapping yet.)
     static let legacyIDs: [OrbCategory: [String: String]] = [:]
+
+    /// Accessories removed from the editor (hats, ears, horns, halo, bow, flower): dropped when a look is read, so
+    /// every Orb stops wearing them. The mustache went the same way; its keys are just no longer read.
+    static let removedAccessories: Set<String> = ["chapeu-festa", "bone", "gorro", "cartola", "coroa", "laco",
+                                                   "aureola", "chifres", "orelhas-gato", "flor"]
 
     /// The same look with every option id the catalog knows: renamed ids map to their successor and unknown
     /// ones fall back to the default (or are dropped, for accessories), so drawing never points at a missing image.
@@ -193,7 +177,7 @@ extension OrbConfig {
 }
 
 enum OrbCategory: String, CaseIterable, Identifiable, Sendable {
-    case color, temperament, eyes, mouth, brows, cheeks, mustache, hair, accessories
+    case color, temperament, eyes, mouth, brows, cheeks, hair, accessories
 
     var id: String { rawValue }
 
@@ -205,7 +189,6 @@ enum OrbCategory: String, CaseIterable, Identifiable, Sendable {
         case .mouth: "Boca"
         case .brows: "Sobrancelhas"
         case .cheeks: "Bochechas"
-        case .mustache: "Bigode"
         case .hair: "Cabelo"
         case .accessories: "Acessórios"
         }
@@ -219,7 +202,6 @@ enum OrbCategory: String, CaseIterable, Identifiable, Sendable {
         case .mouth: "mouth"
         case .brows: "eyebrow"
         case .cheeks: "face.smiling"
-        case .mustache: "mustache"
         case .hair: "comb"
         case .accessories: "eyeglasses"
         }
@@ -231,7 +213,7 @@ struct OrbSwatch: Hashable, Sendable {
     let hex: UInt32
     let name: String
 
-    /// Hair and mustache colors: natural ones first, then a few playful ones.
+    /// Hair colors: natural ones first, then a few playful ones.
     static let naturalHair = [
         OrbSwatch(hex: 0x1C1A2B, name: "Preto"), OrbSwatch(hex: 0x3A2216, name: "Castanho-escuro"),
         OrbSwatch(hex: 0x6B4A2E, name: "Castanho"), OrbSwatch(hex: 0xB5532C, name: "Ruivo"),
@@ -243,9 +225,7 @@ struct OrbSwatch: Hashable, Sendable {
         OrbSwatch(hex: 0x3FA9F5, name: "Azul"), OrbSwatch(hex: 0x2BC4A0, name: "Verde-água"),
         OrbSwatch(hex: 0xFF8A3D, name: "Laranja"),
     ]
-    /// Mustaches can also be white (their automatic color on colored bodies).
-    static let mustache = [OrbSwatch(hex: 0xF4F2FF, name: "Branco")] + hair
-    /// Accessories (boné, gorro, laço, fones…).
+    /// Accessories (the headphones).
     static let accent = [
         OrbSwatch(hex: 0xF4F2FF, name: "Branco"), OrbSwatch(hex: 0x2B2B36, name: "Grafite"),
         OrbSwatch(hex: 0x5A3B22, name: "Marrom"), OrbSwatch(hex: 0xC98A3A, name: "Caramelo"),
@@ -301,10 +281,6 @@ final class OrbCatalog: Sendable {
     let visemes: Set<String>
     /// Hair styles with a `hair/<id>-brilho` layer (highlights, ties and the shadow on the head, untinted).
     let hairShine: Set<String>
-    /// Accessories worn on top of the head, and the hair styles that have a `hair/<id>-chapeu` version to wear
-    /// under them (no bun or crest poking through the hat).
-    let hats: Set<String>
-    let hatHair: Set<String>
     private let knownIDs: [OrbCategory: Set<String>]
     let root: URL?
 
@@ -321,7 +297,6 @@ final class OrbCatalog: Sendable {
         var palettes: [OrbPalette] = []
         var categories: [OrbCategory: [OrbOption]] = [:]
         var tinted: Set<String> = []
-        var hats: Set<String> = []
         if let root, let data = try? Data(contentsOf: root.appendingPathComponent("options.json")),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             for entry in json["color"] as? [[String: Any]] ?? [] {
@@ -338,17 +313,14 @@ final class OrbCatalog: Sendable {
                 }
             }
             tinted = Set(json["tintedAccessories"] as? [String] ?? [])
-            hats = Set(json["hats"] as? [String] ?? [])
         }
         self.palettes = palettes
         self.categories = categories
         self.tintedAccessories = tinted
-        self.hats = hats
         let visemeFiles = root.flatMap { try? FileManager.default.contentsOfDirectory(atPath: $0.appendingPathComponent("visemes").path) }
         visemes = Set((visemeFiles ?? []).filter { $0.hasSuffix(".png") }.map { String($0.dropLast(4)) })
         let hairFiles = root.flatMap { try? FileManager.default.contentsOfDirectory(atPath: $0.appendingPathComponent("hair").path) }
         hairShine = Set((hairFiles ?? []).filter { $0.hasSuffix("-brilho.png") }.map { String($0.dropLast("-brilho.png".count)) })
-        hatHair = Set((hairFiles ?? []).filter { $0.hasSuffix("-chapeu.png") }.map { String($0.dropLast("-chapeu.png".count)) })
         var known = categories.mapValues { Set($0.map(\.id)) }
         known[.color] = Set(palettes.map(\.id))
         knownIDs = known
@@ -401,7 +373,7 @@ enum OrbImages {
         cache.totalCostLimit = 96 << 20
         return cache
     }()
-    /// Untinted bitmaps of layers that are drawn tinted (hair, mustache, accessories): the color picker changes
+    /// Untinted bitmaps of layers that are drawn tinted (hair, accessories): the color picker changes
     /// a tint many times a second, and re-tinting one of these costs a fraction of a PNG decode.
     nonisolated(unsafe) private static let untinted: NSCache<NSString, CGImage> = {
         let cache = NSCache<NSString, CGImage>()
@@ -596,7 +568,7 @@ enum OrbImages {
 
 /// One composited layer: an image path plus an optional multiply tint.
 struct OrbLayer: Identifiable, Hashable, Sendable {
-    enum Kind { case body, cheeks, mouth, mustache, brows, eyes, hair, accessory }
+    enum Kind { case body, cheeks, mouth, brows, eyes, hair, accessory }
     let kind: Kind
     let path: String
     let tint: UInt32?
@@ -608,7 +580,7 @@ struct OrbLayer: Identifiable, Hashable, Sendable {
         case .body: 0
         case .eyes: 0.075
         case .brows: 0.07
-        case .mouth, .mustache, .cheeks: 0.055
+        case .mouth, .cheeks: 0.055
         case .accessory where isEyewear: 0.075   // on the eyes: the lenses stay over them
         case .hair, .accessory: 0.025
         }
@@ -625,17 +597,17 @@ struct OrbLayer: Identifiable, Hashable, Sendable {
 
 /// Where things sit in the rendered layer images, as fractions measured from the top.
 enum OrbGeometry {
-    /// The orb fills `size`, but the images are this much larger so hats and halos fit.
+    /// The orb fills `size`, but the images are this much larger so the tallest hair fits.
     static let imageScale: CGFloat = 1.96
     static let eyeLine: CGFloat = 0.455
-    /// Top of the head: hair and hats swing around it, hanging from the head like real hair.
+    /// Top of the head: hair swings around it, hanging from the head like real hair.
     static let crownLine: CGFloat = 0.245
     /// Upper lip: talking mouths open downward from here.
     static let mouthLine: CGFloat = 0.533
     static let orbBottom: CGFloat = 0.755
     /// Opacity of the status bubble's fill (the chrome's color), live and static.
     static let bubbleFill: Double = 0.92
-    /// Smallest box (points) that shows the status bubble (`?`, `!`, `…`): the box, not the Orb, which a big hair or hat
+    /// Smallest box (points) that shows the status bubble (`?`, `!`, `…`): the box, not the Orb, which a big hair
     /// shrinks inside it.
     static let bubbleBox: CGFloat = 26
 
@@ -667,25 +639,19 @@ extension OrbConfig {
         if cheeks != "nenhuma" { layers.append(OrbLayer(kind: .cheeks, path: "cheeks/\(cheeks)", tint: nil)) }
         let mouthID = mouthOverride ?? mouth
         if mouthID != "nenhuma" { layers.append(OrbLayer(kind: .mouth, path: "mouth/\(mouthID)\(variant)", tint: nil)) }
-        if mustache != "nenhum" {
-            layers.append(OrbLayer(kind: .mustache, path: "mustache/\(mustache)", tint: mustacheColor ?? autoMustacheColor(palette)))
-        }
         let browsID = browsOverride ?? brows
         if browsID != "nenhuma" { layers.append(OrbLayer(kind: .brows, path: "brows/\(browsID)\(variant)", tint: nil)) }
         layers.append(OrbLayer(kind: .eyes, path: "eyes/\(eyesOverride ?? eyes)\(variant)", tint: nil))
         if hair != "nenhum" {
-            let catalog = OrbCatalog.shared
-            let hatted = catalog.hatHair.contains(hair) && accessories.contains(where: catalog.hats.contains)
-            let style = hatted ? "\(hair)-chapeu" : hair
-            layers.append(OrbLayer(kind: .hair, path: "hair/\(style)", tint: hairColor ?? autoHairColor(palette)))
+            layers.append(OrbLayer(kind: .hair, path: "hair/\(hair)", tint: hairColor ?? autoHairColor(palette)))
             // Highlights, ties and the hair's shadow on the head: drawn over the tinted hair, moving with it.
-            if catalog.hairShine.contains(style) {
-                layers.append(OrbLayer(kind: .hair, path: "hair/\(style)-brilho", tint: nil))
+            if OrbCatalog.shared.hairShine.contains(hair) {
+                layers.append(OrbLayer(kind: .hair, path: "hair/\(hair)-brilho", tint: nil))
             }
         }
         for accessory in accessories {
             let tint = OrbCatalog.shared.tintedAccessories.contains(accessory)
-                ? (accentColor ?? autoAccentColor(accessory, palette: palette)) : nil
+                ? (accentColor ?? autoAccentColor(accessory)) : nil
             layers.append(OrbLayer(kind: .accessory, path: "accessories/\(accessory)", tint: tint))
         }
         return layers
@@ -709,30 +675,10 @@ extension OrbConfig {
     }
 
     /// The automatic color of a tinted accessory (`accentColor` nil).
-    func autoAccentColor(_ accessory: String, palette: OrbPalette) -> UInt32 {
+    func autoAccentColor(_ accessory: String) -> UInt32 {
         switch accessory {
-        case "bone": 0xFF5A3D
-        case "gorro": 0xFF6B4A
-        case "laco": 0xFF4F8B
         case "fones": 0xE9E6F5
-        case "chifres": 0xE0303F
-        case "orelhas-gato":
-            switch autoColors {
-            case .original: palette.deep
-            // Over hair the ears take the body's color (in the hair's color they vanished into it); without hair,
-            // the hair color stands out against the body.
-            case .designed: hair == "nenhum" ? autoHairColor(palette) : palette.hexes[1]
-            }
         default: 0xFFFFFF
-        }
-    }
-
-    /// The automatic mustache color (`mustacheColor` nil): the hair's when you chose one (mustaches match hair),
-    /// white on colored bodies, and the hair color on pale ones, where white would vanish.
-    func autoMustacheColor(_ palette: OrbPalette) -> UInt32 {
-        switch autoColors {
-        case .original: 0xF4F2FF
-        case .designed: hairColor ?? (palette.isPale ? autoHairColor(palette) : 0xF4F2FF)
         }
     }
 

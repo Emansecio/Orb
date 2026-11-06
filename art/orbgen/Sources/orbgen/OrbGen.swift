@@ -100,11 +100,6 @@ enum OrbGen {
             let layers = HairRenderer(style: style).render()
             try layers.base.writePNG(to: folder.appendingPathComponent("\(style.id).png"))
             try layers.shine.writePNG(to: folder.appendingPathComponent("\(style.id)-brilho.png"))
-            if let hatted = style.underHat?() {
-                let layers = HairRenderer(style: hatted).render()
-                try layers.base.writePNG(to: folder.appendingPathComponent("\(style.id)-chapeu.png"))
-                try layers.shine.writePNG(to: folder.appendingPathComponent("\(style.id)-chapeu-brilho.png"))
-            }
             print(String(format: "cabelo %@ (%.1f s)", style.id, Date().timeIntervalSince(start)))
         }
     }

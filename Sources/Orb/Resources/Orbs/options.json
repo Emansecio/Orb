@@ -331,32 +331,6 @@
       "label": "Coraçõezinhos"
     }
   ],
-  "mustache": [
-    {
-      "id": "nenhum",
-      "label": "Nenhum"
-    },
-    {
-      "id": "classico",
-      "label": "Clássico"
-    },
-    {
-      "id": "enrolado",
-      "label": "Enrolado"
-    },
-    {
-      "id": "fino",
-      "label": "Fino"
-    },
-    {
-      "id": "chevron",
-      "label": "Escovinha"
-    },
-    {
-      "id": "cavanhaque",
-      "label": "Cavanhaque"
-    }
-  ],
   "hair": [
     {
       "id": "nenhum",
@@ -429,62 +403,15 @@
       "label": "Monóculo"
     },
     {
-      "id": "chapeu-festa",
-      "label": "Chapéu de festa"
-    },
-    {
-      "id": "bone",
-      "label": "Boné"
-    },
-    {
-      "id": "gorro",
-      "label": "Gorro"
-    },
-    {
-      "id": "cartola",
-      "label": "Cartola"
-    },
-    {
-      "id": "coroa",
-      "label": "Coroa"
-    },
-    {
-      "id": "laco",
-      "label": "Laço"
-    },
-    {
       "id": "fones",
       "label": "Fones"
-    },
-    {
-      "id": "aureola",
-      "label": "Auréola"
-    },
-    {
-      "id": "chifres",
-      "label": "Chifrinhos"
-    },
-    {
-      "id": "orelhas-gato",
-      "label": "Orelhas de gato"
-    },
-    {
-      "id": "flor",
-      "label": "Flor"
     }
   ],
   "tinted": [
-    "hair",
-    "mustache"
+    "hair"
   ],
   "tintedAccessories": [
-    "bone",
-    "chifres",
-    "flor",
-    "fones",
-    "gorro",
-    "laco",
-    "orelhas-gato"
+    "fones"
   ],
   "variants": [
     "brows",
@@ -496,12 +423,5 @@
     "fala-o",
     "fala-e",
     "fala-m"
-  ],
-  "hats": [
-    "bone",
-    "cartola",
-    "chapeu-festa",
-    "coroa",
-    "gorro"
   ]
 }

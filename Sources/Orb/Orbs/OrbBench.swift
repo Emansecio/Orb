@@ -20,7 +20,7 @@ enum OrbBench {
     /// The same looks in every build being compared (hair, accessories and a plain one).
     static let looks: [OrbConfig] = [
         OrbConfig(color: "indigo", eyes: "pilulas", mouth: "sorriso", accessories: ["oculos-redondos"]),
-        OrbConfig(color: "rosa", eyes: "ovais", cheeks: "blush", hair: "tufinho", accessories: ["laco"]),
+        OrbConfig(color: "rosa", eyes: "ovais", cheeks: "blush", hair: "tufinho", accessories: ["fones"]),
         OrbConfig(color: "menta", eyes: "felizes", mouth: "sorriso", cheeks: "sardas", hair: "cachos"),
         OrbConfig(color: "perola", eyes: "pilulas", cheeks: "blush", hair: "franja"),
     ]
