@@ -63,11 +63,13 @@ enum ProseText {
     private static let checkboxTodo = checkboxImage(done: false)
 
     /// The space a heading has above it past the blocks' own, after another block (the first line of a text takes none).
+    /// Every level takes some, so a heading sits nearer the text it opens than the one it closes (below it there is only
+    /// the blocks' spacing, which the streamed pieces share).
     static func headingLead(_ level: Int) -> CGFloat {
         switch level {
-        case 1: 6
-        case 2: 4
-        default: 0
+        case 1: 10
+        case 2: 8
+        default: 6
         }
     }
 
