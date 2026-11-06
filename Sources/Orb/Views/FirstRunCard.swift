@@ -467,8 +467,9 @@ struct FirstRunCard: View {
     @State private var key = ""
     @FocusState private var keyFocused: Bool
 
-    /// On the welcome screen the Claude Code path is the one primary action when it is there to use (item 82): the other
-    /// paths are quieter, without a card of their own. The chat and Ajustes keep every path alike.
+    /// On the welcome screen the Claude Code path is the one primary action when it is there to use (item 82): an accent
+    /// outline marks it, and the other paths keep their cards so the choices still read as one list. The chat and Ajustes
+    /// keep every path alike.
     private func isPrimary(_ steps: FirstRunModel) -> Bool {
         if case .welcome = style, !asAlternatives { return steps.claude?.isInstalled == true }
         return false
@@ -494,19 +495,19 @@ struct FirstRunCard: View {
             if let name = steps.connectedName {
                 FirstRunReadyLabel(name: name)
             } else {
-                let quiet = isPrimary(steps)
+                let primary = isPrimary(steps)
                 VStack(spacing: Spacing.s) {
-                    if !asAlternatives { claudeCodeRow(steps, isPrimary: quiet) }
+                    if !asAlternatives { claudeCodeRow(steps, isPrimary: primary) }
                     FirstRunRow(symbol: "bubble.left.and.bubble.right", title: "Entrar com ChatGPT",
                                 subtitle: "Para quem tem ChatGPT Plus ou Pro. Abre o navegador para você entrar.",
-                                phase: phase(.chatgpt, steps), isEnabled: steps.working != .chatgpt, framed: !quiet,
+                                phase: phase(.chatgpt, steps), isEnabled: steps.working != .chatgpt,
                                 onCancel: steps.cancel) {
                         steps.connectChatGPT(model: model)
                     }
                     ForEach(steps.localServers) { kind in
                         FirstRunRow(symbol: "desktopcomputer", title: "Usar o \(kind.shortName) que já está rodando aqui",
                                     subtitle: "Roda no seu Mac, sem enviar nada para fora.",
-                                    phase: phase(.local(kind), steps), isEnabled: steps.working != .local(kind), framed: !quiet,
+                                    phase: phase(.local(kind), steps), isEnabled: steps.working != .local(kind),
                                     onCancel: steps.cancel) {
                             steps.connectLocal(kind, model: model)
                         }
@@ -679,7 +680,9 @@ private struct FirstRunRow: View {
         .padding(.vertical, 10)
         .contentShape(.rect)
 
-        Button(action: action) {
+        // While searching the button stays enabled, because a disabled plain button dims its label whatever its color;
+        // the click does nothing until the search ends.
+        Button { if isEnabled { action() } } label: {
             if framed {
                 content.hoverCard(isHovering && isEnabled, radius: Radius.card)
                     .overlay {
@@ -695,7 +698,8 @@ private struct FirstRunRow: View {
         // The row's own words for VoiceOver, on the button alone: the link and "Cancelar" beside it stay elements of
         // their own (VoiceOver can stop a sign-in that waits on the browser).
         .accessibilityLabel("\(title). \(phaseText)")
-        .disabled(!isEnabled)
+        .disabled(!isEnabled && !isSearching)
+        .accessibilityHint(isSearching ? "Procurando o Claude Code neste Mac" : "")
         .opacity(isEnabled || phase == .working || isSearching ? 1 : 0.6)
         .onHover { isHovering = $0 }
         .overlay(alignment: .trailing) {

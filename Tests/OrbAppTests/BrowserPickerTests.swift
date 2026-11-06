@@ -39,7 +39,7 @@ struct BrowserPickerCopyTests {
         let line = BrowserPickerCopy.browserLine(status: missing("agent-browser", "Chrome"))
         #expect(line.tone == .warning && line.action == .installBrowser)
         // The problem and its consequence are two lines: the first loud, the second quiet. The Orb's name is the one who reads.
-        #expect(line.text == "Falta instalar agent-browser e Chrome")
+        #expect(line.text == "Falta instalar o controle do navegador e o Chrome")
         #expect(line.consequence == "Até lá, o Orb só lê páginas simples.")
         let named = BrowserPickerCopy.browserLine(status: missing("agent-browser"), orbName: "Atlas")
         #expect(named.consequence == "Até lá, Atlas só lê páginas simples.")

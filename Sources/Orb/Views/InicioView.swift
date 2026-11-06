@@ -201,20 +201,19 @@ struct InicioView: View {
         let news = filter.map { id in all.filter { $0.entry.botID == id } } ?? all
         let shown = showingAll ? news : Array(news.prefix(Self.newsAtRest))
         return section("Novidades", count: news.count, tone: .plain) {
+            // The filter sits in the header, beside the count it changes, instead of on a row of its own above the list.
             if orbs.count > 1 {
-                HStack {
-                    Spacer()
-                    Menu(filter.flatMap { model.bot($0)?.name } ?? "Todos os Orbs") {
-                        Button("Todos os Orbs") { orbFilter = nil }
-                        Divider()
-                        ForEach(orbs, id: \.self) { id in
-                            Toggle(model.bot(id)?.name ?? "Orb indisponível", isOn: Binding(get: { filter == id }, set: { orbFilter = $0 ? id : nil }))
-                        }
+                Menu(filter.flatMap { model.bot($0)?.name } ?? "Todos os Orbs") {
+                    Button("Todos os Orbs") { orbFilter = nil }
+                    Divider()
+                    ForEach(orbs, id: \.self) { id in
+                        Toggle(model.bot(id)?.name ?? "Orb indisponível", isOn: Binding(get: { filter == id }, set: { orbFilter = $0 ? id : nil }))
                     }
-                    .menuStyle(.button).buttonStyle(GhostStyle()).fixedSize()
-                    .help("Mostra as novidades de um Orb só")
                 }
+                .menuStyle(.button).buttonStyle(GhostStyle()).controlSize(.small).fixedSize().hangsOnTrailingEdge()
+                .help("Mostra as novidades de um Orb só")
             }
+        } content: {
             if news.isEmpty {
                 Text(model.inicioVisitBase == nil ? "Ainda não há resultados recentes." : "Nenhuma novidade desde sua última visita.")
                     .font(Typography.text).foregroundStyle(Palette.muted).padding(.vertical, 8)
@@ -274,8 +273,15 @@ struct InicioView: View {
     /// `needsYou`: a warm outline and the count in a pill, because these block an Orb. `plain`: no card, the rows are
     /// told apart by dividers (the history is read, not decided).
     private func section<Content: View>(_ title: String, count: Int, tone: SectionTone = .card, @ViewBuilder content: () -> Content) -> some View {
+        section(title, count: count, tone: tone, accessory: { EmptyView() }, content: content)
+    }
+
+    /// `accessory` ends the header row, after the count (the Novidades' filter by Orb).
+    private func section<Accessory: View, Content: View>(_ title: String, count: Int, tone: SectionTone = .card,
+                                                         @ViewBuilder accessory: () -> Accessory,
+                                                         @ViewBuilder content: () -> Content) -> some View {
         let body = VStack(alignment: .leading, spacing: Spacing.m) {
-            HStack {
+            HStack(spacing: Spacing.s) {
                 Text(title).font(Typography.title).foregroundStyle(Palette.ink).accessibilityAddTraits(.isHeader)
                 Spacer()
                 if count > 0 {
@@ -287,6 +293,7 @@ struct InicioView: View {
                         label.foregroundStyle(Palette.muted)
                     }
                 }
+                accessory()
             }
             Divider()
             content()

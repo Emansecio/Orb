@@ -52,7 +52,7 @@ enum BrowserPickerCopy {
     static func browserLine(status: BrowserStatus?, orbName: String = "o Orb") -> Line {
         guard let status else { return Line(text: "Conferindo o que está instalado…", tone: .neutral) }
         guard !status.isReady else { return Line(text: status.program.map { "Pronto · usa o \($0.label)" } ?? "Pronto", tone: .ready) }
-        let missing = status.missing.map(\.name).joined(separator: " e ")
+        let missing = status.missing.map(\.spokenName).joined(separator: " e ")
         return Line(text: "Falta instalar \(missing)", tone: .warning, action: .installBrowser,
                     consequence: "Até lá, \(orbName) só lê páginas simples.")
     }

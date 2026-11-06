@@ -92,6 +92,9 @@ struct BrowserStatus: Sendable, Equatable {
     struct Missing: Sendable, Equatable {
         /// "agent-browser" or "Chrome".
         var name: String
+
+        /// The name for the person, with its article: the tool is "o controle do navegador", not the command it runs as.
+        var spokenName: String { name == BrowserComponent.agentBrowser.name ? "o controle do navegador" : "o \(name)" }
     }
 
     var isReady: Bool { missing.isEmpty }
@@ -99,7 +102,7 @@ struct BrowserStatus: Sendable, Equatable {
     /// For the person: what is missing and where to install it (Portuguese).
     var userMessage: String? {
         guard !missing.isEmpty else { return nil }
-        let names = missing.map(\.name).joined(separator: " e ")
+        let names = missing.map(\.spokenName).joined(separator: " e ")
         return "Falta instalar \(names) para o navegador do Orb. Abra Ajustes → Navegador e clique em Instalar."
     }
 
