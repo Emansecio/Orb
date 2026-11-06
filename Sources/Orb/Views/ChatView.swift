@@ -634,7 +634,7 @@ private struct TranscriptList: View {
             entering(row, row.foldedThread(botID: look.id) { plainRow($0) })
         case .tools(let items):
             ToolGroupRow(items: items, botID: look.id, orb: look.orb, isOpen: openRuns.contains(row.id) || ToolGroupRow.opensInSnapshots,
-                         find: items.contains { $0.id == found?.itemID } ? found : nil) {
+                         find: items.contains { $0.id == found?.itemID } ? found : nil, liveCardShown: LiveScreenSetting.isOn()) {
                 toggleRun(row.id)
             }
             .equatable()

@@ -29,12 +29,14 @@ struct TranscriptRow: View, Equatable {
     var find: FindFocus?
     /// The row is in the Orb's own chat, where a message of yours can be edited (not in a routine's run, an exchange…).
     var editable = false
+    /// How many failed tries of this same action were folded away before it worked (`ToolTally.foldRetries`).
+    var retries = 0
 
     nonisolated static func == (lhs: TranscriptRow, rhs: TranscriptRow) -> Bool {
         lhs.item == rhs.item && lhs.botID == rhs.botID && lhs.orb == rhs.orb && lhs.isLastReply == rhs.isLastReply
             && lhs.showsAvatar == rhs.showsAvatar && lhs.isNarration == rhs.isNarration
             && lhs.offersRedo == rhs.offersRedo && lhs.isDropping == rhs.isDropping && lhs.find == rhs.find
-            && lhs.editable == rhs.editable
+            && lhs.editable == rhs.editable && lhs.retries == rhs.retries
     }
 
     var body: some View {
@@ -54,7 +56,7 @@ struct TranscriptRow: View, Equatable {
                        isLastReply: isLastReply, showsAvatar: showsAvatar, isNarration: isNarration, offersRedo: offersRedo,
                        highlight: find?.query)
         case .tool(let call):
-            ToolCallLine(call: call)
+            ToolCallLine(call: call, retries: retries)
         case .approval(let request):
             if let proposal = request.proposal { // MultiOrb (WP3): an Orb proposes a new Orb
                 OrbProposalCard(request: request, proposal: proposal, botID: botID, pulses: entering)
@@ -891,6 +893,8 @@ enum MarkdownCache {
 /// red mark does, with "Falhou" and the exit code. A click opens what it ran and what came out (`CommandBlock`).
 struct ToolCallLine: View {
     let call: ToolCall
+    /// Failed tries of this same action that the group folded away: the line says it worked after them.
+    var retries = 0
     @State private var isExpanded = Self.opensInSnapshots
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Found once per output, not on every render.
@@ -913,7 +917,8 @@ struct ToolCallLine: View {
         // ended and only for a command, and only where it is used: the open block, or the code beside a failed line.
         let ended = call.isCommand && call.state != .running && (isExpanded || failed) ? call.output.map(CommandOutput.init) : nil
         let time = call.state == .running ? nil : call.duration.map(ElapsedFormat.duration)
-        let meta = [failed ? ended?.lineNote : nil, time].compactMap { $0 }.joined(separator: " · ")
+        let meta = [retries > 0 ? (retries == 1 ? "Falhou, depois funcionou" : "Falhou \(retries) vezes, depois funcionou") : nil,
+                    failed ? ended?.lineNote : nil, time].compactMap { $0 }.joined(separator: " · ")
         VStack(alignment: .leading, spacing: 6) {
             Button {
                 withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) { isExpanded.toggle() }
@@ -926,7 +931,10 @@ struct ToolCallLine: View {
                         .foregroundStyle(failed ? Palette.danger : Palette.secondary)
                         .lineLimit(1)
                     if let code = words.code {
-                        Text(code)
+                        // Repeated runs differ by script and argument, not by the folder: the whole line is in the help.
+                        let shown = call.isCommand ? ShownCommand.compact(code) : code
+                        Text(shown)
+                            .help(shown == code ? "" : code)
                             .font(Typography.codeSmall)
                             .foregroundStyle(Palette.secondary)
                             .lineLimit(1)
@@ -1030,7 +1038,8 @@ struct ToolCallLine: View {
         switch call.state {
         case .running:
             ProgressView()
-                .controlSize(.mini)
+                .controlSize(.small)
+                .modifier(StrongSpinner())
                 .accessibilityHidden(true)
         case .done:
             Image(systemName: call.kind.symbol)
@@ -1229,6 +1238,8 @@ struct ToolGroupRow: View, Equatable {
     var find: FindFocus?
     /// A task step names its purpose; its original progress message remains inside the disclosure.
     var isStep = false
+    /// The Orb's "Ao vivo" card is in the chat and names the site, so the folded line does not repeat it.
+    var liveCardShown = false
     let toggle: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var permissionProblem: MacPermissionProblem?
@@ -1240,7 +1251,7 @@ struct ToolGroupRow: View, Equatable {
 
     nonisolated static func == (lhs: ToolGroupRow, rhs: ToolGroupRow) -> Bool {
         lhs.items == rhs.items && lhs.botID == rhs.botID && lhs.orb == rhs.orb && lhs.isOpen == rhs.isOpen && lhs.find == rhs.find
-            && lhs.isStep == rhs.isStep
+            && lhs.isStep == rhs.isStep && lhs.liveCardShown == rhs.liveCardShown
     }
 
     private var calls: [ToolCall] {
@@ -1250,7 +1261,7 @@ struct ToolGroupRow: View, Equatable {
     var body: some View {
         let calls = calls
         let isRunning = calls.contains { $0.state == .running }
-        let variants = isStep ? ToolTally.stepVariants(items) : ToolTally.lineVariants(calls)
+        let variants = isStep ? ToolTally.stepVariants(items) : ToolTally.lineVariants(calls, showsSite: !liveCardShown)
         let failures = ToolTally.failures(calls)
         // 6 pt between the actions of one group (one list, read down), 12 between the group and what is around it.
         VStack(alignment: .leading, spacing: Self.actionSpacing) {
@@ -1262,9 +1273,13 @@ struct ToolGroupRow: View, Equatable {
             }
             .padding(.leading, gutter)
             if isOpen {
-                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                // What the title already says, and the failed tries of an action that then worked, are not listed again.
+                let repeated = isStep ? ToolTally.openingRepeatedByTitle(items, title: variants[0], keeping: find?.itemID) : nil
+                let folded = ToolTally.foldRetries(items, keeping: find?.itemID)
+                let listed = items.filter { $0.id != repeated && !folded.hidden.contains($0.id) }
+                ForEach(Array(listed.enumerated()), id: \.element.id) { index, item in
                     TranscriptRow(item: item, botID: botID, orb: orb, showsAvatar: false, isNarration: true,
-                                  find: item.id == find?.itemID ? find : nil)
+                                  find: item.id == find?.itemID ? find : nil, retries: folded.retries[item.id] ?? 0)
                         .equatable()
                         .padding(.leading, 22) // under the line's words, past its symbol
                         // A rail under the line's symbol ties the actions to it, one piece per action that reaches down
@@ -1273,11 +1288,11 @@ struct ToolGroupRow: View, Equatable {
                             Rectangle()
                                 .fill(Palette.line)
                                 .frame(width: 1)
-                                .padding(.bottom, index == items.count - 1 ? 0 : -Self.actionSpacing)
+                                .padding(.bottom, index == listed.count - 1 ? 0 : -Self.actionSpacing)
                                 .padding(.leading, gutter + 6.5)
                         }
                         // The find bar scrolls to an action by its id; the first one's is the row's own.
-                        .id(index == 0 ? AnyHashable("\(item.id)-first") : AnyHashable(item.id))
+                        .id(item.id == items[0].id ? AnyHashable("\(item.id)-first") : AnyHashable(item.id))
                         .transition(reduceMotion ? .quiet : AnyTransition.unfold.animation(Motion.enter.delay(Motion.staggerDelay(index))))
                 }
             }
@@ -1299,6 +1314,7 @@ struct ToolGroupRow: View, Equatable {
                             // .small, not .mini: at 10 pt the step in progress read as a gray asterisk (review item 30).
                             ProgressView()
                                 .controlSize(.small)
+                                .modifier(StrongSpinner())
                                 .accessibilityHidden(true)
                         } else {
                             Image(systemName: isStep && failures == nil ? "checkmark" : symbol)
@@ -2269,5 +2285,16 @@ extension OrbTranscript {
             if case .notice(let text) = item.kind, NoticeAction.isMark(text) { return (item.id, text) }
         }
         return nil
+    }
+}
+
+
+/// The system spinner is a weak gray that cannot be tinted: lifted toward the text's end of the scale (lighter in the dark
+/// appearance, darker in the light one) it reads as text beside the words (review item 30).
+private struct StrongSpinner: ViewModifier {
+    @Environment(\.colorScheme) private var scheme
+
+    func body(content: Content) -> some View {
+        content.brightness(scheme == .dark ? 0.6 : -0.5)
     }
 }

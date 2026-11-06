@@ -467,6 +467,13 @@ struct FirstRunCard: View {
     @State private var key = ""
     @FocusState private var keyFocused: Bool
 
+    /// On the welcome screen the Claude Code path is the one primary action when it is there to use (item 82): the other
+    /// paths are quieter, without a card of their own. The chat and Ajustes keep every path alike.
+    private func isPrimary(_ steps: FirstRunModel) -> Bool {
+        if case .welcome = style, !asAlternatives { return steps.claude?.isInstalled == true }
+        return false
+    }
+
     private var steps: FirstRunModel { run ?? ownRun }
 
     var body: some View {
@@ -487,18 +494,19 @@ struct FirstRunCard: View {
             if let name = steps.connectedName {
                 FirstRunReadyLabel(name: name)
             } else {
+                let quiet = isPrimary(steps)
                 VStack(spacing: Spacing.s) {
-                    if !asAlternatives { claudeCodeRow(steps) }
+                    if !asAlternatives { claudeCodeRow(steps, isPrimary: quiet) }
                     FirstRunRow(symbol: "bubble.left.and.bubble.right", title: "Entrar com ChatGPT",
                                 subtitle: "Para quem tem ChatGPT Plus ou Pro. Abre o navegador para você entrar.",
-                                phase: phase(.chatgpt, steps), isEnabled: steps.working != .chatgpt,
+                                phase: phase(.chatgpt, steps), isEnabled: steps.working != .chatgpt, framed: !quiet,
                                 onCancel: steps.cancel) {
                         steps.connectChatGPT(model: model)
                     }
                     ForEach(steps.localServers) { kind in
                         FirstRunRow(symbol: "desktopcomputer", title: "Usar o \(kind.shortName) que já está rodando aqui",
                                     subtitle: "Roda no seu Mac, sem enviar nada para fora.",
-                                    phase: phase(.local(kind), steps), isEnabled: steps.working != .local(kind),
+                                    phase: phase(.local(kind), steps), isEnabled: steps.working != .local(kind), framed: !quiet,
                                     onCancel: steps.cancel) {
                             steps.connectLocal(kind, model: model)
                         }
@@ -532,7 +540,7 @@ struct FirstRunCard: View {
 
     // MARK: Rows
 
-    @ViewBuilder private func claudeCodeRow(_ steps: FirstRunModel) -> some View {
+    @ViewBuilder private func claudeCodeRow(_ steps: FirstRunModel, isPrimary: Bool) -> some View {
         let installed = steps.claude?.isInstalled
         let loggedIn = steps.claude?.isLoggedIn == true
         let subtitle: String = switch (installed, loggedIn) {
@@ -542,7 +550,7 @@ struct FirstRunCard: View {
         case (true, false): "Usa sua assinatura Claude Pro ou Max. Abre o navegador para você entrar."
         }
         FirstRunRow(symbol: "chevron.left.forwardslash.chevron.right", title: "Usar meu Claude Code", subtitle: subtitle,
-                    badge: installed == true ? "Recomendado" : nil,
+                    badge: installed == true ? "Recomendado" : nil, isPrimary: isPrimary,
                     phase: phase(.claudeCode, steps),
                     workingText: loggedIn ? "Conectando…" : "Aguardando o navegador…",
                     isEnabled: steps.working != .claudeCode && installed == true, isSearching: installed == nil,
@@ -617,6 +625,8 @@ private struct FirstRunRow: View {
     let title: String
     let subtitle: String
     var badge: String?
+    /// The one primary path of the welcome screen: an accent outline around its card.
+    var isPrimary = false
     var phase: Phase = .idle
     var workingText = "Aguardando o navegador…"
     var isEnabled = true
@@ -672,6 +682,11 @@ private struct FirstRunRow: View {
         Button(action: action) {
             if framed {
                 content.hoverCard(isHovering && isEnabled, radius: Radius.card)
+                    .overlay {
+                        if isPrimary {
+                            RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Palette.accentText.opacity(0.6), lineWidth: 1.5)
+                        }
+                    }
             } else {
                 content.hoverFill(isHovering && isEnabled, in: .rect(cornerRadius: Radius.card))
             }

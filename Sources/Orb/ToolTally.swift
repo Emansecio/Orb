@@ -140,8 +140,10 @@ enum ToolTally {
     /// `line`, from the fullest wording to the shortest (one when the actions have no descriptions): the row takes the first
     /// that fits its width, so a word is never cut in two. It names what the actions were for without "e mais N": how many
     /// there were is beside it (`countNote`), with the time.
-    static func lineVariants(_ calls: [ToolCall]) -> [String] {
+    /// `showsSite` is false when the Orb's "Ao vivo" card is in the chat and already names the site.
+    static func lineVariants(_ calls: [ToolCall], showsSite: Bool = true) -> [String] {
         if let said = intentVariants(calls) { return said }
+        guard showsSite else { return [summary(calls)] }
         let opened = calls.last { $0.kind == .browser && ["Abrindo página", "Abrindo uma aba"].contains($0.title) }
         guard let site = opened.flatMap({ WorkPhrase.host(of: WorkPhrase.firstLine(of: $0.detail)) }) else { return [summary(calls)] }
         return ["\(site) · \(summary(calls))"]
@@ -172,6 +174,44 @@ enum ToolTally {
             if variants.last != line { variants.append(line) }
         }
         return variants
+    }
+
+    // MARK: What a step does not repeat
+
+    /// The Orb's own words that open a step when the step's title is made from them (`stepVariants` falls back to that
+    /// message): opened, the same sentence would stand right under its title. nil when the title says something else.
+    /// `keeping` is never hidden (the find bar points at it).
+    static func openingRepeatedByTitle(_ items: [TranscriptItem], title: String, keeping: UUID? = nil) -> UUID? {
+        let key = title.lowercased()
+        for item in items {
+            guard case .bot(let text, _) = item.kind else { continue }
+            guard item.id != keeping, ToolIntent.normalize(text)?.lowercased() == key else { return nil }
+            return item.id
+        }
+        return nil
+    }
+
+    /// The actions that failed and were later done again with the same title and detail ("Falhou, depois funcionou"):
+    /// the failed ones leave the list and the action that worked says how many came before it. Only on screen: the
+    /// transcript keeps every action, and the folded line still counts the errors.
+    static func foldRetries(_ items: [TranscriptItem], keeping: UUID? = nil) -> (hidden: Set<UUID>, retries: [UUID: Int]) {
+        var failed: [String: [UUID]] = [:]
+        var hidden: Set<UUID> = []
+        var retries: [UUID: Int] = [:]
+        for item in items {
+            guard case .tool(let call) = item.kind else { continue }
+            let key = call.title + "\u{1}" + call.detail
+            switch call.state {
+            case .failed: failed[key, default: []].append(item.id)
+            case .done:
+                guard let earlier = failed.removeValue(forKey: key) else { continue }
+                let folded = earlier.filter { $0 != keeping }
+                hidden.formUnion(folded)
+                if !folded.isEmpty { retries[item.id] = folded.count }
+            case .running: break
+            }
+        }
+        return (hidden, retries)
     }
 
     /// "12 ações", beside a line that names what the actions were for; nil for one action or none with a

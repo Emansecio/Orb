@@ -332,6 +332,46 @@ struct ToolIntentTests {
         #expect(ToolTally.countNote([described(nil), described("Ler A")]) == "2 ações")
     }
 
+    @Test func theFoldedLineOfTheBrowserLeavesTheSiteToTheLiveCard() {
+        let opened = ToolCall(kind: .browser, title: "Abrindo página", detail: "https://gympass.com/login", state: .done)
+        #expect(ToolTally.lineVariants([opened]).first?.hasPrefix("gympass.com · ") == true)
+        #expect(ToolTally.lineVariants([opened], showsSite: false) == ["Abriu 1 página"])
+    }
+
+    @Test func aStepDoesNotListTheSentenceItsTitleIsMadeFrom() {
+        let said = TranscriptItem(.bot(text: "Conferir as vagas abertas.", isStreaming: false))
+        let call = TranscriptItem(.tool(shell("ls")))
+        let title = ToolTally.stepVariants([said, call])[0]
+        #expect(ToolTally.openingRepeatedByTitle([said, call], title: title) == said.id)
+        #expect(ToolTally.openingRepeatedByTitle([said, call], title: title, keeping: said.id) == nil)
+        // A title that says something else (the purpose of the action) keeps the sentence.
+        let purposeful = TranscriptItem(.tool(shell("ls", intent: "Listar as vagas")))
+        #expect(ToolTally.openingRepeatedByTitle([said, purposeful], title: ToolTally.stepVariants([said, purposeful])[0]) == nil)
+    }
+
+    @Test func aFailedActionThatWorkedLaterIsFoldedIntoTheOneThatWorked() {
+        let failed1 = TranscriptItem(.tool(shell("make", .failed)))
+        let failed2 = TranscriptItem(.tool(shell("make", .failed)))
+        let other = TranscriptItem(.tool(shell("ls", .failed)))
+        let worked = TranscriptItem(.tool(shell("make", .done)))
+        let folded = ToolTally.foldRetries([failed1, other, failed2, worked])
+        #expect(folded.hidden == [failed1.id, failed2.id])
+        #expect(folded.retries == [worked.id: 2])
+        // Still failing, or worked first: nothing to fold.
+        #expect(ToolTally.foldRetries([failed1, other]).hidden.isEmpty)
+        #expect(ToolTally.foldRetries([worked, failed1]).hidden.isEmpty)
+        #expect(ToolTally.foldRetries([failed1, worked], keeping: failed1.id).hidden.isEmpty)
+    }
+
+    @Test func aRepeatedCommandShowsTheScriptAndItsArgumentsAndNotTheFolder() {
+        #expect(ShownCommand.compact("python3 /Users/x/proj/scripts/run.py --lote 3") == "python3 run.py --lote 3")
+        #expect(ShownCommand.compact("node ./tools/build.js") == "node build.js")
+        #expect(ShownCommand.compact("swift build --jobs 6") == "swift build --jobs 6")
+        #expect(ShownCommand.compact("cat \"/a/b c/d.txt\"") == "cat \"/a/b c/d.txt\"")
+        #expect(ShownCommand.compact("cd /Users/x/proj") == "cd /Users/x/proj")
+        #expect(ShownCommand.compact("ls /a") == "ls /a")
+    }
+
     @Test func theWorkOfARequestCountsItsActionsAndLeavesTheDescriptionsToItsLines() {
         let calls = [described("Ler A"), described("Conferir B"), described(nil)]
         #expect(ToolTally.work(calls, seconds: 65) == "Trabalhou por 1 min 05 s · rodou 3 comandos")

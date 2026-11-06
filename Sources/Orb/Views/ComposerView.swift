@@ -165,7 +165,6 @@ struct ComposerView: View {
                     .transition(.adapted(.unfold, reduceMotion: reduceMotion))
                     .accessibilityHidden(true) // the microphone button says it as its value
             }
-            slashSuggestions(matches)
 
             // The whole message is laid out in a scroll view as tall as it is, up to `maxHeight`: past that the wheel and
             // the trackpad scroll the message (not the chat behind it) and its scroller shows. The field's own limit
@@ -218,6 +217,11 @@ struct ComposerView: View {
                             reduceMotion: reduceMotion)
         }
         .onGeometryChange(for: Bool.self) { $0.size.width < Self.compactBelow } action: { isCompact = $0 }
+        // The list floats above the card, as wide as it, instead of a card inside the card (item 33). The keys are the
+        // field's (`onKeyPress`), so ↑↓, ↩, ⇥ and Esc and the focus are the same wherever the list is drawn.
+        .overlay(alignment: .top) {
+            slashSuggestions(matches).alignmentGuide(.top) { $0[.bottom] + Spacing.xs }
+        }
     }
 
     /// A warning under the field. Said as the app's other warnings are: the mark, then the sentence, wrapping under
@@ -424,7 +428,8 @@ struct ComposerView: View {
                 }
             }
             .padding(.vertical, Spacing.xs)
-            .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: Radius.card))
+            .card(radius: Radius.card, fill: Palette.raised)
+            .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Skills sugeridas")
             .transition(.adapted(.asymmetric(insertion: .opacity.combined(with: .offset(y: 4)), removal: .opacity),

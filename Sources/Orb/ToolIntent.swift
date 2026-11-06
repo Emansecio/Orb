@@ -484,6 +484,20 @@ enum ShownCommand {
         return (String(detail[..<note.lowerBound]), String(folder))
     }
 
+    /// The line with every path cut to its last part ("python3 /Users/x/proj/scripts/run.py --lote 3" becomes "python3
+    /// run.py --lote 3"): five runs of the same script then differ by their arguments, not by the same long path. The full
+    /// line goes in the help. `cd` keeps its path, since there the path is the point.
+    static func compact(_ line: String) -> String {
+        let words = line.split(separator: " ", omittingEmptySubsequences: false)
+        guard words.first != "cd" else { return line }
+        return words.map { word -> Substring in
+            guard word.hasPrefix("/") || word.hasPrefix("~/") || word.hasPrefix("./"),
+                  !word.contains(where: { "\"'`$".contains($0) }),
+                  let last = word.split(separator: "/").last, last.count < word.count - 1 else { return word }
+            return last
+        }.joined(separator: " ")
+    }
+
     /// "swift build", or "python3 - <<'EOF' … 18 linhas": the first line that holds a command, whole (the view cuts it in
     /// the middle), and how many lines the command has when it has more than one. nil when there is no command.
     static func line(of detail: String) -> String? {

@@ -23,8 +23,10 @@ struct RequestRail: View {
 
     private var rail: some View {
         VStack(alignment: .trailing, spacing: 2) {
+            // The latest request is the current one (the chat does not track what is scrolled into view): it stands in ink.
+            let current = transcript.requests.last?.id
             ForEach(RequestMark.thinned(transcript.requests, limit: Self.limit)) { mark in
-                RequestRailMark(title: mark.title) { go(mark.id) }
+                RequestRailMark(title: mark.title, isCurrent: mark.id == current) { go(mark.id) }
             }
         }
         .padding(.trailing, Spacing.l)
@@ -35,13 +37,14 @@ struct RequestRail: View {
 
 private struct RequestRailMark: View {
     let title: String
+    var isCurrent = false
     let action: () -> Void
     @State private var isHovering = false
 
     var body: some View {
         Button(action: action) {
             Capsule()
-                .fill(isHovering ? Palette.ink : Palette.muted)
+                .fill(isHovering || isCurrent ? Palette.ink : Palette.muted)
                 .frame(width: isHovering ? 18 : 14, height: 2)
                 .frame(width: 22, height: 9, alignment: .trailing)
                 .contentShape(.rect)
