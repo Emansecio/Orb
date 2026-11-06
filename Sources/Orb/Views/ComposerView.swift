@@ -383,6 +383,7 @@ struct ComposerView: View {
     }
 
     private func mainButton(_ action: ComposerAction, routine: String?, elsewhere: Bool) -> some View {
+        // Stop is the same white circle as Send with another glyph: an accent ring while the Orb works tells them apart.
         Button {
             if action == .stop { model.stopTurn(botID) } else { send() }
         } label: {
@@ -391,7 +392,6 @@ struct ComposerView: View {
                 .animation(Motion.panel(reduceMotion: reduceMotion), value: action.symbol)
         }
         .buttonStyle(RoundActionStyle())
-        // Stop is the same white circle as Send with another glyph: an accent ring while the Orb works tells them apart.
         .overlay { if action == .stop { Circle().strokeBorder(Palette.accentText, lineWidth: 1.5).padding(-3).allowsHitTesting(false) } }
         .disabled(action != .stop && !canSend)
         .accessibilityLabel(action.title(isRoutine: routine != nil, elsewhere: elsewhere))

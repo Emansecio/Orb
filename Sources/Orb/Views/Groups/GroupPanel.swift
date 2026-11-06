@@ -200,12 +200,12 @@ private struct MemberRow: View {
                 .opacity(isHovering ? 1 : 0)
                 .help("Tornar \(look.name) o orquestrador")
             }
+            // Readable at rest, red only under the pointer (it takes the Orb out of the group).
             Button("Remover do grupo", systemImage: "minus.circle") {
                 model.removeMember(look.id, from: group.id)
             }
             .labelStyle(.iconOnly)
             .buttonStyle(CircleGhostStyle(side: 26, fontSize: 12))
-            // Readable at rest, red only under the pointer (it takes the Orb out of the group).
             .foregroundStyle(isHovering && canRemove ? Palette.danger : Palette.secondary)
             .disabled(!canRemove)
             .help(canRemove ? "Tira \(look.name) do grupo" : "Um grupo tem pelo menos 2 Orbs")
