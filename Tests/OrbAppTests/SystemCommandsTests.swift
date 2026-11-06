@@ -49,6 +49,14 @@ import Testing
         #expect(menuBarAlpha(working, at: leftEye) < 64)
     }
 
+    /// Working marks itself with three cut-out dots where waiting keeps the smile, so it is not told apart by the fill alone.
+    @MainActor @Test func menuBarIconWorkingHasThreeDotsAndNoSmile() {
+        let working = menuBarAlphas(.working(1)), waiting = menuBarAlphas(.waiting(1))
+        let sideDot = CGPoint(x: 6.3, y: 10.4) // from the top: below the eyes, left of where the smile reaches
+        #expect(menuBarAlpha(working, at: sideDot) < 64)
+        #expect(menuBarAlpha(waiting, at: sideDot) > 200)
+    }
+
     /// Waiting for you is the filled Orb with a solid dot on its upper-right rim, outside the Orb, behind a clear ring.
     @MainActor @Test func menuBarIconWaitingHasADotOnTheRim() {
         let waiting = menuBarAlphas(.waiting(1)), working = menuBarAlphas(.working(1))
@@ -273,7 +281,15 @@ import Testing
         #expect(entries.first { $0.action == .shortcuts }?.shortcut == "⌘/")
         // "pasta" belongs to the working folder only: it no longer finds "Nova categoria…".
         #expect(!PaletteSearch.rank(entries, query: "pasta").contains { $0.action == .newCategory })
-        #expect(entries.first { $0.id == "folder" }?.subtitle == "Pasta de Atlas")
+        #expect(PaletteSearch.rank(entries, query: "pasta").contains { $0.action == .openFolder })
+    }
+
+    @Test func theActionsHeadingNamesTheOpenOrbAndTheirRowsDoNotRepeatIt() {
+        #expect(PaletteEntry.Section.actions.title(orbName: "Atlas") == "Ações de Atlas")
+        #expect(PaletteEntry.Section.actions.title(orbName: nil) == "Ações")
+        #expect(PaletteEntry.Section.orbs.title(orbName: "Atlas") == "Orbs")
+        let actions = sample().filter { $0.section == .actions }
+        #expect(!actions.contains { ($0.subtitle ?? "").contains("Atlas") })
     }
 
     // MARK: Menu bar panel

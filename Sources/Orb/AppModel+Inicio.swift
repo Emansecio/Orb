@@ -7,6 +7,39 @@ struct InicioJump: Equatable, Sendable {
     var item: UUID
 }
 
+/// Novidades grouped by day for the home page: "Hoje", "Ontem", "Esta semana", then "Mais antigas". Pure, with `now` and
+/// the calendar given, so a test can fix the clock.
+enum InicioDays {
+    struct Group: Identifiable {
+        let title: String
+        let items: [InicioNews]
+        var id: String { title }
+    }
+
+    /// `news` is newest first (as `InicioNews.folded` returns it), so each group keeps that order and the groups come in
+    /// the order their first item appears.
+    static func group(_ news: [InicioNews], now: Date = .now, calendar: Calendar = .current) -> [Group] {
+        var titles: [String] = []
+        var buckets: [String: [InicioNews]] = [:]
+        for item in news {
+            let title = title(of: item.entry.date, now: now, calendar: calendar)
+            if buckets[title] == nil { titles.append(title) }
+            buckets[title, default: []].append(item)
+        }
+        return titles.map { Group(title: $0, items: buckets[$0] ?? []) }
+    }
+
+    static func title(of date: Date, now: Date, calendar: Calendar) -> String {
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: date), to: calendar.startOfDay(for: now)).day ?? 0
+        if days <= 0 { return "Hoje" }
+        if days == 1 { return "Ontem" }
+        return days <= 6 ? "Esta semana" : "Mais antigas"
+    }
+
+    /// "Ver mais 9 itens": the link under a list cut short.
+    static func moreLabel(hidden: Int) -> String { hidden == 1 ? "Ver mais 1 item" : "Ver mais \(hidden) itens" }
+}
+
 extension AppModel {
     func recordInicioChat(bot: UUID, chat: UUID, item: UUID, date: Date, text: String, succeeded: Bool,
                           source: Conversation? = nil) {

@@ -45,6 +45,15 @@ struct SidebarGroupsSection: View {
                     .accessibilityLabel("Novo grupo")
                     .accessibilityIdentifier("sidebar-new-group")
             }
+            if model.groups.isEmpty {
+                // An empty section explains itself, as "Arraste um Orb para cá" does for a category.
+                Text("Junte Orbs para trabalharem juntos")
+                    .font(Typography.small)
+                    .foregroundStyle(Palette.faint)
+                    .padding(.leading, SidebarCategoryLayout.titleInset)
+                    .padding(.vertical, 4)
+                    .transition(.adapted(.arrive, reduceMotion: reduceMotion))
+            }
             ForEach(model.groups) { group in
                 SidebarGroupRow(group: group, selectionSpace: selectionSpace)
                     .transition(.adapted(.arrive, reduceMotion: reduceMotion))
@@ -108,7 +117,7 @@ struct SidebarGroupRow: View {
                     case .unread:
                         Circle()
                             .fill(Palette.accentText)
-                            .frame(width: 7, height: 7)
+                            .frame(width: 8, height: 8)
                             .transition(.adapted(.mark, reduceMotion: reduceMotion))
                     case nil:
                         EmptyView()

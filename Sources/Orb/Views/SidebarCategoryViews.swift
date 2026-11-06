@@ -231,7 +231,7 @@ struct HiddenOrbsMarks: View {
             } else if collapsed && unread {
                 Circle()
                     .fill(Palette.accentText)
-                    .frame(width: 7, height: 7)
+                    .frame(width: 8, height: 8)
                     .transition(.adapted(.mark, reduceMotion: reduceMotion))
             }
         }

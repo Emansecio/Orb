@@ -26,6 +26,10 @@ struct InicioView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var sheet: InicioSheet?
     @State private var showingAll = false
+    /// "Em andamento" opened from its one-line form (shown that way while nothing waits for a decision).
+    @State private var workingOpen = false
+    /// Novidades narrowed to one Orb; nil shows them all.
+    @State private var orbFilter: UUID?
     @State private var showingRecent = false
     @State private var unavailable: String?
     @State private var presentedEntries: [InicioEntry] = []
@@ -34,6 +38,8 @@ struct InicioView: View {
     @State private var scrollAnchor = InicioScrollAnchor()
     @FocusState private var focusedRow: InicioRowFocus?
     @AccessibilityFocusState private var accessibilityFocusedRow: InicioRowFocus?
+
+    private static let columnWidth: CGFloat = 860
 
     private var events: [InicioEntry] {
         let base = model.inicioVisitBase
@@ -71,7 +77,8 @@ struct InicioView: View {
                         .transition(.opacity)
                 }
             }
-            .pageColumn()
+            // A column of reading width: on a wide window the time at a row's end would sit a screen away from its text.
+            .frame(maxWidth: Self.columnWidth).frame(maxWidth: .infinity).padding(Spacing.page)
             .animation(readingBelowTop ? nil : Motion.adapted(Motion.content, reduceMotion: reduceMotionOverride ?? reduceMotion), value: model.workingIDs)
         }
         .coordinateSpace(name: "inicio-scroll")
@@ -87,7 +94,8 @@ struct InicioView: View {
         }
         }
         .background(Palette.canvas)
-        .navigationTitle("Início")
+        // The page's own heading says it; a second "Início" in the title bar would repeat it.
+        .navigationTitle("")
         .onAppear { presentEntries() }
         .onChange(of: model.inicio.entries) { if !readingBelowTop { presentEntries() } }
         .onChange(of: readingBelowTop) { if !readingBelowTop { presentEntries() } }
@@ -125,7 +133,7 @@ struct InicioView: View {
         let pending = model.pendingApprovals
         let flagged = flaggedRuns
         if !pending.isEmpty || !flagged.isEmpty {
-            section("Precisa de você", count: pending.count + flagged.count) {
+            section("Precisa de você", count: pending.count + flagged.count, tone: .needsYou) {
                 ForEach(pending) { item in
                     row(botID: item.bot.id, focus: .approval(item.request.id), title: item.request.title, detail: "Aguardando sua resposta", date: nil) {
                         openPending(item.bot.id, approval: item.request.id)
@@ -151,20 +159,62 @@ struct InicioView: View {
 
     @ViewBuilder private var working: some View {
         if !model.workingIDs.isEmpty {
-            section("Em andamento", count: model.workingIDs.count) {
-                ForEach(model.workingIDs, id: \.self) { id in
-                    row(botID: id, focus: .working(id), title: model.live(id).shownWork?.headline ?? "Trabalhando", detail: "Ver trabalho", date: nil) {
-                        openWork(id)
+            // With nothing waiting on you, what runs is a line: the page leads with results, not with activity.
+            if workingOpen || !model.pendingApprovals.isEmpty || !flaggedRuns.isEmpty {
+                section("Em andamento", count: model.workingIDs.count) {
+                    ForEach(model.workingIDs, id: \.self) { id in
+                        row(botID: id, focus: .working(id), title: model.live(id).shownWork?.headline ?? "Trabalhando", detail: "Ver trabalho", date: nil) {
+                            openWork(id)
+                        }
                     }
                 }
+            } else {
+                Button { workingOpen = true } label: {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Em andamento").font(Typography.title).foregroundStyle(Palette.ink)
+                        Text(Self.itemsLabel(model.workingIDs.count)).font(Typography.small).foregroundStyle(Palette.muted)
+                        Spacer()
+                        Image(systemName: "chevron.down").font(Typography.small).foregroundStyle(Palette.faint).accessibilityHidden(true)
+                    }
+                    .padding(Spacing.cardPadding)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .card(radius: Radius.large, stroke: Palette.line)
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .help("Mostra o que os Orbs estão fazendo agora")
+                .accessibilityLabel("Em andamento, \(Self.itemsLabel(model.workingIDs.count))")
+                .accessibilityHint("Mostra o que os Orbs estão fazendo agora")
             }
         }
     }
 
+    private static func itemsLabel(_ count: Int) -> String { "\(count) \(count == 1 ? "item" : "itens")" }
+
     private var news: some View {
         let currentAttention = Set(flaggedRuns.map(\.1.id))
-        let news = InicioNews.folded(events.filter { !currentAttention.contains($0.id) })
-        return section("Novidades", count: news.count) {
+        let all = InicioNews.folded(events.filter { !currentAttention.contains($0.id) })
+        // The filter lists the Orbs that have news, in the sidebar's order; a filter whose Orb has none left shows all again.
+        let orbs = model.botIDs.filter { id in all.contains { $0.entry.botID == id } }
+        let filter = orbFilter.flatMap { orbs.contains($0) ? $0 : nil }
+        let news = filter.map { id in all.filter { $0.entry.botID == id } } ?? all
+        let shown = showingAll ? news : Array(news.prefix(Self.newsAtRest))
+        return section("Novidades", count: news.count, tone: .plain) {
+            if orbs.count > 1 {
+                HStack {
+                    Spacer()
+                    Menu(filter.flatMap { model.bot($0)?.name } ?? "Todos os Orbs") {
+                        Button("Todos os Orbs") { orbFilter = nil }
+                        Divider()
+                        ForEach(orbs, id: \.self) { id in
+                            Toggle(model.bot(id)?.name ?? "Orb indisponível", isOn: Binding(get: { filter == id }, set: { orbFilter = $0 ? id : nil }))
+                        }
+                    }
+                    .menuStyle(.button).buttonStyle(GhostStyle()).fixedSize()
+                    .help("Mostra as novidades de um Orb só")
+                }
+            }
             if news.isEmpty {
                 Text(model.inicioVisitBase == nil ? "Ainda não há resultados recentes." : "Nenhuma novidade desde sua última visita.")
                     .font(Typography.text).foregroundStyle(Palette.muted).padding(.vertical, 8)
@@ -172,14 +222,24 @@ struct InicioView: View {
                     Button("Ver resultados recentes") { showingRecent = true }.buttonStyle(GhostStyle())
                 }
             } else {
-                ForEach(showingAll ? news : Array(news.prefix(5))) { eventRow($0) }
-                if news.count > 5 {
-                    Button(showingAll ? "Mostrar menos" : "Ver mais") { showingAll.toggle() }.buttonStyle(GhostStyle())
+                ForEach(InicioDays.group(shown)) { day in
+                    Text(day.title).font(Typography.label.weight(.semibold)).foregroundStyle(Palette.secondary)
+                        .accessibilityAddTraits(.isHeader).padding(.top, Spacing.xs)
+                    ForEach(day.items) { item in
+                        eventRow(item)
+                        if item.id != day.items.last?.id { Divider() }
+                    }
+                }
+                if news.count > Self.newsAtRest {
+                    Button(showingAll ? "Mostrar menos" : InicioDays.moreLabel(hidden: news.count - Self.newsAtRest)) { showingAll.toggle() }
+                        .buttonStyle(LinkTextStyle())
                 }
             }
             if showingRecent { Button("Voltar às novidades") { showingRecent = false }.buttonStyle(GhostStyle()) }
         }
     }
+
+    private static let newsAtRest = 5
 
     @ViewBuilder private var followUps: some View {
         // Orb by Orb, its avatar and name once over its run of items: one Orb may keep dozens.
@@ -191,7 +251,8 @@ struct InicioView: View {
                 ForEach(Array(items.enumerated()), id: \.element.1.id) { index, pair in
                     let (routine, item) = pair
                     row(botID: routine.botID, focus: .followUp(item.id), title: item.subject, showsOrb: index == 0 || items[index - 1].0.botID != routine.botID,
-                        detail: "\(item.channel) · \(item.nextStep)" + (item.lastChecked.map { " · Verificado " + RoutineText.stamp($0) } ?? " · Sem verificação registrada"), date: nil) {
+                        detail: item.nextStep, badge: item.channel,
+                        status: item.lastChecked.map { "Verificado " + RoutineText.stamp($0) } ?? "Sem verificação registrada", date: nil) {
                         guard model.routines.contains(where: { $0.id == routine.id && $0.followUps.contains(where: { $0.id == item.id }) }) else {
                             unavailable = "Este acompanhamento não está mais disponível."; return
                         }
@@ -208,22 +269,40 @@ struct InicioView: View {
                    detail: outcome(event.outcome) + (news.runs > 1 ? " · a última de \(news.runs) rodadas" : ""), date: event.date) { open(event) }
     }
 
-    private func section<Content: View>(_ title: String, count: Int, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.m) {
+    private enum SectionTone { case card, needsYou, plain }
+
+    /// `needsYou`: a warm outline and the count in a pill, because these block an Orb. `plain`: no card, the rows are
+    /// told apart by dividers (the history is read, not decided).
+    private func section<Content: View>(_ title: String, count: Int, tone: SectionTone = .card, @ViewBuilder content: () -> Content) -> some View {
+        let body = VStack(alignment: .leading, spacing: Spacing.m) {
             HStack {
                 Text(title).font(Typography.title).foregroundStyle(Palette.ink).accessibilityAddTraits(.isHeader)
                 Spacer()
-                if count > 0 { Text("\(count) \(count == 1 ? "item" : "itens")").font(Typography.small).foregroundStyle(Palette.muted) }
+                if count > 0 {
+                    let label = Text(Self.itemsLabel(count)).font(Typography.small)
+                    if tone == .needsYou {
+                        label.foregroundStyle(Palette.warn).padding(.horizontal, 8).padding(.vertical, 2)
+                            .background(Capsule().fill(Palette.warn.opacity(0.14)))
+                    } else {
+                        label.foregroundStyle(Palette.muted)
+                    }
+                }
             }
             Divider()
             content()
         }
-        .padding(Spacing.cardPadding)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .card(radius: Radius.large, stroke: Palette.line)
+        return Group {
+            if tone == .plain {
+                body.frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                body.padding(Spacing.cardPadding)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .card(radius: Radius.large, stroke: tone == .needsYou ? Palette.warn : Palette.line)
+            }
+        }
     }
 
-    private func row(botID: UUID, focus: InicioRowFocus, title: String, showsOrb: Bool = true, detail: String, date: Date?,
+    private func row(botID: UUID, focus: InicioRowFocus, title: String, showsOrb: Bool = true, detail: String, badge: String? = nil, status: String? = nil, date: Date?,
                      action: @escaping () -> Void) -> some View {
         HStack(alignment: .center, spacing: 10) {
             if !showsOrb {
@@ -249,11 +328,22 @@ struct InicioView: View {
                     HStack(alignment: .center, spacing: 8) {
                         VStack(alignment: .leading, spacing: 3) {
                         // Summaries come from the Orbs in Markdown: drawn as the chat draws them, from its cache.
-                        Text(MarkdownCache.attributed(title)).font(Typography.text).foregroundStyle(Palette.ink).lineLimit(3).multilineTextAlignment(.leading)
-                        Text(MarkdownCache.attributed(detail)).font(Typography.small).foregroundStyle(Palette.muted).lineLimit(2).multilineTextAlignment(.leading)
+                        Text(MarkdownCache.attributed(title)).font(Typography.text).foregroundStyle(Palette.ink).lineLimit(2).multilineTextAlignment(.leading)
+                            .help(title)
+                        if let badge {
+                            // The channel as a pill ahead of the step, the check on its own line below.
+                            HStack(spacing: 6) {
+                                Text(badge).font(Typography.small).foregroundStyle(Palette.secondary)
+                                    .padding(.horizontal, 7).padding(.vertical, 1).background(Capsule().fill(Palette.ghostHover))
+                                Text(MarkdownCache.attributed(detail)).font(Typography.small).foregroundStyle(Palette.muted).lineLimit(1)
+                            }
+                        } else {
+                            Text(MarkdownCache.attributed(detail)).font(Typography.small).foregroundStyle(Palette.muted).lineLimit(1).multilineTextAlignment(.leading)
+                        }
+                        if let status { Text(status).font(Typography.small).foregroundStyle(Palette.muted).lineLimit(1) }
                         }
                         Spacer(minLength: 4)
-                        if let date { Text(ReplyTime.label(date)).font(Typography.small).foregroundStyle(Palette.faint) }
+                        if let date { Text(ReplyTime.label(date)).font(Typography.small).foregroundStyle(Palette.muted) }
                         Image(systemName: "chevron.right").font(Typography.small).foregroundStyle(Palette.faint)
                     }.contentShape(.rect)
                 }.buttonStyle(.plain)

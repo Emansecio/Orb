@@ -478,15 +478,59 @@ private struct PendingApprovalsSection: View {
 
     private func cards(_ pending: [PendingApproval]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            ForEach(pending) { entry in
-                QuickAskApprovalCard(entry: entry, openApp: {
-                    // A sheet of the main window stays (switching the screen would close it with what was typed in it).
-                    if !model.hasOpenSheet { _ = model.openPending(entry.bot.id, approval: entry.request.id) }
-                    openApp()
-                })
-                .transition(.quiet)
+            // One heading per Orb, its cards under it: "Atlas precisa de você" said once, not on every card.
+            ForEach(QuickAskApprovalGroups.byOrb(pending), id: \.first?.bot.id) { group in
+                VStack(alignment: .leading, spacing: 6) {
+                    if let bot = group.first?.bot { QuickAskOrbHeading(bot: bot, count: group.count) }
+                    ForEach(group) { entry in
+                        QuickAskApprovalCard(entry: entry, showsHeading: false, openApp: {
+                            // A sheet of the main window stays (switching the screen would close it with what was typed in it).
+                            if !model.hasOpenSheet { _ = model.openPending(entry.bot.id, approval: entry.request.id) }
+                            openApp()
+                        })
+                        .transition(.quiet)
+                    }
+                }
             }
         }
+    }
+}
+
+enum QuickAskApprovalGroups {
+    /// The requests grouped by the Orb that asks, in the order each Orb first appears; inside a group, in the given order.
+    static func byOrb(_ pending: [PendingApproval]) -> [[PendingApproval]] {
+        var groups: [[PendingApproval]] = []
+        var row: [UUID: Int] = [:]
+        for entry in pending {
+            if let index = row[entry.bot.id] {
+                groups[index].append(entry)
+            } else {
+                row[entry.bot.id] = groups.count
+                groups.append([entry])
+            }
+        }
+        return groups
+    }
+}
+
+/// "Atlas precisa de você", over the cards of one Orb.
+private struct QuickAskOrbHeading: View {
+    @Environment(AppModel.self) private var model
+    let bot: Bot
+    let count: Int
+
+    var body: some View {
+        let live = model.live(bot.id)
+        HStack(spacing: 8) {
+            BotAvatar(live: live, size: 18, paused: live.activity == .idle)
+            Text(bot.name)
+                .font(Typography.label.weight(.semibold))
+            Text(count > 1 ? "precisa de você · \(count) pedidos" : "precisa de você")
+                .font(Typography.small)
+                .foregroundStyle(Palette.muted)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
     }
 }
 
@@ -495,6 +539,8 @@ private struct PendingApprovalsSection: View {
 struct QuickAskApprovalCard: View {
     @Environment(AppModel.self) private var model
     let entry: PendingApproval
+    /// False under an Orb's own heading (`QuickAskOrbHeading`), which already says who asks.
+    var showsHeading = true
     let openApp: () -> Void
 
     var body: some View {
@@ -502,13 +548,15 @@ struct QuickAskApprovalCard: View {
         let preview = ApprovalPreview.of(request)
         let live = model.live(entry.bot.id)
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                BotAvatar(live: live, size: 18, paused: live.activity == .idle)
-                Text(entry.bot.name)
-                    .font(Typography.label.weight(.semibold))
-                Text("precisa de você")
-                    .font(Typography.small)
-                    .foregroundStyle(Palette.muted)
+            if showsHeading {
+                HStack(spacing: 8) {
+                    BotAvatar(live: live, size: 18, paused: live.activity == .idle)
+                    Text(entry.bot.name)
+                        .font(Typography.label.weight(.semibold))
+                    Text("precisa de você")
+                        .font(Typography.small)
+                        .foregroundStyle(Palette.muted)
+                }
             }
             Text(request.title)
                 .font(Typography.text.weight(.medium))
@@ -565,7 +613,8 @@ struct QuickAskApprovalCard: View {
             }
         }
         .padding(10)
-        .card(radius: Radius.medium, stroke: Palette.lineStrong)
+        // The risky one stands out by its outline too, not only by the line inside it.
+        .card(radius: Radius.medium, stroke: request.isDangerous ? Palette.warn : Palette.lineStrong)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(request.isQuestion ? "\(entry.bot.name) pergunta" : request.isHandoff ? "\(entry.bot.name) espera você terminar no navegador" : "\(entry.bot.name) precisa da sua permissão")
     }

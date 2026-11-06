@@ -7,7 +7,8 @@ import Carbon.HIToolbox
 
 /// The icon's pictures, one per state, made once. They are the brand Orb in one ink, drawn as vectors on an 18 pt square
 /// (sharp at @1x and @2x), and all are template images: the menu bar tints them white or black as the wallpaper needs.
-/// Idle is the Orb's outline with its face solid; working is the Orb filled, its face cut out of it; "waiting for you"
+/// Idle is the Orb's outline with its face solid; working is the Orb filled, its eyes and three dots (instead of a smile,
+/// so it differs by a mark and not only by the fill) cut out of it; "waiting for you"
 /// is the filled Orb with a solid dot on its rim (a cut-out, not an orange one, since a template cannot keep a color).
 @MainActor
 enum MenuBarIcon {
@@ -22,7 +23,8 @@ enum MenuBarIcon {
     /// The badge: a dot on the upper-right rim, behind a clear ring that makes it its own mark.
     private static let badgeCenter = CGPoint(x: 14.8, y: 14.8)
     private static let badgeRadius: CGFloat = 2.8
-    private static let badgeRing: CGFloat = 1.2
+    /// The clear gap all around the dot: even, so the Orb's rim is cut by a clean circle.
+    private static let badgeRing: CGFloat = 1.5
 
     private static var cache: [String: NSImage] = [:]
 
@@ -70,9 +72,14 @@ enum MenuBarIcon {
             context.setBlendMode(.clear)
             context.addPath(eyes())
             context.fillPath()
-            context.setLineWidth(smileWidth)
-            context.addPath(smile())
-            context.strokePath()
+            if case .working = state {
+                context.addPath(dots())
+                context.fillPath()
+            } else {
+                context.setLineWidth(smileWidth)
+                context.addPath(smile())
+                context.strokePath()
+            }
             context.setBlendMode(.normal)
         }
 
@@ -96,6 +103,17 @@ enum MenuBarIcon {
         for side in [-1.0, 1.0] as [CGFloat] {
             let rect = CGRect(x: center.x + side * spread - width / 2, y: y - height / 2, width: width, height: height)
             path.addRoundedRect(in: rect, cornerWidth: width / 2, cornerHeight: width / 2)
+        }
+        return path
+    }
+
+    /// Three small dots where the smile would be: the "busy" mark of the working icon.
+    private static func dots() -> CGPath {
+        let y = center.y - radius * 2 * 0.085
+        let r: CGFloat = 0.95, gap: CGFloat = 2.7
+        let path = CGMutablePath()
+        for step in [-1.0, 0.0, 1.0] as [CGFloat] {
+            path.addEllipse(in: CGRect(x: center.x + step * gap - r, y: y - r, width: r * 2, height: r * 2))
         }
         return path
     }

@@ -44,6 +44,16 @@ struct SidebarView: View {
                 SidebarFeatureRow(item: .inicio, name: "Início", symbol: "house",
                                   tip: "Mostra as novidades e os acompanhamentos dos Orbs", selectionSpace: selectionSpace)
                     .accessibilityIdentifier("sidebar-inicio")
+                // The places of the app, together at the top (where you go); the Orbs and groups below are who you talk to.
+                SidebarFeatureRow(item: .routines, name: "Rotinas", symbol: "clock.arrow.circlepath",
+                                  tip: Tip.allRoutines, shortcut: AppShortcut.routines.label, selectionSpace: selectionSpace)
+                    .accessibilityIdentifier("sidebar-routines")
+                SidebarFeatureRow(item: .connectors, name: "Conectores", symbol: "point.3.filled.connected.trianglepath.dotted",
+                                  tip: Tip.manageConnectors, shortcut: AppShortcut.connectors.label, selectionSpace: selectionSpace)
+                    .accessibilityIdentifier("sidebar-connectors")
+                SidebarFeatureRow(item: .skills, name: "Skills", symbol: "wand.and.stars",
+                                  tip: Tip.skillsPage, shortcut: AppShortcut.skills.label, selectionSpace: selectionSpace)
+                    .accessibilityIdentifier("sidebar-skills")
                     .padding(.bottom, 16)
                 // The Orbs, loose and in categories, as one place to drop on: the gap opens anywhere among them.
                 VStack(alignment: .leading, spacing: 1) {
@@ -120,18 +130,6 @@ struct SidebarView: View {
                         .transition(.adapted(.arrive, reduceMotion: reduceMotion))
                 }
                 // MARK: end MultiOrb (WP6)
-
-                // The workspace pages, as rows after the lists: same look and selection as "Início".
-                SidebarFeatureRow(item: .routines, name: "Rotinas", symbol: "clock.arrow.circlepath",
-                                  tip: Tip.allRoutines, shortcut: AppShortcut.routines.label, selectionSpace: selectionSpace)
-                    .accessibilityIdentifier("sidebar-routines")
-                    .padding(.top, 16)
-                SidebarFeatureRow(item: .connectors, name: "Conectores", symbol: "point.3.filled.connected.trianglepath.dotted",
-                                  tip: Tip.manageConnectors, shortcut: AppShortcut.connectors.label, selectionSpace: selectionSpace)
-                    .accessibilityIdentifier("sidebar-connectors")
-                SidebarFeatureRow(item: .skills, name: "Skills", symbol: "wand.and.stars",
-                                  tip: Tip.skillsPage, shortcut: AppShortcut.skills.label, selectionSpace: selectionSpace)
-                    .accessibilityIdentifier("sidebar-skills")
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
@@ -256,8 +254,8 @@ private struct NewOrbMenu: View {
     }
 }
 
-/// One of the sidebar's page rows — "Início" at the top, the workspace pages (Rotinas, Conectores, Skills) after the
-/// lists: icon and name, the selection's background sliding between them through the rows' own namespace.
+/// One of the sidebar's page rows — "Início" and the workspace pages (Rotinas, Conectores, Skills), together at
+/// the top: icon and name, the selection's background sliding between them through the rows' own namespace.
 private struct SidebarFeatureRow: View {
     @Environment(AppModel.self) private var model
     let item: SidebarItem
@@ -462,10 +460,11 @@ private struct ProfileRowButton: View {
             // The Orbs' rows' geometry (a 30 pt picture, 8 pt to the text), so the name starts on the Orbs' names.
             HStack(spacing: 8) {
                 ProfileAvatar(photoPath: model.profilePhotoPath, initial: profile.initial, size: 30)
-                Text(name ?? "Seu perfil")
-                    .font(Typography.text.weight(.medium))
-                    .foregroundStyle(name == nil ? Palette.muted : Palette.secondary)
-                    .lineLimit(1)
+                // A long name gives way to "Thiago V." before it is cut off in the middle of a word.
+                ViewThatFits(in: .horizontal) {
+                    nameText(name ?? "Seu perfil", muted: name == nil)
+                    if let name { nameText(ProfileNameText.short(name), muted: false) }
+                }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, Spacing.xs + Spacing.hairline)
@@ -478,6 +477,24 @@ private struct ProfileRowButton: View {
         .help(Tip.profile(callName: profile.callName))
         .accessibilityLabel(name.map { "Seu perfil, \($0)" } ?? "Seu perfil")
         .accessibilityHint("Abre os Ajustes")
+    }
+
+    private func nameText(_ text: String, muted: Bool) -> some View {
+        Text(text)
+            .font(Typography.text.weight(.medium))
+            .foregroundStyle(muted ? Palette.muted : Palette.secondary)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+    }
+}
+
+/// The name at the foot of the sidebar when the whole one does not fit.
+enum ProfileNameText {
+    /// "Thiago Emanuel Velozo" becomes "Thiago V."; a single word stays as it is.
+    static func short(_ name: String) -> String {
+        let words = name.split(whereSeparator: \.isWhitespace)
+        guard words.count > 1, let initial = words.last?.first else { return name }
+        return "\(words[0]) \(initial.uppercased())."
     }
 }
 
@@ -803,7 +820,7 @@ private struct BotRowContent: View, Equatable {
                                 } else {
                                     Circle()
                                         .fill(Palette.accentText)
-                                        .frame(width: 7, height: 7)
+                                        .frame(width: 8, height: 8)
                                 }
                             }
                             .transition(.adapted(.mark, reduceMotion: reduceMotion))

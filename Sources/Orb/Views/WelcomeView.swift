@@ -506,36 +506,32 @@ private struct WelcomePointView: View {
     }
 }
 
-/// One of the quieter ways in under the main button: an icon and a few words in a soft capsule that lights up and
-/// grows a little under the pointer (opacity and scale only). What it does in full is in the tooltip.
+/// One of the other ways in under the main button, as a link: an icon and a few words in the accent color, underlined
+/// under the pointer. They lead somewhere else (a one-click Orb, the import), so they read as links, not as buttons that
+/// compete with the main one. What each does in full is in the tooltip.
 private struct WelcomeChoice: View {
     let symbol: String
     let title: String
     let help: String
     var onHover: (() -> Void)?
     let action: () -> Void
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: Spacing.s) {
+            HStack(spacing: Spacing.xs + Spacing.hairline) {
                 Image(systemName: symbol)
                     .font(Typography.small.weight(.semibold))
-                    .foregroundStyle(isHovering ? Palette.accentText : Palette.muted)
                 Text(title)
-                    .font(Typography.text.weight(.medium))
-                    .foregroundStyle(isHovering ? Palette.ink : Palette.secondary)
+                    .underline(isHovering)
             }
-            .padding(.horizontal, Spacing.catalogCardPadding)
-            .padding(.vertical, 8)
-            .hoverCard(isHovering, radius: Radius.card, strongOutline: true)
-            .scaleEffect(isHovering && !reduceMotion ? 1.03 : 1)
-            .animation(Motion.hover(isHovering), value: isHovering)
-            .contentShape(.rect(cornerRadius: Radius.card))
+            .font(Typography.text.weight(.medium))
+            .foregroundStyle(Palette.accentText)
+            .padding(.horizontal, Spacing.s)
+            .padding(.vertical, 6)
+            .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .focusEffectDisabled()
         .help(help)
         .onHover {
             isHovering = $0

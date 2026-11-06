@@ -31,6 +31,11 @@ struct PaletteEntry: Identifiable, Equatable {
             case .workspace: "Espaço de trabalho"
             }
         }
+
+        /// The heading as the list shows it: the actions are the open Orb's, so they say whose (and their rows do not repeat it).
+        func title(orbName: String?) -> String {
+            self == .actions ? orbName.map { "Ações de \($0)" } ?? title : title
+        }
     }
 
     let id: String
@@ -104,20 +109,18 @@ enum PaletteBuilder {
                                      shortcut: index < 9 ? AppShortcut.bot(at: index).label : nil, action: .bot(look.id), keywords: "orb conversa",
                                      orb: look.orb))
         }
-        let name = orbs.first { $0.id == current }?.name
         if current != nil {
-            let suffix = name.map { " de \($0)" } ?? ""
-            list.append(PaletteEntry(id: "new-chat", title: CommandName.newChat, subtitle: name.map { "Com \($0), do zero" }, symbol: "square.and.pencil",
+            list.append(PaletteEntry(id: "new-chat", title: CommandName.newChat, subtitle: "Do zero", symbol: "square.and.pencil",
                                      section: .actions, shortcut: ShortcutCatalog.keys(for: .newChat), action: .newChat,
                                      keywords: "nova conversa limpar zero contexto chat"))
-            list.append(PaletteEntry(id: "focus", title: CommandName.writeMessage, subtitle: name, symbol: "text.cursor",
+            list.append(PaletteEntry(id: "focus", title: CommandName.writeMessage, subtitle: nil, symbol: "text.cursor",
                                      section: .actions, shortcut: ShortcutCatalog.keys(for: .writeMessage), action: .focusComposer, keywords: "compositor campo focar digitar"))
-            list.append(PaletteEntry(id: "find", title: CommandName.findInConversation, subtitle: name, symbol: "magnifyingglass",
+            list.append(PaletteEntry(id: "find", title: CommandName.findInConversation, subtitle: nil, symbol: "magnifyingglass",
                                      section: .actions, shortcut: ShortcutCatalog.keys(for: .find), action: .findInConversation, keywords: "procurar pesquisar texto mensagem"))
-            list.append(PaletteEntry(id: "aside", title: CommandName.askAside, subtitle: name, symbol: "bubble.left.and.text.bubble.right",
+            list.append(PaletteEntry(id: "aside", title: CommandName.askAside, subtitle: nil, symbol: "bubble.left.and.text.bubble.right",
                                      section: .actions, shortcut: ShortcutCatalog.keys(for: .askAside), action: .askAside, keywords: "perguntar lateral resumo dúvida"))
-            list.append(PaletteEntry(id: "folder", title: CommandName.openFolder, subtitle: "Pasta\(suffix)", symbol: "folder",
-                                     section: .actions, shortcut: ShortcutCatalog.keys(for: .openFolder), action: .openFolder, keywords: "finder arquivos"))
+            list.append(PaletteEntry(id: "folder", title: CommandName.openFolder, subtitle: nil, symbol: "folder",
+                                     section: .actions, shortcut: ShortcutCatalog.keys(for: .openFolder), action: .openFolder, keywords: "pasta finder arquivos"))
             list.append(PaletteEntry(id: "inspector", title: CommandName.toggleInspector, subtitle: nil, symbol: "sidebar.right",
                                      section: .actions, shortcut: ShortcutCatalog.keys(for: .toggleInspector), action: .toggleInspector,
                                      keywords: "detalhes memória permissões modelo personalizar"))
@@ -221,7 +224,7 @@ struct CommandPalette: View {
                         LazyVStack(alignment: .leading, spacing: Spacing.hairline) {
                             ForEach(Array(results.enumerated()), id: \.element.id) { index, entry in
                                 if showsHeader(at: index, in: results) {
-                                    Text(entry.section.title)
+                                    Text(entry.section.title(orbName: model.commandBotID.map { model.live($0).look.name }))
                                         .sectionTitleStyle()
                                         .padding(.horizontal, Spacing.s + Spacing.hairline)
                                         .padding(.top, index == 0 ? 2 : 10)
@@ -240,6 +243,13 @@ struct CommandPalette: View {
                     .onChange(of: selected) {
                         guard results.indices.contains(selected) else { return }
                         proxy.scrollTo(results[selected].id)
+                    }
+                    // The list is cut by the footer's divider: a short fade says there is more below.
+                    .overlay(alignment: .bottom) {
+                        LinearGradient(colors: [Palette.chrome.opacity(0), Palette.chrome], startPoint: .top, endPoint: .bottom)
+                            .frame(height: 16)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
                     }
                 }
                 .transition(.quiet)

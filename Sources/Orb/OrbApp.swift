@@ -210,33 +210,19 @@ struct AppCommands: Commands {
             Button(CommandName.shortcuts) { showMain(); model.showShortcuts = true }
                 .keyboardShortcut(AppShortcut.shortcuts)
                 .disabled(sheetOpen)
+            Divider()
+            // A maintenance command, not a way to move around: it belongs with the help, away from the Orbs.
+            // The file is watched meanwhile (`startStateWatch`); this reads it again by hand, as the launch does.
+            Button(CommandName.reloadState) { model.reloadStateFromDisk() }
+                .disabled(sheetOpen)
         }
         CommandMenu("Orbs") {
             Button(CommandName.goTo) { showMain(); model.showCommandPalette = true }
                 .keyboardShortcut(AppShortcut.goTo)
                 .disabled(sheetOpen)
-            Divider()
-            Button(CommandName.writeMessage) { showMain(); model.focusComposer() }
-                .keyboardShortcut(AppShortcut.writeMessage)
-                .disabled(model.commandBotID == nil || sheetOpen)
-            // MARK: MultiOrb (WP6): with a group on show, ⌘. stops the group's request.
-            Button(CommandName.stop) { model.stopSelection() }
-                .keyboardShortcut(AppShortcut.stop)
-                .disabled(!model.canStopSelection)
-            Button(CommandName.sendToBackground) { model.sendCurrentCommandToBackground() }
-                .keyboardShortcut(AppShortcut.sendToBackground)
-                .disabled(!model.canSendCommandToBackground)
             Button(CommandName.newGroup) { showMain(); model.showNewGroup = true }
                 .keyboardShortcut(AppShortcut.newGroup)
                 .disabled(sheetOpen || model.botIDs.count < 2)
-            Button(CommandName.openFolder) {
-                if let id = model.commandBotID { model.openFolder(of: id) }
-            }
-            .keyboardShortcut(AppShortcut.openFolder)
-            .disabled(model.commandBotID == nil)
-            Button(CommandName.askAside) { showMain(); model.askAside() }
-                .keyboardShortcut(AppShortcut.askAside)
-                .disabled(sheetOpen || model.commandBotID == nil)
             Divider()
             // Disabled (not just ignored) with a sheet open: an enabled item would keep ⌥↓ and the like from the sheet's
             // text field, and switching the screen would close the sheet along with what was typed in it.
@@ -257,16 +243,33 @@ struct AppCommands: Commands {
                 .keyboardShortcut(AppShortcut.skills)
                 .disabled(sheetOpen)
             Divider()
-            // The file is watched meanwhile (`startStateWatch`); this reads it again by hand, as the launch does.
-            Button(CommandName.reloadState) { model.reloadStateFromDisk() }
-                .disabled(sheetOpen)
-            Divider()
             // Only the names and the order are read, so a status or a new unread message does not rebuild the menu.
             ForEach(Array(model.sidebarBotIDs.prefix(9).enumerated()), id: \.element) { index, id in
                 Button(model.live(id).look.name) { showMain(); model.selection = .bot(id) }
                     .keyboardShortcut(AppShortcut.bot(at: index))
                     .disabled(sheetOpen)
             }
+        }
+        // What acts on the Orb on show, apart from the Orbs menu (where you go and who you make).
+        CommandMenu("Conversa") {
+            Button(CommandName.writeMessage) { showMain(); model.focusComposer() }
+                .keyboardShortcut(AppShortcut.writeMessage)
+                .disabled(model.commandBotID == nil || sheetOpen)
+            // MARK: MultiOrb (WP6): with a group on show, ⌘. stops the group's request.
+            Button(CommandName.stop) { model.stopSelection() }
+                .keyboardShortcut(AppShortcut.stop)
+                .disabled(!model.canStopSelection)
+            Button(CommandName.sendToBackground) { model.sendCurrentCommandToBackground() }
+                .keyboardShortcut(AppShortcut.sendToBackground)
+                .disabled(!model.canSendCommandToBackground)
+            Button(CommandName.openFolder) {
+                if let id = model.commandBotID { model.openFolder(of: id) }
+            }
+            .keyboardShortcut(AppShortcut.openFolder)
+            .disabled(model.commandBotID == nil)
+            Button(CommandName.askAside) { showMain(); model.askAside() }
+                .keyboardShortcut(AppShortcut.askAside)
+                .disabled(sheetOpen || model.commandBotID == nil)
         }
     }
 }
