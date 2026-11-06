@@ -573,6 +573,24 @@ struct QuietTextStyle: ButtonStyle {
     }
 }
 
+/// A text button that leads elsewhere ("Mais opções em Ajustes", "Gerenciar", "Ver mais"): the one blue of a row, so
+/// every link in the app reads the same. Gray stays for quiet actions on the spot (`QuietTextStyle`).
+struct LinkTextStyle: ButtonStyle {
+    var font: Font = Typography.label
+    @State private var isHovering = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(font)
+            .foregroundStyle(Palette.accentText)
+            .underline(isHovering && isEnabled)
+            .opacity(!isEnabled ? 0.4 : configuration.isPressed ? 0.7 : 1)
+            .contentShape(Rectangle())
+            .onHover { isHovering = $0 }
+    }
+}
+
 /// Text-only ghost button with hover fill (in fast, out slow: `hoverFill`).
 struct GhostStyle: ButtonStyle {
     /// A color for the label instead of the usual gray. A button with the destructive role is red without it.
