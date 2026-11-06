@@ -1238,8 +1238,6 @@ struct ToolGroupRow: View, Equatable {
     var find: FindFocus?
     /// A task step names its purpose; its original progress message remains inside the disclosure.
     var isStep = false
-    /// The Orb's "Ao vivo" card is in the chat and names the site, so the folded line does not repeat it.
-    var liveCardShown = false
     let toggle: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var permissionProblem: MacPermissionProblem?
@@ -1251,7 +1249,7 @@ struct ToolGroupRow: View, Equatable {
 
     nonisolated static func == (lhs: ToolGroupRow, rhs: ToolGroupRow) -> Bool {
         lhs.items == rhs.items && lhs.botID == rhs.botID && lhs.orb == rhs.orb && lhs.isOpen == rhs.isOpen && lhs.find == rhs.find
-            && lhs.isStep == rhs.isStep && lhs.liveCardShown == rhs.liveCardShown
+            && lhs.isStep == rhs.isStep
     }
 
     private var calls: [ToolCall] {
@@ -1261,7 +1259,7 @@ struct ToolGroupRow: View, Equatable {
     var body: some View {
         let calls = calls
         let isRunning = calls.contains { $0.state == .running }
-        let variants = isStep ? ToolTally.stepVariants(items) : ToolTally.lineVariants(calls, showsSite: !liveCardShown)
+        let variants = isStep ? ToolTally.stepVariants(items) : ToolTally.lineVariants(calls)
         let failures = ToolTally.failures(calls)
         // 6 pt between the actions of one group (one list, read down), 12 between the group and what is around it.
         VStack(alignment: .leading, spacing: Self.actionSpacing) {

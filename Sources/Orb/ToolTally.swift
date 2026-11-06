@@ -140,10 +140,8 @@ enum ToolTally {
     /// `line`, from the fullest wording to the shortest (one when the actions have no descriptions): the row takes the first
     /// that fits its width, so a word is never cut in two. It names what the actions were for without "e mais N": how many
     /// there were is beside it (`countNote`), with the time.
-    /// `showsSite` is false when the Orb's "Ao vivo" card is in the chat and already names the site.
-    static func lineVariants(_ calls: [ToolCall], showsSite: Bool = true) -> [String] {
+    static func lineVariants(_ calls: [ToolCall]) -> [String] {
         if let said = intentVariants(calls) { return said }
-        guard showsSite else { return [summary(calls)] }
         let opened = calls.last { $0.kind == .browser && ["Abrindo página", "Abrindo uma aba"].contains($0.title) }
         guard let site = opened.flatMap({ WorkPhrase.host(of: WorkPhrase.firstLine(of: $0.detail)) }) else { return [summary(calls)] }
         return ["\(site) · \(summary(calls))"]

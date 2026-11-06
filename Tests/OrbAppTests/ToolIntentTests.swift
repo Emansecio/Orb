@@ -332,12 +332,6 @@ struct ToolIntentTests {
         #expect(ToolTally.countNote([described(nil), described("Ler A")]) == "2 ações")
     }
 
-    @Test func theFoldedLineOfTheBrowserLeavesTheSiteToTheLiveCard() {
-        let opened = ToolCall(kind: .browser, title: "Abrindo página", detail: "https://gympass.com/login", state: .done)
-        #expect(ToolTally.lineVariants([opened]).first?.hasPrefix("gympass.com · ") == true)
-        #expect(ToolTally.lineVariants([opened], showsSite: false) == ["Abriu 1 página"])
-    }
-
     @Test func aStepDoesNotListTheSentenceItsTitleIsMadeFrom() {
         let said = TranscriptItem(.bot(text: "Conferir as vagas abertas.", isStreaming: false))
         let call = TranscriptItem(.tool(shell("ls")))
