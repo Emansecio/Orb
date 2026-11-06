@@ -74,7 +74,8 @@ struct ContextGaugeDriver: View {
 
 // MARK: - Ring
 
-/// A thin rim with a slice that fills clockwise. Decorative: the words next to it, or the button's value, say the same.
+/// A thin rim that fills from the bottom up, like a glass. Decorative: the words next to it, or the button's value, say
+/// the same.
 struct ContextRing: View {
     let fraction: Double
     let tone: ContextTone
@@ -82,11 +83,11 @@ struct ContextRing: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        // A pie in a thin rim: a short arc in a faint ring read as the system's spinner (something loading), a slice
-        // filled from twelve o'clock reads as an amount.
+        // A level in a thin rim: a short arc in a faint ring read as the system's spinner (something loading), and a
+        // slice from twelve o'clock read as a clock's hands, next to the routines' clock. A level reads as how full.
         ZStack {
             Circle().strokeBorder(Palette.faint, lineWidth: 1.25)
-            ContextSlice(fraction: Self.shown(fraction))
+            ContextLevel(fraction: Self.shown(fraction))
                 .fill(tone.color)
                 .padding(2.5)
         }
@@ -96,18 +97,18 @@ struct ContextRing: View {
         .accessibilityHidden(true)
     }
 
-    /// The slice as drawn: never thinner than `minimumSlice` once something is in the conversation, or a few percent
-    /// would be a hairline, like a clock's hand. The number (on hover and in the popover) is the exact one.
+    /// The level as drawn: never lower than `minimumFill` once something is in the conversation, or a few percent
+    /// would be a hairline at the bottom of a 9 pt disc. The number (on hover and in the popover) is the exact one.
     static func shown(_ fraction: Double) -> Double {
         guard fraction > 0 else { return 0 }
-        return min(max(fraction, minimumSlice), 1)
+        return min(max(fraction, minimumFill), 1)
     }
 
-    static let minimumSlice = 0.08
+    static let minimumFill = 0.15
 }
 
-/// The filled part of `ContextRing`: a slice from twelve o'clock, clockwise; it grows smoothly when `fraction` animates.
-private struct ContextSlice: Shape {
+/// The filled part of `ContextRing`: the disc up to `fraction` of its height; it rises smoothly when `fraction` animates.
+private struct ContextLevel: Shape {
     var fraction: Double
 
     var animatableData: Double {
@@ -116,15 +117,11 @@ private struct ContextSlice: Shape {
     }
 
     func path(in rect: CGRect) -> Path {
-        let center = CGPoint(x: rect.midX, y: rect.midY)
-        var path = Path()
-        guard fraction > 0 else { return path }
-        if fraction >= 1 { return Path(ellipseIn: rect) }
-        path.move(to: center)
-        path.addArc(center: center, radius: min(rect.width, rect.height) / 2, startAngle: .degrees(-90),
-                    endAngle: .degrees(-90 + 360 * fraction), clockwise: false)
-        path.closeSubpath()
-        return path
+        guard fraction > 0 else { return Path() }
+        let disc = Path(ellipseIn: rect)
+        if fraction >= 1 { return disc }
+        let height = rect.height * fraction
+        return disc.intersection(Path(CGRect(x: rect.minX, y: rect.maxY - height, width: rect.width, height: height)))
     }
 }
 

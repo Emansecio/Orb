@@ -64,10 +64,10 @@ struct ContextWordsTests {
 }
 
 struct ContextReadingTests {
-    /// The ring's slice: a few percent still drawn as a slice (not a hairline like a clock's hand), the rest as it is.
-    @Test @MainActor func ringSliceHasAVisibleMinimum() {
+    /// The ring's level: a few percent still drawn as a visible level (not a hairline at the bottom), the rest as it is.
+    @Test @MainActor func ringLevelHasAVisibleMinimum() {
         #expect(ContextRing.shown(0) == 0)
-        #expect(ContextRing.shown(0.02) == ContextRing.minimumSlice)
+        #expect(ContextRing.shown(0.02) == ContextRing.minimumFill)
         #expect(ContextRing.shown(0.5) == 0.5)
         #expect(ContextRing.shown(1.3) == 1)
     }

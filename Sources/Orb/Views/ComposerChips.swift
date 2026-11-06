@@ -7,6 +7,9 @@ import SwiftUI
 /// A pill-shaped button for the composer's bar: icon and text, a soft fill on hover, a filled one when `filled`.
 struct ComposerChipStyle: ButtonStyle {
     var filled = false
+    /// A state that stays on and carries a risk (no questions asked): the chip rests in a wash of its color, so it reads
+    /// as a state and not as a link, and stays quieter than the send button.
+    var tint: Color?
     @State private var isHovering = false
 
     func makeBody(configuration: Configuration) -> some View {
@@ -15,7 +18,8 @@ struct ComposerChipStyle: ButtonStyle {
             .padding(.horizontal, 8)
             .frame(minWidth: 28, minHeight: 28)
             .hoverFill(configuration.isPressed || isHovering, pressed: configuration.isPressed, in: .capsule,
-                       color: Palette.ghostSelected, resting: filled ? Palette.raised : nil)
+                       color: tint.map { $0.opacity(0.22) } ?? Palette.ghostSelected,
+                       resting: tint.map { $0.opacity(0.13) } ?? (filled ? Palette.raised : nil))
             .contentShape(.capsule)
             .onHover { isHovering = $0 }
     }
@@ -47,7 +51,7 @@ struct PermissionChip: View {
             }
             .foregroundStyle(Self.tint(permission.mode))
         }
-        .buttonStyle(ComposerChipStyle())
+        .buttonStyle(ComposerChipStyle(tint: permission.mode == .bypass ? Palette.warn : nil))
         .help("Permissões: \(PermissionChipText.spoken(permission)) · \(Tip.withoutFullStop(permission.mode.shortSummary))" + grantsHelp(permission))
         .accessibilityLabel("Permissões")
         .accessibilityValue(PermissionChipText.spoken(permission))
