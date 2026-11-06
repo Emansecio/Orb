@@ -62,25 +62,58 @@ struct CronExpression: Hashable, Sendable {
         return nil
     }
 
-    /// The few lines people actually write, in words ("Todo dia às 9h", "De segunda a sexta às 9h30", "Aos fins de semana
-    /// às 18h"); nil for the rest (lists, steps, one weekday, a day of the month, a month), where the next run is what's shown.
-    /// Read off the parsed sets, so "0 9 * * *" and "0 9 * * 0-6" say the same, as they mean the same.
+    /// The few lines people actually write, in words ("Todo dia às 9h", "De segunda a sexta às 9h30", "A cada 30 min, das
+    /// 8h às 23h30", "Aos fins de semana, a cada 2 horas"); nil for the rest (uneven lists and steps, one weekday, a day of
+    /// the month, a month), where the next run is what's shown. Read off the parsed sets, so "0 9 * * *" and "0 9 * * 0-6"
+    /// say the same, as they mean the same.
     func plainText() -> String? {
         // "*" in the day of the month and every month: only the weekdays tell the days apart. A day of the month that is
         // listed (even "1-31") would make either field enough, so it is left to the next-run line.
-        guard minutes.count == 1, hours.count == 1, anyDay, days.count == 31, months.count == 12 else { return nil }
-        let phrase: String
+        guard anyDay, days.count == 31, months.count == 12 else { return nil }
+        let days: String
         switch weekdays {
-        case Set(1...7): phrase = "Todo dia"
-        case [2, 3, 4, 5, 6]: phrase = "De segunda a sexta"
-        case [1, 7]: phrase = "Aos fins de semana"
+        case Set(1...7): days = "Todo dia"
+        case [2, 3, 4, 5, 6]: days = "De segunda a sexta"
+        case [1, 7]: days = "Aos fins de semana"
         default: return nil
         }
-        // Portuguese says "à 1h" but "às 9h"; midnight reads "à 0h".
-        let article = hours[0] < 2 ? "à" : "às"
-        let minute = minutes[0] == 0 ? "" : String(format: "%02d", minutes[0])
-        return "\(phrase) \(article) \(hours[0])h\(minute)"
+        if minutes.count == 1, hours.count == 1 { return "\(days) \(Self.at(hours[0])) \(Self.time(hours[0], minutes[0]))" }
+        guard let repeats = repetition() else { return nil }
+        return days == "Todo dia" ? repeats.prefix(1).uppercased() + repeats.dropFirst() : "\(days), \(repeats)"
     }
+
+    /// "a cada 30 min, das 8h às 23h30", "a cada 2 horas": the runs of a day when they come at even steps; nil otherwise.
+    private func repetition() -> String? {
+        let first = Self.time(hours[0], minutes[0]), last = Self.time(hours[hours.count - 1], minutes[minutes.count - 1])
+        if minutes.count > 1 {
+            // Every n minutes from the top of the hour, in consecutive hours.
+            guard let step = Self.evenStep(minutes, span: 60), minutes[0] < step, minutes.count == 60 / step,
+                  hours == Array(hours[0]...hours[hours.count - 1]) else { return nil }
+            let every = "a cada \(step) min"
+            return hours.count == 24 ? every : "\(every), \(Self.from(hours[0])) \(first) \(Self.at(hours[hours.count - 1])) \(last)"
+        }
+        guard let step = Self.evenStep(hours, span: 24) else { return nil }
+        let every = step == 1 ? "a cada hora" : "a cada \(step) horas"
+        // The whole day: no window to name ("0 */2 * * *").
+        guard hours[0] >= step || hours[hours.count - 1] + step < 24 else {
+            return minutes[0] == 0 ? every : "\(every), no minuto \(minutes[0])"
+        }
+        return "\(every), \(Self.from(hours[0])) \(first) \(Self.at(hours[hours.count - 1])) \(last)"
+    }
+
+    /// The gap between neighbours when every one is the same and it divides the field evenly (so the runs do not drift
+    /// across the hour or the day); nil for one value or an uneven list.
+    private static func evenStep(_ values: [Int], span: Int) -> Int? {
+        guard values.count > 1 else { return nil }
+        let step = values[1] - values[0]
+        guard zip(values, values.dropFirst()).allSatisfy({ $1 - $0 == step }), span % step == 0 else { return nil }
+        return step
+    }
+
+    /// "9h", "9h05". Portuguese says "à 1h" but "às 9h", and "da 0h" but "das 8h" (midnight reads "0h").
+    private static func time(_ hour: Int, _ minute: Int) -> String { "\(hour)h" + (minute == 0 ? "" : String(format: "%02d", minute)) }
+    private static func at(_ hour: Int) -> String { hour < 2 ? "à" : "às" }
+    private static func from(_ hour: Int) -> String { hour < 2 ? "da" : "das" }
 
     /// A field that starts with `*` (`*`, `*/2`) still holds its values; it only makes the two fields both count, as in
     /// Vixie cron.

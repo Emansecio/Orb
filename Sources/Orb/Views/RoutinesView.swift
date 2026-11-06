@@ -1203,7 +1203,15 @@ enum RoutinesSnapshots {
         ]
         let weekly = Routine(name: "Revisar a semana", botID: bot.id, prompt: "Revise a minha semana.",
                              schedule: .weekly(weekday: 6, hour: 17, minute: 0))
-        model.routines = [morning, weekly,
+        // A cron line and a long summary: the card says the schedule in words and does not end in a cut word.
+        var rounds = Routine(name: "Rodada WhatsApp 30min 8h-23h", botID: bot.id, prompt: "Responda as conversas novas do WhatsApp.",
+                             schedule: .cron(expression: "*/30 8-23 * * *", timeZone: TimeZone.current.identifier))
+        let roundsSummary = "Rodada das 22:00: respondi Bruno Santos, Glauber, Letícia Moura e Paulo; dois pedidos de preço ficaram para amanhã."
+        rounds.runs = [RoutineRun(date: Date.now.addingTimeInterval(-1_800), finishedAt: Date.now.addingTimeInterval(-1_700),
+                                  succeeded: true, summary: roundsSummary,
+                                  report: roundsSummary + "\n\nBruno: plano anual. Glauber: horário. Letícia: trancamento. Paulo: avaliação.")]
+        rounds.lastRun = rounds.runs.first?.date
+        model.routines = [rounds, morning, weekly,
                           goal(RoutineTemplate.desktopGoal.routine(for: bot.id), checks: [
                               (35, .onTrack, "Faltam 26 arquivos antigos; movi 14 para Documentos."),
                               (20, .onTrack, "Movi 9 imagens para Imagens."),

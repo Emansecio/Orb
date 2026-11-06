@@ -881,12 +881,15 @@ enum Schedule: Codable, Hashable, Sendable {
         }
     }
 
-    /// What the screen shows for the schedule: a common cron line in words. `label` stays as it is, because it goes to
-    /// the model and the chat.
+    /// What the screen shows for the schedule: a common cron line in words, with its time zone only when it is not the
+    /// Mac's. `label` stays as it is, because it goes to the model and the chat.
     var plainLabel: String {
         guard case .cron(let expression, let timeZone) = self,
               let text = (try? CronExpression(expression))?.plainText() else { return label }
-        return text + (timeZone.map { " (fuso \($0))" } ?? "")
+        // The Mac's own time zone goes without saying; another one is named by its city ("fuso de Lisboa").
+        guard let timeZone, let zone = TimeZone(identifier: timeZone), zone.identifier != TimeZone.current.identifier else { return text }
+        let city = zone.identifier.split(separator: "/").last.map { String($0).replacing("_", with: " ") } ?? zone.identifier
+        return text + " (fuso de \(city))"
     }
 
     /// "em 14/10/2026 às 09:00", on this Mac's clock.

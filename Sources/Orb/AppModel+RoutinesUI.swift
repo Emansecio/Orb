@@ -135,6 +135,14 @@ enum RoutineText {
     /// How a run is read aloud and titled: a run you stopped is not a failure (the icon already tells them apart).
     static func outcome(_ run: RoutineRun) -> String { run.wasStopped ? "Parada" : run.succeeded ? "Deu certo" : "Não deu certo" }
 
+    /// Whether the panel's last-run line has more to show than its three lines: a report beyond the summary, or a summary
+    /// longer than three lines of the narrowest panel hold (~36 characters each, with the time before it).
+    static func hasMore(_ run: RoutineRun) -> Bool {
+        let summary = run.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let report = run.report?.trimmingCharacters(in: .whitespacesAndNewlines), !report.isEmpty, report != summary { return true }
+        return summary.count > 90
+    }
+
     /// The name a routine gets when you leave it empty: the first words of what it does ("Resuma meus e-mails…").
     static func defaultName(fromPrompt prompt: String, words: Int = 4) -> String {
         let parts = prompt.split(whereSeparator: \.isWhitespace).prefix(words)

@@ -1154,31 +1154,34 @@ private struct RoutineRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
+            // Only the name shares its line with the switch; the schedule under it takes the card's whole width, so a
+            // narrow panel does not break "A cada 30 min, das 8h às 23h30" in two.
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .top, spacing: 10) {
                     Text(routine.name)
                         .font(Typography.text.weight(.medium))
                         .foregroundStyle(Palette.ink)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text(routine.schedule.label)
-                        .font(Typography.label)
-                        .foregroundStyle(Palette.muted)
-                    if let mismatch = RoutineText.nameMismatch(of: routine) {
-                        Label(mismatch, systemImage: "exclamationmark.triangle.fill")
-                            .font(Typography.small)
-                            .foregroundStyle(Palette.warn)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                    Spacer(minLength: Spacing.s)
+                    Toggle("Ativa", isOn: Binding(get: { routine.isEnabled }, set: { model.setRoutineEnabled(routine.id, $0) }))
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                        .controlSize(.mini)
+                        .accessibilityLabel("Ativar \(routine.name)")
+                        .disabled(!routine.canBeEnabled())
+                        .help(routine.canBeEnabled() ? Tip.routineToggle(isOn: routine.isEnabled) : Tip.routineDatePassed)
                 }
-                Spacer(minLength: Spacing.s)
-                Toggle("Ativa", isOn: Binding(get: { routine.isEnabled }, set: { model.setRoutineEnabled(routine.id, $0) }))
-                    .toggleStyle(.switch)
-                    .labelsHidden()
-                    .controlSize(.mini)
-                    .accessibilityLabel("Ativar \(routine.name)")
-                    .disabled(!routine.canBeEnabled())
-                    .help(routine.canBeEnabled() ? Tip.routineToggle(isOn: routine.isEnabled) : Tip.routineDatePassed)
+                Text(routine.schedule.plainLabel)
+                    .font(Typography.label)
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let mismatch = RoutineText.nameMismatch(of: routine) {
+                    Label(mismatch, systemImage: "exclamationmark.triangle.fill")
+                        .font(Typography.small)
+                        .foregroundStyle(Palette.warn)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             if let goal = routine.goal { GoalProgressView(goal: goal, font: Typography.label, showsNote: false) }
             VStack(alignment: .leading, spacing: 6) {
@@ -1298,10 +1301,19 @@ private struct RoutineLastLine: View {
 
     var body: some View {
         if let run = routine.runs.first {
+            let hasMore = RoutineText.hasMore(run)
             Label {
-                Text("\(RoutineText.stamp(run.date)) · \(MarkdownCache.attributed(isExpanded ? run.report ?? run.summary : run.summary))")
-                    .lineLimit(isExpanded ? nil : 2)
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(RoutineText.stamp(run.date)) · \(MarkdownCache.attributed(isExpanded ? run.report ?? run.summary : run.summary))")
+                        .lineLimit(isExpanded ? nil : 3)
+                        .fixedSize(horizontal: false, vertical: true)
+                    // Said, not hidden behind a click only the tip tells about: a cut summary reads as broken.
+                    if hasMore {
+                        Text(isExpanded ? "Ver menos" : "Ver mais")
+                            .foregroundStyle(Palette.accentText)
+                            .accessibilityHidden(true)
+                    }
+                }
             } icon: {
                 Image(systemName: run.wasStopped ? "stop.circle" : run.succeeded ? "checkmark.circle" : "xmark.circle")
                     .foregroundStyle(run.wasStopped ? Palette.muted : run.succeeded ? Palette.ok : Palette.danger)
