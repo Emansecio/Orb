@@ -37,7 +37,7 @@ struct MemoryTab: View {
         // A short memory fits the panel whole; only a long one is cut to a few rows per group.
         let truncates = query.isEmpty && memory.items.count > MemoryGroups.searchableAbove
 
-        Section {
+        PanelSection {
             // From this Orb's own `permission` (assigned only when it changes), not `model.bot(_:)`: that reads the list of
             // all Orbs and would redo this body whenever any of them changes.
             IdentityBlock(memory: memory, name: name, canSummarize: model.live(botID).permission.mode != .readOnly, edit: editIdentity,
@@ -46,7 +46,7 @@ struct MemoryTab: View {
             Text("Como \(name) funciona").sectionTitleStyle()
         }
 
-        Section {
+        PanelSection {
             if memory.items.isEmpty {
                 PanelEmptyNote("Nada guardado ainda", systemImage: "brain",
                                detail: "A memória cresce a cada conversa: preferências, fatos, procedimentos e um resumo de cada uma.")
@@ -67,7 +67,7 @@ struct MemoryTab: View {
 
         ForEach(groups) { group in
             let shown = truncates ? Array(group.items.prefix(Self.rowsPerGroup)) : group.items
-            Section {
+            PanelSection {
                 ForEach(shown) { item in
                     MemoryRow(item: item) { model.memoryUndo.forget(item, of: botID, in: model) }
                         .transition(MemoryMotion.forgotten(reduceMotion: reduceMotion, isSearching: !query.isEmpty))
@@ -85,7 +85,7 @@ struct MemoryTab: View {
         // search shows: typing filters at once (§2.13).
         .animateChanges(of: memory.items.map(\.id))
 
-        Section {
+        PanelSection {
             // "Ver tudo…" only once there is something to see. "Abrir pasta" is not a card of its own: it is text in the
             // note below.
             if !memory.items.isEmpty {

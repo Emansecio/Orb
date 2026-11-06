@@ -62,10 +62,13 @@ extension View {
     /// (in 0.10 s, out 0.22 s), and with `strongOutline` its outline from `Palette.line` to `Palette.lineStrong`. Two layers
     /// cross-fading, so the end states are exactly the theme's colors. Colors only: it stays under Reduce Motion.
     func hoverCard(_ isHovering: Bool, radius: CGFloat, strongOutline: Bool = false) -> some View {
-        hoverFill(isHovering, in: .rect(cornerRadius: radius), color: Palette.raised, resting: Palette.surface)
+        // Under the fills: the card's drop, so a card that answers the pointer sits as high as one that does not.
+        background { RoundedRectangle(cornerRadius: radius, style: .continuous).fill(Palette.surface).modifier(CardDrop()) }
+            .hoverFill(isHovering, in: .rect(cornerRadius: radius), color: Palette.raised, resting: Palette.surface)
             .overlay {
                 ZStack {
-                    RoundedRectangle(cornerRadius: radius).strokeBorder(Palette.line).opacity(strongOutline && isHovering ? 0 : 1)
+                    RoundedRectangle(cornerRadius: radius).strokeBorder(CardSurface.litEdge)
+                        .opacity(strongOutline && isHovering ? 0 : 1)
                     if strongOutline {
                         RoundedRectangle(cornerRadius: radius).strokeBorder(Palette.lineStrong).opacity(isHovering ? 1 : 0)
                     }

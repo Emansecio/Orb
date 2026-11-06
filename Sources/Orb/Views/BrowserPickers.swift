@@ -164,7 +164,7 @@ struct BrowserPickerRows: View {
         // Title and picker apart in both: a Form's own picker row asks for more than it needs, so `ViewThatFits` stacked it
         // even at 360 pt. The title is hidden from VoiceOver, the picker keeps it as its label.
         let label = Text(title).accessibilityHidden(true)
-        let field = Picker(title, selection: selection, content: options).labelsHidden()
+        let field = Picker(title, selection: selection, content: options).labelsHidden().buttonStyle(.borderless)
         return ViewThatFits(in: .horizontal) {
             HStack(spacing: 8) {
                 label
@@ -209,7 +209,10 @@ struct BrowserPickerRows: View {
                 title(bot, showsSummary: false)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+            // Its own switch: the row lays out the title and the chevron itself (the panel's switch style would add the title again).
             Toggle(Capability.browser.label, isOn: $isOn)
+                .toggleStyle(.switch)
+                .controlSize(.small)
                 .labelsHidden()
         }
         .help(Tip.capability(.browser))

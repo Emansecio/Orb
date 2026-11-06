@@ -338,7 +338,7 @@ struct LiveScreenTab: View {
 
     var body: some View {
         let focus = LiveScreenFocus.shared.shown[botID]
-        Section {
+        PanelSection {
             VStack(alignment: .leading, spacing: 10) {
                 if !showsScreen {
                     // Off in Settings: as before the live screen, nothing is opened.

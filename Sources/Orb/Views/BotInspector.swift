@@ -63,7 +63,7 @@ struct BotInspector: View {
                 // panel itself (header, tab bar, tasks) stays. The scroll returns to the top with every swap, and the tasks
                 // below live on the outer stack, so they do not run again.
                 ZStack {
-                    Form {
+                    PanelPage {
                         switch tab {
                         case .general: generalTab(bot)
                         case .memory: memoryTab(bot)
@@ -72,8 +72,6 @@ struct BotInspector: View {
                         case .screen: LiveScreenTab(botID: bot.id)
                         }
                     }
-                    .formStyle(.grouped)
-                    .scrollContentBackground(.hidden)
                     .id(contentKey)
                     .transition(.pageSwap)
                 }
@@ -340,7 +338,7 @@ struct BotInspector: View {
         let warning = ModelCardSummary.warning(mode: bot.permissionMode, unavailableNote: unavailable)
         let modelName = ModelCardSummary.modelText(selection: bot.model, defaultModel: model.defaultModel,
                                                    name: { model.modelName($0) })
-        return Section {
+        return PanelSection {
             FoldHeader(title: "Modelo e permissões", isOpen: isOpen, tip: Tip.toggleModelCard(isOpen: isOpen),
                        spokenSummary: [modelName, warning].compactMap { $0 }.joined(separator: ", "),
                        action: { toggleFold($modelFoldOpen, isOpen: isOpen, hasProblem: unavailable != nil) }) {
@@ -440,7 +438,7 @@ struct BotInspector: View {
     private func capabilitiesCard(_ bot: Bot, isOpen: Bool, hasProblem: Bool, skillNames: [String],
                                   connectorNames: [String]) -> some View {
         let enabled = Capability.allCases.filter { bot.capabilities.contains($0) }.count
-        return Section {
+        return PanelSection {
             FoldHeader(title: "Pode usar", isOpen: isOpen, tip: Tip.toggleCapabilities(isOpen: isOpen),
                        spokenSummary: CapabilityStrip.spokenCount(enabled: enabled, total: Capability.allCases.count),
                        action: { toggleFold($capabilitiesFoldOpen, isOpen: isOpen, hasProblem: hasProblem) }) {
@@ -589,7 +587,7 @@ struct BotInspector: View {
 
     @ViewBuilder
     private func folderTab(_ bot: Bot) -> some View {
-        Section {
+        PanelSection {
             folderRow(bot)
             folderActions(bot)
             folderControls(bot)
@@ -603,7 +601,7 @@ struct BotInspector: View {
         } }
 
         if let file = instructionFile {
-            Section {
+            PanelSection {
                 Toggle(isOn: instructionsTrustBinding(file, of: bot)) {
                     // What it means is said once, in the section's footer below.
                     Label("Confiar nas instruções desta pasta", systemImage: "checkmark.shield")
@@ -623,7 +621,7 @@ struct BotInspector: View {
             .transition(.quiet)
         }
 
-        Section {
+        PanelSection {
             if bot.permissionRules.isEmpty {
                 // The rule of the footer below is said here while there is nothing to list (see the footer).
                 PanelEmptyNote("Nenhuma liberação ainda", systemImage: "checkmark.shield",
@@ -682,36 +680,28 @@ struct BotInspector: View {
                     .textSelection(.enabled)
             }
             .help(bot.workingURL.path)
-            Spacer(minLength: 0)
+            Spacer(minLength: Spacing.s)
+            // Stays enabled with the folder gone: choosing another one is the way out.
+            changeFolderMenu(bot)
         }
     }
 
-    /// Open the folder where the Orb works, in the Finder or in the Terminal, or change it ("Mudar…"): the three things
-    /// people do with it, on one line. Chips
-    /// like the ones of the rows around (one line when they fit, one under the other in a narrow panel); off while the
-    /// folder is gone, which "Recriar" below brings back.
+    /// Open the folder where the Orb works, in the Finder or in the Terminal: two chips side by side, named by the app they
+    /// open ("Abrir no …" is their hover text and what VoiceOver says). "Mudar…" sits on the folder's own line, beside what
+    /// it changes. Off while the folder is gone, which "Recriar" below brings back.
     private func folderActions(_ bot: Bot) -> some View {
-        let chips = Group {
-            Button("Abrir no Finder", systemImage: "folder") { OrbFolder.showInFinder(bot.workingURL) }
+        let disabled = listing?.folder == .missing
+        return HStack(spacing: Spacing.s) {
+            Button("Finder", systemImage: "folder") { OrbFolder.showInFinder(bot.workingURL) }
                 .help(Tip.openFolderInFinder(bot.name))
-            Button("Abrir no Terminal", systemImage: "terminal") { OrbFolder.openInTerminal(bot.workingURL) }
+                .accessibilityLabel("Abrir no Finder")
+            Button("Terminal", systemImage: "terminal") { OrbFolder.openInTerminal(bot.workingURL) }
                 .help(Tip.openFolderInTerminal(bot.name))
+                .accessibilityLabel("Abrir no Terminal")
+            Spacer(minLength: 0)
         }
         .chipButton()
-        .disabled(listing?.folder == .missing)
-        // "Mudar…" stays enabled with the folder gone: choosing another one is the way out.
-        let change = changeFolderMenu(bot)
-        return ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) {
-                chips
-                change
-                Spacer(minLength: 0)
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                chips
-                change
-            }
-        }
+        .disabled(disabled)
     }
 
     /// "Mudar…": choose another folder, or switch between the home folder and one of the Orb's own.
@@ -774,7 +764,7 @@ struct BotInspector: View {
     @ViewBuilder
     private func filesSection(_ bot: Bot) -> some View {
         if let listing, listing.folder != .missing, listing.snapshot != .home {
-            Section {
+            PanelSection {
                 if listing.snapshot == .unreadable {
                     PanelEmptyNote("Sem acesso à pasta", systemImage: "lock",
                                    detail: "O macOS pode estar bloqueando: libere em Ajustes do Sistema → Privacidade e Segurança.")
@@ -816,17 +806,17 @@ struct BotInspector: View {
         let routines = model.routines(for: bot.id)
         // Each routine is a card of its own, with no heading: "Rotinas" is already the tab's name right above.
         if routines.isEmpty {
-            Section {
+            PanelSection {
                 PanelEmptyNote("Nenhuma rotina ainda", systemImage: "clock.badge",
                                detail: "Peça a \(bot.name) no chat, como “verifique meus e-mails a cada 30 minutos”, ou crie uma aqui.")
             }
         }
         ForEach(routines) { routine in
-            Section {
+            PanelSection {
                 RoutineRow(routine: routine) { editingRoutine = routine }
             }
         }
-        Section {
+        PanelSection {
             let newRoutine = Button("Nova rotina…", systemImage: "plus") {
                 editingRoutine = Routine(name: "", botID: bot.id, prompt: "", schedule: .daily(hour: 9, minute: 0))
             }

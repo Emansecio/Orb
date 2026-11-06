@@ -120,6 +120,46 @@ extension View {
 }
 
 
+/// The one card of the app (the panel's sections, the home page, the catalogs, the cards in a chat): its fill with a
+/// faint sheen at the top, an edge lit from above (brighter at the top, fading down the sides) and a short dark drop.
+/// The dark theme has few greys, so a flat fill and a hairline read as a box drawn on the page; this makes it sit a
+/// step above it, felt more than seen.
+struct CardSurface: View {
+    var radius: CGFloat = Radius.card
+    var fill: Color = Palette.surface
+    var stroke: Color = Palette.line
+    var lineWidth: CGFloat = 1
+
+    /// The default edge: brighter where the light falls (the top), quieter at the bottom.
+    static let litEdge = LinearGradient(colors: [Color.white.opacity(0.11), Color.white.opacity(0.045)],
+                                        startPoint: .top, endPoint: .bottom)
+    static let sheen = LinearGradient(colors: [Color.white.opacity(0.025), .clear], startPoint: .top, endPoint: .center)
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        shape
+            .fill(fill)
+            .overlay { shape.fill(Self.sheen) }
+            .overlay {
+                if stroke == Palette.line {
+                    shape.strokeBorder(Self.litEdge, lineWidth: lineWidth)
+                } else {
+                    shape.strokeBorder(stroke, lineWidth: lineWidth)
+                }
+            }
+            .modifier(CardDrop())
+    }
+}
+
+/// The drop under a card: a tight contact shadow and a wide soft one, so it lifts without a halo.
+struct CardDrop: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .shadow(color: .black.opacity(0.4), radius: 1, y: 1)
+            .shadow(color: .black.opacity(0.24), radius: 10, y: 4)
+    }
+}
+
 /// Shadows under floating cards.
 enum Shadow {
     /// Black under a popover, a picker or a floating card.
@@ -201,10 +241,11 @@ enum ControlHeight {
 // MARK: Surfaces
 
 extension View {
+    /// A card a step above what it sits on (`CardSurface`). A custom `stroke` (a warning's orange, a danger's red) is drawn
+    /// as given; the default hairline is lit from above.
     func card(radius: CGFloat = Radius.card, fill: Color = Palette.surface, stroke: Color = Palette.line,
               lineWidth: CGFloat = 1) -> some View {
-        background(fill, in: .rect(cornerRadius: radius))
-            .overlay(RoundedRectangle(cornerRadius: radius).strokeBorder(stroke, lineWidth: lineWidth))
+        background(CardSurface(radius: radius, fill: fill, stroke: stroke, lineWidth: lineWidth))
     }
 
     /// Sweeping highlight across dim text, used for "working" states (steady text under Reduce Motion).
