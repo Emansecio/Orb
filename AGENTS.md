@@ -50,3 +50,34 @@ Os caminhos de código abreviados são relativos a `Sources/Orb/`. Caminhos inic
 - Sempre que executar um build para o usuário, conclua gerando a versão release com `./scripts/bundle.sh release` e abrindo `build/Orb.app`, que é o aplicativo fixado no Dock neste Mac. Uma compilação `swift build` sozinha não atualiza o app do Dock.
 - Se o Orb estiver aberto, encerre-o normalmente e reabra o bundle atualizado para que o processo em execução corresponda à assinatura e continue acessando o Keychain. Respeite eventuais diálogos ou trabalho em andamento; não force o encerramento.
 - Confirme que o bundle foi gerado e que o processo aberto corresponde a `build/Orb.app`. Não execute o bundling ao fim de cada compilação intermediária do mesmo trabalho: atualize o Dock ao final do build solicitado.
+
+## Regras fixas
+
+Correções que o usuário já fez mais de uma vez. Valem em toda tarefa, inclusive para subagentes.
+
+### Interface
+
+1. Controle novo copia o estilo das linhas vizinhas da mesma seção (tipo de linha, `Picker`/`Toggle` nativo, tamanho, alinhamento). Não invente um estilo próprio para um controle só.
+2. Todo cartão usa `.card()`/`CardSurface` (no painel, `PanelSection`); nunca um fundo chapado com fio. Link em texto usa `LinkTextStyle`.
+3. Cor tem função: laranja só para aviso ou risco; vermelho só na confirmação de uma ação destrutiva, que fica no menu `⋯`, não exposta na linha.
+4. Mudança visual só está pronta depois de conferida por `--snapshot` em 460 e 1100 pt (com `ORB_DATA_DIR` temporário). O `--snapshot` não tira o foco; rode um por vez, não em lote longo.
+
+### Textos da interface
+
+5. pt-BR com acentuação correta e caixa de sentença; nada de Title Case em rótulos, títulos ou botões.
+6. Sem jargão na tela: nenhum slug, id ou nome técnico (ex.: "agent-browser"); use o nome falado ("o controle do navegador").
+7. Pasta, grupo, espaço e categoria já têm significado na lateral; não reutilize essas palavras para outra coisa.
+8. Não corte a parte útil: caminho trunca no meio (`.truncationMode(.middle)`); texto que pode ser cortado ganha `.help` com o texto inteiro.
+
+### Foco e máquina
+
+9. Não roube o foco do usuário: nada de trazer apps para a frente, abrir abas do Chrome por AppleScript/`open` ou ativar janelas enquanto ele trabalha. Para links, entregue um arquivo ou a lista clicável.
+10. A suíte inteira só roda com o Orb fechado (os testes de navegador real falham com ele aberto); no dia a dia, rode apenas as suítes filtradas da área.
+11. Nada pago: nenhuma API ou serviço cobrado sem pedido explícito. Erro 429 significa esperar, não trocar para uma API paga.
+12. Espere com `waitUntil`, `TestGate`, `Monitor` ou um processo em segundo plano; nunca com `sleep N` (nem em subagentes, que deixam `sleep` órfãos).
+
+### Agentes e forma de trabalho
+
+13. Subagentes que escrevem código são Sonnet, cada um em sua worktree, no máximo 3 compilando ao mesmo tempo (com `nice -n 15`). A worktree nasce de `origin/main`: o agente roda `git merge --ff-only main` antes de começar. A revisão final dos diffs é da sessão principal.
+14. Depois de levar o commit do agente para a `main`, remova a worktree e o branch dele.
+15. Não repita o que o usuário já recusou ou desfez (ex.: a janela de Ajustes mudando de altura entre abas). Antes de corrigir, confirme a causa no código e nas capturas, não na suposição.
