@@ -45,18 +45,27 @@ struct RoutinesView: View {
                         ForEach(owners) { bot in
                             VStack(alignment: .leading, spacing: Spacing.m) {
                                 if owners.count > 1 {
-                                    HStack(spacing: 8) {
-                                        BotAvatar(orb: bot.orb, size: 22, animated: false)
-                                        Text(bot.name)
-                                            .font(.system(size: 14, weight: .semibold))
-                                            .lineLimit(1)
-                                            .accessibilityAddTraits(.isHeader)
+                                    // The Orb is named once, here: its cards start at the routine's name (`showsOrb`).
+                                    Button { openOrb(bot.id) } label: {
+                                        HStack(spacing: 8) {
+                                            BotAvatar(orb: bot.orb, size: 22, animated: false)
+                                            Text(bot.name)
+                                                .font(.system(size: 14, weight: .semibold))
+                                                .foregroundStyle(Palette.ink)
+                                                .lineLimit(1)
+                                        }
+                                        .contentShape(.rect)
                                     }
+                                    .buttonStyle(.plain)
+                                    .accessibilityAddTraits(.isHeader)
+                                    .help("Abrir \(bot.name) e suas rotinas")
                                 }
-                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 340), spacing: Spacing.cardSpacing, alignment: .top)],
+                                // Up to 460 pt a card, so one routine does not stretch across the page; the cards keep their own
+                                // height instead of matching the tallest of the row.
+                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 340, maximum: 460), spacing: Spacing.cardSpacing, alignment: .top)],
                                           alignment: .leading, spacing: Spacing.cardSpacing) {
                                     ForEach(model.routines(for: bot.id)) { routine in
-                                        RoutineCard(routine: routine, botName: bot.name, orb: bot.orb,
+                                        RoutineCard(routine: routine, botName: bot.name, orb: bot.orb, showsOrb: owners.count == 1,
                                                     isRunning: model.isRoutineRunning(routine.id),
                                                     isQueued: model.isRoutineQueued(routine.id),
                                                     onToggle: { model.setRoutineEnabled(routine.id, $0) },
@@ -64,10 +73,7 @@ struct RoutinesView: View {
                                                     onEdit: { sheet = .edit(routine) },
                                                     onOpen: { sheet = .conversation(routine.id) },
                                                     onOpenRun: { sheet = .run(routine: routine.id, run: $0) },
-                                                    onOpenOrb: {
-                                                        model.setInspector(true)
-                                                        model.request(.showTab(.routines), of: bot.id)
-                                                    },
+                                                    onOpenOrb: { openOrb(bot.id) },
                                                     onDelete: { model.deleteRoutine(routine.id) })
                                             .id(routine.id)
                                             .transition(.adapted(.arrive, reduceMotion: reduceMotion))
@@ -120,6 +126,12 @@ struct RoutinesView: View {
                                 onConversation: { self.sheet = .conversation(routineID) })
             }
         }
+    }
+
+    /// The Orb that owns a routine, with its panel on the routines tab.
+    private func openOrb(_ id: UUID) {
+        model.setInspector(true)
+        model.request(.showTab(.routines), of: id)
     }
 
     private func focusInicioRoutine(using proxy: ScrollViewProxy) {
@@ -222,13 +234,17 @@ private struct TemplateCard: View {
                 Text(template.title)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Palette.ink)
-                Text(template.goal == nil ? template.whenText : "\(template.whenText) · com meta")
-                    .font(Typography.small.weight(.medium))
-                    .foregroundStyle(Palette.secondary)
-                Text(template.prompt)
+                HStack(spacing: 6) {
+                    Text(template.whenText)
+                        .font(Typography.small.weight(.medium))
+                        .foregroundStyle(Palette.secondary)
+                    if template.goal != nil { CatalogBadge(text: "Com meta", symbol: "target") }
+                }
+                // A short description that always ends in a full stop; the whole prompt is the tooltip.
+                Text(template.blurb)
                     .font(Typography.small)
                     .foregroundStyle(Palette.muted)
-                    .lineLimit(5)
+                    .lineLimit(3)
                     .multilineTextAlignment(.leading)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -252,6 +268,9 @@ private struct RoutineCard: View {
     /// The Orb that owns it: its name and avatar, not the whole `Bot`.
     let botName: String
     let orb: OrbConfig
+    /// The card names its Orb (avatar and name) only when the page has no section header for it, which is when one Orb owns
+    /// every routine: otherwise the header says it once for all its cards.
+    let showsOrb: Bool
     /// This routine is running now / is waiting for its Orb to be free.
     let isRunning: Bool
     let isQueued: Bool
@@ -265,6 +284,7 @@ private struct RoutineCard: View {
     let onOpenOrb: () -> Void
     let onDelete: () -> Void
     @State private var isConfirmingDelete = false
+    @State private var showsAllFollowUps = false
 
     /// The last run failed: said in the header, not only in the line at the bottom.
     private var lastRunFailed: Bool { routine.runs.first?.succeeded == false }
@@ -273,33 +293,37 @@ private struct RoutineCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.m) {
-            HStack(spacing: 8) {
-                Button(action: onOpenOrb) {
-                    HStack(spacing: 8) {
-                        BotAvatar(orb: orb, size: 30, activity: routine.isEnabled ? .idle : .sleepy, animated: false)
-                        Text(botName)
-                            .font(Typography.text.weight(.semibold))
-                            .foregroundStyle(Palette.secondary)
-                            .lineLimit(1)
+            let datePassed = !routine.canBeEnabled()
+            // The label is hidden but read by VoiceOver: it names the routine, since every card has the same switch.
+            let toggle = Toggle("Ativar \(routine.name)", isOn: Binding(get: { routine.isEnabled }, set: onToggle))
+                .toggleStyle(.switch)
+                .labelsHidden()
+                .controlSize(.small)
+                .disabled(datePassed)
+                .help(datePassed ? Tip.routineDatePassed : Tip.routineToggle(isOn: routine.isEnabled))
+            let modeBadge = routine.permissionMode.map { mode in
+                CatalogBadge(text: mode.label, symbol: mode.symbol)
+                    .help("Esta rotina roda em “\(mode.label)”, mesmo que o Orb use outro modo")
+            }
+            if showsOrb {
+                HStack(spacing: 8) {
+                    Button(action: onOpenOrb) {
+                        HStack(spacing: 8) {
+                            BotAvatar(orb: orb, size: 30, activity: routine.isEnabled ? .idle : .sleepy, animated: false)
+                            Text(botName)
+                                .font(Typography.text.weight(.semibold))
+                                .foregroundStyle(Palette.secondary)
+                                .lineLimit(1)
+                        }
+                        .opacity(dimming)
+                        .contentShape(.rect)
                     }
-                    .opacity(dimming)
-                    .contentShape(.rect)
+                    .buttonStyle(.plain)
+                    .help("Abrir \(botName) e suas rotinas")
+                    modeBadge
+                    Spacer()
+                    toggle
                 }
-                .buttonStyle(.plain)
-                .help("Abrir \(botName) e suas rotinas")
-                if let mode = routine.permissionMode {
-                    CatalogBadge(text: mode.label, symbol: mode.symbol)
-                        .help("Esta rotina roda em “\(mode.label)”, mesmo que o Orb use outro modo")
-                }
-                Spacer()
-                let datePassed = !routine.canBeEnabled()
-                // The label is hidden but read by VoiceOver: it names the routine, since every card has the same switch.
-                Toggle("Ativar \(routine.name)", isOn: Binding(get: { routine.isEnabled }, set: onToggle))
-                    .toggleStyle(.switch)
-                    .labelsHidden()
-                    .controlSize(.small)
-                    .disabled(datePassed)
-                    .help(datePassed ? Tip.routineDatePassed : Tip.routineToggle(isOn: routine.isEnabled))
             }
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(routine.name)
@@ -309,6 +333,12 @@ private struct RoutineCard: View {
                 if lastRunFailed {
                     CatalogBadge(text: "Falhou", symbol: "exclamationmark.triangle.fill", tint: Palette.danger)
                         .fixedSize()
+                }
+                if !showsOrb {
+                    // Under the Orb's section header the card starts here: the routine's name, the switch at its end.
+                    modeBadge
+                    Spacer(minLength: 8)
+                    toggle
                 }
             }
             VStack(alignment: .leading, spacing: 4) {
@@ -326,24 +356,36 @@ private struct RoutineCard: View {
             let openFollowUps = routine.followUps.filter { !$0.resolved }
             if !openFollowUps.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Acompanhamentos em aberto").font(Typography.label.weight(.semibold))
-                    ForEach(openFollowUps) { item in
+                    // A section label, not a heading: the routine's name above is what the card is about.
+                    Text("Acompanhamentos em aberto")
+                        .font(Typography.label.weight(.medium))
+                        .foregroundStyle(Palette.secondary)
+                    ForEach(RoutineText.visibleFollowUps(openFollowUps, showsAll: showsAllFollowUps)) { item in
                         HStack(alignment: .top) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(item.subject).font(Typography.label.weight(.medium))
-                                Text("\(item.channel) · \(item.nextStep)").font(Typography.small).foregroundStyle(Palette.muted)
+                                Text("\(item.channel) · \(item.nextStep)")
+                                    .font(Typography.small).foregroundStyle(Palette.muted)
+                                    .lineLimit(2)
+                                    .help(item.nextStep)
                                 if let checked = item.lastChecked {
                                     Text("Verificado \(RoutineText.stamp(checked))").font(Typography.small).foregroundStyle(Palette.faint)
                                 }
                             }
                             Spacer()
-                            Button("Concluir") {
+                            Button("Concluir", systemImage: "checkmark.circle") {
                                 guard let r = model.routines.firstIndex(where: { $0.id == routine.id }),
                                       let i = model.routines[r].followUps.firstIndex(where: { $0.id == item.id }) else { return }
                                 model.routines[r].followUps[i].resolved = true
                                 model.routines[r].followUps[i].updatedAt = .now
-                            }.buttonStyle(GhostStyle())
+                            }
+                            .buttonStyle(GhostStyle())
+                            .accessibilityLabel("Concluir acompanhamento: \(item.subject)")
                         }
+                    }
+                    if openFollowUps.count > RoutineText.followUpsShown {
+                        Button(showsAllFollowUps ? "Ver menos" : "Ver todos (\(openFollowUps.count))") { showsAllFollowUps.toggle() }
+                            .buttonStyle(LinkTextStyle())
                     }
                 }
             }
@@ -356,7 +398,6 @@ private struct RoutineCard: View {
             } else {
                 RunHistory(runs: routine.runs, onOpen: onOpenRun)
             }
-            Spacer(minLength: 0)
             // The same buttons as the routine's card in the Orb's panel: ghosts for what opens something, a pill for the run.
             HStack(spacing: Spacing.xs + Spacing.hairline) {
                 Button("Editar", systemImage: "pencil", action: onEdit)
@@ -366,11 +407,11 @@ private struct RoutineCard: View {
                 Button("Ver conversa", systemImage: "text.bubble", action: onOpen)
                     .buttonStyle(GhostStyle())
                     .help(Tip.routineConversation)
-                MoreMenu(name: routine.name, tip: "Edita ou apaga a rotina") {
-                    Button("Editar…", action: onEdit)
+                MoreMenu(name: routine.name, tip: "Mais ações: editar ou apagar a rotina") {
+                    Button("Editar rotina…", systemImage: "pencil", action: onEdit)
                         .help(Tip.editRoutine)
                     Divider()
-                    Button("Apagar…", role: .destructive) { isConfirmingDelete = true }
+                    Button("Apagar rotina…", systemImage: "trash", role: .destructive) { isConfirmingDelete = true }
                         .help(Tip.deleteRoutine)
                 }
                 Spacer()
@@ -380,8 +421,6 @@ private struct RoutineCard: View {
             .controlSize(.small)
         }
         .padding(Spacing.cardPadding)
-        // The cards of one row are as tall as the tallest, with their buttons on the same line at the bottom.
-        .frame(maxHeight: .infinity, alignment: .top)
         .card(radius: Radius.large)
         .animateChanges(of: routine.isEnabled)
         .animateChanges(of: lastRunFailed)
@@ -539,12 +578,13 @@ private struct RunHistory: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if let latest = runs.first { RunLine(run: latest, lineLimit: 3) { onOpen(latest.id) } }
-            if runs.count > 1, let current = runs[0].openFollowUps, let previous = runs[1].openFollowUps {
-                let added = Set(current).subtracting(previous).count
-                let completed = Set(previous).subtracting(current).count
-                Text("Desde a execução anterior: \(added) novos · \(completed) concluídos · \(current.count) em aberto")
-                    .font(Typography.small).foregroundStyle(Palette.muted)
+            if let latest = runs.first {
+                RunLine(run: latest, lineLimit: 3, showsMore: RoutineText.hasMore(latest)) { onOpen(latest.id) }
+            }
+            if runs.count > 1, let current = runs[0].openFollowUps, let previous = runs[1].openFollowUps,
+               let line = RoutineText.sinceLastRun(added: Set(current).subtracting(previous).count,
+                                                   completed: Set(previous).subtracting(current).count, open: current.count) {
+                Text(line).font(Typography.small).foregroundStyle(Palette.muted)
             }
             if runs.count > 1 {
                 DisclosureGroup("Execuções anteriores (\(runs.count - 1))") {
@@ -565,6 +605,9 @@ private struct RunHistory: View {
 private struct RunLine: View {
     let run: RoutineRun
     let lineLimit: Int
+    /// The summary is cut or the report has more: said as a link-colored "Ver mais" (the whole line opens the report), as in
+    /// the Orb's panel, so a cut summary does not read as broken.
+    var showsMore = false
     let action: () -> Void
 
     var body: some View {
@@ -583,6 +626,12 @@ private struct RunLine: View {
                         .foregroundStyle(Palette.muted)
                         .lineLimit(lineLimit)
                         .multilineTextAlignment(.leading)
+                    if showsMore {
+                        Text("Ver mais")
+                            .font(Typography.small)
+                            .foregroundStyle(Palette.accentText)
+                            .accessibilityHidden(true)
+                    }
                 }
                 Spacer(minLength: 4)
                 // A goal's runs read as its timeline: where each check put it.
@@ -673,7 +722,7 @@ struct RoutineRunSheet: View {
     }
 
     private func reportContent(_ run: RoutineRun) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             if !run.succeeded {
                 Label(run.summary, systemImage: "exclamationmark.triangle")
                     .font(Typography.text)
@@ -704,9 +753,6 @@ struct RoutineRunSheet: View {
                     .buttonStyle(GhostStyle())
                     .help(Tip.openReportFile)
             }
-            Button("Ver conversa", systemImage: "text.bubble", action: onConversation)
-                .buttonStyle(GhostStyle())
-                .help(Tip.routineConversation)
             if !run.succeeded {
                 Button("Rodar de novo", systemImage: "arrow.clockwise") {
                     model.runRoutine(routineID, manual: true)
@@ -717,9 +763,13 @@ struct RoutineRunSheet: View {
                 .disabled(model.isRoutineRunning(routineID))
             }
             Spacer(minLength: Spacing.s)
+            // "Fechar" is quiet (Esc does it); the way on, the routine's conversation, is the main action.
             Button("Fechar") { dismiss() }
-                .buttonStyle(PrimaryPillStyle())
+                .buttonStyle(GhostStyle())
                 .keyboardShortcut(.cancelAction)
+            Button("Ver conversa", systemImage: "text.bubble", action: onConversation)
+                .buttonStyle(PrimaryPillStyle())
+                .help(Tip.routineConversation)
         }
         .labelStyle(FixedIconLabelStyle())
     }
@@ -748,11 +798,11 @@ private struct ReportBlockView: View {
                 Text(MarkdownCache.attributed(text))
             }
             .font(Typography.text)
-            .foregroundStyle(Palette.secondary)
+            .foregroundStyle(Palette.ink) // the report is what the sheet is for: full contrast, not the gray of captions
         case .paragraph(let text):
             Text(MarkdownCache.attributed(text))
                 .font(Typography.text)
-                .foregroundStyle(Palette.secondary)
+                .foregroundStyle(Palette.ink)
                 .lineSpacing(3)
         }
     }
@@ -803,7 +853,8 @@ struct RoutineConversationSheet: View {
                 ContentUnavailableView("Esta rotina não está mais aqui", systemImage: "clock.arrow.circlepath")
             }
         }
-        .frame(height: 400)
+        // An empty conversation is a short sheet, not 400 pt of black around one line.
+        .frame(height: items.isEmpty && !isLoading ? 200 : 400)
         .background(Palette.canvas)
         .orbSheet(routine?.name ?? "Rotina",
                   subtitle: live == nil ? "Conversa da rotina, só para ler"
@@ -910,9 +961,19 @@ struct RoutineEditor: View {
         scheduleCheck = ScheduleCheck(schedule)
     }
 
-    /// The cron line in words, when it parses and is one of the common ones.
-    private var cronPlainText: String? {
-        (try? CronExpression(cronExpression.trimmingCharacters(in: .whitespaces)))?.plainText()
+    /// Beside the expression: "Válida" (with the line in words when it is a common one) or what is wrong with it.
+    @ViewBuilder private var cronStatusLine: some View {
+        switch RoutineText.cronStatus(cronExpression) {
+        case .valid(let plain):
+            Label(plain.map { "Válida · \($0)" } ?? "Válida", systemImage: "checkmark.circle")
+                .font(Typography.small)
+                .foregroundStyle(Palette.ok)
+        case .invalid(let reason):
+            Label(reason, systemImage: "exclamationmark.circle")
+                .font(Typography.small)
+                .foregroundStyle(Palette.warn)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private var zoneProblem: String? {
@@ -936,8 +997,17 @@ struct RoutineEditor: View {
                 // Right under the Orb it depends on, so it is seen before the rest of the form.
                 Section { waitingWarning(bot).transition(.quiet) }
             }
-            // A routine made for a goal (a goal idea or template) shows it first: below "O que fazer" it would open off screen.
+            // What the routine does comes before when it runs: it is the heart of it. A routine made for a goal (a goal idea or
+            // template) shows the goal first: below "O que fazer" it would open off screen.
             if leadsWithGoal { goalSection }
+            Section("O que fazer") {
+                PlaceholderTextEditor(placeholder: "Ex.: Leia meus e-mails não lidos e resuma os importantes em 5 tópicos.",
+                                      text: $routine.prompt, minHeight: 70)
+                if isNew {
+                    Toggle("Rodar uma vez agora, para testar", isOn: $runsNow)
+                        .help(Tip.runOnceNow)
+                }
+            }
             Section("Quando") {
                 Picker("Repetir", selection: $kind) {
                     Text("Todo dia").tag(Kind.daily)
@@ -969,12 +1039,8 @@ struct RoutineEditor: View {
                         .font(Typography.text.monospaced())
                         .help(Tip.cronExpression)
                         .transition(.quiet)
-                    if let plain = cronPlainText {
-                        Text(plain)
-                            .font(Typography.small)
-                            .foregroundStyle(Palette.muted)
-                            .transition(.quiet)
-                    }
+                    cronStatusLine
+                        .transition(.quiet)
                     TextField("Fuso", text: $cronTimeZone, prompt: Text(TimeZone.current.identifier))
                         .transition(.quiet)
                     if let zoneProblem {
@@ -993,14 +1059,6 @@ struct RoutineEditor: View {
                     .font(Typography.small)
                     .foregroundStyle(Palette.muted)
                     .textSwap(preview)
-            }
-            Section("O que fazer") {
-                PlaceholderTextEditor(placeholder: "Ex.: Leia meus e-mails não lidos e resuma os importantes em 5 tópicos.",
-                                      text: $routine.prompt, minHeight: 70)
-                if isNew {
-                    Toggle("Rodar uma vez agora, para testar", isOn: $runsNow)
-                        .help(Tip.runOnceNow)
-                }
             }
             if !leadsWithGoal { goalSection }
             Section {
@@ -1074,13 +1132,18 @@ struct RoutineEditor: View {
             .font(Typography.label)
             .foregroundStyle(Palette.warn)
             HStack(spacing: 8) {
-                Button("Usar Automático") { choose(.auto) }
+                Button("Rodar no modo Automático") { choose(.auto) }
                     .help(Tip.routineUseAuto)
-                Button("Usar Só leitura") { choose(.readOnly) }
+                Button("Rodar em Só leitura") { choose(.readOnly) }
                     .help(Tip.routineUseReadOnly)
             }
             .buttonStyle(SecondaryPillStyle())
             .controlSize(.small)
+            // `choose` sets this routine's own mode (under "Avançado"): the Orb keeps its mode for the rest.
+            Text("Vale só para esta rotina; \(bot.name) continua como está nas conversas.")
+                .font(Typography.small)
+                .foregroundStyle(Palette.muted)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.vertical, 2)
     }

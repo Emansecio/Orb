@@ -19,6 +19,8 @@ struct RoutineTemplate: Identifiable, Equatable, Sendable {
     let permissionMode: PermissionMode?
     /// What success looks like, for a template that works toward a goal: the editor opens with "Meta" on.
     var goal: String?
+    /// What the template does in about 90 characters, for its card (the prompt is long and was cut mid-sentence).
+    var blurb: String = ""
 
     /// "Todo dia às 08:30"
     var whenText: String { schedule.label }
@@ -33,11 +35,13 @@ struct RoutineTemplate: Identifiable, Equatable, Sendable {
         RoutineTemplate(
             id: "organizar-arquivos", title: "Organizar arquivos", symbol: "tray.full",
             prompt: "Organize os arquivos da pasta de trabalho deste Orb: separe-os em pastas por tipo (imagens, documentos, outros), não apague nada e, no fim, liste o que ficou de fora e por quê.",
-            schedule: .weekly(weekday: 1, hour: 10, minute: 0), permissionMode: nil),
+            schedule: .weekly(weekday: 1, hour: 10, minute: 0), permissionMode: nil,
+            blurb: "Separa os arquivos da pasta por tipo, sem apagar nada."),
         RoutineTemplate(
             id: "revisar-a-semana", title: "Revisar a semana", symbol: "calendar",
             prompt: "Revise a minha semana: o que mudou nesta pasta e nos relatórios das rotinas nos últimos 7 dias, o que parece pendente e três sugestões para a próxima semana.",
-            schedule: .weekly(weekday: 6, hour: 17, minute: 0), permissionMode: .readOnly),
+            schedule: .weekly(weekday: 6, hour: 17, minute: 0), permissionMode: .readOnly,
+            blurb: "Resume o que mudou na semana e sugere o que fazer na próxima."),
         desktopGoal,
     ]
 
@@ -45,7 +49,8 @@ struct RoutineTemplate: Identifiable, Equatable, Sendable {
     static let morningSummary = RoutineTemplate(
         id: "resumo-da-manha", title: "Resumo da manhã", symbol: "sun.max",
         prompt: "Faça um resumo da minha manhã usando os conectores de agenda e de e-mail, se eu tiver algum: o que está na minha agenda de hoje e os e-mails não lidos que parecem importantes. Se faltar um conector, diga qual e siga com o que der. Termine com o que eu deveria fazer primeiro, em até 5 tópicos curtos.",
-        schedule: .daily(hour: 8, minute: 30), permissionMode: nil)
+        schedule: .daily(hour: 8, minute: 30), permissionMode: nil,
+        blurb: "Agenda de hoje e e-mails importantes, com o que fazer primeiro.")
 
     /// Also offered in an empty chat, as the goal idea: something a run can measure with its tools (old files left
     /// loose) and move a little at a time without risk (moving, never deleting).
@@ -53,7 +58,8 @@ struct RoutineTemplate: Identifiable, Equatable, Sendable {
         id: "meta-mesa", title: "Mesa em ordem", symbol: "target",
         prompt: "Confira a Mesa (~/Desktop): conte os arquivos soltos nela com mais de 7 dias e mova alguns deles para pastas por tipo (Imagens, Documentos, Outros) dentro da Mesa. Não apague nada.",
         schedule: .daily(hour: 18, minute: 0), permissionMode: nil,
-        goal: "Nenhum arquivo com mais de 7 dias solto na Mesa: os antigos ficam em pastas por tipo.")
+        goal: "Nenhum arquivo com mais de 7 dias solto na Mesa: os antigos ficam em pastas por tipo.",
+        blurb: "Move aos poucos os arquivos antigos da Mesa para pastas por tipo.")
 }
 
 /// What "Nova rotina" (or a template) does, given what the app has: the routines page never shows a dead end.
@@ -216,6 +222,45 @@ enum RoutineText {
         if isLate(date, now: now) { return late(date, now: now, calendar: calendar) }
         // The day first, then how long until it: the same order as the Orb's panel and the editor's preview.
         return "Próxima: \(dayAndTime(date, now: now, calendar: calendar)) · \(relative(until: date, now: now))"
+    }
+
+    /// The Orb panel's one line for a card that is on: how often and, for a repeating routine, the day of the next run
+    /// ("Todo dia às 08:30 · próxima amanhã"). A one-time routine's label already carries its date.
+    static func cadence(plain: String, isRepeating: Bool, next: Date, now: Date = .now, calendar: Calendar = .current) -> String {
+        guard isRepeating, next != .distantFuture else { return plain }
+        return "\(plain) · próxima \(day(next, now: now, calendar: calendar))"
+    }
+
+    /// How many open follow-ups a card lists before "Ver todos (N)".
+    static let followUpsShown = 3
+
+    static func visibleFollowUps<T>(_ items: [T], showsAll: Bool) -> [T] {
+        showsAll ? items : Array(items.prefix(followUpsShown))
+    }
+
+    /// "Desde a execução anterior: 2 novos · 1 concluído · 3 em aberto", leaving out the terms that are zero; nil when
+    /// nothing was added or completed (the open count alone is said by the list below).
+    static func sinceLastRun(added: Int, completed: Int, open: Int) -> String? {
+        guard added > 0 || completed > 0 else { return nil }
+        var terms: [String] = []
+        if added > 0 { terms.append(added == 1 ? "1 novo" : "\(added) novos") }
+        if completed > 0 { terms.append(completed == 1 ? "1 concluído" : "\(completed) concluídos") }
+        if open > 0 { terms.append("\(open) em aberto") }
+        return "Desde a execução anterior: " + terms.joined(separator: " · ")
+    }
+
+    /// The cron field's verdict while it is typed: valid (with the schedule in words when it is a common one) or why not.
+    enum CronStatus: Equatable {
+        case valid(plain: String?)
+        case invalid(String)
+    }
+
+    static func cronStatus(_ expression: String) -> CronStatus {
+        do {
+            return .valid(plain: try CronExpression(expression.trimmingCharacters(in: .whitespaces)).plainText())
+        } catch {
+            return .invalid((error as? CronExpression.Invalid)?.reason ?? "Expressão cron inválida.")
+        }
     }
 
     /// A time that passed more than a minute ago without its run (the app was closed, the Mac asleep): the next pass of

@@ -191,6 +191,46 @@ struct RoutinesUITests {
         #expect(RoutineText.reportBlocks("").isEmpty)
         #expect(RoutineText.reportBlocks("   \n\n").isEmpty)
     }
+
+    // MARK: Ondas da revisão de UI/UX
+
+    @Test func theLineSinceTheLastRunLeavesOutZeroTermsAndHidesWhenNothingMoved() {
+        #expect(RoutineText.sinceLastRun(added: 0, completed: 0, open: 3) == nil)
+        #expect(RoutineText.sinceLastRun(added: 2, completed: 0, open: 3) == "Desde a execução anterior: 2 novos · 3 em aberto")
+        #expect(RoutineText.sinceLastRun(added: 0, completed: 1, open: 0) == "Desde a execução anterior: 1 concluído")
+        #expect(RoutineText.sinceLastRun(added: 1, completed: 2, open: 4)
+                == "Desde a execução anterior: 1 novo · 2 concluídos · 4 em aberto")
+    }
+
+    @Test func openFollowUpsShowThreeUntilAskedForAll() {
+        let items = Array(1...5)
+        #expect(RoutineText.visibleFollowUps(items, showsAll: false) == [1, 2, 3])
+        #expect(RoutineText.visibleFollowUps(items, showsAll: true) == items)
+        #expect(RoutineText.visibleFollowUps([1, 2], showsAll: false) == [1, 2])
+    }
+
+    @Test func theCronFieldSaysWhetherTheExpressionIsValid() {
+        if case .valid = RoutineText.cronStatus("30 8 * * *") {} else { Issue.record("expected a valid expression") }
+        if case .valid(let plain) = RoutineText.cronStatus("  0 9 * * *  ") { #expect(plain != nil) } else { Issue.record("padding is trimmed") }
+        if case .invalid(let reason) = RoutineText.cronStatus("0 9 *") { #expect(reason.contains("5 campos")) } else { Issue.record("three fields") }
+        if case .invalid = RoutineText.cronStatus("99 9 * * *") {} else { Issue.record("minute out of range") }
+        if case .invalid = RoutineText.cronStatus("") {} else { Issue.record("empty") }
+    }
+
+    @Test func theCadenceLineJoinsHowOftenAndTheDayOfTheNextRun() {
+        let tomorrow = date(2026, 10, 9, 8, 30)
+        #expect(RoutineText.cadence(plain: "Todo dia às 08:30", isRepeating: true, next: tomorrow, now: now, calendar: calendar)
+                == "Todo dia às 08:30 · próxima amanhã")
+        #expect(RoutineText.cadence(plain: "em 09/10/2026 às 08:30", isRepeating: false, next: tomorrow, now: now, calendar: calendar)
+                == "em 09/10/2026 às 08:30")
+        #expect(RoutineText.cadence(plain: "Todo dia", isRepeating: true, next: .distantFuture, now: now, calendar: calendar) == "Todo dia")
+    }
+
+    @Test func everyTemplateHasABlurbThatFitsItsCard() {
+        for template in RoutineTemplate.all {
+            #expect(!template.blurb.isEmpty && template.blurb.count <= 90, "\(template.id)")
+        }
+    }
 }
 
 /// "Nova rotina" with no Orb is not a dead end: what each start says (the paths that make the Atlas are in WelcomeTests).
@@ -219,4 +259,5 @@ struct RoutineStartTests {
         #expect(RoutineStart.createsAtlas.templateHint.contains("Cria o Atlas"))
         #expect(RoutineStart.needsModel.templateHint.contains("conectar um modelo"))
     }
+
 }
