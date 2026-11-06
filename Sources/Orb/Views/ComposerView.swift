@@ -75,15 +75,14 @@ struct ComposerView: View {
                 .animation(Motion.fade, value: hintText)
                 .accessibilityHidden(true)
         }
-        // Padded first, then capped: the card is as wide as the transcript's text (704 pt), not 56 pt wider.
-        .padding(.horizontal, TranscriptLayout.edge)
+        // Padded first, then capped: the card lines up with the replies' text (`composerLeading`), not with the
+        // transcript's edge, so the column has one left edge and the card's borders stand out of the text evenly.
+        .padding(.leading, TranscriptLayout.edge + TranscriptLayout.composerLeading)
+        .padding(.trailing, TranscriptLayout.edge + TranscriptLayout.composerTrailing)
         .frame(maxWidth: TranscriptLayout.column)
         .padding(.top, Spacing.xs + Spacing.hairline)
         .padding(.bottom, Spacing.s)
         .frame(maxWidth: .infinity)
-        .background {
-            LinearGradient(colors: [Palette.canvas.opacity(0), Palette.canvas], startPoint: .top, endPoint: .init(x: 0.5, y: 0.35))
-        }
         .background {
             // Its own view: it reads the transcript (the steered messages), which this body must not observe.
             ComposerShortcuts(botID: botID, isQueueing: isQueueing, canSend: canSend, queuedCount: lane.queued.count,
@@ -162,33 +161,36 @@ struct ComposerView: View {
             // The whole message is laid out in a scroll view as tall as it is, up to `maxHeight`: past that the wheel and
             // the trackpad scroll the message (not the chat behind it) and its scroller shows. The field's own limit
             // would keep the caret in view but take no scrolling, so the caret is followed here (`ComposerCaretFollower`).
-            ScrollView(.vertical) {
-                // The prompt in `faint`, the placeholder gray the palette names (the system's own is fainter).
-                TextField(text: draft, prompt: Text(placeholder(situation.live)).foregroundStyle(Palette.faint), axis: .vertical) { Text(placeholder(situation.live)) }
-                    .textFieldStyle(.plain)
-                    .font(Palette.conversationFont)
-                    .foregroundStyle(Palette.ink)
-                    .focused($isFocused)
-                    // The line under the card is hidden from VoiceOver (it would be read twice); the keys it names are said here.
-                    .accessibilityHint(ComposerHint.spoken(hintText.isEmpty && showsIdleKeys(isWorking: situation.live.isWorking) ? ComposerHint.idleKeys : hintText))
-                    .onSubmit { send() }
-                    .onKeyPress(.upArrow) { moveSlash(-1) }
-                    .onKeyPress(.downArrow) { moveSlash(1) }
-                    .onKeyPress(keys: [.tab]) { handleTab($0) }
-                    .onKeyPress(.escape) { handleEscape() }
-                    .onChange(of: draft.wrappedValue) {
-                        isSlashDismissed = false
-                        slashIndex = 0 // a new word means a new list: the highlight starts at its top
-                    }
-                    .padding(.horizontal, Spacing.xs)
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fieldHeight = $0 }
-            }
-            .scrollBounceBehavior(.basedOnSize)
-            .scrollIndicators(.automatic)
-            .frame(height: min(max(fieldHeight, ComposerField.lineHeight), ComposerField.maxHeight))
-            .background { ComposerCaretFollower() }
+            // The field and its bar a step closer than the strips above them: one control, not two blocks.
+            VStack(alignment: .leading, spacing: Spacing.s) {
+                ScrollView(.vertical) {
+                    // The prompt in `faint`, the placeholder gray the palette names (the system's own is fainter).
+                    TextField(text: draft, prompt: Text(placeholder(situation.live)).foregroundStyle(Palette.faint), axis: .vertical) { Text(placeholder(situation.live)) }
+                        .textFieldStyle(.plain)
+                        .font(Palette.conversationFont)
+                        .foregroundStyle(Palette.ink)
+                        .focused($isFocused)
+                        // The line under the card is hidden from VoiceOver (it would be read twice); the keys it names are said here.
+                        .accessibilityHint(ComposerHint.spoken(hintText.isEmpty && showsIdleKeys(isWorking: situation.live.isWorking) ? ComposerHint.idleKeys : hintText))
+                        .onSubmit { send() }
+                        .onKeyPress(.upArrow) { moveSlash(-1) }
+                        .onKeyPress(.downArrow) { moveSlash(1) }
+                        .onKeyPress(keys: [.tab]) { handleTab($0) }
+                        .onKeyPress(.escape) { handleEscape() }
+                        .onChange(of: draft.wrappedValue) {
+                            isSlashDismissed = false
+                            slashIndex = 0 // a new word means a new list: the highlight starts at its top
+                        }
+                        .padding(.horizontal, Spacing.xs)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fieldHeight = $0 }
+                }
+                .scrollBounceBehavior(.basedOnSize)
+                .scrollIndicators(.automatic)
+                .frame(height: min(max(fieldHeight, ComposerField.lineHeight), ComposerField.maxHeight))
+                .background { ComposerCaretFollower() }
 
-            bar(situation)
+                bar(situation)
+            }
         }
         .padding(.horizontal, Spacing.m)
         .padding(.top, Spacing.m)

@@ -817,8 +817,9 @@ struct FirstRunBanner: View {
         .modifier(NudgePulsingCard(radius: Radius.large, nudge: model.setupNudge))
         // The phrases and the buttons that change as the connection goes (waiting, failed, ready) swap in place.
         .animateChanges(of: BannerPhase(connectedName: steps.connectedName, working: steps.working, failure: steps.failure?.message))
-        // Padded, then capped: as wide as the composer under it and the transcript's text.
-        .padding(.horizontal, TranscriptLayout.edge)
+        // Padded, then capped: on the composer's two edges, under the replies' text.
+        .padding(.leading, TranscriptLayout.edge + TranscriptLayout.composerLeading)
+        .padding(.trailing, TranscriptLayout.edge + TranscriptLayout.composerTrailing)
         .frame(maxWidth: TranscriptLayout.column)
         .task {
             steps.attach(model)

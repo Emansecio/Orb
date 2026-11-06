@@ -122,6 +122,24 @@ enum TranscriptSample {
         Custa $5 ou $10, e o relatório está em `/tmp` e em /Users/voce/inexistente/nota.md.
         """#
 
+    /// A routine's report as its prompt now asks: what needs you first, then what waits, then what is scheduled.
+    static let routineReport = """
+        Rodada das 18:00: link enviado à Andressa e abertura para uma lead nova. 2 casos precisam de você.
+
+        ## Precisa de você
+        - **Marco Antônio**: mandou um áudio dizendo que passaram o contato de uma academia. Não há histórico com ele; não respondi.
+        - **Vanessa**: respondeu "Tá bom". O acesso dela termina em 06/11; reativar ou substituir depende de você.
+
+        ## Aguardando resposta
+        - Andressa Souza perguntou se podia fechar o Família. Mandei o link; quando o pedido for pago, peço os dados das 4 pessoas.
+        - Carla Noronha, amiga do Lucian, quer o Família. Pedi academia e cidade para conferir a cobertura.
+        - Olavo, Gabriel, Adriano, Giselly, Marques e Carolina receberam a abertura e não responderam.
+
+        ## Lembretes agendados
+        - Andressa e Laine: lembrete único amanhã, perto das 18:00 e das 15:30, se não pagarem.
+        - Úrsula e Rafa a partir das 19:45; Lucien e Érika a partir das 20:35.
+        """
+
     /// The run marker's date, as `Conversation.startingRoutineRun` writes it (its formatter is private).
     private static let routineRunDate: DateFormatter = {
         let formatter = DateFormatter()
@@ -343,6 +361,13 @@ enum TranscriptSample {
                          OrbQuestion(text: "Quais seções entram?", options: ["Resumo", "Preços", "Riscos"], multiple: true), botName: bot.name))),
                      TranscriptItem(.approval(ApprovalRequest.question(
                          OrbQuestion(text: "Como devo enviar?", fields: [.init(label: "Para quem"), .init(label: "Formato", options: ["PDF", "Planilha"])]), botName: bot.name)))]
+        case "transcript-report":
+            // A routine's report in the shape its prompt asks for (`RoutinePrompt.unattended`), with the way back to
+            // the end over the fade and the chip of an Orb that asks nothing.
+            JumpToEndButton.showsInSnapshots = true
+            model.update(bot.id) { $0.permissionMode = .bypass }
+            items = [TranscriptItem(.user(text: "Como estão os atendimentos de hoje?", attachments: [])),
+                     TranscriptItem(.bot(text: routineReport, isStreaming: false))]
         case "transcript-retry":
             items = [user, TranscriptItem(.notice("Não deu certo: Sem conexão com o provedor: A conexão com a Internet parece estar desligada."))]
         default:

@@ -121,6 +121,14 @@ enum TranscriptLayout {
     static let column: CGFloat = 760
     /// What stays free at the right of each line for the hover buttons of a reply.
     static let actionsReserve: CGFloat = 90
+    /// How far the composer's text sits inside its card: the card's inset plus the field's (`ComposerView.card`).
+    static let composerTextInset: CGFloat = Spacing.m + Spacing.xs
+    /// The composer's card stands out of the replies' text by its own inset on both sides, so what you type starts on
+    /// the replies' left edge and the card's two borders are the same distance from the text.
+    static let composerLeading: CGFloat = gutter - composerTextInset
+    static let composerTrailing: CGFloat = actionsReserve - composerTextInset
+    /// The band over the composer where the conversation fades out instead of being cut by the card's border.
+    static let composerFade: CGFloat = 28
     /// The least space kept at the left of a user bubble, so a short line does not touch the right edge.
     static let bubbleSpacer: CGFloat = 120
     /// How far an empty chat pushes its first block down: the same for the spinner of a loading one.

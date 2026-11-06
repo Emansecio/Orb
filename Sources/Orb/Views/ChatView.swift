@@ -93,6 +93,16 @@ struct ChatView: View {
             // build it again, and it clears what belongs to one Orb itself (`ComposerView.orbChanged`).
             ComposerView(botID: botID, isDropTargeted: isDropTargeted)
         }
+        .padding(.top, TranscriptLayout.composerFade)
+        .background {
+            // The conversation fades out over the band above the card (the jump-to-end arrow rests on it), then the
+            // canvas is opaque behind the card: no line is cut in half by the card's border.
+            VStack(spacing: 0) {
+                LinearGradient(colors: [Palette.canvas.opacity(0), Palette.canvas], startPoint: .top, endPoint: .bottom)
+                    .frame(height: TranscriptLayout.composerFade)
+                Palette.canvas
+            }
+        }
     }
 }
 
@@ -491,7 +501,10 @@ private struct TranscriptList: View {
                             .transition(.adapted(.arrive, reduceMotion: reduceMotion))
                     }
                 }
-                .padding(.bottom, Spacing.m)
+                // Over the composer's card, not the window's middle (the card stands left of it, with the replies'
+                // text), and just above the band where the conversation fades out.
+                .offset(x: (TranscriptLayout.composerLeading - TranscriptLayout.composerTrailing) / 2)
+                .padding(.bottom, Spacing.xs)
                 .motion(Motion.content, value: showsJump)
             }
             .environment(\.replyGrew, replyGrew(proxy))
