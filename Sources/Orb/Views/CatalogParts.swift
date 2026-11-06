@@ -203,7 +203,7 @@ struct CatalogSearchHeader: View {
                 ScrollView(.horizontal) {
                     HStack(spacing: 6) {
                         ForEach(suggestions, id: \.self) { suggestion in
-                            Button(suggestion) { query = suggestion }
+                            Button(SkillText.displayName(suggestion)) { query = suggestion }
                                 .buttonStyle(ChipStyle(isSelected: query.lowercased() == suggestion.lowercased()))
                                 .help(Tip.searchFor(suggestion))
                         }

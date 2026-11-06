@@ -119,6 +119,8 @@ private struct InstalledSkills: View {
     /// What the Orbs proposed and waits for you, read from their memories when the page opens and when a review ends.
     @State private var pending: [SkillDraft] = []
     @State private var reviewing: SkillDraft?
+    /// The proposals already opened by "Revisar uma a uma" (nil outside it): "Decidir depois" must not open the same one again.
+    @State private var reviewedInQueue: Set<String>?
 
     private var showsFilter: Bool { model.skills.count >= InstalledSkillFilter.threshold }
     /// A filter typed before the list got short is gone with its field, not kept hiding skills.
@@ -161,7 +163,10 @@ private struct InstalledSkills: View {
         }
         .task { pending = await model.pendingSkillDrafts() }
         .sheet(item: $reviewing, onDismiss: {
-            Task { pending = await model.pendingSkillDrafts() }
+            Task {
+                pending = await model.pendingSkillDrafts()
+                presentNext()
+            }
         }) { draft in
             SkillEditor(skill: draft.skill, proposal: draft)
         }
@@ -176,31 +181,52 @@ private struct InstalledSkills: View {
         }
     }
 
+    /// Opens the next proposal not yet seen in the one-by-one review; ends the review when none is left.
+    private func presentNext() {
+        guard var seen = reviewedInQueue else { return }
+        guard let next = pending.first(where: { !seen.contains($0.id) }) else { reviewedInQueue = nil; return }
+        seen.insert(next.id)
+        reviewedInQueue = seen
+        reviewing = next
+    }
+
     /// The skills the Orbs learned and proposed, from every Orb: nothing is saved until you read it and say so.
     private var pendingReview: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Aguardando sua revisão (\(pending.count))")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Palette.ink)
+            HStack {
+                Text("Aguardando sua revisão (\(pending.count))")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Palette.ink)
+                Spacer(minLength: 12)
+                if pending.count > 1 {
+                    Button("Revisar uma a uma") {
+                        reviewedInQueue = []
+                        presentNext()
+                    }
+                    .buttonStyle(LinkTextStyle())
+                    .help("Abre uma proposta depois da outra")
+                }
+            }
             ForEach(pending) { draft in
                 HStack(spacing: Spacing.cardSpacing) {
-                    CatalogIcon(symbol: "sparkles")
+                    // The initial of the Orb that proposed it tells the cards apart at a glance.
+                    CatalogIcon(symbol: SkillText.orbInitialSymbol(draft.orbName))
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 6) {
-                            Text(draft.skill.name)
+                            Text(SkillText.displayName(draft.skill.name))
                                 .font(.system(size: 14, weight: .semibold))
                             Text("de \(draft.orbName)")
                                 .font(Typography.label)
                                 .foregroundStyle(Palette.muted)
                         }
                         if draft.isUpdate {
-                            CatalogBadge(text: "Melhoria de /\(draft.slug)", symbol: "arrow.triangle.2.circlepath")
+                            CatalogBadge(text: "Melhoria de \(SkillText.displayName(draft.slug))", symbol: "arrow.triangle.2.circlepath")
                         }
                     }
                     Spacer(minLength: 12)
-                    Button("Revisar") { reviewing = draft }
+                    Button("Revisar") { reviewedInQueue = nil; reviewing = draft }
                         .buttonStyle(SecondaryPillStyle())
-                        .accessibilityLabel("Revisar \(draft.skill.name), proposta de \(draft.orbName)")
+                        .accessibilityLabel("Revisar \(SkillText.displayName(draft.skill.name)), proposta de \(draft.orbName)")
                         .help("Abre a proposta para salvar ou descartar")
                 }
                 .padding(Spacing.cardPadding)
@@ -240,6 +266,88 @@ enum SkillBadge {
     static func catalogNote(for skill: Skill) -> String? {
         guard skill.isFromCatalog, let source = skill.source else { return nil }
         return "Veio de \(origin(of: source)). A edição fica só neste Mac."
+    }
+}
+
+/// How a skill's name and a search theme read on screen: a proposal arrives named after its slug ("publicar-lp-docker").
+enum SkillText {
+    /// Words that are initialisms, written in capitals wherever they appear in a name or a theme.
+    private static let acronyms: Set<String> = ["pdf", "seo", "aeo", "api", "ui", "ux", "csv", "json", "html", "css", "sql",
+                                                "url", "lp", "ai", "ia", "ios", "cli", "mcp", "xml", "yaml", "ssh", "http"]
+
+    /// "publicar-lp-docker" -> "Publicar LP docker"; "pdf" -> "PDF". A word that already has a capital is left as written,
+    /// so a name the person typed ("Resumir para o CEO") does not change.
+    static func displayName(_ raw: String) -> String {
+        let words = raw.split(whereSeparator: { $0 == "-" || $0 == "_" || $0.isWhitespace }).map(String.init)
+        return words.enumerated().map { index, word in
+            if acronyms.contains(word.lowercased()) { return word.uppercased() }
+            if index == 0, word.first?.isLowercase == true { return word.prefix(1).uppercased() + word.dropFirst() }
+            return word
+        }.joined(separator: " ")
+    }
+
+    /// The instructions without a first-line "# Title" that repeats the sheet's own title (the name of the skill).
+    static func droppingTitle(_ markdown: String, matching name: String) -> String {
+        let lines = markdown.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+        guard let first = lines.first, first.hasPrefix("# "),
+              first.dropFirst(2).trimmingCharacters(in: .whitespaces).caseInsensitiveCompare(name) == .orderedSame else { return markdown }
+        return lines.count > 1 ? String(lines[1]).trimmingCharacters(in: .newlines) : ""
+    }
+
+    /// "a.circle" for an Orb called "Atlas" (accents folded); a neutral symbol when the name starts with anything else.
+    static func orbInitialSymbol(_ orbName: String) -> String {
+        guard let first = orbName.trimmingCharacters(in: .whitespaces).folding(options: .diacriticInsensitive, locale: nil)
+            .lowercased().first, first.isASCII, first.isLetter else { return "sparkles" }
+        return "\(first).circle"
+    }
+}
+
+/// A line diff between two texts, for the review of an improvement an Orb proposed.
+enum LineDiff {
+    enum Kind: Equatable { case same, added, removed }
+    struct Line: Equatable {
+        let kind: Kind
+        let text: String
+    }
+
+    /// Past this many cells of the table the exact diff is not worth its memory: the middle is shown as replaced whole.
+    private static let maxCells = 4_000_000
+
+    static func lines(old: String, new: String) -> [Line] {
+        func split(_ text: String) -> [String] {
+            text.replacingOccurrences(of: "\r\n", with: "\n").split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        }
+        let a = split(old), b = split(new)
+        // What both texts share at the ends stays out of the table: edits are usually in the middle.
+        var head = 0
+        while head < a.count, head < b.count, a[head] == b[head] { head += 1 }
+        var tail = 0
+        while tail < a.count - head, tail < b.count - head, a[a.count - 1 - tail] == b[b.count - 1 - tail] { tail += 1 }
+        let x = Array(a[head..<(a.count - tail)]), y = Array(b[head..<(b.count - tail)])
+        var middle: [Line] = []
+        if x.count * y.count > maxCells {
+            middle = x.map { Line(kind: .removed, text: $0) } + y.map { Line(kind: .added, text: $0) }
+        } else {
+            // Longest common subsequence, filled from the end so the walk below reads forward.
+            var table = [[Int]](repeating: [Int](repeating: 0, count: y.count + 1), count: x.count + 1)
+            for i in stride(from: x.count - 1, through: 0, by: -1) {
+                for j in stride(from: y.count - 1, through: 0, by: -1) {
+                    table[i][j] = x[i] == y[j] ? table[i + 1][j + 1] + 1 : max(table[i + 1][j], table[i][j + 1])
+                }
+            }
+            var i = 0, j = 0
+            while i < x.count || j < y.count {
+                if i < x.count, j < y.count, x[i] == y[j] {
+                    middle.append(Line(kind: .same, text: x[i])); i += 1; j += 1
+                } else if i < x.count, j == y.count || table[i + 1][j] >= table[i][j + 1] {
+                    middle.append(Line(kind: .removed, text: x[i])); i += 1
+                } else {
+                    middle.append(Line(kind: .added, text: y[j])); j += 1
+                }
+            }
+        }
+        let same: (ArraySlice<String>) -> [Line] = { $0.map { Line(kind: .same, text: $0) } }
+        return same(a[..<head]) + middle + same(a[(a.count - tail)...])
     }
 }
 
@@ -292,8 +400,9 @@ private struct InstalledSkillRow: View {
                         if !skill.isEnabled {
                             CatalogBadge(text: "Desativada", symbol: "pause.circle")
                         }
+                        // No badge for the app's own skills: it is the default, and the delete dialog says where it came from.
                         if skill.source == Skill.builtInSource {
-                            CatalogBadge(text: "Incluída no app", symbol: "circle.hexagongrid")
+                            EmptyView()
                         } else if skill.source == Skill.learnedSource {
                             CatalogBadge(text: SkillBadge.learned(by: model.bots.first { $0.id == skill.learnedBy }?.name), symbol: "sparkles")
                         } else if let source = skill.source {
@@ -562,7 +671,7 @@ struct SkillPreview: View {
                             // Read as the Markdown it is (headings, lists, code), not as raw source.
                             // On the canvas, as in a chat: code and tables are `raised` with no hairline, and would vanish on
                             // a `raised` frame.
-                            MarkdownChunk(source: document.instructions).equatable()
+                            MarkdownChunk(source: SkillText.droppingTitle(document.instructions, matching: document.name)).equatable()
                                 .padding(12)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .background(Palette.canvas, in: .rect(cornerRadius: Radius.medium))
@@ -628,6 +737,49 @@ struct SkillPreview: View {
 
 // MARK: Editor
 
+/// The instructions a skill has today, read-only, in the editor's place.
+private struct ReadOnlyInstructions: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(Typography.text)
+            .foregroundStyle(Palette.secondary)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, minHeight: 260, alignment: .topLeading)
+    }
+}
+
+/// The lines that changed, tinted as in the code blocks; the lines that stayed are dimmed.
+private struct DiffInstructions: View {
+    let lines: [LineDiff.Line]
+
+    var body: some View {
+        if lines.allSatisfy({ $0.kind == .same }) {
+            Text("A proposta mantém as instruções atuais.")
+                .font(Typography.label)
+                .foregroundStyle(Palette.muted)
+                .frame(maxWidth: .infinity, minHeight: 60, alignment: .topLeading)
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                    // The sign says it too: the state does not rest on color alone.
+                    let sign = line.kind == .added ? "+ " : line.kind == .removed ? "− " : "  "
+                    Text(sign + line.text)
+                        .font(.system(size: 12).monospaced())
+                        .foregroundStyle(line.kind == .same ? Palette.muted : Palette.ink)
+                        .padding(.horizontal, 6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(line.kind == .added ? Palette.codeAdded.opacity(0.18)
+                                    : line.kind == .removed ? Palette.codeRemoved.opacity(0.18) : .clear)
+                        .accessibilityLabel((line.kind == .added ? "Adicionada: " : line.kind == .removed ? "Removida: " : "") + line.text)
+                }
+            }
+            .textSelection(.enabled)
+        }
+    }
+}
+
 struct SkillEditor: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -636,6 +788,9 @@ struct SkillEditor: View {
     @State private var slugEdited: Bool
     /// The skill an Orb proposed, which this editor shows whole for you to save or discard (nil: a skill of yours).
     let proposal: SkillDraft?
+    /// What the instructions area shows while an improvement is reviewed: the proposed text, the current one or the difference.
+    enum ReviewView: String, CaseIterable { case new = "Nova", current = "Atual", changes = "Mudanças" }
+    @State private var reviewView = ReviewView.new
 
     /// Beyond this many characters the instructions weigh on every conversation that uses the skill.
     static let longInstructions = 4_000
@@ -646,6 +801,11 @@ struct SkillEditor: View {
         self.proposal = proposal
     }
 
+    /// The text an improvement would replace (nil for a new skill or when the skill is gone).
+    private var currentInstructions: String? {
+        guard let proposal, proposal.isUpdate else { return nil }
+        return model.skills.first { $0.slug == proposal.slug && $0.isImprovable }?.instructions
+    }
     private var isNew: Bool { !model.skills.contains { $0.id == skill.id } }
     private var finalSlug: String { Skill.cleanSlug(skill.slug) }
     private var slugTaken: Bool { model.skills.contains { $0.slug == finalSlug && $0.id != skill.id } }
@@ -660,7 +820,7 @@ struct SkillEditor: View {
         return nil
     }
     private var title: String {
-        if let proposal { return proposal.isUpdate ? "Melhoria de \(skill.name)" : "Skill proposta" }
+        if let proposal { return proposal.isUpdate ? "Melhoria de \(SkillText.displayName(skill.name))" : "Skill proposta" }
         return isNew ? "Nova skill" : "Editar \(skill.name.isEmpty ? "skill" : skill.name)"
     }
     private var subtitle: String {
@@ -691,7 +851,9 @@ struct SkillEditor: View {
                             slugEdited = !cleaned.isEmpty && cleaned != Skill.cleanSlug(skill.name)
                         }
                 }
-                TextField("O que faz", text: $skill.summary, prompt: Text("ex.: Resume um texto em 5 tópicos"))
+                // Grows to three lines: a proposed summary is a sentence and was cut off in one.
+                TextField("O que faz", text: $skill.summary, prompt: Text("ex.: Resume um texto em 5 tópicos"), axis: .vertical)
+                    .lineLimit(1...3)
             } footer: { FormFootnote {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(finalSlug.isEmpty ? "O comando é o que você escreve no chat para usar a skill."
@@ -702,8 +864,21 @@ struct SkillEditor: View {
                 }
             } }
             Section {
-                PlaceholderTextEditor(placeholder: "Quando eu pedir /\(finalSlug.isEmpty ? "resumir" : finalSlug), leia o texto e responda em 5 tópicos curtos.",
-                                      text: $skill.instructions, minHeight: proposal == nil ? 100 : 260)
+                if let current = currentInstructions {
+                    Picker("Ver", selection: $reviewView) {
+                        ForEach(ReviewView.allCases, id: \.self) { Text($0.rawValue) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .help("Compare a proposta com as instruções que a skill tem hoje")
+                    switch reviewView {
+                    case .new: instructionsEditor
+                    case .current: ReadOnlyInstructions(text: current)
+                    case .changes: DiffInstructions(lines: LineDiff.lines(old: current, new: skill.instructions))
+                    }
+                } else {
+                    instructionsEditor
+                }
             } header: {
                 Text("Instruções para o Orb")
             } footer: { FormFootnote {
@@ -727,15 +902,20 @@ struct SkillEditor: View {
         .orbSheet(title, subtitle: subtitle, size: .medium) {
             if let proposal {
                 // Esc and "Fechar" leave the proposal waiting; only "Descartar" throws it away.
-                SheetFooter(message: message, destructiveTitle: "Descartar", destructive: {
+                SheetFooter(message: message, destructiveTitle: "Descartar proposta", destructive: {
                     model.finishSkillDraft(proposal)
                     dismiss()
-                }, cancelTitle: "Fechar", cancel: { dismiss() }, primaryTitle: "Salvar skill", isPrimaryDisabled: !canSave,
+                }, cancelTitle: "Decidir depois", cancel: { dismiss() }, primaryTitle: "Salvar skill", isPrimaryDisabled: !canSave,
                 destructiveHelp: Tip.discardProposal, cancelHelp: Tip.keepProposal, primaryHelp: Tip.saveProposal, primary: save)
             } else {
                 SheetFooter(message: message, cancel: { dismiss() }, primaryTitle: "Salvar", isPrimaryDisabled: !canSave, primary: save)
             }
         }
+    }
+
+    private var instructionsEditor: some View {
+        PlaceholderTextEditor(placeholder: "Quando eu pedir /\(finalSlug.isEmpty ? "resumir" : finalSlug), leia o texto e responda em 5 tópicos curtos.",
+                              text: $skill.instructions, minHeight: proposal == nil ? 100 : 260)
     }
 
     private func save() {
