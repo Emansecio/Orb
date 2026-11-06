@@ -2,9 +2,10 @@ import Foundation
 
 /// orbgen: procedural layers for the Orb app.
 ///
-///     swift run -c release --package-path art/orbgen orbgen all            # faces + body + hair + manifest
+///     swift run -c release --package-path art/orbgen orbgen all            # faces + hair + manifest (the body is
+///                                                                           # the plush from art/pelucia.py)
 ///     swift run -c release --package-path art/orbgen orbgen faces [categories…]  # seat the flat Blender layers
-///     swift run -c release --package-path art/orbgen orbgen body [ids…]
+///     swift run -c release --package-path art/orbgen orbgen body [ids…]     # the old satin body, overwrites the plush
 ///     swift run -c release --package-path art/orbgen orbgen hair [ids…]       # also updates options.json
 ///     swift run -c release --package-path art/orbgen orbgen manifest          # hair ids/labels + default hair colors
 ///     swift run -c release --package-path art/orbgen orbgen preview out.png  # quick contact sheet
@@ -37,8 +38,8 @@ enum OrbGen {
             let start = Date()
             switch command {
             case "all":
+                // The body is the plush from Blender (art/pelucia.py): `all` must not paint the satin one over it.
                 try Decals.run(flat: flatFolder, resources: resources, only: [])
-                try renderBodies(into: resources, only: [])
                 try renderHair(into: resources, only: [])
                 try Manifest.update(resources: resources)
             case "body": try renderBodies(into: resources, only: only)

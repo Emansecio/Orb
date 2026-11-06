@@ -90,13 +90,14 @@ struct OrbDesignTests {
     }
 
     @Test func layerArtStaysSmall() throws {
-        // The art is re-encoded without hidden color under transparent pixels (it was ~12 MB before).
+        // The art is re-encoded without hidden color under transparent pixels (it was ~12 MB before). The plush
+        // bodies (2026-11) are most of it, ~4.5 MB: fur is fine detail that PNG can't squeeze like the satin gradient.
         let root = try #require(catalog.root)
         let files = try FileManager.default.subpathsOfDirectory(atPath: root.path).filter { $0.hasSuffix(".png") }
         let bytes = try files.reduce(0) { total, file in
             total + (try FileManager.default.attributesOfItem(atPath: root.appendingPathComponent(file).path)[.size] as? Int ?? 0)
         }
-        #expect(bytes > 0 && bytes < 6_000_000)
+        #expect(bytes > 0 && bytes < 8_000_000)
     }
 
     // MARK: Automatic colors

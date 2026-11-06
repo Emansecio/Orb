@@ -1,8 +1,8 @@
 # Orbs
 
-No app Orb, cada assistente é um **Orb**: uma esfera **acetinada**, como vinil de toque macio, iluminada como um objeto
-3D (luz difusa do alto à esquerda com sombra de forma, aro fosco fino, um lustro largo e baixo; sem reflexo de janela,
-ponto de luz, aura nem brilho saindo pela base) e animada ao vivo no app. Todos os Orbs têm o mesmo formato redondo; a identidade vem da cor, do rosto, do cabelo e dos acessórios.
+No app Orb, cada assistente é um **Orb**: uma bola de **pelúcia**, de pelo fino e denso com a borda felpuda, iluminada
+como um objeto 3D (luz do alto à esquerda) e animada ao vivo no app. O pelo é pré-renderizado no Blender (`art/pelucia.py`);
+até 2026-11 o corpo era uma esfera acetinada do orbgen. Todos os Orbs têm o mesmo formato redondo; a identidade vem da cor, do rosto, do cabelo e dos acessórios.
 
 Este documento cobre o lado do app: opções, atividades, jeito, movimento, onde os Orbs aparecem e o sistema de animação
 (desempenho incluído). **A arte e o gerador estão descritos em [art/README.md](../art/README.md)**; é lá que se vê como as
@@ -18,7 +18,8 @@ camadas são feitas e como acrescentar uma opção nova.
 art/orbs.py + art/orbkit/          Blender 5.2: traços planos (olhos, bocas, sobrancelhas,
         │  orbs.py layers          visemas, acessórios) -> art/orbgen/flat
         ▼
-art/orbgen (Swift, CPU)            orbgen all: corpo iluminado (18 cores), cabelos por campos de distância
+art/pelucia.py (Blender)           corpo de pelúcia (18 cores) -> Resources/Orbs/body
+art/orbgen (Swift, CPU)            orbgen all: cabelos por campos de distância
         │                          (+ -brilho), traços assentados com sombra de contato, options.json
         ▼
 Sources/Orb/Resources/Orbs/     PNGs de 640 px em camadas (corpo, traços, cabelo, acessórios, visemas) + options.json (~4 MB)
@@ -525,8 +526,8 @@ os Orbs numa janela própria sem borda, `alphaValue = 0`, `ignoresMouseEvents = 
 
 ## 8. Arte
 
-As camadas, as opções e os geradores (`art/orbgen` em Swift para o corpo, os cabelos e o assentamento dos traços;
-o Blender para os traços planos; como acrescentar um penteado ou um acessório; o manifesto `options.json`)
+As camadas, as opções e os geradores (`art/pelucia.py` no Blender para o corpo de pelúcia; `art/orbgen` em Swift para os cabelos e o assentamento
+dos traços; o Blender para os traços planos; como acrescentar um penteado ou um acessório; o manifesto `options.json`)
 estão descritos em [art/README.md](../art/README.md). O app só depende do que sai de lá: os PNGs em
 `Sources/Orb/Resources/Orbs/` e o `options.json` com os ids, rótulos e cores. Acrescentar uma opção nova não exige mexer em
 Swift, exceto quando ela precisa de uma cor padrão (`OrbConfig.autoAccentColor(_:palette:)`) ou de uma ordem de camadas diferente

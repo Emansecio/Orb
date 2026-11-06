@@ -1,8 +1,21 @@
 # Orbs: personagens 3D do app Orb
 
-Esferas acetinadas (vinil de toque macio) com luz de objeto 3D: difusa, sombra de forma, aro fosco fino e um lustro largo, sem reflexo nem brilho saindo pela base; o brilho dos fios do cabelo é um terço do antigo (`HairRenderer.satin`). A arte das camadas vem de duas ferramentas:
+Bolas de pelúcia: pelo fino e denso, cada fio inclinado para um lado, com cacho leve e frizz nas pontas, e a borda
+felpuda. O corpo de pelúcia sai do Blender (`pelucia.py`); até 2026-11 era a esfera acetinada do orbgen
+(`orbgen body` ainda a gera, mas o `orbgen all` não a regrava mais). O brilho dos fios do cabelo é um terço do antigo
+(`HairRenderer.satin`). A arte das camadas vem de três ferramentas:
 
-- **`orbgen/`** (Swift, CPU, reproduzível): o **corpo** iluminado de cada cor, os **cabelos** (campos de
+- **`pelucia.py`** (Blender, Cycles, ~1 min por cor): o **corpo** de cada cor, no enquadramento do orbgen (640 px,
+  raio de 168,5 px). Cada fio pega a cor do degradê da paleta na altura dele, um pouco mais saturada; o miolo é 8 %
+  menor para a borda felpuda cair no contorno de antes, onde o cabelo e os traços foram encaixados. O pelo vem dos
+  mockups (`mockups/materiais.py`).
+
+  ```bash
+  nice -n 15 /Applications/Blender.app/Contents/MacOS/Blender -b --python art/pelucia.py [-- --only lavanda,coral]   # -> Sources/Orb/Resources/Orbs/body (~18 min)
+  ```
+
+
+- **`orbgen/`** (Swift, CPU, reproduzível): os **cabelos** (campos de
   distância, com camada `-brilho` sem tinta), o **assentamento** dos traços planos (sombra de
   contato) e as entradas de `options.json` que são dele. Não precisa de Blender.
 - **Blender (Cycles)** por script (`orbs.py`): os **traços planos** (olhos, bocas, sobrancelhas, bochechas,
