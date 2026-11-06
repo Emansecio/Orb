@@ -324,7 +324,10 @@ struct MacPermissionsView: View {
             } header: {
                 Text("Essenciais")
             } footer: { FormFootnote {
-                LearnMoreNote(short: "A gravação de tela só vale depois de reabrir o Orb.",
+                // The reopen warning stays out of the footer once the Screen Recording row says it itself (with its own
+                // "Reabrir o Orb" button): the same sentence twice, one of them loose under the card.
+                LearnMoreNote(short: model.row(.screenRecording).note == nil ? "A gravação de tela só vale depois de reabrir o Orb."
+                                  : "O macOS pergunta uma vez só.",
                               more: "O macOS pergunta uma vez só. Testar usa a permissão de verdade, só olhando, sem salvar nada.")
             } }
             Section {
@@ -523,6 +526,8 @@ private struct StatusBadge: View {
                     .transition(mark)
             }
         }
+        // Rows share one status column, so the buttons beside it line up whatever the status says.
+        .frame(minWidth: 130, alignment: .trailing)
         .motion(Motion.content, value: badge)
     }
 }

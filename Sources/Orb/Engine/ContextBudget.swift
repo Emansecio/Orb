@@ -28,9 +28,9 @@ enum ContextMemoryLevel: String, Codable, CaseIterable, Sendable {
 
     var summary: String {
         switch self {
-        case .economical: "Lembra até ~40 mil tokens palavra por palavra. Gasta menos por mensagem."
-        case .balanced: "Lembra até ~80 mil tokens palavra por palavra. O equilíbrio entre custo e contexto."
-        case .wide: "Usa até 60% da janela do modelo, nunca menos que o Equilibrado. Mais contexto, mais custo por mensagem."
+        case .economical: "Lembra até ~40 mil tokens palavra por palavra. Gasta menos."
+        case .balanced: "Lembra até ~80 mil tokens palavra por palavra. Custo e contexto em equilíbrio."
+        case .wide: "Usa até 60% da janela do modelo. Mais contexto, mais custo."
         }
     }
 

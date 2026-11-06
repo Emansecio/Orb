@@ -32,9 +32,15 @@ enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// One height for every tab: a window that grew and shrank at each click jumped under the pointer (SwiftUI does not
-    /// animate the Settings window's frame). A taller tab scrolls inside it, as its `Form` already does.
-    var height: CGFloat { 720 }
+    /// Two heights, not one per tab: a window that changed at each click jumped under the pointer (SwiftUI does not
+    /// animate the Settings window's frame), so only the tabs whose content is short get the lower one (Modelos and Acesso
+    /// ao Mac were mostly empty at 720). A taller tab scrolls inside it, as its `Form` already does.
+    var height: CGFloat {
+        switch self {
+        case .models, .permissions: 600
+        case .general, .orbs, .browser, .usage: 720
+        }
+    }
 }
 
 /// Opens Ajustes on a given tab: from the first-use card, a failed tool, a provider error.
@@ -176,9 +182,12 @@ struct GeneralSettings: View {
                         help: Tip.dataFolder) {
                     NSWorkspace.shared.activateFileViewerSelecting([Store.standard.directory])
                 }
-                dataRow("Memórias guardadas", GeneralSettings.keptMemoriesDetail(count: keptCount),
-                        button: "Mostrar no Finder", isEnabled: keptCount > 0, help: Tip.keptMemoriesFolder) {
-                    NSWorkspace.shared.activateFileViewerSelecting([GeneralSettings.keptMemoriesFolder])
+                // Only when there is something kept: a disabled row told nothing the other rows needed.
+                if keptCount > 0 {
+                    dataRow("Memórias guardadas", GeneralSettings.keptMemoriesDetail(count: keptCount),
+                            button: "Mostrar no Finder", isEnabled: true, help: Tip.keptMemoriesFolder) {
+                        NSWorkspace.shared.activateFileViewerSelecting([GeneralSettings.keptMemoriesFolder])
+                    }
                 }
                 dataRow("Pasta dos Orbs", OrbFolder.display(OrbFolder.defaultBase), button: "Mostrar no Finder",
                         isEnabled: hasOrbsFolder, help: Tip.orbsFolder) {

@@ -51,7 +51,7 @@ private struct BrowserComponentRowView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.s) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(row.title).font(.body.weight(.medium))
+                Text(displayTitle).font(.body.weight(.medium))
                 if row.updateAvailable, case .installed = row.phase {
                     CatalogBadge(text: "Atualização", tint: Palette.accentText)
                 }
@@ -73,7 +73,7 @@ private struct BrowserComponentRowView: View {
         }
         .padding(.vertical, Spacing.hairline)
         .animateChanges(of: row.phase.kind)
-        .confirmationDialog("Remover \(row.title)?", isPresented: $isConfirmingRemoval) {
+        .confirmationDialog("Remover \(displayTitle)?", isPresented: $isConfirmingRemoval) {
             Button("Remover", role: .destructive) { setup.remove(row.component) }
         } message: {
             Text("Os arquivos saem deste Mac. Os logins que os Orbs guardaram ficam. Você pode instalar de novo quando quiser.")
@@ -102,24 +102,47 @@ private struct BrowserComponentRowView: View {
                         .help("Instala a versão mais nova")
                         .chipButton()
                 }
-                Button("Remover…", role: .destructive) { isConfirmingRemoval = true }
-                    .disabled(!row.canRemove)
-                    .buttonStyle(GhostStyle())
-                    .controlSize(.small)
-                    .hangsOnTrailingEdge()
-                    .help("Tira do Mac o que o Orb instalou, perguntando antes")
+                // Destruction sits in the row's menu, in neutral text: the red is for the confirmation only.
+                Menu {
+                    Button("Remover…") { isConfirmingRemoval = true }
+                        .disabled(!row.canRemove)
+                        .help("Tira do Mac o que o Orb instalou, perguntando antes")
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Mais ações de \(displayTitle)")
+                .accessibilityLabel("Mais ações de \(displayTitle)")
             }
         }
     }
+
+    /// The product's name for people; the command line's own name goes below, small, with its version.
+    private var displayTitle: String { row.component == .agentBrowser ? "Controle do navegador" : row.title }
 
     private var isFailed: Bool { if case .failed = row.phase { true } else { false } }
 
     @ViewBuilder private var statusLine: some View {
         switch row.phase {
         case .installed:
-            Label(row.statusText, systemImage: "checkmark.circle.fill")
-                .font(.caption)
-                .foregroundStyle(Palette.ok)
+            if row.component == .agentBrowser {
+                HStack(spacing: Spacing.s) {
+                    Label("Instalado", systemImage: "checkmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(Palette.ok)
+                    if let version = row.versionText {
+                        Text(version).font(.caption2).foregroundStyle(Palette.muted).textSelection(.enabled)
+                    }
+                }
+            } else {
+                Label(row.statusText, systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(Palette.ok)
+                    .lineLimit(2)
+                    .help(row.statusText)
+            }
         case .failed:
             Label(row.statusText, systemImage: "exclamationmark.triangle.fill")
                 .font(.caption)

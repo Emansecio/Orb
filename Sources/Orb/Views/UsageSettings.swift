@@ -113,8 +113,8 @@ struct UsageSettings: View {
                 } else {
                     totalSection(report)
                     chartSection(report)
-                    rowsSection("Por Orb", rows: report.orbRows, report: report, isModel: false)
-                    rowsSection("Por modelo", rows: report.modelRows, report: report, isModel: true)
+                    rowsSection("Detalhes por Orb", rows: report.orbRows, report: report, isModel: false)
+                    rowsSection("Detalhes por modelo", rows: report.modelRows, report: report, isModel: true)
                     hourSection(report)
                 }
                 Section {} footer: {
@@ -180,10 +180,18 @@ struct UsageSettings: View {
                         .capabilityCaption()
                 }
                 if report.hasUnpriced {
-                    Label("Parte do uso é de modelos sem preço. Defina o preço em “Por modelo”.", systemImage: "exclamationmark.triangle.fill")
-                        .font(Typography.small)
-                        .foregroundStyle(Palette.warn)
-                        .padding(.top, Spacing.hairline)
+                    HStack(spacing: Spacing.s) {
+                        Label("Parte do uso é de modelos sem preço.", systemImage: "exclamationmark.triangle.fill")
+                            .font(Typography.small)
+                            .foregroundStyle(Palette.warn)
+                        // Opens the price editor of the first model without one (the rows below are the same list).
+                        if let first = report.modelRows.first(where: { $0.state == .unpriced }) {
+                            Button("Definir preços") { editingPrice = first.id }
+                                .buttonStyle(LinkTextStyle(font: Typography.small))
+                                .help(Tip.priceMissing)
+                        }
+                    }
+                    .padding(.top, Spacing.hairline)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -201,12 +209,6 @@ struct UsageSettings: View {
         let unit = report.period.barUnit
         let end = Calendar.current.dateInterval(of: unit, for: report.interval.end)?.end ?? report.interval.end
         return Section {
-            Picker("Cores por", selection: $chartBy) {
-                ForEach(UsageChartBy.allCases) { Text($0.title).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .help(Tip.usageChartBy)
             Chart(points) { point in
                 BarMark(x: .value(unit == .hour ? "Hora" : "Dia", point.date, unit: unit),
                         y: .value(report.measure == .cost ? "Dólares" : "Tokens", point.value))
@@ -220,7 +222,7 @@ struct UsageSettings: View {
             .chartXAxis {
                 AxisMarks(values: unit == .hour ? .stride(by: .hour, count: 3) : .automatic(desiredCount: 6)) { _ in
                     AxisGridLine().foregroundStyle(Palette.line)
-                    AxisValueLabel(format: unit == .hour ? .dateTime.hour() : .dateTime.day().month(.abbreviated))
+                    AxisValueLabel(format: unit == .hour ? .dateTime.hour() : .dateTime.day().month(.twoDigits))
                         .foregroundStyle(Palette.faint)
                 }
             }
@@ -241,16 +243,28 @@ struct UsageSettings: View {
             .accessibilityValue(chartSummary(report))
             legend(series, colors: colors)
         } header: {
-            Text(report.measure == .cost ? "Gasto por \(unit == .hour ? "hora" : "dia")" : "Tokens por \(unit == .hour ? "hora" : "dia")")
+            // The "by Orb / by model" switch sits with the chart it colors, not in the body above it.
+            HStack {
+                Text(report.measure == .cost ? "Gasto por \(unit == .hour ? "hora" : "dia")" : "Tokens por \(unit == .hour ? "hora" : "dia")")
+                Spacer()
+                Picker("Cores por", selection: $chartBy) {
+                    ForEach(UsageChartBy.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .help(Tip.usageChartBy)
+            }
         }
     }
 
     private func legend(_ series: [UsageSeries], colors: [Color]) -> some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), alignment: .leading)], alignment: .leading, spacing: Spacing.s) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), alignment: .leading)], alignment: .leading, spacing: Spacing.s) {
             ForEach(Array(series.enumerated()), id: \.element.id) { index, item in
                 HStack(spacing: Spacing.s) {
                     Circle().fill(colors[index]).frame(width: 8, height: 8).accessibilityHidden(true)
                     Text(item.name).font(Typography.small).foregroundStyle(Palette.muted).lineLimit(1)
+                        .truncationMode(.middle).help(item.name)
                 }
             }
         }
@@ -376,7 +390,15 @@ private struct UsageRowView: View {
     @ViewBuilder private var amount: some View {
         switch row.state {
         case .billed:
-            Text(UsageFormat.dollars(row.cost)).monospacedDigit()
+            HStack(spacing: Spacing.xs) {
+                if row.hasUnpriced {
+                    // An icon with the explanation in the tooltip: the orange line repeated on every row was noise.
+                    Image(systemName: "exclamationmark.triangle.fill").font(Typography.small).foregroundStyle(Palette.warn)
+                        .help("Esta soma não inclui o uso sem preço.")
+                        .accessibilityLabel("Há uso sem preço")
+                }
+                Text(UsageFormat.dollars(row.cost)).monospacedDigit()
+            }
         case .included:
             Text("Incluído no plano").foregroundStyle(Palette.secondary)
             if row.equivalent > 0 {
@@ -389,11 +411,9 @@ private struct UsageRowView: View {
                 Button("Sem preço", action: editPrice).buttonStyle(.link).foregroundStyle(Palette.warn)
                     .help(Tip.priceMissing)
             } else {
-                Text("Sem preço").foregroundStyle(Palette.warn)
+                Label("Sem preço", systemImage: "exclamationmark.triangle.fill").foregroundStyle(Palette.warn)
+                    .help(Tip.priceMissing)
             }
-        }
-        if row.state == .billed && row.hasUnpriced {
-            Text("e uso sem preço").font(Typography.small).foregroundStyle(Palette.warn)
         }
     }
 

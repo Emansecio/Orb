@@ -85,7 +85,7 @@ struct ProfileSettings: View {
     private func field(_ title: String, prompt: String, _ keyPath: WritableKeyPath<UserProfile, String>, limit: Int) -> some View {
         LabeledContent(title) {
             LimitedTextField(title: title, prompt: prompt, limit: limit, axis: .horizontal, value: binding(keyPath))
-                .multilineTextAlignment(.trailing)
+                .frame(maxWidth: 280)
         }
     }
 
@@ -120,7 +120,8 @@ private struct LimitedTextField: View {
     var body: some View {
         TextField(title, text: $text, prompt: Text(prompt), axis: axis)
             .labelsHidden()
-            .textFieldStyle(.plain)
+            // A bordered field: bare text with a gray placeholder did not read as something to type in.
+            .textFieldStyle(.roundedBorder)
             .onChange(of: text) {
                 let cut = String(text.prefix(limit))
                 if cut != text { text = cut }

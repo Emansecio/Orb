@@ -89,7 +89,15 @@ struct ProviderSettings: View {
             Section {
                 addMenu
             } footer: {
-                FormFootnote { Text("A chave da busca na web fica na aba Navegador.") }
+                FormFootnote {
+                    HStack(spacing: Spacing.xs) {
+                        Text("A chave da busca na web fica na aba")
+                        // A link: it switches the tab (Ajustes reads the request); as plain text it led nowhere.
+                        Button("Navegador") { SettingsRouter.request(.browser) }
+                            .buttonStyle(LinkTextStyle(font: Typography.small))
+                            .accessibilityHint("Abre a aba Navegador")
+                    }
+                }
             }
         }
         .formStyle(.grouped)
@@ -214,6 +222,10 @@ private struct ProviderRow: View {
             Button(account.isEnabled ? "Desativar este provedor" : "Usar este provedor") {
                 model.updateProvider(kind) { $0.isEnabled.toggle() }
             }
+            // Destruction lives in the row's menu, in neutral text: the red is for the confirmation only.
+            Divider()
+            Button("Remover…") { isConfirmingRemoval = true }
+                .help(Tip.removeProvider)
         } label: {
             Image(systemName: "ellipsis.circle")
         }
@@ -227,6 +239,20 @@ private struct ProviderRow: View {
     // MARK: Open row
 
     @ViewBuilder private func details(_ account: ProviderAccount, status: ProviderStatus) -> some View {
+        if account.isEnabled {
+            enabledDetails(account, status: status)
+        } else {
+            // Turned off by the user: only the way back on, the fields come with it. (A provider that is merely
+            // unconfigured says "Falta a chave", not "Desativado", and keeps its fields.)
+            Text(kind.summary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Toggle("Usar este provedor", isOn: Binding(get: { false }, set: { _ in model.updateProvider(kind) { $0.isEnabled = true } }))
+        }
+    }
+
+    @ViewBuilder private func enabledDetails(_ account: ProviderAccount, status: ProviderStatus) -> some View {
         Text(kind.summary)
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -257,9 +283,6 @@ private struct ProviderRow: View {
             .disabled(isWorking || health.isChecking(kind) || !canRefresh(account))
             .hangsOnLeadingEdge()
             Spacer()
-            Button("Remover…", role: .destructive) { isConfirmingRemoval = true }
-                .help(Tip.removeProvider)
-                .hangsOnTrailingEdge()
         }
         .buttonStyle(GhostStyle())
         .controlSize(.small)
