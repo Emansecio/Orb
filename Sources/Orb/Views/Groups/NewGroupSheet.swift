@@ -185,7 +185,7 @@ private struct OrbChoiceCard: View {
                     // Always one line, so the cards of a row keep the same height.
                     Text(isOrchestrator ? "Orquestrador" : " ")
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Palette.warn)
+                        .foregroundStyle(Palette.accentText)
                         .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity)
@@ -207,7 +207,7 @@ private struct OrbChoiceCard: View {
                 if isOrchestrator {
                     Image(systemName: "star.fill")
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Palette.warn)
+                        .foregroundStyle(Palette.accentText)
                         .frame(width: 22, height: 22)
                         .background(Palette.raised, in: .circle)
                         .modifier(StarSlide(space: starSpace, reduceMotion: reduceMotion))

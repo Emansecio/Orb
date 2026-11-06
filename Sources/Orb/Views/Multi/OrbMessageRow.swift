@@ -133,7 +133,8 @@ struct ExchangeStateMark: View {
         case .failed: Palette.danger
         case .refused: Palette.warn
         case .replied: Palette.muted
-        case .open, .cancelled, .lost: Palette.faint
+        case .lost: Palette.warn // no answer came: the person may need to decide
+        case .open, .cancelled: Palette.faint
         }
     }
 

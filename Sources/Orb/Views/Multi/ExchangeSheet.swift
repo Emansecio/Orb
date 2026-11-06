@@ -158,7 +158,8 @@ struct ExchangeSheet: View {
         case .failed: ("Não deu certo", Palette.danger)
         case .refused: ("Recusado", Palette.warn)
         case .cancelled: ("Cancelado", Palette.faint)
-        case .lost: ("Sem resposta", Palette.faint)
+        // Warn, not faint: no answer is waiting for a decision.
+        case .lost: ("Sem resposta", Palette.warn)
         }
     }
 }

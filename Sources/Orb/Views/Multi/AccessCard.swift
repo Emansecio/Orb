@@ -57,7 +57,8 @@ struct AccessCard: View {
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(AccessLines.lines(for: access), id: \.self) { line in
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Image(systemName: "checkmark.circle")
+                        // Not a check: the lines are what the Orb will get once allowed, nothing is done yet.
+                        Image(systemName: "arrow.right.circle")
                             .font(Typography.small)
                             .foregroundStyle(Palette.secondary)
                             .accessibilityHidden(true)

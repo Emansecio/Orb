@@ -33,6 +33,13 @@ struct GroupBoardView: View {
     /// The window of the undo: ten seconds, as the Orb's memory gives.
     static let undoSeconds = 10
 
+    private func addAgreement() {
+        let text = agreement.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        remember(text)
+        agreement = ""
+    }
+
     var body: some View {
         let agreements = MemoryGroups.make(memory.items, matching: query, kind: .preferencia, cache: folded).flatMap(\.items)
         let groups = MemoryGroups.make(memory.items.filter { $0.kind != .preferencia }, matching: query, cache: folded)
@@ -52,16 +59,21 @@ struct GroupBoardView: View {
                     ForEach(agreements) { item in
                         MemoryRow(item: item, lineLimit: 3) { forgetItem(item) }
                     }
-                    TextField("Novo combinado (↩ salva)", text: $agreement)
-                        .textFieldStyle(.plain)
-                        .font(Typography.text)
-                        .sheetTextField(radius: Radius.small)
-                        .onSubmit {
-                            let text = agreement.trimmingCharacters(in: .whitespacesAndNewlines)
-                            guard !text.isEmpty else { return }
-                            remember(text)
-                            agreement = ""
+                    HStack(spacing: Spacing.s) {
+                        TextField("Novo combinado", text: $agreement)
+                            .textFieldStyle(.plain)
+                            .font(Typography.text)
+                            .sheetTextField(radius: Radius.small)
+                            .onSubmit(addAgreement)
+                        // "↩ salva" used to live in the placeholder, which goes away as soon as one types.
+                        if !agreement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Button("Adicionar", action: addAgreement)
+                                .buttonStyle(SecondaryPillStyle())
+                                .help("Guarda o combinado (↩)")
+                                .transition(.opacity)
                         }
+                    }
+                    .motion(Motion.content, value: agreement.isEmpty)
                 }
                 TitledSection("Lembranças", isHeader: true) {
                     MemorySearchField(query: $query)

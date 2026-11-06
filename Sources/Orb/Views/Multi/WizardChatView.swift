@@ -15,8 +15,16 @@ struct WizardChatView: View {
     var body: some View {
         VStack(spacing: 0) {
             transcript
+            // Outside the scroll, so the notice and "Tentar de novo" are always in view above the field, however long the talk.
+            if let failure = runner.failure {
+                WizardFailure(message: failure, retry: runner.retry)
+                    .padding(.horizontal, TranscriptLayout.edge)
+                    .padding(.bottom, Spacing.s)
+                    .transition(.adapted(.rise, reduceMotion: reduceMotion))
+            }
             composer
         }
+        .motion(Motion.content, value: runner.failure)
         .task { isFocused = true }
         // "Voltar a conversar": the field is where to write.
         .onChange(of: runner.draft.ready) { if !runner.draft.ready { isFocused = true } }
@@ -43,10 +51,6 @@ struct WizardChatView: View {
                     } else if runner.isThinking {
                         writing.transition(.opacity)
                     }
-                    if let failure = runner.failure {
-                        WizardFailure(message: failure, retry: runner.retry)
-                            .transition(.adapted(.rise, reduceMotion: reduceMotion))
-                    }
                     Color.clear.frame(height: 1).id(Self.bottom)
                 }
                 .padding(.horizontal, TranscriptLayout.edge)
@@ -55,10 +59,8 @@ struct WizardChatView: View {
             }
             .motion(Motion.enter, value: runner.messages.count)
             .motion(Motion.content, value: runner.isThinking)
-            .motion(Motion.content, value: runner.failure)
             .onChange(of: runner.messages.count) { scrollToEnd(proxy) }
             .onChange(of: runner.isThinking) { scrollToEnd(proxy) }
-            .onChange(of: runner.failure) { scrollToEnd(proxy) }
         }
     }
 

@@ -173,8 +173,8 @@ struct OrbProposalCard: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(request.title)
-                .font(Typography.text)
-                .foregroundStyle(Palette.secondary)
+                .font(Typography.text.weight(.semibold))
+                .foregroundStyle(Palette.ink)
             if !request.reason.isEmpty {
                 Text(request.reason)
                     .font(Typography.label)
@@ -266,12 +266,24 @@ struct OrbProposalCard: View {
         .motion(Motion.content, value: showsAll)
     }
 
+    private var shownCapabilities: [Capability] {
+        Capability.allCases.filter { $0 != .connectors && shown.capabilities.contains($0) }
+    }
+
+    /// The chips on one row when they fit; in a narrow chat they would stack up beside the stage, so they become one line of text.
     private var chips: some View {
-        WrappingLayout(spacing: 6) {
-            ForEach(Capability.allCases.filter { $0 != .connectors && shown.capabilities.contains($0) }) { capability in
-                chip(ProposalSpeech.chip(capability), symbol: capability.symbol)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) {
+                ForEach(shownCapabilities) { capability in
+                    chip(ProposalSpeech.chip(capability), symbol: capability.symbol)
+                }
+                chip(shown.mode.label, symbol: shown.mode == .readOnly ? "eye" : "hand.raised")
             }
-            chip(shown.mode.label, symbol: shown.mode == .readOnly ? "eye" : "hand.raised")
+            .fixedSize()
+            Text((shownCapabilities.map(ProposalSpeech.chip) + [shown.mode.label]).joined(separator: " · "))
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Palette.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -456,7 +468,7 @@ struct OrbProposalCard: View {
                 if showsKeys {
                     Text(AppShortcut.commandReturn.label)
                         .font(Typography.small)
-                        .opacity(0.55)
+                        .opacity(0.6)
                 }
             }
             .font(.system(size: 13, weight: .medium))

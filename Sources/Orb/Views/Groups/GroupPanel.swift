@@ -83,17 +83,27 @@ private struct GroupMembersTab: View {
                         Button(model.live(id).look.name) { model.addMember(id, to: group.id) }
                     }
                 } label: {
-                    Label("Adicionar Orb", systemImage: "plus")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Palette.secondary)
+                    // A row of the list's own rhythm: a dashed avatar where the members' avatars are.
+                    HStack(spacing: Spacing.m) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 12, weight: .medium))
+                            .frame(width: 30, height: 30)
+                            .overlay(Circle().strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [3, 3])))
+                            .accessibilityHidden(true)
+                        Text("Adicionar Orb")
+                            .font(.system(size: 13, weight: .medium))
+                        Spacer(minLength: 0)
+                    }
+                    .foregroundStyle(Palette.secondary)
+                    .frame(minHeight: 44)
+                    .contentShape(.rect)
                 }
                 .menuStyle(.button)
                 .buttonStyle(GhostStyle())
                 .disabled(looks.count >= OrbGroup.memberLimits.upperBound || candidates.isEmpty)
                 .help(looks.count >= OrbGroup.memberLimits.upperBound ? "Um grupo tem até 8 Orbs"
                       : candidates.isEmpty ? "Todos os seus Orbs já estão neste grupo" : "Põe mais um Orb neste grupo")
-                .padding(.top, 8)
-                // The "+" lines up with the avatars above (the rows' own 8 pt), not with the button's hover shape.
+                // The dashed avatar lines up with the avatars above (the rows' own 8 pt), not with the button's hover shape.
                 .padding(.leading, Spacing.s - Spacing.ghostInset)
             }
             .padding(.horizontal, Spacing.l)
@@ -159,10 +169,11 @@ private struct MemberRow: View {
                         Text(look.name)
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(Palette.ink)
-                        Text(isOrchestrator ? "Orquestrador" : (look.role.isEmpty ? "Membro" : look.role))
+                        Text(look.role.isEmpty ? "Membro" : look.role)
                             .font(Typography.small)
                             .foregroundStyle(Palette.faint)
                             .lineLimit(1)
+                            .help(look.role) // the Orquestrador badge takes room: the whole role stays one hover away
                     }
                     Spacer(minLength: 4)
                 }
@@ -171,11 +182,14 @@ private struct MemberRow: View {
             .buttonStyle(.plain)
             .help("Abrir a conversa de \(look.name)")
             if isOrchestrator {
-                Image(systemName: "star.fill")
-                    .font(Typography.label)
+                // The badge only on the active one; the others get their star on hover.
+                Label("Orquestrador", systemImage: "star.fill")
+                    .font(Typography.small.weight(.medium))
                     .foregroundStyle(Palette.accentText)
-                    .frame(width: 26, height: 26) // as wide as the round buttons beside it, so the stars line up
-                    .accessibilityLabel("Orquestrador")
+                    .padding(.horizontal, Spacing.s)
+                    .padding(.vertical, 3)
+                    .background(Palette.accentText.opacity(0.14), in: .capsule)
+                    .fixedSize()
             } else {
                 Button("Tornar orquestrador", systemImage: "star") {
                     model.setOrchestrator(look.id, of: group.id)
@@ -183,6 +197,7 @@ private struct MemberRow: View {
                 .labelStyle(.iconOnly)
                 .buttonStyle(CircleGhostStyle(side: 26, fontSize: 12))
                 .foregroundStyle(Palette.muted)
+                .opacity(isHovering ? 1 : 0)
                 .help("Tornar \(look.name) o orquestrador")
             }
             Button("Remover do grupo", systemImage: "minus.circle") {
@@ -190,10 +205,10 @@ private struct MemberRow: View {
             }
             .labelStyle(.iconOnly)
             .buttonStyle(CircleGhostStyle(side: 26, fontSize: 12))
-            .foregroundStyle(Palette.muted)
+            // Readable at rest, red only under the pointer (it takes the Orb out of the group).
+            .foregroundStyle(isHovering && canRemove ? Palette.danger : Palette.secondary)
             .disabled(!canRemove)
             .help(canRemove ? "Tira \(look.name) do grupo" : "Um grupo tem pelo menos 2 Orbs")
-            .opacity(isHovering || !canRemove ? 1 : 0.55)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
@@ -304,8 +319,8 @@ struct TitledSection<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Palette.faint)
+                .font(Typography.label.weight(.semibold))
+                .foregroundStyle(Palette.secondary)
                 .accessibilityAddTraits(isHeader ? .isHeader : [])
             content
         }

@@ -255,9 +255,9 @@ struct OrbEditor: View {
     /// A hop shows nothing with Reduce Motion (the Orb holds still), so there is no button for it then.
     @ViewBuilder private var hopButton: some View {
         if !reduceMotion {
-            Button("Pular", systemImage: "arrow.up.circle") { poke += 1 }
+            Button("Dar um pulo", systemImage: "arrow.up.circle") { poke += 1 }
                 .buttonStyle(GhostStyle())
-                .help("Faz o Orb pular")
+                .help("Faz o Orb dar um pulinho, só para você ver como ele se mexe")
         }
     }
 

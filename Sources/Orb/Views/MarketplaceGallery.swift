@@ -94,7 +94,9 @@ struct MarketplaceGallery: View {
         return VStack(alignment: .leading, spacing: 10) {
             SearchBox(label: "Buscar bot", prompt: "Buscar por nome, assunto ou autor", text: $query, isFocused: $isSearching)
             categoryChips(index.categories)
-            ScrollView {
+            // No scroll of its own: the panel around it scrolls, and a list inside a list fights the trackpad. Lazy, so a
+            // long catalog still builds only the rows that are seen.
+            VStack(spacing: 0) {
                 LazyVStack(spacing: 2) {
                     ForEach(shown, id: \.id) { bot in
                         let page = GrokMarketplace.Link.page(bot.id).url.absoluteString
@@ -109,7 +111,6 @@ struct MarketplaceGallery: View {
                         .frame(maxWidth: .infinity, minHeight: 80)
                 }
             }
-            .frame(height: 300)
             .card(radius: Radius.card)
             HStack {
                 Text(shown.count == bots.count ? "\(bots.count) bots" : "\(shown.count) de \(bots.count) bots")

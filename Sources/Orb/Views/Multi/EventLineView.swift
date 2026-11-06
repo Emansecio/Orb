@@ -87,6 +87,8 @@ struct EventLineView: View {
             Image(systemName: Self.symbol(for: event.kind))
                 .font(Typography.small)
                 .foregroundStyle(Palette.muted)
+                // One width for every symbol, so the sentences start on the same column.
+                .frame(width: 20)
                 .accessibilityHidden(true)
             Text(event.sentence)
                 .font(Typography.label)

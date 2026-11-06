@@ -8,7 +8,8 @@ import UniformTypeIdentifiers
 /// Fixed words of the import, shared by the panel, the sheet and the tests.
 enum ImportText {
     static let title = "Importar de outro assistente"
-    static let fromMarketplace = "Importar um bot do Grok Bot ou de outro assistente"
+    /// The panel's own heading: neutral, since it also reads a folder or a Grok Bot link, not only another assistant.
+    static let sheetTitle = "Importar um Orb"
     static let hint = "Traga o que o ChatGPT ou o Gemini já sabe de você, ou um bot pronto do marketplace do Grok Bot."
     static let confirm = "Usar esta importação"
     static let notCreatedYet = "Nada foi criado ainda."
@@ -246,7 +247,7 @@ struct ImportPanel: View {
             .buttonStyle(GhostStyle())
             .hangsOnLeadingEdge()
             .help(Tip.importBack)
-            Text(ImportText.title)
+            Text(ImportText.sheetTitle)
                 .font(Typography.title)
                 .foregroundStyle(Palette.ink)
                 .accessibilityAddTraits(.isHeader)

@@ -259,6 +259,8 @@ struct WizardPreviewPane: View {
                     .padding(.vertical, 4)
                     // A label, not a button: no fill of its own (only the wash of a change), since nothing here is clickable.
                     .background(flashed.contains(item.field) ? Palette.findWash : .clear, in: .capsule)
+                    // What it can use (plain) is told apart from how it asks (outlined): the mode is not a capability.
+                    .overlay { if item.field == .mode { Capsule().strokeBorder(Palette.line) } }
                     .transition(reduceMotion ? .quiet
                                 : AnyTransition.rise.animation(Motion.enter.delay(Motion.staggerDelay(index))))
             }
@@ -267,7 +269,8 @@ struct WizardPreviewPane: View {
         .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: flashed)
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Pode usar: " + chipItems.map(\.title).joined(separator: ", "))
+        .accessibilityLabel("Pode usar: " + chipItems.filter { $0.field == .capabilities }.map(\.title).joined(separator: ", ")
+                            + ". " + draft.mode.label)
     }
 
     /// The brief wash behind the part the last call changed.

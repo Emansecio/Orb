@@ -336,12 +336,8 @@ struct NewBotSheet: View {
 
     /// The import in "Criar conversando", where the form's "Começar de" is not shown: it opens on the Grok Bot gallery.
     private var assistantImportLink: some View {
-        Button { isImporting = true } label: {
-            Label(ImportText.fromMarketplace, systemImage: "square.and.arrow.down").font(Typography.label)
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(Palette.accentText)
-        .help(Tip.importFromAssistant)
+        // The same button as the form's "Começar de" row ("Grok Bot" is in the form's footnote).
+        importButton
         // Centered under the pills above it, as one header for the chat.
         .frame(maxWidth: .infinity, alignment: .center)
         .padding(.horizontal, Spacing.l)
@@ -397,6 +393,15 @@ struct NewBotSheet: View {
     /// "Começar de": a memory kept from an Orb that is gone (only when there are some; choosing one fills in the Orb's
     /// name, role and look, which stay editable) and, always, a way to import what another assistant knew. The two
     /// exclude each other.
+    /// "Importar de outro assistente", the one button of both tabs: it leads to another panel, so it is a link.
+    private var importButton: some View {
+        Button { isImporting = true } label: {
+            Label(ImportText.title, systemImage: "square.and.arrow.down")
+        }
+        .buttonStyle(LinkTextStyle())
+        .help(Tip.importFromAssistant)
+    }
+
     private var startFromSection: some View {
         Section {
             if !kept.isEmpty {
@@ -417,13 +422,7 @@ struct NewBotSheet: View {
                 ImportSummaryRow(imported: imported, review: { draft = imported; isImporting = true }, remove: removeImport)
                     .transition(.quiet)
             } else {
-                Button { isImporting = true } label: {
-                    Label(ImportText.title, systemImage: "square.and.arrow.down")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(Palette.accentText)
-                .help(Tip.importFromAssistant)
-                .transition(.quiet)
+                importButton.transition(.quiet)
             }
         } header: {
             Text("Começar de")

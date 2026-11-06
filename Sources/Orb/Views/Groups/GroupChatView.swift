@@ -401,7 +401,7 @@ struct GroupEmptyState: View {
                     .accessibilityHidden(true)
             }
             VStack(spacing: 8) {
-                Text("Fale com o grupo.")
+                Text("Fale com o grupo")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(Palette.ink)
                 Text("\(orchestrator?.name ?? "O orquestrador") coordena, divide o trabalho e chama os outros. Você pode entrar a qualquer momento.")
@@ -409,6 +409,15 @@ struct GroupEmptyState: View {
                     .foregroundStyle(Palette.muted)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 420)
+                // An individual chat says when no model is connected; a group that cannot answer must too.
+                if let orchestrator, !model.hasModelSetup(for: orchestrator.id) {
+                    Label("Falta conectar um modelo: abra Ajustes › Modelos para o grupo poder responder.",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .font(Typography.label)
+                        .foregroundStyle(Palette.warn)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 420)
+                }
             }
         }
         .frame(maxWidth: .infinity)

@@ -133,6 +133,8 @@ struct DeleteOrbSheet: View {
             .orbSheet("Apagar \(bot.name)?", size: .medium) {
                 SheetFooter(destructiveTitle: "Apagar tudo, inclusive a memória",
                             destructive: { model.confirmDelete(botID, keepMemory: false) },
+                            // One red in the footer: the pill. The wider deletion is plain text, so two reds do not compete.
+                            leadingIsDestructive: false,
                             cancel: { model.deletingBotID = nil },
                             primaryTitle: "Apagar, guardando a memória",
                             primaryIsDefault: false, // deleting is never what a reflex Return does; Esc still cancels
