@@ -254,7 +254,7 @@ struct BotInspector: View {
     /// tab. Who made an Orb another made is at the end of the General tab.
     private func header(_ bot: Bot) -> some View {
         let summary = AppearanceSummary.text(for: bot.orb)
-        return HStack(alignment: .center, spacing: 12) {
+        return HStack(alignment: .top, spacing: 12) {
             LiveBotAvatar(botID: bot.id, orb: bot.orb, size: 46, interactive: true, restsWhenIdle: true) // the only part that follows the activity
             VStack(alignment: .leading, spacing: 3) {
                 // The name and role fade into the other Orb's, as the content below does.
@@ -264,13 +264,14 @@ struct BotInspector: View {
                         .transition(.pageSwap)
                 }
                 .motion(Motion.crossFade, value: bot.id)
-                Button("Personalizar…") { openLookEditor() }
-                .buttonStyle(QuietTextStyle())
-                .font(Typography.small)
-                .fixedSize()
-                .help("\(Tip.customizeOrb) (\(summary))")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            // "Personalizar" is an icon in the corner: it used to take a whole line under the name for a rare action.
+            Button("Personalizar", systemImage: "paintpalette") { openLookEditor() }
+                .labelStyle(.iconOnly)
+                .buttonStyle(CircleGhostStyle(side: 26, fontSize: 13))
+                .foregroundStyle(Palette.muted)
+                .iconTip("\(Tip.customizeOrb) (\(summary))", label: "Personalizar")
         }
         // The same side padding as the form's cards below, so the header, the tabs and the cards share edges.
         .padding(.horizontal, Spacing.xl)
@@ -351,7 +352,16 @@ struct BotInspector: View {
                         modelSummary(modelName).frame(maxWidth: 80, alignment: .trailing)
                         Color.clear.frame(width: 0, height: 0)
                     }
-                    if let warning {
+                    // The riskiest setting is said on the folded row, not only inside it (a model problem keeps the mark).
+                    if unavailable == nil, let chip = ModelCardSummary.riskChip(mode: bot.permissionMode) {
+                        Text(chip)
+                            .font(Typography.small.weight(.medium))
+                            .foregroundStyle(Palette.warn)
+                            .padding(.horizontal, 7).padding(.vertical, 1)
+                            .background(Palette.warn.opacity(0.14), in: .capsule)
+                            .fixedSize()
+                            .help(ModelCardSummary.bypassLine)
+                    } else if let warning {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .font(Typography.small)
                             .foregroundStyle(Palette.warn)
@@ -524,18 +534,17 @@ struct BotInspector: View {
         }
     }
 
-    /// "Skills: Resumir e Traduzir" with "Gerenciar" after it, in the quiet text of the links above. Cut in a narrow
-    /// panel, the whole list is the hover text.
+    /// "3 skills" with "Gerenciar" after it, which leads to the catalog page. The names are the hover text.
     private func scopeNote(_ title: String, names: [String], tip: String, action: @escaping () -> Void) -> some View {
         HStack(spacing: 4) {
-            Text("\(title): \(OrbScopeText.list(names, limit: 3))")
+            // A count, not the list: the list was cut mid-name in a narrow panel. The names are the hover text.
+            Text(CapabilityCopy.scopeCount(title: title, count: names.count))
                 .foregroundStyle(Palette.muted)
                 .lineLimit(1)
-                .truncationMode(.tail)
                 .help(names.joined(separator: ", "))
             Text("·").foregroundStyle(Palette.faint).accessibilityHidden(true)
             Button("Gerenciar", action: action)
-                .buttonStyle(QuietTextStyle())
+                .buttonStyle(LinkTextStyle(font: Typography.small))
                 .fixedSize()
                 .help(tip)
                 .accessibilityLabel("Gerenciar \(title.lowercased())")
@@ -556,16 +565,20 @@ struct BotInspector: View {
         .transition(.quiet)
     }
 
-    /// Under the cards, quietly: who made an Orb another made, and "Apagar", gray until the pointer is over it. Both sit
-    /// outside the cards, on the same inset as the notes under a section.
+    /// Under the cards: who made an Orb another made, then, past a divider, "Apagar este Orb…" in neutral text (red is for
+    /// the confirmation button alone). Both sit outside the cards, on the same inset as the notes under a section.
     private func panelFooter(_ bot: Bot) -> some View {
         VStack(alignment: .leading, spacing: Spacing.s) {
             if bot.createdByName != nil {
                 CreatedByLine(bot: bot) // MultiOrb (WP3)
             }
-            // One sheet for the sidebar and here (DeleteOrbDialog.swift).
-            Button("Apagar \(bot.name)…", role: .destructive) { model.askToDelete(bot.id) }
-                .buttonStyle(QuietDeleteStyle())
+            Divider().padding(.top, Spacing.xs)
+            // One sheet for the sidebar and here (DeleteOrbDialog.swift). The name is not in the label (it is in the header
+            // above, and a long one was cut), but VoiceOver still hears whose Orb it is.
+            Button("Apagar este Orb…") { model.askToDelete(bot.id) }
+                .buttonStyle(QuietTextStyle())
+                .font(Typography.label)
+                .accessibilityLabel("Apagar \(bot.name)")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.leading, FormFootnote<EmptyView>.headingInset)
@@ -612,8 +625,9 @@ struct BotInspector: View {
 
         Section {
             if bot.permissionRules.isEmpty {
+                // The rule of the footer below is said here while there is nothing to list (see the footer).
                 PanelEmptyNote("Nenhuma liberação ainda", systemImage: "checkmark.shield",
-                               detail: "Ao aprovar um pedido, escolha “Sempre permitir…” e ela aparece aqui.")
+                               detail: "Ao aprovar um pedido, escolha “Sempre permitir…” e ela aparece aqui. \(PermissionMode.grantsNote)")
                     .transition(.quiet)
             }
             ForEach(bot.permissionRules, id: \.self) { rule in
@@ -636,7 +650,10 @@ struct BotInspector: View {
         } header: {
             Text("Liberações").sectionTitleStyle()
         } footer: { FormFootnote {
-            Text(PermissionMode.grantsNote).help(PermissionMode.grantsNoteDetail)
+            // With grants listed the rule sits under them, with its detail one hover away; with none the empty note says it.
+            if !bot.permissionRules.isEmpty {
+                Label(PermissionMode.grantsNote, systemImage: "info.circle").help(PermissionMode.grantsNoteDetail)
+            }
         } }
         // Bound to the rules themselves (a short list), so only a grant coming or going moves anything.
         .animateChanges(of: bot.permissionRules)
@@ -644,8 +661,7 @@ struct BotInspector: View {
         filesSection(bot)
     }
 
-    /// The folder the Orb works in, said as a place: its name ("Pasta pessoal" for the home folder) over its path, and
-    /// "Mudar…" at the end of the line.
+    /// The folder the Orb works in, said as a place: its name ("Pasta pessoal" for the home folder) over its path.
     private func folderRow(_ bot: Bot) -> some View {
         let isHome = EmptyChatContent.usesHome(bot)
         return HStack(spacing: Spacing.s) {
@@ -662,16 +678,16 @@ struct BotInspector: View {
                     .font(Typography.small.monospaced())
                     .foregroundStyle(Palette.muted)
                     .lineLimit(1)
-                    .truncationMode(.head)
+                    .truncationMode(.middle)
                     .textSelection(.enabled)
             }
             .help(bot.workingURL.path)
-            Spacer(minLength: 4)
-            changeFolderMenu(bot)
+            Spacer(minLength: 0)
         }
     }
 
-    /// Open the folder where the Orb works, in the Finder or in the Terminal: the two things people do most with it. Chips
+    /// Open the folder where the Orb works, in the Finder or in the Terminal, or change it ("Mudar…"): the three things
+    /// people do with it, on one line. Chips
     /// like the ones of the rows around (one line when they fit, one under the other in a narrow panel); off while the
     /// folder is gone, which "Recriar" below brings back.
     private func folderActions(_ bot: Bot) -> some View {
@@ -683,12 +699,18 @@ struct BotInspector: View {
         }
         .chipButton()
         .disabled(listing?.folder == .missing)
+        // "Mudar…" stays enabled with the folder gone: choosing another one is the way out.
+        let change = changeFolderMenu(bot)
         return ViewThatFits(in: .horizontal) {
             HStack(spacing: 8) {
                 chips
+                change
                 Spacer(minLength: 0)
             }
-            VStack(alignment: .leading, spacing: 8) { chips }
+            VStack(alignment: .leading, spacing: 8) {
+                chips
+                change
+            }
         }
     }
 
@@ -939,7 +961,7 @@ private struct InspectorTabBar: View {
                                 .fixedSize(horizontal: true, vertical: false)
                         }
                     }
-                    .foregroundStyle(isSelected ? Palette.ink : Palette.muted)
+                    .foregroundStyle(isSelected ? Palette.ink : Palette.secondary)
                     .frame(maxWidth: .infinity, minHeight: 44, maxHeight: 44)
                     .padding(.horizontal, 2)
                     .background {
@@ -947,6 +969,13 @@ private struct InspectorTabBar: View {
                             RoundedRectangle(cornerRadius: Radius.small)
                                 .fill(Palette.ghostSelected)
                                 .matchedGeometryEffect(id: "destaque", in: highlight)
+                        }
+                    }
+                    // The gray fill alone is ~1.2:1 against the panel: a 2 pt accent bar says which tab is open.
+                    .overlay(alignment: .bottom) {
+                        if isSelected {
+                            Capsule().fill(Palette.accentText).frame(width: 18, height: 2)
+                                .matchedGeometryEffect(id: "indicador", in: highlight)
                         }
                     }
                     .contentShape(.rect(cornerRadius: Radius.small))
@@ -1000,7 +1029,7 @@ private struct InspectorHeader: View {
                     .foregroundStyle(Palette.warn)
                     .transition(.quiet)
             }
-            // At rest the role is one line, ending in "…" when it is longer (all of it in the hover text); a click opens the
+            // At rest the role is two lines at most, ending in "…" when it is longer (all of it in the hover text); a click opens the
             // field, which grows with what is typed. (A one-line field would show its own first line and scroll the rest away.)
             if isEditingRole {
                 TextField("Papel", text: $role, prompt: Text("Papel"), axis: .vertical)
@@ -1021,7 +1050,8 @@ private struct InspectorHeader: View {
                     Text(role.isEmpty ? "Papel" : role)
                         .font(Typography.label)
                         .foregroundStyle(role.isEmpty ? Palette.faint : Palette.secondary)
-                        .lineLimit(1)
+                        .lineLimit(2) // a role is a sentence: two lines before the cut (all of it in the hover text)
+                        .multilineTextAlignment(.leading)
                         .truncationMode(.tail)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
@@ -1106,9 +1136,10 @@ private struct WorkspaceFileRow: View {
                     .frame(width: 22)
                     .help(file.marker?.help ?? "")
             }
+            // Middle: the start of the name and its date stamp survive ("…-05-D628EFC2-grande.png" lost the start).
             Text(file.path)
                 .lineLimit(1)
-                .truncationMode(.head)
+                .truncationMode(.middle)
             Spacer(minLength: 4)
             if let modified = file.modified {
                 Text(RelativeTime.text(modified))
@@ -1172,10 +1203,6 @@ private struct RoutineRow: View {
                         .disabled(!routine.canBeEnabled())
                         .help(routine.canBeEnabled() ? Tip.routineToggle(isOn: routine.isEnabled) : Tip.routineDatePassed)
                 }
-                Text(routine.schedule.plainLabel)
-                    .font(Typography.label)
-                    .foregroundStyle(Palette.muted)
-                    .fixedSize(horizontal: false, vertical: true)
                 if let mismatch = RoutineText.nameMismatch(of: routine) {
                     Label(mismatch, systemImage: "exclamationmark.triangle.fill")
                         .font(Typography.small)
@@ -1185,7 +1212,7 @@ private struct RoutineRow: View {
             }
             if let goal = routine.goal { GoalProgressView(goal: goal, font: Typography.label, showsNote: false) }
             VStack(alignment: .leading, spacing: 6) {
-                RoutineNextLine(routine: routine)
+                RoutineNextLine(routine: routine) // the schedule, the next run and its state, in one line
                 RoutineLastLine(routine: routine)
             }
             footer
@@ -1228,8 +1255,9 @@ private struct RoutineRow: View {
             } else {
                 // "Rodar agora" and "Editar" together at the start, the same pill; the trash can at the end. At the narrowest
                 // panel only the pencil fits; it keeps "Editar" as its tip and VoiceOver label.
+                // "Editar" is plain text, "Rodar agora" the pill: the same as on the Rotinas page.
                 let editButton = Button("Editar", systemImage: "pencil", action: edit)
-                    .buttonStyle(SecondaryPillStyle())
+                    .buttonStyle(GhostStyle())
                     .help(Tip.editRoutine)
                 // Read once: both layouts below are made.
                 let runState = RoutineRunState(isRunning: model.isRoutineRunning(routine.id),
@@ -1262,34 +1290,36 @@ private struct RoutineRow: View {
     }
 }
 
-/// "Próxima: amanhã às 01:03 · em 5 h 59 min", kept right as the minutes pass; "Pausada" while it is off.
+/// The schedule and the next run in one line ("Todo dia às 08:30 · próxima amanhã"); a late run is said in the warning
+/// color, under it; "Pausada" and "Concluída" follow the schedule while it is off.
 private struct RoutineNextLine: View {
     let routine: Routine
 
     var body: some View {
+        let plain = routine.schedule.plainLabel
+        let isRepeating: Bool = if case .once = routine.schedule { false } else { true }
         if routine.isEnabled {
             TimelineView(.periodic(from: .now, by: 60)) { context in
                 // `nextRun` walks the cron expression: once per tick, not once per use.
                 let next = routine.nextRun
-                let isLate = RoutineText.isLate(next, now: context.date)
-                Label {
-                    if isLate {
-                        Text(RoutineText.late(next, now: context.date))
-                    } else {
-                        // "em 9 h 57 min" never breaks inside.
-                        Text("Próxima: \(RoutineText.dayAndTime(next, now: context.date)) · \(RoutineText.relative(until: next, now: context.date).replacing(" ", with: "\u{A0}"))")
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(RoutineText.cadence(plain: plain, isRepeating: isRepeating, next: next, now: context.date))
+                        .foregroundStyle(Palette.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if RoutineText.isLate(next, now: context.date) {
+                        // Abnormal states take the warning color (on time is the plain line above).
+                        Label(RoutineText.late(next, now: context.date), systemImage: "clock.badge.exclamationmark")
+                            .foregroundStyle(Palette.warn)
                     }
-                } icon: {
-                    Image(systemName: isLate ? "clock.badge.exclamationmark" : "arrow.forward.circle")
                 }
                 .font(Typography.label)
-                .foregroundStyle(Palette.secondary)
             }
         } else {
-            // One mark per state: the glyph and the switch already say it is off, so the line is only the word.
-            Text(RoutineText.isConcluded(routine) ? "Concluída" : "Pausada")
+            // One mark per state: the switch already says it is off, so the line is the schedule and the word.
+            Text("\(plain) · \(RoutineText.isConcluded(routine) ? "Concluída" : "Pausada")")
                 .font(Typography.label)
                 .foregroundStyle(Palette.muted)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -1370,9 +1400,11 @@ private struct OwnFolderNote: View {
     @State private var path: String?
 
     var body: some View {
-        Text(FolderNoteText.ownFolder(name: name, path: path))
+        // One short line with an ⓘ; the whole sentence, with the folder's path, is the hover text.
+        Label(FolderNoteText.ownFolderShort(name: name), systemImage: "info.circle")
             .font(Typography.small)
             .foregroundStyle(Palette.muted)
+            .help(FolderNoteText.ownFolder(name: name, path: path))
             .task(id: name) {
                 let orbName = name
                 path = await Task.detached {
@@ -1383,6 +1415,9 @@ private struct OwnFolderNote: View {
 }
 
 enum FolderNoteText {
+    /// The line itself: what an own folder would loosen, without the folder's path (that is in `ownFolder`, the tip).
+    static func ownFolderShort(name: String) -> String { "Em pasta própria, \(name) grava sem pedir, mesmo em “Perguntar antes”." }
+
     /// The sentence under the folder's row when the Orb has none of its own. `path` is nil until the folder is looked up.
     static func ownFolder(name: String, path: String?) -> String {
         let place = path.map { "uma pasta própria (\($0))" } ?? "uma pasta própria"
@@ -1466,20 +1501,5 @@ struct PanelEmptyNote: View {
         }
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
-    }
-}
-
-/// "Apagar" at the end of the General tab: small and gray (as readable as the quiet links, it is the only way out), red only
-/// with the pointer over it.
-private struct QuietDeleteStyle: ButtonStyle {
-    @State private var isHovering = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(Typography.label)
-            .foregroundStyle(configuration.isPressed || isHovering ? Palette.danger : Palette.muted)
-            .contentShape(Rectangle())
-            .onHover { isHovering = $0 }
-            .animation(Motion.hover(isHovering), value: isHovering)
     }
 }

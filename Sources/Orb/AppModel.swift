@@ -136,6 +136,15 @@ final class AppModel {
     }
 
     func toggleInspector() { setInspector(!showInspector) }
+
+    /// The panel column reports it was shown or dismissed (the binding of `.inspector`). Only the Orb's page owns the
+    /// choice: the column also reports `false` while it leaves with a page change, and a stale closure from the last
+    /// render of the Orb's page used to store that as if the user had closed it, so it never came back. The page is read
+    /// live here, not captured at render time.
+    func inspectorPresentationChanged(_ open: Bool) {
+        guard DetailPage.page(for: selection, botIDs: botIDs) == .orb else { return }
+        showInspector = open
+    }
     var showNewBot = false
     /// The kept memory the new-Orb sheet starts from when it opens from the welcome screen (nil: no memory chosen).
     var newBotStart: KeptMemory?

@@ -47,6 +47,20 @@ struct InspectorFoldTests {
         #expect(ModelCardSummary.warning(mode: .bypass, unavailableNote: "Sem conexão") == "Sem conexão")
     }
 
+    @Test func onlyTheModeThatNeverAsksGetsTheShortOrangeChipOnTheClosedRow() {
+        for mode in PermissionMode.allCases {
+            #expect((ModelCardSummary.riskChip(mode: mode) != nil) == (mode == .bypass))
+        }
+        #expect(ModelCardSummary.riskChip(mode: .bypass) == "Sem pedir")
+    }
+
+    @Test func theSkillsAndConnectorsNotesAreCounts() {
+        #expect(CapabilityCopy.scopeCount(title: "Skills", count: 1) == "1 skill")
+        #expect(CapabilityCopy.scopeCount(title: "Skills", count: 3) == "3 skills")
+        #expect(CapabilityCopy.scopeCount(title: "Conectores", count: 1) == "1 conector")
+        #expect(CapabilityCopy.scopeCount(title: "Conectores", count: 2) == "2 conectores")
+    }
+
     @Test func bypassAloneIsAMarkOnTheClosedRow() {
         // "Sem pedir permissão" is a choice: a mark on the closed row, not a reason to open the card.
         #expect(ModelCardSummary.warning(mode: .bypass, unavailableNote: nil) == ModelCardSummary.bypassLine)

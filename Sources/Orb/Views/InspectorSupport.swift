@@ -68,6 +68,13 @@ enum InspectorTabMemory {
 
 /// How the panel talks about what the Orb may use. (What each switch does is its row's hover text: `Tip.capability`.)
 enum CapabilityCopy {
+    /// "1 skill", "3 skills", "2 conectores": what the Skills and Conectores notes of the "Pode usar" card say, with the
+    /// names left to the hover text. `title` is the note's heading ("Skills", "Conectores").
+    static func scopeCount(title: String, count: Int) -> String {
+        let noun = title == "Conectores" ? (count == 1 ? "conector" : "conectores") : (count == 1 ? "skill" : "skills")
+        return "\(count) \(noun)"
+    }
+
     /// The connectors row's line: how many are on, since the toggle alone does not say. `anyInstalled` tells "none
     /// installed at all" from "none in this Orb's scope" (every installed connector is kept for other Orbs).
     static func connectorsLine(enabled: Int, total: Int, anyInstalled: Bool) -> String {
@@ -107,6 +114,9 @@ enum InspectorFold {
 enum ModelCardSummary {
     /// The mode that never asks, said in one line (the whole warning is `PermissionMode.summary`).
     static let bypassLine = "Roda tudo sem perguntar"
+
+    /// The short orange chip on the closed row for the mode that never asks (nil for the others).
+    static func riskChip(mode: PermissionMode) -> String? { mode == .bypass ? "Sem pedir" : nil }
 
     /// The model as the closed row names it: the chosen one, else the app's default, else just "Padrão".
     static func modelText(selection: String, defaultModel: String, name: (String) -> String) -> String {

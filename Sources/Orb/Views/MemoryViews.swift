@@ -74,7 +74,7 @@ struct MemoryTab: View {
                 }
                 if shown.count < group.items.count {
                     Button("Ver todos (\(group.items.count))…") { showAll(group.kind) }
-                        .buttonStyle(QuietTextStyle())
+                        .buttonStyle(LinkTextStyle())
                         .help(Tip.memoryShowKind)
                 }
             } header: {
@@ -101,7 +101,7 @@ struct MemoryTab: View {
                 }
                 Text("·").foregroundStyle(Palette.faint).accessibilityHidden(true)
                 Button("Abrir pasta") { NSWorkspace.shared.open(model.memory.directory(for: botID)) }
-                    .buttonStyle(QuietTextStyle())
+                    .buttonStyle(LinkTextStyle(font: Typography.small)) // opens the Finder: a link
                     .help(Tip.memoryFolder)
                     .accessibilityLabel("Abrir pasta da memória")
             }
@@ -152,17 +152,11 @@ private struct IdentityBlock: View {
                     .help(Tip.editIdentity)
                 Spacer()
                 if !memory.interviewPending {
-                    Menu {
+                    // The shared "⋯": a 28 pt target with its hover text and VoiceOver label.
+                    MoreMenu(name: name) {
                         Button("Fazer a entrevista de novo", systemImage: "questionmark.bubble", action: restartInterview)
                             .help(Tip.restartInterview(name))
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
                     }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                    .help(Tip.moreOptions(of: name))
-                    .accessibilityLabel("Mais opções de \(name)")
                 }
             }
             .controlSize(.small)
@@ -250,7 +244,8 @@ struct MemoryRow: View {
                     .font(Typography.label)
                     .foregroundStyle(Palette.ink.opacity(0.9))
                     .lineSpacing(1.5)
-                    .lineLimit(isExpanded ? nil : (item.kind == .sessao ? 1 : lineLimit))
+                    // A session summary is a sentence: two lines, not a first line cut at a word (the hover text has it whole).
+                    .lineLimit(isExpanded ? nil : (item.kind == .sessao ? 2 : lineLimit))
                     .fixedSize(horizontal: false, vertical: true)
                     .motion(Motion.content, value: isExpanded)
                 if isExpanded, item.kind == .sessao {
@@ -288,7 +283,7 @@ struct MemoryRow: View {
         }
         .contentShape(Rectangle())
         .onTapGesture { isExpanded.toggle() }
-        .help(isExpanded ? Tip.collapseMemory : Tip.expandMemory)
+        .help(isExpanded ? Tip.collapseMemory : "\(Self.text(of: item))\n\n\(Tip.expandMemory)")
         .onHover { isHovering = $0 }
         .contextMenu {
             Button("Esquecer", systemImage: "trash", action: forget)

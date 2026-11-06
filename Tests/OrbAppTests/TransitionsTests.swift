@@ -72,6 +72,17 @@ import Testing
         #expect(model.showInspector)
     }
 
+    @Test @MainActor func aPanelReportedClosedOutsideTheOrbsPageDoesNotChangeTheChoice() {
+        let model = makeModel()
+        model.setInspector(true)
+        model.selection = .inicio
+        model.inspectorPresentationChanged(false) // the column leaving with the page
+        model.selection = .bot(model.botIDs[0])
+        #expect(model.showInspector)
+        model.inspectorPresentationChanged(false) // the user closing it on the Orb's page
+        #expect(!model.showInspector)
+    }
+
     // MARK: The curves
 
     @Test func crossFadesAreEighteenHundredthsAndTheContentCurveIsAQuarterSecond() {

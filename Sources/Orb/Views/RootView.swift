@@ -126,7 +126,7 @@ private struct DetailView: View {
         // staying a fade-length behind it and vanishing. The user's choice (`showInspector`) is left as it was.
         .inspector(isPresented: Binding(
             get: { panelShows },
-            set: { if page == .orb { model.showInspector = $0 } }
+            set: { model.inspectorPresentationChanged($0) }
         )) {
             ZStack {
                 if let id = selectedBotID {

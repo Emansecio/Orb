@@ -305,8 +305,7 @@ struct BrowserPickerRows: View {
             if let action = line.action {
                 // No arrow: the link says where it goes ("Ajustes"), and the line above already carries the icon.
                 Button(action.title) { SettingsRouter.openBrowser(using: openSettings) }
-                    .buttonStyle(QuietTextStyle())
-                    .font(Typography.small)
+                    .buttonStyle(LinkTextStyle(font: Typography.small)) // leads to Ajustes: a link
                     .help(action.tip)
                     .transition(.quiet)
             }
