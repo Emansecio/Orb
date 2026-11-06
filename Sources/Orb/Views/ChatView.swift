@@ -211,6 +211,9 @@ struct CompactedFoldLine: View {
     static var opensInBench = false
 
     let fold: CompactedFold
+    /// What the compaction notice says (tokens before and after), shown on hover: the notice itself is not drawn once
+    /// this line stands for it, so the compaction has one representation (review item 22).
+    var detail: String?
     let isOpen: Bool
     let toggle: () -> Void
     @State private var isHovered = false
@@ -242,7 +245,8 @@ struct CompactedFoldLine: View {
         .onHover { isHovered = $0 }
         .frame(maxWidth: .infinity)
         .padding(.vertical, Spacing.xs)
-        .help(isOpen ? "Oculta de novo as mensagens que viraram resumo" : "Mostra as mensagens que viraram resumo (o Orb segue com o resumo)")
+        .help([isOpen ? "Oculta de novo as mensagens que viraram resumo" : "Mostra as mensagens que viraram resumo (o Orb segue com o resumo)", detail]
+            .compactMap { $0 }.joined(separator: "\n"))
         .accessibilityLabel(fold.title)
         .accessibilityHint(isOpen ? "Oculta essas mensagens" : "Mostra essas mensagens")
     }
@@ -720,7 +724,7 @@ private struct TranscriptList: View {
 
     /// The line in place of what a compaction folded; opening it puts the messages back above it.
     private func foldLine(_ fold: CompactedFold, _ proxy: ScrollViewProxy) -> some View {
-        CompactedFoldLine(fold: fold, isOpen: showsFolded) { toggleFold(proxy) }
+        CompactedFoldLine(fold: fold, detail: model.orbTranscript(look.id).latestCompactionNotice?.text, isOpen: showsFolded) { toggleFold(proxy) }
             .id(FoldAnchor.id)
             .transition(.identity)
     }
@@ -1323,7 +1327,9 @@ private struct WorkingLine: View {
                     // The phrase leaving follows its parent when the line is pushed down by a row coming in above it,
                     // instead of staying drawn where the line used to be.
                     .geometryGroup()
-                    TaskPlanRing(transcript: transcript, showsSteps: $showsPlan)
+                    // A plan of several steps has its card (`PlanCard`) under the chat: the same plan twice, with two
+                    // weights, is what the ring stays out of.
+                    if (transcript.plan?.steps.count ?? 0) <= 1 { TaskPlanRing(transcript: transcript, showsSteps: $showsPlan) }
                     WorkMeterView(work: work, since: live.workingSince, spend: live.turnSpend, expanded: isHovering)
                     // A command holds the turn: it can go on by itself while you talk to the Orb. The button waits a
                     // moment (`CommandRelease.buttonDelay`), so a quick command ends before it ever shows, and once

@@ -79,13 +79,13 @@ struct QuestionCard: View {
                 .fixedSize(horizontal: false, vertical: true)
             if !question.options.isEmpty {
                 VStack(alignment: .leading, spacing: Spacing.s) {
-                    ForEach(question.options, id: \.self) { option in
+                    ForEach(Array(question.options.enumerated()), id: \.element) { index, option in
                         if question.multiple {
                             QuestionOptionButton(text: option, isPicked: picked.contains(option)) {
                                 if picked.insert(option).inserted == false { picked.remove(option) }
                             }
                         } else {
-                            QuestionOptionButton(text: option) { answer(option) }
+                            QuestionOptionButton(text: option, number: index + 1) { answer(option) }
                         }
                     }
                 }
@@ -267,12 +267,21 @@ extension OrbQuestion {
 private struct QuestionOptionButton: View {
     let text: String
     var isPicked: Bool?
+    /// The option's place in the list (single choice): a numbered row reads as an answer to click, not a text field.
+    var number: Int?
     let action: () -> Void
     @State private var isHovering = false
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 10) {
+                if let number {
+                    Text("\(number)")
+                        .font(Typography.label.monospacedDigit())
+                        .foregroundStyle(Palette.muted)
+                        .frame(width: 12)
+                        .accessibilityHidden(true)
+                }
                 if let isPicked {
                     Image(systemName: isPicked ? "checkmark.square.fill" : "square")
                         .foregroundStyle(isPicked ? Palette.accentText : Palette.muted)
@@ -293,8 +302,8 @@ private struct QuestionOptionButton: View {
             .font(Typography.text)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .hoverFill(isHovering, in: .rect(cornerRadius: Radius.small), color: Palette.raised, resting: Palette.surface)
-            .overlay(RoundedRectangle(cornerRadius: Radius.small).strokeBorder(Palette.line))
+            // Filled, with no border: the border is the "Outra resposta…" field's, so the two no longer look alike.
+            .hoverFill(isHovering, in: .rect(cornerRadius: Radius.small), color: Palette.raisedHover, resting: Palette.raised)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)

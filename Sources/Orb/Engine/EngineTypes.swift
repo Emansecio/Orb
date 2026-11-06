@@ -381,8 +381,9 @@ enum CacheHealth {
     /// A turn whose prompts were read from the cache less than this is not caching.
     static let healthyRatio = 0.2
 
-    static let notice = "O provedor não está reaproveitando o início das conversas (cache), o que deixa cada passo mais caro. "
-        + "Se continuar, confira o modelo e o provedor em Ajustes → Modelos."
+    static let notice = "Cache do provedor desligado: cada passo custa mais. Ver Ajustes › Modelos"
+    /// How the same notice started before it was shortened (saved conversations keep it).
+    static let oldNoticePrefix = "O provedor não está reaproveitando o início das conversas"
 
     /// `total` is the turn's usage summed over `requests` model calls.
     static func isFailing(_ total: TokenUsage, requests: Int) -> Bool {
@@ -541,7 +542,7 @@ enum LLMError: LocalizedError, Equatable {
         case 429 where isAboutMoney:
             // OpenAI answers an account without credit with 429 `insufficient_quota`; waiting does not help.
             "Sem saldo ou limite de gasto liberado no provedor (429). Confira o saldo e o plano no console do provedor. Detalhe do provedor: \(message)"
-        case 401, 403: "Chave ou login inválido (\(status)). Confira em Ajustes → Modelos. Detalhe do provedor: \(message)"
+        case 401, 403: "A chave ou o login foi recusado (\(status)). Detalhe do provedor: \(message)"
         case 402: "O provedor pede pagamento ou mais saldo (402). Confira seu plano. Detalhe do provedor: \(message)"
         case 429: "Você atingiu o limite de uso do provedor (429); espere um pouco ou confira seu plano. Detalhe do provedor: \(message)"
         case 500...599: "O provedor está sobrecarregado ou instável (\(status)); tente de novo em instantes. Detalhe do provedor: \(message)"

@@ -67,9 +67,9 @@ import Testing
     }
 
     @Test func aProviderOrKeyProblemOpensAjustesFirst() {
-        #expect(NoticeAction.actions(for: "Não deu certo: Chave ou login inválido (401). Confira em Ajustes → Modelos.") == [.openSettings, .retry])
-        #expect(NoticeAction.actions(for: "Não deu certo: Nenhum modelo configurado. Abra Ajustes → Modelos.") == [.openSettings, .retry])
-        #expect(NoticeAction.actions(for: "Não deu certo: O Claude Code não foi encontrado neste Mac. Veja Ajustes → Modelos.") == [.openSettings, .retry])
+        #expect(NoticeAction.actions(for: "Não deu certo: A chave ou o login foi recusado (401).") == [.openSettings])
+        #expect(NoticeAction.actions(for: "Não deu certo: Nenhum modelo configurado. Abra Ajustes → Modelos.") == [.openSettings])
+        #expect(NoticeAction.actions(for: "Não deu certo: O Claude Code não foi encontrado neste Mac. Veja Ajustes → Modelos.") == [.openSettings])
         #expect(NoticeAction.actions(for: "Conecte um modelo em Ajustes → Modelos para começar.") == [.openSettings])
     }
 
@@ -88,9 +88,9 @@ import Testing
     }
 
     @Test func aBadKeyOpensAjustesFirst() {
-        #expect(NoticeAction.actions(for: notice(.http(status: 401, message: "invalid x-api-key"))) == [.openSettings, .retry])
-        #expect(NoticeAction.actions(for: notice(.http(status: 403, message: "forbidden"))) == [.openSettings, .retry])
-        #expect(NoticeAction.actions(for: notice(.notConfigured)) == [.openSettings, .retry])
+        #expect(NoticeAction.actions(for: notice(.http(status: 401, message: "invalid x-api-key"))) == [.openSettings])
+        #expect(NoticeAction.actions(for: notice(.http(status: 403, message: "forbidden"))) == [.openSettings])
+        #expect(NoticeAction.actions(for: notice(.notConfigured)) == [.openSettings])
     }
 
     @Test func aModelTheProviderRefusedWithAGoodKeyOnlyOffersToTryAgain() {
@@ -105,6 +105,24 @@ import Testing
         // "login" and "chave" in the provider's text must not turn a rate limit into a settings problem.
         #expect(NoticeAction.actions(for: notice(.http(status: 429, message: "faça login ou troque a chave, ajustes necessários"))) == [.retry])
         #expect(NoticeAction.actions(for: notice(.http(status: 500, message: "chave de cache inválida"))) == [.retry])
+    }
+
+    @Test func aRefusedKeyDoesNotOfferToTryAgain() {
+        for status in [401, 403] {
+            let actions = NoticeAction.actions(for: notice(.http(status: status, message: "denied")), canCompact: false, canSwitchModel: true)
+            #expect(actions == [.openSettings, .otherModel])
+            #expect(!actions.contains(.retry))
+        }
+        #expect(!NoticeAction.actions(for: notice(.notConfigured)).contains(.retry))
+        // The missing balance still tries again once it is topped up.
+        #expect(NoticeAction.actions(for: notice(.http(status: 402, message: "pay"))).contains(.retry))
+    }
+
+    @Test func theAppsOwnWordsAboutItsRunAreSetApartFromTheReply() {
+        #expect(NoticeAction.systemWarningSymbol(CacheHealth.notice) == "exclamationmark.circle")
+        #expect(NoticeAction.systemWarningSymbol(CacheHealth.oldNoticePrefix + " (cache), o que deixa cada passo mais caro.") == "exclamationmark.circle")
+        #expect(NoticeAction.systemWarningSymbol("Pausei depois de 100 passos neste turno.") == "pause.circle")
+        #expect(NoticeAction.systemWarningSymbol("Você interrompeu esta resposta.") == nil)
     }
 
     @Test func aPausedOrCutReplyOffersToContinue() {
@@ -125,8 +143,8 @@ import Testing
         let silent = "Não deu certo: O modelo não respondeu."
         #expect(NoticeAction.actions(for: silent, canCompact: false, canSwitchModel: true) == [.retry, .otherModel])
         #expect(NoticeAction.actions(for: silent, canCompact: false) == [.retry])
-        let key = "Não deu certo: Chave ou login inválido (401). Confira em Ajustes → Modelos."
-        #expect(NoticeAction.actions(for: key, canCompact: false, canSwitchModel: true) == [.openSettings, .retry, .otherModel])
+        let key = "Não deu certo: A chave ou o login foi recusado (401)."
+        #expect(NoticeAction.actions(for: key, canCompact: false, canSwitchModel: true) == [.openSettings, .otherModel])
         // Another model does not make a conversation shorter, nor a paused task a failure.
         let tooLong = "Não deu certo: A conversa ficou grande demais para este modelo."
         #expect(NoticeAction.actions(for: tooLong, canCompact: true, canSwitchModel: true) == [.compact])

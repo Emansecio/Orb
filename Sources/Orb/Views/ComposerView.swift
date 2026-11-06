@@ -62,7 +62,8 @@ struct ComposerView: View {
         let hintText = hint(situation)
         VStack(spacing: 0) {
             card(lane, hint: hintText, situation)
-            Text(hintText)
+            // What dictation says is inside the card; the line under it keeps the hints of the keys.
+            Text(DictationButton.hint(model.dictation, botID: botID) == nil ? hintText : "")
                 .font(Typography.small)
                 .foregroundStyle(Palette.muted)
                 .lineLimit(1)
@@ -155,6 +156,14 @@ struct ComposerView: View {
             if let error = lane.error {
                 errorLine(error, lane: lane)
                     .transition(.adapted(.unfold, reduceMotion: reduceMotion))
+            }
+            if let dictating = DictationButton.hint(model.dictation, botID: botID) {
+                Label(dictating, systemImage: "mic.fill")
+                    .font(Typography.small)
+                    .foregroundStyle(Palette.muted)
+                    .padding(.horizontal, Spacing.xs)
+                    .transition(.adapted(.unfold, reduceMotion: reduceMotion))
+                    .accessibilityHidden(true) // the microphone button says it as its value
             }
             slashSuggestions(matches)
 
@@ -259,7 +268,7 @@ struct ComposerView: View {
     }
 
     private func placeholder(_ live: BotLive) -> LocalizedStringKey {
-        if isQueueing { return "Escreva para orientar o Orb enquanto ele trabalha" }
+        if isQueueing { return "Oriente o Orb enquanto ele trabalha" }
         // Free or running a routine (the strip above the field says so): the same short line, naming the Orb.
         return LocalizedStringKey(ComposerAction.placeholder(orbName: live.look.name))
     }
@@ -378,6 +387,8 @@ struct ComposerView: View {
                 .animation(Motion.panel(reduceMotion: reduceMotion), value: action.symbol)
         }
         .buttonStyle(RoundActionStyle())
+        // Stop is the same white circle as Send with another glyph: an accent ring while the Orb works tells them apart.
+        .overlay { if action == .stop { Circle().strokeBorder(Palette.accentText, lineWidth: 1.5).padding(-3).allowsHitTesting(false) } }
         .disabled(action != .stop && !canSend)
         .accessibilityLabel(action.title(isRoutine: routine != nil, elsewhere: elsewhere))
         .help(action.help(isRoutine: routine != nil, elsewhere: elsewhere))
@@ -646,6 +657,8 @@ struct RemoveButton: View {
         Button(label, systemImage: "xmark.circle.fill", action: action)
             .labelStyle(.iconOnly)
             .buttonStyle(.plain)
+            // 18 pt, not the 14 of the default symbol, with the canvas ring `removable` gives it: it was lost on dark thumbnails.
+            .font(.system(size: 18))
             .help(Tip.removeAttachment)
             .frame(width: Self.size, height: Self.size)
             // The fill is a little smaller than the target, so the strip's edges never clip it.

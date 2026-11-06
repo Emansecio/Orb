@@ -545,7 +545,7 @@ struct FirstRunCard: View {
                     badge: installed == true ? "Recomendado" : nil,
                     phase: phase(.claudeCode, steps),
                     workingText: loggedIn ? "Conectando…" : "Aguardando o navegador…",
-                    isEnabled: steps.working != .claudeCode && installed == true,
+                    isEnabled: steps.working != .claudeCode && installed == true, isSearching: installed == nil,
                     trailingLink: installed == false ? ("Como instalar", ClaudeCode.setupPage) : nil,
                     onCancel: steps.cancel) {
             steps.connectClaudeCode(model: model)
@@ -621,6 +621,8 @@ private struct FirstRunRow: View {
     var workingText = "Aguardando o navegador…"
     var isEnabled = true
     var trailingSymbol = "chevron.right"
+    /// Still looking for it: a spinner in place of the chevron and the row at full strength (a dimmed row read as "off").
+    var isSearching = false
     var trailingLink: (title: String, url: URL?)?
     /// Draws its own card (the key row draws one around the row and its form).
     var framed = true
@@ -679,7 +681,7 @@ private struct FirstRunRow: View {
         // their own (VoiceOver can stop a sign-in that waits on the browser).
         .accessibilityLabel("\(title). \(phaseText)")
         .disabled(!isEnabled)
-        .opacity(isEnabled || phase == .working ? 1 : 0.6)
+        .opacity(isEnabled || phase == .working || isSearching ? 1 : 0.6)
         .onHover { isHovering = $0 }
         .overlay(alignment: .trailing) {
             // A real link or button beside the row, not inside the button (nothing inside a button takes its own click).
@@ -707,7 +709,7 @@ private struct FirstRunRow: View {
     }
 
     @ViewBuilder private var trailing: some View {
-        if phase == .working {
+        if phase == .working || isSearching {
             ProgressView().controlSize(.small)
         } else if case .failed = phase {
             Text("Tentar de novo")
@@ -738,6 +740,9 @@ struct FirstRunBanner: View {
     @State private var isAskingKey = false
     @State private var keyKind = ProviderKind.openai
     @State private var key = ""
+    /// The paths to connect are open. With a conversation going they start closed, as one line (`collapsedLine`): the
+    /// large card is the empty chat's, and the banner said the same thing a third time (review item 34).
+    @State private var isExpanded = false
 
     /// While a message of the chat is being edited the card above the field steps back: one line less and tighter, so the
     /// editing banner, the field and this one fit together without crowding the conversation.
@@ -753,7 +758,38 @@ struct FirstRunBanner: View {
         .motion(Motion.enter, value: shows)
     }
 
-    private var banner: some View {
+    /// Nothing is happening to the connection and the paths were not asked for: one line is enough.
+    private var isCollapsed: Bool {
+        !isExpanded && !alwaysShown && steps.connectedName == nil && steps.working == nil && steps.failure == nil
+    }
+
+    private var collapsedLine: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "cpu").foregroundStyle(Palette.muted).accessibilityHidden(true)
+            Text("Sem modelo conectado").font(Typography.label).foregroundStyle(Palette.secondary)
+            Spacer(minLength: 0)
+            Button("Conectar…") { isExpanded = true }
+                .buttonStyle(LinkTextStyle())
+                .help(Tip.modelSettings)
+        }
+        .padding(.horizontal, Spacing.l)
+        .frame(minHeight: 44)
+        .modifier(NudgePulsingCard(radius: Radius.large, nudge: model.setupNudge))
+        .onChange(of: model.setupNudge) { isExpanded = true } // a message sent with no model asks for the paths
+        .padding(.leading, TranscriptLayout.edge + TranscriptLayout.composerLeading)
+        .padding(.trailing, TranscriptLayout.edge + TranscriptLayout.composerTrailing)
+        .frame(maxWidth: TranscriptLayout.column)
+        .task {
+            steps.attach(model)
+            await steps.detect()
+        }
+    }
+
+    @ViewBuilder private var banner: some View {
+        if isCollapsed { collapsedLine } else { fullBanner }
+    }
+
+    private var fullBanner: some View {
         VStack(alignment: .leading, spacing: isCompact ? Spacing.s : Spacing.m) {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: steps.connectedName == nil ? "cpu" : "checkmark.circle.fill")

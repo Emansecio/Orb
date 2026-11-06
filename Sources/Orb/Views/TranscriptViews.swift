@@ -962,6 +962,12 @@ struct ToolCallLine: View {
                     }
                     Spacer(minLength: 0)
                 }
+                // A failure stands out from the lines around it: in a long turn it is the one that matters (item 24).
+                .background {
+                    if failed {
+                        RoundedRectangle(cornerRadius: 6).fill(Palette.danger.opacity(0.08)).padding(.horizontal, -6).padding(.vertical, -3)
+                    }
+                }
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
@@ -1290,8 +1296,9 @@ struct ToolGroupRow: View, Equatable {
                 HStack(spacing: 8) {
                     Group {
                         if isRunning {
+                            // .small, not .mini: at 10 pt the step in progress read as a gray asterisk (review item 30).
                             ProgressView()
-                                .controlSize(.mini)
+                                .controlSize(.small)
                                 .accessibilityHidden(true)
                         } else {
                             Image(systemName: isStep && failures == nil ? "checkmark" : symbol)
@@ -1530,7 +1537,19 @@ private struct NoticeLine: View {
     @State private var showsCompaction = false
 
     var body: some View {
-        if NoticeAction.isMark(text) { mark } else { notice }
+        if NoticeAction.isMark(text) {
+            // The latest compaction is the line above the chat ("N mensagens anteriores foram resumidas",
+            // `CompactedFoldLine`), which carries these words on hover: drawn here too it was the same fact twice,
+            // and inside a turn's card.
+            if !isStoodForByFoldLine { mark }
+        } else {
+            notice
+        }
+    }
+
+    private var isStoodForByFoldLine: Bool {
+        let transcript = model.orbTranscript(botID)
+        return transcript.fold.count > 0 && transcript.latestCompactionNotice?.id == id
     }
 
     /// A compaction: a point of the conversation, across it between two hairlines, like the time above a moment.
@@ -1579,6 +1598,16 @@ private struct NoticeLine: View {
                                 .textSelection(.enabled)
                             if let provider = parts.provider { providerDetail(provider) }
                         }
+                    } else if let symbol = NoticeAction.systemWarningSymbol(text) {
+                        // The app's voice, not the Orb's: an icon, the small type and room above set it apart from the reply.
+                        Label {
+                            Text(text).multilineTextAlignment(.leading)
+                        } icon: {
+                            Image(systemName: symbol)
+                        }
+                        .font(Typography.small)
+                        .foregroundStyle(Palette.muted)
+                        .padding(.top, 12)
                     } else {
                         Text(text)
                             .font(Typography.label)
@@ -1957,7 +1986,8 @@ struct ApprovalCard: View {
         // grows in `Motion.content` (§2.13). Focus goes to the field at once.
         .motion(Motion.content, value: showsNote)
         .padding(14)
-        .card(radius: Radius.card, stroke: Palette.lineStrong)
+        // A risky request has a border of its own, so it is told apart by more than the small triangle (item 25).
+        .card(radius: Radius.card, stroke: request.isDangerous ? Palette.danger.opacity(0.35) : Palette.lineStrong)
         .overlay {
             if ApprovalPulse.pulses(isNew: pulsesOnArrival, reduceMotion: reduceMotion) {
                 ApprovalPulseBorder(radius: Radius.card, trigger: pulse)
@@ -2090,6 +2120,8 @@ struct ApprovalCard: View {
             }
         }
         .buttonStyle(GhostStyle())
+        // Outlined, so the two answers weigh alike: a bare word beside a filled pill read as a lesser choice (item 25).
+        .overlay(Capsule().strokeBorder(Palette.lineStrong, lineWidth: 1))
         .background(pressed == .deny ? Palette.ghostSelected : .clear, in: .capsule)
         .scaleEffect(pressed == .deny ? ApprovalShortcut.pressScale : 1)
         .animation(Motion.press, value: pressed)
@@ -2227,5 +2259,15 @@ struct ApprovalCard: View {
         case .allow: model.decide(.once, approvalID: request.id, botID: botID)
         case .deny: deny()
         }
+    }
+}
+
+extension OrbTranscript {
+    /// The latest compaction notice (the one `fold` is read from): its id and words.
+    var latestCompactionNotice: (id: UUID, text: String)? {
+        for item in items.reversed() {
+            if case .notice(let text) = item.kind, NoticeAction.isMark(text) { return (item.id, text) }
+        }
+        return nil
     }
 }

@@ -41,8 +41,8 @@ private struct RequestRailMark: View {
     var body: some View {
         Button(action: action) {
             Capsule()
-                .fill(isHovering ? Palette.ink : Palette.hint)
-                .frame(width: isHovering ? 18 : 12, height: 2)
+                .fill(isHovering ? Palette.ink : Palette.muted)
+                .frame(width: isHovering ? 18 : 14, height: 2)
                 .frame(width: 22, height: 9, alignment: .trailing)
                 .contentShape(.rect)
         }
@@ -85,7 +85,7 @@ struct PlanCard: View {
                 .clickablePointer()
                 .accessibilityLabel("Plano, " + TaskPlanRing.summary(plan))
                 .accessibilityHint(isFolded ? "Mostra as etapas" : "Oculta as etapas")
-                if !isFolded { TaskPlanSteps(plan: plan) }
+                if !isFolded { TaskPlanSteps(plan: plan, showsGoal: false) }
             }
             .padding(Spacing.m)
             .frame(maxWidth: cardWidth, alignment: .leading)

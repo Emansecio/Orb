@@ -113,6 +113,14 @@ enum NoticeAction: Equatable, Sendable {
         !actions.isEmpty && (isOffer(notice) || offers())
     }
 
+    /// The app speaking about its own run (a paused turn, a provider that does not cache), not the Orb's answer: the
+    /// transcript sets it apart with an icon and room above, so it is not read as the end of the reply.
+    static func systemWarningSymbol(_ notice: String) -> String? {
+        if notice.hasPrefix(pausePrefix) { return "pause.circle" }
+        if notice == CacheHealth.notice || notice.hasPrefix(CacheHealth.oldNoticePrefix) { return "exclamationmark.circle" }
+        return nil
+    }
+
     /// A notice about something kept or proposed for you (a memory, a skill), not about the turn: its buttons stay while what
     /// it offers waits, wherever it is in the chat.
     static func isOffer(_ notice: String) -> Bool {
@@ -141,15 +149,18 @@ enum NoticeAction: Equatable, Sendable {
         if reason.contains("grande demais") { return [.compact] }
         // Out of balance: trying again is right once the balance is topped up; Ajustes only if another model is wanted.
         if reason.contains("sem saldo") || reason.contains("pede pagamento") { return [.retry, .openSettings] }
-        return isSettingsProblem(reason) ? [.openSettings, .retry] : [.retry]
+        // A refused key or login (or no model) fails the same way again: only Ajustes helps, so "Tentar de novo" is not offered.
+        return isSettingsProblem(reason) ? [.openSettings] : [.retry]
     }
 
     /// `actions(for:)` without "Compactar e tentar de novo" when the conversation has nothing older to summarize, and
     /// without "Revisar" or "Unificar" once the proposal is gone (saved, discarded, deleted, applied or expired). With another model to try
     /// (`canSwitchModel`), a failure that can be tried again also offers "Outro modelo", right after "Tentar de novo".
     static func actions(for notice: String, canCompact: Bool, hasProposal: Bool = true, canSwitchModel: Bool = false) -> [NoticeAction] {
-        actions(for: notice).filter { ($0 != .compact || canCompact) && (![.reviewSkill, .mergeMemory].contains($0) || hasProposal) }
+        let shown = actions(for: notice).filter { ($0 != .compact || canCompact) && (![.reviewSkill, .mergeMemory].contains($0) || hasProposal) }
             .flatMap { $0 == .retry && canSwitchModel ? [.retry, .otherModel] : [$0] }
+        // A refused key has no "Tentar de novo", but another model is still a way out of it.
+        return shown == [.openSettings] && canSwitchModel && notice.hasPrefix(failurePrefix) ? shown + [.otherModel] : shown
     }
 
     /// The part of a failure the app wrote, before the provider's own words.

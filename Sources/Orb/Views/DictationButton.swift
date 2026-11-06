@@ -17,12 +17,13 @@ struct DictationButton: View {
         } label: {
             Image(systemName: Self.symbol(phase))
                 .font(.system(size: 13, weight: isOn ? .bold : .regular))
-                .foregroundStyle(isOn ? Palette.onInk : Palette.muted)
+                .foregroundStyle(isOn ? Palette.danger : Palette.muted)
                 .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
                 .symbolEffect(.pulse, options: .repeating,
                               isActive: appearsActive && !reduceMotion && [.starting, .downloading, .finishing, .reviewing].contains(phase))
                 .frame(width: 28, height: 28)
-                .background { Circle().fill(isOn ? Palette.danger : .clear) }
+                // A red ring, not a red disc: beside Send's white circle a solid one fought it for the eye.
+                .overlay { Circle().strokeBorder(Palette.danger, lineWidth: 1.5).opacity(isOn ? 1 : 0) }
                 .background { DictationHalo(listening: phase == .listening) }
                 .contentShape(.circle)
         }

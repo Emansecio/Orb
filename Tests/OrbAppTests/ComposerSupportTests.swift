@@ -77,9 +77,9 @@ struct ComposerSupportTests {
         #expect(ComposerAction.elsewhereHelp(chatTitle: "Bug", needsYou: false) == "Voltar para “Bug”")
     }
 
-    @Test @MainActor func thePermissionChipSaysItsNameOnlyForTheUnusualModesAndOnlyWhenThereIsRoom() {
+    @Test @MainActor func thePermissionChipSaysItsNameForTheUnusualModesAndBypassKeepsItWhenNarrow() {
         for mode in PermissionMode.allCases {
-            #expect(!PermissionChip.showsName(mode, compact: true))
+            #expect(PermissionChip.showsName(mode, compact: true) == (mode == .bypass))
             #expect(PermissionChip.showsName(mode, compact: false) == (mode == .bypass || mode == .readOnly))
         }
     }

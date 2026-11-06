@@ -63,7 +63,8 @@ struct PermissionChip: View {
     }
 
     static func showsName(_ mode: PermissionMode, compact: Bool) -> Bool {
-        !compact && (mode == .bypass || mode == .readOnly)
+        // The risky mode keeps its words even in a narrow bar: a lone bolt hid that every prompt was off (item 4).
+        mode == .bypass || (!compact && mode == .readOnly)
     }
 
     static func tint(_ mode: PermissionMode) -> Color {
@@ -293,7 +294,7 @@ struct SkillRow: View {
                 }
                 if !skill.summary.isEmpty {
                     Text(skill.summary)
-                        .font(Typography.label)
+                        .font(Typography.small)
                         .foregroundStyle(Palette.muted)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
@@ -308,6 +309,12 @@ struct SkillRow: View {
             .hoverFill(isHovering && !isHighlighted, in: .rect(cornerRadius: Radius.small), color: Palette.ghostSelected)
             .background {
                 RoundedRectangle(cornerRadius: Radius.small).fill(Palette.ghostSelected)
+                    .opacity(isHighlighted ? 1 : 0)
+                    .animation(nil, value: isHighlighted)
+            }
+            // A 2 pt accent marker: the fill alone barely differs from the list's own (item 33).
+            .overlay(alignment: .leading) {
+                Capsule().fill(Palette.accentText).frame(width: 2).padding(.vertical, 5).padding(.leading, 1)
                     .opacity(isHighlighted ? 1 : 0)
                     .animation(nil, value: isHighlighted)
             }

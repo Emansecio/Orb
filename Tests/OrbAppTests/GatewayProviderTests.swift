@@ -161,7 +161,7 @@ struct GatewayWireTests {
             for try await _ in client.stream(model: "claude-haiku-4-5-20251001", messages: [.user("oi")], tools: []) {}
         })
         let text = error.errorDescription ?? ""
-        #expect(text.contains("plano não inclui acesso à API") && !text.contains("Chave ou login inválido"))
+        #expect(text.contains("plano não inclui acesso à API") && !text.contains("A chave ou o login foi recusado"))
         // Anthropic's own 403 is not about a plan.
         #expect(ProviderTransport.errorMessage(from: Data(body.utf8), status: 403, host: "api.anthropic.com") == "Go plan has no API access")
     }
@@ -203,7 +203,7 @@ struct GatewayErrorTests {
 
     @Test func explainsTheGoPlanHasNoAPI() {
         let text = LLMError.http(status: 403, message: "Plan lacks API access [upgrade_required]").errorDescription ?? ""
-        #expect(text.contains("plano não inclui acesso à API") && text.contains("Go") && !text.contains("Chave ou login inválido"))
+        #expect(text.contains("plano não inclui acesso à API") && text.contains("Go") && !text.contains("A chave ou o login foi recusado"))
     }
 
     @Test func aModelOpenCodeRefusedIsNotABadKey() {
@@ -213,17 +213,17 @@ struct GatewayErrorTests {
                                   (403, "The latest version of this model is only available hosted in China and requires explicit opt in: https://opencode.ai/workspace/x/go"),
                                   (403, "This model is not available in your country.")] {
             let text = LLMError.http(status: status, message: message).errorDescription ?? ""
-            #expect(text.contains("recusou este modelo") && !text.contains("Chave ou login inválido"), "\(message)")
+            #expect(text.contains("recusou este modelo") && !text.contains("A chave ou o login foi recusado"), "\(message)")
         }
-        #expect(LLMError.http(status: 401, message: "Invalid API key.").errorDescription?.contains("Chave ou login inválido") == true)
+        #expect(LLMError.http(status: 401, message: "Invalid API key.").errorDescription?.contains("A chave ou o login foi recusado") == true)
     }
 
     @Test func aMissingBalanceIsNotABadKey() {
         for message in ["Insufficient balance. Manage your billing here", "No payment method. Add one in billing", "Monthly limit reached"] {
             let text = LLMError.http(status: 401, message: message).errorDescription ?? ""
-            #expect(text.contains("Sem saldo") && !text.contains("Chave ou login inválido"), "\(message)")
+            #expect(text.contains("Sem saldo") && !text.contains("A chave ou o login foi recusado"), "\(message)")
         }
-        #expect(LLMError.http(status: 401, message: "Invalid API key").errorDescription?.contains("Chave ou login inválido") == true)
+        #expect(LLMError.http(status: 401, message: "Invalid API key").errorDescription?.contains("A chave ou o login foi recusado") == true)
         #expect(LLMError.http(status: 402, message: "x").errorDescription?.contains("pagamento") == true)
     }
 

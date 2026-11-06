@@ -77,8 +77,8 @@ struct CacheMetricsTests {
     }
 
     @Test func theWarningIsInPortugueseAndPointsToTheCost() {
-        #expect(CacheHealth.notice.contains("cache"))
-        #expect(CacheHealth.notice.contains("mais caro"))
+        #expect(CacheHealth.notice.contains("Cache"))
+        #expect(CacheHealth.notice.contains("custa mais"))
     }
 
     @Test func theDebugLineShowsTheRatioPerRequest() {

@@ -33,6 +33,9 @@ struct LiveChip: View {
         HStack(spacing: 5) {
             if state.pulses {
                 BreathingDot(color: Palette.ok, breathes: !reduceMotion).frame(width: 6, height: 6).accessibilityHidden(true)
+            } else if state == .connecting {
+                // "Conectando" is work in progress: a gray breathing dot says so, where the word alone looked stalled.
+                BreathingDot(color: Palette.faint, breathes: !reduceMotion).frame(width: 6, height: 6).accessibilityHidden(true)
             }
             Text(chip).font(.system(size: 11, weight: .semibold))
         }
@@ -152,9 +155,15 @@ private struct LiveScreenCard: View {
         let showsKeys = handoff.map { model.showsApprovalKeys($0.id, of: botID) } ?? false
         // A narrow column first shortens the words ("Parar Orb" to "Parar"), and only then drops the last buttons rather
         // than wrapping: the card keeps its height.
-        func row(_ count: Int, short: Bool = false) -> some View {
+        @ViewBuilder func row(_ count: Int, short: Bool = false) -> some View {
+            let shown = Array(kinds.prefix(count))
             HStack(spacing: Spacing.xs) {
-                ForEach(Array(kinds.prefix(count)), id: \.self) { button($0, handoff: handoff, store: store, showsKeys: showsKeys, short: short) }
+                ForEach(shown.filter { $0 != .stop }, id: \.self) { button($0, handoff: handoff, store: store, showsKeys: showsKeys, short: short) }
+                // Stopping the Orb is not one more choice among the others: it sits apart, at the end of the row.
+                if shown.contains(.stop) {
+                    Spacer(minLength: Spacing.s)
+                    button(.stop, handoff: handoff, store: store, showsKeys: showsKeys, short: short)
+                }
             }
         }
         return ViewThatFits(in: .horizontal) {
@@ -174,8 +183,7 @@ private struct LiveScreenCard: View {
             Button("Ampliar") { enlarge() }.buttonStyle(SecondaryPillStyle()).help(Tip.enlargeScreen)
         case .stop:
             // Stops the whole Orb (its chains with other Orbs too), not just the turn as the composer's Stop does.
-            Button(short ? "Parar" : "Parar Orb") { model.stop(botID) }.buttonStyle(SecondaryPillStyle()).help(Tip.stopBrowsing)
-                .accessibilityLabel("Parar Orb")
+            StopOrbButton(botID: botID, short: short)
         case .hide:
             Button(short ? "Ocultar" : "Ocultar tela") { store.isPrivate = true }.buttonStyle(SecondaryPillStyle()).help(Tip.hideScreen)
                 .accessibilityLabel("Ocultar tela")
@@ -214,6 +222,23 @@ private struct LiveScreenCard: View {
     /// Opens the Orb's browser in a window of its own, live and large, where the person can take it over.
     private func enlarge() {
         LiveScreenWindow.open(botID, with: openWindow)
+    }
+}
+
+/// "Parar Orb" on the card and on the tab: red text and a stop sign, so it is not read as one more of the neutral pills beside
+/// it. It stops the whole Orb (its chains with other Orbs too), not just the turn as the composer's Stop does.
+private struct StopOrbButton: View {
+    @Environment(AppModel.self) private var model
+    let botID: UUID
+    var short = false
+
+    var body: some View {
+        Button { model.stop(botID) } label: {
+            Label(short ? "Parar" : "Parar Orb", systemImage: "stop.fill")
+        }
+        .buttonStyle(GhostStyle(tint: Palette.danger))
+        .help(Tip.stopBrowsing)
+        .accessibilityLabel("Parar Orb")
     }
 }
 
@@ -306,6 +331,7 @@ final class LiveScreenFocus {
 /// The panel's "Tela" tab: the Orb's page, live and larger (or the last page of a use that ended, when asked for).
 struct LiveScreenTab: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.openWindow) private var openWindow
     let botID: UUID
     @AppStorage(LiveScreenSetting.key) private var showsScreen = true
     @State private var lastImage: NSImage?
@@ -374,7 +400,7 @@ struct LiveScreenTab: View {
                     LiveScreenVeil(veil: state.veil, text: LiveScreenText.veilText(for: state, handoffPage: handoff?.command))
                         .transition(.opacity)
                 } else if isIdle {
-                    placeholder("O Orb não está usando o navegador agora")
+                    placeholder("O Orb não está usando o navegador agora. Peça uma tarefa na web e a página aparece aqui.")
                 }
             }
             .aspectRatio(1.6, contentMode: .fit)
@@ -386,6 +412,18 @@ struct LiveScreenTab: View {
             if state == .needsYou {
                 Text(LiveScreenText.handoffCaption(page: handoff?.command ?? ""))
                     .font(Typography.label).foregroundStyle(Palette.secondary)
+            }
+            // The card's actions (Ampliar, Parar Orb), so the tab is not a thumbnail with nothing to do about it.
+            if !isIdle, state.buttons.contains(.enlarge) || state.buttons.contains(.stop) {
+                HStack(spacing: Spacing.xs) {
+                    if state.buttons.contains(.enlarge) {
+                        Button("Ampliar") { LiveScreenWindow.open(botID, with: openWindow) }
+                            .buttonStyle(SecondaryPillStyle()).help(Tip.enlargeScreen)
+                    }
+                    Spacer(minLength: Spacing.s)
+                    if state.buttons.contains(.stop) { StopOrbButton(botID: botID).hangsOnTrailingEdge() }
+                }
+                .controlSize(.small)
             }
         }
     }

@@ -155,7 +155,7 @@ struct ProviderPresentationTests {
     @Test func aRefusedKeyIsToldFromOtherHTTPErrors() {
         for status in [401, 403] {
             if case .rejected(let message) = ProviderCheck.failure(from: LLMError.http(status: status, message: "Invalid API key")) {
-                #expect(message.contains("Chave ou login inválido"))
+                #expect(message.contains("A chave ou o login foi recusado"))
             } else {
                 Issue.record("\(status) with a bad key is a refused credential")
             }
@@ -166,10 +166,10 @@ struct ProviderPresentationTests {
         }
         #expect(ProviderCheck.failure(from: LLMError.http(status: 429, message: "slow")) != .rejected("x"))
         let refused = ProviderStatus.make(kind: .openai, account: account(.openai, models: 2), isConnected: true,
-                                          lastError: .rejected("Chave ou login inválido (401). Confira em Ajustes → Modelos. Detalhe do provedor: x"),
+                                          lastError: .rejected("A chave ou o login foi recusado (401). Detalhe do provedor: x"),
                                           isChecking: false)
         #expect(refused.isProblem)
-        #expect(refused.explanation(for: .openai) == "Chave ou login inválido (401). Detalhe do provedor: x")
+        #expect(refused.explanation(for: .openai) == "A chave ou o login foi recusado (401). Detalhe do provedor: x")
     }
 
     @Test func removingSaysWhatItDoes() {

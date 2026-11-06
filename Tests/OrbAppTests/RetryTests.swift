@@ -203,8 +203,8 @@ struct LLMErrorTests {
 
     @Test func describesFailuresInPortugueseKeepingTheProviderDetail() {
         let describe = { (status: Int) in LLMError.http(status: status, message: "detalhe X").errorDescription ?? "" }
-        #expect(describe(401).contains("Chave ou login inválido") && describe(401).contains("detalhe X"))
-        #expect(describe(403).contains("Chave ou login inválido"))
+        #expect(describe(401).contains("A chave ou o login foi recusado") && describe(401).contains("detalhe X"))
+        #expect(describe(403).contains("A chave ou o login foi recusado"))
         #expect(describe(429).contains("limite de uso") && describe(429).contains("detalhe X"))
         for status in [500, 502, 503, 529] {
             #expect(describe(status).contains("sobrecarregado") && describe(status).contains("detalhe X"))

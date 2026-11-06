@@ -243,7 +243,7 @@ enum TranscriptSample {
                  TranscriptItem(.bot(text: "Pronto: os três estão em `Contratos/2025`.", isStreaming: false)),
                  TranscriptItem(.notice("Compactei a conversa: os 2 primeiros pedidos viraram um resumo (≈ 58 mil → 19 mil tokens)."))]
         case "transcript-failed":
-            items = [user, TranscriptItem(.notice("Não deu certo: Chave ou login inválido (401). Confira em Ajustes → Modelos. Detalhe do provedor: invalid x-api-key"))]
+            items = [user, TranscriptItem(.notice("Não deu certo: A chave ou o login foi recusado (401). Detalhe do provedor: invalid x-api-key"))]
         case "transcript-skill-proposal":
             items = [TranscriptItem(.user(text: "Publica o site de novo, agora com a versão 2.4", attachments: [])), tool,
                      TranscriptItem(.bot(text: "Publicado: a versão 2.4 já está no ar e o rodapé confere.", isStreaming: false)),
@@ -267,7 +267,7 @@ enum TranscriptSample {
                      run("python3 \(folder)/fila.py\" --resumo"),
                      TranscriptItem(.bot(text: "A fila trouxe 61 conversas; agora vou ler o histórico de cada uma em lotes.", isStreaming: false)),
                      run("cd \(folder)\" && ls"),
-                     TranscriptItem(.notice("O provedor não está reaproveitando o início das conversas (cache), o que deixa cada passo mais caro. Se continuar, confira o modelo e o provedor em Ajustes → Modelos.")),
+                     TranscriptItem(.notice("Cache do provedor desligado: cada passo custa mais. Ver Ajustes › Modelos")),
                      run("python3.14 \(folder)/historico.py\" --lote 1"),
                      run("python3.14 \(folder)/historico.py\" --lote 2"),
                      run("python3.14 \(folder)/historico.py\" --lote 3", .shell, "Rodando no Terminal", .failed),

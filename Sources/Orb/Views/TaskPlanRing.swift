@@ -104,12 +104,16 @@ struct TaskPlanRing: View {
 /// The goal and the steps of a plan, with the state of each: the popover of the ring and of the line of a finished plan.
 struct TaskPlanSteps: View {
     let plan: TaskPlan
+    /// False in the plan's card, whose neighbours already say what the task is (the goal repeated the turn's title).
+    var showsGoal = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(plan.goal)
-                .font(Typography.label.weight(.medium))
-                .foregroundStyle(Palette.secondary)
+            if showsGoal {
+                Text(plan.goal)
+                    .font(Typography.label.weight(.medium))
+                    .foregroundStyle(Palette.secondary)
+            }
             ForEach(plan.steps.indices, id: \.self) { index in
                 let step = plan.steps[index]
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
