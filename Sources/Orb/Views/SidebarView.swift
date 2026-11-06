@@ -463,7 +463,8 @@ private struct ProfileRowButton: View {
                 // A long name gives way to "Thiago V." before it is cut off in the middle of a word.
                 ViewThatFits(in: .horizontal) {
                     nameText(name ?? "Seu perfil", muted: name == nil)
-                    if let name { nameText(ProfileNameText.short(name), muted: false) }
+                    // The last choice may still be too wide (a very narrow sidebar): it truncates instead of overflowing.
+                    if let name { nameText(ProfileNameText.short(name), muted: false, fixed: false) }
                 }
             }
             .padding(.horizontal, 8)
@@ -479,12 +480,12 @@ private struct ProfileRowButton: View {
         .accessibilityHint("Abre os Ajustes")
     }
 
-    private func nameText(_ text: String, muted: Bool) -> some View {
+    private func nameText(_ text: String, muted: Bool, fixed: Bool = true) -> some View {
         Text(text)
             .font(Typography.text.weight(.medium))
             .foregroundStyle(muted ? Palette.muted : Palette.secondary)
             .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: false)
+            .fixedSize(horizontal: fixed, vertical: false)
     }
 }
 
