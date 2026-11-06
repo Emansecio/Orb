@@ -18,7 +18,7 @@ struct ConnectorGalleryView: View {
                     .font(Typography.label)
                     .foregroundStyle(Palette.muted)
                 // Keep cards aligned across columns when a neighbour has a warning.
-                let statuses = ConnectorGallery.services.map { ($0, status(of: $0)) }
+                let statuses = ConnectorGallery.serviceCards.map { ($0, status(of: $0)) }
                 let reservesNote = hasMultipleColumns && statuses.contains { if case .needsAttention = $0.1 { true } else { false } }
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), spacing: Spacing.cardSpacing, alignment: .top)], spacing: Spacing.cardSpacing) {
                     ForEach(statuses, id: \.0.id) { service, status in
@@ -27,14 +27,31 @@ struct ConnectorGalleryView: View {
                 }
                 // One column needs no empty warning slot in every other card. Observe only the column-count boundary.
                 .onGeometryChange(for: Bool.self) { $0.size.width >= 2 * 290 + Spacing.cardSpacing } action: { hasMultipleColumns = $0 }
+                features
                 HStack(spacing: 6) {
                     Text("Não achou o que procura?").foregroundStyle(Palette.muted)
-                    Button("Explorar o registro de conectores", action: explore).buttonStyle(.link)
+                    Button("Explorar o registro de conectores", action: explore).buttonStyle(LinkTextStyle())
                         .help("Abre a busca no registro oficial de conectores")
                 }
                 .font(Typography.label)
             }
             .pageColumn()
+        }
+    }
+
+    /// What the Orb can do by itself, with a switch: nothing here needs an account, so nothing says "Conectar".
+    private var features: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Recursos do Orb")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Palette.ink)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), spacing: Spacing.cardSpacing, alignment: .top)], spacing: Spacing.cardSpacing) {
+                ForEach(ConnectorGallery.featureCards) { feature in
+                    FeatureCard(service: feature, installed: ConnectorGallery.installed(feature, in: model.connectors)) {
+                        open(feature, status: status(of: feature))
+                    }
+                }
+            }
         }
     }
 
@@ -132,6 +149,49 @@ struct ConnectorIcon: View {
     }
 }
 
+/// A resource of the Orb that runs as a connector: the switch installs it the first time (through the same setup sheet as
+/// any other connector) and then only turns it on or off.
+private struct FeatureCard: View {
+    @Environment(AppModel.self) private var model
+    let service: ConnectorService
+    let installed: MCPServerConfig?
+    let install: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            ServiceTile(mark: service.mark)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(service.name)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Palette.ink)
+                    .lineLimit(1)
+                Text(service.summary)
+                    .font(Typography.label)
+                    .foregroundStyle(Palette.muted)
+                    .lineLimit(2)
+                    .help(service.summary)
+            }
+            Spacer(minLength: 8)
+            Toggle("Ligar \(service.name)", isOn: Binding(
+                get: { installed?.isEnabled ?? false },
+                set: { isOn in
+                    if let id = installed?.id, let index = model.connectors.firstIndex(where: { $0.id == id }) {
+                        model.connectors[index].isEnabled = isOn
+                    } else if isOn {
+                        install()
+                    }
+                }
+            ))
+            .toggleStyle(.switch)
+            .labelsHidden()
+            .controlSize(.small)
+            .help(installed == nil ? "Liga \(service.name): abre a instalação" : installed?.isEnabled == true ? "Desliga \(service.name); ele continua instalado" : "Liga \(service.name)")
+        }
+        .padding(Spacing.catalogCardPadding)
+        .card(radius: Radius.large)
+    }
+}
+
 private struct ServiceCard: View {
     let service: ConnectorService
     let status: ServiceStatus
@@ -155,6 +215,7 @@ private struct ServiceCard: View {
                     .foregroundStyle(Palette.muted)
                     .lineLimit(2, reservesSpace: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .help(service.summary)
                 if case .needsAttention(let message) = status {
                     note(message).transition(.opacity)
                 } else if reservesNote {
@@ -166,7 +227,7 @@ private struct ServiceCard: View {
                     label
                 }
                 // The button and the badges differ in height: the row keeps one so the cards of a line stay level.
-                .frame(minHeight: 26)
+                .frame(minHeight: 28)
             }
             .padding(Spacing.catalogCardPadding)
             .hoverCard(isHovering && status != .soon, radius: Radius.large, strongOutline: true)
@@ -200,7 +261,7 @@ private struct ServiceCard: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(Palette.ink)
                 .padding(.horizontal, 12)
-                .padding(.vertical, 4)
+                .frame(minHeight: 28)
                 .background(Color.white.opacity(0.1), in: .capsule)
         case .connected:
             CatalogBadge(text: "Conectado", symbol: "checkmark.circle.fill", tint: Palette.ok)
@@ -211,7 +272,7 @@ private struct ServiceCard: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(Palette.onInk)
                 .padding(.horizontal, 12)
-                .padding(.vertical, 4)
+                .frame(minHeight: 28)
                 .background(Palette.warn, in: .capsule)
         case .soon:
             CatalogBadge(text: "Em breve", symbol: "clock")

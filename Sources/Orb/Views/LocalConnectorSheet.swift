@@ -45,8 +45,9 @@ struct LocalConnectorSheet: View {
         case .intro, .working:
             Form {
                 Section {
-                    ForEach(steps, id: \.self) { step in
-                        Label(step, systemImage: "checkmark.circle").foregroundStyle(Palette.secondary)
+                    // Numbered, not checked: the steps have not happened yet, and a check reads as "done".
+                    ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
+                        Label(step, systemImage: "\(index + 1).circle").foregroundStyle(Palette.secondary)
                     }
                 } header: {
                     Text("O que acontece")

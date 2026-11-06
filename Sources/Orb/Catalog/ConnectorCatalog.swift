@@ -34,3 +34,28 @@ struct ConnectorCatalog: Codable, Sendable, Equatable {
         self.updatedAt = updatedAt
     }
 }
+
+/// How much a connector tool can change, as its server declared it (MCP `readOnlyHint` / `destructiveHint`).
+enum ToolEffect: Equatable, Sendable {
+    case readOnly
+    /// Writes, but the server did not mark it destructive (`create_issue`, `merge_pull_request`).
+    case modifies
+    case destructive
+    /// The server said nothing: no claim is made either way.
+    case unknown
+
+    init(_ annotations: MCPToolAnnotations) {
+        if annotations.destructive == true { self = .destructive }
+        else if annotations.readOnly == true { self = .readOnly }
+        else if annotations.readOnly == false || annotations.destructive == false { self = .modifies }
+        else { self = .unknown }
+    }
+}
+
+enum ConnectorToolText {
+    /// "create_issue" -> "Create issue": the tool's name as a phrase; the identifier stays beside it, small, for who needs it.
+    static func title(_ identifier: String) -> String {
+        let words = identifier.split(whereSeparator: { $0 == "_" || $0 == "-" }).joined(separator: " ")
+        return words.prefix(1).uppercased() + words.dropFirst()
+    }
+}

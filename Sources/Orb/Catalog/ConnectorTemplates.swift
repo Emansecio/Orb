@@ -77,7 +77,7 @@ struct ConnectorTemplate: Identifiable, Sendable {
             }(),
             summary: "Ler repositórios, issues e pull requests do GitHub.",
             category: .code,
-            inputs: [.init(name: "Authorization", summary: "Token de acesso pessoal do GitHub. Crie um em github.com/settings/tokens.",
+            inputs: [.init(name: "Authorization", summary: "Token de acesso pessoal do GitHub.",
                            isSecret: true, isRequired: true, prefix: "Bearer ")],
             helpURL: URL(string: "https://github.com/settings/tokens")),
         ConnectorTemplate(

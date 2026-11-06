@@ -39,6 +39,9 @@ struct ConnectorService: Identifiable, Sendable {
     let mark: ServiceMark
     let source: Source
     let access: Access
+    /// A capability of the Orb itself (memory, step-by-step thinking), not a service with an account: the page lists it apart,
+    /// with a switch instead of "Conectar".
+    var isFeature = false
 
     /// How it connects, in two or three words: "Pelo Mac", "Chave de acesso", "Não precisa de chave".
     var how: String { access.label }
@@ -95,30 +98,35 @@ enum ConnectorGallery {
                          mark: ServiceMark(symbol: "calendar", monogram: "A", color: 0x4285F4, brand: "googlecalendar"), source: .local(.agenda), access: .onThisMac),
         ConnectorService(id: "slack", name: "Slack", summary: "Buscar e ler mensagens e canais e, se você liberar, enviar. Servidor oficial do Slack.",
                          mark: ServiceMark(symbol: "number", monogram: "S", color: 0x611F69, brand: "slack"), source: .template("slack-oficial"), access: .loginWithApp),
-        ConnectorService(id: "notion", name: "Notion", summary: "Buscar e editar páginas e bancos de dados. Você entra com a sua conta.",
+        ConnectorService(id: "notion", name: "Notion", summary: "Buscar e editar páginas e bancos de dados.",
                          mark: ServiceMark(symbol: nil, monogram: "N", color: 0x2F3437, brand: "notion"), source: .template("notion-oficial"), access: .loginWithAccount),
         ConnectorService(id: "github", name: "GitHub", summary: "Ler repositórios, issues e pull requests do GitHub.",
                          mark: ServiceMark(symbol: "chevron.left.forwardslash.chevron.right", monogram: "G", color: 0x30363D, brand: "github"),
                          source: .template("github"), access: .key),
         ConnectorService(id: "supabase", name: "Supabase", summary: "Consultar os projetos e as tabelas do seu Supabase, em leitura.",
                          mark: ServiceMark(symbol: "bolt.fill", monogram: "S", color: 0x1E9E6A, brand: "supabase"), source: .template("supabase"), access: .key),
-        ConnectorService(id: "linear", name: "Linear", summary: "Ver e atualizar issues e projetos. Você entra com a sua conta.",
+        ConnectorService(id: "linear", name: "Linear", summary: "Ver e atualizar issues e projetos.",
                          mark: ServiceMark(symbol: nil, monogram: "L", color: 0x5E6AD2, brand: "linear"), source: .template("linear"), access: .loginWithAccount),
-        ConnectorService(id: "atlassian", name: "Atlassian", summary: "Buscar e editar issues do Jira e páginas do Confluence. Você entra com a sua conta.",
+        ConnectorService(id: "atlassian", name: "Atlassian", summary: "Buscar e editar issues do Jira e páginas do Confluence.",
                          mark: ServiceMark(symbol: nil, monogram: "A", color: 0x0052CC, brand: "atlassian"), source: .template("atlassian"), access: .loginWithAccount),
-        ConnectorService(id: "sentry", name: "Sentry", summary: "Ver erros, issues e projetos do Sentry. Você entra com a sua conta.",
+        ConnectorService(id: "sentry", name: "Sentry", summary: "Ver erros, issues e projetos do Sentry.",
                          mark: ServiceMark(symbol: nil, monogram: "S", color: 0x362D59, brand: "sentry"), source: .template("sentry"), access: .loginWithAccount),
         ConnectorService(id: "lembretes", name: "Lembretes", summary: LocalConnectorKind.lembretes.summary,
                          mark: ServiceMark(symbol: "checklist", monogram: "L", color: 0xFF9500), source: .local(.lembretes), access: .onThisMac),
         ConnectorService(id: "arquivos", name: "Arquivos", summary: "Ler e organizar arquivos de uma pasta do Mac. Você escolhe qual pasta fica liberada.",
                          mark: ServiceMark(symbol: "folder.fill", monogram: "A", color: 0x636366), source: .template("arquivos"), access: .noKey),
         ConnectorService(id: "memoria", name: "Memória (grafo)", summary: "Guarda fatos e as relações entre eles para os Orbs consultarem depois.",
-                         mark: ServiceMark(symbol: "brain", monogram: "M", color: 0x7D5BE6), source: .template("memoria"), access: .noKey),
+                         mark: ServiceMark(symbol: "brain", monogram: "M", color: 0x7D5BE6), source: .template("memoria"), access: .noKey, isFeature: true),
         ConnectorService(id: "pensamento", name: "Pensamento em etapas", summary: "Ajuda o Orb a pensar passo a passo em problemas difíceis.",
-                         mark: ServiceMark(symbol: "lightbulb.fill", monogram: "P", color: 0xC98A00), source: .template("pensamento"), access: .noKey),
+                         mark: ServiceMark(symbol: "lightbulb.fill", monogram: "P", color: 0xC98A00), source: .template("pensamento"), access: .noKey, isFeature: true),
         ConnectorService(id: "fetch", name: "Busca na web (Fetch)", summary: "Baixa uma página da web e converte em texto. O Orb já lê páginas sozinho.",
                          mark: ServiceMark(symbol: "globe", monogram: "F", color: 0x0A84FF), source: .template("fetch"), access: .noKey),
     ]
+
+    /// The cards that are services (an app or an account), in the gallery's order.
+    static var serviceCards: [ConnectorService] { services.filter { !$0.isFeature } }
+    /// The capabilities of the Orb that happen to run as a connector: "Recursos do Orb".
+    static var featureCards: [ConnectorService] { services.filter(\.isFeature) }
 
     /// The installed connector a service stands for, if any.
     static func installed(_ service: ConnectorService, in connectors: [MCPServerConfig]) -> MCPServerConfig? {

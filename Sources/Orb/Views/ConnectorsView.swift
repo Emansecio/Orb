@@ -614,16 +614,25 @@ struct ConnectorToolsSheet: View {
     private func row(_ tool: ConnectorCatalog.Tool) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
-                Text(tool.name)
-                    .font(.system(size: 12, weight: .semibold).monospaced())
+                Text(ConnectorToolText.title(tool.name))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Palette.ink)
                     .lineLimit(1)
-                if tool.annotations.destructive == true {
-                    CatalogBadge(text: "Destrutiva", symbol: "exclamationmark.triangle.fill", tint: Palette.warn)
-                        .fixedSize()
-                } else if tool.annotations.readOnly == true {
-                    CatalogBadge(text: "Só leitura", symbol: "eye", tint: Palette.ok)
-                        .fixedSize()
+                // The technical name, for who needs it, small and gray.
+                Text(tool.name)
+                    .font(.system(size: 11).monospaced())
+                    .foregroundStyle(Palette.faint)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                switch ToolEffect(tool.annotations) {
+                case .destructive:
+                    CatalogBadge(text: "Destrutiva", symbol: "exclamationmark.triangle.fill", tint: Palette.warn).fixedSize()
+                case .modifies:
+                    CatalogBadge(text: "Altera dados", symbol: "pencil").fixedSize()
+                case .readOnly:
+                    CatalogBadge(text: "Só leitura", symbol: "eye", tint: Palette.ok).fixedSize()
+                case .unknown:
+                    EmptyView()
                 }
             }
             Text(tool.description.split(whereSeparator: \.isNewline).first.map(String.init) ?? "Sem descrição.")
@@ -965,11 +974,11 @@ struct ConnectorEditor: View {
 
     private var form: some View {
         VStack(spacing: 0) {
-            if draft.isGuided && (draft.isOfficial || draft.helpURL != nil || isRemote) {
+            if draft.isGuided && (draft.isOfficial || (draft.helpURL != nil && !keyLinkOnField) || isRemote) {
                 HStack(spacing: 8) {
                     if draft.isOfficial { CatalogBadge(text: "Oficial", symbol: "checkmark.seal.fill", tint: Palette.accentText) }
                     if isRemote { CatalogBadge(text: "Remoto", symbol: "cloud") }
-                    if let url = draft.helpURL {
+                    if let url = draft.helpURL, !keyLinkOnField {
                         Link(destination: url) { CatalogBadge(text: "Onde conseguir a chave", symbol: "arrow.up.right.square") }
                             .help("Abre no navegador a página onde a chave é criada")
                     }
@@ -995,9 +1004,10 @@ struct ConnectorEditor: View {
                         } header: {
                             Text(secretRows.count == 1 ? "Chave" : "Chaves")
                         } footer: { FormFootnote {
+                            // One sentence: the field's own line already says what the key is.
                             VStack(alignment: .leading, spacing: 6) {
                                 if let note = draft.note { Text(note) }
-                                Text("Chaves ficam no Keychain do Mac, não no arquivo de dados do app.")
+                                Text("Fica no Keychain do Mac, não no arquivo de dados do app.")
                             }
                         } }
                     }
@@ -1113,6 +1123,9 @@ struct ConnectorEditor: View {
         } }
     }
 
+    /// The page where the key is made is linked on the key's own row ("Obter chave"), not in a badge far above it.
+    private var keyLinkOnField: Bool { draft.helpURL != nil && !secretRows.isEmpty && !signsInWithApp }
+
     private var inputRows: [KeyValueRow] { values.filter { inputsByName[$0.key] != nil } }
     private var secretRows: [KeyValueRow] { inputRows.filter { isSecret($0.key) } }
     private var plainRows: [KeyValueRow] { inputRows.filter { !isSecret($0.key) } }
@@ -1120,7 +1133,7 @@ struct ConnectorEditor: View {
     @ViewBuilder private func inputFields(_ rows: [KeyValueRow]) -> some View {
         ForEach(rows) { row in
             KeyValueField(row: KeyValueRow.binding(in: $values, id: row.id, fallback: row), input: inputsByName[row.key],
-                          isSecret: isSecret(row.key)) {}
+                          isSecret: isSecret(row.key), keyPage: keyLinkOnField && isSecret(row.key) ? draft.helpURL : nil) {}
         }
     }
 
@@ -1427,6 +1440,8 @@ private struct KeyValueField: View {
     let input: RegistryServer.Input?
     /// Decided by the editor (`isSecret(_:)`), so the rule lives in one place.
     let isSecret: Bool
+    /// Where the key is made: "Obter chave" beside the field.
+    var keyPage: URL?
     let onRemove: () -> Void
 
     private var isAuthorizationHeader: Bool { row.key == "Authorization" && input?.prefix.isEmpty == false }
@@ -1454,7 +1469,7 @@ private struct KeyValueField: View {
                 }
                 Group {
                     if isSecret {
-                        SecureField("valor", text: $row.value)
+                        SecureField("valor", text: $row.value, prompt: Text(input == nil ? "valor" : "Cole o token aqui"))
                     } else {
                         TextField("valor", text: $row.value)
                     }
@@ -1462,6 +1477,11 @@ private struct KeyValueField: View {
                 .textFieldStyle(.roundedBorder)
                 .labelsHidden()
                 .accessibilityLabel(KeyValueRow.valueLabel(key: row.key, isAuthorizationHeader: isAuthorizationHeader))
+                if let keyPage {
+                    Button("Obter chave") { NSWorkspace.shared.open(keyPage) }
+                        .buttonStyle(LinkTextStyle())
+                        .help("Abre no navegador a página onde a chave é criada")
+                }
                 if input == nil {
                     Button("Remover", systemImage: "minus.circle", action: onRemove)
                         .labelStyle(.iconOnly)
