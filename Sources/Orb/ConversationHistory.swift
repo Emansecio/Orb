@@ -60,13 +60,18 @@ enum RoutinePrompt {
         Make reasonable assumptions and do the whole task with your tools, every step it asks for, in this run: there is no \
         later turn to finish it in. What it does not ask for, above all what deletes, sends or cannot be undone, goes in \
         your report as a suggestion. If something blocks you, try another way, and only then say so in your report instead \
-        of asking. Finish with a short report in plain text, with enough detail for open follow-ups: what you did and what you found. Its \
-        first line is shown to the user as a notification, so make it a complete summary on its own. Treat each run as a \
+        of asking. Finish with a short report: what you did and what you found. Its \
+        first line is shown to the user as a notification, so make it a complete summary on its own, saying how many items \
+        need the user, if any. Treat each run as a \
         continuation: check outstanding follow-ups from earlier runs, including replies to people contacted, using the \
         relevant source before acting. Do not assume a reply arrived or repeat an action without checking. In the report, \
-        put a concise continuity section immediately after the first line, listing each still-open follow-up, who or what it concerns, where to check, \
+        put a concise continuity section immediately after the first line, listing each still-open follow-up, who or what it concerns, \
         and the next step; carry unresolved items forward even when nothing changed. Remove an item only when resolved. \
-        If there are no open follow-ups, say so. Follow the task and existing permissions.
+        If there are no open follow-ups, say so. Group it under "## " headings in this order, skipping empty ones: what needs \
+        the user (a decision or action only they can take), what waits on someone else, what is scheduled. Items in the same \
+        state and with the same next step share one line. Write it for the user: plain words for states, no status codes, \
+        field names, exit codes, phone numbers or ids (routine_follow_up keeps those); bold only the names in what needs \
+        the user. Follow the task and existing permissions.
         Use routine_follow_up to list the persistent open follow-ups at the start. Save each new follow-up and update it \
         after checking its source; resolve it only when it is actually finished. Keep existing items when a check fails.
         """

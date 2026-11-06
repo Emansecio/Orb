@@ -353,6 +353,19 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(!RoutinePrompt.unattended("faça X", routine: "Diária").contains("previous run"))
     }
 
+    @Test func theReportPutsWhatNeedsTheUserFirstAndKeepsInternalCodesOut() {
+        let text = RoutinePrompt.unattended("faça X", routine: "Diária")
+        let needsUser = text.range(of: "what needs the user (")
+        let waits = text.range(of: "what waits on someone else")
+        let scheduled = text.range(of: "what is scheduled")
+        #expect(needsUser != nil && waits != nil && scheduled != nil)
+        if let needsUser, let waits, let scheduled {
+            #expect(needsUser.lowerBound < waits.lowerBound && waits.lowerBound < scheduled.lowerBound)
+        }
+        #expect(text.contains("no status codes"))
+        #expect(text.contains("how many items need the user"))
+    }
+
     @Test @MainActor func nextRunReceivesOpenFollowUpsAndPreviousActivity() async throws {
         let stub = StubModel(reply: "Atendi a cliente.\nPendências: verificar resposta de Ana na caixa de entrada.")
         let (model, bot, routine) = setUp(stub)
