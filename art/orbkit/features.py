@@ -46,6 +46,7 @@ class Ctx:
         self.palette_id = config.get("color", "indigo")
         self.palette = PALETTE[self.palette_id]
         light = self.palette_id in LIGHT_PALETTES
+        self.light = light
         feature_hex = config.get("feature_color", 0x2A2540 if light else 0xFFFFFF)
         # Features are solid little pieces sewn onto the plush: lit and shaded, with a coat highlight, not self-lit
         # stickers. A touch of emission keeps the white white in the shade.
@@ -96,10 +97,11 @@ def eyes_grandes(ctx):
     for side in (-1, 1):
         x = EYE_X * side
         _pill(ctx, x, 0.115, 0.03)
-        pupil = capsule(0.072, 0.018, 0.014, iris)
-        on_surface(pupil, ctx.orb, x + 0.01, EYE_Z - 0.015, sink=-0.026)
+        # Above the pill's dome (it stands about 0.06 off the skin), or the pill swallows them.
+        pupil = capsule(0.072, 0.018, 0.016, iris)
+        on_surface(pupil, ctx.orb, x + 0.01, EYE_Z - 0.015, sink=-0.052)
         dot = capsule(0.026, 0.0, 0.01, glow(0xFFFFFF, 2.0))
-        on_surface(dot, ctx.orb, x - 0.025, EYE_Z + 0.03, sink=-0.036)
+        on_surface(dot, ctx.orb, x - 0.025, EYE_Z + 0.03, sink=-0.066)
 
 
 def eyes_fendas(ctx):
@@ -124,14 +126,12 @@ def eyes_piscadela(ctx):
 
 def eyes_estrelas(ctx):
     for side in (-1, 1):
-        star = flat_shape(star_points(0.11, 0.05), ctx.feature)
-        on_surface(star, ctx.orb, EYE_X * side, EYE_Z, sink=-0.012)
+        _puffy(star_points(0.11, 0.05), ctx.feature, ctx, EYE_X * side, EYE_Z, bevel=0.008)
 
 
 def eyes_coracoes(ctx):
     for side in (-1, 1):
-        heart = flat_shape(heart_points(0.1), ctx.feature)
-        on_surface(heart, ctx.orb, EYE_X * side, EYE_Z, sink=-0.012)
+        _puffy(heart_points(0.1), ctx.feature, ctx, EYE_X * side, EYE_Z, bevel=0.0015)
 
 
 def eyes_tontos(ctx):
@@ -147,6 +147,60 @@ def eyes_bravos(ctx):
         _pill(ctx, EYE_X * side, 0.064, 0.05, roll=0.5 * side)
 
 
+def _puffy(points, material, ctx, x, z, roll=0.0, bevel=0.014):
+    """A filled outline with volume, like the pills: thick and well rounded at the edge. Outlines with sharp inner
+    corners (the heart's notch) need a small bevel, or the rounding spikes out of them."""
+    piece = flat_shape(points, material, extrude=0.016, bevel=bevel)
+    on_surface(piece, ctx.orb, x, z, sink=-0.016, roll=roll)
+    return piece
+
+
+def _rounded_rect(half_w, half_h, radius, steps=8):
+    pts = []
+    for cx, cy, a0 in ((half_w - radius, half_h - radius, 0), (-half_w + radius, half_h - radius, 90),
+                       (-half_w + radius, -half_h + radius, 180), (half_w - radius, -half_h + radius, 270)):
+        for i in range(steps + 1):
+            a = math.radians(a0 + 90 * i / steps)
+            pts.append((cx + radius * math.cos(a), cy + radius * math.sin(a)))
+    return pts
+
+
+def _half_disc(rx, ry, up=True, steps=32):
+    """A half ellipse with a softly rounded flat side: up=True is a dome (flat side down)."""
+    sign = 1 if up else -1
+    return [(rx * math.cos(math.pi * i / steps), sign * ry * math.sin(math.pi * i / steps)) for i in range(steps + 1)]
+
+
+def eyes_contentes(ctx):
+    for side in (-1, 1):
+        _puffy(_half_disc(0.095, 0.09, up=True), ctx.feature, ctx, EYE_X * side, EYE_Z - 0.03)
+
+
+def eyes_cansados(ctx):
+    for side in (-1, 1):
+        _puffy(_half_disc(0.09, 0.095, up=False), ctx.feature, ctx, EYE_X * side, EYE_Z + 0.03)
+
+
+def eyes_quadrados(ctx):
+    for side in (-1, 1):
+        _puffy(_rounded_rect(0.078, 0.078, 0.03), ctx.feature, ctx, EYE_X * side, EYE_Z)
+
+
+def eyes_losangos(ctx):
+    for side in (-1, 1):
+        _puffy(_rounded_rect(0.072, 0.072, 0.024), ctx.feature, ctx, EYE_X * side, EYE_Z, roll=math.pi / 4)
+
+
+def eyes_curiosos(ctx):
+    """Pills with a pupil glancing up to the side: on light palettes the pill is dark and the pupil light."""
+    pupil_material = plastic(0xFFFFFF, roughness=0.3, coat=0.8, emission=0.4) if ctx.light else ctx.ink
+    for side in (-1, 1):
+        x = EYE_X * side
+        _pill(ctx, x, 0.085, 0.06)
+        pupil = capsule(0.052, 0.014, 0.016, pupil_material)
+        on_surface(pupil, ctx.orb, x + 0.018, EYE_Z + 0.025, sink=-0.054)
+
+
 EYES = [
     ("pilulas", "Pílulas", eyes_pilulas),
     ("pontos", "Pontos", eyes_pontos),
@@ -160,70 +214,122 @@ EYES = [
     ("coracoes", "Corações", eyes_coracoes),
     ("tontos", "Tontos", eyes_tontos),
     ("bravos", "Bravos", eyes_bravos),
+    ("contentes", "Contentes", eyes_contentes),
+    ("cansados", "Cansados", eyes_cansados),
+    ("quadrados", "Quadradinhos", eyes_quadrados),
+    ("losangos", "Losangos", eyes_losangos),
+    ("curiosos", "Curiosos", eyes_curiosos),
 ]
 
 # ---------------------------------------------------------------------------
 # Mouths
 
 
-def _open_mouth(ctx, width, depth, tongue=True):
+STROKE = 0.03  # mouth lines: thick enough to read as a sewn-on piece at sidebar size
+
+
+def _open_mouth(ctx, width, depth, tongue=True, teeth=False):
     pts = [(-width / 2 + width * i / 20, 0.0) for i in range(21)]
     pts += [(width / 2 * math.cos(math.pi * i / 20), -depth * math.sin(math.pi * i / 20)) for i in range(1, 20)]
-    mouth = flat_shape(pts, ctx.ink, extrude=0.008)
-    on_surface(mouth, ctx.orb, 0, ctx.mouth_z + 0.02, sink=-0.012)
+    mouth = flat_shape(pts, ctx.ink, extrude=0.01, bevel=0.01)
+    on_surface(mouth, ctx.orb, 0, ctx.mouth_z + 0.02, sink=-0.014)
     if tongue:
-        t = flat_shape([(0.05 * math.cos(2 * math.pi * i / 32), 0.03 * math.sin(2 * math.pi * i / 32)) for i in range(32)],
-                       ctx.tongue, extrude=0.006)
-        on_surface(t, ctx.orb, 0, ctx.mouth_z + 0.02 - depth * 0.62, sink=-0.022)
+        tw = width * 0.19
+        t = flat_shape([(tw * math.cos(2 * math.pi * i / 32), tw * 0.62 * math.sin(2 * math.pi * i / 32)) for i in range(32)],
+                       ctx.tongue, extrude=0.008, bevel=0.006)
+        on_surface(t, ctx.orb, 0, ctx.mouth_z + 0.02 - depth * 0.66, sink=-0.028)
+    if teeth:
+        strip = flat_shape(_rounded_rect(width * 0.36, 0.018, 0.012), _tooth_material(), extrude=0.006, bevel=0.005)
+        on_surface(strip, ctx.orb, 0, ctx.mouth_z + 0.002, sink=-0.028)
+
+
+def _tooth_material():
+    return plastic(0xFFFFFF, roughness=0.25, coat=0.9, emission=0.35, subsurface=0)
 
 
 def mouth_sorriso(ctx):
-    tube(arc(0, ctx.mouth_z + 0.03, 0.24, -0.075), [1, 1, 1], ctx.feature, bevel=0.024, orb=ctx.orb, lift=0.008)
+    tube(arc(0, ctx.mouth_z + 0.03, 0.27, -0.085), [1, 1, 1], ctx.feature, bevel=STROKE, orb=ctx.orb, lift=0.012)
 
 
 def mouth_sorrisao(ctx):
-    _open_mouth(ctx, 0.3, 0.15)
+    _open_mouth(ctx, 0.32, 0.16)
 
 
 def mouth_surpresa(ctx):
-    o = flat_shape([(0.06 * math.cos(2 * math.pi * i / 40), 0.08 * math.sin(2 * math.pi * i / 40)) for i in range(40)],
-                   ctx.ink, extrude=0.008)
-    on_surface(o, ctx.orb, 0, ctx.mouth_z - 0.01, sink=-0.012)
+    o = flat_shape([(0.068 * math.cos(2 * math.pi * i / 40), 0.088 * math.sin(2 * math.pi * i / 40)) for i in range(40)],
+                   ctx.ink, extrude=0.01, bevel=0.01)
+    on_surface(o, ctx.orb, 0, ctx.mouth_z - 0.01, sink=-0.014)
 
 
 def mouth_neutra(ctx):
-    tube([(-0.1, ctx.mouth_z), (0, ctx.mouth_z), (0.1, ctx.mouth_z)], [1, 1, 1], ctx.feature, bevel=0.023,
-         orb=ctx.orb, lift=0.008)
+    tube([(-0.11, ctx.mouth_z), (0, ctx.mouth_z), (0.11, ctx.mouth_z)], [1, 1, 1], ctx.feature, bevel=STROKE,
+         orb=ctx.orb, lift=0.012)
 
 
 def mouth_gatinho(ctx):
     z = ctx.mouth_z + 0.01
     tube([(-0.13, z + 0.015), (-0.065, z - 0.05), (0, z), (0.065, z - 0.05), (0.13, z + 0.015)], [1, 1, 1, 1, 1],
-         ctx.feature, bevel=0.022, orb=ctx.orb, lift=0.008)
+         ctx.feature, bevel=0.027, orb=ctx.orb, lift=0.012)
 
 
 def mouth_lingua(ctx):
     mouth_sorriso(ctx)
-    t = flat_shape([(0.06 * math.cos(math.pi * i / 16), -0.085 * math.sin(math.pi * i / 16)) for i in range(17)],
-                   ctx.tongue, extrude=0.008)
-    on_surface(t, ctx.orb, 0.035, ctx.mouth_z - 0.035, sink=-0.016)
+    t = flat_shape([(0.064 * math.cos(math.pi * i / 16), -0.095 * math.sin(math.pi * i / 16)) for i in range(17)],
+                   ctx.tongue, extrude=0.01, bevel=0.01)
+    # Under the smile line: the line's thickness covers the tongue's root.
+    on_surface(t, ctx.orb, 0.04, ctx.mouth_z - 0.04, sink=-0.012)
 
 
 def mouth_dentinho(ctx):
     mouth_sorriso(ctx)
-    tooth = flat_shape([(-0.032, 0.0), (0.032, 0.0), (0.032, -0.05), (0.0, -0.06), (-0.032, -0.05)],
-                       plastic(0xFFFFFF, roughness=0.2, coat=1.0, subsurface=0), extrude=0.008)
-    on_surface(tooth, ctx.orb, 0, ctx.mouth_z - 0.03, sink=-0.014)
+    tooth = flat_shape(_rounded_rect(0.05, 0.03, 0.016), _tooth_material(), extrude=0.01, bevel=0.008)
+    on_surface(tooth, ctx.orb, 0, ctx.mouth_z - 0.078, sink=-0.012)
 
 
 def mouth_triste(ctx):
-    tube(arc(0, ctx.mouth_z - 0.04, 0.22, 0.065), [1, 1, 1], ctx.feature, bevel=0.023, orb=ctx.orb, lift=0.008)
+    tube(arc(0, ctx.mouth_z - 0.04, 0.24, 0.07), [1, 1, 1], ctx.feature, bevel=STROKE, orb=ctx.orb, lift=0.012)
+
+
+def _ellipse(rx, ry, steps=40):
+    return [(rx * math.cos(2 * math.pi * i / steps), ry * math.sin(2 * math.pi * i / steps)) for i in range(steps)]
 
 
 def mouth_assobio(ctx):
-    o = flat_shape([(0.035 * math.cos(2 * math.pi * i / 32), 0.042 * math.sin(2 * math.pi * i / 32)) for i in range(32)],
-                   ctx.ink, extrude=0.008)
-    on_surface(o, ctx.orb, 0.07, ctx.mouth_z, sink=-0.012)
+    # Puckered lips: a ring of the feature color around a small dark hole.
+    lips = flat_shape(_ellipse(0.055, 0.062), ctx.feature, extrude=0.012, bevel=0.012)
+    on_surface(lips, ctx.orb, 0.06, ctx.mouth_z, sink=-0.014)
+    hole = flat_shape(_ellipse(0.022, 0.027), ctx.ink, extrude=0.006, bevel=0.004)
+    on_surface(hole, ctx.orb, 0.06, ctx.mouth_z, sink=-0.036)
+
+
+def mouth_gargalhada(ctx):
+    _open_mouth(ctx, 0.36, 0.2, teeth=True)
+
+
+def mouth_dentes(ctx):
+    """A wide toothy grin: a dark rounded slot with a row of teeth along the top."""
+    slot = flat_shape(_rounded_rect(0.15, 0.08, 0.06), ctx.ink, extrude=0.01, bevel=0.01)
+    on_surface(slot, ctx.orb, 0, ctx.mouth_z - 0.03, sink=-0.014)
+    teeth = flat_shape(_rounded_rect(0.11, 0.016, 0.012), _tooth_material(), extrude=0.006, bevel=0.004)
+    on_surface(teeth, ctx.orb, 0, ctx.mouth_z + 0.024, sink=-0.03)
+
+
+def mouth_beijinho(ctx):
+    """A sideways 3: two little bumps toward the right."""
+    x, z = 0.02, ctx.mouth_z - 0.02
+    tube([(x, z + 0.09), (x + 0.085, z + 0.055), (x + 0.01, z), (x + 0.085, z - 0.055), (x, z - 0.09)], [1, 1, 1, 1, 1],
+         ctx.feature, bevel=0.026, orb=ctx.orb, lift=0.012)
+
+
+def mouth_ondulada(ctx):
+    z = ctx.mouth_z - 0.01
+    # A sine sampled finely: a few zigzag points make the curve's handles loop over themselves.
+    pts = [(-0.14 + 0.28 * i / 24, z + 0.024 * math.sin(3 * math.pi * i / 12)) for i in range(25)]
+    tube(pts, [1] * len(pts), ctx.feature, bevel=0.025, orb=ctx.orb, lift=0.012)
+
+
+def mouth_boquinha(ctx):
+    tube(arc(0, ctx.mouth_z + 0.01, 0.12, -0.04), [1, 1, 1], ctx.feature, bevel=STROKE, orb=ctx.orb, lift=0.012)
 
 
 MOUTHS = [
@@ -237,6 +343,11 @@ MOUTHS = [
     ("dentinho", "Dentinho", mouth_dentinho),
     ("triste", "Triste", mouth_triste),
     ("assobio", "Assobio", mouth_assobio),
+    ("gargalhada", "Gargalhada", mouth_gargalhada),
+    ("dentes", "Dentes", mouth_dentes),
+    ("beijinho", "Beijinho", mouth_beijinho),
+    ("ondulada", "Nervosa", mouth_ondulada),
+    ("boquinha", "Boquinha", mouth_boquinha),
 ]
 
 # ---------------------------------------------------------------------------
@@ -255,8 +366,8 @@ def _smiling_opening(ctx, half_width, rise, smile, depth, steps=48):
         c, s = math.cos(t), math.sin(t)
         z = rise * s - smile * s * s if s > 0 else depth * s
         pts.append((half_width * c, z))
-    mouth = flat_shape(pts, ctx.ink, extrude=0.008)
-    on_surface(mouth, ctx.orb, 0, ctx.mouth_z + VISEME_TOP, sink=-0.012)
+    mouth = flat_shape(pts, ctx.ink, extrude=0.01, bevel=0.01)
+    on_surface(mouth, ctx.orb, 0, ctx.mouth_z + VISEME_TOP, sink=-0.014)
     return mouth
 
 
@@ -278,7 +389,7 @@ def viseme_e(ctx):
 
 
 def viseme_m(ctx):
-    tube(arc(0, ctx.mouth_z + VISEME_TOP - 0.005, 0.21, -0.032), [1, 1, 1], ctx.feature, bevel=0.0235, orb=ctx.orb, lift=0.008)
+    tube(arc(0, ctx.mouth_z + VISEME_TOP - 0.005, 0.23, -0.035), [1, 1, 1], ctx.feature, bevel=STROKE, orb=ctx.orb, lift=0.012)
 
 
 VISEMES = [

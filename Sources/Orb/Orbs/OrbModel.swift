@@ -53,9 +53,11 @@ struct OrbConfig: Hashable, Codable, Sendable {
         let shape = pick(.shape, ["circulo": Double(others) * 2 / 3], other: 1, allowed: drawable)
         if !shape.isEmpty { config.shape = shape }
         config.eyes = pick(.eyes, ["pilulas": 4, "ovais": 3, "pontos": 2, "grandes": 2, "felizes": 1.5, "piscadela": 0.6,
-                                   "estrelas": 0.5, "coracoes": 0.5])
+                                   "estrelas": 0.5, "coracoes": 0.5, "contentes": 1.2, "curiosos": 1, "quadrados": 0.8,
+                                   "losangos": 0.5, "cansados": 0.4])
         config.mouth = pick(.mouth, ["nenhuma": 3, "sorriso": 4, "sorrisao": 1.5, "gatinho": 1.5, "lingua": 0.8,
-                                     "dentinho": 0.8, "neutra": 0.5, "assobio": 0.3])
+                                     "dentinho": 0.8, "neutra": 0.5, "assobio": 0.3, "boquinha": 1.5, "gargalhada": 0.6,
+                                     "dentes": 0.4, "beijinho": 0.4, "ondulada": 0.3])
         config.brows = pick(.brows, ["nenhuma": 6, "retas": 1, "arqueadas": 2])
         config.cheeks = pick(.cheeks, ["nenhuma": 4, "blush": 3, "sardas": 1.5, "coracoes": 0.8])
         return config

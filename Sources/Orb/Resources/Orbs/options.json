@@ -283,6 +283,26 @@
     {
       "id": "bravos",
       "label": "Bravos"
+    },
+    {
+      "id": "contentes",
+      "label": "Contentes"
+    },
+    {
+      "id": "cansados",
+      "label": "Cansados"
+    },
+    {
+      "id": "quadrados",
+      "label": "Quadradinhos"
+    },
+    {
+      "id": "losangos",
+      "label": "Losangos"
+    },
+    {
+      "id": "curiosos",
+      "label": "Curiosos"
     }
   ],
   "mouth": [
@@ -325,6 +345,26 @@
     {
       "id": "assobio",
       "label": "Assobio"
+    },
+    {
+      "id": "gargalhada",
+      "label": "Gargalhada"
+    },
+    {
+      "id": "dentes",
+      "label": "Dentes"
+    },
+    {
+      "id": "beijinho",
+      "label": "Beijinho"
+    },
+    {
+      "id": "ondulada",
+      "label": "Nervosa"
+    },
+    {
+      "id": "boquinha",
+      "label": "Boquinha"
     }
   ],
   "brows": [

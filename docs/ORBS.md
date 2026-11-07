@@ -44,8 +44,8 @@ Os ids e rótulos vêm de `options.json` (gerado junto com as imagens); a tabela
 |---|---|---|
 | Cor (`color`) | 18 | indigo, ceu, oceano, menta, lima, sol, pessego, coral, cereja, rosa, lavanda, ametista, aurora, algodao, chocolate, noite, grafite, perola |
 | Formato (`shape`) | 8 | circulo, seixo, almofada, capsula, triangulo, hexagono, nuvem, gota (ver "Formatos" abaixo) |
-| Olhos (`eyes`) | 12 | pilulas, pontos, ovais, grandes, fendas, felizes, sono, piscadela, estrelas, coracoes, tontos, bravos |
-| Boca (`mouth`) | 10 | nenhuma, sorriso, sorrisao, surpresa, neutra, gatinho, lingua, dentinho, triste, assobio |
+| Olhos (`eyes`) | 17 | pilulas, pontos, ovais, grandes, fendas, felizes, sono, piscadela, estrelas, coracoes, tontos, bravos, contentes, cansados, quadrados, losangos, curiosos |
+| Boca (`mouth`) | 15 | nenhuma, sorriso, sorrisao, surpresa, neutra, gatinho, lingua, dentinho, triste, assobio, gargalhada, dentes, beijinho, ondulada (Nervosa), boquinha |
 | Visemas (`visemes`, só para falar) | 4 | fala-a (aberta), fala-o (redonda), fala-e (larga), fala-m (fechada) |
 | Sobrancelhas (`brows`) | 5 | nenhuma, retas, arqueadas, bravas, preocupadas |
 | Bochechas (`cheeks`) | 4 | nenhuma, blush, sardas, coracoes |
