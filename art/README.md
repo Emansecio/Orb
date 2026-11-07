@@ -14,6 +14,16 @@ felpuda. O corpo de pelúcia sai do Blender (`pelucia.py`); até 2026-11 era a e
   nice -n 15 /Applications/Blender.app/Contents/MacOS/Blender -b --python art/pelucia.py [-- --only lavanda,coral]   # -> Sources/Orb/Resources/Orbs/body (~18 min)
   ```
 
+  Com `--shapes`, gera os **formatos** (seixo, almofada, cápsula, triângulo, hexágono, nuvem, gota) em tons de cinza,
+  um por formato, em `Resources/Orbs/shape/` (~7 min). Cada formato é um contorno 2D "estufado" como almofada, com o
+  pé na mesma linha do círculo; o app pinta com a paleta pela luminância (`OrbRecolor.stops`). O círculo continua
+  sendo `body/<cor>.png`. A posição do rosto em cada formato fica no `"face"` da chave `shape` do `options.json`.
+  Rascunho rápido (~1 min para os 7): `-- --shapes --side 320 --fur-count 150000 --samples 16 --out <pasta>`.
+
+  ```bash
+  nice -n 15 /Applications/Blender.app/Contents/MacOS/Blender -b --python art/pelucia.py -- --shapes [--only nuvem,gota]
+  ```
+
 
 - **`orbgen/`** (Swift, CPU, reproduzível): o **assentamento** dos traços planos (sombra de
   contato) e uma folha de prévia dos corpos. Não precisa de Blender.
@@ -44,7 +54,8 @@ $B -b --python art/orbs.py -- catalog [--category eyes]
 $B -b --python art/orbs.py -- personas
 
 # Traços planos para o orbgen assentar (o corpo é o da pelúcia e fica de fora)
-$B -b --python art/orbs.py -- layers [--category eyes]   # -> art/orbgen/flat (+ options.json do app)
+$B -b --python art/orbs.py -- layers [--category eyes] --size 640   # -> art/orbgen/flat (+ options.json do app, mantendo a chave shape)
+# Os traços claros são peças 3D sombreadas (plástico branco com verniz), não adesivos que brilham sozinhos
 
 # Manifesto com ids e rótulos para o editor do app
 $B -b --python art/orbs.py -- manifest      # -> options.json do app

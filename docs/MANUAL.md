@@ -94,9 +94,10 @@ nome, como te chamar e o texto em cada conversa (assim eles sabem como te chamar
   no resto do Mac dentro das permissões. Apagar o Orb não apaga a pasta.
 - **Opções avançadas**: as permissões (veja abaixo), "Como funciona" (as instruções dele, que vão em toda conversa) e
   "Na primeira conversa, me fazer perguntas" (ligado por padrão: o Orb conhece você).
-- O **editor de aparência** ao lado: Cor (18), Jeito (calmo, equilibrado, animado, tímido, curioso: como ele se mexe e reage
-  ao mouse, não o que faz), Olhos, Boca, Sobrancelhas, Bochechas, com
-  **Sortear**. Os olhos seguem o cursor; o Orb mostra o que está fazendo (pensando, digitando no terminal, lendo, precisando de
+- O **editor de aparência** ao lado: Cor (18), Formato (círculo, seixo, almofada, cápsula, triângulo, hexágono, nuvem, gota), Jeito (calmo, equilibrado, animado, tímido, curioso: como ele se mexe e reage
+  ao mouse, não o que faz), Olhos (com o controle "Tamanho dos olhos"), Boca, Sobrancelhas, Bochechas, com
+  **Sortear**. A seção "No app" mostra como o Orb fica na lista (24, 32 e 40 pt); a ficha "Aviso" mostra o ponto de resposta
+  não lida, e cada mudança de visual faz o Orb dar um pulinho. Os olhos seguem o cursor; o Orb mostra o que está fazendo (pensando, digitando no terminal, lendo, precisando de
   você, feliz ao terminar) e "fala" enquanto a resposta chega.
 
 O **painel do Orb** (⌥⌘B mostra ou esconde) tem quatro abas:

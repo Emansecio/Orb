@@ -33,6 +33,11 @@ struct OrbView: View {
     /// How big its joy is while `activity` is `happy`.
     var celebration = OrbCelebration.big
     var interactive = false
+    /// A reply waits unread: a small dot at the Orb's upper right. Only where no count sits beside the Orb.
+    var badge = false
+    /// A change of look plays the "pop" (a squash and a rebound while the changed layers crossfade; a plain crossfade
+    /// under Reduce Motion). For the editor's Orbs: elsewhere a look changes rarely, and thumbnails would all pop at once.
+    var popsOnChange = false
     /// What VoiceOver says (default: "Orb" and what it is doing).
     var accessibilityText: String?
 
@@ -53,9 +58,11 @@ struct OrbView: View {
             }
         }
         .frame(width: orb, height: orb)
+        .modifier(LookChange(look: config.appearance, enabled: popsOnChange, reduceMotion: reduceMotion))
         .frame(width: size, height: size)
+        .overlay(alignment: .topTrailing) { OrbBadge(show: badge, size: orb) }
         .accessibilityElement()
-        .accessibilityLabel(accessibilityText ?? "Orb, \(activity.label)")
+        .accessibilityLabel((accessibilityText ?? "Orb, \(activity.label)") + (badge ? ". Resposta não lida." : ""))
     }
 
     /// Dev aid for profiling: `ORB_STATIC=1`.
@@ -66,6 +73,72 @@ struct OrbView: View {
     /// while the window is inactive or hidden.
     /// (A `var` so tests, which have no visible window, can turn it on.)
     nonisolated(unsafe) static var animateInactive = ProcessInfo.processInfo.environment["ORB_ANIMATE_INACTIVE"] != nil
+}
+
+/// The look-change transition (see `OrbView.popsOnChange`). Plays only when `look` changes, never on first appearance or
+/// on an activity change (the look does not carry it).
+private struct LookChange: ViewModifier {
+    let look: OrbConfig
+    let enabled: Bool
+    let reduceMotion: Bool
+
+    /// Scale of the pop: squash (wider and lower), rebound past the rest size, settle. About 0.35 s in all.
+    private struct Pop {
+        var x = 1.0, y = 1.0
+    }
+
+    func body(content: Content) -> some View {
+        if !enabled {
+            content
+        } else if reduceMotion {
+            // The old look fades out as the new one fades in (a still Orb: Reduce Motion draws it with a Canvas).
+            ZStack { content.id(look).transition(.opacity) }
+                .animation(.easeInOut(duration: 0.18), value: look)
+        } else {
+            content.keyframeAnimator(initialValue: Pop(), trigger: look) { view, pop in
+                view.scaleEffect(x: pop.x, y: pop.y, anchor: .bottom)
+            } keyframes: { _ in
+                KeyframeTrack(\.x) {
+                    CubicKeyframe(1.04, duration: 0.09)
+                    CubicKeyframe(0.98, duration: 0.13)
+                    CubicKeyframe(1, duration: 0.13)
+                }
+                KeyframeTrack(\.y) {
+                    CubicKeyframe(0.92, duration: 0.09)
+                    CubicKeyframe(1.05, duration: 0.13)
+                    CubicKeyframe(1, duration: 0.13)
+                }
+            }
+        }
+    }
+}
+
+/// The unread dot: the accent color with a thin ring in the chrome's, so it reads on any body. It pops in with a short
+/// spring (a fade under Reduce Motion). Sits at the upper right of a box `size` wide, so it can also be laid over a chip
+/// that dims its Orb.
+struct OrbBadge: View {
+    let show: Bool
+    let size: CGFloat
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ZStack {
+            if show { dot }
+        }
+        .animation(reduceMotion ? Motion.fade : .spring(response: 0.3, dampingFraction: 0.55), value: show)
+    }
+
+    private var dot: some View {
+        let diameter = min(16, max(8, (size * 0.28).rounded()))
+        return Circle()
+            .fill(Palette.accent)
+            .frame(width: diameter, height: diameter)
+            .overlay(Circle().strokeBorder(Palette.chrome, lineWidth: max(1, diameter * 0.16)))
+            // Sits on the orb's edge, at about two o'clock.
+            .offset(x: diameter * 0.2, y: -diameter * 0.2)
+            .transition(reduceMotion ? .opacity : .scale(scale: 0.2).combined(with: .opacity))
+            .accessibilityHidden(true)
+    }
 }
 
 /// Draws one frame of the Orb from its layers in a single Canvas (no per-frame layout work).
@@ -116,6 +189,9 @@ struct OrbFrame: View {
         return zip(complete.bitmaps.layers, complete.images).map { Drawn(layer: $0, image: $1) }
     }
 
+    private var eyeScale: CGFloat { config.drawnEyeScale }
+    private var faceOffset: CGSize { config.faceOffset }
+
     /// The activity's expression; a talking Orb shows an open mouth shape.
     private var layers: [OrbLayer] {
         let layers = config.layers(for: activity)
@@ -135,7 +211,8 @@ struct OrbFrame: View {
             .overlay {
                 Canvas(rendersAsynchronously: true) { context, _ in
                     OrbPainter(activity: activity, layers: drawn, size: size, side: side, scale: scale,
-                               pose: pose, showsBubble: showsBubble ?? (size >= OrbGeometry.bubbleBox), decodedBatches: batches)
+                               pose: pose, showsBubble: showsBubble ?? (size >= OrbGeometry.bubbleBox), eyeScale: eyeScale,
+                               faceOffset: faceOffset, decodedBatches: batches)
                         .draw(in: &context)
                 }
                 .frame(width: side, height: side)
@@ -170,6 +247,10 @@ private struct OrbPainter {
     let scale: CGFloat
     let pose: OrbPose
     let showsBubble: Bool
+    /// The eyes and brows are drawn this much bigger, about the eye center.
+    var eyeScale: CGFloat = 1
+    /// The face's shift for the body shape (fractions of the orb size, +y down).
+    var faceOffset: CGSize = .zero
     /// Not used by the drawing: it makes the canvas redraw when more bitmaps are decoded.
     var decodedBatches = 0
 
@@ -199,13 +280,21 @@ private struct OrbPainter {
         for item in layers {
             let layer = item.layer
             let image = item.image ?? (OrbImages.decodesSynchronously
-                ? OrbImages.cgImage(layer.path, pixels: side * scale) : nil)
+                ? OrbImages.cgImage(layer, pixels: side * scale) : nil)
             guard let image else { continue }
             var layerContext = orb
             let shift = parallax(layer)
             layerContext.translateBy(x: shift.width, y: shift.height)
+            if layer.kind != .body {
+                layerContext.translateBy(x: faceOffset.width * size, y: faceOffset.height * size)
+            }
+            let line = side * OrbGeometry.eyeLine
+            if (layer.kind == .eyes || layer.kind == .brows), eyeScale != 1 {
+                layerContext.translateBy(x: center.x, y: line)
+                layerContext.scaleBy(x: eyeScale, y: eyeScale)
+                layerContext.translateBy(x: -center.x, y: -line)
+            }
             if layer.kind == .eyes, pose.blink > 0 {
-                let line = side * OrbGeometry.eyeLine
                 layerContext.translateBy(x: 0, y: line)
                 layerContext.scaleBy(x: 1, y: max(0.08, 1 - pose.blink))
                 layerContext.translateBy(x: 0, y: -line)
@@ -259,17 +348,18 @@ struct BotAvatar: View {
     var glance = 0
     var cue = OrbCueSignal()
     var interactive = false
+    var badge = false
 
     var body: some View {
         OrbView(config: orb, activity: activity, size: size, animated: animated, paused: paused, poke: poke, ack: ack,
-                landing: landing, glance: glance, cue: cue, celebration: celebration, interactive: interactive)
+                landing: landing, glance: glance, cue: cue, celebration: celebration, interactive: interactive, badge: badge)
     }
 }
 
 extension BotAvatar {
     /// The Orb as it is now: what it does, how much it celebrates and the cue it was given.
-    init(live: BotLive, size: CGFloat, paused: Bool = false) {
+    init(live: BotLive, size: CGFloat, paused: Bool = false, badge: Bool = false) {
         self.init(orb: live.look.orb, size: size, activity: live.activity, celebration: live.celebration, paused: paused,
-                  cue: live.cue)
+                  cue: live.cue, badge: badge)
     }
 }

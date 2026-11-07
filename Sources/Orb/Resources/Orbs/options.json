@@ -181,6 +181,60 @@
       ]
     }
   ],
+  "shape": [
+    {
+      "id": "circulo",
+      "label": "Círculo"
+    },
+    {
+      "id": "seixo",
+      "label": "Seixo",
+      "face": [
+        0,
+        0.07
+      ]
+    },
+    {
+      "id": "almofada",
+      "label": "Almofada"
+    },
+    {
+      "id": "capsula",
+      "label": "Cápsula",
+      "face": [
+        0,
+        0.14
+      ]
+    },
+    {
+      "id": "triangulo",
+      "label": "Triângulo",
+      "face": [
+        0,
+        0.17
+      ]
+    },
+    {
+      "id": "hexagono",
+      "label": "Hexágono"
+    },
+    {
+      "id": "nuvem",
+      "label": "Nuvem",
+      "face": [
+        0,
+        0.05
+      ]
+    },
+    {
+      "id": "gota",
+      "label": "Gota",
+      "face": [
+        0,
+        0.14
+      ]
+    }
+  ],
   "eyes": [
     {
       "id": "pilulas",

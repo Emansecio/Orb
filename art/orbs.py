@@ -182,6 +182,11 @@ def manifest(path=None):
                      for pid, label, colors in features.PALETTES]
     data["variants"] = sorted(VARIANT_CATEGORIES)
     data["visemes"] = [oid for oid, _, _ in features.VISEMES]
+    # Keys this script doesn't make (the body shapes, from art/pelucia.py and the app) stay, in their place.
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as handle:
+            existing = json.load(handle)
+        data = {**{key: data.get(key, value) for key, value in existing.items()}, **data}
     with open(path, "w", encoding="utf-8") as handle:
         json.dump(data, handle, ensure_ascii=False, indent=2)
     print("manifest written")

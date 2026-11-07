@@ -19,6 +19,7 @@ art/orbs.py + art/orbkit/          Blender 5.2: traços planos (olhos, bocas, so
         │  orbs.py layers          bochechas, visemas) -> art/orbgen/flat
         ▼
 art/pelucia.py (Blender)           corpo de pelúcia (18 cores) -> Resources/Orbs/body
+                                   formatos em cinza (--shapes) -> Resources/Orbs/shape
 art/orbgen (Swift, CPU)            orbgen all: traços assentados com sombra de contato
         ▼
 Sources/Orb/Resources/Orbs/     PNGs de 640 px em camadas (corpo, traços, visemas) + options.json (~4 MB)
@@ -42,6 +43,7 @@ Os ids e rótulos vêm de `options.json` (gerado junto com as imagens); a tabela
 | Categoria | Qtde | Ids |
 |---|---|---|
 | Cor (`color`) | 18 | indigo, ceu, oceano, menta, lima, sol, pessego, coral, cereja, rosa, lavanda, ametista, aurora, algodao, chocolate, noite, grafite, perola |
+| Formato (`shape`) | 8 | circulo, seixo, almofada, capsula, triangulo, hexagono, nuvem, gota (ver "Formatos" abaixo) |
 | Olhos (`eyes`) | 12 | pilulas, pontos, ovais, grandes, fendas, felizes, sono, piscadela, estrelas, coracoes, tontos, bravos |
 | Boca (`mouth`) | 10 | nenhuma, sorriso, sorrisao, surpresa, neutra, gatinho, lingua, dentinho, triste, assobio |
 | Visemas (`visemes`, só para falar) | 4 | fala-a (aberta), fala-o (redonda), fala-e (larga), fala-m (fechada) |
@@ -67,15 +69,37 @@ orb.color = "rosa"; orb.eyes = "ovais"; orb.cheeks = "blush"
 orb.mouth = "sorriso"; orb.temperament = .curioso
 ```
 
+### Formatos, tamanho dos olhos, avisos e a transição
+
+- **Formato** (`OrbConfig.shape`, padrão `circulo`; chave ausente ou id desconhecido vira círculo ao desenhar). O círculo
+  usa `body/<cor>.png` como sempre. Os outros usam `shape/<id>.png`, uma pelúcia em **tons de cinza** que o app pinta com a
+  paleta (`OrbRecolor`: tabela de 256 cores feita de [borda, centro, fundo] pela luminância; tabela de paradas em
+  `OrbRecolor.stops`, em luz linear, alfa preservado). `OrbLayer.recolor` leva o id da paleta e entra na chave do cache;
+  a decodificação cinza fica num cache à parte, então trocar de cor no editor não decodifica o PNG de novo. Sem o arquivo
+  em `shape/`, o Orb desenha o corpo do círculo (nunca fica em branco) e o Sortear não sorteia esse formato.
+- Cada formato do `options.json` pode ter `"face": [dx, dy]` (fração do tamanho do Orb, +dy para baixo, limitado a ±0,2):
+  desloca olhos, sobrancelhas, boca, bochechas e visemas nos dois caminhos de desenho.
+- **Tamanho dos olhos** (`OrbConfig.eyeScale`, 1,0; desenhado entre 0,8 e 1,4): escala olhos e sobrancelhas em torno do
+  centro dos olhos, junto com o piscar e o olhar. Controle no topo da aba Olhos; arrastar vale um passo só no desfazer.
+- **Aviso** (`OrbView.badge`): ponto azul com anel da cor do painel no canto superior direito, entra com mola curta (só
+  esmaece com Reduzir movimento). Aparece onde o Orb não tem contador ao lado: o painel do Orb (`LiveBotAvatar.showsUnread`)
+  e as fichas do popover da barra de menus (`OrbBadge`, por cima da ficha, que escurece o Orb não escolhido). A barra
+  lateral já mostra o ponto ou a contagem. No editor, a ficha "Aviso" mostra o ponto no palco.
+- **Transição de visual** (`OrbView.popsOnChange`, ligada no palco e na prévia "No app"): ao mudar o visual
+  (`OrbConfig.appearance`, que ignora o tamanho dos olhos e o jeito) o Orb encolhe (~0,92), passa de 1,05 e assenta em
+  ~0,35 s, e o corpo e os traços trocados se dissolvem na mesma vista. Com Reduzir movimento, só a dissolução. Não toca na
+  primeira aparição nem na mudança de atividade.
+
 ### Onde o usuário edita
 - **Novo Orb** (⌘N): o formulário (nome, papel, modelo, pasta e opções avançadas) à esquerda e o editor à direita.
 - **Painel do Orb** (⌥⌘B): no cabeçalho, **"Personalizar…"** abre o mesmo editor numa folha. O menu de contexto do Orb na
   barra lateral também tem "Personalizar…" (`AppModel.showLookEditor`).
 - O editor (`OrbEditor`) tem um palco ao vivo de 144 pt com holofote neutro (clicável, com prévia de
-  cada atividade), categorias em dois grupos (**Corpo**: Cor, Jeito; **Rosto**: Olhos, Boca, Sobrancelhas,
+  cada atividade), categorias em dois grupos (**Corpo**: Cor, Formato, Jeito; **Rosto**: Olhos, Boca, Sobrancelhas,
   Bochechas), miniaturas que enquadram o que mudam (close do rosto para os traços; animam ao passar o mouse),
   **Sortear** (sorteio harmonioso que mantém o jeito, `OrbConfig.random(using:)`), **Pular** e **Desfazer** pelo gerenciador de desfazer da janela
   (`OrbEditUndo`: ⌘Z, ⇧⌘Z e Editar ▸ Desfazer). As categorias quebram em duas linhas quando o editor é estreito.
+  Em Cor, Formato e Olhos, a seção **No app** mostra o Orb em linhas de 24, 32 e 40 pt com o nome (anima sob o ponteiro).
   O VoiceOver lê o visual inteiro do palco (`OrbConfig.summary`).
 - **Palco compacto** (folha Novo Orb, ou o editor com menos de 680 pt de altura): Orb de 112 pt, Sortear,
   Desfazer e Pular no alto, ao lado da cabeça (onde nem o pulo chega), a prévia de atividade num menu no

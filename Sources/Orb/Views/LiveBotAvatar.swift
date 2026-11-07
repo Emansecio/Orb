@@ -18,6 +18,8 @@ struct LiveBotAvatar: View {
     var restsWhenIdle = false
     /// Lives for a few seconds (its entrance, the pointer on it, work), then settles and rests (`SettlingOrb`).
     var settles = false
+    /// Shows the unread-reply dot while the Orb has unread replies. For places that show the Orb without its count.
+    var showsUnread = false
     /// An interactive Orb that rests when idle wakes while the pointer is on it, so its gaze and click still work.
     @State private var hovering = false
 
@@ -29,7 +31,7 @@ struct LiveBotAvatar: View {
         SettlingOrb(idle: settles && activity == .idle, wake: live.poke &+ landing) { settled in
             BotAvatar(orb: orb, size: size, activity: activity, celebration: live.celebration,
                       paused: paused || settled || (restsWhenIdle && activity == .idle && !hovering), ack: live.poke, landing: landing,
-                      cue: live.cue, interactive: interactive)
+                      cue: live.cue, interactive: interactive, badge: showsUnread && live.unread > 0)
         }
         .onHover { if interactive && restsWhenIdle { hovering = $0 } }
     }

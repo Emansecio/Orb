@@ -340,6 +340,9 @@ private struct QuickAskOrbButton: View {
                             .overlay(Circle().strokeBorder(Palette.chrome, lineWidth: 1.5))
                     }
                 }
+                // Over the chip, not in the Orb: an Orb that is not chosen is dimmed, and the dot must not be. The amber
+                // dot above has the corner when the Orb waits for you.
+                .overlay(alignment: .topTrailing) { OrbBadge(show: live.unread > 0 && !live.needsYou, size: 28).padding(3) }
         }
         .buttonStyle(.plain)
         .help(Tip.chooseOrb(named: live.look.name))

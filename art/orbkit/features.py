@@ -46,11 +46,13 @@ class Ctx:
         self.palette_id = config.get("color", "indigo")
         self.palette = PALETTE[self.palette_id]
         light = self.palette_id in LIGHT_PALETTES
-        feature_hex = config.get("feature_color", 0x2A2540 if light else 0xF0EEFF)
+        feature_hex = config.get("feature_color", 0x2A2540 if light else 0xFFFFFF)
+        # Features are solid little pieces sewn onto the plush: lit and shaded, with a coat highlight, not self-lit
+        # stickers. A touch of emission keeps the white white in the shade.
         if light:
             self.feature = plastic(feature_hex, roughness=0.25, coat=0.8, subsurface=0)
         else:
-            self.feature = glow(feature_hex, 1.0)
+            self.feature = plastic(feature_hex, roughness=0.3, coat=0.8, emission=0.55, subsurface=0.2)
         self.ink = plastic(0x2B0F2E, roughness=0.35, coat=0.6, subsurface=0)
         self.tongue = plastic(0xFF7A9C, roughness=0.4, coat=0.4)
         self.mouth_z = -0.1
@@ -69,8 +71,8 @@ def arc(x, z, width, height):
 
 
 def _pill(ctx, x, radius, half, roll=0.0, material=None):
-    eye = capsule(radius, half, 0.018, material or ctx.feature)
-    on_surface(eye, ctx.orb, x, EYE_Z, sink=-0.012, roll=roll)
+    eye = capsule(radius, half, 0.042, material or ctx.feature)
+    on_surface(eye, ctx.orb, x, EYE_Z, sink=-0.02, roll=roll)
     return eye
 
 

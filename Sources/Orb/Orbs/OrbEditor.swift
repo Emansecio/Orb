@@ -14,6 +14,10 @@ struct OrbEditor: View {
     @State private var category: OrbCategory
     @State private var previewActivity: OrbActivity = .idle
     @State private var poke = 0
+    /// The "Aviso" chip: the stage's Orb shows the unread-reply dot.
+    @State private var previewBadge = false
+    /// The look before an eye-size drag began: the whole drag is one undo step.
+    @State private var eyeDragStart: OrbConfig?
     /// The one highlight behind the chosen category slides to the new one through this namespace (both bars).
     @Namespace private var categoryHighlight
     /// Owns this editor's entries in the window's undo manager (dropped when the editor goes away).
@@ -33,7 +37,7 @@ struct OrbEditor: View {
     private let previewActivities: [OrbActivity] = [.idle, .speaking, .thinking, .typing, .browsing, .searching, .waiting, .happy, .error, .sleepy]
 
     /// Categories grouped the way people think about a character.
-    private static let bodyGroup: (title: String, categories: [OrbCategory]) = ("Corpo", [.color, .temperament])
+    private static let bodyGroup: (title: String, categories: [OrbCategory]) = ("Corpo", [.color, .shape, .temperament])
     private static let faceGroup: (title: String, categories: [OrbCategory]) = ("Rosto", [.eyes, .mouth, .brows, .cheeks])
 
     /// The stage's Orb (regular and compact), and the room it needs: a hop with a stretch takes it ~0.3 of its size
@@ -56,8 +60,14 @@ struct OrbEditor: View {
                 categoryBar
                 Divider().overlay(Palette.line)
                 ScrollView {
-                    optionsContent
-                        .padding(16)
+                    VStack(alignment: .leading, spacing: 16) {
+                        // Where the choice shows: color, shape and eye size change how the Orb reads at the app's sizes.
+                        if [.color, .shape, .eyes].contains(category) {
+                            OrbInAppPreview(config: config, name: name)
+                        }
+                        optionsContent
+                    }
+                    .padding(16)
                 }
                 .scrollIndicators(.automatic)
             }
@@ -80,6 +90,7 @@ struct OrbEditor: View {
                 if category == .temperament {
                     temperamentList
                 } else {
+                    if category == .eyes { eyeSizeRow }
                     optionGrid
                 }
                 categoryNote
@@ -99,13 +110,60 @@ struct OrbEditor: View {
         var next = config
         change(&next)
         guard next != config else { return }
-        let binding = $config
         let animation: Animation? = reduceMotion ? nil : .snappy
-        OrbEditUndo.register(undoManager, target: undoTarget, from: config, to: next) { look in
-            withAnimation(animation) { binding.wrappedValue = look }
-        }
+        registerUndo(from: config, to: next)
         withAnimation(animation) { config = next }
         if hop { poke += 1 }
+    }
+
+    private func registerUndo(from old: OrbConfig, to new: OrbConfig) {
+        let binding = $config
+        let animation: Animation? = reduceMotion ? nil : .snappy
+        OrbEditUndo.register(undoManager, target: undoTarget, from: old, to: new) { look in
+            withAnimation(animation) { binding.wrappedValue = look }
+        }
+    }
+
+    // MARK: Eye size
+
+    /// A drag changes the look many times a second without an undo entry each: the entry is made when the drag ends, from
+    /// the look it began with. A change without a drag (the keyboard) is an edit like any other.
+    private var eyeScaleBinding: Binding<Double> {
+        Binding {
+            Double(config.drawnEyeScale)
+        } set: { value in
+            guard value != config.eyeScale else { return }
+            if eyeDragStart == nil { edit(hop: false) { $0.eyeScale = value } } else { config.eyeScale = value }
+        }
+    }
+
+    private var eyeSizeRow: some View {
+        let percent = Int((config.drawnEyeScale * 100).rounded())
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Tamanho dos olhos")
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(Palette.secondary)
+                Spacer(minLength: 8)
+                Text("\(percent) %")
+                    .font(Typography.small)
+                    .monospacedDigit()
+                    .foregroundStyle(Palette.muted)
+            }
+            Slider(value: eyeScaleBinding, in: OrbConfig.eyeScaleRange, step: 0.05) { editing in
+                if editing {
+                    eyeDragStart = config
+                } else if let start = eyeDragStart {
+                    eyeDragStart = nil
+                    if start != config { registerUndo(from: start, to: config) }
+                }
+            }
+            .accessibilityLabel("Tamanho dos olhos")
+            .accessibilityValue("\(percent) por cento")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(Color.white.opacity(0.05), in: .rect(cornerRadius: Radius.card))
     }
 
     private func undo() {
@@ -120,8 +178,8 @@ struct OrbEditor: View {
         let orb = stageOrb, compact = isCompact
         let spot = 230 * orb / Self.stageOrb
         return VStack(spacing: compact ? 8 : 10) {
-            OrbView(config: config, activity: previewActivity, size: orb, poke: poke, interactive: true,
-                    accessibilityText: "Prévia do Orb: \(config.summary). \(previewActivity.label).")
+            OrbView(config: config, activity: previewActivity, size: orb, poke: poke, interactive: true, badge: previewBadge,
+                    popsOnChange: true, accessibilityText: "Prévia do Orb: \(config.summary). \(previewActivity.label).")
                 .background {
                     // A soft neutral spotlight: the satin Orb has no glow of its own to spill around it.
                     // (A circle stretched sideways, so the gradient fades out exactly at its edge.)
@@ -201,6 +259,20 @@ struct OrbEditor: View {
                 .accessibilityLabel("Prévia: \(activity.label)")
                 .accessibilityAddTraits(previewActivity == activity ? .isSelected : [])
             }
+            Button {
+                previewBadge.toggle()
+            } label: {
+                Label("Aviso", systemImage: "bell.badge")
+                    .font(.system(size: 11, weight: .medium))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .foregroundStyle(previewBadge ? Palette.onInk : Palette.secondary)
+                    .background(previewBadge ? Palette.ink : Color.white.opacity(0.07), in: .capsule)
+            }
+            .buttonStyle(.plain)
+            .help("Mostra o ponto de resposta não lida no Orb")
+            .accessibilityLabel("Prévia: aviso de resposta não lida")
+            .accessibilityAddTraits(previewBadge ? .isSelected : [])
         }
         .padding(.horizontal, 16)
     }
@@ -215,6 +287,8 @@ struct OrbEditor: View {
             }
             .pickerStyle(.inline)
             .labelsHidden()
+            Divider()
+            Toggle("Aviso de resposta não lida", isOn: $previewBadge)
         } label: {
             Label(previewActivity.label, systemImage: previewActivity.symbol)
                 .font(.system(size: 11, weight: .medium))
@@ -458,6 +532,67 @@ private extension View {
     }
 }
 
+/// The Orb as the app shows it: sidebar-style rows at 24, 32 and 40 pt with its name and the size. A row's Orb moves
+/// while the pointer is over it, like an option's.
+private struct OrbInAppPreview: View {
+    let config: OrbConfig
+    let name: String
+
+    private static let sizes: [CGFloat] = [24, 32, 40]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("No app")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Palette.faint)
+                .padding(.leading, 2)
+                .accessibilityAddTraits(.isHeader)
+            // Side by side when they fit; otherwise one under the other.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { rows }
+                VStack(spacing: 4) { rows }
+            }
+        }
+    }
+
+    @ViewBuilder private var rows: some View {
+        ForEach(Self.sizes, id: \.self) { size in
+            Row(config: config, name: name.isEmpty ? "Seu Orb" : name, size: size)
+        }
+    }
+
+    private struct Row: View {
+        let config: OrbConfig
+        let name: String
+        let size: CGFloat
+        @State private var isHovering = false
+
+        var body: some View {
+            HStack(spacing: 8) {
+                OrbView(config: config, size: size, animated: isHovering, followsPointer: false, popsOnChange: true)
+                    .frame(width: 40, height: 40)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(name)
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(Palette.ink)
+                        .lineLimit(1)
+                    Text("\(Int(size)) pt")
+                        .font(Typography.small)
+                        .foregroundStyle(Palette.muted)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.white.opacity(0.05), in: .rect(cornerRadius: Radius.card))
+            .onHover { isHovering = $0 }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(name) com \(Int(size)) pontos")
+        }
+    }
+}
+
 private struct OptionCell: View {
     /// What the thumbnail shows: the whole Orb (colors) or a close-up of the face (eyes, mouth…).
     enum Framing {
@@ -466,7 +601,7 @@ private struct OptionCell: View {
         init(_ category: OrbCategory) {
             switch category {
             case .eyes, .mouth, .brows, .cheeks: self = .face
-            case .color, .temperament: self = .whole
+            case .color, .shape, .temperament: self = .whole
             }
         }
     }

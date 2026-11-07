@@ -95,6 +95,9 @@ final class OrbAnimationView: NSView {
     private var followsPointer = true
     private var interactive = false
     private var live = true
+    /// The eyes' size and the face's shift for the body shape, read from the config when it changes (not per frame).
+    private var eyeScale: CGFloat = 1
+    private var faceOffset = CGSize.zero
     var lastPoke = 0
     var lastAck = 0
     var lastLanding = 0
@@ -250,8 +253,14 @@ final class OrbAnimationView: NSView {
     func configure(config: OrbConfig, activity: OrbActivity, celebration: OrbCelebration = .big, size: CGFloat,
                    showsBubble: Bool? = nil, followsPointer: Bool, interactive: Bool, live: Bool) {
         let resized = size != self.size, restyled = config != self.config
+        // The eyes' size is a slider that sends many configs: it moves layers, so it needs no new bitmaps.
+        let relooked = config.appearance != self.config.appearance
         let resumed = live && !self.live
         self.config = config
+        if restyled {
+            eyeScale = config.drawnEyeScale
+            faceOffset = config.faceOffset
+        }
         self.activity = activity
         self.celebration = celebration
         self.size = size
@@ -269,10 +278,10 @@ final class OrbAnimationView: NSView {
             appliedTemperament = config.temperament
         }
         if resized || restyled {
-            visemeImages = [:]
+            if relooked || resized { visemeImages = [:] }
             rebuild(resize: resized)
         }
-        if resized || restyled || resumed { prewarmExpressions() }
+        if resized || relooked || resumed { prewarmExpressions() }
         updateBlinkFactor()
         syncActivity(at: now)
         if resumed { liven(at: now) }
@@ -375,7 +384,8 @@ final class OrbAnimationView: NSView {
     }
 
     /// Features that change with the expression: a new one replaces the old in the same view.
-    private static let swapsInPlace: Set<OrbLayer.Kind> = [.eyes, .mouth, .brows]
+    /// The body too: another color or shape crossfades on the same view instead of fading in from nothing.
+    private static let swapsInPlace: Set<OrbLayer.Kind> = [.body, .eyes, .mouth, .brows]
 
     private static func fade(_ duration: CFTimeInterval) -> CATransition {
         let fade = CATransition()
@@ -419,7 +429,7 @@ final class OrbAnimationView: NSView {
             let reusable = resize ? [] : Set(placed.map(\.layer))
             let needed = layers.filter { !reusable.contains($0) }
             // Hold the cached bitmaps through the rebuild: memory pressure may evict them between lookup and placement.
-            for item in needed { images[item] = OrbImages.cached(item.path, pixels: side * scale) }
+            for item in needed { images[item] = OrbImages.cached(item, pixels: side * scale) }
             if images.count < needed.count {
                 needsResize = resize
                 let request = imageRequest
@@ -485,6 +495,8 @@ final class OrbAnimationView: NSView {
                 view.bounds = CGRect(x: 0, y: 0, width: side, height: side)
                 if item.kind == .eyes { view.anchorPoint = CGPoint(x: 0.5, y: 1 - OrbGeometry.eyeLine) }
                 if item.kind == .mouth { view.anchorPoint = CGPoint(x: 0.5, y: 1 - OrbGeometry.mouthLine) }
+                // The brows scale with the eyes, about the same center.
+                if item.kind == .brows { view.anchorPoint = CGPoint(x: 0.5, y: 1 - OrbGeometry.eyeLine) }
                 if fades && !fadesWhole { view.add(Self.appear(0.18), forKey: "swap") }
                 return Placed(layer: item, view: view)
             }
@@ -963,20 +975,26 @@ final class OrbAnimationView: NSView {
             var dx = pose.look.x * depth, dy = pose.look.y * depth
             switch item.layer.kind {
             case .eyes:
-                dx += pose.eyeLead.x
-                dy += pose.eyeLead.y + 0.006 * eyeTalk
+                dx += pose.eyeLead.x + faceOffset.width
+                dy += pose.eyeLead.y + 0.006 * eyeTalk - faceOffset.height
                 view.position = CGPoint(x: mid + dx * size, y: side * (1 - OrbGeometry.eyeLine) + dy * size)
-                view.transform = CATransform3DMakeScale(1, max(0.08, 1 - pose.blink - 0.14 * eyeTalk), 1)
+                view.transform = CATransform3DMakeScale(eyeScale, eyeScale * max(0.08, 1 - pose.blink - 0.14 * eyeTalk), 1)
+            case .brows:
+                view.position = CGPoint(x: mid + (dx + faceOffset.width) * size,
+                                        y: side * (1 - OrbGeometry.eyeLine) + (dy - faceOffset.height) * size)
+                view.transform = CATransform3DMakeScale(eyeScale, eyeScale, 1)
             case .mouth:
-                view.position = CGPoint(x: mid + dx * size, y: side * (1 - OrbGeometry.mouthLine) + dy * size)
+                view.position = CGPoint(x: mid + (dx + faceOffset.width) * size,
+                                        y: side * (1 - OrbGeometry.mouthLine) + (dy - faceOffset.height) * size)
                 showViseme(pose.viseme, on: view)
                 // The new shape starts from the jaw's current opening and springs into place.
                 let stretch = 1 + 0.25 * traits.mouthOpening * (pose.talk - (pose.viseme?.opening ?? 0))
                 view.transform = CATransform3DMakeScale(1, min(1.5, max(0.6, stretch)), 1)
             default:
                 if depth != 0 || freshLayers {
-                    // The body (depth 0) never moves inside the orb: placed once, not every frame.
-                    view.position = CGPoint(x: mid + dx * size, y: mid + dy * size)
+                    // The body (depth 0) never moves inside the orb: placed once, not every frame. The cheeks go with the face.
+                    let face = item.layer.kind == .body ? CGSize.zero : faceOffset
+                    view.position = CGPoint(x: mid + (dx + face.width) * size, y: mid + (dy - face.height) * size)
                 }
             }
         }

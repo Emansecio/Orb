@@ -436,18 +436,23 @@ def face_parting(root, normal, margin=0.085):
     return near, away
 
 
-def add_fur(orb, hair_mat, count=800000, steps=10, strand_color=None):
+def add_fur(orb, hair_mat, count=800000, steps=10, strand_color=None, surface=None):
     """Plush coat as real curves, built strand by strand: each strand leans a little in its own direction (with only
     a faint downward comb), curls softly, barely clumps and frizzes at the tip. Straight radial strands read as a
-    plasma ball; strongly combed ones as an animal pelt; a plush toy is in between, dense, soft and fuzzy-tipped."""
+    plasma ball; strongly combed ones as an animal pelt; a plush toy is in between, dense, soft and fuzzy-tipped.
+    `surface(count, rng)` returns (root, normal) for bodies that aren't the scaled sphere (art/pelucia.py shapes)."""
     count = FUR_DENSITY.get("count", count)
     rng = np.random.default_rng(11)
-    scale = np.array(orb.scale, dtype=np.float64)
-    unit = rng.normal(size=(count, 3))
-    unit /= np.linalg.norm(unit, axis=1, keepdims=True)
-    root = unit * scale
-    normal = unit / scale
-    normal /= np.linalg.norm(normal, axis=1, keepdims=True)
+    if surface is not None:
+        root, normal = surface(count, rng)
+        count = len(root)
+    else:
+        scale = np.array(orb.scale, dtype=np.float64)
+        unit = rng.normal(size=(count, 3))
+        unit /= np.linalg.norm(unit, axis=1, keepdims=True)
+        root = unit * scale
+        normal = unit / scale
+        normal /= np.linalg.norm(normal, axis=1, keepdims=True)
 
     # Flow: combed downward, bent by slow swirls; projected on the surface.
     swirl = np.stack([noise_field(root, 2.2, rng) for _ in range(3)], axis=1)

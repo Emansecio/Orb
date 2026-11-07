@@ -253,7 +253,7 @@ struct BotInspector: View {
     private func header(_ bot: Bot) -> some View {
         let summary = AppearanceSummary.text(for: bot.orb)
         return HStack(alignment: .top, spacing: 12) {
-            LiveBotAvatar(botID: bot.id, orb: bot.orb, size: 46, interactive: true, restsWhenIdle: true) // the only part that follows the activity
+            LiveBotAvatar(botID: bot.id, orb: bot.orb, size: 46, interactive: true, restsWhenIdle: true, showsUnread: true) // the only part that follows the activity
             VStack(alignment: .leading, spacing: 3) {
                 // The name and role fade into the other Orb's, as the content below does.
                 ZStack(alignment: .leading) {

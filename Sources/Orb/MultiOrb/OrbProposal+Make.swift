@@ -117,7 +117,7 @@ extension OrbProposal {
     static func look(from value: JSONValue?, catalog: OrbCatalog = .shared) -> OrbConfig {
         var config = OrbConfig.random()
         guard let value, case .object = value else { return config }
-        let singles: [(String, OrbCategory)] = [("color", .color), ("eyes", .eyes), ("mouth", .mouth), ("brows", .brows),
+        let singles: [(String, OrbCategory)] = [("color", .color), ("shape", .shape), ("eyes", .eyes), ("mouth", .mouth), ("brows", .brows),
                                                 ("cheeks", .cheeks)]
         for (key, category) in singles {
             guard let id = value[key]?.string, catalog.ids(category).contains(id) else { continue }

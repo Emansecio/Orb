@@ -74,7 +74,7 @@ struct OrbDesignTests {
         }
         #expect(try JSONDecoder().decode(OrbConfig.self, from: Data(saved.utf8)) == old)
         // The editor and the catalog offer none of them, and the art is gone.
-        #expect(OrbCategory.allCases.map(\.rawValue) == ["color", "temperament", "eyes", "mouth", "brows", "cheeks"])
+        #expect(OrbCategory.allCases.map(\.rawValue) == ["color", "shape", "temperament", "eyes", "mouth", "brows", "cheeks"])
         let root = try #require(catalog.root)
         for folder in ["hair", "accessories"] {
             #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent(folder).path), "\(folder)")

@@ -364,4 +364,29 @@ extension OrbDriverTests {
         view.cueNow(.blink)
         #expect(!view.isCueBlinking)
     }
+
+    @Test func theEyesAndBrowsScaleAboutTheEyeCenterWithoutNewBitmaps() async throws {
+        try #require(NSScreen.main != nil)
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 300))
+        let view = OrbAnimationView(frame: NSRect(x: 40, y: 40, width: 120, height: 120))
+        var look = OrbConfig(eyes: "ovais", brows: "retas")
+        look.eyeScale = 1.3
+        view.configure(config: look, activity: .idle, size: 41, followsPointer: false, interactive: false, live: false)
+        content.addSubview(view)
+        let win = placementWindow(content)
+        defer { closePlacement(win) }
+        await waitUntil("the first layers") { view.placedLayerCount > 0 }
+        let eyes = try #require(layers(view, .eyes).first), brows = try #require(layers(view, .brows).first)
+        #expect(abs(eyes.transform.m11 - 1.3) < 1e-6 && abs(eyes.transform.m22 - 1.3) < 1e-6)
+        #expect(abs(brows.transform.m11 - 1.3) < 1e-6 && abs(brows.transform.m22 - 1.3) < 1e-6)
+        // Both pivot on the eye line, so the brows keep their distance from the eyes' center.
+        #expect(eyes.anchorPoint.y == 1 - OrbGeometry.eyeLine && brows.anchorPoint.y == 1 - OrbGeometry.eyeLine)
+        // Only the size changes: the same views stand, scaled again, and a size outside the range is held to it.
+        look.eyeScale = 5
+        view.configure(config: look, activity: .idle, size: 41, followsPointer: false, interactive: false, live: false)
+        #expect(layers(view, .eyes).first === eyes && abs(eyes.transform.m11 - 1.4) < 1e-6)
+        look.eyeScale = 1
+        view.configure(config: look, activity: .idle, size: 41, followsPointer: false, interactive: false, live: false)
+        #expect(eyes.transform.m11 == 1 && brows.transform.m11 == 1)
+    }
 }

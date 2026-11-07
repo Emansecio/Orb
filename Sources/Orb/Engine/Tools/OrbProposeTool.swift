@@ -5,7 +5,7 @@ import Foundation
 struct OrbProposeTool: AgentTool {
     static let name = "orb_propose"
     static let instructionsLimit = 1_500
-    static let looks = ["color", "eyes", "mouth", "brows", "cheeks"]
+    static let looks = ["color", "shape", "eyes", "mouth", "brows", "cheeks"]
 
     let spec = ToolSpec(
         name: OrbProposeTool.name,
@@ -21,7 +21,9 @@ struct OrbProposeTool: AgentTool {
                                      "description": .string("Only what the role needs: each adds tools to every request. Empty: all of yours."),
                                      "items": .object(["type": .string("string"),
                                                        "enum": .array(["terminal", "browser", "computerUse"].map(JSONValue.string))])]),
-            "look": JSONValue.schema(Dictionary(uniqueKeysWithValues: OrbProposeTool.looks.map { ($0, JSONValue.property("string")) })),
+            "look": JSONValue.schema(Dictionary(uniqueKeysWithValues: OrbProposeTool.looks.map {
+                ($0, $0 == "shape" ? JSONValue.property("string", "Body shape; default round.") : JSONValue.property("string"))
+            })),
             "reason": .property("string", "Why, in one sentence."),
         ], required: ["name", "role", "instructions"]))
 
