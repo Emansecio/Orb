@@ -34,7 +34,7 @@ import Testing
     // MARK: The profile
 
     @Test func theProfileHoldsOnlyWhoTheOrbWas() throws {
-        let profile = KeptProfile(name: "Atlas", role: "Cuida da agenda", orb: OrbConfig(color: "rosa", eyes: "ovais", hair: "coque"))
+        let profile = KeptProfile(name: "Atlas", role: "Cuida da agenda", orb: OrbConfig(color: "rosa", eyes: "ovais"))
         let object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(profile)) as? [String: Any])
         #expect(Set(object.keys) == ["version", "name", "role", "orb"]) // no permissions, mode, folder or secrets
         #expect(try JSONDecoder().decode(KeptProfile.self, from: JSONEncoder().encode(profile)) == profile)
@@ -44,7 +44,7 @@ import Testing
         let library = MemoryLibrary(root: memoryRoot)
         let id = UUID()
         await Self.makeMemory(id, library: library)
-        let profile = KeptProfile(name: "Atlas", role: "Cuida da agenda", orb: OrbConfig(color: "rosa", eyes: "ovais", hair: "coque"))
+        let profile = KeptProfile(name: "Atlas", role: "Cuida da agenda", orb: OrbConfig(color: "rosa", eyes: "ovais"))
 
         let kept = try #require(library.keep(id, name: "Atlas", profile: profile, now: date(2026, 10, 8, 12, 30)))
 

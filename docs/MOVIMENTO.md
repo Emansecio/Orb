@@ -283,7 +283,7 @@ Só usa tokens que já existem; o fundo é estático (um gradiente desenhado uma
   (`Motion.hover`); pressionado, escala 0,97 em `Motion.press`.
 - **Reduzir movimento.** Tudo entra junto em `Motion.fade` (0,15 s), sem queda nem pulos. Os Orbs ficam estáticos (o `OrbView`
   já faz); a comemoração vira só o rosto `.happy` parado por 3 s; o botão não anima no hover nem ao pressionar; a troca cartão → ações é só opacidade.
-- **VoiceOver.** O herói é uma imagem ("Três Orbs sorrindo: Atlas, de óculos, no meio; Lia, com um laço; Bento, com fones"); a ordem de
+- **VoiceOver.** O herói é uma imagem ("Três Orbs sorrindo: Atlas no meio, Lia e Bento ao lado"); a ordem de
   leitura é título, subtítulo, os três pontos, cartão ou botão, alternativa e memórias. Ao conectar o modelo é anunciado "Pronto. Agora
   crie seu primeiro Orb." e o foco vai para o botão principal.
 - **Abrir o app já com modelo.** `model.connected` só é preenchido por `refreshConnections` (Keychain, ChatGPT, `claude auth status`),

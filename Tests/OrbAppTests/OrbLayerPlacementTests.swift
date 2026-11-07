@@ -3,8 +3,8 @@ import QuartzCore
 import Testing
 @testable import Orb
 
-/// Where the live orb puts its layers when it is rebuilt: the body (placed only then) and the loose layers (hair and
-/// headphones, rotated only when their swing changes), with real views in a real window. Part of `OrbDriverTests` so it runs
+/// Where the live orb puts its layers when it is rebuilt: the body (placed only then) and the features, with real views
+/// in a real window. Part of `OrbDriverTests` so it runs
 /// serialized with it: every orb on a screen shares one driver, and those tests count its orbs.
 extension OrbDriverTests {
     private func placementWindow(_ content: NSView) -> NSWindow {
@@ -32,7 +32,7 @@ extension OrbDriverTests {
         try #require(NSScreen.main != nil)
         let content = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 300))
         let view = OrbAnimationView(frame: NSRect(x: 40, y: 40, width: 120, height: 120))
-        let look = OrbConfig(hair: "franja")
+        let look = OrbConfig(cheeks: "blush")
         view.configure(config: look, activity: .idle, size: 33, followsPointer: false, interactive: false, live: false)
         content.addSubview(view)
         let win = placementWindow(content)
@@ -51,7 +51,7 @@ extension OrbDriverTests {
         try #require(NSScreen.main != nil)
         let content = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 300))
         let view = OrbAnimationView(frame: NSRect(x: 40, y: 40, width: 120, height: 120))
-        let look = OrbConfig(hair: "franja")
+        let look = OrbConfig(cheeks: "blush")
         view.configure(config: look, activity: .idle, size: 31, followsPointer: false, interactive: false, live: false)
         content.addSubview(view)
         let win = placementWindow(content)
@@ -113,22 +113,6 @@ extension OrbDriverTests {
             let width = (layers(view, .mouth).first?.contents as! CGImage?)?.width
             #expect(width == wide)
         }
-    }
-
-    @Test func aBigHairdoDoesNotHideTheBubble() async throws {
-        // An afro shrinks the Orb inside its 30 pt sidebar box below the bubble's size: the box decides, not the Orb.
-        try #require(NSScreen.main != nil)
-        let look = OrbConfig(hair: "black-power")
-        let shrunk = (30 * OrbFootprint.fit(look).scale).rounded()
-        try #require(shrunk < OrbGeometry.bubbleBox)
-        let content = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 300))
-        let view = OrbAnimationView(frame: NSRect(x: 40, y: 40, width: 60, height: 60))
-        view.configure(config: look, activity: .waiting, size: shrunk, showsBubble: true, followsPointer: false,
-                       interactive: false, live: false)
-        content.addSubview(view)
-        let win = placementWindow(content)
-        defer { closePlacement(win) }
-        await waitUntil("the question mark") { view.isBubbleShown }
     }
 
     @Test func aRestingOrbShowsTheBubbleOfItsNewActivity() async throws {
@@ -379,37 +363,5 @@ extension OrbDriverTests {
         #expect(!view.isRunning)
         view.cueNow(.blink)
         #expect(!view.isCueBlinking)
-    }
-
-    @Test func looseLayersHangFromTheCrownAndSwingTogetherAfterARebuild() async throws {
-        try #require(NSScreen.main != nil)
-        let content = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 300))
-        let view = OrbAnimationView(frame: NSRect(x: 40, y: 40, width: 120, height: 120))
-        let tail = OrbConfig(hair: "rabo-de-cavalo")
-        view.configure(config: tail, activity: .happy, size: 64, followsPointer: false, interactive: false, live: true)
-        content.addSubview(view)
-        let win = placementWindow(content)
-        defer { closePlacement(win) }
-        await waitUntil("the hair placed") { !layers(view, .hair).isEmpty }
-        // Hop for a while, so the hair swings.
-        var time = CACurrentMediaTime()
-        for _ in 0..<45 {
-            time += 1.0 / 30
-            view.stepIfDue(at: time)
-        }
-        // Headphones join the loose layers: a rebuild in the middle of the swing.
-        view.configure(config: OrbConfig(hair: "rabo-de-cavalo", accessories: ["fones"]), activity: .happy, size: 64,
-                       followsPointer: false, interactive: false, live: true)
-        await waitUntil("the headphones placed") { !layers(view, .accessory).isEmpty }
-        time += 1.0 / 30
-        view.stepIfDue(at: time)
-        let loose = view.placedLayersForTesting.filter { $0.layer.isLoose }.map(\.view)
-        #expect(loose.count == 3)   // hair, its shine, the headphones
-        let crown = 1 - OrbGeometry.crownLine
-        #expect(loose.allSatisfy { abs($0.anchorPoint.y - crown) < 1e-9 && $0.anchorPoint.x == 0.5 })
-        let first = try #require(loose.first).transform
-        #expect(loose.allSatisfy { CATransform3DEqualToTransform($0.transform, first) })
-        // The rest of the face doesn't swing.
-        #expect(layers(view, .eyes).allSatisfy { $0.anchorPoint.y == 1 - OrbGeometry.eyeLine })
     }
 }

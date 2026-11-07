@@ -137,7 +137,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 OrbBench.run(arguments: Array(arguments.dropFirst(flag + 2)))
                 return
             }
-            // `Orb --render-orbs out.png cabelos`: one of the design-review sheets (`OrbDesignSheet.names`).
+            // `Orb --render-orbs out.png olhos`: one of the design-review sheets (`OrbDesignSheet.names`).
             if arguments.indices.contains(flag + 2) {
                 let rendered = OrbDesignSheet.render(arguments[flag + 2], to: URL(fileURLWithPath: arguments[flag + 1]))
                 if !rendered { FileHandle.standardError.write(Data("folhas: \(OrbDesignSheet.names.joined(separator: ", "))\n".utf8)) }
@@ -281,12 +281,12 @@ enum OrbSheet {
     static func render(to url: URL) {
         let activities: [OrbActivity] = [.idle, .speaking, .thinking, .typing, .searching, .waiting, .happy, .error, .sleepy]
         let orbs = AppState.initial.bots.map(\.orb) + [
-            OrbConfig(color: "rosa", eyes: "ovais", cheeks: "blush", hair: "tufinho"),
-            OrbConfig(color: "grafite", eyes: "pilulas", brows: "retas", accessories: ["fones"]),
-            OrbConfig(color: "menta", eyes: "felizes", mouth: "sorriso", cheeks: "sardas", accessories: ["oculos-redondos"]),
-            OrbConfig(color: "sol", eyes: "pontos", mouth: "sorrisao", hair: "espetado"),
-            OrbConfig(color: "noite", eyes: "pilulas", hair: "topete", accessories: ["oculos-sol"]),
-            OrbConfig(color: "perola", eyes: "pilulas", cheeks: "blush", accessories: ["monoculo"]),
+            OrbConfig(color: "rosa", eyes: "ovais", cheeks: "blush"),
+            OrbConfig(color: "grafite", eyes: "pilulas", brows: "retas"),
+            OrbConfig(color: "menta", eyes: "felizes", mouth: "sorriso", cheeks: "sardas"),
+            OrbConfig(color: "sol", eyes: "pontos", mouth: "sorrisao"),
+            OrbConfig(color: "noite", eyes: "pilulas", brows: "arqueadas"),
+            OrbConfig(color: "perola", eyes: "pilulas", cheeks: "blush"),
         ]
         let sheet = VStack(alignment: .leading, spacing: 22) {
             HStack(spacing: 20) {
@@ -392,9 +392,8 @@ enum Snapshot {
         case "menubar-icons": AnyView(SystemSnapshots.menuBarIcons())
         case "editor": AnyView(OrbEditor(config: .constant(AppState.initial.bots[0].orb), name: "Atlas", category: .temperament))
         case let screen where screen.hasPrefix("editor-"):
-            // `editor-hair`, `editor-eyes`…: the editor on one category, with a look that has hair and headphones.
-            AnyView(OrbEditor(config: .constant(OrbConfig(color: "rosa", eyes: "ovais", mouth: "sorriso", cheeks: "blush",
-                                                          hair: "chiquinhas", accessories: ["fones"])),
+            // `editor-eyes`, `editor-mouth`…: the editor on one category.
+            AnyView(OrbEditor(config: .constant(OrbConfig(color: "rosa", eyes: "ovais", mouth: "sorriso", cheeks: "blush")),
                               name: "Lia", category: OrbCategory(rawValue: String(screen.dropFirst(7))) ?? .color)
                 .frame(width: 540))
         case let name where name.hasPrefix("transcript"):

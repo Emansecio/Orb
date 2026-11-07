@@ -1,6 +1,6 @@
 import Foundation
 
-/// Seats the flat feature layers (eyes, mouths, brows, visemes, accessories rendered by Blender, kept in
+/// Seats the flat feature layers (eyes, mouths, brows, visemes, cheeks rendered by Blender, kept in
 /// `art/orbgen/flat/`) on the lit body: each gets a soft contact shadow cast away from the key light, limited to the
 /// head, so it reads as part of the 3D object instead of a sticker. The original pixels stay on top, untouched.
 enum Decals {
@@ -16,34 +16,21 @@ enum Decals {
         "brows": Look(offset: (2, 4), blur: 2.5, opacity: 0.26),
         "mouth": Look(offset: (2, 4), blur: 3, opacity: 0.28),
         "visemes": Look(offset: (2, 4), blur: 3, opacity: 0.28),
-        "accessories": Look(offset: (5, 9), blur: 6, opacity: 0.32),
     ]
 
-    /// Layers the app tints by multiplying (the headphones) keep no shadow: the multiply would turn
-    /// a translucent dark shadow into a translucent tinted glow. They are copied as they are.
     static func run(flat: URL, resources: URL, only: Set<String>) throws {
         let fm = FileManager.default
-        let tinted = try tintedAccessories(resources)
         let categories = Set(looks.keys).union(["cheeks"])
         for category in categories.sorted() where only.isEmpty || only.contains(category) {
             let folder = flat.appendingPathComponent(category)
             guard let files = try? fm.contentsOfDirectory(atPath: folder.path) else { continue }
             for file in files.sorted() where file.hasSuffix(".png") {
                 let source = try Canvas.read(folder.appendingPathComponent(file))
-                let id = String(file.dropLast(4))
-                let skip = category == "accessories" && tinted.contains(id)
-                let out = looks[category].flatMap { skip ? nil : seat(source, look: $0) } ?? source
+                let out = looks[category].map { seat(source, look: $0) } ?? source
                 try out.writePNG(to: resources.appendingPathComponent("\(category)/\(file)"))
             }
             print("traços", category, files.filter { $0.hasSuffix(".png") }.count)
         }
-    }
-
-    private static func tintedAccessories(_ resources: URL) throws -> Set<String> {
-        let url = resources.appendingPathComponent("options.json")
-        guard let data = try? Data(contentsOf: url),
-              let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw ArtError.read(url.path) }
-        return Set(json["tintedAccessories"] as? [String] ?? [])
     }
 
     static func seat(_ source: Canvas, look: Look) -> Canvas {

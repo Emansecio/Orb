@@ -386,8 +386,8 @@ struct OrbDriverTests {
     // MARK: Whole sets only
 
     @Test func theCanvasNeverDrawsAPartOfASet() async {
-        let body = OrbLayer(kind: .body, path: "body/perola", tint: nil)
-        let eyes = OrbLayer(kind: .eyes, path: "eyes/pontos", tint: nil)
+        let body = OrbLayer(kind: .body, path: "body/perola")
+        let eyes = OrbLayer(kind: .eyes, path: "eyes/pontos")
         let wanted = OrbFrame.Bitmaps(layers: [body, eyes], pixels: 161)
         guard !OrbImages.decodesSynchronously else { return }
         func layers(_ drawn: [OrbFrame.Drawn]) -> [OrbLayer] { drawn.map(\.layer) }
@@ -410,8 +410,8 @@ struct OrbDriverTests {
     }
 
     @Test func aStillOrbKeepsItsFaceWhenTheCacheDropsItsBitmaps() async throws {
-        let body = OrbLayer(kind: .body, path: "body/perola", tint: nil)
-        let eyes = OrbLayer(kind: .eyes, path: "eyes/pontos", tint: nil)
+        let body = OrbLayer(kind: .body, path: "body/perola")
+        let eyes = OrbLayer(kind: .eyes, path: "eyes/pontos")
         guard !OrbImages.decodesSynchronously else { return }
         // A pixel size no other test draws, so evicting does not disturb them.
         let wanted = OrbFrame.Bitmaps(layers: [body, eyes], pixels: 163)
@@ -427,7 +427,7 @@ struct OrbDriverTests {
         #expect(drawn.allSatisfy { $0.image != nil })
 
         // A different expression asked for while they are gone: still the last whole face, never a part of anything.
-        let smiling = OrbFrame.Bitmaps(layers: [body, OrbLayer(kind: .eyes, path: "eyes/felizes", tint: nil)], pixels: 163)
+        let smiling = OrbFrame.Bitmaps(layers: [body, OrbLayer(kind: .eyes, path: "eyes/felizes")], pixels: 163)
         #expect(OrbFrame.drawable(wanted: smiling, complete: complete).map(\.layer) == [body, eyes])
         #expect(OrbFrame.drawable(wanted: smiling, complete: nil).isEmpty)
     }

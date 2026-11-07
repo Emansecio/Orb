@@ -44,7 +44,7 @@ struct AppState: Codable, Sendable {
     /// A state with Atlas ready, for tests and the developer modes' sample data.
     static let initial: AppState = {
         let atlas = Bot(name: "Atlas", role: "Assistente do seu Mac",
-                        orb: OrbConfig(color: "indigo", eyes: "pilulas", mouth: "sorriso", accessories: ["oculos-redondos"]))
+                        orb: OrbConfig(color: "indigo", eyes: "pilulas", mouth: "sorriso"))
         return AppState(bots: [atlas], skills: Skill.starters(scopedTo: [atlas.id]))
     }()
 }

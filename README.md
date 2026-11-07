@@ -51,7 +51,7 @@ Tudo que mexe nas suas coisas passa por você: **Permitir** só aquela vez, só 
 ### Crie um Orb conversando
 
 Conte para que você quer ajuda e ele monta o resto: nome, papel, instruções e o que pode fazer.<br>
-Depois escolha a cara dele, com cor, olhos, boca, cabelo e acessórios.
+Depois escolha a cara dele, com cor, olhos, boca, sobrancelhas e bochechas.
 
 <img src="docs/readme/create.png" width="49%" alt="Criar um Orb conversando: o assistente pergunta e a prévia se monta ao lado"> <img src="docs/readme/appearance.png" width="49%" alt="Aparência do Orb: grade de cores com a prévia em cima">
 

@@ -387,7 +387,7 @@ struct SchedulePermissionTests {
     /// A model with two Orbs, Atlas (the one asking) and Lia.
     @MainActor private func setUp() -> (AppModel, Bot, Bot) {
         var state = AppState.initial
-        state.bots.append(Bot(name: "Lia", role: "Outra", orb: OrbConfig(color: "rosa", eyes: "pilulas", mouth: "sorriso", accessories: [])))
+        state.bots.append(Bot(name: "Lia", role: "Outra", orb: OrbConfig(color: "rosa", eyes: "pilulas", mouth: "sorriso")))
         Store(directory: root).save(state)
         Store(directory: root).flush()
         let model = AppModel(store: Store(directory: root), runsBackgroundWork: false)

@@ -14,7 +14,7 @@ enum SidebarCategorySnapshots {
         let support = Bot(name: "Atendente AcessosFit", role: "Atende clientes no WhatsApp", orb: OrbConfig(color: "ceu", eyes: "ovais", mouth: "sorriso"))
         let campaign = Bot(name: "Gestor de Campanha", role: "Revisa a campanha", orb: OrbConfig(color: "lavanda", eyes: "pontos", mouth: "sorriso"))
         let research = Bot(name: "Pesquisador", role: "Pesquisa na web", orb: WelcomeLooks.bento)
-        let review = Bot(name: "Revisor", role: "Revisa textos", orb: OrbConfig(color: "grafite", eyes: "pilulas", brows: "retas", accessories: ["fones"]))
+        let review = Bot(name: "Revisor", role: "Revisa textos", orb: OrbConfig(color: "grafite", eyes: "pilulas", brows: "retas"))
         model.bots = [loose, landing, support, campaign, research, review]
         model.categories = [
             SidebarCategory(name: "AcessosFit", botIDs: [support.id, landing.id, campaign.id]),

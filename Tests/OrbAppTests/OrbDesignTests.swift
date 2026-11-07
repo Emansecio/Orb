@@ -1,36 +1,24 @@
 import Foundation
 import CoreGraphics
-import ImageIO
 import Testing
 @testable import Orb
 
-/// The redesigned art and motion: saved Orbs keep loading, every combination finds its images, hair follows the
-/// body, and the one-shot reactions calm down.
+/// The redesigned art and motion: saved Orbs keep loading, every combination finds its images, and the one-shot
+/// reactions calm down.
 struct OrbDesignTests {
     private let catalog = OrbCatalog.shared
 
     // MARK: Saved Orbs
 
-    @Test func everyHairStyleSavedBeforeTheRedesignStillExists() throws {
-        // The ids options.json had before: none may vanish (saved Orbs point at them).
-        for id in ["nenhum", "topete", "tufinho", "franja", "cachos", "coque", "moicano", "antena"] {
-            #expect(catalog.options(.hair).contains { $0.id == id }, "\(id)")
-            let json = #"{"color":"rosa","eyes":"ovais","hair":"\#(id)","hairColor":5913378,"accessories":["fones"]}"#
-            let config = try JSONDecoder().decode(OrbConfig.self, from: Data(json.utf8))
-            #expect(config.hair == id && config.hairColor == 0x5A3B22 && config.accessories == ["fones"])
-        }
-    }
-
     @Test func unknownOptionsDrawAsDefaultsButStaySaved() throws {
         // A look saved by a newer build: what this build doesn't know draws as the default…
-        let json = #"{"color":"marte","eyes":"laser","mouth":"sorriso","hair":"careca-brilhante","accessories":["jetpack","fones"],"autoColors":2}"#
+        let json = #"{"color":"marte","eyes":"laser","mouth":"sorriso","brows":"monocelha"}"#
         let config = try JSONDecoder().decode(OrbConfig.self, from: Data(json.utf8))
         let paths = config.layers().map(\.path)
         #expect(paths.contains("body/indigo") && paths.contains("eyes/pilulas") && paths.contains("mouth/sorriso"))
-        #expect(!paths.contains { $0.hasPrefix("hair/") })
-        #expect(paths.filter { $0.hasPrefix("accessories/") } == ["accessories/fones"])
+        #expect(!paths.contains { $0.hasPrefix("brows/") })
         // …but the saved look keeps its ids, so going back to the newer build loses nothing.
-        #expect(config.color == "marte" && config.hair == "careca-brilhante" && config.accessories == ["jetpack", "fones"])
+        #expect(config.color == "marte" && config.eyes == "laser" && config.brows == "monocelha")
         let again = try JSONDecoder().decode(OrbConfig.self, from: JSONEncoder().encode(config))
         #expect(again == config)
     }
@@ -44,50 +32,17 @@ struct OrbDesignTests {
 
     @Test func renamedOptionsMapToTheirSuccessor() {
         var old = OrbConfig()
-        old.hair = "cachinhos-antigos"
-        old.accessories = ["lupa-velha", "fones", "lupa-velha"]
-        let renamed: [OrbCategory: [String: String]] = [.hair: ["cachinhos-antigos": "cachos"], .accessories: ["lupa-velha": "monoculo"]]
-        let migrated = old.migrated(in: catalog, renamed: renamed)
-        #expect(migrated.hair == "cachos")
-        #expect(migrated.accessories == ["monoculo", "fones"])
+        old.eyes = "olhos-antigos"
+        let renamed: [OrbCategory: [String: String]] = [.eyes: ["olhos-antigos": "ovais"]]
+        #expect(old.migrated(in: catalog, renamed: renamed).eyes == "ovais")
+        // An id nobody maps falls back to the default.
+        #expect(old.migrated(in: catalog, renamed: [:]).eyes == OrbConfig().eyes)
         // A known config is left exactly as it is.
-        let current = OrbConfig(color: "menta", eyes: "felizes", hair: "franja", accessories: ["fones"])
+        let current = OrbConfig(color: "menta", eyes: "felizes", cheeks: "blush")
         #expect(current.migrated(in: catalog, renamed: renamed) == current)
     }
 
     // MARK: Layers
-
-    @Test func everyHairAndAccessoryCombinationFindsItsImages() {
-        let accessories = [nil] + catalog.options(.accessories).map(\.id)
-        for hair in catalog.options(.hair).map(\.id) {
-            for accessory in accessories {
-                let config = OrbConfig(color: "ceu", hair: hair, accessories: accessory.map { [$0] } ?? [])
-                for layer in config.layers() {
-                    #expect(OrbImages.cgImage(layer.path, pixels: 60, tint: layer.tint) != nil, "\(layer.path)")
-                }
-            }
-        }
-    }
-
-    @Test func hairComesWithItsUntintedShineLayer() {
-        let layers = OrbConfig(color: "rosa", hair: "franja").layers()
-        let hair = layers.filter { $0.kind == .hair }
-        #expect(hair.map(\.path) == ["hair/franja", "hair/franja-brilho"])
-        #expect(hair[0].tint != nil && hair[1].tint == nil)
-        let loose = hair.allSatisfy { $0.isLoose }
-        #expect(loose)
-    }
-
-    @Test func defaultHairColorIsDesignedPerPalette() {
-        for palette in catalog.palettes {
-            #expect(palette.hair != nil, "\(palette.id)")
-            let tint = OrbConfig(color: palette.id, hair: "franja").layers().first { $0.kind == .hair }?.tint
-            #expect(tint == palette.hair)
-        }
-        var custom = OrbConfig(color: "rosa", hair: "franja")
-        custom.hairColor = 0x123456
-        #expect(custom.layers().first { $0.kind == .hair }?.tint == 0x123456)
-    }
 
     @Test func layerArtStaysSmall() throws {
         // The art is re-encoded without hidden color under transparent pixels (it was ~12 MB before). The plush
@@ -100,46 +55,30 @@ struct OrbDesignTests {
         #expect(bytes > 0 && bytes < 8_000_000)
     }
 
-    // MARK: Automatic colors
+    // MARK: Hair and accessories removed
 
-    @Test func orbsSavedBeforeTheDesignedColorsKeepTheirColors() throws {
-        // Saved by an earlier version (no `autoColors`): every automatic color is the one it always had.
-        let json = #"{"color":"lima","eyes":"ovais","hair":"franja","accessories":["fones"]}"#
+    @Test func hairAndAccessoriesLeaveEveryOrb() throws {
+        // A look saved while hair, accessories and their colors existed: they are ignored, the rest stays.
+        let json = #"{"color":"ceu","eyes":"ovais","mouth":"sorriso","cheeks":"blush","temperament":"timido","hair":"coque","hairColor":5913378,"accessories":["fones","oculos-sol"],"accentColor":16732043,"autoColors":2}"#
         let old = try JSONDecoder().decode(OrbConfig.self, from: Data(json.utf8))
-        #expect(old.autoColors == .original)
-        let lima = catalog.palette("lima")
-        let tints = Dictionary(old.layers().map { ($0.path, $0.tint) }, uniquingKeysWith: { first, _ in first })
-        #expect(tints["hair/franja"] == OrbConfig.darkened(lima.deep, 0.55))
-        // Headphones are the exception: the old dark ones vanished on the dark background.
-        #expect(tints["accessories/fones"] == 0xE9E6F5)
-        // It stays that way when saved again.
-        #expect(try JSONDecoder().decode(OrbConfig.self, from: JSONEncoder().encode(old)).autoColors == .original)
-        // New looks get the designed colors.
-        var new = old
-        new.autoColors = .designed
-        #expect(new.layers().first { $0.kind == .hair }?.tint == lima.hair)
-        #expect(OrbConfig().autoColors == .designed && OrbConfig.random().autoColors == .designed)
-    }
-
-    @Test func mustachesAndHeadAccessoriesLeaveEveryOrb() throws {
-        // A look saved while they existed: the mustache and the head-worn accessories go, the rest stays.
-        let json = #"{"color":"ceu","eyes":"ovais","hair":"coque","mustache":"classico","mustacheColor":5913378,"accessories":["cartola","fones","laco","oculos-sol"],"autoColors":2}"#
-        let old = try JSONDecoder().decode(OrbConfig.self, from: Data(json.utf8))
-        #expect(old.accessories == ["fones", "oculos-sol"])
-        #expect(old.color == "ceu" && old.eyes == "ovais" && old.hair == "coque")
-        // Nothing of them is drawn, and the hair is its own (no version squeezed under a hat).
+        #expect(old.color == "ceu" && old.eyes == "ovais" && old.mouth == "sorriso" && old.cheeks == "blush")
+        #expect(old.temperament == .timido)
+        // No hair or accessory layer is drawn.
         let paths = old.layers().map(\.path)
-        #expect(!paths.contains { $0.hasPrefix("mustache/") || $0.contains("-chapeu") })
-        #expect(paths.contains("hair/coque") && paths.contains("accessories/fones") && paths.contains("accessories/oculos-sol"))
-        // Saved again, the look no longer carries them.
+        #expect(paths == ["body/ceu", "cheeks/blush", "mouth/sorriso", "eyes/ovais"])
+        #expect(!paths.contains { $0.hasPrefix("hair/") || $0.hasPrefix("accessories/") })
+        // Saved again, the look no longer carries any of the removed keys.
         let saved = try #require(String(data: JSONEncoder().encode(old), encoding: .utf8))
-        #expect(!saved.contains("mustache") && !saved.contains("cartola") && !saved.contains("laco"))
-        // And the editor and the catalog offer none of them.
-        #expect(!OrbCategory.allCases.map(\.rawValue).contains("mustache"))
-        #expect(catalog.options(.accessories).map(\.id) == ["oculos-redondos", "oculos-quadrados", "oculos-sol", "monoculo", "fones"])
-        // An Orb drawn from a look the old way (built in code) does not wear them either.
-        let built = OrbConfig(accessories: ["coroa", "fones"]).layers().filter { $0.kind == .accessory }.map(\.path)
-        #expect(built == ["accessories/fones"])
+        for key in ["hair", "accessories", "hairColor", "accentColor", "autoColors"] {
+            #expect(!saved.contains("\"\(key)\""), "\(key)")
+        }
+        #expect(try JSONDecoder().decode(OrbConfig.self, from: Data(saved.utf8)) == old)
+        // The editor and the catalog offer none of them, and the art is gone.
+        #expect(OrbCategory.allCases.map(\.rawValue) == ["color", "temperament", "eyes", "mouth", "brows", "cheeks"])
+        let root = try #require(catalog.root)
+        for folder in ["hair", "accessories"] {
+            #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent(folder).path), "\(folder)")
+        }
     }
 
     // MARK: Sortear
@@ -147,35 +86,22 @@ struct OrbDesignTests {
     @Test func randomLooksHangTogether() {
         var rng = SeededRandom(seed: 42)
         let borrowed: Set = ["tontos", "bravos", "sono", "fendas", "triste", "preocupadas", "bravas"]
-        var hairs = Set<String>(), colors = Set<String>()
+        var colors = Set<String>()
         for _ in 0..<600 {
             let config = OrbConfig.random(using: &rng)
             // Every id exists, so nothing points at a missing image.
             #expect(config.migrated(in: catalog) == config)
             #expect(!borrowed.contains(config.eyes) && !borrowed.contains(config.mouth) && !borrowed.contains(config.brows))
-            #expect(config.accessories.count <= 1)
-            if config.hair == "nenhum" { #expect(config.hairColor == nil) }
-            if let tint = config.hairColor { #expect(OrbSwatch.naturalHair.contains { $0.hex == tint }) }
-            hairs.insert(config.hair)
             colors.insert(config.color)
         }
-        // ...and still explores the whole catalog of colors and hair.
-        #expect(hairs.count == catalog.options(.hair).count)
+        // ...and still explores the whole catalog of colors.
         #expect(colors.count == catalog.palettes.count)
     }
 
     @Test func summaryDescribesTheLookInWords() {
-        let config = OrbConfig(color: "rosa", eyes: "ovais", mouth: "sorriso", hair: "chiquinhas", accessories: ["fones"])
-        #expect(config.summary == "Rosa, olhos Ovais, boca Sorriso, cabelo Maria-chiquinha, Fones")
+        let config = OrbConfig(color: "rosa", eyes: "ovais", mouth: "sorriso", cheeks: "blush")
+        #expect(config.summary == "Rosa, olhos Ovais, boca Sorriso, bochechas Rosadas")
         #expect(OrbConfig().summary == "Índigo, olhos Pílulas")
-    }
-
-    @Test func swatchesAreNamedAndDistinct() {
-        for list in [OrbSwatch.hair, OrbSwatch.accent] {
-            #expect(Set(list.map(\.hex)).count == list.count)
-            let named = list.allSatisfy { !$0.name.isEmpty }
-            #expect(named)
-        }
     }
 
     // MARK: Motion
@@ -233,14 +159,6 @@ struct OrbDesignTests {
         let speed = zip(tilts, tilts.dropFirst()).map { abs($1 - $0) / 0.01 }.max() ?? 0
         let pixelsPerSecond = speed * .pi / 360 * 96 * 2
         #expect(OrbFrameRate.rate(forSpeed: pixelsPerSecond, cap: 60) == OrbFrameRate.steps[0])
-    }
-
-    @Test func hairSwingCountsAsMotionAndBlends() {
-        var swung = OrbPose()
-        swung.hairSwing = 2
-        #expect(swung.pixelDistance(to: OrbPose(), size: 96, scale: 2) > 1)
-        #expect(abs(OrbPose.mix(swung, .rest, 0.5).hairSwing - 1) < 1e-9)
-        #expect(OrbPose.rest.hairSwing == 0)
     }
 
     // MARK: Editor
@@ -308,57 +226,6 @@ struct OrbDesignTests {
         #expect(squashed.squash == 0.12)
     }
 
-    /// The tallest hairdo or accessory, at the highest the body can go (lift and stretch at their caps, grown under the
-    /// pointer, hair trailing up and the head looking up, tilted either way), stays inside the stage's headroom.
-    @Test func theStageHeadroomFitsTheTallestHairAtTheHighestJump() throws {
-        let root = try #require(catalog.root)
-        let files = try ["hair", "accessories"].flatMap { folder in
-            try FileManager.default.contentsOfDirectory(at: root.appending(path: folder), includingPropertiesForKeys: nil)
-                .filter { $0.pathExtension == "png" }
-        }
-        #expect(files.count > 25)
-        let room = OrbStageRoom.self
-        let sx = 1 + room.maxGrow, sy = 1 + room.maxStretch + room.maxGrow
-        let tilts = [-16.0, -8, 0, 8, 16].map { $0 * .pi / 180 }
-        let scale = Double(OrbGeometry.imageScale), bottom = Double(OrbGeometry.orbBottom)
-        var highest = 0.0, tallest = ""
-        for file in files {
-            let (pixels, width, height) = try alpha(of: file)
-            for y in stride(from: 0, to: height / 2, by: 2) {
-                for x in stride(from: 0, to: width, by: 2) where pixels[y * width + x] > 40 {
-                    let hx = (Double(x) / Double(width) - 0.5) * scale, hy = (bottom - Double(y) / Double(height)) * scale
-                    for tilt in tilts {
-                        let top = hx * sx * sin(tilt) + hy * sy * cos(tilt)
-                        if top > highest { (highest, tallest) = (top, file.lastPathComponent) }
-                    }
-                }
-            }
-        }
-        // Height of the size box's top above the orb's base (the anchor everything scales and turns around).
-        let boxTop = (bottom - 0.5) * scale + 0.5
-        let looseRise = OrbSprings.maxLag + 1 * OrbLayer(kind: .hair, path: "hair/coque", tint: nil).depth
-        let reach = highest - boxTop + room.maxLift + looseRise
-        #expect(reach <= room.headroomFraction, "\(tallest) reaches \(reach)")
-        #expect(reach > room.headroomFraction - 0.1, "the headroom could be smaller: \(reach)")
-    }
-
-    /// Alpha of every pixel of a PNG, top row first.
-    private func alpha(of file: URL) throws -> (pixels: [UInt8], width: Int, height: Int) {
-        let source = try #require(CGImageSourceCreateWithURL(file as CFURL, nil))
-        let image = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
-        let (width, height) = (image.width, image.height)
-        var pixels = [UInt8](repeating: 0, count: width * height)
-        let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
-            guard let context = CGContext(data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
-                                          bytesPerRow: width, space: CGColorSpaceCreateDeviceGray(),
-                                          bitmapInfo: CGImageAlphaInfo.alphaOnly.rawValue) else { return false }
-            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-            return true
-        }
-        try #require(drawn)
-        return (pixels, width, height)
-    }
-
     // MARK: The selection glance
 
     @Test func theSelectionGlanceIsQuickSmoothAndBlinks() {
@@ -374,14 +241,13 @@ struct OrbDesignTests {
         var turning = OrbPose()
         OrbGlance.apply(to: &turning, elapsed: 0.06)
         #expect(turning.eyeLead.x > 0)     // the eyes get there first...
-        #expect(turning.hairLag.x < 0)     // ...the hair after the head
         #expect(turning.blink == 0)        // and the turn is not hidden behind the blink
         var arrived = OrbPose()
         OrbGlance.apply(to: &arrived, elapsed: OrbGlance.blinkAt + 0.08)
         #expect(arrived.blink > 0.5)       // the blink comes as it gets there
         var after = OrbPose()
-        OrbGlance.apply(to: &after, elapsed: OrbGlance.total)
-        #expect(after == OrbPose())        // nothing left once it is over (the hair is back too)
+        OrbGlance.apply(to: &after, elapsed: OrbGlance.duration)
+        #expect(after == OrbPose())        // nothing left once it is over
     }
 
     @Test func theGlanceLooksTowardTheChatAndComesBack() {

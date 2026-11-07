@@ -1,4 +1,4 @@
-"""Orb customization catalog: palettes, eyes, mouths, brows, cheeks, hair and accessories.
+"""Orb customization catalog: palettes, eyes, mouths, brows, and cheeks.
 
 Every option is (id, Portuguese label, builder). Builders receive a Ctx and add objects to the scene.
 The same ids are exported to the app (options.json, in the app) so the editor and the renders stay in sync.
@@ -6,13 +6,7 @@ The same ids are exported to the app (options.json, in the app) so the editor an
 
 import math
 
-from mathutils import Vector
-
-from . import core
-import bpy
-
-from .core import (capsule, cone, cylinder, flat_shape, frame_on, glow, heart_points, metal, on_surface,
-                   plastic, sphere, star_points, surface, torus, tube)
+from .core import capsule, flat_shape, glow, heart_points, on_surface, plastic, star_points, tube
 
 # ---------------------------------------------------------------------------
 # Palettes: (rim, core, deep, glow), sRGB hex. "light" palettes get dark features.
@@ -347,191 +341,13 @@ CHEEKS = [
     ("coracoes", "Coraçõezinhos", cheeks_coracoes),
 ]
 
-# ---------------------------------------------------------------------------
-# Hair (world coordinates; crown at z ≈ 0.97, face toward -Y)
-
-
-def _hair_material(ctx):
-    color = ctx.config.get("hair_color")
-    if color is None:
-        deep = ctx.palette[2]
-        color = sum(int(((deep >> s) & 0xFF) * 0.55) << s for s in (16, 8, 0))
-        return plastic(color, roughness=0.3, coat=0.9, emission=0.25)
-    return plastic(color, roughness=0.3, coat=0.8, emission=0.15)
-
-
-def hair_topete(ctx):
-    m = _hair_material(ctx)
-    tube([(-0.2, 0.0, 0.93), (-0.12, -0.05, 1.18), (0.08, -0.06, 1.3), (0.28, -0.04, 1.22), (0.3, -0.03, 1.08),
-          (0.2, -0.02, 1.04)], [1.0, 1.0, 0.85, 0.65, 0.45, 0.3], m, bevel=0.085)
-    tube([(0.05, 0.05, 0.94), (0.14, 0.0, 1.12), (0.3, 0.0, 1.16)], [0.9, 0.6, 0.25], m, bevel=0.06)
-
-
-def hair_tufinho(ctx):
-    m = _hair_material(ctx)
-    for base_x, tip in ((-0.06, (0.1, -0.04, 1.26)), (0.02, (0.26, -0.03, 1.2)), (0.1, (0.36, -0.02, 1.08))):
-        base, tip = Vector((base_x, 0.0, 0.96)), Vector(tip)
-        mid = Vector((base.x * 0.4 + tip.x * 0.6 - 0.04, (base.y + tip.y) / 2, (base.z + tip.z) / 2 + 0.07))
-        tube([base, mid, tip], [1.0, 0.7, 0.12], m, bevel=0.07)
-
-
-def hair_franja(ctx):
-    m = _hair_material(ctx)
-    for i in range(6):
-        x = -0.32 + i * 0.128
-        length = 0.6 if i % 2 else 0.66
-        tube([(x * 0.55, 0.93), (x * 0.9, 0.78), (x * 1.0, length)], [1.0, 0.9, 0.4], m, bevel=0.075, orb=ctx.orb, lift=0.05)
-
-
-def hair_cachos(ctx):
-    m = _hair_material(ctx)
-    for i in range(7):
-        angle = 2 * math.pi * i / 7
-        location = (0.3 * math.cos(angle), 0.3 * math.sin(angle), 0.94)
-        torus(0.085, 0.04, location, m, rotation=(math.pi / 2, 0, angle))
-    sphere(0.12, (0, 0, 1.02), m)
-
-
-def hair_coque(ctx):
-    m = _hair_material(ctx)
-    sphere(0.21, (0, 0.06, 1.14), m)
-    torus(0.15, 0.035, (0, 0.06, 1.0), plastic(0xFF5A7A, roughness=0.35, coat=0.6))
-
-
-def hair_moicano(ctx):
-    m = _hair_material(ctx)
-    for i, angle in enumerate((-0.42, -0.21, 0.0, 0.21, 0.42)):
-        x, z = math.sin(angle) * 0.97, math.cos(angle) * 0.97
-        tilt = Vector((x, -0.15, z)).normalized()
-        location = Vector((x, -0.05, z)) + tilt * 0.14
-        height = 0.4 - abs(angle) * 0.3
-        c = cone(0.1, 0.0, height, location, m)
-        c.rotation_euler = tilt.to_track_quat("Z", "Y").to_euler()
-
-
-def hair_antena(ctx):
-    m = _hair_material(ctx)
-    tube([(0.0, 0.0, 0.95), (0.03, 0.0, 1.15), (0.14, 0.0, 1.3), (0.24, 0.0, 1.32)], [1.0, 0.8, 0.7, 0.6], m, bevel=0.025)
-    sphere(0.06, (0.27, 0.0, 1.32), glow(0x9FF0FF, 3.0))
-
-
-HAIR = [
-    ("nenhum", "Nenhum", None),
-    ("topete", "Topete", hair_topete),
-    ("tufinho", "Tufinho", hair_tufinho),
-    ("franja", "Franja", hair_franja),
-    ("cachos", "Cachinhos", hair_cachos),
-    ("coque", "Coque", hair_coque),
-    ("moicano", "Moicano", hair_moicano),
-    ("antena", "Antena", hair_antena),
-]
-
-# ---------------------------------------------------------------------------
-# Accessories (any number at once)
-
-
-def _eye_anchor(ctx, side, lift=0.06):
-    location, normal = surface(ctx.orb, EYE_X * side, EYE_Z)
-    return location + normal * lift, normal
-
-
-def _glasses(ctx, frame, lens, shape="round"):
-    anchors = []
-    for side in (-1, 1):
-        center, normal = _eye_anchor(ctx, side)
-        anchors.append((center, normal))
-        rotation = frame_on((normal * 0.6 + Vector((0, -1, 0)) * 0.4).normalized()).to_euler()
-        if shape == "round":
-            ring = torus(0.125, 0.016, center, frame)
-            ring.rotation_euler = rotation
-            disc = cylinder(0.118, 0.006, center, lens)
-            disc.rotation_euler = rotation
-        else:
-            x = EYE_X * side
-            pts = []
-            for i in range(40):
-                t = 2 * math.pi * i / 40
-                c, s = math.cos(t), math.sin(t)
-                px = 0.14 * math.copysign(abs(c) ** 0.45, c)
-                pz = 0.105 * math.copysign(abs(s) ** 0.45, s)
-                pts.append((x + px, EYE_Z + pz))
-            pts.append(pts[0])
-            tube(pts, [1] * len(pts), frame, bevel=0.016, orb=ctx.orb, lift=0.065, resolution=6)
-    (left, _), (right, _) = anchors
-    inner = 0.125 if shape == "round" else 0.14
-    tube([left + Vector((inner, 0, 0.0)), (left + right) / 2 + Vector((0, -0.02, 0.03)), right - Vector((inner, 0, 0.0))],
-         [1, 1, 1], frame, bevel=0.014)
-    for (center, _), side in zip(anchors, (-1, 1)):
-        start = center + Vector((inner * side, 0, 0.01))
-        tube([start, Vector((0.92 * side, -0.1, EYE_Z + 0.02)), Vector((0.98 * side, 0.25, EYE_Z))], [1, 1, 1], frame, bevel=0.013)
-
-
-def acc_oculos_redondos(ctx):
-    _glasses(ctx, metal(0xD9A441, 0.25), core.glass(), "round")
-
-
-def acc_oculos_quadrados(ctx):
-    _glasses(ctx, plastic(0x18161F, roughness=0.25, coat=1.0, subsurface=0), core.glass(), "square")
-
-
-def acc_oculos_sol(ctx):
-    _glasses(ctx, plastic(0x18161F, roughness=0.25, coat=1.0, subsurface=0), core.glass(darkness=0.92), "round")
-
-
-def acc_monoculo(ctx):
-    gold = metal(0xD9A441, 0.2)
-    center, normal = _eye_anchor(ctx, 1)
-    ring = torus(0.13, 0.017, center, gold)
-    ring.rotation_euler = frame_on(normal).to_euler()
-    disc = cylinder(0.122, 0.006, center, core.glass())
-    disc.rotation_euler = ring.rotation_euler
-    tube([center + Vector((0.08, 0, -0.1)), center + Vector((0.2, -0.05, -0.35)), Vector((0.62, -0.62, -0.5))], [1, 1, 1],
-         gold, bevel=0.008)
-
-
-def acc_fones(ctx):
-    color = ctx.config.get("accent_color", 0x2B2B36)
-    shell = plastic(color, roughness=0.3, coat=0.8, subsurface=0)
-    tube([(-1.04, 0.0, 0.15), (-0.75, 0.0, 0.85), (0.0, 0.0, 1.16), (0.75, 0.0, 0.85), (1.04, 0.0, 0.15)],
-         [1, 1, 1, 1, 1], shell, bevel=0.045)
-    for side in (-1, 1):
-        cylinder(0.24, 0.16, (1.02 * side, 0.0, 0.05), shell, rotation=(0, math.pi / 2, 0))
-        torus(0.19, 0.06, (0.95 * side, 0.0, 0.05), plastic(0x55556A, roughness=0.8, coat=0), rotation=(0, math.pi / 2, 0))
-
-
-ACCESSORIES = [
-    ("oculos-redondos", "Óculos redondos", acc_oculos_redondos),
-    ("oculos-quadrados", "Óculos quadrados", acc_oculos_quadrados),
-    ("oculos-sol", "Óculos de sol", acc_oculos_sol),
-    ("monoculo", "Monóculo", acc_monoculo),
-    ("fones", "Fones", acc_fones),
-]
-
 CATEGORIES = {
     "color": PALETTES,
     "eyes": EYES,
     "mouth": MOUTHS,
     "brows": BROWS,
     "cheeks": CHEEKS,
-    "hair": HAIR,
-    "accessories": ACCESSORIES,
 }
-
-
-FEATURE_SCALE = {"hair": 1.35}
-PIVOTS = {"hair": (0, 0, 0.96)}
-
-
-def _scaled(builder, ctx, key):
-    before = set(bpy.data.objects)
-    builder(ctx)
-    factor = FEATURE_SCALE.get(key)
-    if not factor:
-        return
-    pivot = Vector(PIVOTS[key])
-    for obj in set(bpy.data.objects) - before:
-        obj.location = pivot + (obj.location - pivot) * factor
-        obj.scale = obj.scale * factor
 
 
 def build_features(ctx, only=None):
@@ -543,16 +359,13 @@ def build_features(ctx, only=None):
         category, option = only
         builder = lookup[category].get(option)
         if builder:
-            _scaled(builder, ctx, option if category == "accessories" else category)
+            builder(ctx)
         return
     if "viseme" in config:
         config = dict(config, mouth=None)
-        _scaled(lookup["visemes"][config["viseme"]], ctx, "visemes")
+        lookup["visemes"][config["viseme"]](ctx)
     lookup["eyes"][config.get("eyes", "pilulas")](ctx)
-    for category, default in (("mouth", "nenhuma"), ("brows", "nenhuma"), ("cheeks", "nenhuma"),
-                              ("hair", "nenhum")):
+    for category, default in (("mouth", "nenhuma"), ("brows", "nenhuma"), ("cheeks", "nenhuma")):
         builder = lookup[category].get(config.get(category, default))
         if builder:
-            _scaled(builder, ctx, category)
-    for accessory in config.get("accessories", []):
-        _scaled(lookup["accessories"][accessory], ctx, accessory)
+            builder(ctx)

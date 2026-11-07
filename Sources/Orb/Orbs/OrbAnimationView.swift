@@ -105,7 +105,6 @@ final class OrbAnimationView: NSView {
     private struct Placed {
         let layer: OrbLayer
         let view: CALayer
-        let isLoose: Bool
     }
 
     // Layers (bottom-left origin, like AppKit)
@@ -167,10 +166,6 @@ final class OrbAnimationView: NSView {
     private var lastTime: Double?
     private var head = SpringPoint()     // turns the whole face, unhurried
     private var eyes = SpringPoint()     // quick saccades, leading the head
-    private var loose = SpringPoint()    // hair and headphones trailing the head and body
-    private var swing = Spring()         // hair and headphones swinging behind the body's tilt
-    /// The swing the loose layers were last rotated to (infinity: not yet, e.g. new layers).
-    private var appliedSwing = Double.infinity
     /// Layers were just (re)built: everything is placed once, even what never moves (the body).
     private var freshLayers = true
     private var hover = Spring()
@@ -235,7 +230,7 @@ final class OrbAnimationView: NSView {
         ground.colors = OrbShadow.stops.map { NSColor.black.withAlphaComponent($0).cgColor } + [NSColor.clear.cgColor]
         bubble.alignmentMode = .center
         bubble.masksToBounds = true
-        // Nearly opaque, so it reads as in front of the orb: hair and headphones sit right behind it.
+        // Nearly opaque, so it reads as in front of the orb.
         bubble.backgroundColor = NSColor(Palette.chrome).withAlphaComponent(OrbGeometry.bubbleFill).cgColor
         bubble.borderColor = NSColor.white.withAlphaComponent(0.2).cgColor
         bubble.borderWidth = 0.5
@@ -424,7 +419,7 @@ final class OrbAnimationView: NSView {
             let reusable = resize ? [] : Set(placed.map(\.layer))
             let needed = layers.filter { !reusable.contains($0) }
             // Hold the cached bitmaps through the rebuild: memory pressure may evict them between lookup and placement.
-            for item in needed { images[item] = OrbImages.cached(item.path, pixels: side * scale, tint: item.tint) }
+            for item in needed { images[item] = OrbImages.cached(item.path, pixels: side * scale) }
             if images.count < needed.count {
                 needsResize = resize
                 let request = imageRequest
@@ -463,7 +458,7 @@ final class OrbAnimationView: NSView {
             // meanwhile, and fading all of it would blend it with a still picture of itself.
             let fadesWhole = fades && (current.isEmpty || resize)
             if fadesWhole { orb.add(Self.fade(0.18), forKey: "swap") }
-            // Layers that stay (body, cheeks, hair…) are reused; only changed features get new bitmaps.
+            // Layers that stay (body, cheeks…) are reused; only changed features get new bitmaps.
             var reusable = resize ? [:] : Dictionary(placed.map { ($0.layer, $0) }, uniquingKeysWith: { first, _ in first })
             // The eyes, mouth or brows of another expression take over the view the old ones had.
             let wanted = Set(layers)
@@ -479,7 +474,7 @@ final class OrbAnimationView: NSView {
                 if let old = swappable.removeValue(forKey: item.kind) {
                     if fades { old.view.add(Self.fade(0.18), forKey: "swap") }
                     old.view.contents = image
-                    return Placed(layer: item, view: old.view, isLoose: item.isLoose)
+                    return Placed(layer: item, view: old.view)
                 }
                 let view = CALayer()
                 view.contents = image
@@ -489,13 +484,11 @@ final class OrbAnimationView: NSView {
                 view.magnificationFilter = .linear
                 view.bounds = CGRect(x: 0, y: 0, width: side, height: side)
                 if item.kind == .eyes { view.anchorPoint = CGPoint(x: 0.5, y: 1 - OrbGeometry.eyeLine) }
-                if item.isLoose { view.anchorPoint = CGPoint(x: 0.5, y: 1 - OrbGeometry.crownLine) }
                 if item.kind == .mouth { view.anchorPoint = CGPoint(x: 0.5, y: 1 - OrbGeometry.mouthLine) }
                 if fades && !fadesWhole { view.add(Self.appear(0.18), forKey: "swap") }
-                return Placed(layer: item, view: view, isLoose: item.isLoose)
+                return Placed(layer: item, view: view)
             }
             orb.sublayers = placed.map(\.view)
-            appliedSwing = .infinity   // new loose layers start unrotated
             freshLayers = true
         }
 
@@ -535,7 +528,6 @@ final class OrbAnimationView: NSView {
         let box = CGRect(x: 0, y: 0, width: side, height: side)
         for item in placed { item.view.bounds = box }
         freshLayers = true      // the body is placed again, at the new center
-        appliedSwing = .infinity
         apply(lastPose)
     }
 
@@ -737,7 +729,7 @@ final class OrbAnimationView: NSView {
         var pose = resting ? rest : OrbPose.mix(self.pose(at: time, dt: dt), rest, min(1, max(0, settle.value)))
         // Over the settling, so an orb selected while resting glances at full strength as it wakes up.
         if let start = glanceStart {
-            if resting || time - start >= OrbGlance.total {
+            if resting || time - start >= OrbGlance.duration {
                 glanceStart = nil
             } else {
                 OrbGlance.apply(to: &pose, elapsed: time - start, blinkFactor: blinkFactor)
@@ -882,11 +874,6 @@ final class OrbAnimationView: NSView {
         lean.step(toward: pointer.lean, dt: dt, response: 0.5 * springs, damping: 0.8)
         pose.tilt += 7 * lean.value
 
-        // Hair and headphones trail the head turn and the body's bounce, with a little overshoot.
-        pose.hairLag = OrbSprings.hairLag(&loose, anchor: OrbSprings.hairAnchor(look: pose.look, lift: pose.lift), dt: dt)
-        // ...and swing behind the body's tilt, overshooting a little as it settles.
-        pose.hairSwing = OrbSprings.hairSwing(&swing, tilt: pose.tilt, dt: dt)
-
         hover.step(toward: hoverPoint == nil ? 0 : 1, dt: dt, response: 0.35 * springs, damping: 0.6)
         pose.hover = hover.value * (1 + 0.75 * traits.lean)
 
@@ -971,16 +958,9 @@ final class OrbAnimationView: NSView {
 
         // Mouthless orbs show talking with a rhythmic squint instead.
         let eyeTalk = config.mouth == "nenhuma" ? max(0, pose.talk) * traits.mouthOpening : 0
-        // Loose layers are only rotated again when their swing moved their outer edge (about half the image away
-        // from the center) by a quarter of a device pixel or more: most frames it doesn't.
-        let swingStep = 0.25 / (0.5 * side * backingScale) * 180 / .pi
-        let swingTransform: CATransform3D? = abs(pose.hairSwing - appliedSwing) >= swingStep
-            ? CATransform3DMakeRotation(-pose.hairSwing * .pi / 180, 0, 0, 1) : nil
-        if swingTransform != nil { appliedSwing = pose.hairSwing }
         for item in placed {
             let depth = item.layer.depth, view = item.view
             var dx = pose.look.x * depth, dy = pose.look.y * depth
-            if item.isLoose { dx += pose.hairLag.x; dy += pose.hairLag.y }
             switch item.layer.kind {
             case .eyes:
                 dx += pose.eyeLead.x
@@ -994,11 +974,7 @@ final class OrbAnimationView: NSView {
                 let stretch = 1 + 0.25 * traits.mouthOpening * (pose.talk - (pose.viseme?.opening ?? 0))
                 view.transform = CATransform3DMakeScale(1, min(1.5, max(0.6, stretch)), 1)
             default:
-                if item.isLoose {
-                    // Hung from the top of the head (their anchor), so they swing like hair, not like a seesaw.
-                    view.position = CGPoint(x: mid + dx * size, y: side * (1 - OrbGeometry.crownLine) + dy * size)
-                    if let swingTransform { view.transform = swingTransform }
-                } else if depth != 0 || freshLayers {
+                if depth != 0 || freshLayers {
                     // The body (depth 0) never moves inside the orb: placed once, not every frame.
                     view.position = CGPoint(x: mid + dx * size, y: mid + dy * size)
                 }
@@ -1020,7 +996,7 @@ final class OrbAnimationView: NSView {
     private func showViseme(_ viseme: OrbViseme?, on view: CALayer) {
         guard viseme != shownViseme else { return }
         if let viseme, visemeImages[viseme] == nil, let layer = config.visemeLayers()?[viseme] {
-            visemeImages[viseme] = OrbImages.cached(layer.path, pixels: builtPixels, tint: nil)
+            visemeImages[viseme] = OrbImages.cached(layer.path, pixels: builtPixels)
             if visemeImages[viseme] == nil {
                 loadVisemes()
                 return

@@ -33,9 +33,6 @@ struct OrbView: View {
     /// How big its joy is while `activity` is `happy`.
     var celebration = OrbCelebration.big
     var interactive = false
-    /// Shrinks a look that reaches past the box (an afro, headphones) until all of it fits (`OrbFootprint`): for
-    /// avatars set among other things. The Orb on a stage with room around it leaves it off.
-    var fits = false
     /// What VoiceOver says (default: "Orb" and what it is doing).
     var accessibilityText: String?
 
@@ -43,8 +40,7 @@ struct OrbView: View {
     @Environment(\.appearsActive) private var appearsActive
 
     var body: some View {
-        let fit = fits ? OrbFootprint.fit(config) : (scale: 1, offset: .zero)
-        let orb = (size * fit.scale).rounded()
+        let orb = size.rounded()
         let showsBubble = size >= OrbGeometry.bubbleBox
         Group {
             if animated && !reduceMotion && !OrbView.forceStatic {
@@ -57,7 +53,6 @@ struct OrbView: View {
             }
         }
         .frame(width: orb, height: orb)
-        .offset(x: (fit.offset.width * size).rounded(), y: (fit.offset.height * size).rounded())
         .frame(width: size, height: size)
         .accessibilityElement()
         .accessibilityLabel(accessibilityText ?? "Orb, \(activity.label)")
@@ -74,7 +69,7 @@ struct OrbView: View {
 }
 
 /// Draws one frame of the Orb from its layers in a single Canvas (no per-frame layout work).
-/// The canvas is an overlay larger than `size`, so hair, headphones and glow can overflow the avatar box.
+/// The canvas is an overlay larger than `size`, so the glow can overflow the avatar box.
 struct OrbFrame: View {
     let config: OrbConfig
     let activity: OrbActivity
@@ -204,18 +199,11 @@ private struct OrbPainter {
         for item in layers {
             let layer = item.layer
             let image = item.image ?? (OrbImages.decodesSynchronously
-                ? OrbImages.cgImage(layer.path, pixels: side * scale, tint: layer.tint) : nil)
+                ? OrbImages.cgImage(layer.path, pixels: side * scale) : nil)
             guard let image else { continue }
             var layerContext = orb
             let shift = parallax(layer)
             layerContext.translateBy(x: shift.width, y: shift.height)
-            if layer.isLoose, pose.hairSwing != 0 {
-                // Around the top of the head, as the live orb does.
-                let crown = side * OrbGeometry.crownLine
-                layerContext.translateBy(x: side / 2, y: crown)
-                layerContext.rotate(by: .degrees(pose.hairSwing))
-                layerContext.translateBy(x: -side / 2, y: -crown)
-            }
             if layer.kind == .eyes, pose.blink > 0 {
                 let line = side * OrbGeometry.eyeLine
                 layerContext.translateBy(x: 0, y: line)
@@ -234,7 +222,6 @@ private struct OrbPainter {
     private func parallax(_ layer: OrbLayer) -> CGSize {
         var x = pose.look.x * layer.depth, y = pose.look.y * layer.depth
         if layer.kind == .eyes { x += pose.eyeLead.x; y += pose.eyeLead.y }
-        if layer.isLoose { x += pose.hairLag.x; y += pose.hairLag.y }
         return CGSize(width: x * size, height: -y * size)
     }
 
@@ -272,12 +259,10 @@ struct BotAvatar: View {
     var glance = 0
     var cue = OrbCueSignal()
     var interactive = false
-    /// On by default: an avatar sits among other things, so a big hair shrinks to fit (`OrbView.fits`).
-    var fits = true
 
     var body: some View {
         OrbView(config: orb, activity: activity, size: size, animated: animated, paused: paused, poke: poke, ack: ack,
-                landing: landing, glance: glance, cue: cue, celebration: celebration, interactive: interactive, fits: fits)
+                landing: landing, glance: glance, cue: cue, celebration: celebration, interactive: interactive)
     }
 }
 

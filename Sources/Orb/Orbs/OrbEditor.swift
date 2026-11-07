@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Full Orb customizer: a big live stage (with activity preview, "Sortear" and undo), categories grouped by
-/// body, face and style, option grids whose thumbnails frame what they change, and named tint swatches.
+/// body and face, and option grids whose thumbnails frame what they change.
 ///
 /// A short editor (the "Novo Orb" sheet, or a sheet over a short window) uses a compact stage: a smaller Orb, the
 /// buttons up in the room beside its head and no name under it, so the options keep most of the height.
@@ -35,11 +35,9 @@ struct OrbEditor: View {
     /// Categories grouped the way people think about a character.
     private static let bodyGroup: (title: String, categories: [OrbCategory]) = ("Corpo", [.color, .temperament])
     private static let faceGroup: (title: String, categories: [OrbCategory]) = ("Rosto", [.eyes, .mouth, .brows, .cheeks])
-    private static let styleGroup: (title: String, categories: [OrbCategory]) = ("Estilo", [.hair, .accessories])
 
-    /// The stage's Orb (regular and compact), and the room it needs: the tallest hair reaches ~0.35 of its size above
-    /// it (the room was sized for the hats, ~0.39), and a hop with a stretch adds ~0.3 more (lively temperaments jump
-    /// 1.4× higher); below it, its shadow and glow. Both are proportional to the Orb (`OrbStageRoom`).
+    /// The stage's Orb (regular and compact), and the room it needs: a hop with a stretch takes it ~0.3 of its size
+    /// above its box (lively temperaments jump 1.4× higher); below it, its shadow and glow. Both are proportional to the Orb (`OrbStageRoom`).
     nonisolated static let stageOrb: CGFloat = 144, compactStageOrb: CGFloat = 112
     /// Editors shorter than this get the compact stage (the regular one leaves the options too little room).
     nonisolated static let compactBelow: CGFloat = 680
@@ -84,7 +82,7 @@ struct OrbEditor: View {
                 } else {
                     optionGrid
                 }
-                tintRow
+                categoryNote
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .id(category)
@@ -137,7 +135,7 @@ struct OrbEditor: View {
                 .padding(.top, OrbStageRoom.headroom(for: orb))
                 .padding(.bottom, OrbStageRoom.footroom(for: orb))
                 .frame(maxWidth: .infinity)
-                // Compact: the buttons sit up beside the head, where nothing of the Orb reaches (hair and hops stay
+                // Compact: the buttons sit up beside the head, where nothing of the Orb reaches (hops stay
                 // within the middle column).
                 .overlay(alignment: .top) {
                     if compact {
@@ -263,7 +261,7 @@ struct OrbEditor: View {
 
     // MARK: Categories
 
-    /// One row when it fits; below that, Corpo and Estilo on top and Rosto underneath. The compact editor uses one
+    /// One row when it fits; below that, Corpo on top and Rosto underneath. The compact editor uses one
     /// row of icons instead, the chosen category with its name, the groups apart.
     @ViewBuilder private var categoryBar: some View {
         if isCompact { compactCategoryBar } else { groupedCategoryBar }
@@ -285,7 +283,7 @@ struct OrbEditor: View {
 
     private func compactCategoryRow(labeled: Bool) -> some View {
         HStack(spacing: 2) {
-            ForEach(Array([Self.bodyGroup, Self.faceGroup, Self.styleGroup].enumerated()), id: \.offset) { index, group in
+            ForEach(Array([Self.bodyGroup, Self.faceGroup].enumerated()), id: \.offset) { index, group in
                 if index > 0 {
                     Rectangle().fill(Palette.line).frame(width: 1, height: 18).padding(.horizontal, 5)
                 }
@@ -341,13 +339,9 @@ struct OrbEditor: View {
             HStack(alignment: .top, spacing: 12) {
                 group(Self.bodyGroup)
                 group(Self.faceGroup)
-                group(Self.styleGroup)
             }
             VStack(alignment: .center, spacing: 6) {
-                HStack(alignment: .top, spacing: 12) {
-                    group(Self.bodyGroup)
-                    group(Self.styleGroup)
-                }
+                group(Self.bodyGroup)
                 group(Self.faceGroup)
             }
         }
@@ -432,43 +426,21 @@ struct OrbEditor: View {
     }
 
     private func isSelected(_ id: String) -> Bool {
-        category == .accessories ? config.accessories.contains(id) : config.value(for: category) == id
+        config.value(for: category) == id
     }
 
     private func previewConfig(_ id: String) -> OrbConfig {
         var preview = config
-        if category == .accessories {
-            if !preview.accessories.contains(id) { preview.accessories = [id] }
-        } else {
-            preview.set(category, id)
-        }
+        preview.set(category, id)
         return preview
     }
 
-    // MARK: Tints
-
     @ViewBuilder
-    private var tintRow: some View {
-        switch category {
-        case .hair where config.hair != "nenhum":
-            TintPicker(title: "Cor do cabelo", value: config.hairColor, swatches: OrbSwatch.hair,
-                       automatic: config.autoHairColor(OrbCatalog.shared.palette(config.color))) { tint in
-                edit(hop: false) { $0.hairColor = tint }
-            }
-        case .accessories where config.accessories.contains(where: OrbCatalog.shared.tintedAccessories.contains):
-            TintPicker(title: "Cor dos acessórios", value: config.accentColor, swatches: OrbSwatch.accent, automatic: nil) { tint in
-                edit(hop: false) { $0.accentColor = tint }
-            }
-        case .accessories:
-            Text("Combine quantos acessórios quiser. Clique de novo para remover.")
-                .font(Typography.small)
-                .foregroundStyle(Palette.faint)
-        case .temperament:
+    private var categoryNote: some View {
+        if category == .temperament {
             Text("O jeito muda como o Orb se mexe, pisca e reage ao ponteiro, não a aparência.")
                 .font(Typography.small)
                 .foregroundStyle(Palette.faint)
-        default:
-            EmptyView()
         }
     }
 }
@@ -487,15 +459,13 @@ private extension View {
 }
 
 private struct OptionCell: View {
-    /// What the thumbnail shows: the whole Orb (colors), a close-up of the face (eyes, mouth…), or the head with
-    /// room above it (hair, headphones).
+    /// What the thumbnail shows: the whole Orb (colors) or a close-up of the face (eyes, mouth…).
     enum Framing {
-        case whole, face, head
+        case whole, face
 
         init(_ category: OrbCategory) {
             switch category {
             case .eyes, .mouth, .brows, .cheeks: self = .face
-            case .hair, .accessories: self = .head
             case .color, .temperament: self = .whole
             }
         }
@@ -534,10 +504,6 @@ private struct OptionCell: View {
         switch framing {
         case .whole:
             OrbView(config: preview, size: 46, animated: isHovering, followsPointer: false)
-        case .head:
-            // Hair reaches about half an orb above the head.
-            OrbView(config: preview, size: 44, animated: isHovering, followsPointer: false)
-                .offset(y: 10)
         case .face:
             // A close-up: the band from the brows to the mouth fills the cell. Static: the live orb is an AppKit
             // view, which the clip shape would not cut.
@@ -587,84 +553,6 @@ private struct TemperamentRow: View {
         .onHover { isHovering = $0 }
         .accessibilityLabel("\(temperament.label): \(temperament.summary)")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
-    }
-}
-
-/// "Auto" plus named swatches in a grid that wraps; the automatic chip shows the color it stands for, and a saved
-/// color that isn't in the list shows as a custom swatch. Rings keep a 3:1 contrast on the dark background and on
-/// light swatches alike (WCAG 1.4.11).
-private struct TintPicker: View {
-    let title: String
-    let value: UInt32?
-    let swatches: [OrbSwatch]
-    /// The color "Auto" gives (nil: each accessory has its own).
-    let automatic: UInt32?
-    let pick: (UInt32?) -> Void
-
-    private var shown: [OrbSwatch] {
-        guard let value, !swatches.contains(where: { $0.hex == value }) else { return swatches }
-        return [OrbSwatch(hex: value, name: "Cor personalizada")] + swatches
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Palette.muted)
-            HStack(alignment: .top, spacing: 7) {
-                Button {
-                    pick(nil)
-                } label: {
-                    HStack(spacing: 4) {
-                        if let automatic {
-                            Circle().fill(Color(hex: automatic)).frame(width: 10, height: 10)
-                                .overlay(Circle().strokeBorder(Color.white.opacity(0.4), lineWidth: 0.5))
-                        }
-                        Text("Auto")
-                            .font(.system(size: 10, weight: .medium))
-                    }
-                    .foregroundStyle(value == nil ? Palette.onInk : Palette.secondary)
-                    .padding(.horizontal, 8)
-                    .frame(height: 24)
-                    .background(value == nil ? Palette.ink : Color.white.opacity(0.08), in: .capsule)
-                    .fixedSize()
-                }
-                .buttonStyle(.plain)
-                .help(Tip.autoColor)
-                .accessibilityLabel("Cor automática")
-                .accessibilityAddTraits(value == nil ? .isSelected : [])
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 24, maximum: 24), spacing: 7)], alignment: .leading, spacing: 7) {
-                    ForEach(shown, id: \.self) { swatch in
-                        Button {
-                            pick(swatch.hex)
-                        } label: {
-                            SwatchDot(color: Color(hex: swatch.hex), isSelected: value == swatch.hex)
-                        }
-                        .buttonStyle(.plain)
-                        .help(swatch.name)
-                        .accessibilityLabel(swatch.name)
-                        .accessibilityAddTraits(value == swatch.hex ? .isSelected : [])
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// A color dot: a light hairline so dark colors stand out on the dark background; when selected, a white ring with a
-/// dark inner ring, visible on white and on black swatches.
-private struct SwatchDot: View {
-    let color: Color
-    let isSelected: Bool
-
-    var body: some View {
-        Circle()
-            .fill(color)
-            .frame(width: 24, height: 24)
-            .overlay(Circle().strokeBorder(Color.white.opacity(isSelected ? 0.95 : 0.4), lineWidth: isSelected ? 2 : 1))
-            .overlay {
-                if isSelected { Circle().inset(by: 2).strokeBorder(Color.black.opacity(0.6), lineWidth: 1) }
-            }
     }
 }
 

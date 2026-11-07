@@ -17,12 +17,12 @@ import Darwin
 /// transaction, exactly like the shared link (same code path and pacing, minus the WindowServer).
 @MainActor
 enum OrbBench {
-    /// The same looks in every build being compared (hair, accessories and a plain one).
+    /// The same looks in every build being compared (a plain one and a few with cheeks and brows).
     static let looks: [OrbConfig] = [
-        OrbConfig(color: "indigo", eyes: "pilulas", mouth: "sorriso", accessories: ["oculos-redondos"]),
-        OrbConfig(color: "rosa", eyes: "ovais", cheeks: "blush", hair: "tufinho", accessories: ["fones"]),
-        OrbConfig(color: "menta", eyes: "felizes", mouth: "sorriso", cheeks: "sardas", hair: "cachos"),
-        OrbConfig(color: "perola", eyes: "pilulas", cheeks: "blush", hair: "franja"),
+        OrbConfig(color: "indigo", eyes: "pilulas", mouth: "sorriso"),
+        OrbConfig(color: "rosa", eyes: "ovais", brows: "arqueadas", cheeks: "blush"),
+        OrbConfig(color: "menta", eyes: "felizes", mouth: "sorriso", cheeks: "sardas"),
+        OrbConfig(color: "perola", eyes: "pilulas", cheeks: "blush"),
     ]
 
     static func run(arguments: [String]) {

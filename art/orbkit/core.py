@@ -85,7 +85,7 @@ def add_lights_and_camera(scene, framing=1.0):
 
     area("Key", (-2.6, -3.2, 3.4), 45, 7.0)
     area("Fill", (3.2, -2.4, 0.4), 18, 7.0)
-    # Accessory key: a small, slightly harder light so plastic/metal parts get readable highlights
+    # Accent key: a small, slightly harder light so the face features get readable highlights
     area("Accent", (-1.8, -4.0, 2.6), 60, 2.5)
 
     camera = bpy.data.cameras.new("Camera")
@@ -201,30 +201,6 @@ def plastic(hex_value, roughness=0.32, coat=0.6, emission=0.0, subsurface=0.15):
     return material
 
 
-def metal(hex_value, roughness=0.22):
-    material = bpy.data.materials.new("Metal")
-    material.use_nodes = True
-    bsdf = material.node_tree.nodes["Principled BSDF"]
-    bsdf.inputs["Base Color"].default_value = linear(hex_value)
-    bsdf.inputs["Metallic"].default_value = 1.0
-    bsdf.inputs["Roughness"].default_value = roughness
-    return material
-
-
-def glass(tint=0xFFFFFF, darkness=0.0):
-    material = bpy.data.materials.new("Glass")
-    material.use_nodes = True
-    bsdf = material.node_tree.nodes["Principled BSDF"]
-    bsdf.inputs["Base Color"].default_value = linear(tint)
-    bsdf.inputs["Roughness"].default_value = 0.04
-    bsdf.inputs["Transmission Weight"].default_value = 1.0 - darkness
-    bsdf.inputs["IOR"].default_value = 1.45
-    bsdf.inputs["Coat Weight"].default_value = 1.0
-    if darkness:
-        bsdf.inputs["Base Color"].default_value = linear(0x101016)
-    return material
-
-
 # ---------------------------------------------------------------------------
 # Geometry
 
@@ -278,13 +254,6 @@ def smooth_last(material):
     return obj
 
 
-def sphere(radius, location, material, scale=(1, 1, 1), segments=48):
-    bpy.ops.mesh.primitive_uv_sphere_add(segments=segments, ring_count=segments // 2, radius=radius, location=location)
-    obj = smooth_last(material)
-    obj.scale = scale
-    return obj
-
-
 def capsule(radius, half_length, depth, material, segments=48):
     """Pill lying in the local XY plane (long axis Y), flattened along Z (the surface normal)."""
     bpy.ops.mesh.primitive_uv_sphere_add(segments=segments, ring_count=segments // 2, radius=radius)
@@ -296,29 +265,6 @@ def capsule(radius, half_length, depth, material, segments=48):
     bpy.ops.object.transform_apply(rotation=True)
     obj.scale = (1, 1, depth / radius)
     return smooth_last(material)
-
-
-def torus(major, minor, location, material, rotation=(0, 0, 0)):
-    bpy.ops.mesh.primitive_torus_add(major_radius=major, minor_radius=minor, major_segments=96, minor_segments=24,
-                                     location=location, rotation=rotation)
-    return smooth_last(material)
-
-
-def cone(radius1, radius2, depth, location, material, rotation=(0, 0, 0), vertices=64):
-    bpy.ops.mesh.primitive_cone_add(vertices=vertices, radius1=radius1, radius2=radius2, depth=depth,
-                                    location=location, rotation=rotation)
-    obj = smooth_last(material)
-    obj.modifiers.new("Bevel", "BEVEL").width = min(radius1, depth) * 0.08
-    return obj
-
-
-def cylinder(radius, depth, location, material, rotation=(0, 0, 0)):
-    bpy.ops.mesh.primitive_cylinder_add(vertices=64, radius=radius, depth=depth, location=location, rotation=rotation)
-    obj = smooth_last(material)
-    bevel = obj.modifiers.new("Bevel", "BEVEL")
-    bevel.width = min(radius, depth) * 0.2
-    bevel.segments = 6
-    return obj
 
 
 def tube(points, radii, material, bevel=0.02, orb=None, lift=0.0, resolution=24):

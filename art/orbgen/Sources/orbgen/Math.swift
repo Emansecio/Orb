@@ -44,36 +44,3 @@ func srgb(_ v: Double) -> Double {
 }
 
 func luminance(_ c: V3) -> Double { dot(c, V3(0.2126, 0.7152, 0.0722)) }
-
-// MARK: - Noise (deterministic, for hair texture)
-
-@inline(__always) private func hash(_ x: Int, _ y: Int, _ z: Int) -> Double {
-    var h = UInt64(bitPattern: Int64(x &* 73_856_093 ^ y &* 19_349_663 ^ z &* 83_492_791))
-    h = (h ^ (h >> 33)) &* 0xFF51AFD7ED558CCD
-    h = (h ^ (h >> 33)) &* 0xC4CEB9FE1A85EC53
-    h ^= h >> 33
-    return Double(h & 0xFFFFFF) / Double(0xFFFFFF)
-}
-
-/// Smooth value noise in 0...1.
-func noise(_ p: V3) -> Double {
-    let i = V3(floor(p.x), floor(p.y), floor(p.z))
-    let f = p - i
-    let u = f * f * (V3(repeating: 3) - 2 * f)
-    let x = Int(i.x), y = Int(i.y), z = Int(i.z)
-    func corner(_ dx: Int, _ dy: Int, _ dz: Int) -> Double { hash(x + dx, y + dy, z + dz) }
-    let x00 = mix(corner(0, 0, 0), corner(1, 0, 0), u.x), x10 = mix(corner(0, 1, 0), corner(1, 1, 0), u.x)
-    let x01 = mix(corner(0, 0, 1), corner(1, 0, 1), u.x), x11 = mix(corner(0, 1, 1), corner(1, 1, 1), u.x)
-    return mix(mix(x00, x10, u.y), mix(x01, x11, u.y), u.z)
-}
-
-/// Deterministic pseudo-random sequence (for placing curls and strands).
-struct Seeded {
-    private var state: UInt64
-    init(_ seed: UInt64) { state = seed &+ 0x9E3779B97F4A7C15 }
-    mutating func next() -> Double {
-        state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
-        return Double((state >> 33) & 0xFFFFFF) / Double(0xFFFFFF)
-    }
-    mutating func range(_ lo: Double, _ hi: Double) -> Double { lo + (hi - lo) * next() }
-}

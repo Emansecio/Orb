@@ -2,12 +2,10 @@ import Foundation
 
 /// orbgen: procedural layers for the Orb app.
 ///
-///     swift run -c release --package-path art/orbgen orbgen all            # faces + hair + manifest (the body is
-///                                                                           # the plush from art/pelucia.py)
+///     swift run -c release --package-path art/orbgen orbgen all            # same as faces (the body is the plush
+///                                                                           # from art/pelucia.py)
 ///     swift run -c release --package-path art/orbgen orbgen faces [categories…]  # seat the flat Blender layers
 ///     swift run -c release --package-path art/orbgen orbgen body [ids…]     # the old satin body, overwrites the plush
-///     swift run -c release --package-path art/orbgen orbgen hair [ids…]       # also updates options.json
-///     swift run -c release --package-path art/orbgen orbgen manifest          # hair ids/labels + default hair colors
 ///     swift run -c release --package-path art/orbgen orbgen preview out.png  # quick contact sheet
 ///
 /// Layers are written to Sources/Orb/Resources/Orbs (override with --out <dir>).
@@ -30,7 +28,7 @@ enum OrbGen {
             arguments.removeSubrange(flag...(flag + 1))
         }
         guard let command = arguments.first else {
-            print("uso: orbgen all | body [ids…] | hair [ids…] | manifest | preview out.png [tile] [ids…] | zoom out.png paleta[:hex] ids…")
+            print("uso: orbgen all | faces [categorias…] | body [ids…] | clean [pasta] | preview out.png [tile]")
             exit(2)
         }
         let only = Set(arguments.dropFirst())
@@ -40,13 +38,7 @@ enum OrbGen {
             case "all":
                 // The body is the plush from Blender (art/pelucia.py): `all` must not paint the satin one over it.
                 try Decals.run(flat: flatFolder, resources: resources, only: [])
-                try renderHair(into: resources, only: [])
-                try Manifest.update(resources: resources)
             case "body": try renderBodies(into: resources, only: only)
-            case "hair":
-                try renderHair(into: resources, only: only)
-                try Manifest.update(resources: resources)
-            case "manifest": try Manifest.update(resources: resources)
             case "clean":
                 // Re-encodes PNGs under a folder: transparent pixels lose their hidden color (Blender keeps it),
                 // which makes the files several times smaller. Nothing visible changes.
@@ -61,20 +53,10 @@ enum OrbGen {
                 // The flat Blender renders live next to this package (see art/README.md).
                 try Decals.run(flat: flatFolder, resources: resources, only: only)
             case "preview":
-                // preview out.png [tile] [hair ids…]
+                // preview out.png [tile]
                 let rest = Array(arguments.dropFirst())
-                guard let path = rest.first else { throw ArtError.usage("preview <out.png> [tile] [ids…]") }
-                let tile = rest.dropFirst().first.flatMap { Int($0) }
-                let ids = Array(rest.dropFirst(tile == nil ? 1 : 2))
-                try Preview.sheet(resources: resources, to: URL(fileURLWithPath: path), hairs: ids, tile: tile ?? 200)
-            case "zoom":
-                // zoom out.png palette[:hex] hair… — big tiles of one palette, for close inspection.
-                let rest = Array(arguments.dropFirst())
-                guard rest.count >= 3 else { throw ArtError.usage("zoom <out.png> <palette[:hex]> <hair ids…>") }
-                let parts = rest[1].split(separator: ":")
-                let tint = parts.count > 1 ? UInt32(parts[1], radix: 16) : nil
-                try Preview.sheet(resources: resources, to: URL(fileURLWithPath: rest[0]), hairs: Array(rest.dropFirst(2)),
-                                  tile: 420, columns: [(String(parts[0]), tint)])
+                guard let path = rest.first else { throw ArtError.usage("preview <out.png> [tile]") }
+                try Preview.sheet(resources: resources, to: URL(fileURLWithPath: path), tile: rest.dropFirst().first.flatMap { Int($0) } ?? 200)
             default: throw ArtError.usage("comando desconhecido: \(command)")
             }
             print(String(format: "pronto em %.1f s", Date().timeIntervalSince(start)))
@@ -90,18 +72,6 @@ enum OrbGen {
             let canvas = Canvas.render { u, v in shader.shade(u, v) }
             try canvas.writePNG(to: resources.appendingPathComponent("body/\(palette.id).png"))
             print("corpo", palette.id)
-        }
-    }
-
-    static func renderHair(into resources: URL, only: Set<String>) throws {
-        let folder = resources.appendingPathComponent("hair")
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        for style in HairStyle.all where only.isEmpty || only.contains(style.id) {
-            let start = Date()
-            let layers = HairRenderer(style: style).render()
-            try layers.base.writePNG(to: folder.appendingPathComponent("\(style.id).png"))
-            try layers.shine.writePNG(to: folder.appendingPathComponent("\(style.id)-brilho.png"))
-            print(String(format: "cabelo %@ (%.1f s)", style.id, Date().timeIntervalSince(start)))
         }
     }
 }

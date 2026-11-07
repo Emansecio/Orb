@@ -127,10 +127,9 @@ final class Canvas: @unchecked Sendable {
     }
 
     /// `other` over `self`.
-    func composite(_ other: Canvas, tint: V3? = nil) {
+    func composite(_ other: Canvas) {
         for i in 0..<pixels.count {
-            var top = other.pixels[i]
-            if let tint { top = Pixel(top.x * tint.x, top.y * tint.y, top.z * tint.z, top.w) }
+            let top = other.pixels[i]
             pixels[i] = top + pixels[i] * (1 - top.w)
         }
     }

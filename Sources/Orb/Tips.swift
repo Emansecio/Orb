@@ -316,7 +316,6 @@ enum Tip {
 
     // MARK: Odds and ends
 
-    static let autoColor = "Usa uma cor que combina com a do corpo do Orb"
     static let routineTemplate = "Abre o editor de rotina já preenchido com este modelo"
     static let openRunReport = "Abre o relatório desta execução"
     static let findResults = "Mostra a lista dos resultados, com um trecho de cada"
@@ -379,7 +378,7 @@ enum Tip {
          usagePeriod, usageChartBy, priceCorrected, priceCorrect, priceMissing, priceRestore, copyCode, copyCommand, copyOutput,
          copyTableMarkdown, copyTableCSV, jumpToEnd, markAnswer, openSource, previewPage, openPage, ignoreProposals, useProposal, interactivePages, enlargeBlock, showDrawing, showSource,
          recheckPermissions, resetConfirm,
-         autoColor, routineTemplate, openRunReport, exploreSkills, showProviderDetails, hideProviderDetails,
+         routineTemplate, openRunReport, exploreSkills, showProviderDetails, hideProviderDetails,
          previewActivity("pensando"),
          findResults, findClose, findInConversation(), findNext(), findPrevious(),
          newOrbOrCategory, newGroup(), settings(), inspector(isShowing: true), inspector(isShowing: false),

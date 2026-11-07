@@ -48,7 +48,7 @@ private struct SampleGroups {
         var lead = model.bots.first ?? Bot(name: "Atlas", role: "Assistente do seu Mac", orb: WelcomeLooks.atlas)
         research = Bot(name: "Pesquisador", role: "Pesquisa na web", orb: WelcomeLooks.bento)
         var reviewer = Bot(name: "Revisor", role: "Revisa código",
-                           orb: OrbConfig(color: "grafite", eyes: "pilulas", brows: "retas", accessories: ["fones"]))
+                           orb: OrbConfig(color: "grafite", eyes: "pilulas", brows: "retas"))
         if mode.hasSuffix("-readonly") {
             lead.permissionMode = .readOnly
             reviewer.permissionMode = .readOnly

@@ -9,10 +9,6 @@ struct OrbPose: Equatable {
     var look = CGPoint.zero
     /// Extra eye offset while the eyes lead the head during a saccade.
     var eyeLead = CGPoint.zero
-    /// Offset of loose layers (hair, headphones) trailing the head and body.
-    var hairLag = CGPoint.zero
-    /// Extra rotation (degrees) of loose layers swinging behind the body's tilt.
-    var hairSwing = 0.0
     var lift = 0.0
     var squash = 0.0
     var tilt = 0.0
@@ -29,17 +25,11 @@ struct OrbPose: Equatable {
 
     static let rest = OrbPose()
 
-    /// How far from the crown the hair's ends reach (fraction of the orb size): long hair hangs to the bottom of the
-    /// body, about a whole orb below the crown (a swing moves it along that radius, not the body's).
-    static let hairReach = Double(OrbGeometry.orbBottom - OrbGeometry.crownLine) * Double(OrbGeometry.imageScale)
-
     /// Largest on-screen change between two poses, in device pixels (opacity changes count as a few pixels).
     /// Frames whose change is below a fraction of a pixel can be skipped.
     func pixelDistance(to other: OrbPose, size: Double, scale: Double) -> Double {
         let length = max(abs(lift - other.lift), abs(shake - other.shake), abs(bubbleBob - other.bubbleBob),
                          hypot(eyeLead.x - other.eyeLead.x, eyeLead.y - other.eyeLead.y),
-                         hypot(hairLag.x - other.hairLag.x, hairLag.y - other.hairLag.y),
-                         abs(hairSwing - other.hairSwing) * .pi / 180 * Self.hairReach,
                          hypot(look.x - other.look.x, look.y - other.look.y) * OrbLayer.maxDepth,
                          abs(squash - other.squash) / 2, abs(hover - other.hover) * 0.02,
                          abs(tilt - other.tilt) * .pi / 360, abs(blink - other.blink) * 0.12,
@@ -57,8 +47,6 @@ struct OrbPose: Equatable {
         var pose = OrbPose()
         pose.look = OrbMath.mix(a.look, b.look, t)
         pose.eyeLead = OrbMath.mix(a.eyeLead, b.eyeLead, t)
-        pose.hairLag = OrbMath.mix(a.hairLag, b.hairLag, t)
-        pose.hairSwing = m(a.hairSwing, b.hairSwing)
         pose.lift = m(a.lift, b.lift)
         pose.squash = m(a.squash, b.squash)
         pose.tilt = m(a.tilt, b.tilt)
@@ -79,36 +67,11 @@ struct OrbPose: Equatable {
 enum OrbSprings {
     /// The head turning toward where the eyes look.
     static let head = (response: 0.4, damping: 0.9)
-    /// Hair and headphones trailing the head and body (position), and swinging behind the body's tilt (rotation).
-    static let loose = (response: 0.28, damping: 0.5)
-    static let swing = (response: 0.3, damping: 0.5)
-    /// Largest trailing offset (fraction of the orb) and swing (degrees).
-    static let maxLag = 0.02, maxSwing = 3.0
-
-    /// What hair and headphones follow: where the head looks and the body's lift (fractions of the orb).
-    static func hairAnchor(look: CGPoint, lift: Double) -> CGPoint {
-        CGPoint(x: look.x * 0.05, y: look.y * 0.05 + lift)
-    }
-
-    /// Steps the trailing spring toward `anchor` and returns how far hair and headphones lag behind it (at most `maxLag`),
-    /// with a little overshoot. The live orb and the review sheets both call this, so the sheets show the real motion.
-    static func hairLag(_ loose: inout SpringPoint, anchor: CGPoint, dt: Double) -> CGPoint {
-        loose.step(toward: anchor, dt: dt, response: Self.loose.response, damping: Self.loose.damping)
-        return CGPoint(x: max(-maxLag, min(maxLag, loose.value.x - anchor.x)), y: max(-maxLag, min(maxLag, loose.value.y - anchor.y)))
-    }
-
-    /// Steps the swing spring toward the body's `tilt` and returns how many degrees hair and headphones swing behind it
-    /// (at most `maxSwing`), overshooting a little as it settles.
-    static func hairSwing(_ swing: inout Spring, tilt: Double, dt: Double) -> Double {
-        swing.step(toward: tilt, dt: dt, response: Self.swing.response, damping: Self.swing.damping)
-        return max(-maxSwing, min(maxSwing, swing.value - tilt))
-    }
 }
 
 /// How far a live Orb reaches above its size box, so a stage can leave room for it (fractions of its size). Lifts
 /// from hops, the click jump and the temperament's flourishes can stack (a click during a hop), so the body's lift
-/// and stretch are eased under caps (`limit`) instead of adding up past them. With the tallest hair (~0.35 above the
-/// box at rest; the hats that left the catalog reached ~0.39), the caps, the hover growth and the hair's trailing,
+/// and stretch are eased under caps (`limit`) instead of adding up past them. With the caps and the hover growth,
 /// `headroomFraction` is enough (`OrbDesignTests`).
 enum OrbStageRoom {
     static let maxLift = 0.19, liftKnee = 0.15
@@ -284,15 +247,13 @@ struct Saccades {
 
 /// The Orb was selected in the sidebar: a quick look toward the chat (to its right) and a blink as it gets there,
 /// laid over whatever it was doing and back again in `duration` seconds. The eyes get there a moment before the
-/// head, and the hair a moment after it.
+/// head.
 enum OrbGlance {
     static let duration = 0.6
     /// Where it looks (gaze x right, y up): the chat, beside the sidebar.
     static let look = CGPoint(x: 0.6, y: -0.05)
-    /// Seconds the eyes lead the head by, and the hair trails it by.
-    static let eyeLead = 0.05, hairDelay = 0.07
-    /// Until the hair is back too.
-    static let total = duration + hairDelay
+    /// Seconds the eyes lead the head by.
+    static let eyeLead = 0.05
     /// Seconds to turn and to come back.
     private static let turn = 0.16, back = 0.22
     /// The blink starts as the head arrives, so the turn itself (eyes first) shows.
@@ -308,23 +269,16 @@ enum OrbGlance {
         return OrbMath.smoothstep(elapsed / turn) * (1 - OrbMath.smoothstep((elapsed - (duration - back)) / back))
     }
 
-    /// Lays the glance over `pose`: the look, the eyes leading it, the hair trailing it and the blink.
+    /// Lays the glance over `pose`: the look, the eyes leading it and the blink.
     /// `blinkFactor`: how much of the blink the Orb's eyes make (`Blinker.factor`).
     static func apply(to pose: inout OrbPose, elapsed: Double, blinkFactor: Double = 1) {
-        let head = weight(elapsed), eyes = weight(elapsed + eyeLead), hair = weight(elapsed - hairDelay)
+        let head = weight(elapsed), eyes = weight(elapsed + eyeLead)
         let from = pose.look
         let dx = Double(look.x - from.x), dy = Double(look.y - from.y)
         pose.look = OrbMath.mix(from, look, head)
         let lead: Double = (eyes - head) * 0.035
         pose.eyeLead.x += CGFloat(dx * lead)
         pose.eyeLead.y += CGFloat(dy * lead)
-        // The loose layers follow the head at 5 % of its turn (as in the live pose), a moment late.
-        let lag: Double = OrbSprings.maxLag
-        let trail: Double = (hair - head) * 0.05
-        let lagX: Double = Double(pose.hairLag.x) + dx * trail
-        let lagY: Double = Double(pose.hairLag.y) + dy * trail
-        pose.hairLag.x = CGFloat(max(-lag, min(lag, lagX)))
-        pose.hairLag.y = CGFloat(max(-lag, min(lag, lagY)))
         pose.blink = max(pose.blink, Blinker.closure(elapsed - blinkAt) * blinkFactor)
     }
 }

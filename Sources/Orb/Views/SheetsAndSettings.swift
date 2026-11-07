@@ -642,7 +642,7 @@ private struct NewBotFolderSection: View {
 enum NewBotSnapshots {
     static func keptSheet(height: CGFloat?) -> AnyView {
         let nina = KeptProfile(name: "Nina", role: "Cuida da minha agenda",
-                               orb: OrbConfig(color: "menta", eyes: "pilulas", mouth: "sorriso", hair: "franja", accessories: ["laco"]))
+                               orb: OrbConfig(color: "menta", eyes: "pilulas", mouth: "sorriso"))
         let luna = KeptProfile(name: "Luna", role: "Escreve comigo", orb: OrbConfig(color: "rosa", eyes: "ovais", cheeks: "blush"))
         let list = sampleKept(nina, luna)
         return AnyView(NewBotSheet(height: height, kept: list, chosen: list.first))

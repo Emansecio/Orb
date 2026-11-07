@@ -96,65 +96,27 @@ struct OrbPerformanceTests {
 
     @Test func bitmapsLoadInTheBackgroundAndThenAreCached() async {
         // A size no other test uses, so the cache starts cold.
-        let layers = [OrbLayer(kind: .eyes, path: "eyes/pontos", tint: nil), OrbLayer(kind: .hair, path: "hair/topete", tint: 0x336699)]
-        #expect(OrbImages.cached("eyes/pontos", pixels: 143, tint: nil) == nil)
+        let layers = [OrbLayer(kind: .eyes, path: "eyes/pontos"), OrbLayer(kind: .mouth, path: "mouth/sorriso")]
+        #expect(OrbImages.cached("eyes/pontos", pixels: 143) == nil)
         #expect(OrbImages.cachedImages(layers, pixels: 143) == nil)
         await OrbImages.load(layers, pixels: 143)
         #expect(OrbImages.cachedImages(layers, pixels: 143) != nil)
-        #expect(OrbImages.cached("hair/topete", pixels: 143, tint: 0x336699)?.width == 143)
+        #expect(OrbImages.cached("mouth/sorriso", pixels: 143)?.width == 143)
     }
 
     @Test func loadingHandsOverTheBitmapsInOrder() async {
         // The caller keeps them: the cache may drop a bitmap before the rebuild that needs it.
-        let ghost = OrbLayer(kind: .eyes, path: "eyes/does-not-exist", tint: nil)
-        let hair = OrbLayer(kind: .hair, path: "hair/topete", tint: 0x336699)
-        let images = await OrbImages.load([hair, ghost], pixels: 159)
+        let ghost = OrbLayer(kind: .eyes, path: "eyes/does-not-exist")
+        let mouth = OrbLayer(kind: .mouth, path: "mouth/sorriso")
+        let images = await OrbImages.load([mouth, ghost], pixels: 159)
         #expect(images.count == 2)
         #expect(images.first??.width == 159)
         #expect(images.last! == nil)
     }
 
-    @Test func aTintDarkensSoftEdgesAsMuchAsTheRest() throws {
-        // A multiply that saw white where the hair is see-through left its edges lighter than the hair.
-        let tint: UInt32 = 0x804020
-        let plain = try #require(OrbImages.cgImage("hair/topete", pixels: 157, tint: nil))
-        let tinted = try #require(OrbImages.cgImage("hair/topete", pixels: 157, tint: tint))
-        let (a, b) = (rgba(plain), rgba(tinted))
-        let factors = [Int(tint >> 16 & 0xFF), Int(tint >> 8 & 0xFF), Int(tint & 0xFF)]
-        var softEdges = 0, wrong = 0
-        for i in stride(from: 0, to: a.count, by: 4) {
-            if a[i + 3] > 0 && a[i + 3] < 255 { softEdges += 1 }
-            if b[i + 3] != a[i + 3] { wrong += 1 }
-            for c in 0..<3 where abs(Int(b[i + c]) - Int(a[i + c]) * factors[c] / 255) > 1 { wrong += 1 }
-        }
-        #expect(softEdges > 0)
-        #expect(wrong == 0)
-    }
-
-    /// The image's premultiplied RGBA bytes.
-    private func rgba(_ image: CGImage) -> [UInt8] {
-        var bytes = [UInt8](repeating: 0, count: image.width * image.height * 4)
-        bytes.withUnsafeMutableBytes { buffer in
-            let context = CGContext(data: buffer.baseAddress, width: image.width, height: image.height, bitsPerComponent: 8,
-                                    bytesPerRow: image.width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-            context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
-        }
-        return bytes
-    }
-
-    @Test func glassesMoveWithTheEyes() {
-        let glasses = OrbLayer(kind: .accessory, path: "accessories/oculos-redondos", tint: nil)
-        let headphones = OrbLayer(kind: .accessory, path: "accessories/fones", tint: nil)
-        #expect(glasses.depth == OrbLayer(kind: .eyes, path: "eyes/pontos", tint: nil).depth)
-        #expect(!glasses.isLoose)
-        #expect(headphones.depth < glasses.depth)
-        #expect(headphones.isLoose)
-    }
-
     @Test func loadingCompletesOnTheMainActor() async {
         await withCheckedContinuation { continuation in
-            OrbImages.load([OrbLayer(kind: .eyes, path: "eyes/pontos", tint: nil)], pixels: 147) { _ in
+            OrbImages.load([OrbLayer(kind: .eyes, path: "eyes/pontos")], pixels: 147) { _ in
                 #expect(Thread.isMainThread)
                 continuation.resume()
             }
@@ -162,28 +124,15 @@ struct OrbPerformanceTests {
     }
 
     @Test func loadingCompletesForMissingFilesToo() async {
-        let ghost = OrbLayer(kind: .eyes, path: "eyes/does-not-exist", tint: nil)
+        let ghost = OrbLayer(kind: .eyes, path: "eyes/does-not-exist")
         await OrbImages.load([ghost], pixels: 151)
-        #expect(OrbImages.cached(ghost.path, pixels: 151, tint: nil) == nil)
+        #expect(OrbImages.cached(ghost.path, pixels: 151) == nil)
     }
 
     @Test func loadingWhatIsCachedCompletesAtOnce() async {
-        let layer = OrbLayer(kind: .eyes, path: "eyes/pontos", tint: nil)
+        let layer = OrbLayer(kind: .eyes, path: "eyes/pontos")
         await OrbImages.load([layer], pixels: 155)
         await OrbImages.load([layer], pixels: 155)
         #expect(OrbImages.cachedImages([layer], pixels: 155) != nil)
-    }
-
-    @Test func retintingReusesTheDecodedBitmap() {
-        // The color picker passes through many tints of one layer: each is a bitmap of its own, all the right size.
-        let colors: [UInt32] = [0xFF0000, 0x00FF00, 0x0000FF]
-        let images = colors.map { OrbImages.cgImage("hair/topete", pixels: 159, tint: $0) }
-        #expect(images.allSatisfy { $0?.width == 159 && $0?.height == 159 })
-        #expect(OrbImages.cached("hair/topete", pixels: 159, tint: 0x00FF00) != nil)
-        func pixel(_ image: CGImage?) -> [UInt8] {
-            guard let image, let data = image.dataProvider?.data as Data? else { return [] }
-            return Array(data)
-        }
-        #expect(pixel(images[0]) != pixel(images[1]))
     }
 }

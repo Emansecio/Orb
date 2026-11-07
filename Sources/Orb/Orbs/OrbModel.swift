@@ -13,19 +13,11 @@ struct OrbConfig: Hashable, Codable, Sendable {
     var mouth = "nenhuma"
     var brows = "nenhuma"
     var cheeks = "nenhuma"
-    var hair = "nenhum"
-    var accessories: [String] = []
-    /// Optional tints (sRGB hex). nil = automatic default.
-    var hairColor: UInt32?
-    var accentColor: UInt32?
     /// Personality: how the Orb moves and reacts (not how it looks).
     var temperament = OrbTemperament.equilibrado
-    /// Which automatic colors the nil tints get (see `OrbAutoColors`).
-    var autoColors = OrbAutoColors.designed
 
     /// A random look that hangs together (new Orbs and the editor's "Sortear"): friendly expressions are much
-    /// likelier than the ones activities borrow (dizzy, angry, sleepy, sad), brows are occasional, there is at most
-    /// one accessory, and the hair keeps the palette's own color most of the time (otherwise a natural one).
+    /// likelier than the ones activities borrow (dizzy, angry, sleepy, sad), and brows are occasional.
     static func random() -> OrbConfig {
         var rng = SystemRandomNumberGenerator()
         return random(using: &rng)
@@ -54,26 +46,16 @@ struct OrbConfig: Hashable, Codable, Sendable {
                                      "dentinho": 0.8, "neutra": 0.5, "assobio": 0.3])
         config.brows = pick(.brows, ["nenhuma": 6, "retas": 1, "arqueadas": 2])
         config.cheeks = pick(.cheeks, ["nenhuma": 4, "blush": 3, "sardas": 1.5, "coracoes": 0.8])
-        config.hair = pick(.hair, ["nenhum": 3], other: 0.7)
-        if config.hair != "nenhum", Double.random(in: 0..<1, using: &rng) < 0.35 {
-            config.hairColor = OrbSwatch.naturalHair.randomElement(using: &rng)?.hex
-        }
-        if Double.random(in: 0..<1, using: &rng) < 0.45 {
-            let accessory = pick(.accessories, [:], other: 1)
-            if !accessory.isEmpty { config.accessories = [accessory] }
-        }
         return config
     }
 
-    /// Spoken description of the look (VoiceOver), e.g. "Índigo, olhos Pílulas, boca Sorriso, cabelo Franja, Laço".
+    /// Spoken description of the look (VoiceOver), e.g. "Índigo, olhos Pílulas, boca Sorriso, bochechas Blush".
     var summary: String {
         let catalog = OrbCatalog.shared
         var parts = [catalog.label(.color, color), "olhos \(catalog.label(.eyes, eyes))"]
         if mouth != "nenhuma" { parts.append("boca \(catalog.label(.mouth, mouth))") }
         if brows != "nenhuma" { parts.append("sobrancelhas \(catalog.label(.brows, brows))") }
         if cheeks != "nenhuma" { parts.append("bochechas \(catalog.label(.cheeks, cheeks))") }
-        if hair != "nenhum" { parts.append("cabelo \(catalog.label(.hair, hair))") }
-        parts += accessories.map { catalog.label(.accessories, $0) }
         return parts.joined(separator: ", ")
     }
 
@@ -85,8 +67,6 @@ struct OrbConfig: Hashable, Codable, Sendable {
         case .mouth: mouth
         case .brows: brows
         case .cheeks: cheeks
-        case .hair: hair
-        case .accessories: accessories.first ?? ""
         }
     }
 
@@ -98,19 +78,8 @@ struct OrbConfig: Hashable, Codable, Sendable {
         case .mouth: mouth = id
         case .brows: brows = id
         case .cheeks: cheeks = id
-        case .hair: hair = id
-        case .accessories:
-            if let index = accessories.firstIndex(of: id) { accessories.remove(at: index) } else { accessories.append(id) }
         }
     }
-}
-
-/// Which automatic colors a look gets for the tints left nil (`hairColor`, `accentColor`).
-/// Orbs saved before the designed defaults keep the colors they always had (`original`: hair a darker shade of the
-/// body's deep color); everything made since gets the `designed` ones.
-/// Saved with the look, so an Orb never changes color by itself; headphones are white in both (dark ones vanished).
-enum OrbAutoColors: Int, Codable, Sendable {
-    case original = 1, designed = 2
 }
 
 /// Tolerant decoding: Orbs saved by older versions (missing newer keys) still load, and ids are kept exactly as
@@ -124,35 +93,24 @@ extension OrbConfig {
         mouth = try c.value(.mouth, default: fallback.mouth)
         brows = try c.value(.brows, default: fallback.brows)
         cheeks = try c.value(.cheeks, default: fallback.cheeks)
-        hair = try c.value(.hair, default: fallback.hair)
-        // Head-worn accessories left the catalog (2026-11): a saved look sheds them, as it does the mustache key.
-        accessories = try c.value(.accessories, default: [String]()).filter { !Self.removedAccessories.contains($0) }
-        hairColor = try c.decodeIfPresent(UInt32.self, forKey: .hairColor)
-        accentColor = try c.decodeIfPresent(UInt32.self, forKey: .accentColor)
+        // Hair, accessories and their colors left the catalog (2026-11): those keys are no longer read, so a saved
+        // look sheds them (as it did the mustache) and is written back without them.
         temperament = try c.value(.temperament, default: fallback.temperament)
-        // Saved before the key existed: the original automatic colors. A value from a newer build: the designed ones.
-        autoColors = c.contains(.autoColors) ? ((try? c.decode(OrbAutoColors.self, forKey: .autoColors)) ?? .designed) : .original
     }
 
     /// Option ids that were renamed or removed, mapped to the closest one that exists now. Add an entry whenever an
-    /// option leaves `options.json` (e.g. `.hair: ["old-id": "new-id"]`); other unknown ids fall back to the default.
-    /// (The hair redesign kept every earlier id, so nothing needs mapping yet.)
+    /// option leaves `options.json` (e.g. `.eyes: ["old-id": "new-id"]`); other unknown ids fall back to the default.
     static let legacyIDs: [OrbCategory: [String: String]] = [:]
 
-    /// Accessories removed from the editor (hats, ears, horns, halo, bow, flower): dropped when a look is read, so
-    /// every Orb stops wearing them. The mustache went the same way; its keys are just no longer read.
-    static let removedAccessories: Set<String> = ["chapeu-festa", "bone", "gorro", "cartola", "coroa", "laco",
-                                                   "aureola", "chifres", "orelhas-gato", "flor"]
-
     /// The same look with every option id the catalog knows: renamed ids map to their successor and unknown
-    /// ones fall back to the default (or are dropped, for accessories), so drawing never points at a missing image.
+    /// ones fall back to the default, so drawing never points at a missing image.
     /// Only for drawing: the saved look keeps its ids. Categories the catalog has no options for (no art found) are
     /// left alone.
     func migrated(in catalog: OrbCatalog, renamed: [OrbCategory: [String: String]] = legacyIDs) -> OrbConfig {
         guard !catalog.knows(self) else { return self }
         var config = self
         let defaults = OrbConfig()
-        for category in OrbCategory.allCases where category != .temperament && category != .accessories {
+        for category in OrbCategory.allCases where category != .temperament {
             let known = catalog.ids(category)
             let id = value(for: category)
             guard !known.isEmpty, !known.contains(id) else { continue }
@@ -162,22 +120,12 @@ extension OrbConfig {
                 config.set(category, defaults.value(for: category))
             }
         }
-        let accessories = catalog.ids(.accessories)
-        if !accessories.isEmpty {
-            var kept: [String] = []
-            for id in self.accessories {
-                guard let known = accessories.contains(id) ? id : renamed[.accessories]?[id],
-                      accessories.contains(known), !kept.contains(known) else { continue }
-                kept.append(known)
-            }
-            config.accessories = kept
-        }
         return config
     }
 }
 
 enum OrbCategory: String, CaseIterable, Identifiable, Sendable {
-    case color, temperament, eyes, mouth, brows, cheeks, hair, accessories
+    case color, temperament, eyes, mouth, brows, cheeks
 
     var id: String { rawValue }
 
@@ -189,8 +137,6 @@ enum OrbCategory: String, CaseIterable, Identifiable, Sendable {
         case .mouth: "Boca"
         case .brows: "Sobrancelhas"
         case .cheeks: "Bochechas"
-        case .hair: "Cabelo"
-        case .accessories: "Acessórios"
         }
     }
 
@@ -202,37 +148,8 @@ enum OrbCategory: String, CaseIterable, Identifiable, Sendable {
         case .mouth: "mouth"
         case .brows: "eyebrow"
         case .cheeks: "face.smiling"
-        case .hair: "comb"
-        case .accessories: "eyeglasses"
         }
     }
-}
-
-/// A named color for the editor's tint pickers (the name is what VoiceOver reads).
-struct OrbSwatch: Hashable, Sendable {
-    let hex: UInt32
-    let name: String
-
-    /// Hair colors: natural ones first, then a few playful ones.
-    static let naturalHair = [
-        OrbSwatch(hex: 0x1C1A2B, name: "Preto"), OrbSwatch(hex: 0x3A2216, name: "Castanho-escuro"),
-        OrbSwatch(hex: 0x6B4A2E, name: "Castanho"), OrbSwatch(hex: 0xB5532C, name: "Ruivo"),
-        OrbSwatch(hex: 0xE0B062, name: "Loiro"), OrbSwatch(hex: 0xF1E6CC, name: "Platinado"),
-        OrbSwatch(hex: 0xB9B6C8, name: "Grisalho"),
-    ]
-    static let hair = naturalHair + [
-        OrbSwatch(hex: 0xFF7AB6, name: "Rosa-chiclete"), OrbSwatch(hex: 0x8F7BFF, name: "Lilás"),
-        OrbSwatch(hex: 0x3FA9F5, name: "Azul"), OrbSwatch(hex: 0x2BC4A0, name: "Verde-água"),
-        OrbSwatch(hex: 0xFF8A3D, name: "Laranja"),
-    ]
-    /// Accessories (the headphones).
-    static let accent = [
-        OrbSwatch(hex: 0xF4F2FF, name: "Branco"), OrbSwatch(hex: 0x2B2B36, name: "Grafite"),
-        OrbSwatch(hex: 0x5A3B22, name: "Marrom"), OrbSwatch(hex: 0xC98A3A, name: "Caramelo"),
-        OrbSwatch(hex: 0xFF5A3D, name: "Vermelho"), OrbSwatch(hex: 0xFF4F8B, name: "Rosa"),
-        OrbSwatch(hex: 0x8A5BFF, name: "Roxo"), OrbSwatch(hex: 0x2E9BFF, name: "Azul"),
-        OrbSwatch(hex: 0x14C08C, name: "Verde"), OrbSwatch(hex: 0xFFC83D, name: "Amarelo"),
-    ]
 }
 
 // MARK: - Catalog (options.json)
@@ -247,8 +164,6 @@ struct OrbPalette: Identifiable, Hashable, Sendable {
     let label: String
     /// rim, core, deep, glow
     let hexes: [UInt32]
-    /// Default hair color, designed per palette (nil: a darker shade of `deep`).
-    var hair: UInt32?
 
     var core: Color { Color(hex: hexes[1]) }
     var deep: UInt32 { hexes[2] }
@@ -276,11 +191,8 @@ final class OrbCatalog: Sendable {
 
     let palettes: [OrbPalette]
     private let categories: [OrbCategory: [OrbOption]]
-    let tintedAccessories: Set<String>
     /// Viseme images present in `visemes/` (ids with variant suffix), see `OrbConfig.visemePath`.
     let visemes: Set<String>
-    /// Hair styles with a `hair/<id>-brilho` layer (highlights, ties and the shadow on the head, untinted).
-    let hairShine: Set<String>
     private let knownIDs: [OrbCategory: Set<String>]
     let root: URL?
 
@@ -296,14 +208,12 @@ final class OrbCatalog: Sendable {
 
         var palettes: [OrbPalette] = []
         var categories: [OrbCategory: [OrbOption]] = [:]
-        var tinted: Set<String> = []
         if let root, let data = try? Data(contentsOf: root.appendingPathComponent("options.json")),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             for entry in json["color"] as? [[String: Any]] ?? [] {
                 let hexes = (entry["hex"] as? [String] ?? []).compactMap { UInt32($0.dropFirst(), radix: 16) }
-                let hair = (entry["hair"] as? String).flatMap { UInt32($0.dropFirst(), radix: 16) }
                 if let id = entry["id"] as? String, let label = entry["label"] as? String, hexes.count == 4 {
-                    palettes.append(OrbPalette(id: id, label: label, hexes: hexes, hair: hair))
+                    palettes.append(OrbPalette(id: id, label: label, hexes: hexes))
                 }
             }
             for category in OrbCategory.allCases where category != .color && category != .temperament {
@@ -312,15 +222,11 @@ final class OrbCatalog: Sendable {
                     return OrbOption(id: id, label: label)
                 }
             }
-            tinted = Set(json["tintedAccessories"] as? [String] ?? [])
         }
         self.palettes = palettes
         self.categories = categories
-        self.tintedAccessories = tinted
         let visemeFiles = root.flatMap { try? FileManager.default.contentsOfDirectory(atPath: $0.appendingPathComponent("visemes").path) }
         visemes = Set((visemeFiles ?? []).filter { $0.hasSuffix(".png") }.map { String($0.dropLast(4)) })
-        let hairFiles = root.flatMap { try? FileManager.default.contentsOfDirectory(atPath: $0.appendingPathComponent("hair").path) }
-        hairShine = Set((hairFiles ?? []).filter { $0.hasSuffix("-brilho.png") }.map { String($0.dropLast("-brilho.png".count)) })
         var known = categories.mapValues { Set($0.map(\.id)) }
         known[.color] = Set(palettes.map(\.id))
         knownIDs = known
@@ -333,12 +239,11 @@ final class OrbCatalog: Sendable {
 
     /// Whether every id in the look is one the catalog has (or the category has no art at all).
     func knows(_ config: OrbConfig) -> Bool {
-        for category in OrbCategory.allCases where category != .temperament && category != .accessories {
+        for category in OrbCategory.allCases where category != .temperament {
             let known = ids(category)
             if !known.isEmpty && !known.contains(config.value(for: category)) { return false }
         }
-        let accessories = ids(.accessories)
-        return accessories.isEmpty || config.accessories.allSatisfy(accessories.contains)
+        return true
     }
 
     func options(_ category: OrbCategory) -> [OrbOption] {
@@ -361,23 +266,15 @@ final class OrbCatalog: Sendable {
 
 // MARK: - Layer images
 
-/// Decoded, downsampled and tinted layer bitmaps, cached per pixel size. Thread-safe. Decoding a 640 px PNG
+/// Decoded and downsampled layer bitmaps, cached per pixel size. Thread-safe. Decoding a 640 px PNG
 /// takes 6-8 ms, so views never decode on the main thread: they ask `cached`, and when something is missing
 /// they `load` it in the background (keeping what they show until it arrives). `cgImage` decodes in place and
 /// is for tests, snapshots and the rare fallback.
 enum OrbImages {
-    /// Bounded by bytes: the editor can make many variants (every tint the color picker passes through, every
-    /// option at stage size), and layers on screen keep their own bitmap anyway. NSCache is thread-safe.
+    /// Bounded by bytes: the editor can make many variants (every option at stage size), and layers on screen keep their own bitmap anyway. NSCache is thread-safe.
     nonisolated(unsafe) private static let cache: NSCache<NSString, CGImage> = {
         let cache = NSCache<NSString, CGImage>()
         cache.totalCostLimit = 96 << 20
-        return cache
-    }()
-    /// Untinted bitmaps of layers that are drawn tinted (hair, accessories): the color picker changes
-    /// a tint many times a second, and re-tinting one of these costs a fraction of a PNG decode.
-    nonisolated(unsafe) private static let untinted: NSCache<NSString, CGImage> = {
-        let cache = NSCache<NSString, CGImage>()
-        cache.totalCostLimit = 24 << 20
         return cache
     }()
     /// Size of the source PNGs.
@@ -389,43 +286,41 @@ enum OrbImages {
         min(sourceSide, max(16, Int(pixels.rounded())))
     }
 
-    private static func key(_ relativePath: String, side: Int, tint: UInt32?) -> NSString {
-        "\(relativePath)@\(side)#\(tint.map { String($0, radix: 16) } ?? "-")" as NSString
+    private static func key(_ relativePath: String, side: Int) -> NSString {
+        "\(relativePath)@\(side)" as NSString
     }
 
     /// The bitmap if it is already decoded; never decodes.
-    static func cached(_ relativePath: String, pixels: CGFloat, tint: UInt32?) -> CGImage? {
-        cache.object(forKey: key(relativePath, side: bitmapSide(for: pixels), tint: tint))
+    static func cached(_ relativePath: String, pixels: CGFloat) -> CGImage? {
+        cache.object(forKey: key(relativePath, side: bitmapSide(for: pixels)))
     }
 
     /// The bitmaps of `layers` (in order) when every one is decoded, else nil: a set is whole or nothing.
     static func cachedImages(_ layers: [OrbLayer], pixels: CGFloat) -> [CGImage]? {
         var images: [CGImage] = []
         for layer in layers {
-            guard let image = cached(layer.path, pixels: pixels, tint: layer.tint) else { return nil }
+            guard let image = cached(layer.path, pixels: pixels) else { return nil }
             images.append(image)
         }
         return images
     }
 
-    /// Lets go of every decoded bitmap. The editor fills the caches with variants (each tint, each option at stage size)
+    /// Lets go of every decoded bitmap. The editor fills the cache with variants (each option at stage size)
     /// that nothing shows once it closes; the Orbs on screen keep their own bitmaps, and a size they ask for again is
     /// decoded in the background as usual.
     static func trim() {
         cache.removeAllObjects()
-        untinted.removeAllObjects()
     }
 
     /// For tests: drops these bitmaps from the shared cache, as its byte limit or memory pressure would.
     static func evictForTesting(_ layers: [OrbLayer], pixels: CGFloat) {
-        for layer in layers { cache.removeObject(forKey: key(layer.path, side: bitmapSide(for: pixels), tint: layer.tint)) }
+        for layer in layers { cache.removeObject(forKey: key(layer.path, side: bitmapSide(for: pixels))) }
     }
 
-    /// Bitmap with the multiply tint baked in (Core Animation layers can't multiply cheaply). Decodes on the
-    /// calling thread when it is not cached: not for the main thread outside tests and snapshots.
-    static func cgImage(_ relativePath: String, pixels: CGFloat, tint: UInt32?) -> CGImage? {
+    /// Decodes on the calling thread when the bitmap is not cached: not for the main thread outside tests and snapshots.
+    static func cgImage(_ relativePath: String, pixels: CGFloat) -> CGImage? {
         let side = bitmapSide(for: pixels)
-        let key = key(relativePath, side: side, tint: tint)
+        let key = key(relativePath, side: side)
         if let cached = cache.object(forKey: key) { return cached }
         // One decode per image at a time: a second caller of the same image waits and then finds it cached.
         let gate = gates[Int(UInt(bitPattern: key.hash) % UInt(gates.count))]
@@ -433,7 +328,7 @@ enum OrbImages {
         defer { gate.unlock() }
         if let cached = cache.object(forKey: key) { return cached }
         if Thread.isMainThread { mainDecodes.withLock { $0 += 1 } }
-        guard let image = render(relativePath, side: side, tint: tint) else { return nil }
+        guard let image = decode(relativePath, side: side) else { return nil }
         cache.setObject(image, forKey: key, cost: image.bytesPerRow * image.height)
         return image
     }
@@ -458,11 +353,11 @@ enum OrbImages {
     /// order (nil: failed): the caller holds them, so the bounded cache dropping one meanwhile costs no decode on the main thread.
     static func load(_ layers: [OrbLayer], pixels: CGFloat, priority: Priority = .needed,
                      completion: (@MainActor @Sendable ([CGImage?]) -> Void)? = nil) {
-        let missing = layers.filter { cached($0.path, pixels: pixels, tint: $0.tint) == nil }
+        let missing = layers.filter { cached($0.path, pixels: pixels) == nil }
         let finish: @Sendable () -> Void = {
             // Off the main thread: a bitmap the cache dropped since is decoded again here.
             guard let completion else { return }
-            let images = layers.map { cgImage($0.path, pixels: pixels, tint: $0.tint) }
+            let images = layers.map { cgImage($0.path, pixels: pixels) }
             Task { @MainActor in completion(images) }
         }
         guard !missing.isEmpty else {
@@ -473,13 +368,13 @@ enum OrbImages {
         case .needed:
             DispatchQueue.global(qos: .userInitiated).async {
                 DispatchQueue.concurrentPerform(iterations: missing.count) { index in
-                    _ = cgImage(missing[index].path, pixels: pixels, tint: missing[index].tint)
+                    _ = cgImage(missing[index].path, pixels: pixels)
                 }
                 finish()
             }
         case .prewarm:
             prewarmQueue.async {
-                for layer in missing { _ = cgImage(layer.path, pixels: pixels, tint: layer.tint) }
+                for layer in missing { _ = cgImage(layer.path, pixels: pixels) }
                 finish()
             }
         }
@@ -518,36 +413,7 @@ enum OrbImages {
     static let decodesSynchronously = CommandLine.arguments.contains { ["--snapshot", "--render-orbs", "--render-icon"].contains($0) }
 
     /// ImageIO decodes straight to the target size (no full-size bitmap is kept around).
-    private static func render(_ relativePath: String, side: Int, tint: UInt32?) -> CGImage? {
-        guard let decoded = decode(relativePath, side: side, keepUntinted: tint != nil) else { return nil }
-        guard let tint else { return decoded }
-        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
-              let context = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0, space: space,
-                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-        context.draw(decoded, in: CGRect(x: 0, y: 0, width: side, height: side))
-        guard let data = context.data else { return nil }
-        // Multiplies the premultiplied channels and keeps alpha: a soft edge darkens like the rest. (A multiply fill
-        // also blends in white where the pixel is see-through, so edges came out lighter than the hair.)
-        let pixels = data.assumingMemoryBound(to: UInt8.self)
-        let r = Int(tint >> 16 & 0xFF), g = Int(tint >> 8 & 0xFF), b = Int(tint & 0xFF)
-        let times = { (value: UInt8, factor: Int) in UInt8((Int(value) * factor + 127) / 255) }
-        for y in 0..<side {
-            var i = y * context.bytesPerRow
-            for _ in 0..<side {
-                pixels[i] = times(pixels[i], r)
-                pixels[i + 1] = times(pixels[i + 1], g)
-                pixels[i + 2] = times(pixels[i + 2], b)
-                i += 4
-            }
-        }
-        return context.makeImage()
-    }
-
-    /// The untinted bitmap `side` pixels wide: from a cache when this image was decoded before (plain, or to be
-    /// tinted), else from the PNG.
-    private static func decode(_ relativePath: String, side: Int, keepUntinted: Bool) -> CGImage? {
-        let key = key(relativePath, side: side, tint: nil)
-        if let plain = cache.object(forKey: key) ?? untinted.object(forKey: key) { return plain }
+    private static func decode(_ relativePath: String, side: Int) -> CGImage? {
         guard let url = OrbCatalog.shared.root?.appendingPathComponent(relativePath + ".png"),
               let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
@@ -560,18 +426,15 @@ enum OrbImages {
                                       bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
         context.interpolationQuality = .high
         context.draw(thumbnail, in: CGRect(x: 0, y: 0, width: side, height: side))
-        guard let image = context.makeImage() else { return nil }
-        if keepUntinted { untinted.setObject(image, forKey: key, cost: image.bytesPerRow * image.height) }
-        return image
+        return context.makeImage()
     }
 }
 
-/// One composited layer: an image path plus an optional multiply tint.
+/// One composited layer: a kind and the path of its image.
 struct OrbLayer: Identifiable, Hashable, Sendable {
-    enum Kind { case body, cheeks, mouth, brows, eyes, hair, accessory }
+    enum Kind { case body, cheeks, mouth, brows, eyes }
     let kind: Kind
     let path: String
-    let tint: UInt32?
     var id: String { path }
 
     /// How far the layer shifts with the gaze (fraction of the orb size); nearer features move more.
@@ -581,34 +444,23 @@ struct OrbLayer: Identifiable, Hashable, Sendable {
         case .eyes: 0.075
         case .brows: 0.07
         case .mouth, .cheeks: 0.055
-        case .accessory where isEyewear: 0.075   // on the eyes: the lenses stay over them
-        case .hair, .accessory: 0.025
         }
     }
 
     static let maxDepth = 0.075
-
-    /// Glasses and the monocle: worn on the eyes, not on the head.
-    var isEyewear: Bool { kind == .accessory && (path.contains("oculos") || path.contains("monoculo")) }
-
-    /// Hair and head-worn accessories trail the head a little; eyewear stays put on the face.
-    var isLoose: Bool { kind == .hair || (kind == .accessory && !isEyewear) }
 }
 
 /// Where things sit in the rendered layer images, as fractions measured from the top.
 enum OrbGeometry {
-    /// The orb fills `size`, but the images are this much larger so the tallest hair fits.
+    /// The orb fills `size`, but the images are this much larger so glow and the speech bubble fit.
     static let imageScale: CGFloat = 1.96
     static let eyeLine: CGFloat = 0.455
-    /// Top of the head: hair swings around it, hanging from the head like real hair.
-    static let crownLine: CGFloat = 0.245
     /// Upper lip: talking mouths open downward from here.
     static let mouthLine: CGFloat = 0.533
     static let orbBottom: CGFloat = 0.755
     /// Opacity of the status bubble's fill (the chrome's color), live and static.
     static let bubbleFill: Double = 0.92
-    /// Smallest box (points) that shows the status bubble (`?`, `!`, `…`): the box, not the Orb, which a big hair
-    /// shrinks inside it.
+    /// Smallest box (points) that shows the status bubble (`?`, `!`, `…`): the box, not the Orb.
     static let bubbleBox: CGFloat = 26
 
     /// Side of the layer images (points) for an orb of `size` points at `scale`: about `imageScale × size`, but a
@@ -635,25 +487,13 @@ extension OrbConfig {
         guard resolved == self else { return resolved.layers(eyes: eyesOverride, mouth: mouthOverride, brows: browsOverride) }
         let palette = OrbCatalog.shared.palette(color)
         let variant = palette.isLight ? "-dark" : ""
-        var layers = [OrbLayer(kind: .body, path: "body/\(color)", tint: nil)]
-        if cheeks != "nenhuma" { layers.append(OrbLayer(kind: .cheeks, path: "cheeks/\(cheeks)", tint: nil)) }
+        var layers = [OrbLayer(kind: .body, path: "body/\(color)")]
+        if cheeks != "nenhuma" { layers.append(OrbLayer(kind: .cheeks, path: "cheeks/\(cheeks)")) }
         let mouthID = mouthOverride ?? mouth
-        if mouthID != "nenhuma" { layers.append(OrbLayer(kind: .mouth, path: "mouth/\(mouthID)\(variant)", tint: nil)) }
+        if mouthID != "nenhuma" { layers.append(OrbLayer(kind: .mouth, path: "mouth/\(mouthID)\(variant)")) }
         let browsID = browsOverride ?? brows
-        if browsID != "nenhuma" { layers.append(OrbLayer(kind: .brows, path: "brows/\(browsID)\(variant)", tint: nil)) }
-        layers.append(OrbLayer(kind: .eyes, path: "eyes/\(eyesOverride ?? eyes)\(variant)", tint: nil))
-        if hair != "nenhum" {
-            layers.append(OrbLayer(kind: .hair, path: "hair/\(hair)", tint: hairColor ?? autoHairColor(palette)))
-            // Highlights, ties and the hair's shadow on the head: drawn over the tinted hair, moving with it.
-            if OrbCatalog.shared.hairShine.contains(hair) {
-                layers.append(OrbLayer(kind: .hair, path: "hair/\(hair)-brilho", tint: nil))
-            }
-        }
-        for accessory in accessories {
-            let tint = OrbCatalog.shared.tintedAccessories.contains(accessory)
-                ? (accentColor ?? autoAccentColor(accessory)) : nil
-            layers.append(OrbLayer(kind: .accessory, path: "accessories/\(accessory)", tint: tint))
-        }
+        if browsID != "nenhuma" { layers.append(OrbLayer(kind: .brows, path: "brows/\(browsID)\(variant)")) }
+        layers.append(OrbLayer(kind: .eyes, path: "eyes/\(eyesOverride ?? eyes)\(variant)"))
         return layers
     }
 
@@ -670,29 +510,7 @@ extension OrbConfig {
         guard resolved == self else { return resolved.visemeLayers() }
         guard mouth != "nenhuma" else { return nil }
         return Dictionary(uniqueKeysWithValues: OrbViseme.allCases.map {
-            ($0, OrbLayer(kind: .mouth, path: visemePath($0), tint: nil))
+            ($0, OrbLayer(kind: .mouth, path: visemePath($0)))
         })
-    }
-
-    /// The automatic color of a tinted accessory (`accentColor` nil).
-    func autoAccentColor(_ accessory: String) -> UInt32 {
-        switch accessory {
-        case "fones": 0xE9E6F5
-        default: 0xFFFFFF
-        }
-    }
-
-    /// The automatic hair color (`hairColor` nil): designed per palette, or originally a darker shade of its deep color.
-    func autoHairColor(_ palette: OrbPalette) -> UInt32 {
-        switch autoColors {
-        case .original: Self.darkened(palette.deep, 0.55)
-        case .designed: palette.hair ?? Self.darkened(palette.deep, 0.55)
-        }
-    }
-
-    static func darkened(_ hex: UInt32, _ factor: Double) -> UInt32 {
-        [16, 8, 0].reduce(UInt32(0)) { result, shift in
-            result | (UInt32(Double((hex >> UInt32(shift)) & 0xFF) * factor) << UInt32(shift))
-        }
     }
 }

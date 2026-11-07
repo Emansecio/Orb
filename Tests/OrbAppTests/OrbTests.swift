@@ -187,7 +187,7 @@ struct OrbTests {
         #expect(OrbImages.bitmapSide(for: 118) == 118)
         #expect(OrbImages.bitmapSide(for: 517.4) == 517)
         #expect(OrbImages.bitmapSide(for: 2000) == OrbImages.sourceSide)
-        let image = OrbImages.cgImage("hair/topete", pixels: 118, tint: 0xFF0000)
+        let image = OrbImages.cgImage("eyes/pilulas", pixels: 118)
         #expect(image?.width == 118 && image?.height == 118)
     }
 
@@ -256,19 +256,15 @@ struct OrbTests {
     // MARK: Config
 
     @Test func configsSavedBeforeTemperamentsStillLoad() throws {
-        let json = #"{"color":"rosa","eyes":"ovais","mouth":"sorriso","accessories":["fones"],"accentColor":16732043}"#
+        let json = #"{"color":"rosa","eyes":"ovais","mouth":"sorriso","cheeks":"blush"}"#
         let config = try JSONDecoder().decode(OrbConfig.self, from: Data(json.utf8))
-        #expect(config.color == "rosa" && config.eyes == "ovais" && config.accessories == ["fones"])
-        #expect(config.accentColor == 0xFF4F8B && config.hairColor == nil)
+        #expect(config.color == "rosa" && config.eyes == "ovais" && config.cheeks == "blush")
         #expect(config.brows == "nenhuma" && config.temperament == .equilibrado)
 
         var shy = config
         shy.temperament = .timido
         #expect(try JSONDecoder().decode(OrbConfig.self, from: JSONEncoder().encode(shy)) == shy)
-        // (Saved before the designed automatic colors, so it keeps the original ones: see OrbDesignTests.)
-        var empty = OrbConfig()
-        empty.autoColors = .original
-        #expect(try JSONDecoder().decode(OrbConfig.self, from: Data("{}".utf8)) == empty)
+        #expect(try JSONDecoder().decode(OrbConfig.self, from: Data("{}".utf8)) == OrbConfig())
     }
 
     @Test func temperamentIsEditedLikeACategory() {
@@ -498,7 +494,7 @@ struct OrbTests {
         #expect(config.visemePath(.round).hasSuffix("-dark"))
         #expect(config.visemeLayers()?.count == OrbViseme.allCases.count)
         for layer in config.visemeLayers()?.values.map({ $0 }) ?? [] {
-            #expect(OrbImages.cgImage(layer.path, pixels: 96, tint: nil) != nil, "\(layer.path)")
+            #expect(OrbImages.cgImage(layer.path, pixels: 96) != nil, "\(layer.path)")
         }
         config.mouth = "nenhuma"
         #expect(config.visemeLayers() == nil)
@@ -510,12 +506,6 @@ struct OrbTests {
         #expect(talking.pixelDistance(to: OrbPose(), size: 30, scale: 1) >= 1)
     }
 
-    @Test func looseLayersExcludeEyewear() {
-        #expect(OrbLayer(kind: .hair, path: "hair/topete", tint: nil).isLoose)
-        #expect(OrbLayer(kind: .accessory, path: "accessories/fones", tint: nil).isLoose)
-        #expect(!OrbLayer(kind: .accessory, path: "accessories/oculos-redondos", tint: nil).isLoose)
-        #expect(!OrbLayer(kind: .eyes, path: "eyes/pilulas", tint: nil).isLoose)
-    }
 }
 
 // Test-only helpers.

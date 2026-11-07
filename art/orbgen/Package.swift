@@ -1,7 +1,7 @@
 // swift-tools-version: 6.0
 import PackageDescription
 
-// Procedural art for the Orb layers (body shading and hair), rendered on the CPU:
+// Procedural art for the Orb layers (body shading and the seating of the flat face layers), rendered on the CPU:
 // `swift run -c release --package-path art/orbgen orbgen all`. See art/README.md.
 let package = Package(
     name: "orbgen",

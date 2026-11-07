@@ -61,8 +61,7 @@ enum WizardSnapshots {
         bot("Tudo certo: a Maia está pronta. É só clicar em Criar."),
     ]
 
-    private static let look = OrbConfig(color: "menta", eyes: "pilulas", mouth: "sorriso", cheeks: "blush", hair: "franja",
-                                        accessories: ["laco"])
+    private static let look = OrbConfig(color: "menta", eyes: "pilulas", mouth: "sorriso", cheeks: "blush")
 
     private static let instructions = """
     Você é a Maia, assistente de agenda e e-mails do trabalho.

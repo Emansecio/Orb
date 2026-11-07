@@ -64,7 +64,7 @@ import Testing
     // MARK: Começar de
 
     @Test func choosingAMemoryFillsTheNameTheRoleAndTheLook() {
-        let look = OrbConfig(color: "rosa", eyes: "ovais", hair: "coque")
+        let look = OrbConfig(color: "rosa", eyes: "ovais")
         let memory = KeptMemory(id: "Atlas – 2026-10-08 12.30", url: URL(fileURLWithPath: "/tmp/x"), name: "Atlas", date: .now, pageCount: 12,
                                 profile: KeptProfile(name: "Atlas", role: "Cuida da agenda", orb: look))
         var name = "", role = "", orb = OrbConfig(color: "indigo")
@@ -84,7 +84,7 @@ import Testing
     }
 
     @Test func goingBackToNoMemoryTakesBackWhatItGaveButKeepsWhatWasTyped() {
-        let look = OrbConfig(color: "rosa", eyes: "ovais", hair: "coque")
+        let look = OrbConfig(color: "rosa", eyes: "ovais")
         let memory = KeptMemory(id: "Nina – 2026-10-08 12.30", url: URL(fileURLWithPath: "/tmp/z"), name: "Nina", date: .now, pageCount: 3,
                                 profile: KeptProfile(name: "Nina", role: "Estuda comigo", orb: look))
         let before = StartSnapshot(name: "Ana", role: "", orb: OrbConfig(color: "indigo"))

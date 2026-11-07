@@ -93,16 +93,16 @@ enum WelcomeCopy: Equatable {
         Point(symbol: "brain.head.profile", title: "Lembra de você", detail: "Guarda o que importa e melhora a cada conversa."),
     ]
 
-    static let heroAccessibilityLabel = "Três Orbs sorrindo: Atlas, de óculos, no meio; Lia, com um laço; Bento, com fones"
+    static let heroAccessibilityLabel = "Três Orbs sorrindo: Atlas no meio, Lia e Bento ao lado"
 }
 
 /// The three Orbs of the hero. Fixed looks (not random, not the user's): the same welcome for everyone.
 enum WelcomeLooks {
     /// The suggested Orb is also the one the app used to start with.
     static let atlas = AppState.initial.bots[0].orb
-    static let lia = OrbConfig(color: "rosa", eyes: "ovais", mouth: "sorriso", cheeks: "blush", hair: "tufinho",
-                               accessories: ["laco"], temperament: .timido)
-    static let bento = OrbConfig(color: "menta", eyes: "pontos", mouth: "sorrisao", accessories: ["fones"],
+    static let lia = OrbConfig(color: "rosa", eyes: "ovais", mouth: "sorriso", cheeks: "blush",
+                               temperament: .timido)
+    static let bento = OrbConfig(color: "menta", eyes: "pontos", mouth: "sorrisao",
                                  temperament: .curioso)
 }
 

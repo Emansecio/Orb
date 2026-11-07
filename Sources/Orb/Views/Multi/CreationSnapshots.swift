@@ -31,7 +31,7 @@ enum CreationSnapshots {
         return OrbProposal(
             creator: OrbRef(creator), name: "Pesquisador", role: "Pesquisa na web e resume o que achou", instructions: instructions,
             capabilities: [.browser, .terminal], mode: .ask, modeCeiling: .auto,
-            orb: OrbConfig(color: "menta", eyes: "felizes", mouth: "sorriso", cheeks: "sardas", accessories: ["fones"]),
+            orb: OrbConfig(color: "menta", eyes: "felizes", mouth: "sorriso", cheeks: "sardas"),
             reason: "Para cuidar das pesquisas enquanto eu organizo seus arquivos.", creatorCapabilities: [.terminal, .browser])
     }
 
@@ -72,7 +72,7 @@ enum CreationSnapshots {
     /// The sidebar with the Orb that was just created, and its panel with "Criado por Atlas".
     private static func sidebar(_ creator: Bot, model: AppModel) -> AnyView {
         var child = Bot(name: "Pesquisador", role: "Pesquisa na web e resume o que achou",
-                        orb: OrbConfig(color: "menta", eyes: "felizes", mouth: "sorriso", cheeks: "sardas", accessories: ["fones"]))
+                        orb: OrbConfig(color: "menta", eyes: "felizes", mouth: "sorriso", cheeks: "sardas"))
         child.createdBy = creator.id
         child.createdByName = creator.name
         child.createdAt = .now

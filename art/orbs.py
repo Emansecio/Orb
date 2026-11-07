@@ -3,14 +3,14 @@
     Blender -b --python art/orbs.py -- <command> [options]
 
 Commands:
-    render  --config '{"color": "rosa", "eyes": "ovais", "hair": "tufinho", "accessories": ["fones"]}'
-            --name rosa-dj        -> art/renders/<name>.png (+ -dark/-light previews)
+    render  --config '{"color": "rosa", "eyes": "ovais", "mouth": "sorriso", "cheeks": "blush"}'
+            --name rosa-feliz        -> art/renders/<name>.png (+ -dark/-light previews)
     catalog [--category eyes]     -> one labeled tile per option + a contact sheet per category
                                      (--category visemes: the talking mouths, not user options)
     layers [--category mouth]     -> flat feature layers in art/orbgen/flat (+ options.json in the app)
                                      (--category visemes -> visemes/<id>.png and <id>-dark.png)
                                      Then `orbgen faces` seats them on the lit body (art/orbgen). The body
-                                     and the hair are made by orbgen, not here.
+                                     is the plush from art/pelucia.py, not made here.
     manifest                      -> options.json in the app (ids + labels for the app editor)
 """
 
@@ -30,8 +30,8 @@ from orbkit import core, features  # noqa: E402
 ART = os.path.dirname(os.path.abspath(__file__))
 DARK = (0.027, 0.027, 0.027)
 RESOURCES = os.path.join(os.path.dirname(ART), "Sources", "Orb", "Resources", "Orbs")
-# Made by art/orbgen (procedural lighting), not by Blender: `layers` skips them and `manifest` keeps their entries.
-ORBGEN_CATEGORIES = {"color", "hair"}
+# Made by art/orbgen (procedural lighting), not by Blender: `layers` skips them.
+ORBGEN_CATEGORIES = {"color"}
 
 
 def build(config, samples, size, label=None):
@@ -79,9 +79,7 @@ def contact_sheet(paths, out, columns=6):
 
 CATALOG_BASE = {"color": "indigo", "eyes": "pilulas"}
 CATALOG_OVERRIDES = {
-    # Show hair/brows on a neutral face, accessories on a smiling one
     "mouth": {},
-    "accessories": {"mouth": "sorriso"},
 }
 
 
@@ -95,9 +93,7 @@ def catalog(category, samples, size):
     tiles = []
     for option_id, label, _ in options_of(category):
         config = dict(CATALOG_BASE, **CATALOG_OVERRIDES.get(category, {}))
-        if category == "accessories":
-            config["accessories"] = [option_id]
-        elif category == "visemes":
+        if category == "visemes":
             config["viseme"] = option_id
         else:
             config[category] = option_id
@@ -109,19 +105,18 @@ def catalog(category, samples, size):
 
 
 PERSONAS = [
-    ("professor", "Professor", {"color": "chocolate", "eyes": "pontos", "brows": "arqueadas", "mouth": "sorriso",
-                                "accessories": ["oculos-redondos"]}),
-    ("dj", "DJ", {"color": "aurora", "eyes": "fendas", "mouth": "neutra", "accessories": ["fones", "oculos-sol"]}),
-    ("princesa", "Realeza", {"color": "rosa", "eyes": "grandes", "cheeks": "blush", "mouth": "sorriso", "hair": "coque"}),
-    ("festa", "Festeiro", {"color": "sol", "eyes": "felizes", "mouth": "sorrisao", "cheeks": "blush", "hair": "black-power"}),
+    ("professor", "Professor", {"color": "chocolate", "eyes": "pontos", "brows": "arqueadas", "mouth": "sorriso"}),
+    ("dj", "DJ", {"color": "aurora", "eyes": "fendas", "mouth": "neutra"}),
+    ("princesa", "Realeza", {"color": "rosa", "eyes": "grandes", "cheeks": "blush", "mouth": "sorriso"}),
+    ("festa", "Festeiro", {"color": "sol", "eyes": "felizes", "mouth": "sorrisao", "cheeks": "blush"}),
     ("gato", "Gatinho", {"color": "lavanda", "eyes": "ovais", "mouth": "gatinho", "cheeks": "coracoes"}),
-    ("capeta", "Travesso", {"color": "cereja", "eyes": "bravos", "brows": "bravas", "mouth": "dentinho", "hair": "espetado"}),
-    ("anjo", "Anjinho", {"color": "perola", "eyes": "sono", "mouth": "sorriso", "cheeks": "blush", "hair": "cachos"}),
-    ("cavalheiro", "Cavalheiro", {"color": "noite", "eyes": "pilulas", "hair": "topete", "accessories": ["monoculo"]}),
-    ("skater", "Skatista", {"color": "lima", "eyes": "piscadela", "mouth": "lingua", "cheeks": "sardas", "hair": "franja"}),
-    ("inverno", "Inverno", {"color": "ceu", "eyes": "pontos", "mouth": "assobio", "cheeks": "blush", "accessories": ["fones"]}),
-    ("rock", "Roqueiro", {"color": "grafite", "eyes": "estrelas", "mouth": "sorrisao", "hair": "moicano"}),
-    ("jardim", "Jardineira", {"color": "menta", "eyes": "coracoes", "mouth": "sorriso", "hair": "chiquinhas"}),
+    ("capeta", "Travesso", {"color": "cereja", "eyes": "bravos", "brows": "bravas", "mouth": "dentinho"}),
+    ("anjo", "Anjinho", {"color": "perola", "eyes": "sono", "mouth": "sorriso", "cheeks": "blush"}),
+    ("cavalheiro", "Cavalheiro", {"color": "noite", "eyes": "pilulas"}),
+    ("skater", "Skatista", {"color": "lima", "eyes": "piscadela", "mouth": "lingua", "cheeks": "sardas"}),
+    ("inverno", "Inverno", {"color": "ceu", "eyes": "pontos", "mouth": "assobio", "cheeks": "blush"}),
+    ("rock", "Roqueiro", {"color": "grafite", "eyes": "estrelas", "mouth": "sorrisao"}),
+    ("jardim", "Jardineira", {"color": "menta", "eyes": "coracoes", "mouth": "sorriso"}),
 ]
 
 def personas(samples, size):
@@ -136,9 +131,6 @@ def personas(samples, size):
     contact_sheet(tiles, os.path.join(ART, "renders", "personas.png"))
 
 
-# Layers whose material is rendered white and tinted in the app (multiply)
-TINTED = {"hair"}
-TINTED_ACCESSORIES = {"fones"}
 VARIANT_CATEGORIES = {"eyes", "mouth", "brows"}   # light (glowing) + dark (for light palettes)
 LAYER_CATEGORIES = [name for name in features.CATEGORIES if name != "color"] + ["visemes"]   # visemes: like mouth
 
@@ -172,40 +164,22 @@ def layers(samples, size, out, only_category=None):
         for option_id, _, builder in options_of(category):
             if builder is None:
                 continue
-            # Neutral (white) body light for non-variant layers so tints stay true in the app
+            # Neutral (white) body light for non-variant layers
             has_variants = category in VARIANT_CATEGORIES or category == "visemes"
             variants = [("", "indigo"), ("-dark", "perola")] if has_variants else [("", "perola")]
             for suffix, color in variants:
-                config = {"color": color}
-                if category == "hair":
-                    config["hair_color"] = 0xFFFFFF
-                if category == "accessories" and option_id in TINTED_ACCESSORIES:
-                    config["accent_color"] = 0xFFFFFF
-                render_scene(config, os.path.join(out, category, f"{option_id}{suffix}.png"), only=(category, option_id))
+                render_scene({"color": color}, os.path.join(out, category, f"{option_id}{suffix}.png"), only=(category, option_id))
                 print("layer", category, option_id + suffix)
 
     manifest(os.path.join(RESOURCES, "options.json"))
 
 
 def manifest(path=None):
+    path = path or os.path.join(RESOURCES, "options.json")
     data = {name: [{"id": oid, "label": label} for oid, label, _ in options]
             for name, options in features.CATEGORIES.items()}
     data["color"] = [{"id": pid, "label": label, "hex": [f"#{c:06X}" for c in colors]}
                      for pid, label, colors in features.PALETTES]
-    # Keep what orbgen owns: the hair styles and each palette's default hair color.
-    path = path or os.path.join(RESOURCES, "options.json")
-    previous_path = path
-    if os.path.exists(previous_path):
-        with open(previous_path, encoding="utf-8") as handle:
-            previous = json.load(handle)
-        if "hair" in previous:
-            data["hair"] = previous["hair"]
-        hair_colors = {entry["id"]: entry["hair"] for entry in previous.get("color", []) if "hair" in entry}
-        for entry in data["color"]:
-            if entry["id"] in hair_colors:
-                entry["hair"] = hair_colors[entry["id"]]
-    data["tinted"] = sorted(TINTED)
-    data["tintedAccessories"] = sorted(TINTED_ACCESSORIES)
     data["variants"] = sorted(VARIANT_CATEGORIES)
     data["visemes"] = [oid for oid, _, _ in features.VISEMES]
     with open(path, "w", encoding="utf-8") as handle:

@@ -51,12 +51,11 @@ struct OrbProposalTests {
     }
 
     @Test func aLookTheCatalogKnowsIsKeptAndTheRestIsIgnored() {
-        let look: JSONValue = .object(["color": .string("menta"), "eyes": .string("nao-existe"), "hair": .string("<script>"),
-                                       "accessories": .array([.string("fones"), .string("cartola-de-ouro")])])
+        let look: JSONValue = .object(["color": .string("menta"), "eyes": .string("nao-existe"), "cheeks": .string("<script>"),
+                                       "hair": .string("franja"), "accessories": .array([.string("fones")])])
         let proposal = make(["look": look])
         #expect(proposal.orb.color == "menta")
-        #expect(proposal.orb.eyes != "nao-existe" && proposal.orb.hair != "<script>")
-        #expect(proposal.orb.accessories == ["fones"])
+        #expect(proposal.orb.eyes != "nao-existe" && proposal.orb.cheeks != "<script>")
         #expect(OrbCatalog.shared.knows(proposal.orb))
         #expect(OrbCatalog.shared.knows(make().orb), "no look: a random one that hangs together")
     }

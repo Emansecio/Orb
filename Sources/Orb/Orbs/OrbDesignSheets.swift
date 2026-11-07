@@ -6,15 +6,12 @@ import AppKit
 /// `Orb --render-orbs out.png <sheet>`. Without a sheet name, `--render-orbs` writes the Orbs × activities sheet.
 @MainActor
 enum OrbDesignSheet {
-    static let names = ["cabelos", "cabelo-padrao", "acessorios", "olhos", "bocas", "detalhes", "cores", "tamanhos", "quadros", "reacoes", "polimento", "icone"]
+    static let names = ["olhos", "bocas", "detalhes", "cores", "tamanhos", "quadros", "reacoes", "polimento", "icone"]
 
     /// Writes the sheet `name` (one of `names`); false for an unknown name.
     @discardableResult
     static func render(_ name: String, to url: URL) -> Bool {
         switch name {
-        case "cabelos": hair(to: url)
-        case "cabelo-padrao": defaultHair(to: url)
-        case "acessorios": accessories(to: url)
         case "olhos": category(.eyes, to: url)
         case "bocas": category(.mouth, to: url)
         case "detalhes": details(to: url)
@@ -30,51 +27,6 @@ enum OrbDesignSheet {
     }
 
     // MARK: Sheets
-
-    /// Every hair style × palettes and custom hair colors.
-    private static func hair(to url: URL) {
-        let base = OrbConfig(color: "indigo", eyes: "pilulas", mouth: "sorriso")
-        let columns: [(String, (inout OrbConfig) -> Void)] = [
-            ("Índigo", { $0.color = "indigo" }),
-            ("Rosa", { $0.color = "rosa" }),
-            ("Menta", { $0.color = "menta" }),
-            ("Sol", { $0.color = "sol" }),
-            ("Pérola", { $0.color = "perola" }),
-            ("Noite", { $0.color = "noite" }),
-            ("Castanho", { $0.color = "pessego"; $0.hairColor = 0x5A3B22 }),
-            ("Loiro", { $0.color = "ceu"; $0.hairColor = 0xE8B95A }),
-            ("Preto", { $0.color = "lavanda"; $0.hairColor = 0x1C1A2B }),
-        ]
-        let rows = OrbCatalog.shared.options(.hair).map { option in
-            (option.label, columns.map { column -> OrbConfig in
-                var config = base
-                config.hair = option.id
-                column.1(&config)
-                return config
-            })
-        }
-        write(grid(columns: columns.map(\.0), rows: rows, size: 84), to: url)
-    }
-
-    /// Every palette with its default hair color, on a few styles.
-    private static func defaultHair(to url: URL) {
-        let palettes = OrbCatalog.shared.palettes
-        let rows = ["franja", "cachos", "rabo-de-cavalo"].map { hair in
-            (OrbCatalog.shared.label(.hair, hair), palettes.map { OrbConfig(color: $0.id, eyes: "pilulas", mouth: "sorriso", hair: hair) })
-        }
-        write(grid(columns: palettes.map(\.label), rows: rows, size: 64), to: url)
-    }
-
-    private static func accessories(to url: URL) {
-        let palettes = ["indigo", "rosa", "menta", "sol", "perola", "grafite"]
-        let rows = OrbCatalog.shared.options(.accessories).map { option in
-            (option.label, palettes.map { palette in
-                OrbConfig(color: palette, eyes: "pilulas", mouth: "sorriso", accessories: [option.id])
-            })
-        }
-        let labels = palettes.map { OrbCatalog.shared.palette($0).label }
-        write(grid(columns: labels, rows: rows, size: 84), to: url)
-    }
 
     /// One category's options on a dark palette and a light one.
     private static func category(_ category: OrbCategory, to url: URL) {
@@ -141,7 +93,7 @@ enum OrbDesignSheet {
 
     /// Two seconds of each activity, 12 frames per row, from the same motion functions the live orb uses.
     private static func frames(to url: URL) {
-        let orb = OrbConfig(color: "rosa", eyes: "ovais", mouth: "sorriso", cheeks: "blush", hair: "coque")
+        let orb = OrbConfig(color: "rosa", eyes: "ovais", mouth: "sorriso", cheeks: "blush")
         let activities: [OrbActivity] = [.idle, .speaking, .thinking, .typing, .waiting, .happy, .error, .sleepy]
         let times = (0..<12).map { Double($0) / 6 }
         let sheet = VStack(alignment: .leading, spacing: 8) {
@@ -157,7 +109,7 @@ enum OrbDesignSheet {
     /// The Orb reacting to the interface: idle, watching you type (`attentive`) and the selection glance, frame by
     /// frame (every 50 ms for the glance).
     private static func reactions(to url: URL) {
-        let orb = OrbConfig(color: "rosa", eyes: "ovais", mouth: "sorriso", cheeks: "blush", hair: "coque")
+        let orb = OrbConfig(color: "rosa", eyes: "ovais", mouth: "sorriso", cheeks: "blush")
         let times = (0..<13).map { Double($0) / 6 }
         let glanceTimes = (0..<13).map { Double($0) * 0.05 }
         let idle = OrbPosePreview.poses(activity: .idle, at: times.map { $0 + 3 })
@@ -185,7 +137,7 @@ enum OrbDesignSheet {
     /// The reactions of the polishing round, frame by frame: the three sizes of joy, "precisa de você" over a minute
     /// (its first 3 s, then the hops every 7 s, then after a minute), the error and its "no", and the three jumps.
     private static func polish(to url: URL) {
-        let orb = OrbConfig(color: "rosa", eyes: "ovais", mouth: "sorriso", cheeks: "blush", hair: "coque")
+        let orb = OrbConfig(color: "rosa", eyes: "ovais", mouth: "sorriso", cheeks: "blush")
         func at(_ step: Double, count: Int = 13) -> [Double] { (0..<count).map { Double($0) * step } }
         func jump(_ kind: OrbJump) -> [OrbPose] {
             let times = at(kind.duration / 12)
@@ -347,11 +299,11 @@ enum OrbDesignSheet {
     }
 }
 
-/// Poses of an activity over time for review sheets: the activity's body motion and gaze, a blink and the
-/// hair's follow-through spring, simulated at 60 fps like the live orb (no pointer, no randomness).
+/// Poses of an activity over time for review sheets: the activity's body motion and gaze, a blink,
+/// simulated at 60 fps like the live orb (no pointer, no randomness).
 enum OrbPosePreview {
     static func poses(activity: OrbActivity, at times: [Double], celebration: OrbCelebration = .big) -> [OrbPose] {
-        var loose = SpringPoint(), head = SpringPoint(), swing = Spring()
+        var head = SpringPoint()
         var result: [OrbPose] = []
         var time = 0.0
         let dt = 1.0 / 60
@@ -368,8 +320,6 @@ enum OrbPosePreview {
                 head.step(toward: activity.gaze(at: time).look, dt: dt, response: OrbSprings.head.response,
                           damping: OrbSprings.head.damping)
                 pose.look = head.value
-                pose.hairLag = OrbSprings.hairLag(&loose, anchor: OrbSprings.hairAnchor(look: pose.look, lift: pose.lift), dt: dt)
-                pose.hairSwing = OrbSprings.hairSwing(&swing, tilt: pose.tilt, dt: dt)
                 pose.blink = Blinker.closure(time - 1.5) * Blinker.factor(eyes: activity.eyes ?? "")
                 time += dt
             } while time < target

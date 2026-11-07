@@ -36,7 +36,7 @@ import Testing
     @Test func theLookIsNotTheModelsToChoose() {
         var draft = OrbDraft()
         let before = draft.orb
-        let report = draft.apply(args(#"{"name":"Maia","look":{"color":"menta","eyes":"ovais","hair":"franja","accessories":["laco"]}}"#))
+        let report = draft.apply(args(#"{"name":"Maia","look":{"color":"menta","eyes":"ovais","cheeks":"blush"}}"#))
         #expect(draft.orb == before, "an old model that still sends a look changes nothing")
         #expect(report.changed == [.name] && report.rejected.isEmpty, "and is not scolded")
         // Neither the tool nor the prompt offers it (every word is billed in every request).

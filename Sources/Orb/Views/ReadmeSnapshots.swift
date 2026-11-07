@@ -33,7 +33,7 @@ enum ReadmeSnapshots {
         let support = Bot(name: "Atendente", role: "Responde clientes no WhatsApp", orb: OrbConfig(color: "ceu", eyes: "ovais", mouth: "sorriso"))
         let landing = Bot(name: "Gestor do site", role: "Mantém a página de vendas", orb: OrbConfig(color: "lavanda", eyes: "pontos", mouth: "sorriso"))
         let review = Bot(name: "Revisor", role: "Revisa textos antes de publicar",
-                         orb: OrbConfig(color: "grafite", eyes: "pilulas", brows: "retas", accessories: ["fones"]))
+                         orb: OrbConfig(color: "grafite", eyes: "pilulas", brows: "retas"))
         model.bots = [atlas, lia, bento, support, landing, review]
         model.categories = [SidebarCategory(name: "Minha loja", botIDs: [support.id, landing.id, review.id])]
         model.live(support.id).setUnread(3)

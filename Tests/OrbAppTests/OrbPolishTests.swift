@@ -254,7 +254,6 @@ struct OrbPolishTests {
         // The lift's period is 2π/1.3 ≈ 4.8 s.
         let crossings = zip(lifts, lifts.dropFirst()).filter { $0 < 0 && $1 >= 0 }.count
         #expect(crossings == Int((30 * 1.3 / (2 * .pi)).rounded(.down)))
-        #expect(OrbSprings.loose.damping == 0.5 && OrbSprings.swing.damping == 0.5)
     }
 
     // MARK: Jumps
@@ -312,8 +311,8 @@ struct OrbPolishTests {
         // The turn takes 0.16 s now.
         #expect(OrbGlance.weight(0.08) < 1 && OrbGlance.weight(0.16) == 1 && OrbGlance.weight(0.3) == 1)
         #expect(OrbGlance.blinkAt == 0.16)
-        // The eyes still lead the head by 50 ms and the hair trails it by 70 ms.
-        #expect(OrbGlance.eyeLead == 0.05 && OrbGlance.hairDelay == 0.07)
+        // The eyes still lead the head by 50 ms.
+        #expect(OrbGlance.eyeLead == 0.05)
     }
 
     @Test func theSelectionGlanceBlinksWithTheSameFactor() {
