@@ -45,6 +45,14 @@ struct SkillsView: View {
         .sheet(item: $editing) { skill in
             SkillEditor(skill: skill)
         }
+        .onAppear(perform: openChosenSkill)
+        .onChange(of: model.skillToOpen) { openChosenSkill() }
+    }
+
+    private func openChosenSkill() {
+        guard let id = model.skillToOpen else { return }
+        model.skillToOpen = nil
+        if let skill = model.skills.first(where: { $0.id == id }) { editing = skill }
     }
 
     private func newSkill() {

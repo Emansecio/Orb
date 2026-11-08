@@ -176,6 +176,8 @@ struct RoutineRunLine: View {
     var mark: OrbEvent.Outcome?
     var showsNote = true
     var chevron: String?
+    /// The report was asked for and is gone (deleted, or in a folder that no longer exists).
+    @State private var reportIsMissing = false
 
     var body: some View {
         let outcome = mark ?? event.outcome
@@ -197,10 +199,14 @@ struct RoutineRunLine: View {
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if chevron == nil, let url = reportURL {
-                    Button("Abrir relatório") { NSWorkspace.shared.open(url) }
-                        .buttonStyle(.link)
-                        .help(Tip.openReportFile)
+                if chevron == nil, event.file != nil {
+                    if reportIsMissing {
+                        Text("O arquivo do relatório não está mais lá.").foregroundStyle(Palette.warn)
+                    } else {
+                        Button("Abrir relatório", action: openReport)
+                            .buttonStyle(.link)
+                            .help(Tip.openReportFile)
+                    }
                 }
             }
         }
@@ -212,10 +218,20 @@ struct RoutineRunLine: View {
         .accessibilityIdentifier("event-line")
     }
 
-    private var reportURL: URL? {
-        let botID = event.actor?.id ?? model.routines.first { $0.name == event.detail }?.botID // a run told as text has no actor
-        guard let file = event.file, let bot = botID.flatMap({ model.bot($0) }) else { return nil }
-        return bot.workingURL.appendingPathComponent(file)
+    /// Opens the report if the file is still there, else says so. The run (by id) knows the folder it was written in; a line
+    /// without a run falls back to the Orb's folder. A routine found by name only counts when it is the only one with it:
+    /// another Orb's routine of the same name is not this run's.
+    private func openReport() {
+        let run = model.routines.lazy.flatMap(\.runs).first { $0.id == event.runID }
+        let named = model.routines.filter { $0.name == event.detail }
+        let botID = event.actor?.id ?? (named.count == 1 ? named[0].botID : nil) // a run told as text has no actor
+        let orbFolder = botID.flatMap { model.bot($0) }?.workingURL
+        guard let file = event.file else { return }
+        let probe = run ?? RoutineRun(date: .now, succeeded: true, summary: "", reportFile: file)
+        Task {
+            let url = await Task.detached { probe.existingReportFile(inOrbFolder: orbFolder) }.value
+            if let url { NSWorkspace.shared.open(url) } else { reportIsMissing = true }
+        }
     }
 }
 

@@ -1409,6 +1409,24 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(RoutineReport.safeName(String(repeating: "n", count: 200)).count == 60)
     }
 
+    @Test func aReportIsStillFoundAfterTheOrbChangesFolder() throws {
+        let written = root.appending(path: "pasta antiga")
+        let now = root.appending(path: "pasta nova")
+        try FileManager.default.createDirectory(at: now, withIntermediateDirectories: true)
+        let date = Date(timeIntervalSince1970: 1_800_000_000)
+        let file = try #require(RoutineReport.write("a", routine: "Diária", orb: "Atlas", date: date, in: written))
+        // A run saved with the folder it was written in is found there, whatever the Orb's folder is now.
+        let run = RoutineRun(date: date, succeeded: true, summary: "", reportFile: file, reportFolder: written.path)
+        #expect(run.existingReportFile(inOrbFolder: now) == written.appendingPathComponent(file))
+        // An older run (no folder saved) is looked for in the Orb's current folder, and is nil when it is not there.
+        let old = RoutineRun(date: date, succeeded: true, summary: "", reportFile: file)
+        #expect(old.existingReportFile(inOrbFolder: now) == nil)
+        #expect(old.existingReportFile(inOrbFolder: written) == written.appendingPathComponent(file))
+        // Deleted: nothing to open.
+        try FileManager.default.removeItem(at: written)
+        #expect(run.existingReportFile(inOrbFolder: now) == nil)
+    }
+
     // MARK: Pieces
 
     @Test func theFirstLineOfAReportLosesItsMarkdownAndIsShort() {

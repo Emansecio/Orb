@@ -15,6 +15,8 @@ struct PaletteEntry: Identifiable, Equatable {
         /// Ajustes, and one conversation (its id) of an Orb (the second id).
         case settings
         case chat(UUID, of: UUID)
+        /// A routine or a skill (its id): the page opens with it in focus.
+        case routine(UUID), skill(UUID)
     }
 
     /// The order of the groups when nothing was typed.
@@ -101,7 +103,7 @@ enum PaletteSearch {
 enum PaletteBuilder {
     /// Everything the palette can go to. `current` is the open Orb: the actions are its.
     static func entries(orbs: [BotLook], current: UUID?, routines: [Routine], skills: [Skill],
-                        groups: [OrbGroup] = [], chats: [UUID: OrbChats] = [:]) -> [PaletteEntry] {
+                        groups: [OrbGroup] = [], chats: [UUID: OrbChats] = [:], categoryCount: Int = 0) -> [PaletteEntry] {
         var list: [PaletteEntry] = []
         for (index, look) in orbs.enumerated() {
             list.append(PaletteEntry(id: "bot-\(look.id)", title: look.name, subtitle: look.role.isEmpty ? nil : look.role,
@@ -134,8 +136,11 @@ enum PaletteBuilder {
                                      section: .actions, shortcut: ShortcutCatalog.keys(for: .newGroup), action: .newGroup,
                                      keywords: "grupo equipe orquestrador juntos"))
         }
-        list.append(PaletteEntry(id: "new-category", title: CommandName.newCategory, subtitle: "Organizar Orbs na lista", symbol: "rectangle.stack",
-                                 section: .actions, shortcut: nil, action: .newCategory, keywords: "seção organizar lateral projeto"))
+        // The "+" menu of the sidebar dims this item by the same rule: nothing to sort with one Orb and no category.
+        if SidebarOrder.showsNewCategory(botCount: orbs.count, categoryCount: categoryCount) {
+            list.append(PaletteEntry(id: "new-category", title: CommandName.newCategory, subtitle: "Organizar Orbs na lista", symbol: "rectangle.stack",
+                                     section: .actions, shortcut: nil, action: .newCategory, keywords: "seção organizar lateral projeto"))
+        }
         list.append(PaletteEntry(id: "import-orb", title: CommandName.importOrb, subtitle: "Trazer o que outro assistente sabe", symbol: "square.and.arrow.down",
                                  section: .actions, shortcut: nil, action: .importOrb, keywords: "chatgpt gemini hermes openclaw memória migrar"))
         list.append(PaletteEntry(id: "shortcuts", title: CommandName.shortcuts, subtitle: nil, symbol: "keyboard", section: .actions,
@@ -151,7 +156,7 @@ enum PaletteBuilder {
         for routine in routines {
             let owner = orbs.first { $0.id == routine.botID }?.name
             list.append(PaletteEntry(id: "routine-\(routine.id)", title: "Rotina: \(routine.name)", subtitle: owner, symbol: "clock",
-                                     section: .workspace, action: .page(.routines)))
+                                     section: .workspace, action: .routine(routine.id)))
         }
         for group in groups {
             list.append(PaletteEntry(id: "group-\(group.id)", title: "Grupo: \(group.name)",
@@ -161,7 +166,7 @@ enum PaletteBuilder {
         }
         for skill in skills where skill.isEnabled {
             list.append(PaletteEntry(id: "skill-\(skill.id)", title: "Skill: \(skill.name)", subtitle: skill.summary.isEmpty ? "/\(skill.slug)" : skill.summary,
-                                     symbol: "wand.and.stars", section: .workspace, action: .page(.skills), keywords: skill.slug))
+                                     symbol: "wand.and.stars", section: .workspace, action: .skill(skill.id), keywords: skill.slug))
         }
         // The Orbs' other conversations, found by title and only when something is typed. A "Nova conversa" is still empty
         // and would only echo the action of that name.
@@ -294,7 +299,8 @@ struct CommandPalette: View {
     private func build() {
         entries = PaletteBuilder.entries(orbs: model.sidebarBotIDs.map { model.live($0).look }, current: model.commandBotID,
                                          routines: model.routines, skills: model.skills, groups: model.groups,
-                                         chats: model.sidebarBotIDs.reduce(into: [:]) { $0[$1] = model.live($1).chats })
+                                         chats: model.sidebarBotIDs.reduce(into: [:]) { $0[$1] = model.live($1).chats },
+                                         categoryCount: model.categories.count)
         folded = PaletteSearch.fold(entries)
     }
 
@@ -316,6 +322,12 @@ struct CommandPalette: View {
         switch action {
         case .bot(let id): model.selection = .bot(id)
         case .page(let page): model.selection = page
+        case .routine(let id):
+            if model.routines.contains(where: { $0.id == id }) { model.inicioRoutineFocus = id } // gone since: the page still opens
+            model.selection = .routines
+        case .skill(let id):
+            if model.skills.contains(where: { $0.id == id }) { model.skillToOpen = id }
+            model.selection = .skills
         case .newBot: model.showNewBot = true
         case .group(let id): model.selection = .group(id)
         case .newGroup: model.showNewGroup = true

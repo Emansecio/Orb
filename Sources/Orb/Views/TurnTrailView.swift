@@ -103,6 +103,8 @@ struct TurnTrailView: View {
     @Environment(AppModel.self) private var model
     let trail: TurnTrail
     let botID: UUID
+    /// Routines the line pointed at that are gone by now (the Orb or the user deleted them).
+    @State private var goneRoutines: Set<String> = []
 
     private static let shownSources = 6
 
@@ -130,7 +132,9 @@ struct TurnTrailView: View {
                 .foregroundStyle(Palette.muted)
                 .lineLimit(1)
                 .truncationMode(.tail)
-            if let action {
+            if case .routine(let name) = change, goneRoutines.contains(name) {
+                Text("(apagada)").foregroundStyle(Palette.warn)
+            } else if let action {
                 Button(action) { open(change) }
                     .buttonStyle(.plain)
                     .foregroundStyle(Palette.accentText)
@@ -143,7 +147,14 @@ struct TurnTrailView: View {
 
     private func open(_ change: TurnTrail.Change) {
         switch change {
-        case .routine: model.selection = .routines
+        case .routine(let name):
+            // Focus this Orb's routine of that name; one deleted since says so instead of opening the page on nothing.
+            guard let routine = model.routines.first(where: { $0.botID == botID && $0.name.sameName(as: name) }) else {
+                goneRoutines.insert(name)
+                return
+            }
+            model.inicioRoutineFocus = routine.id
+            model.selection = .routines
         case .memory: model.showMemory(of: botID)
         case .group: break
         }

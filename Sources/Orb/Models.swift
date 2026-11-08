@@ -787,9 +787,20 @@ struct RoutineRun: Identifiable, Codable, Sendable, Equatable {
     var check: GoalCheck?
     /// Open follow-ups after this run, when this version recorded them.
     var openFollowUps: [UUID]? = nil
+    /// The Orb's folder the report file was written in. `reportFile` is relative to it, so the report is still found after
+    /// the routine moves to another Orb or the Orb to another folder. Runs saved before this field have none.
+    var reportFolder: String? = nil
 }
 
 extension RoutineRun {
+    /// Where the report file is now: in the folder it was written in, else (older runs) in the Orb's current one. Nil when
+    /// neither has it. Touches the disk: call it off the main thread.
+    func existingReportFile(inOrbFolder orbFolder: URL?) -> URL? {
+        guard let reportFile else { return nil }
+        let folders = [reportFolder.map { URL(fileURLWithPath: $0, isDirectory: true) }, orbFolder].compactMap { $0 }
+        return folders.map { $0.appendingPathComponent(reportFile) }.first { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.value(.id, default: UUID())
@@ -801,6 +812,7 @@ extension RoutineRun {
         reportFile = try c.decodeIfPresent(String.self, forKey: .reportFile)
         check = (try? c.decodeIfPresent(GoalCheck.self, forKey: .check)) ?? nil
         openFollowUps = try? c.decodeIfPresent([UUID].self, forKey: .openFollowUps)
+        reportFolder = try? c.decodeIfPresent(String.self, forKey: .reportFolder)
     }
 }
 

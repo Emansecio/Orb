@@ -284,6 +284,25 @@ import Testing
         #expect(PaletteSearch.rank(entries, query: "pasta").contains { $0.action == .openFolder })
     }
 
+    @Test func newCategoryFollowsTheRuleOfTheSidebarMenu() {
+        let atlas = BotLook(Bot(id: UUID(), name: "Atlas", role: "", orb: OrbConfig()))
+        func hasNewCategory(orbs: [BotLook], categories: Int) -> Bool {
+            PaletteBuilder.entries(orbs: orbs, current: nil, routines: [], skills: [], categoryCount: categories).contains { $0.id == "new-category" }
+        }
+        #expect(!hasNewCategory(orbs: [atlas], categories: 0))
+        #expect(hasNewCategory(orbs: [atlas], categories: 1))
+        #expect(hasNewCategory(orbs: [atlas, atlas], categories: 0))
+    }
+
+    @Test func aRoutineOrSkillEntryFocusesItInsteadOfOnlyOpeningThePage() {
+        let atlas = BotLook(Bot(id: UUID(), name: "Atlas", role: "", orb: OrbConfig()))
+        let routine = Routine(name: "Manhã", botID: atlas.id, prompt: "x", schedule: .daily(hour: 9, minute: 0))
+        let skill = Skill(slug: "resumo", name: "Resumo", summary: "", instructions: "x")
+        let entries = PaletteBuilder.entries(orbs: [atlas], current: nil, routines: [routine], skills: [skill])
+        #expect(entries.first { $0.id == "routine-\(routine.id)" }?.action == .routine(routine.id))
+        #expect(entries.first { $0.id == "skill-\(skill.id)" }?.action == .skill(skill.id))
+    }
+
     @Test func theActionsHeadingNamesTheOpenOrbAndTheirRowsDoNotRepeatIt() {
         #expect(PaletteEntry.Section.actions.title(orbName: "Atlas") == "Ações de Atlas")
         #expect(PaletteEntry.Section.actions.title(orbName: nil) == "Ações")

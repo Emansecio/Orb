@@ -32,6 +32,8 @@ final class AppModel {
     var inicioJump: InicioJump?
     var inicioNavigationNotice: String?
     var inicioRoutineFocus: UUID?
+    /// A skill the command palette chose: the Skills page opens its editor when it shows.
+    var skillToOpen: UUID?
     /// Orbs asking each other for work.
     @ObservationIgnored lazy var delegation: DelegationHub = DelegationHub(model: self)
     /// What is in flight (an Orb's own task, a group's request, an Orb's request to another), kept on disk so the next launch goes on with it.
@@ -2520,6 +2522,7 @@ final class AppModel {
             run.report = reply.map { Conversation.clipped($0, to: RoutineRun.reportLimit) }
             if let reply, let folder = PermissionPolicy.ownFolder(bot.workingURL, home: homeFolder), Self.isFolder(folder) {
                 run.reportFile = RoutineReport.write(reply, routine: routine.name, orb: bot.name, date: started, in: folder)
+                if run.reportFile != nil { run.reportFolder = folder.path }
             }
         } else {
             let why = own.items.reversed().lazy.compactMap { item -> String? in

@@ -718,7 +718,7 @@ struct RoutineRunSheet: View {
             }
             .task(id: runID) {
                 blocks = RoutineText.reportBlocks(run.report ?? "")
-                fileURL = await Self.existingFile(run.reportFile, of: model.bot(routine.botID))
+                fileURL = await Self.existingFile(run, of: model.bot(routine.botID))
             }
         } else {
             ContentUnavailableView("Esta execução não está mais aqui", systemImage: "clock.arrow.circlepath")
@@ -780,11 +780,10 @@ struct RoutineRunSheet: View {
         .labelStyle(FixedIconLabelStyle())
     }
 
-    /// The report file of the run inside the Orb's folder, if it is still there.
-    private static func existingFile(_ path: String?, of bot: Bot?) async -> URL? {
-        guard let path, let bot else { return nil }
-        let url = bot.workingURL.appendingPathComponent(path)
-        return await Task.detached { FileManager.default.fileExists(atPath: url.path) ? url : nil }.value
+    /// The report file of the run, if it is still there (where it was written, or in the Orb's folder for older runs).
+    private static func existingFile(_ run: RoutineRun, of bot: Bot?) async -> URL? {
+        let orbFolder = bot?.workingURL
+        return await Task.detached { run.existingReportFile(inOrbFolder: orbFolder) }.value
     }
 }
 
@@ -902,6 +901,8 @@ struct RoutineEditor: View {
     @State private var showsAdvanced = false
     /// Why the Orb could not be changed on save (the routine is running).
     @State private var moveProblem: String?
+    /// The routine was deleted (by the Orb) while this sheet was open: saving asks before bringing it back.
+    @State private var isConfirmingRecreate = false
     @State private var runsNow = false
     @State private var isConfirmingDelete = false
     /// The "Meta" section, apart from `routine.goal` so switching it off and on keeps what was typed.
@@ -1104,6 +1105,17 @@ struct RoutineEditor: View {
         } message: {
             Text("A rotina e o histórico dela serão apagados. Não dá para desfazer.")
         }
+        .confirmationDialog("Esta rotina foi apagada", isPresented: $isConfirmingRecreate) {
+            Button("Recriar rotina") {
+                routine.createdAt = .now
+                routine.lastRun = nil
+                model.routines.append(routine)
+                dismiss()
+            }
+            Button("Voltar ao texto", role: .cancel) {}
+        } message: {
+            Text("O Orb apagou esta rotina enquanto você editava. Recriar com o que está na folha, ou voltar ao texto?")
+        }
         .onAppear(perform: load)
         .task(id: draftSchedule) { await refreshScheduleCheck() }
     }
@@ -1235,6 +1247,7 @@ struct RoutineEditor: View {
                 return
             }
             model.routines[index] = merged
+            dismiss()
         } else if isNew {
             if scheduleChanged {
                 // Count the next run from now, not from when the draft was created.
@@ -1243,8 +1256,12 @@ struct RoutineEditor: View {
             }
             model.routines.append(routine)
             if runsNow { model.runRoutine(routine.id, manual: true) }
-        } // else deleted while open: saving does not bring it back
-        dismiss()
+            dismiss()
+        } else {
+            // Deleted while open: closing in silence would lose the typed text, so the person chooses (the sheet stays
+            // open on "Voltar", with the text). Recreating is never automatic.
+            isConfirmingRecreate = true
+        }
     }
 }
 
