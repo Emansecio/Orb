@@ -99,9 +99,10 @@ extension ToolCall {
         case .browser:
             return starts(["Baixando"])
         case .schedule:
-            return starts(["Agendando", "Apagando"])
+            // Every action but the plain look changes a task (create, change, pause, resume, run, delete).
+            return !starts(["Listando"])
         case .orbs:
-            return starts(["Falando", "Avisando", "Propondo"]) // another Orb was asked to work, or an Orb was proposed
+            return starts(["Falando", "Avisando", "Propondo", "Montando", "Criando"]) // another Orb was asked to work, or an Orb or group was made
         case .search, .memory, .connector, .plan:
             return false // a connector's calls count through the cards that were answered (see `Conversation.dropsChanges`)
         }

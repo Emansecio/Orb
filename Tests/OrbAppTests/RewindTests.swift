@@ -300,6 +300,27 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
         #expect(chat.dropsChanges(from: 1))
     }
 
+    @Test func everyScheduleActionButTheListCountsAsAChange() {
+        var chat = conversation(["a"])
+        for title in ["Agendando tarefa", "Alterando tarefa agendada", "Pausando tarefa agendada", "Retomando tarefa agendada",
+                      "Rodando tarefa agendada agora", "Apagando tarefa agendada"] {
+            chat.items.insert(tool(title, "x", kind: .schedule), at: 2)
+            #expect(chat.dropsChanges(from: 1), "\(title)")
+            chat.items.remove(at: 2)
+        }
+        chat.items.insert(tool("Listando tarefas agendadas", "", kind: .schedule), at: 2)
+        #expect(!chat.dropsChanges(from: 1))
+    }
+
+    @Test func makingAGroupOrAnOrbCountsAsAChange() {
+        var chat = conversation(["a"])
+        for title in ["Criando um grupo", "Montando o Orb"] {
+            chat.items.insert(tool(title, "x", kind: .orbs), at: 2)
+            #expect(chat.dropsChanges(from: 1), "\(title)")
+            chat.items.remove(at: 2)
+        }
+    }
+
     @Test func aConnectorCallCountsOnlyWhenACardWasAnsweredYes() {
         var chat = conversation(["a"])
         chat.items.insert(tool("Usando create_issue", "", kind: .connector), at: 2)
