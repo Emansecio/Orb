@@ -127,14 +127,26 @@ struct WorkFolderNamesTests {
         let repo = try await Repo()
         let run = UUID()
         let first = await repo.prepare("Atlas", run: run)
-        let gitDir = try await repo.git(["rev-parse", "--path-format=absolute", "--git-dir"], in: first.url)
-        // What a git killed during checkout leaves: the worktree is registered and holds a stale lock.
-        try "".write(to: URL(fileURLWithPath: gitDir).appending(path: "index.lock"), atomically: true, encoding: .utf8)
+        // What a git killed during checkout leaves: the worktree is registered but its index was never written.
+        let index = try await repo.git(["rev-parse", "--path-format=absolute", "--git-path", "index"], in: first.url)
+        try FileManager.default.removeItem(atPath: index)
         let again = await repo.prepare("Atlas", run: run)
         #expect(again.problem == nil && again.branch == first.branch)
-        let lock = try await repo.git(["rev-parse", "--path-format=absolute", "--git-path", "index.lock"], in: again.url)
-        #expect(!FileManager.default.fileExists(atPath: lock))
+        #expect(FileManager.default.fileExists(atPath: index))
         #expect(FileManager.default.fileExists(atPath: again.url.appending(path: "a.txt").path))
+    }
+
+    @Test(.enabled(if: gitReady)) func aLeftoverLockNeverThrowsAwayTheMembersUncommittedWork() async throws {
+        let repo = try await Repo()
+        let run = UUID()
+        let first = await repo.prepare("Atlas", run: run)
+        // A commit cut short leaves `index.lock` next to work that was not committed yet: the folder is handed over as it is.
+        try "rascunho".write(to: first.url.appending(path: "novo.txt"), atomically: true, encoding: .utf8)
+        let lock = try await repo.git(["rev-parse", "--path-format=absolute", "--git-path", "index.lock"], in: first.url)
+        try "".write(toFile: lock, atomically: true, encoding: .utf8)
+        let again = await repo.prepare("Atlas", run: run)
+        #expect(again.problem == nil && again.url == first.url)
+        #expect(FileManager.default.fileExists(atPath: first.url.appending(path: "novo.txt").path))
     }
 
     @Test(.enabled(if: gitReady)) func aFailedAddLeavesNoBranchOrFolderBehind() async throws {

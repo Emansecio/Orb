@@ -74,13 +74,15 @@ enum WorkFolders {
         return WorkFolder(url: inside(folder, relative), branch: branch)
     }
 
-    /// A listed worktree is ready when its folder exists, git can read its HEAD there and no checkout lock is left behind.
+    /// A listed worktree is ready when its folder exists, git can read its HEAD there and its index was written (a checkout
+    /// cut short has none yet). A leftover `index.lock` alone is not a reason: it may come from a commit cut short, and
+    /// dropping the folder would throw away the member's uncommitted work.
     private static func isIntact(_ folder: URL, git: Git) async -> Bool {
         guard FileManager.default.fileExists(atPath: folder.path),
               await git.run(["rev-parse", "--verify", "--quiet", "HEAD"], in: folder).output != nil,
-              let lock = await git.run(["rev-parse", "--path-format=absolute", "--git-path", "index.lock"], in: folder).output
+              let index = await git.run(["rev-parse", "--path-format=absolute", "--git-path", "index"], in: folder).output
         else { return false }
-        return !FileManager.default.fileExists(atPath: lock)
+        return FileManager.default.fileExists(atPath: index)
     }
 
     // MARK: Telling the Orb
