@@ -247,7 +247,8 @@ enum Tip {
     static let reviewDictation = "Corrige o texto ditado com o modelo do Orb antes de você enviar"
     static let orbsCanTalk = "Deixa os Orbs pedirem ajuda uns aos outros; Parar interrompe a conversa toda"
     static let orbsCanManageGroups = "Deixa os Orbs mudarem os grupos sozinhos; apagar um grupo sempre pede a sua confirmação"
-    static let orbsCanStartGroups = "Deixa um Orb criar um grupo ou pedir a um grupo dele quando você pede no chat"
+    static let orbsCanStartGroups = "Deixa um Orb criar um grupo ou pedir a um grupo dele"
+    static let orbsActOnOwn = "Os Orbs criam e acionam grupos quando acham útil, sem você pedir"
     static let dataFolder = "Mostra no Finder a pasta com conversas, memórias e ajustes"
     static let keptMemoriesFolder = "Mostra no Finder as memórias guardadas de Orbs apagados"
     static let orbsFolder = "Mostra no Finder a pasta onde ficam as pastas dos Orbs"
@@ -371,7 +372,7 @@ enum Tip {
          createAtlas, startWithClaudeCode, otherWaysToConnect(isShowing: true), otherWaysToConnect(isShowing: false),
          newRoutineCreatingAtlas, newRoutineNeedingModel, routineTemplateCreatingAtlas, allKeptMemories, continueFromMemory, modelSettings, useClaudeCode, signInClaudeCode, signInChatGPT,
          pasteKey, stopConnecting, retryConnecting, useLocalServer("Ollama"), createOrbSheet(),
-         launchAtLogin, openLoginItems, notifyWhenDone, proposeSkills, summarizeSessions, reviewDictation, orbsCanTalk, orbsCanStartGroups, orbsCanManageGroups, dataFolder, keptMemoriesFolder, orbsFolder, resetOrb,
+         launchAtLogin, openLoginItems, notifyWhenDone, proposeSkills, summarizeSessions, reviewDictation, orbsCanTalk, orbsCanStartGroups, orbsActOnOwn, orbsCanManageGroups, dataFolder, keptMemoriesFolder, orbsFolder, resetOrb,
          openSystemNotifications, askNotifications, globalShortcut,
          profilePhotoAvatar, profilePhotoChoose, profilePhotoRemove,
          addProvider, refreshModels, removeProvider, signOutChatGPT, replaceKey, deleteKey, saveKey, keepKey, getKey, listAllModels,

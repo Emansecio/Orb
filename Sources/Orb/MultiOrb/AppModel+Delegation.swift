@@ -36,10 +36,12 @@ extension AppModel {
         }
         let inGroup = turnGroup(of: botID) != nil
         // A member of a group may ask the group from its chat even with the switch off: groups do not depend on it.
-        let hasTeam = inGroup || (orbsCanTalk && bots.count > 1) || (ownChat && canStartGroups(botID))
+        // "Orbs agem por conta própria" takes groups out of the own chat: a routine or a request may start them too.
+        let mayStart = ownChat || orbsActOnOwn
+        let hasTeam = inGroup || (orbsCanTalk && bots.count > 1) || (mayStart && canStartGroups(botID))
         return MultiOrbOffering(orbs: hasTeam, propose: ownChat, groupMemory: false,
                                 groupRecall: ownChat && !groups(containing: botID).isEmpty,
-                                groupCreate: ownChat && orbsCanStartGroups && bots.count > 1,
+                                groupCreate: mayStart && orbsCanStartGroups && bots.count > 1,
                                 groupEdit: orbsCanManageGroups && (!groups.isEmpty || bots.count > 1), askUser: ownChat, access: ownChat,
                                 sideRun: !ownChat)
     }
@@ -61,7 +63,8 @@ extension AppModel {
         let team = delegation.roster(for: bot.id, groupID: group).compactMap { self.bot($0.id) }
         let teammates = OrbsPrompt.section(for: bot, roster: team, isGroup: group != nil)
         guard group == nil else { return teammates }
-        let groups = OrbsPrompt.groups(groupLines(for: bot.id), canStart: isOwnChat(bot.id) && orbsCanStartGroups,
+        let groups = OrbsPrompt.groups(groupLines(for: bot.id), canStart: (isOwnChat(bot.id) || orbsActOnOwn) && orbsCanStartGroups,
+                                       actsOnOwn: orbsActOnOwn,
                                        canRecall: isOwnChat(bot.id), canEdit: orbsCanManageGroups)
         return [teammates, groups].filter { !$0.isEmpty }.joined(separator: "\n\n")
     }

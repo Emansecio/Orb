@@ -79,6 +79,8 @@ enum DelegationRefusal: Error, Equatable, Sendable {
         case notFromHere
         /// The turn is the chat's but the person did not start it.
         case notAsked
+        /// In a group's turn only the orchestrator creates groups.
+        case notOrchestrator
         case noName
         /// An Orb or a group already has the name.
         case nameTaken(String)
@@ -96,6 +98,10 @@ enum DelegationRefusal: Error, Equatable, Sendable {
         case notFromHere
         /// The turn is the chat's but the person did not start it (an answer from another Orb woke it).
         case notAsked
+        /// In a group's turn only the orchestrator asks another group.
+        case notOrchestrator
+        /// That group is already in this chain of groups asking groups: asking it back would loop.
+        case inChain
         /// The group could not take the request (the app is resetting, its orchestrator is gone).
         case unavailable
         /// A group is asked, not told.
@@ -140,6 +146,11 @@ enum DelegationRefusal: Error, Equatable, Sendable {
                     + "outro Orb). Diga no resultado o que o grupo deveria fazer."
             case .notAsked:
                 "Você só aciona o grupo “\(name)” quando o usuário pede, no turno dele: pergunte se ele quer."
+            case .notOrchestrator:
+                "Só o orquestrador aciona outro grupo: responda com o resultado e diga o que falta."
+            case .inChain:
+                "O grupo “\(name)” já está nesta cadeia de grupos (ele acionou este, direta ou indiretamente): não peça de volta. "
+                    + "Termine com o que tem; sua resposta final segue para quem pediu."
             case .unavailable:
                 "O grupo “\(name)” não pôde receber o pedido agora: diga isso ao usuário e ofereça pedir a cada membro "
                     + "separadamente."
@@ -154,6 +165,8 @@ enum DelegationRefusal: Error, Equatable, Sendable {
                 "Daqui não se cria grupo: só no seu chat, a pedido do usuário. Diga no resultado que grupo faria sentido."
             case .notAsked:
                 "Você só cria um grupo quando o usuário pede, no turno dele: pergunte se ele quer."
+            case .notOrchestrator:
+                "Só o orquestrador cria grupos no turno de um grupo: diga ao orquestrador que grupo faria sentido."
             case .noName:
                 "Dê um nome ao grupo em name."
             case .nameTaken(let name):

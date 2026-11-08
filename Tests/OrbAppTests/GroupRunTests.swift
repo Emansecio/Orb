@@ -279,7 +279,13 @@ struct GroupPolicyAndExtrasTests {
         let world = GroupWorld()
         let first = await startOrchestratorTurn(world)
         let extras = try #require(world.model.groupTurnExtras(for: world.atlas.id))
-        #expect(extras.groupID == world.groupID && extras.offering == MultiOrbOffering(orbs: true, propose: false, groupMemory: true, groupEdit: true))
+        // The orchestrator may also create groups (the GroupWorld has three Orbs and the default "Orbs agem por conta própria").
+        #expect(extras.groupID == world.groupID && extras.offering
+            == MultiOrbOffering(orbs: true, propose: false, groupMemory: true, groupCreate: true, groupEdit: true))
+        world.model.orbsActOnOwn = false
+        #expect(world.model.groupTurnExtras(for: world.atlas.id)?.offering
+            == MultiOrbOffering(orbs: true, propose: false, groupMemory: true, groupEdit: true))
+        world.model.orbsActOnOwn = true
         #expect(extras.grants == [PermissionRule(family: .delegation), PermissionRule(family: .groupMemory)])
         let names = ToolBox.offered(for: [], accessibilityGranted: true, multi: extras.offering).map(\.spec.name)
         #expect(names.contains("orbs") && names.contains("group_remember") && names.contains("group_recall") && !names.contains("orb_propose"))

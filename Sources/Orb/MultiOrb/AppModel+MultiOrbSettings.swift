@@ -25,6 +25,17 @@ extension AppModel {
         set { preferences.set(newValue, forKey: Self.orbsCanStartGroupsKey) }
     }
 
+    /// The preference behind Ajustes → Orbs → "Orbs agem por conta própria".
+    static let orbsActOnOwnKey = "orbsActOnOwn"
+
+    /// Whether an Orb may create and ask groups without the user asking in that turn: from a routine, another Orb's request or a
+    /// group's turn too. On unless switched off; off, only the own chat in a turn the person started (the old rule). It adds no
+    /// permission of its own: "Orbs podem acionar grupos" still has to be on.
+    var orbsActOnOwn: Bool {
+        get { preferences.object(forKey: Self.orbsActOnOwnKey) as? Bool ?? true }
+        set { preferences.set(newValue, forKey: Self.orbsActOnOwnKey) }
+    }
+
     /// The preference behind Ajustes → Orbs → "Orbs organizam os grupos".
     static let orbsCanManageGroupsKey = "orbsCanManageGroups"
 

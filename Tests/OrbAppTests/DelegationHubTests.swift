@@ -1899,6 +1899,7 @@ private actor Names {
         }
         defer { team.cleanUp() }
         let model = team.model, hub = model.delegation
+        model.orbsActOnOwn = false // the old rule: only the chat, at the person's request
         let group = group(team)
         func refusal(from bot: Bot, _ kind: String = "ask") async -> String {
             do {
@@ -2012,6 +2013,7 @@ private actor Names {
         let team = Team { _ in say("?") }
         defer { team.cleanUp() }
         let model = team.model, hub = model.delegation
+        model.orbsActOnOwn = false // the old rule: only the chat, at the person's request
         func create(_ name: String, _ members: [String], orchestrator: String? = nil) async -> String {
             var fields: [String: JSONValue] = ["action": .string("create_group"), "name": .string(name),
                                                "members": .array(members.map(JSONValue.string))]
@@ -2036,6 +2038,94 @@ private actor Names {
         #expect(await create("Dupla", ["Pesquisador", "Revisor"]).hasSuffix("Você não é membro: o usuário manda os pedidos na tela do grupo."))
         #expect(await create("dupla", ["Atlas", "Revisor"]).hasPrefix("Já existe um Orb ou um grupo chamado “dupla”"))
         session.turnAskedByUser = false
+    }
+
+    // MARK: Groups on the Orbs' own initiative ("Orbs agem por conta própria")
+
+    private func tool(_ hub: DelegationHub, _ fields: [String: JSONValue], by bot: Bot) async -> String {
+        do { return try await hub.handleTool(.object(fields), orb: bot.id) } catch { return (error as? ToolError)?.message ?? "" }
+    }
+
+    private func askGroup(_ hub: DelegationHub, _ name: String, by bot: Bot) async -> String {
+        await tool(hub, ["action": .string("ask"), "to": .string(name), "message": .string("Façam isso.")], by: bot)
+    }
+
+    @Test func withActingOnItsOwnOnAnOrbCreatesAndAsksGroupsFromARoutineOrARequest() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let model = team.model, hub = model.delegation
+        model.groupHub.settle = .zero
+        model.groupHub.isAppActive = { false }
+        #expect(model.orbsActOnOwn) // on unless switched off
+        let session = model.session(team.atlas.id)
+        for kind in [SideRunKind.routine, .delegation] {
+            session.sideKind = kind
+            session.turnAskedByUser = false
+            #expect(model.multiOrbOffering(for: team.atlas.id).groupCreate)
+            let name = "Time \(kind.rawValue)"
+            let made = await tool(hub, ["action": .string("create_group"), "name": .string(name),
+                                        "members": .array(["Atlas", "Revisor"].map(JSONValue.string))], by: team.atlas)
+            #expect(made.hasPrefix("Grupo \(name) criado"), "\(made)")
+            let sent = await askGroup(hub, name, by: team.atlas)
+            #expect(sent.hasPrefix("Pedido enviado ao grupo \(name)"), "\(sent)")
+        }
+        // "Orbs podem acionar grupos" still rules, and so does membership.
+        model.orbsCanStartGroups = false
+        #expect(model.multiOrbOffering(for: team.atlas.id).groupCreate == false)
+        #expect(await askGroup(hub, "Time routine", by: team.atlas).hasPrefix("O usuário desligou “Orbs podem acionar grupos”"))
+        model.orbsCanStartGroups = true
+        #expect(await askGroup(hub, "Time routine", by: team.pesquisador).hasPrefix("Você não faz parte do grupo"))
+        // Switched off, the old refusals come back.
+        model.orbsActOnOwn = false
+        #expect(model.multiOrbOffering(for: team.atlas.id).groupCreate == false)
+        #expect(await askGroup(hub, "Time routine", by: team.atlas).hasPrefix("Daqui não se aciona o grupo"))
+        let again = await tool(hub, ["action": .string("create_group"), "name": .string("Outro"),
+                                     "members": .array(["Atlas", "Revisor"].map(JSONValue.string))], by: team.atlas)
+        #expect(again.hasPrefix("Daqui não se cria grupo"))
+    }
+
+    @Test func anOrchestratorAsksAndCreatesGroupsInAGroupsTurnButNeverBackIntoTheChain() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let model = team.model, hub = model.delegation
+        model.groupHub.settle = .zero
+        model.groupHub.isAppActive = { false }
+        let first = try #require(model.createGroup(name: "Primeiro", members: [team.atlas.id, team.revisor.id], orchestrator: team.atlas.id))
+        let second = try #require(model.createGroup(name: "Segundo", members: [team.atlas.id, team.revisor.id], orchestrator: team.revisor.id))
+        func inTurn(_ bot: Bot, of group: OrbGroup, chain: UUID = UUID()) {
+            model.session(bot.id).chain = ChainContext(chainID: chain, hop: 1, path: [], groupID: group.id)
+        }
+        // Its own group is refused; a member that does not orchestrate may not start another group.
+        inTurn(team.atlas, of: first)
+        #expect(await askGroup(hub, "Primeiro", by: team.atlas).hasPrefix("Você já está trabalhando no grupo “Primeiro”"))
+        inTurn(team.revisor, of: first)
+        #expect(await askGroup(hub, "Segundo", by: team.revisor).hasPrefix("Só o orquestrador aciona outro grupo"))
+        let none = await tool(hub, ["action": .string("create_group"), "name": .string("Terceiro"),
+                                    "members": .array(["Atlas", "Revisor"].map(JSONValue.string))], by: team.revisor)
+        #expect(none.hasPrefix("Só o orquestrador cria grupos"))
+        // The orchestrator of the first group asks the second, and may create a group.
+        inTurn(team.atlas, of: first)
+        let sent = await askGroup(hub, "Segundo", by: team.atlas)
+        #expect(sent.hasPrefix("Pedido enviado ao grupo Segundo"), "\(sent)")
+        let made = await tool(hub, ["action": .string("create_group"), "name": .string("Terceiro"),
+                                    "members": .array(["Atlas", "Revisor"].map(JSONValue.string))], by: team.atlas)
+        #expect(made.hasPrefix("Grupo Terceiro criado"), "\(made)")
+        // The second group's orchestrator, working on that request, asking the first back would loop; a new group is fine.
+        let run = try #require(model.groupHub.run(second.id))
+        let chain = try #require(hub.chainStates[run.id])
+        #expect(chain.groupsVisited == [first.id])
+        inTurn(team.revisor, of: second, chain: run.id)
+        #expect(await askGroup(hub, "Primeiro", by: team.revisor).hasPrefix("O grupo “Primeiro” já está nesta cadeia de grupos"))
+        #expect(model.groupHub.run(first.id) == nil)
+        let third = await askGroup(hub, "Terceiro", by: team.revisor)
+        #expect(third.hasPrefix("Pedido enviado ao grupo Terceiro"), "\(third)")
+        let thirdGroup = try #require(model.groups.first { $0.name == "Terceiro" })
+        let thirdRun = try #require(model.groupHub.run(thirdGroup.id))
+        #expect(hub.chainStates[thirdRun.id]?.groupsVisited == [first.id, second.id])
+        // Switched off, a group's turn goes back to the old rule: no group asked from it.
+        model.orbsActOnOwn = false
+        inTurn(team.atlas, of: first)
+        #expect(await askGroup(hub, "Segundo", by: team.atlas).hasPrefix("“Segundo” é um grupo, não um Orb"))
     }
 
     @Test func inItsChatAnOrbReadsTheBoardOfItsGroups() async throws {

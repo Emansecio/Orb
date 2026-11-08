@@ -349,6 +349,7 @@ struct OrbsSettings: View {
     @State private var orbsCanTalk = true
     @State private var orbsCanStartGroups = true
     @State private var orbsCanManageGroups = true
+    @State private var orbsActOnOwn = true
     @State private var isConfirmingOrbsOff = false
     @State private var openTalks: [DelegationHub.OpenTalk] = []
     @State private var learnedWindows: [LearnedWindowRow] = []
@@ -386,10 +387,16 @@ struct OrbsSettings: View {
                 }
                 Toggle(isOn: Binding(get: { orbsCanStartGroups }, set: { orbsCanStartGroups = $0; model.orbsCanStartGroups = $0 })) {
                     toggleLabel("Orbs podem acionar grupos",
-                                "Quando você pede no chat, o Orb cria um grupo ou manda um pedido a um grupo de que faz parte; a resposta final do grupo volta para o chat. Nunca por conta própria.")
+                                "O Orb cria um grupo ou manda um pedido a um grupo de que faz parte; a resposta final do grupo volta para o chat. Sem \"Orbs agem por conta própria\", só quando você pede no chat.")
                 }
                 .help(Tip.orbsCanStartGroups)
                 .onAppear { orbsCanStartGroups = model.orbsCanStartGroups }
+                Toggle(isOn: Binding(get: { orbsActOnOwn }, set: { orbsActOnOwn = $0; model.orbsActOnOwn = $0 })) {
+                    toggleLabel("Orbs agem por conta própria",
+                                "Os Orbs criam e acionam grupos quando acham útil, de qualquer conversa, rotina ou pedido, sem esperar você pedir.")
+                }
+                .help(Tip.orbsActOnOwn)
+                .onAppear { orbsActOnOwn = model.orbsActOnOwn }
                 Toggle(isOn: Binding(get: { orbsCanManageGroups }, set: { orbsCanManageGroups = $0; model.orbsCanManageGroups = $0 })) {
                     toggleLabel("Orbs organizam os grupos",
                                 "Os Orbs adicionam e tiram membros, trocam o orquestrador e renomeiam grupos sozinhos. Apagar sempre pede sua confirmação.")
