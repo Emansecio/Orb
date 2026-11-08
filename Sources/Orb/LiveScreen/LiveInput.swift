@@ -109,6 +109,12 @@ enum LiveInput {
         return json(message)
     }
 
+    /// Whether a key goes through the Mac's text input (dead keys and composition: ABNT2's ´ then a is "á") instead of by its name.
+    /// Shortcuts (⌘, ⌃) and the keys the page knows by name keep the direct path.
+    static func usesTextInput(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
+        !modifiers.contains(.command) && !modifiers.contains(.control) && namedKeys[keyCode] == nil
+    }
+
     /// The most a paste types: past it the rest is left out (a key per character goes over the stream).
     static let pasteLimit = 20_000
 

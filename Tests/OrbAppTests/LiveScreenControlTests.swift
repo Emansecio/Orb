@@ -75,6 +75,18 @@ struct LiveInputTests {
         #expect(space["code"] as? String == "Space" && space["text"] as? String == " " && space["windowsVirtualKeyCode"] as? Int == 32)
     }
 
+    @Test func textKeysGoThroughTheTextInputSoDeadKeysCompose() throws {
+        // Letters, the ABNT2 dead key (´ is keyCode 33 there) and Option combinations are composed by the Mac...
+        #expect(LiveInput.usesTextInput(keyCode: 0, modifiers: []) && LiveInput.usesTextInput(keyCode: 33, modifiers: []))
+        #expect(LiveInput.usesTextInput(keyCode: 0, modifiers: [.shift, .option]))
+        // ...shortcuts and named keys are not.
+        #expect(!LiveInput.usesTextInput(keyCode: 0, modifiers: [.command]) && !LiveInput.usesTextInput(keyCode: 0, modifiers: [.control]))
+        #expect(!LiveInput.usesTextInput(keyCode: 36, modifiers: []) && !LiveInput.usesTextInput(keyCode: 123, modifiers: []))
+        // What the input context hands back ("á" after ´ and a) is typed whole, once.
+        let typed = try LiveInput.text("á").map { try object($0) }
+        #expect(typed.count == 1 && typed[0]["text"] as? String == "á" && typed[0]["eventType"] as? String == "keyDown")
+    }
+
     @Test func namedKeysGoByTheirNameAndEnterSubmits() throws {
         let enter = try object(#require(LiveInput.key(down: true, keyCode: 36, characters: "\r", modifiers: [])))
         #expect(enter["key"] as? String == "Enter" && enter["text"] as? String == "\r" && enter["windowsVirtualKeyCode"] as? Int == 13)
@@ -212,6 +224,22 @@ struct LiveScreenControlHubTests {
         #expect(socket.written == [click])
     }
 
+    @Test func anotherOrbsCardDoesNotTakeTheStreamFromTheOrbThePersonControls() async throws {
+        let rig = LiveRig()
+        let a = rig.orb(), b = rig.orb()
+        rig.hub.acquire(a, wide: true)
+        #expect(await rig.opened(1))
+        rig.hub.takeControl(a)
+        rig.hub.acquire(b, wide: false)
+        let click = LiveInput.mouse(.pressed, at: CGPoint(x: 5, y: 5), button: .left, clickCount: 1)
+        #expect(rig.hub.send(click, to: a), "A keeps the connection the input goes on")
+        #expect(rig.hub.store(a).phase != .paused)
+        // Back to the Orb: the latest card (B) streams.
+        rig.hub.giveBackControl(a)
+        rig.hub.acquire(b, wide: false)
+        #expect(await rig.opened(2))
+    }
+
     @Test func aDeletedOrbGivesTheBrowserBack() async {
         let rig = LiveRig()
         let bot = rig.orb()
@@ -262,6 +290,9 @@ struct LiveCardControlTests {
         #expect(state.chip == "Você no controle")
         #expect(LiveScreenText.caption(for: state, work: nil, handoffPage: nil, lastAction: nil) == "O Orb espera você devolver o navegador")
         #expect(LiveScreenText.announcement(for: state) != nil)
+        // A broken stream is not hidden behind "you control": the window shows the failure.
+        #expect(LiveCardState.of(outcome: .running, phase: .failed, isProtected: false, isPrivate: false, handoff: false,
+                                 userControls: true) == .failed)
         // A hand-off still comes first; a finished use is the closing line.
         #expect(LiveCardState.of(outcome: .running, phase: .live, isProtected: false, isPrivate: false, handoff: true,
                                  userControls: true) == .needsYou)

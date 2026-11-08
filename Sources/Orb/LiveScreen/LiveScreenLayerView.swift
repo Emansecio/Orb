@@ -300,6 +300,8 @@ final class LiveScreenLayerView: NSView {
     private var pointerToken: UUID?
     /// When the last hover went to the page (`mouseMoved`), so they go at a steady pace.
     var lastMoveSent: TimeInterval = 0
+    /// The dead key or composition the Mac is holding, not yet typed (`NSTextInputClient`, below).
+    var markedText = ""
 
     private func unregister() {
         if let frameToken { store.removeObserver(frameToken) }
@@ -441,6 +443,11 @@ extension LiveScreenLayerView {
     }
 
     override func keyDown(with event: NSEvent) {
+        // Text goes through the input context, so a dead key waits for its letter ("´" + "a" is "á"); `insertText` sends the result.
+        if isInteractive, LiveInput.usesTextInput(keyCode: event.keyCode, modifiers: event.modifierFlags) {
+            if inputContext?.handleEvent(event) != true { super.keyDown(with: event) }
+            return
+        }
         guard isInteractive,
               let message = LiveInput.key(down: true, keyCode: event.keyCode, characters: event.characters, modifiers: event.modifierFlags)
         else { return super.keyDown(with: event) }
@@ -448,6 +455,8 @@ extension LiveScreenLayerView {
     }
 
     override func keyUp(with event: NSEvent) {
+        // The text of these keys went out whole on key down (see `insertText`); a lone key up would carry the uncomposed key.
+        if isInteractive, LiveInput.usesTextInput(keyCode: event.keyCode, modifiers: event.modifierFlags) { return }
         guard isInteractive,
               let message = LiveInput.key(down: false, keyCode: event.keyCode, characters: event.characters, modifiers: event.modifierFlags)
         else { return super.keyUp(with: event) }
@@ -466,6 +475,33 @@ extension LiveScreenLayerView {
         guard isInteractive else { return }
         addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect], owner: self))
     }
+}
+
+/// Text input for the page: the Mac composes dead keys and accents, and the result is typed into the page as it is pasted.
+extension LiveScreenLayerView: @preconcurrency NSTextInputClient {
+    func insertText(_ string: Any, replacementRange: NSRange) {
+        markedText = ""
+        guard isInteractive else { return }
+        let text = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
+        for message in LiveInput.text(text) { hub.send(message, to: botID) }
+    }
+
+    func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        markedText = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
+    }
+
+    func unmarkText() { markedText = "" }
+    func hasMarkedText() -> Bool { !markedText.isEmpty }
+    func markedRange() -> NSRange { markedText.isEmpty ? NSRange(location: NSNotFound, length: 0) : NSRange(location: 0, length: markedText.utf16.count) }
+    func selectedRange() -> NSRange { NSRange(location: NSNotFound, length: 0) }
+    func attributedSubstring(forProposedRange range: NSRange, actualRange: NSRangePointer?) -> NSAttributedString? { nil }
+    func validAttributesForMarkedText() -> [NSAttributedString.Key] { [] }
+    func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
+        window?.convertToScreen(convert(bounds, to: nil)) ?? .zero
+    }
+    func characterIndex(for point: NSPoint) -> Int { NSNotFound }
+    /// Commands of the text system (Delete, arrows…): those keys go by name, so nothing is left to do here.
+    override func doCommand(by selector: Selector) {}
 }
 
 extension Motion {
