@@ -282,12 +282,17 @@ enum OrbsPrompt {
     static let groupLimit = 12
 
     /// What the Orb is told, outside a group's turn, about the groups it is in: their names and members, and what it can do
-    /// about them (empty without groups). `canStart`: its own chat, with "Orbs podem acionar grupos" on. The same bytes for the
+    /// about them (empty without groups). `canStart`: with "Orbs podem acionar grupos" on (its own chat, or any turn with `actsOnOwn`). The same bytes for the
     /// same groups, so the provider's cache holds.
-    static func groups(_ groups: [GroupLine], canStart: Bool = false, canRecall: Bool = false) -> String {
+    static func groups(_ groups: [GroupLine], canStart: Bool = false, actsOnOwn: Bool = false, canRecall: Bool = false,
+                       canEdit: Bool = false) -> String {
         guard !groups.isEmpty else { return "" }
         let lines = groups.prefix(groupLimit).map { "- " + line($0) }
-        let how = canStart
+        let how = canStart && actsOnOwn
+            ? "When a group would help the user's work, use orbs ask with the group's name as to, or group_create to make one; no need "
+                + "to ask first. Its orchestrator gets your message (yours, not the user's), the group works in its thread, and its "
+                + "final answer comes back to you as a message. You cannot otherwise write in a group's thread."
+            : canStart
             ? "When the user asks you to involve a group, use orbs ask with the group's name as to: its orchestrator gets your "
                 + "message (yours, not the user's), the group works in its thread, and its final answer comes back to you as a "
                 + "message. Only at the user's request in this chat, never on your own. You cannot otherwise write in a group's thread."
@@ -295,11 +300,14 @@ enum OrbsPrompt {
                 + "so and offer to ask the members one by one with orbs (each request runs outside the group) or to write the text "
                 + "for the user to paste."
         let recall = canRecall ? " group_recall searches a group's shared board (its decisions and notes)." : ""
+        let edit = canEdit
+            ? " group_edit reorganizes a group (members, orchestrator, name, objective); deleting one asks the user."
+            : ""
         return """
         ## Your groups
         Groups of the user you are a member of (each has a shared thread on its own screen):
         \(lines.joined(separator: "\n"))
-        \(how)\(recall)
+        \(how)\(recall)\(edit)
         """
     }
 

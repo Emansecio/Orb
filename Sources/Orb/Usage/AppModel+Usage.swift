@@ -13,6 +13,7 @@ extension AppModel {
         usageLog.record(totals, orb: botID, name: name, model: model, source: source)
         // What a group's turn costs goes to the request's count (what the provider charges in full or writes to its cache).
         if source == .group { groupHub.noteTokens(totals.budgetTokens, botID: botID) }
+        pulseCharge(totals, botID: botID, source: source) // the pulse's own turn and its chains count against its daily budget
     }
 
     /// For a call the app makes for itself whose reply is a single `TokenUsage` (the note on a stretch the next fold will

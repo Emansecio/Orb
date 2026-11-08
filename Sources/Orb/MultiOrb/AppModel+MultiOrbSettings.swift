@@ -24,4 +24,36 @@ extension AppModel {
         get { preferences.object(forKey: Self.orbsCanStartGroupsKey) as? Bool ?? true }
         set { preferences.set(newValue, forKey: Self.orbsCanStartGroupsKey) }
     }
+
+    /// The preference behind Ajustes → Orbs → "Orbs agem por conta própria".
+    static let orbsActOnOwnKey = "orbsActOnOwn"
+
+    /// Whether an Orb may create and ask groups without the user asking in that turn: from a routine, another Orb's request or a
+    /// group's turn too. On unless switched off; off, only the own chat in a turn the person started (the old rule). It adds no
+    /// permission of its own: "Orbs podem acionar grupos" still has to be on.
+    var orbsActOnOwn: Bool {
+        get { preferences.object(forKey: Self.orbsActOnOwnKey) as? Bool ?? true }
+        set { preferences.set(newValue, forKey: Self.orbsActOnOwnKey) }
+    }
+
+    /// The preference behind Ajustes → Orbs → "Orbs organizam os grupos".
+    static let orbsCanManageGroupsKey = "orbsCanManageGroups"
+
+    /// Whether an Orb may change the user's groups on its own with `group_edit` (members, orchestrator, name, objective), and
+    /// offer to delete an Orb with `orb_delete`. On unless switched off. Deleting a group or an Orb, or taking out the member
+    /// that would dissolve a group, always asks the user, whatever this says.
+    var orbsCanManageGroups: Bool {
+        get { preferences.object(forKey: Self.orbsCanManageGroupsKey) as? Bool ?? true }
+        set { preferences.set(newValue, forKey: Self.orbsCanManageGroupsKey) }
+    }
+
+    /// The preference behind Ajustes → Orbs → "Orbs criam Orbs sem perguntar".
+    static let orbsCreateWithoutAskingKey = "orbsCreateWithoutAsking"
+
+    /// Whether `orb_propose` creates the Orb at once (the creator's chat gets a line with "Desfazer") instead of opening the
+    /// creation card. On unless switched off. The new Orb never has more than its creator, whatever this says.
+    var orbsCreateWithoutAsking: Bool {
+        get { preferences.object(forKey: Self.orbsCreateWithoutAskingKey) as? Bool ?? true }
+        set { preferences.set(newValue, forKey: Self.orbsCreateWithoutAskingKey) }
+    }
 }

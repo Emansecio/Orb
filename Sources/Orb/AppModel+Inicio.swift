@@ -62,6 +62,13 @@ extension AppModel {
         if inicio.removeEntries(where: gone) { store.saveInicioJournal(inicio) }
     }
 
+    /// A pulse that did something: the row opens the line it left in the Orb's chat.
+    func recordInicioPulse(bot: UUID, chat: UUID, item: UUID, summary: String, outcome: InicioEntry.Outcome) {
+        let previous = inicio.nextSequence
+        inicio.append(id: item, date: .now, origin: .pulse(bot: bot, chat: chat, item: item), outcome: outcome, summary: summary)
+        if inicio.nextSequence != previous { store.saveInicioJournal(inicio) }
+    }
+
     func recordInicioRoutine(bot: UUID, routine: UUID, run: RoutineRun, outcome: InicioEntry.Outcome, journal: Bool = true) {
         let previous = inicio.nextSequence
         inicio.append(id: run.id, date: run.finishedAt ?? run.date, origin: .routine(bot: bot, routine: routine, run: run.id),

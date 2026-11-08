@@ -5,6 +5,7 @@ import Foundation
 typealias BridgeHandler = @Sendable (JSONValue) async throws -> String
 
 /// Opens the creation card for a proposal and waits for the person's decision. The engine defines it, as it does `handoff`.
+typealias ConfirmHandler = @Sendable (_ title: String, _ detail: String) async -> Bool
 typealias ProposalHandler = @Sendable (OrbProposal) async -> ProposalOutcome
 
 /// A request between Orbs as the app keeps it while it is in flight (memory only; the `WorkJournal` keeps the envelope of one outside any group, to send it again after the app closed).
@@ -48,6 +49,27 @@ enum DelegationRefusal: Error, Equatable, Sendable {
     case groupDoor(String, GroupDoor)
     /// `group_create` was not let through (`DelegationHub.createGroup`).
     case groupSetup(GroupSetup)
+    /// `group_edit` was not let through (`DelegationHub.editGroup`).
+    case groupEdit(GroupEdit)
+
+    /// Why a group was not changed.
+    enum GroupEdit: Sendable, Equatable {
+        /// "Orbs organizam os grupos" is off.
+        case switchedOff
+        /// No group has that name; the names that exist.
+        case noGroup(String, [String])
+        case unknownEdit(String)
+        /// The edit needs `orb`, `name` or `objective` and it came empty.
+        case missing(String)
+        case alreadyMember(orb: String, group: String)
+        case notMember(orb: String, group: String)
+        case full(String)
+        case nameTaken(String)
+        /// Deleting, or taking out the member that dissolves the group, runs only after the user confirms.
+        case needsConfirmation
+        case objectiveRefused
+        case unavailable
+    }
 
     /// Why a group was not created.
     enum GroupSetup: Sendable, Equatable {
@@ -57,6 +79,8 @@ enum DelegationRefusal: Error, Equatable, Sendable {
         case notFromHere
         /// The turn is the chat's but the person did not start it.
         case notAsked
+        /// In a group's turn only the orchestrator creates groups.
+        case notOrchestrator
         case noName
         /// An Orb or a group already has the name.
         case nameTaken(String)
@@ -74,6 +98,10 @@ enum DelegationRefusal: Error, Equatable, Sendable {
         case notFromHere
         /// The turn is the chat's but the person did not start it (an answer from another Orb woke it).
         case notAsked
+        /// In a group's turn only the orchestrator asks another group.
+        case notOrchestrator
+        /// That group is already in this chain of groups asking groups: asking it back would loop.
+        case inChain
         /// The group could not take the request (the app is resetting, its orchestrator is gone).
         case unavailable
         /// A group is asked, not told.
@@ -118,6 +146,11 @@ enum DelegationRefusal: Error, Equatable, Sendable {
                     + "outro Orb). Diga no resultado o que o grupo deveria fazer."
             case .notAsked:
                 "Você só aciona o grupo “\(name)” quando o usuário pede, no turno dele: pergunte se ele quer."
+            case .notOrchestrator:
+                "Só o orquestrador aciona outro grupo: responda com o resultado e diga o que falta."
+            case .inChain:
+                "O grupo “\(name)” já está nesta cadeia de grupos (ele acionou este, direta ou indiretamente): não peça de volta. "
+                    + "Termine com o que tem; sua resposta final segue para quem pediu."
             case .unavailable:
                 "O grupo “\(name)” não pôde receber o pedido agora: diga isso ao usuário e ofereça pedir a cada membro "
                     + "separadamente."
@@ -132,6 +165,8 @@ enum DelegationRefusal: Error, Equatable, Sendable {
                 "Daqui não se cria grupo: só no seu chat, a pedido do usuário. Diga no resultado que grupo faria sentido."
             case .notAsked:
                 "Você só cria um grupo quando o usuário pede, no turno dele: pergunte se ele quer."
+            case .notOrchestrator:
+                "Só o orquestrador cria grupos no turno de um grupo: diga ao orquestrador que grupo faria sentido."
             case .noName:
                 "Dê um nome ao grupo em name."
             case .nameTaken(let name):
@@ -143,6 +178,31 @@ enum DelegationRefusal: Error, Equatable, Sendable {
                 "“\(name)” não está em members: o orquestrador é um dos membros."
             case .unavailable:
                 "Não consegui criar o grupo agora: diga isso ao usuário; ele cria em Novo grupo (⌥⌘G)."
+            }
+        case .groupEdit(let why):
+            switch why {
+            case .switchedOff:
+                "O usuário desligou “Orbs organizam os grupos” nos Ajustes: ele muda o grupo na tela dele. Diga o que você mudaria."
+            case .noGroup(let name, let known):
+                "Não há grupo chamado “\(name)”." + (known.isEmpty ? " O usuário não tem grupos." : " Grupos: " + known.joined(separator: ", ") + ".")
+            case .unknownEdit(let edit):
+                "“\(edit)” não é uma mudança: use add, remove, orchestrator, rename, objective ou delete."
+            case .missing(let field):
+                "Preencha \(field) para essa mudança."
+            case .alreadyMember(let orb, let group):
+                "\(orb) já é membro do grupo “\(group)”."
+            case .notMember(let orb, let group):
+                "\(orb) não é membro do grupo “\(group)”."
+            case .full(let group):
+                "O grupo “\(group)” já tem \(OrbGroup.memberLimits.upperBound) membros, o máximo. Tire alguém antes de pôr outro Orb."
+            case .nameTaken(let name):
+                "Já existe um Orb ou um grupo chamado “\(name)”: escolha outro nome."
+            case .needsConfirmation:
+                "Essa mudança só vale depois que o usuário confirma, e ele não confirmou. Nada mudou."
+            case .objectiveRefused:
+                "Não consegui gravar o objetivo (grande demais ou a pasta do grupo não aceita escrita): encurte o texto ou diga isso ao usuário."
+            case .unavailable:
+                "Não consegui mudar o grupo agora: diga isso ao usuário; ele muda na tela do grupo."
             }
         case .ownGroup(let name):
             "Você já está trabalhando no grupo “\(name)”: peça a um membro pelo nome (os membros estão no início da mensagem do "
@@ -162,7 +222,8 @@ struct ChainContext: Sendable, Equatable {
     var serving: UUID?
 }
 
-/// What `BotSession.routineID` stands for when it is set: a routine's run, a request from another Orb, or a turn in a group.
+/// What `BotSession.routineID` stands for when it is set: a routine's run, a request from another Orb, a turn in a group, or the
+/// pulse (an Orb waking itself, `Pulse.swift`).
 enum SideRunKind: String, Sendable, Equatable {
-    case routine, delegation, group
+    case routine, delegation, group, pulse
 }

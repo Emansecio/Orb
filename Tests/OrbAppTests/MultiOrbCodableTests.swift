@@ -284,6 +284,7 @@ struct OrbEventSentenceTests {
         #expect(sentence(.chainStopped) == "Você parou a conversa entre Orbs")
         #expect(sentence(.groupRunDone, detail: "5 turnos · 42 mil tokens") == "Pedido concluído: 5 turnos · 42 mil tokens")
         #expect(sentence(.groupStopped) == "Você parou o grupo")
+        #expect(sentence(.groupStopped, detail: OrbEvent.budgetStop) == "O teto diário do pulso parou o grupo")
         #expect(sentence(.delegationReceived, actor: atlas, subject: revisor) == "Atlas pediu ajuda ao Revisor")
         #expect(sentence(.delegationReceived, actor: revisor, subject: lia) == "Revisor pediu ajuda à Lia")
     }
@@ -296,7 +297,7 @@ struct OrbEventSentenceTests {
 
     @Test func missingPartsNeverCrashAndNeverLeaveAHole() {
         for kind in [OrbEvent.Kind.orbCreated, .joinedGroup, .leftGroup, .groupCreated, .routineCreated, .renamed, .chainStopped,
-                     .groupRunDone, .groupStopped, .delegationReceived] {
+                     .groupRunDone, .groupStopped, .delegationReceived, .orchestratorChanged] {
             #expect(!sentence(kind).isEmpty, "\(kind)")
         }
         #expect(sentence(.unknown) == "")
@@ -418,9 +419,9 @@ struct MultiOrbInvariantTests {
 
     @Test func theProposalOutcomesSayWhatTheContractSays() {
         #expect(ProposalOutcome.created(name: "Pesquisador", folder: "~/Orbs/Pesquisador").modelText
-            == "O usuário criou o Orb Pesquisador (pasta ~/Orbs/Pesquisador). Você pode pedir trabalho a ele com orbs.")
+            == "O Orb Pesquisador foi criado (pasta ~/Orbs/Pesquisador). Você pode pedir trabalho a ele com orbs.")
         #expect(ProposalOutcome.declined.modelText == "O usuário não quis criar esse Orb. Não proponha de novo.")
-        #expect(ProposalOutcome.createdEdited(name: "P", folder: "~/Orbs/P", summary: "nome").modelText.contains("com ajustes: nome"))
+        #expect(ProposalOutcome.createdEdited(name: "P", folder: "~/Orbs/P", summary: "nome").modelText.contains("com ajustes do usuário: nome"))
         #expect(ProposalOutcome.failed("Limite").modelText == "Limite")
     }
 

@@ -46,7 +46,8 @@ extension AppModel {
             runningActivity = nil
             activity.end(token)
         }
-        let waiting = keepsAwakeForRoutines && !isResetting && routines.contains { $0.isEnabled }
+        // The pulse wakes an Orb on a timer, so with it on the app is not napped either, as with a routine scheduled.
+        let waiting = keepsAwakeForRoutines && !isResetting && (routines.contains { $0.isEnabled } || (pulseIsOn && bots.count > 1))
         if waiting, waitingActivity == nil {
             waitingActivity = activity.begin(.waiting, reason: "Rotinas agendadas")
         } else if !waiting, let token = waitingActivity {

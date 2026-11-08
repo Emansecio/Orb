@@ -241,7 +241,7 @@ extension AppModel {
     func canQueue(_ botID: UUID) -> Bool {
         if canSteer(botID) { return true }
         guard let session = sessions[botID], session.turnTask != nil else { return false }
-        return session.workingChatID != nil || (session.routineID != nil && (session.sideKind == nil || session.sideKind == .routine))
+        return session.workingChatID != nil || (session.routineID != nil && (session.sideKind == nil || session.sideKind == .routine || session.sideKind == .pulse))
     }
 
     /// Whether a routine's run holds this Orb (its name may be unknown if the routine was deleted meanwhile).

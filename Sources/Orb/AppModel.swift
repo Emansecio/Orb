@@ -71,6 +71,13 @@ final class AppModel {
     /// back to disk (`unloadIdleConversations`). Not observed itself: a session is made with its Orb (`syncLives`)
     /// and views read the session's own observed properties.
     @ObservationIgnored private(set) var sessions: [UUID: BotSession] = [:]
+    // The pulse (`Pulse.swift`): what it remembers, the pass in progress, the runs going on and the Orbs held while their file is read.
+    @ObservationIgnored lazy var pulseState: PulseState = loadPulseState()
+    @ObservationIgnored var pulseTask: Task<Void, Never>?
+    @ObservationIgnored var pulseRuns: [UUID: PulseRun] = [:]
+    @ObservationIgnored var pulseStarting: Set<UUID> = []
+    /// The clock the pulse's budget counts the day by (tests put their own).
+    @ObservationIgnored var pulseNow: () -> Date = { .now }
     /// Routines that came due while their Orb was busy; each runs when the Orb is free. One entry per routine.
     private(set) var queuedRoutines: [UUID] = []
     /// Queued runs asked for explicitly (a manual "run now"): they keep skipping the precheck when they start.
@@ -451,7 +458,7 @@ final class AppModel {
             let botIDs = Set(state.bots.map(\.id))
             recoveredInicio.recover(from: journal) { entry in
                 switch entry.origin {
-                case .chat(let bot, let chat, let item):
+                case .chat(let bot, let chat, let item), .pulse(let bot, let chat, let item):
                     guard botIDs.contains(bot), entry.id == item else { return false }
                     return state.chats[bot.uuidString].map { $0.title(of: chat) != nil } ?? (chat == bot)
                 case .routine(let bot, let routine, let run):
@@ -701,6 +708,7 @@ final class AppModel {
         }
         if stem.hasPrefix(Store.pedidoPrefix + "-") { return "a conversa de um pedido de outro Orb a \(owner.name)" }
         if stem.hasPrefix(Store.grupoPrefix + "-") { return "a conversa de \(owner.name) num grupo" }
+        if stem.hasPrefix(Store.pulsoPrefix + "-") { return "o histórico do pulso de \(owner.name)" }
         return UUID(uuidString: stem) == nil ? nil : "uma conversa antiga de \(owner.name)"
     }
 
@@ -1806,7 +1814,7 @@ final class AppModel {
         // MARK: MultiOrb (WP1)
         // Asking and telling other Orbs needs no card per message (a mode that reads only still refuses it): the turn grants it.
         let multi = multiOrbOffering(for: botID)
-        if multi.orbs || multi.groupCreate { turnGrants.append(PermissionRule(family: .delegation)) }
+        if multi.orbs || multi.groupCreate || multi.groupEdit || multi.orbDelete { turnGrants.append(PermissionRule(family: .delegation)) }
         for grant in groupTurn?.grants ?? [] where !turnGrants.contains(grant) { turnGrants.append(grant) }
         // MARK: end MultiOrb (WP1)
 
@@ -1851,7 +1859,7 @@ final class AppModel {
         context.stamps = stamps(for: botID)
         let userTurns = session.userTurnCount()
         // MARK: MultiOrb (WP1)
-        if multi.orbs || multi.groupCreate { context.orbs = delegationHandler(for: botID) }
+        if multi.orbs || multi.groupCreate || multi.groupEdit || multi.orbDelete { context.orbs = delegationHandler(for: botID) }
         let teammates = multi.orbs ? orbsSection(for: bot) : ""
         if let routineID = session.routineID, session.sideKind == nil || session.sideKind == .routine {
             context.followUps = followUpHandler(routineID: routineID, botID: botID)
@@ -2428,7 +2436,7 @@ final class AppModel {
     /// Whether nothing holds the Orb: no turn, no routine or request being started.
     func canTakeSideWork(_ botID: UUID) -> Bool {
         !isResetting && bot(botID) != nil && sessions[botID]?.turnTask == nil && startingRoutines[botID] == nil
-            && !delegation.isStarting(botID)
+            && !delegation.isStarting(botID) && !pulseStarting.contains(botID)
     }
 
     /// The Orb became free: what waits for it runs now, in this order: the answers to what it asked (they wake it), a request from
@@ -2695,6 +2703,7 @@ final class AppModel {
                 runRoutine(routine.id)
             }
         }
+        runPulseIfDue(now: now) // after the same holds as the routines: not right after the Mac woke
     }
 
     // MARK: Catalogs

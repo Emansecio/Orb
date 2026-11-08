@@ -1,6 +1,6 @@
 import Foundation
 
-/// Lets an Orb create a group of the user's Orbs when the user asks for one in its chat. The app does the work
+/// Lets an Orb create a group of the user's Orbs when one would help (always when the user asks). The app does the work
 /// (`DelegationHub.createGroup`), reached through the same bridge as `orbs`.
 struct GroupCreateTool: AgentTool {
     static let name = "group_create"
@@ -8,7 +8,7 @@ struct GroupCreateTool: AgentTool {
     let spec = ToolSpec(
         name: GroupCreateTool.name,
         description: """
-        Create a group of the user's Orbs, only when the user asks for one in this chat. A group has a shared thread on its own \
+        Create a group of the user's Orbs when one would help the user's work. A group has a shared thread on its own \
         screen and an orchestrator that hands out the work of each request. If you are a member, send it the first \
         request with orbs ask, the group's name as to. Software: add a builder and a reviewer.
         """,

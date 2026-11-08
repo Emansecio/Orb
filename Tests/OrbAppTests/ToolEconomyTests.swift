@@ -167,9 +167,10 @@ struct ToolSpecEconomyTests {
     /// The multi-Orb tools (`orbs`, `orb_propose`, `group_*`, `ask_user`) were measured at 3,705 characters in all
     /// (docs/REVISAO-TOKENS-PROMPT-2026-10-17.md); they had no ceiling of their own. `multiple` and `fields` of `ask_user`
     /// (the fuller questions, 2026-11-02) took it to 3,964. `folder` on `orbs` and `group_create` (a shared project, a git
-    /// worktree per member) and the builder/reviewer hint of `group_create` took it to 4,173.
+    /// worktree per member) and the builder/reviewer hint of `group_create` took it to 4,173. `group_edit` (2026-11-07) took it to 4,723. `orb_delete` and the neutral `orb_propose` (2026-11-08) took it to 4,979.
     @Test func theMultiOrbToolSpecsStayWithinTheirOwnCeiling() {
-        #expect(specChars(ToolBox.multiOrbTools + [AskUserTool()]) <= 4_200)
+        let now = specChars(ToolBox.multiOrbTools + [AskUserTool()])
+        #expect(now <= 5_000, "\(now) characters")
     }
 
     /// `connector_install` goes with every request of a watched turn (so an Orb without connectors can get its first one).

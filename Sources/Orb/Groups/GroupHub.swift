@@ -283,9 +283,9 @@ final class GroupHub: GroupTurnHooks {
         addUnread(groupID)
     }
 
-    func chainStopped(_ chainID: UUID) {
+    func chainStopped(_ chainID: UUID, by reason: CancelReason) {
         guard let groupID = runs.first(where: { $0.value.id == chainID && $0.value.isOpen })?.key else { return }
-        stopGroup(groupID)
+        terminate(groupID, by: reason)
     }
 
     func refusal(forRequestFrom asker: UUID, to member: UUID, chain: UUID) -> DelegationRefusal? {
@@ -348,7 +348,7 @@ final class GroupHub: GroupTurnHooks {
             if ownsTurn { model.session(member).stop(startsQueuedRoutines: false) }
         }
         if writesEvent {
-            model.groupSession(groupID)?.append(.event(OrbEvent(kind: .groupStopped, chainID: run.id, groupID: groupID)))
+            model.groupSession(groupID)?.append(.event(OrbEvent(kind: .groupStopped, detail: reason == .budget ? OrbEvent.budgetStop : nil, chainID: run.id, groupID: groupID)))
         }
         // Same rule as a finished request: what is merged goes, the rest stays and is reported. A group already taken out of
         // the list (dissolved) is passed in, because its project folder is no longer readable from the model.

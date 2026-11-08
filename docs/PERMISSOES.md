@@ -345,6 +345,22 @@ botão "Permitir as N". "Só nesta tarefa" num grupo concede todas as regras que
 chamada é **avaliada de novo com o modo da hora**: só troca "perguntar" por "permitir", então "Só leitura" continua
 bloqueando o que ainda não rodou. Chamadas só de leitura do mesmo passo rodam ao mesmo tempo; o resto roda em ordem.
 
+### Orbs que mexem no time
+
+`group_create`, `group_edit` e `orb_delete` são `.sensitive` (seguem o modo do Orb e são recusadas em "Só leitura"); `orb_propose` é `.safe`, mas recusa quem está em "Só leitura".
+- **Cartão de apagar.** Apagar um grupo, tirar o membro de um grupo de dois (o que o desfaz) e apagar um Orb abrem sempre um cartão
+  simples (`ApprovalGate.confirm`), "Confirmar mudança no grupo" ou "Apagar um Orb", **em qualquer modo**, sem "Sempre permitir". O modelo não
+  confirma por conta própria: o `confirmed` que ele manda é descartado, e só o cartão o liga. Sem ninguém para responder (sem cartão
+  possível), a ferramenta recusa e manda o Orb avisar você. As outras edições de `group_edit` (adicionar, tirar, orquestrador,
+  renomear, objetivo) não pedem cartão, e "Orbs organizam o time" desligado as recusa, assim como `orb_delete`.
+- **Criar sem cartão.** Com "Orbs criam Orbs sem perguntar" (padrão), `orb_propose` cria o Orb na hora, sem cartão e sem limite de
+  quantidade (os limites antigos de 5 por criador e 12 no total saíram). A trava é o acesso: o Orb novo nunca passa do modo, das
+  capacidades e da pasta de quem o criou. A linha no chat de quem criou tem **Desfazer**, que vale enquanto o Orb novo não conversou nem trabalha;
+  desligado, abre o cartão de criação.
+- **Por conta própria.** "Orbs agem por conta própria" (padrão) só libera **onde** essas ferramentas aparecem: com ele, também em
+  rotina, pedido de outro Orb, turno de grupo e no pulso; sem ele, só no chat próprio, num turno que você começou. Não dá permissão
+  nova: "Orbs podem acionar grupos" e "Orbs organizam o time" continuam mandando em cada ferramenta.
+
 ### Teclado
 
 ⌘↩ permite e Esc nega o cartão **mais novo** do Orb aberto (`ApprovalKeyboard`). Esc não conta enquanto você edita texto

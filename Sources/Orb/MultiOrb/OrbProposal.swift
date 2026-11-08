@@ -59,9 +59,9 @@ enum ProposalOutcome: Equatable, Sendable {
     var modelText: String {
         switch self {
         case .created(let name, let folder):
-            "O usuário criou o Orb \(name) (pasta \(folder)). Você pode pedir trabalho a ele com orbs."
+            "O Orb \(name) foi criado (pasta \(folder)). Você pode pedir trabalho a ele com orbs."
         case .createdEdited(let name, let folder, let summary):
-            "O usuário criou o Orb \(name) com ajustes: \(summary). Pasta \(folder). Você pode pedir trabalho a ele com orbs."
+            "O Orb \(name) foi criado, com ajustes do usuário: \(summary). Pasta \(folder). Você pode pedir trabalho a ele com orbs."
         case .declined:
             "O usuário não quis criar esse Orb. Não proponha de novo."
         case .failed(let reason):

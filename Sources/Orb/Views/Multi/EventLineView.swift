@@ -67,6 +67,19 @@ struct EventLineView: View {
             .accessibilityLabel(event.sentence)
             .accessibilityHint("Abre o grupo")
             .accessibilityIdentifier("event-line")
+        } else if event.kind == .orbCreated, !centered, let created = event.subject, model.canUndoCreation(of: created.id) {
+            // The Orb exists and nobody has used it: the creator's line offers to take it back. It goes away with the Orb.
+            HStack(spacing: Spacing.s) {
+                line(opens: false)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("event-line")
+                Button("Desfazer") { model.undoCreation(of: created.id) }
+                    .buttonStyle(.link)
+                    .font(Typography.label)
+                    .help(Tip.undoOrbCreation)
+                    .accessibilityLabel("Desfazer a criação de \(created.name)")
+                    .accessibilityIdentifier("undo-orb-creation")
+            }
         } else {
             line(opens: false)
                 .accessibilityElement(children: .combine)
@@ -108,7 +121,7 @@ struct EventLineView: View {
     static func symbol(for kind: OrbEvent.Kind) -> String {
         switch kind {
         case .orbCreated: "sparkles"
-        case .joinedGroup, .leftGroup, .groupCreated, .groupWorked: "person.2"
+        case .joinedGroup, .leftGroup, .groupCreated, .groupWorked, .orchestratorChanged: "person.2"
         case .routineCreated, .routineRun: "clock.arrow.circlepath"
         case .renamed: "pencil"
         case .chainStopped, .groupStopped: "stop.circle"
@@ -116,6 +129,8 @@ struct EventLineView: View {
         case .groupRunDone: "checkmark.circle"
         case .delegationReceived: "bubble.left"
         case .planDone: "checklist"
+        case .pulseRan: "waveform.path.ecg"
+        case .pulseStopped: "stop.circle"
         case .unknown: "info.circle"
         }
     }

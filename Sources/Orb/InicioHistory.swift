@@ -5,6 +5,8 @@ struct InicioEntry: Codable, Equatable, Sendable, Identifiable {
     enum Origin: Codable, Equatable, Sendable {
         case chat(bot: UUID, chat: UUID, item: UUID)
         case routine(bot: UUID, routine: UUID, run: UUID)
+        /// What an Orb did on its own pulse: the line in its chat (`item`) that tells it, like `chat`.
+        case pulse(bot: UUID, chat: UUID, item: UUID)
     }
 
     enum Outcome: String, Codable, Sendable {
@@ -21,7 +23,7 @@ struct InicioEntry: Codable, Equatable, Sendable, Identifiable {
 
     var botID: UUID {
         switch origin {
-        case .chat(let bot, _, _), .routine(let bot, _, _): bot
+        case .chat(let bot, _, _), .routine(let bot, _, _), .pulse(let bot, _, _): bot
         }
     }
 }
@@ -79,8 +81,10 @@ struct InicioHistory: Codable, Equatable, Sendable {
     mutating func removeChatResults(of items: Set<UUID>) -> Bool {
         let before = entries.count
         entries.removeAll { entry in
-            if case .chat(_, _, let item) = entry.origin { return items.contains(item) }
-            return false
+            switch entry.origin {
+            case .chat(_, _, let item), .pulse(_, _, let item): return items.contains(item)
+            case .routine: return false
+            }
         }
         return entries.count != before
     }

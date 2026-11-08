@@ -379,7 +379,7 @@ struct InicioView: View {
 
     private func open(_ event: InicioEntry) {
         switch event.origin {
-        case .chat(let bot, let chat, let item):
+        case .chat(let bot, let chat, let item), .pulse(let bot, let chat, let item):
             if !model.openInicioChat(bot: bot, chat: chat, item: item) { unavailable = "A conversa de origem não está mais disponível." }
         case .routine(let bot, let routine, let run):
             guard model.routines.contains(where: { $0.id == routine && $0.botID == bot }) else {
@@ -405,6 +405,8 @@ struct InicioView: View {
         } else if session.routineID == nil && session.sideKind == nil {
             let chat = session.workingChatID ?? session.chatID
             if model.live(botID).chats == nil { model.selection = .bot(botID) } else { model.openChat(chat, of: botID) }
+        } else if session.sideKind == .pulse {
+            model.selection = .bot(botID) // the chat narrates the pulse while it runs
         } else if session.sideKind == .group, model.showGroupOfMember(botID) {
             return
         } else if session.sideKind == .delegation, let request = session.servingRequest {

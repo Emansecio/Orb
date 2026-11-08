@@ -17,7 +17,8 @@ final class DelegationHub: DelegationService {
     /// A chain of requests: where it began, whether the person stopped it and what was just sent (to tell a repeat). It outlives
     /// its last request (a woken asker that asks again is still in it).
     struct ChainState {
-        enum Origin: Equatable { case chat(UUID), routine(UUID), group(UUID) }
+        /// `pulse`: begun by an Orb's pulse run (its id); everything the chain spends counts against the pulse's daily budget.
+        enum Origin: Equatable { case chat(UUID), routine(UUID), group(UUID), pulse(UUID) }
 
         var origin: Origin
         /// The Orb that began the chain: where "Você parou a conversa" is written.
@@ -31,6 +32,9 @@ final class DelegationHub: DelegationService {
         /// The Orbs this chain left notices (`tell`), and in which of their conversations: stopping the chain takes back
         /// the ones not handed to a turn yet.
         var noticed: [UUID: Set<UUID>] = [:]
+        /// The groups this chain already went through when a group's turn asked another group: asking one of them again would loop
+        /// (A asks B, B asks A). Not persisted: it only outlives a request while the app runs.
+        var groupsVisited: Set<UUID> = []
     }
 
     private(set) var requests: [UUID: DelegationRequest] = [:]
@@ -214,8 +218,9 @@ final class DelegationHub: DelegationService {
                                 fromChat: Bool) -> DelegationRequest {
         let from = askedBy.flatMap { model?.bot($0) } ?? model?.bot(member)
         let target = model?.bot(member)
-        // From the asker's own chat there is no request it serves: the answer wakes that chat.
-        let serving = fromChat ? nil : context.serving ?? askedBy.flatMap { model?.session($0).servingRequest }
+        // From the asker's own chat there is no request it serves: the answer wakes that chat. An asker in a side run (a group's
+        // turn, another Orb's request) is serving a request, and the answer resumes that one instead.
+        let serving = context.serving ?? askedBy.flatMap { model?.session($0).servingRequest }
         var envelope = OrbEnvelope(
             id: id, chainID: context.chainID, kind: .ask, from: from.map(OrbRef.init) ?? OrbRef(id: askedBy ?? member, name: ""),
             to: target.map(OrbRef.init) ?? OrbRef(id: member, name: ""), text: text, hop: context.hop + 1,
@@ -224,8 +229,10 @@ final class DelegationHub: DelegationService {
         envelope.fromChat = fromChat
         if fromChat { envelope.chat = askedBy.flatMap { model?.sessions[$0]?.conversationChat } }
         guard model != nil, target != nil, !isShuttingDown else { return DelegationRequest(envelope: envelope, state: .failed) }
-        var chain = chainStates[context.chainID] ?? ChainState(origin: .group(context.chainID), originBot: askedBy ?? member,
-                                                               groupID: groupID)
+        // A group the pulse starts from its Orb's pulse run is charged to the pulse (`AppModel.pulseCharge`).
+        let pulseRun = fromChat ? askedBy.flatMap { model?.sessions[$0] }.flatMap { $0.sideKind == .pulse ? $0.routineID : nil } : nil
+        var chain = chainStates[context.chainID] ?? ChainState(origin: pulseRun.map { .pulse($0) } ?? .group(context.chainID),
+                                                               originBot: askedBy ?? member, groupID: groupID)
         chain.touched = .now
         chainStates[context.chainID] = chain
         guard !chain.cancelled else { return DelegationRequest(envelope: envelope, state: .cancelled) }
@@ -500,7 +507,7 @@ final class DelegationHub: DelegationService {
         switch kind {
         case .delegation: model.store.saveSideConversation(conversation, prefix: Store.pedidoPrefix, id: runID, for: botID)
         case .group: model.store.saveSideConversation(conversation, prefix: Store.grupoPrefix, id: runID, for: botID)
-        case .routine: break
+        case .routine, .pulse: break // the pulse writes its own file (`AppModel.finishPulse`)
         }
     }
 
@@ -649,6 +656,7 @@ final class DelegationHub: DelegationService {
         // A group's answer to the chat (`OrbEnvelope.fromChat`) does not make the chat a turn of the group: what it asks next
         // begins a chain of its own.
         session.chain = first.groupID != nil ? nil : ChainContext(chainID: first.chainID, hop: hop, path: first.path, groupID: nil)
+        session.usageChain = first.chainID
         session.servingRequest = nil
         for reply in batch {
             session.changeConversation { $0.items.settingSent(reply.replyTo ?? reply.id, to: SendOrigin.state(of: reply.status)) }
@@ -660,6 +668,7 @@ final class DelegationHub: DelegationService {
             return true
         }
         session.chain = nil // no model: the notice says so, and the answers have nobody to wake
+        session.usageChain = nil
         return false
     }
 
@@ -757,7 +766,8 @@ final class DelegationHub: DelegationService {
         for botID in running {
             model.session(botID).stop(startsQueuedRoutines: false,
                                       notice: isShuttingDown ? BotSession.quitSideNotice
-                                          : reason == .gaveUp ? ApprovalWait.gaveUpNotice : BotSession.stoppedNotice)
+                                          : reason == .gaveUp ? ApprovalWait.gaveUpNotice
+                                          : reason == .budget ? AppModel.pulseCappedNotice : BotSession.stoppedNotice)
         }
         refresh(Array(touched))
         // A group's chain says it stopped in the group's own thread (`groupStopped`), never in its orchestrator's private chat.
@@ -768,7 +778,7 @@ final class DelegationHub: DelegationService {
         for botID in touched { schedulePump(botID) }
         // A group's chain stopped by the person from elsewhere (the Parar of whoever waits for it) stops the group.
         // Not while quitting: the run must stay in the journal and resume, not be written as stopped by the person.
-        if reason == .user, !isShuttingDown, chain.groupID != nil, !alreadyCancelled { groupHooks?.chainStopped(id) }
+        if reason == .user || reason == .budget, !isShuttingDown, chain.groupID != nil, !alreadyCancelled { groupHooks?.chainStopped(id, by: reason) }
         settleWaitingRoutines()
     }
 
@@ -1037,12 +1047,23 @@ final class DelegationHub: DelegationService {
             return teammatesText(for: botID, groupID: groupID)
         case "create_group":
             do { return try createGroup(arguments, by: botID) } catch let refusal as DelegationRefusal { throw refusal.toolError }
+        case "edit_group_plan":
+            // For the tool: what the user must confirm first, "" when the edit needs nobody.
+            do { return try planGroupEdit(arguments, by: botID).confirmation ?? "" } catch let refusal as DelegationRefusal { throw refusal.toolError }
+        case "edit_group":
+            do { return try await editGroup(arguments, by: botID) } catch let refusal as DelegationRefusal { throw refusal.toolError }
+        case "delete_orb_plan":
+            // For the tool: the text of the user's card.
+            return try planOrbDelete(arguments, by: botID).confirmation
+        case "delete_orb":
+            return try deleteOrb(arguments, by: botID)
         case "ask", "tell":
             let kind: OrbEnvelope.Kind = arguments["action"]?.string?.lowercased() == "tell" ? .tell : .ask
             let name = arguments["to"]?.string ?? "", text = arguments["message"]?.string ?? ""
             do {
                 // Outside a group's turn, a group's name (that no Orb has) is a request to that group.
-                if groupID == nil, let group = group(named: name) {
+                // In a group's turn too, with "Orbs agem por conta própria" (an orchestrator asking another group).
+                if groupID == nil || model.orbsActOnOwn, let group = group(named: name) {
                     let envelope = try submitToGroup(group, from: botID, text: text, kind: kind, messageID: messageID)
                     let ignoredFolder = arguments["folder"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
                     return "Pedido enviado ao grupo \(group.name) (id \(envelope.shortID)): \(envelope.to.name) orquestra, o grupo "
@@ -1072,7 +1093,7 @@ final class DelegationHub: DelegationService {
     }
 
     /// "- Pesquisador: Pesquisa na web e resume (livre)": the teammates, without ids or folders. Outside a group's turn, the
-    /// groups the Orb is in come after them.
+    /// groups the Orb is in come after them; in one, the other groups its orchestrator may ask.
     func teammatesText(for botID: UUID, groupID: UUID?) -> String {
         guard let model else { return "" }
         let team = roster(for: botID, groupID: groupID).compactMap { model.bot($0.id) }
@@ -1081,14 +1102,17 @@ final class DelegationHub: DelegationService {
             let state = groupID.map { groupStatus(of: orb.id, in: $0) } ?? status(of: orb.id)
             return "- \(orb.name)\(role.isEmpty ? "" : ": " + role) (\(state))"
         }.joined(separator: "\n")
-        guard groupID == nil else { return teammates }
-        let groups = model.groupLines(for: botID).prefix(OrbsPrompt.groupLimit).map { group in
+        let lines = groupID == nil ? model.groupLines(for: botID) : model.otherGroupLines(for: botID, inTurnOf: groupID)
+        let groups = lines.prefix(OrbsPrompt.groupLimit).map { group in
             let lead = group.youOrchestrate ? "você orquestra" : "\(group.orchestrator) orquestra"
             return "- \(group.name): \(lead)" + (group.others.isEmpty ? "" : "; outros membros: " + group.others.joined(separator: ", "))
         }
         guard !groups.isEmpty else { return teammates }
-        return teammates + "\n\nSeus grupos (o usuário inicia o trabalho de um grupo na tela dele; você não escreve no fio):\n"
-            + groups.joined(separator: "\n")
+        // Outside a group's turn the Orb may start a group's work only with both switches on; else the user does it on the group's screen.
+        let mayAsk = groupID != nil || (model.orbsActOnOwn && model.orbsCanStartGroups)
+        let note = mayAsk ? "você pode acionar estes com ask, pelo nome"
+            : "o usuário inicia o trabalho de um grupo na tela dele; você não escreve no fio"
+        return teammates + "\n\nSeus grupos (\(note)):\n" + groups.joined(separator: "\n")
     }
 
     /// "livre", "ocupado", or "espera aprovação do usuário": a card of its turn is open, so whoever waits for it waits for the
@@ -1248,7 +1272,7 @@ final class DelegationHub: DelegationService {
         return group
     }
 
-    /// `orbs ask` with the name of a group the Orb is in, from its own chat and in a turn the person started: a new request of
+    /// `orbs ask` with the name of a group the Orb is in, from its own chat and in a turn the person started (any turn with "Orbs agem por conta própria"): a new request of
     /// the group (`GroupHub.postOrbRequest`), marked as the Orb's and handed to the orchestrator as data. The refusals say what
     /// to do instead; nothing changes when one is thrown.
     private func submitToGroup(_ group: OrbGroup, from botID: UUID, text raw: String, kind: OrbEnvelope.Kind,
@@ -1258,8 +1282,19 @@ final class DelegationHub: DelegationService {
         guard kind == .ask else { throw DelegationRefusal.groupDoor(name, .tell) }
         guard model.orbsCanStartGroups else { throw DelegationRefusal.groupDoor(name, .switchedOff) }
         guard group.memberIDs.contains(botID) else { throw DelegationRefusal.groupDoor(name, .notMember) }
-        guard model.isOwnChat(botID) else { throw DelegationRefusal.groupDoor(name, .notFromHere) }
-        guard model.session(botID).turnAskedByUser else { throw DelegationRefusal.groupDoor(name, .notAsked) }
+        // Groups already behind the asking turn: its own group and the ones that led to it.
+        var visited: Set<UUID> = []
+        if model.orbsActOnOwn {
+            if let running = model.session(botID).chain, let current = running.groupID {
+                guard group.id != current else { throw DelegationRefusal.ownGroup(name) }
+                guard model.group(current)?.orchestratorID == botID else { throw DelegationRefusal.groupDoor(name, .notOrchestrator) }
+                visited = (chainStates[running.chainID]?.groupsVisited ?? []).union([current])
+                guard !visited.contains(group.id) else { throw DelegationRefusal.groupDoor(name, .inChain) }
+            }
+        } else {
+            guard model.isOwnChat(botID) else { throw DelegationRefusal.groupDoor(name, .notFromHere) }
+            guard model.session(botID).turnAskedByUser else { throw DelegationRefusal.groupDoor(name, .notAsked) }
+        }
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { throw DelegationRefusal.emptyMessage }
         guard text.count <= DelegationLimits.messageLimit else { throw DelegationRefusal.tooLong }
@@ -1270,6 +1305,8 @@ final class DelegationHub: DelegationService {
         seenMessageIDs.append(messageID)
         if seenMessageIDs.count > Self.seenLimit { seenMessageIDs.removeFirst(seenMessageIDs.count - Self.seenLimit) }
         let envelope = request.envelope
+        // The target group's turns start on a later pass of the main actor, so this lands before any of them can ask back.
+        if !visited.isEmpty { chainStates[envelope.chainID]?.groupsVisited.formUnion(visited) }
         // The asker's chat: "Atlas pediu ao Estúdio" (the group's name, the orchestrator's color).
         model.session(botID).append(.orbMessage(OrbMessageItem(direction: .sent, kind: .ask, state: .open, from: OrbRef(sender),
                                                                to: OrbRef(id: envelope.to.id, name: name), text: text,
@@ -1280,13 +1317,19 @@ final class DelegationHub: DelegationService {
         return envelope
     }
 
-    /// `group_create`: a group of the user's Orbs, made from the Orb's own chat in a turn the person started. The refusals say
+    /// `group_create`: a group of the user's Orbs, made from the Orb's own chat in a turn the person started (any turn with "Orbs agem por conta própria"). The refusals say
     /// what to do instead; nothing is created when one is thrown.
     private func createGroup(_ arguments: JSONValue, by botID: UUID) throws -> String {
         guard let model, !isShuttingDown else { throw DelegationRefusal.groupSetup(.unavailable) }
         guard model.orbsCanStartGroups else { throw DelegationRefusal.groupSetup(.switchedOff) }
-        guard model.isOwnChat(botID) else { throw DelegationRefusal.groupSetup(.notFromHere) }
-        guard model.session(botID).turnAskedByUser else { throw DelegationRefusal.groupSetup(.notAsked) }
+        if model.orbsActOnOwn {
+            if let current = model.session(botID).chain?.groupID, model.group(current)?.orchestratorID != botID {
+                throw DelegationRefusal.groupSetup(.notOrchestrator)
+            }
+        } else {
+            guard model.isOwnChat(botID) else { throw DelegationRefusal.groupSetup(.notFromHere) }
+            guard model.session(botID).turnAskedByUser else { throw DelegationRefusal.groupSetup(.notAsked) }
+        }
         let name = (arguments["name"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { throw DelegationRefusal.groupSetup(.noName) }
         let orbs = model.bots.map(OrbRef.init)
@@ -1330,6 +1373,136 @@ final class DelegationHub: DelegationService {
             + "na lateral. " + (project.isEmpty ? "" : "Pasta do projeto: \(project); os membros (menos o orquestrador) trabalham cada um no seu ramo. ") + next
     }
 
+    /// One checked `group_edit`: the group, the Orb it is about and what the user is asked first (nil when nobody is).
+    private struct GroupEditPlan {
+        enum Edit: String { case add, remove, orchestrator, rename, objective, delete }
+        var edit: Edit
+        var group: OrbGroup
+        var orb: OrbRef?
+        var text = ""
+        var confirmation: String?
+    }
+
+    /// Checks a `group_edit` against the groups as they are now, changing nothing. Deleting a group, or taking out a member of a group
+    /// of two (which dissolves it), carries the text of the user's card.
+    private func planGroupEdit(_ arguments: JSONValue, by botID: UUID) throws -> GroupEditPlan {
+        guard let model, !isShuttingDown else { throw DelegationRefusal.groupEdit(.unavailable) }
+        guard model.orbsCanManageGroups else { throw DelegationRefusal.groupEdit(.switchedOff) }
+        let typedGroup = (arguments["group"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let wanted = DelegationRules.fold(typedGroup)
+        guard !wanted.isEmpty, let group = model.groups.first(where: { DelegationRules.fold($0.name) == wanted }) else {
+            throw DelegationRefusal.groupEdit(.noGroup(typedGroup, model.groups.prefix(OrbsPrompt.groupLimit).map(\.name)))
+        }
+        let typedEdit = (arguments["edit"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard let edit = GroupEditPlan.Edit(rawValue: typedEdit) else { throw DelegationRefusal.groupEdit(.unknownEdit(typedEdit)) }
+        var plan = GroupEditPlan(edit: edit, group: group)
+        let orbs = model.bots.map(OrbRef.init)
+        switch edit {
+        case .add, .remove, .orchestrator:
+            let typed = (arguments["orb"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !typed.isEmpty else { throw DelegationRefusal.groupEdit(.missing("orb")) }
+            guard let orb = DelegationRules.resolve(typed, among: orbs) else { throw DelegationRefusal.unknownOrb(typed) }
+            plan.orb = orb
+            let isMember = group.memberIDs.contains(orb.id)
+            switch edit {
+            case .add:
+                guard !isMember else { throw DelegationRefusal.groupEdit(.alreadyMember(orb: orb.name, group: group.name)) }
+                guard group.memberIDs.count < OrbGroup.memberLimits.upperBound else { throw DelegationRefusal.groupEdit(.full(group.name)) }
+            case .remove:
+                guard isMember else { throw DelegationRefusal.groupEdit(.notMember(orb: orb.name, group: group.name)) }
+                if group.memberIDs.count <= OrbGroup.memberLimits.lowerBound {
+                    plan.confirmation = "\(model.bot(botID)?.name ?? "Um Orb") quer tirar \(orb.name) do grupo “\(group.name)”. "
+                        + "Com isso o grupo acaba (precisa de \(OrbGroup.memberLimits.lowerBound) Orbs, no mínimo); os Orbs ficam."
+                }
+            default:
+                guard isMember else { throw DelegationRefusal.groupEdit(.notMember(orb: orb.name, group: group.name)) }
+            }
+        case .rename:
+            let name = (arguments["name"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { throw DelegationRefusal.groupEdit(.missing("name")) }
+            // The same rule as `group_create`: a name an Orb or another group has would make `orbs ask` ambiguous.
+            guard DelegationRules.resolve(name, among: orbs) == nil,
+                  !model.groups.contains(where: { $0.id != group.id && DelegationRules.fold($0.name) == DelegationRules.fold(name) }) else {
+                throw DelegationRefusal.groupEdit(.nameTaken(name))
+            }
+            plan.text = name
+        case .objective:
+            let text = (arguments["objective"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { throw DelegationRefusal.groupEdit(.missing("objective")) }
+            plan.text = text
+        case .delete:
+            plan.confirmation = "\(model.bot(botID)?.name ?? "Um Orb") quer apagar o grupo “\(group.name)”: o fio, o quadro e as conversas dos "
+                + "membros nele vão embora. Os Orbs ficam."
+        }
+        return plan
+    }
+
+    /// `group_edit`: changes one of the user's groups. The refusals say what to do instead; nothing changes when one is thrown.
+    /// `confirmed` comes from the tool after the user's card; an edit that needs it is refused without.
+    private func editGroup(_ arguments: JSONValue, by botID: UUID) async throws -> String {
+        guard let model else { throw DelegationRefusal.groupEdit(.unavailable) }
+        let plan = try planGroupEdit(arguments, by: botID)
+        if plan.confirmation != nil, arguments["confirmed"]?.bool != true { throw DelegationRefusal.groupEdit(.needsConfirmation) }
+        let group = plan.group
+        switch plan.edit {
+        case .add:
+            guard let orb = plan.orb, model.addMember(orb.id, to: group.id) else { throw DelegationRefusal.groupEdit(.unavailable) }
+            return "\(orb.name) entrou no grupo \(group.name)."
+        case .remove:
+            guard let orb = plan.orb, model.removeMember(orb.id, from: group.id) else { throw DelegationRefusal.groupEdit(.unavailable) }
+            guard let left = model.group(group.id) else { return "\(orb.name) saiu e o grupo \(group.name) acabou (precisa de 2 Orbs, no mínimo)." }
+            let lead = left.orchestratorID != group.orchestratorID ? " \(model.bot(left.orchestratorID)?.name ?? "Outro Orb") passou a orquestrar." : ""
+            return "\(orb.name) saiu do grupo \(group.name)." + lead
+        case .orchestrator:
+            guard let orb = plan.orb, model.setOrchestrator(orb.id, of: group.id) else { throw DelegationRefusal.groupEdit(.unavailable) }
+            return "\(orb.name) agora orquestra o grupo \(group.name)."
+        case .rename:
+            model.renameGroup(group.id, to: plan.text)
+            guard let renamed = model.group(group.id) else { throw DelegationRefusal.groupEdit(.unavailable) }
+            return "O grupo \(group.name) agora se chama \(renamed.name)."
+        case .objective:
+            guard await model.setGroupObjective(plan.text, of: group.id) else { throw DelegationRefusal.groupEdit(.objectiveRefused) }
+            return "Objetivo do grupo \(group.name) gravado."
+        case .delete:
+            model.deleteGroup(group.id)
+            return "Grupo \(group.name) apagado; os Orbs continuam."
+        }
+    }
+
+    /// Checks an `orb_delete` against the Orbs as they are now, changing nothing: the Orb to delete (by its whole name, never a
+    /// prefix) and the text of the user's card. A refusal says what to do instead.
+    private func planOrbDelete(_ arguments: JSONValue, by botID: UUID) throws -> (orb: OrbRef, confirmation: String) {
+        guard let model, !isShuttingDown else { throw ToolError("The app is closing.") }
+        guard model.orbsCanManageGroups else {
+            throw ToolError("The user switched off \"Orbs organizam o time\": tell them which Orb you would delete and why.")
+        }
+        let typed = (arguments["name"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let wanted = DelegationRules.fold(typed)
+        let matches = model.bots.filter { DelegationRules.fold($0.name) == wanted }
+        guard !wanted.isEmpty, matches.count == 1, let target = matches.first else {
+            throw ToolError(matches.count > 1 ? "More than one Orb is named \"\(typed)\": the user can delete it on their screen."
+                            : "No Orb is named \"\(typed)\" (use the whole name; orbs list shows them).")
+        }
+        guard target.id != botID else { throw ToolError("You cannot delete yourself: ask the user if you should go.") }
+        guard model.liveBot(target.id)?.isWorking != true, model.sessions[target.id]?.turnTask == nil else {
+            throw ToolError("\(target.name) is working right now: try again when it is free.")
+        }
+        let reason = String(MemoryText.flatten(MemorySanitizer.scrub(arguments["reason"]?.string ?? "")).prefix(200))
+        let who = model.bot(botID)?.name ?? "Um Orb"
+        let because = reason.isEmpty ? "" : " Motivo: \(reason)"
+        return (OrbRef(target), "\(who) quer apagar \(PortugueseArticle.article(for: target.name)) \(target.name).\(because) "
+            + "A conversa, a memória e as rotinas dele vão embora, e ele sai dos grupos.")
+    }
+
+    /// `orb_delete` once the user confirmed in the tool's card (`confirmed` is set by the tool alone).
+    private func deleteOrb(_ arguments: JSONValue, by botID: UUID) throws -> String {
+        guard let model else { throw ToolError("The app is closing.") }
+        let plan = try planOrbDelete(arguments, by: botID)
+        guard arguments["confirmed"]?.bool == true else { throw ToolError("The user did not confirm. Nothing changed.") }
+        model.deleteBot(plan.orb.id)
+        return "\(plan.orb.name) was deleted."
+    }
+
     /// Who a request went to, as the asker reads it: the Orb, or the group for a request sent to one from a chat.
     private func displayName(of envelope: OrbEnvelope) -> String {
         if envelope.fromChat, let group = envelope.groupID.flatMap({ id in model?.groups.first { $0.id == id } }) { return group.name }
@@ -1344,6 +1517,7 @@ final class DelegationHub: DelegationService {
     private func newChain(startedBy sender: Bot, session: BotSession, groupID: UUID?) -> ChainState {
         let origin: ChainState.Origin = if let groupID { .group(groupID) }
             else if session.sideKind == .routine, let routine = session.routineID { .routine(routine) }
+            else if session.sideKind == .pulse, let run = session.routineID { .pulse(run) }
             else { .chat(sender.id) }
         return ChainState(origin: origin, originBot: sender.id, groupID: groupID, chat: session.conversationChat)
     }

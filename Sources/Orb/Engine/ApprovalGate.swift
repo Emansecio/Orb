@@ -102,6 +102,16 @@ extension ApprovalGate {
         return (card, await wait(for: card.id))
     }
 
+    /// The card of a change to the user's groups that cannot be undone (`group_edit`): a plain approval that asks whatever the permission
+    /// mode is. False on "Negar" or Parar. It has no rules to grant: "Sempre" makes no sense for a deletion.
+    func confirm(toolName: String, title: String, detail: String, botID: UUID, show: (ApprovalRequest) -> Void) async -> Bool {
+        let card = ApprovalRequest(toolName: toolName, title: title, command: detail, reason: "", isDangerous: true)
+        open(card.id, botID: botID, alwaysAsks: true)
+        show(card)
+        let answer = await wait(for: card.id)
+        return answer.decision != .deny && answer.decision != .review && !Task.isCancelled
+    }
+
     /// The whole of `orb_propose` once the engine has the proposal: the card, the wait, and, on "Criar", the creation. A refusal
     /// (or Parar) is the model's "o usuário não quis criar esse Orb"; the app says what it made, or why it could not.
     func proposeAndCreate(_ proposal: OrbProposal, creation: OrbCreationSupport, botName: String, botID: UUID,

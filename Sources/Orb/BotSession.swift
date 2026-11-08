@@ -102,7 +102,7 @@ final class BotSession {
     /// The parked chat's lines, in their file order, come first; the run's follow. When the run ends the chat returns
     /// unchanged, with only the routine's event line added (`closeRoutineRun`).
     var shownItems: [TranscriptItem] {
-        guard let parked = parkedChat, routineID != nil, (sideKind ?? .routine) == .routine,
+        guard let parked = parkedChat, routineID != nil, [.routine, .pulse].contains(sideKind ?? .routine),
               let running = conversation else { return (parkedChat ?? conversation)?.items ?? [] }
         return parked.items + running.items.suffix(from: lastRoutineRunStart(in: running))
     }
@@ -192,6 +192,9 @@ final class BotSession {
     @ObservationIgnored var sideKind: SideRunKind?
     /// Where the running turn stands in its chain of requests between Orbs (nil: a turn of the person's own chat).
     @ObservationIgnored var chain: ChainContext?
+    /// The chain whose answer woke this turn when `chain` is left nil on purpose (a group's answer to the chat): only what the
+    /// pulse's budget reads, so that turn is counted with the chain that asked for it.
+    @ObservationIgnored var usageChain: UUID?
     /// The request between Orbs the running side run answers (what a request `orbs` makes while it runs is a child of it).
     @ObservationIgnored var servingRequest: UUID?
     /// The running turn is one the person started in the Orb's own chat (not a routine, another Orb's request or answer, a group's

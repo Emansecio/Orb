@@ -368,6 +368,7 @@ extension BotSession {
         case (nil, _): .chat
         case (_, .delegation): .delegation
         case (_, .group): .group
+        case (_, .pulse): .pulse
         default: .routine
         }
         return UsageLabel(model: name, source: source)
@@ -470,9 +471,12 @@ extension BotSession {
         let serving = servingRequest
         servingRequest = nil
         chain = nil
+        usageChain = nil
         self.routineID = nil
         if let routineID {
-            if isOrbRun {
+            if kind == .pulse {
+                model.finishPulse(id, runID: routineID, succeeded: completed, userStopped: userStopped, reply: reply)
+            } else if isOrbRun {
                 model.delegation.finishSideRun(id, runID: routineID, kind: kind ?? .delegation, serving: serving,
                                                succeeded: completed, userStopped: userStopped, reply: reply)
             } else {
@@ -491,8 +495,8 @@ extension BotSession {
                                                selected: model.selection == .bot(id)))
             }
             // The row's second line, for every turn that ended with an answer (a routine's, an Orb's request too).
-            if let reply, let preview = ReplyPreview.make(from: reply) { model.setLastReply(preview, for: id) }
-            if !isOrbRun, !waits, let bot = model.bot(id), let reply {
+            if kind != .pulse, let reply, let preview = ReplyPreview.make(from: reply) { model.setLastReply(preview, for: id) }
+            if !isOrbRun, kind != .pulse, !waits, let bot = model.bot(id), let reply {
                 // A routine's banner opens its run (the report), recorded just above; a chat turn's opens the Orb.
                 let run = routineID.flatMap { routine in model.routines.first { $0.id == routine }?.runs.first.map { (routine, $0.id) } }
                 model.notify(about: id, bot.name, RoutineRun.preview(of: reply), run: run, chat: routineID == nil ? turnChat : nil)

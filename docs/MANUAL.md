@@ -71,7 +71,7 @@ mensagens não lidas; um anel em volta do rosto diz o mesmo de relance (azul tra
 janela traz, sob o nome do Orb, o que ele está fazendo, ou o modelo quando está livre. O botão direito abre o menu do Orb (abrir pasta, personalizar, ver
 rotinas, apagar). No meio fica o chat; à direita, o painel do Orb.
 
-**Início** reúne pedidos aguardando você, trabalhos em andamento, resultados recentes e acompanhamentos em aberto das rotinas. O avatar ou o nome abre a conversa atual do Orb; o conteúdo de um resultado abre a conversa ou execução de origem. Um acompanhamento abre seus detalhes e permite ir à rotina. Novidades são contadas desde a última visita a Início, sem alterar os indicadores de mensagens não lidas. Se chegar um resultado enquanto você lê mais abaixo, **Novos resultados** permite vê-lo sem deslocar a leitura. A página usa informações já registradas no Orb e não dispara consultas externas.
+**Início** reúne pedidos aguardando você, trabalhos em andamento, resultados recentes (inclusive o que um Orb fez ao acordar sozinho, no pulso) e acompanhamentos em aberto das rotinas. O avatar ou o nome abre a conversa atual do Orb; o conteúdo de um resultado abre a conversa ou execução de origem. Um acompanhamento abre seus detalhes e permite ir à rotina. Novidades são contadas desde a última visita a Início, sem alterar os indicadores de mensagens não lidas. Se chegar um resultado enquanto você lê mais abaixo, **Novos resultados** permite vê-lo sem deslocar a leitura. A página usa informações já registradas no Orb e não dispara consultas externas.
 
 No canto inferior esquerdo da barra lateral fica a **sua foto** (um círculo; sem foto, a inicial do seu nome ou uma silhueta):
 um clique abre **Ajustes → Geral → Você**, onde você diz **Nome**, **Como te chamar** e um texto **Sobre você** (até 400
@@ -597,7 +597,7 @@ aviso dizendo por quê.
 - **Pedir a outro Orb.** Uma rotina que pede algo a outro Orb (`orbs ask`) espera a resposta: a execução segue na conversa
   dela quando a resposta chega, e só então entra no histórico, com o relatório final (o banner também espera). Seu chat não ganha
   turno com isso. Enquanto ela espera, o próximo horário não dispara outra execução. Se você para a conversa entre Orbs, ou se o
-  app fecha antes da resposta, a execução termina como falha, com o motivo. Rotinas não acionam grupos.
+  app fecha antes da resposta, a execução termina como falha, com o motivo. Uma rotina só cria ou aciona grupos com **Orbs agem por conta própria** ligado.
 
 ## Orbs juntos
 
@@ -621,8 +621,19 @@ Com **Orbs podem conversar entre si** ligado em Ajustes → Orbs, um Orb pede aj
   faz parte ("peça ao grupo Lançamento…"). O pedido vai ao orquestrador, o fio mostra "Pesquisador pediu ao Atlas, a seu
   pedido: …" e a resposta final do grupo volta ao chat ("O grupo Lançamento respondeu"). Dentro do grupo, o orquestrador pode
   passar parte do trabalho ao próprio Orb que pediu. Se o grupo já está trabalhando, o pedido entra no que está em andamento e o
-  orquestrador o pega depois do turno atual. Isso vale só quando você pede, no chat do Orb: uma rotina ou um pedido de outro
-  Orb não criam nem acionam grupos. Parar o chat que espera para o grupo também.
+  orquestrador o pega depois do turno atual. Parar o chat que espera para o grupo também.
+- **Por conta própria.** Com **Orbs agem por conta própria** ligado (padrão), os Orbs criam e acionam grupos sem você pedir: de
+  qualquer conversa, de uma rotina, de um pedido de outro Orb ou do turno de um grupo. Um grupo que aciona outro recebe a
+  resposta de volta no próprio turno, e um grupo não é acionado duas vezes na mesma cadeia (sem laço grupo → grupo). Desligado,
+  vale o que está acima: só no chat do Orb, no turno em que você pede. Ele não libera nada além de **Orbs podem acionar grupos**,
+  que continua precisando estar ligado.
+- **Organizar o time.** Com **Orbs organizam o time** ligado (padrão), um Orb adiciona e tira membros, troca o orquestrador e
+  renomeia grupos ou muda o objetivo sozinho (`group_edit`), e pode propor apagar outro Orb (`orb_delete`). Apagar um grupo,
+  tirar o membro que o desfaria (grupo de dois) e apagar um Orb **sempre** pedem a sua confirmação num cartão, em qualquer modo de
+  permissão. Em Só leitura o Orb não faz nenhuma dessas mudanças.
+- **Criar Orbs.** Com **Orbs criam Orbs sem perguntar** ligado (padrão), o Orb novo aparece na hora, sem cartão e sem limite de
+  quantidade; o chat de quem o criou mostra a linha com **Desfazer**, que apaga o Orb enquanto ele não conversou nem está
+  trabalhando. O Orb novo nunca tem mais acesso do que quem o criou, e criar fora do chat próprio também depende de **Orbs agem por conta própria**. Desligado, abre o cartão de criação para você aprovar.
 - **Quadro do grupo no chat.** No chat pessoal, o Orb consulta o quadro dos grupos de que faz parte (`group_recall`): as
   decisões e notas que os membros guardaram. Guardar no quadro continua sendo só nos turnos do grupo.
 - **Mensagens seguidas ao grupo.** Se você manda uma segunda mensagem antes de o turno da primeira começar, as duas vão juntas
@@ -647,6 +658,23 @@ Com **Orbs podem conversar entre si** ligado em Ajustes → Orbs, um Orb pede aj
   `~/Library/Application Support/Orb/trabalho/`) num ramo `orb/<membro>/…`, e o orquestrador junta os ramos aprovados na pasta
   do projeto. Ao fim, as cópias já juntadas somem; as que não foram juntadas ficam, com aviso no fio. Sem git, todos usam a
   mesma pasta. Em qualquer caso, um Orb não grava por cima de um arquivo que mudou depois que ele o leu: lê de novo primeiro.
+
+### O pulso
+
+Nada acordava um Orb sem uma mensagem ou uma rotina. Com **Pulso dos Orbs** ligado em Ajustes → Orbs → Pulso (padrão), de tempos em
+tempos um Orb acorda sozinho, olha o time, os grupos e a memória e, se coordenar ajudar, age: pede a um colega, cria Orbs ou grupos,
+ajusta membros. Se não há nada a fazer, não diz nada.
+- **Quem e quando.** Um Orb por vez, em rodízio, a cada **Intervalo** (padrão 60 min). O primeiro intervalo só começa depois que o
+  pulso olha pela primeira vez, então uma instalação nova não gasta nada de imediato.
+- **Sem gastar à toa.** Antes de acordar um Orb, o app confere, sem modelo e sem tokens, se algo mudou para ele desde o último
+  pulso (conversa, pasta, memória, grupos). Se nada mudou, ele é pulado. Um Orb ocupado espera a próxima volta.
+- **Teto por dia.** O **Teto por dia** (padrão 300 mil tokens, mínimo 10 mil) conta o turno do pulso e tudo o que ele começa:
+  pedidos a outros Orbs e turnos de grupo. Ao chegar nele, o trabalho que o pulso começou para, o chat de cada Orb afetado diz "O
+  pulso parou: o teto diário de tokens foi atingido", o grupo parado mostra "O teto diário do pulso parou o grupo" e nada
+  novo começa até o dia seguinte. O painel mostra os **Usados hoje** e o **Último pulso**.
+- **Onde aparece.** Quando o pulso faz algo, o chat do Orb ganha a linha "Atlas acordou sozinho: …" (com o custo em tokens), que
+  também aparece em Início. O pulso age só com **Orbs agem por conta própria** ligado (Ajustes avisa) e não ganha permissão
+  nenhuma: segue o modo do Orb, e as confirmações de apagar continuam valendo.
 
 ## Contexto da conversa
 

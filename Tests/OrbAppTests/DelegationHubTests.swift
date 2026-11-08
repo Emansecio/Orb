@@ -1285,7 +1285,7 @@ private final class Hooks: GroupTurnHooks {
             try model.delegation.submit(from: team.atlas.id, to: "Revisor", text: "x", kind: .ask, messageID: UUID(), groupID: nil)
         }
         // What stays: proposing an Orb (WP3), creating a group (groups do not depend on the switch), asking you and asking for access.
-        #expect(model.multiOrbOffering(for: team.atlas.id) == MultiOrbOffering(propose: true, groupCreate: true, askUser: true, access: true))
+        #expect(model.multiOrbOffering(for: team.atlas.id) == MultiOrbOffering(propose: true, groupCreate: true, groupEdit: true, orbDelete: true, askUser: true, access: true))
         model.orbsCanTalk = true
         #expect(model.multiOrbOffering(for: team.atlas.id).orbs)
     }
@@ -1366,8 +1366,14 @@ private final class Hooks: GroupTurnHooks {
         // `list` says it too, after the teammates.
         let list = try await hub.handleTool(.object(["action": .string("list")]), orb: team.pesquisador.id)
         #expect(list == "- Atlas: Coordena o trabalho (livre)\n- Revisor: Revisa o que foi feito (livre)\n\n"
-            + "Seus grupos (o usuário inicia o trabalho de um grupo na tela dele; você não escreve no fio):\n"
+            + "Seus grupos (você pode acionar estes com ask, pelo nome):\n"
             + "- Estúdio: Atlas orquestra; outros membros: Atlas")
+        // Without "Orbs agem por conta própria" the user starts a group's work on its screen, and the note says so.
+        model.orbsActOnOwn = false
+        defer { model.orbsActOnOwn = true }
+        #expect(try await hub.handleTool(.object(["action": .string("list")]), orb: team.pesquisador.id)
+            .contains("Seus grupos (o usuário inicia o trabalho de um grupo na tela dele; você não escreve no fio)"))
+        model.orbsActOnOwn = true
         // The group's name gets a refusal that says what to do, not "no such Orb, use list": a group is asked, not told; with
         // "Orbs podem acionar grupos" off, the person starts it on the group's screen.
         let error = try #require(await #expect(throws: ToolError.self) {
@@ -1955,6 +1961,7 @@ private actor Names {
         }
         defer { team.cleanUp() }
         let model = team.model, hub = model.delegation
+        model.orbsActOnOwn = false // the old rule: only the chat, at the person's request
         let group = group(team)
         func refusal(from bot: Bot, _ kind: String = "ask") async -> String {
             do {
@@ -2136,6 +2143,7 @@ private actor Names {
         let team = Team { _ in say("?") }
         defer { team.cleanUp() }
         let model = team.model, hub = model.delegation
+        model.orbsActOnOwn = false // the old rule: only the chat, at the person's request
         func create(_ name: String, _ members: [String], orchestrator: String? = nil) async -> String {
             var fields: [String: JSONValue] = ["action": .string("create_group"), "name": .string(name),
                                                "members": .array(members.map(JSONValue.string))]
@@ -2160,6 +2168,157 @@ private actor Names {
         #expect(await create("Dupla", ["Pesquisador", "Revisor"]).hasSuffix("Você não é membro: o usuário manda os pedidos na tela do grupo."))
         #expect(await create("dupla", ["Atlas", "Revisor"]).hasPrefix("Já existe um Orb ou um grupo chamado “dupla”"))
         session.turnAskedByUser = false
+    }
+
+    // MARK: Groups on the Orbs' own initiative ("Orbs agem por conta própria")
+
+    private func tool(_ hub: DelegationHub, _ fields: [String: JSONValue], by bot: Bot) async -> String {
+        do { return try await hub.handleTool(.object(fields), orb: bot.id) } catch { return (error as? ToolError)?.message ?? "" }
+    }
+
+    private func askGroup(_ hub: DelegationHub, _ name: String, by bot: Bot) async -> String {
+        await tool(hub, ["action": .string("ask"), "to": .string(name), "message": .string("Façam isso.")], by: bot)
+    }
+
+    @Test func withActingOnItsOwnOnAnOrbCreatesAndAsksGroupsFromARoutineOrARequest() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let model = team.model, hub = model.delegation
+        model.groupHub.settle = .zero
+        model.groupHub.isAppActive = { false }
+        #expect(model.orbsActOnOwn) // on unless switched off
+        let session = model.session(team.atlas.id)
+        for kind in [SideRunKind.routine, .delegation] {
+            session.sideKind = kind
+            session.turnAskedByUser = false
+            #expect(model.multiOrbOffering(for: team.atlas.id).groupCreate)
+            let name = "Time \(kind.rawValue)"
+            let made = await tool(hub, ["action": .string("create_group"), "name": .string(name),
+                                        "members": .array(["Atlas", "Revisor"].map(JSONValue.string))], by: team.atlas)
+            #expect(made.hasPrefix("Grupo \(name) criado"), "\(made)")
+            let sent = await askGroup(hub, name, by: team.atlas)
+            #expect(sent.hasPrefix("Pedido enviado ao grupo \(name)"), "\(sent)")
+        }
+        // "Orbs podem acionar grupos" still rules, and so does membership.
+        model.orbsCanStartGroups = false
+        #expect(model.multiOrbOffering(for: team.atlas.id).groupCreate == false)
+        #expect(await askGroup(hub, "Time routine", by: team.atlas).hasPrefix("O usuário desligou “Orbs podem acionar grupos”"))
+        model.orbsCanStartGroups = true
+        #expect(await askGroup(hub, "Time routine", by: team.pesquisador).hasPrefix("Você não faz parte do grupo"))
+        // Switched off, the old refusals come back.
+        model.orbsActOnOwn = false
+        #expect(model.multiOrbOffering(for: team.atlas.id).groupCreate == false)
+        #expect(await askGroup(hub, "Time routine", by: team.atlas).hasPrefix("Daqui não se aciona o grupo"))
+        let again = await tool(hub, ["action": .string("create_group"), "name": .string("Outro"),
+                                     "members": .array(["Atlas", "Revisor"].map(JSONValue.string))], by: team.atlas)
+        #expect(again.hasPrefix("Daqui não se cria grupo"))
+    }
+
+    @Test func anOrchestratorAsksAndCreatesGroupsInAGroupsTurnButNeverBackIntoTheChain() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let model = team.model, hub = model.delegation
+        model.groupHub.settle = .zero
+        model.groupHub.isAppActive = { false }
+        let first = try #require(model.createGroup(name: "Primeiro", members: [team.atlas.id, team.revisor.id], orchestrator: team.atlas.id))
+        let second = try #require(model.createGroup(name: "Segundo", members: [team.atlas.id, team.revisor.id], orchestrator: team.revisor.id))
+        func inTurn(_ bot: Bot, of group: OrbGroup, chain: UUID = UUID()) {
+            model.session(bot.id).chain = ChainContext(chainID: chain, hop: 1, path: [], groupID: group.id)
+        }
+        // Its own group is refused; a member that does not orchestrate may not start another group.
+        inTurn(team.atlas, of: first)
+        #expect(await askGroup(hub, "Primeiro", by: team.atlas).hasPrefix("Você já está trabalhando no grupo “Primeiro”"))
+        inTurn(team.revisor, of: first)
+        #expect(await askGroup(hub, "Segundo", by: team.revisor).hasPrefix("Só o orquestrador aciona outro grupo"))
+        let none = await tool(hub, ["action": .string("create_group"), "name": .string("Terceiro"),
+                                    "members": .array(["Atlas", "Revisor"].map(JSONValue.string))], by: team.revisor)
+        #expect(none.hasPrefix("Só o orquestrador cria grupos"))
+        // The orchestrator of the first group asks the second, and may create a group.
+        inTurn(team.atlas, of: first)
+        let sent = await askGroup(hub, "Segundo", by: team.atlas)
+        #expect(sent.hasPrefix("Pedido enviado ao grupo Segundo"), "\(sent)")
+        let made = await tool(hub, ["action": .string("create_group"), "name": .string("Terceiro"),
+                                    "members": .array(["Atlas", "Revisor"].map(JSONValue.string))], by: team.atlas)
+        #expect(made.hasPrefix("Grupo Terceiro criado"), "\(made)")
+        // The second group's orchestrator, working on that request, asking the first back would loop; a new group is fine.
+        let run = try #require(model.groupHub.run(second.id))
+        let chain = try #require(hub.chainStates[run.id])
+        #expect(chain.groupsVisited == [first.id])
+        inTurn(team.revisor, of: second, chain: run.id)
+        #expect(await askGroup(hub, "Primeiro", by: team.revisor).hasPrefix("O grupo “Primeiro” já está nesta cadeia de grupos"))
+        #expect(model.groupHub.run(first.id) == nil)
+        let third = await askGroup(hub, "Terceiro", by: team.revisor)
+        #expect(third.hasPrefix("Pedido enviado ao grupo Terceiro"), "\(third)")
+        let thirdGroup = try #require(model.groups.first { $0.name == "Terceiro" })
+        let thirdRun = try #require(model.groupHub.run(thirdGroup.id))
+        #expect(hub.chainStates[thirdRun.id]?.groupsVisited == [first.id, second.id])
+        // Switched off, a group's turn goes back to the old rule: no group asked from it.
+        model.orbsActOnOwn = false
+        inTurn(team.atlas, of: first)
+        #expect(await askGroup(hub, "Segundo", by: team.atlas).hasPrefix("“Segundo” é um grupo, não um Orb"))
+    }
+
+    @Test func aGroupsOrchestratorAsksAnotherGroupAndTheAnswerWakesItInsideTheGroupsRequest() async throws {
+        let team = Team { seen in
+            switch seen.who {
+            case "Atlas":
+                if seen.user.contains("<orb_reply") { return say("Primeiro pronto: o Segundo disse que o texto está bom.") }
+                if seen.toolResult != nil { return say("Pedi ao grupo Segundo.") }
+                return orbsCall("ask", to: "Segundo", "Revisem o texto.")
+            case "Revisor": return say("Texto bom.")
+            default: return say("?")
+            }
+        }
+        defer { team.cleanUp() }
+        let model = team.model
+        model.groupHub.settle = .zero
+        model.groupHub.isAppActive = { false }
+        let first = try #require(model.createGroup(name: "Primeiro", members: [team.atlas.id, team.revisor.id], orchestrator: team.atlas.id))
+        let second = try #require(model.createGroup(name: "Segundo", members: [team.atlas.id, team.revisor.id], orchestrator: team.revisor.id))
+        #expect(model.postUserMessage("Preparar o texto", to: first.id))
+        await waitUntil("the first group's request to end") {
+            model.groupHub.run(first.id) == nil && self.finalPosts(team, first, "Primeiro pronto: o Segundo disse que o texto está bom.") > 0
+        }
+        await team.settle()
+        // The second group answered, and the answer reached the first group's orchestrator in that request, not in its own chat.
+        #expect(finalPosts(team, second, "Texto bom.") == 1)
+        let atlas = await team.log.calls(by: "Atlas")
+        #expect(atlas.contains { $0.user.contains("<orb_reply") && $0.user.contains("Texto bom.") })
+        #expect(team.botTexts(team.atlas).isEmpty, "the answer must not wake the Orb's own chat")
+        #expect(model.groupHub.run(first.id) == nil && model.groupHub.run(second.id) == nil)
+        #expect(model.delegation.requests.values.allSatisfy { !DelegationHub.isOpen($0.state) } && model.delegation.inbox.isEmpty)
+    }
+
+    @Test func inAGroupsTurnTheOrchestratorSeesTheOtherGroupsInThePromptAndInOrbsList() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let model = team.model, hub = model.delegation
+        let first = try #require(model.createGroup(name: "Primeiro", members: [team.atlas.id, team.revisor.id], orchestrator: team.atlas.id))
+        try #require(model.createGroup(name: "Segundo", members: [team.atlas.id, team.revisor.id], orchestrator: team.revisor.id))
+        func inTurn(_ bot: Bot, of group: OrbGroup) {
+            let session = model.session(bot.id)
+            session.sideKind = .group
+            session.chain = ChainContext(chainID: UUID(), hop: 1, path: [], groupID: group.id)
+        }
+        // The orchestrator of the first group is told about the second, not about its own group.
+        inTurn(team.atlas, of: first)
+        let prompt = model.orbsSection(for: team.atlas)
+        #expect(prompt.contains("## Your groups") && prompt.contains("Segundo") && !prompt.contains("Primeiro:"), "\(prompt)")
+        #expect(prompt == model.orbsSection(for: team.atlas)) // the same bytes for the same groups
+        let list = hub.teammatesText(for: team.atlas.id, groupID: first.id)
+        #expect(list.contains("Seus grupos") && list.contains("- Segundo: Revisor orquestra") && !list.contains("Primeiro"), "\(list)")
+        // A member that does not orchestrate sees none.
+        inTurn(team.revisor, of: first)
+        #expect(!model.orbsSection(for: team.revisor).contains("## Your groups"))
+        #expect(!hub.teammatesText(for: team.revisor.id, groupID: first.id).contains("Seus grupos"))
+        // Neither without the switches.
+        inTurn(team.atlas, of: first)
+        model.orbsCanStartGroups = false
+        #expect(!model.orbsSection(for: team.atlas).contains("## Your groups"))
+        model.orbsCanStartGroups = true
+        model.orbsActOnOwn = false
+        #expect(!model.orbsSection(for: team.atlas).contains("## Your groups"))
+        #expect(!hub.teammatesText(for: team.atlas.id, groupID: first.id).contains("Seus grupos"))
     }
 
     @Test func inItsChatAnOrbReadsTheBoardOfItsGroups() async throws {
@@ -2435,5 +2594,353 @@ private actor Names {
         model.openChat(new, of: atlas)
         await model.loadedConversation(atlas)
         #expect(team.orbMessages(team.atlas).map(\.text) == ["O relatório saiu."])
+    }
+}
+
+// MARK: group_edit
+
+@Suite @MainActor struct GroupEditTests {
+    /// One `group_edit` through the hub, as the tool sends it after the user's card (`confirmed`); a refusal comes back as its text.
+    private func edit(_ team: Team, _ fields: [String: String], confirmed: Bool = true, action: String = "edit_group") async -> String {
+        var arguments = fields.mapValues(JSONValue.string)
+        arguments["action"] = .string(action)
+        if confirmed { arguments["confirmed"] = .bool(true) }
+        do { return try await team.model.delegation.handleTool(.object(arguments), orb: team.atlas.id) } catch {
+            return (error as? ToolError)?.message ?? "\(error)"
+        }
+    }
+
+    private func newGroup(_ team: Team, members: [Bot]? = nil) -> OrbGroup {
+        team.model.createGroup(name: "Lançamento", members: (members ?? [team.atlas, team.pesquisador]).map(\.id))!
+    }
+
+    private func lastEvent(_ team: Team, _ group: OrbGroup) -> OrbEvent? {
+        (team.model.groupSession(group.id)?.items ?? []).compactMap { item -> OrbEvent? in
+            if case .event(let event) = item.kind { event } else { nil }
+        }.last
+    }
+
+    @Test func eachEditChangesTheGroup() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let model = team.model
+        let group = newGroup(team)
+        #expect(await edit(team, ["group": "lancamento", "edit": "add", "orb": "Revisor"]) == "Revisor entrou no grupo Lançamento.")
+        #expect(model.group(group.id)?.memberIDs.contains(team.revisor.id) == true)
+
+        #expect(await edit(team, ["group": "Lançamento", "edit": "orchestrator", "orb": "Pesquisador"]) == "Pesquisador agora orquestra o grupo Lançamento.")
+        #expect(model.group(group.id)?.orchestratorID == team.pesquisador.id)
+        #expect(lastEvent(team, group)?.kind == .orchestratorChanged)
+        #expect(lastEvent(team, group)?.sentence == "Pesquisador agora orquestra o grupo Lançamento")
+
+        // The orchestrator leaves: the first member takes over, and the answer says so.
+        let removed = await edit(team, ["group": "Lançamento", "edit": "remove", "orb": "Pesquisador"])
+        #expect(removed == "Pesquisador saiu do grupo Lançamento. Atlas passou a orquestrar.")
+        #expect(model.group(group.id)?.memberIDs.contains(team.pesquisador.id) == false)
+
+        #expect(await edit(team, ["group": "Lançamento", "edit": "rename", "name": "  Estreia "]) == "O grupo Lançamento agora se chama Estreia.")
+        #expect(model.group(group.id)?.name == "Estreia")
+        #expect(await edit(team, ["group": "estreia", "edit": "objective", "objective": "Entregar a versão 2."]) == "Objetivo do grupo Estreia gravado.")
+        await waitUntil("the objective on the board") { await model.memory.groupBank(for: group.id).snapshot().identity.contains("versão 2") }
+    }
+
+    @Test func renamingToTheSameNameWithOtherCaseIsAllowed() async {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let group = newGroup(team)
+        #expect(await edit(team, ["group": "Lançamento", "edit": "rename", "name": "LANÇAMENTO"]).hasPrefix("O grupo Lançamento agora se chama"))
+        #expect(team.model.group(group.id)?.name == "LANÇAMENTO")
+    }
+
+    @Test func refusalsSayWhatIsWrongAndChangeNothing() async {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let model = team.model
+        let group = newGroup(team)
+        _ = model.createGroup(name: "Outro", members: [team.revisor.id, team.pesquisador.id])
+        #expect(await edit(team, ["group": "Nada", "edit": "add", "orb": "Revisor"]) == "Não há grupo chamado “Nada”. Grupos: Lançamento, Outro.")
+        #expect(await edit(team, ["group": "Lançamento", "edit": "voar"]).hasPrefix("“voar” não é uma mudança"))
+        #expect(await edit(team, ["group": "Lançamento", "edit": "add"]) == "Preencha orb para essa mudança.")
+        #expect(await edit(team, ["group": "Lançamento", "edit": "add", "orb": "Lia"]).hasPrefix("Não existe um Orb chamado “Lia”"))
+        #expect(await edit(team, ["group": "Lançamento", "edit": "add", "orb": "Atlas"]) == "Atlas já é membro do grupo “Lançamento”.")
+        #expect(await edit(team, ["group": "Lançamento", "edit": "remove", "orb": "Revisor"]) == "Revisor não é membro do grupo “Lançamento”.")
+        #expect(await edit(team, ["group": "Lançamento", "edit": "orchestrator", "orb": "Revisor"]) == "Revisor não é membro do grupo “Lançamento”.")
+        #expect(await edit(team, ["group": "Lançamento", "edit": "rename", "name": "  "]) == "Preencha name para essa mudança.")
+        #expect(await edit(team, ["group": "Lançamento", "edit": "rename", "name": "Revisor"]).hasPrefix("Já existe um Orb ou um grupo chamado “Revisor”"))
+        #expect(await edit(team, ["group": "Lançamento", "edit": "rename", "name": "outro"]).hasPrefix("Já existe um Orb ou um grupo chamado “outro”"))
+        #expect(await edit(team, ["group": "Lançamento", "edit": "objective", "objective": " "]) == "Preencha objective para essa mudança.")
+        #expect(model.group(group.id)?.name == "Lançamento" && model.group(group.id)?.memberIDs.count == 2)
+    }
+
+    @Test func aFullGroupRefusesAnotherMember() async {
+        let team = Team(extra: ["A1", "A2", "A3", "A4", "A5", "Nono"]) { _ in say("?") }
+        defer { team.cleanUp() }
+        let members = ([team.atlas, team.pesquisador, team.revisor] + team.others.dropLast()).map(\.id)
+        let group = team.model.createGroup(name: "Cheio", members: members)!
+        #expect(team.model.group(group.id)?.memberIDs.count == 8)
+        #expect(await edit(team, ["group": "Cheio", "edit": "add", "orb": "Nono"])
+                == "O grupo “Cheio” já tem 8 membros, o máximo. Tire alguém antes de pôr outro Orb.")
+        #expect(team.model.group(group.id)?.memberIDs.count == 8)
+    }
+
+    @Test func removingFromAGroupOfTwoAndDeletingNeedTheUser() async {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let model = team.model
+        let group = newGroup(team)
+        let askRemove = ["group": "Lançamento", "edit": "remove", "orb": "Pesquisador"]
+        let plan = await edit(team, askRemove, confirmed: false, action: "edit_group_plan")
+        #expect(plan.contains("Atlas quer tirar Pesquisador do grupo “Lançamento”") && plan.contains("o grupo acaba"))
+        #expect(await edit(team, askRemove, confirmed: false).hasPrefix("Essa mudança só vale depois que o usuário confirma"))
+        #expect(model.group(group.id) != nil)
+        let askDelete = ["group": "Lançamento", "edit": "delete"]
+        #expect(await edit(team, askDelete, confirmed: false, action: "edit_group_plan").contains("quer apagar o grupo “Lançamento”"))
+        #expect(await edit(team, askDelete, confirmed: false).hasPrefix("Essa mudança só vale depois"))
+        #expect(model.group(group.id) != nil)
+        // An edit that needs nobody plans nothing.
+        #expect(await edit(team, ["group": "Lançamento", "edit": "rename", "name": "Novo"], confirmed: false, action: "edit_group_plan") == "")
+        #expect(await edit(team, askDelete) == "Grupo Lançamento apagado; os Orbs continuam.")
+        #expect(model.group(group.id) == nil && model.bot(team.atlas.id) != nil)
+    }
+
+    @Test func removingFromAGroupOfTwoDissolvesItOnceConfirmed() async {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let group = newGroup(team)
+        let text = await edit(team, ["group": "Lançamento", "edit": "remove", "orb": "Pesquisador"])
+        #expect(text == "Pesquisador saiu e o grupo Lançamento acabou (precisa de 2 Orbs, no mínimo).")
+        #expect(team.model.group(group.id) == nil)
+    }
+
+    @Test func switchingThePreferenceOffRefusesAndHidesTheTool() async {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let group = newGroup(team)
+        #expect(team.model.multiOrbOffering(for: team.atlas.id).groupEdit)
+        team.model.orbsCanManageGroups = false
+        defer { team.model.orbsCanManageGroups = true }
+        #expect(team.model.multiOrbOffering(for: team.atlas.id).groupEdit == false)
+        #expect(await edit(team, ["group": "Lançamento", "edit": "rename", "name": "Novo"]).hasPrefix("O usuário desligou “Orbs organizam os grupos”"))
+        #expect(team.model.group(group.id)?.name == "Lançamento")
+    }
+
+    @Test func theToolIsOfferedInEveryKindOfTurnWhenThereIsAGroupOrAnotherOrb() {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let model = team.model
+        #expect(model.multiOrbOffering(for: team.atlas.id).groupEdit) // three Orbs, no group yet
+        model.session(team.atlas.id).routineID = UUID() // a routine's run gets it too
+        #expect(model.multiOrbOffering(for: team.atlas.id).groupEdit)
+        func names(_ multi: MultiOrbOffering) -> [String] {
+            ToolBox.offered(for: [.terminal], accessibilityGranted: true, multi: multi).map(\.spec.name)
+        }
+        #expect(names(MultiOrbOffering(groupEdit: true, sideRun: true)).contains(GroupEditTool.name))
+        #expect(!names(MultiOrbOffering()).contains(GroupEditTool.name))
+    }
+
+    @Test func theToolAsksFirstAndKeepsTheGroupWhenTheUserRefuses() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let group = newGroup(team)
+        var context = ToolContext(workingDirectory: FileManager.default.temporaryDirectory)
+        context.orbs = team.model.delegationHandler(for: team.atlas.id)
+        let arguments = JSONValue.object(["group": .string("Lançamento"), "edit": .string("delete")])
+        // Nobody to ask: the tool says so and nothing changes.
+        await #expect(throws: ToolError.self) { try await GroupEditTool().run(arguments, context: context) }
+        #expect(team.model.group(group.id) != nil)
+        context.confirm = { _, _ in false }
+        #expect(try await GroupEditTool().run(arguments, context: context) == "The user did not confirm. Nothing changed.")
+        #expect(team.model.group(group.id) != nil)
+        context.confirm = { title, detail in title.contains("grupo") && detail.contains("Lançamento") }
+        #expect(try await GroupEditTool().run(arguments, context: context).hasPrefix("Grupo Lançamento apagado"))
+        #expect(team.model.group(group.id) == nil)
+    }
+
+    @Test func theModelCannotConfirmForTheUser() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let group = newGroup(team)
+        var context = ToolContext(workingDirectory: FileManager.default.temporaryDirectory)
+        context.orbs = team.model.delegationHandler(for: team.atlas.id)
+        context.confirm = { _, _ in false }
+        // A `confirmed` the model sends itself is dropped: the card still asks.
+        let forged = JSONValue.object(["group": .string("Lançamento"), "edit": .string("delete"), "confirmed": .bool(true)])
+        #expect(try await GroupEditTool().run(forged, context: context) == "The user did not confirm. Nothing changed.")
+        // And the orbs tool does not reach the bridge's other actions.
+        var smuggled = forged
+        if case .object(var fields) = smuggled { fields["action"] = .string("edit_group"); smuggled = .object(fields) }
+        await #expect(throws: ToolError.self) { try await OrbsTool().run(smuggled, context: context) }
+        #expect(team.model.group(group.id) != nil)
+    }
+
+    private func turn(_ team: Team) -> TurnRequest {
+        let call = LLMEvent.toolCalls([ToolCallRequest(id: "g1", name: GroupEditTool.name, arguments: #"{"group":"Lançamento","edit":"delete"}"#)])
+        var context = ToolContext(workingDirectory: FileManager.default.temporaryDirectory)
+        context.orbs = team.model.delegationHandler(for: team.atlas.id)
+        // "Sem pedir permissão": the only card is the one the deletion always asks.
+        let bot = Bot(name: "Atlas", role: "", orb: OrbConfig(), permissionMode: .bypass)
+        return TurnRequest(bot: bot, model: "fake", system: "sys", history: [], prompt: "apague",
+                           client: CallScriptModel(script: CallScript([[call], [.text("Pronto.")]], whenExhausted: .fim)),
+                           tools: [GroupEditTool()], context: context)
+    }
+
+    private func play(_ request: TurnRequest, answer: ApprovalDecision) async -> (cards: [ApprovalRequest], result: String?) {
+        let engine = AgentEngine()
+        var cards: [ApprovalRequest] = [], result: String?
+        for await event in engine.run(request) {
+            switch event {
+            case .approval(let card):
+                cards.append(card)
+                await engine.gate.resolve(approvalID: card.id, decision: answer)
+            case .message(let message) where message.role == .tool:
+                result = result ?? message.content
+            default:
+                break
+            }
+        }
+        return (cards, result)
+    }
+
+    @Test func deletingAsksOnACardEvenWithoutPermissionAndOnlyAllowDeletes() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let group = newGroup(team)
+        let denied = await play(turn(team), answer: .deny)
+        let card = try #require(denied.cards.first)
+        #expect(denied.cards.count == 1 && card.toolName == GroupEditTool.name && card.isDangerous && card.command.contains("quer apagar o grupo"))
+        #expect(card.suggestions.isEmpty && !card.isHandoff)
+        #expect(denied.result == "The user did not confirm. Nothing changed.")
+        #expect(team.model.group(group.id) != nil)
+
+        let allowed = await play(turn(team), answer: .once)
+        #expect(allowed.cards.count == 1)
+        #expect(allowed.result?.hasPrefix("Grupo Lançamento apagado") == true)
+        #expect(team.model.group(group.id) == nil)
+    }
+
+    // MARK: orb_delete
+
+    private func deleteContext(_ team: Team, confirm: ConfirmHandler?) -> ToolContext {
+        var context = ToolContext(workingDirectory: FileManager.default.temporaryDirectory)
+        context.orbs = team.model.delegationHandler(for: team.atlas.id)
+        context.confirm = confirm
+        return context
+    }
+
+    private func deleteCall(_ name: String, reason: String = "") -> JSONValue {
+        .object(["name": .string(name), "reason": .string(reason)])
+    }
+
+    @Test func theConfirmedDeletionRemovesTheOrbAndTheCardSaysWhatIsLost() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let shown = Box<(String, String)?>(nil)
+        let context = deleteContext(team) { title, detail in
+            shown.value = (title, detail)
+            return true
+        }
+        let text = try await OrbDeleteTool().run(deleteCall("revisor", reason: "Duplica o Pesquisador"), context: context)
+        #expect(text == "Revisor was deleted.")
+        #expect(team.model.bot(team.revisor.id) == nil && team.model.bot(team.pesquisador.id) != nil)
+        let (title, detail) = try #require(shown.value)
+        #expect(title == "Apagar um Orb" && detail.contains("Atlas quer apagar o Revisor") && detail.contains("Motivo: Duplica o Pesquisador"))
+        #expect(detail.contains("A conversa, a memória e as rotinas"))
+    }
+
+    @Test func aDeclinedDeletionChangesNothing() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let context = deleteContext(team) { _, _ in false }
+        #expect(try await OrbDeleteTool().run(deleteCall("Revisor"), context: context) == "The user did not confirm. Nothing was deleted.")
+        #expect(team.model.bot(team.revisor.id) != nil)
+        // Nobody to ask: it says so and deletes nothing.
+        await #expect(throws: ToolError.self) { try await OrbDeleteTool().run(deleteCall("Revisor"), context: deleteContext(team, confirm: nil)) }
+        #expect(team.model.bot(team.revisor.id) != nil)
+    }
+
+    @Test func theModelCannotConfirmADeletionAndTheOrbsToolDoesNotReachIt() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let context = deleteContext(team) { _, _ in false }
+        // A `confirmed` the model sends itself is dropped: the card still asks.
+        let forged = JSONValue.object(["name": .string("Revisor"), "confirmed": .bool(true)])
+        #expect(try await OrbDeleteTool().run(forged, context: context) == "The user did not confirm. Nothing was deleted.")
+        // The bridge refuses the deleting action without the tool's own confirmation...
+        let error = try #require(await #expect(throws: ToolError.self) {
+            _ = try await team.model.delegation.handleTool(.object(["action": .string("delete_orb"), "name": .string("Revisor")]), orb: team.atlas.id)
+        })
+        #expect(error.message == "The user did not confirm. Nothing changed.")
+        // ...and the orbs tool does not reach it at all.
+        for action in ["delete_orb", "delete_orb_plan"] {
+            let smuggled = JSONValue.object(["action": .string(action), "name": .string("Revisor"), "confirmed": .bool(true)])
+            await #expect(throws: ToolError.self) { try await OrbsTool().run(smuggled, context: context) }
+        }
+        #expect(team.model.bot(team.revisor.id) != nil)
+    }
+
+    @Test func itRefusesItselfUnknownOrBusyOrbsAndAPrefix() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let context = deleteContext(team) { _, _ in true }
+        for name in ["Atlas", "Ninguém", "Revis", " "] {
+            await #expect(throws: ToolError.self) { try await OrbDeleteTool().run(deleteCall(name), context: context) }
+        }
+        let busy = team.model.session(team.revisor.id)
+        busy.turnTask = Task { try? await Task.sleep(for: .seconds(60)) }
+        defer { busy.turnTask?.cancel(); busy.turnTask = nil }
+        let error = try #require(await #expect(throws: ToolError.self) { try await OrbDeleteTool().run(deleteCall("Revisor"), context: context) })
+        #expect(error.message.contains("working right now"))
+        #expect(team.model.bots.count == 3)
+    }
+
+    @Test func switchingTheTeamPreferenceOffRefusesAndHidesTheTool() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        #expect(team.model.multiOrbOffering(for: team.atlas.id).orbDelete)
+        team.model.orbsCanManageGroups = false
+        defer { team.model.orbsCanManageGroups = true }
+        #expect(!team.model.multiOrbOffering(for: team.atlas.id).orbDelete)
+        let context = deleteContext(team) { _, _ in true }
+        await #expect(throws: ToolError.self) { try await OrbDeleteTool().run(deleteCall("Revisor"), context: context) }
+        #expect(team.model.bot(team.revisor.id) != nil)
+    }
+
+    @Test func theDeletionIsOfferedInEveryKindOfTurn() {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let model = team.model
+        let session = model.session(team.atlas.id)
+        func names(_ multi: MultiOrbOffering) -> [String] {
+            ToolBox.offered(for: [.terminal], accessibilityGranted: true, multi: multi).map(\.spec.name)
+        }
+        #expect(model.multiOrbOffering(for: team.atlas.id).orbDelete)
+        session.routineID = UUID()
+        #expect(model.multiOrbOffering(for: team.atlas.id).orbDelete)
+        session.routineID = nil
+        session.sideKind = .delegation
+        #expect(model.multiOrbOffering(for: team.atlas.id).orbDelete)
+        session.sideKind = nil
+        #expect(names(MultiOrbOffering(orbDelete: true)).contains(OrbDeleteTool.name))
+        #expect(!names(MultiOrbOffering()).contains(OrbDeleteTool.name))
+    }
+
+    @Test func theEngineAsksOnACardEvenWithoutPermissionAndOnlyAllowDeletes() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        func request() -> TurnRequest {
+            let call = LLMEvent.toolCalls([ToolCallRequest(id: "d1", name: OrbDeleteTool.name, arguments: #"{"name":"Revisor","confirmed":true}"#)])
+            let bot = Bot(name: "Atlas", role: "", orb: OrbConfig(), permissionMode: .bypass)
+            return TurnRequest(bot: bot, model: "fake", system: "sys", history: [], prompt: "apague",
+                               client: CallScriptModel(script: CallScript([[call], [.text("Pronto.")]], whenExhausted: .fim)),
+                               tools: [OrbDeleteTool()], context: deleteContext(team, confirm: nil))
+        }
+        let denied = await play(request(), answer: .deny)
+        let card = try #require(denied.cards.first)
+        #expect(denied.cards.count == 1 && card.toolName == OrbDeleteTool.name && card.isDangerous && card.command.contains("quer apagar"))
+        #expect(denied.result == "The user did not confirm. Nothing was deleted.")
+        #expect(team.model.bot(team.revisor.id) != nil)
+        let allowed = await play(request(), answer: .once)
+        #expect(allowed.cards.count == 1 && allowed.result == "Revisor was deleted.")
+        #expect(team.model.bot(team.revisor.id) == nil)
     }
 }

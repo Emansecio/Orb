@@ -1068,7 +1068,20 @@ actor AgentEngine {
                 context.orbCreation = creation
                 let support = creation
                 context.proposeOrb = { [self] proposal in
-                    await propose(proposal, creation: support, resuming: summary.title, request: request, out: out)
+                    // "Orbs criam Orbs sem perguntar": no card; the creator's chat gets a line with "Desfazer" instead.
+                    if support.withoutCard { return await support.create(UUID(), proposal) }
+                    return await propose(proposal, creation: support, resuming: summary.title, request: request, out: out)
+                }
+            }
+            if tool.spec.name == GroupEditTool.name || tool.spec.name == OrbDeleteTool.name {
+                let toolName = tool.spec.name
+                context.confirm = { [self] title, detail in
+                    let answered = await gate.confirm(toolName: toolName, title: title, detail: detail, botID: request.bot.id) { card in
+                        out.yield(.approval(card))
+                        out.yield(.status("Esperando sua resposta"))
+                    }
+                    out.yield(.status(summary.title))
+                    return answered
                 }
             }
             // MARK: end MultiOrb (WP3)

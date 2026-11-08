@@ -175,7 +175,10 @@ extension AppModel {
     @discardableResult
     func setOrchestrator(_ botID: UUID, of groupID: UUID) -> Bool {
         guard let index = groups.firstIndex(where: { $0.id == groupID }), groups[index].memberIDs.contains(botID) else { return false }
-        if groups[index].orchestratorID != botID { groups[index].orchestratorID = botID }
+        if groups[index].orchestratorID != botID {
+            groups[index].orchestratorID = botID
+            groupSession(groupID)?.append(.event(OrbEvent(kind: .orchestratorChanged, subject: orbRef(botID), detail: groups[index].name, groupID: groupID)))
+        }
         return true
     }
 
@@ -312,7 +315,11 @@ extension AppModel {
         let isOrchestrator = botID == group.orchestratorID
         let role: GroupPrompt.Role = isOrchestrator ? .orchestrator : .member
         // A member may ask the others only when the group lets members talk; the orchestrator always may.
-        let offering = MultiOrbOffering(orbs: isOrchestrator || group.policy.membersMayTalk, propose: false, groupMemory: true)
+        // With "Orbs agem por conta própria" the orchestrator may also create groups (and ask the ones it is in, through `orbs`).
+        let offering = MultiOrbOffering(orbs: isOrchestrator || group.policy.membersMayTalk, propose: isOrchestrator && orbsActOnOwn, groupMemory: true,
+                                    groupCreate: isOrchestrator && orbsActOnOwn && orbsCanStartGroups && bots.count > 1,
+                                    groupEdit: isOrchestrator && orbsCanManageGroups,
+                                    orbDelete: isOrchestrator && orbsCanManageGroups && bots.count > 1)
         return GroupTurnExtras(
             groupID: group.id, runID: run.id, requestID: turn.requestID,
             groupName: group.name, role: role,

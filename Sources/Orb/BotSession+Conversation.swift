@@ -162,6 +162,8 @@ extension BotSession {
             model.store.saveSideConversation(conversation, prefix: Store.pedidoPrefix, id: routineID, for: id)
         case .group:
             model.store.saveSideConversation(conversation, prefix: Store.grupoPrefix, id: routineID, for: id)
+        case .pulse: // one file per Orb: the last pulses, as a routine keeps its last runs
+            model.store.saveSideConversation(conversation, prefix: Store.pulsoPrefix, id: id, for: id)
         }
     }
 

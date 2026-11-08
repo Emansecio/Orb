@@ -348,6 +348,14 @@ struct OrbsSettings: View {
     @AppStorage(SessionNote.settingKey) private var summarizeSessions = false
     @State private var orbsCanTalk = true
     @State private var orbsCanStartGroups = true
+    @State private var orbsCanManageGroups = true
+    @State private var orbsActOnOwn = true
+    @State private var orbsCreateWithoutAsking = true
+    @State private var pulseEnabled = true
+    @State private var pulseMinutes = Pulse.defaultMinutes
+    @State private var pulseDailyTokens = Pulse.defaultDailyTokens
+    @State private var pulseUsed = 0
+    @State private var pulseLast: String?
     @State private var isConfirmingOrbsOff = false
     @State private var openTalks: [DelegationHub.OpenTalk] = []
     @State private var learnedWindows: [LearnedWindowRow] = []
@@ -368,6 +376,48 @@ struct OrbsSettings: View {
         model.orbsCanTalk = on
     }
 
+    /// "Pulso": a Orb wakes by itself now and then. Read again each time the tab opens and every few seconds with it (the
+    /// day's count moves while Orbs work).
+    @ViewBuilder private var pulseSection: some View {
+        Section("Pulso") {
+            Toggle(isOn: Binding(get: { pulseEnabled }, set: { pulseEnabled = $0; model.pulseEnabled = $0 })) {
+                toggleLabel("Pulso dos Orbs",
+                            "De tempos em tempos um Orb acorda sozinho para ver se há algo a coordenar. Para no teto do dia.")
+            }
+            .help(Tip.pulseEnabled)
+            if pulseEnabled {
+                if !orbsActOnOwn {
+                    Text("O pulso só age com “Orbs agem por conta própria” ligado.").capabilityCaption()
+                }
+                Stepper(value: Binding(get: { pulseMinutes }, set: { pulseMinutes = $0; model.pulseMinutes = $0 }),
+                        in: Schedule.minuteRange, step: 15) {
+                    toggleLabel("Intervalo", "A cada \(Self.minutesText(pulseMinutes)), um Orb por vez.")
+                }
+                .help(Tip.pulseMinutes)
+                Stepper(value: Binding(get: { pulseDailyTokens }, set: { pulseDailyTokens = $0; model.pulseDailyTokens = $0 }),
+                        in: Pulse.minimumDailyTokens...5_000_000, step: 50_000) {
+                    toggleLabel("Teto por dia", "\(GroupUsageText.tokens(pulseDailyTokens)), contando o pulso e o trabalho que ele começa.")
+                }
+                .help(Tip.pulseDailyTokens)
+                LabeledContent("Usados hoje", value: GroupUsageText.tokens(pulseUsed))
+                LabeledContent("Último pulso", value: pulseLast ?? "Nenhum ainda")
+            }
+        }
+        .onAppear { loadPulse() }
+    }
+
+    private func loadPulse() {
+        pulseEnabled = model.pulseEnabled
+        pulseMinutes = model.pulseMinutes
+        pulseDailyTokens = model.pulseDailyTokens
+        pulseUsed = model.pulseTokensToday()
+        pulseLast = model.pulseState.lastActed.map { RoutineText.stamp($0) + ((model.pulseState.lastSummary).map { ": " + $0 } ?? "") }
+    }
+
+    static func minutesText(_ minutes: Int) -> String {
+        minutes < 60 ? "\(minutes) min" : minutes % 60 == 0 ? "\(minutes / 60) h" : "\(minutes / 60) h \(minutes % 60) min"
+    }
+
     var body: some View {
         Form {
             Section("Orbs") {
@@ -385,10 +435,28 @@ struct OrbsSettings: View {
                 }
                 Toggle(isOn: Binding(get: { orbsCanStartGroups }, set: { orbsCanStartGroups = $0; model.orbsCanStartGroups = $0 })) {
                     toggleLabel("Orbs podem acionar grupos",
-                                "Quando você pede no chat, o Orb cria um grupo ou manda um pedido a um grupo de que faz parte; a resposta final do grupo volta para o chat. Nunca por conta própria.")
+                                "O Orb cria um grupo ou manda um pedido a um grupo de que faz parte; a resposta final do grupo volta para o chat. Sem \"Orbs agem por conta própria\", só quando você pede no chat.")
                 }
                 .help(Tip.orbsCanStartGroups)
                 .onAppear { orbsCanStartGroups = model.orbsCanStartGroups }
+                Toggle(isOn: Binding(get: { orbsActOnOwn }, set: { orbsActOnOwn = $0; model.orbsActOnOwn = $0 })) {
+                    toggleLabel("Orbs agem por conta própria",
+                                "Os Orbs criam e acionam grupos quando acham útil, de qualquer conversa, rotina ou pedido, sem esperar você pedir.")
+                }
+                .help(Tip.orbsActOnOwn)
+                .onAppear { orbsActOnOwn = model.orbsActOnOwn }
+                Toggle(isOn: Binding(get: { orbsCanManageGroups }, set: { orbsCanManageGroups = $0; model.orbsCanManageGroups = $0 })) {
+                    toggleLabel("Orbs organizam o time",
+                                "Os Orbs adicionam e tiram membros, trocam o orquestrador e renomeiam grupos sozinhos, e podem pedir para apagar um Orb. Apagar um grupo ou um Orb sempre pede sua confirmação.")
+                }
+                .help(Tip.orbsCanManageGroups)
+                .onAppear { orbsCanManageGroups = model.orbsCanManageGroups }
+                Toggle(isOn: Binding(get: { orbsCreateWithoutAsking }, set: { orbsCreateWithoutAsking = $0; model.orbsCreateWithoutAsking = $0 })) {
+                    toggleLabel("Orbs criam Orbs sem perguntar",
+                                "O Orb novo aparece na hora, com um aviso no chat de quem criou e um botão Desfazer.")
+                }
+                .help(Tip.orbsCreateWithoutAsking)
+                .onAppear { orbsCreateWithoutAsking = model.orbsCreateWithoutAsking }
                 Toggle(isOn: $proposeSkills) {
                     toggleLabel("Propor skills com o que os Orbs aprendem",
                                 "Depois de tarefas longas, o Orb pode propor uma skill. Nada é salvo sem você aprovar.")
@@ -400,6 +468,7 @@ struct OrbsSettings: View {
                 }
                 .help(Tip.summarizeSessions)
             }
+            pulseSection
             OpenTalksSection(talks: $openTalks)
             ContextMemorySettings()
             LearnedWindowsSettings(rows: $learnedWindows)
@@ -413,6 +482,7 @@ struct OrbsSettings: View {
             while !Task.isCancelled {
                 let now = model.delegation.openTalks()
                 if now != openTalks { openTalks = now }
+                if model.pulseTokensToday() != pulseUsed { pulseUsed = model.pulseTokensToday() }
                 try? await Task.sleep(for: .seconds(2))
             }
         }
