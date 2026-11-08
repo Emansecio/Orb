@@ -153,4 +153,25 @@ private let gitReady = WorkFolders.Git.make() != nil
         let branches = await WorkFolders.Git.make()?.run(["branch", "--format=%(refname:short)"], in: project)
         #expect(branches?.text.contains("orb/") == false, "the merged branch goes with its worktree")
     }
+
+    @Test(.enabled(if: gitReady)) @MainActor func renamingAMemberMidRequestKeepsItsWorktree() async throws {
+        try await makeRepo()
+        let script = CallScript([[.text("Li tudo."), .finished(.done, nil)]], holdsCall: 1)
+        let (model, group, _, revisor) = try setUp(script)
+        model.postUserMessage("@Revisor confira o projeto", to: group.id)
+        let work = root.appending("trabalho")
+        func worktrees() -> [String] {
+            (try? FileManager.default.contentsOfDirectory(atPath: work.path)).map { projects in
+                projects.flatMap { (try? FileManager.default.contentsOfDirectory(atPath: work.path + "/" + $0)) ?? [] }
+            } ?? []
+        }
+        _ = await waitUntil("the first worktree") { worktrees().count == 1 && model.groupHub.run(group.id) != nil }
+        let first = worktrees()
+        #expect(model.rename(revisor.id, to: "Outro nome"))
+        // A second message in the same run reaches the renamed Orb: it must go on in the worktree it had.
+        model.postUserMessage("@Outro nome mais uma coisa", to: group.id)
+        await script.release()
+        _ = await waitUntil("the second turn") { await script.calls.count >= 2 }
+        #expect(worktrees() == first, "a new worktree was made for the new name")
+    }
 }

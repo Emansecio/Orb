@@ -69,6 +69,9 @@ final class DelegationHub: DelegationService {
     /// The folder a request's turns work in when it is not the Orb's own (a worktree, or a group's project folder); it outlives
     /// the first turn so the turn that resumes the request after its children answered works in the same place.
     private var workFolders: [UUID: URL] = [:]
+    /// The name a member first worked under in a group run ("run/member" -> name): the worktree and branch are named after it, so
+    /// renaming the Orb mid-run keeps working in the same worktree instead of orphaning the first one's commits.
+    private var workMemberNames: [String: String] = [:]
     /// The project of each request that works in a worktree of its own (`ask` with a `folder`), until the worktree is cleaned up.
     private var folderRuns: [UUID: URL] = [:]
     /// When each sender last asked each target the same text from its own chat (no chain to hold it), pruned on write.
@@ -333,7 +336,10 @@ final class DelegationHub: DelegationService {
         if member.id == group.orchestratorID {
             return (project, await WorkFolders.orchestratorNote(project: project, run: request.envelope.chainID, root: root))
         }
-        let work = await WorkFolders.prepare(project: project, member: member.name, run: request.envelope.chainID, root: root)
+        let nameKey = "\(request.envelope.chainID)/\(member.id)"
+        let name = workMemberNames[nameKey] ?? member.name
+        workMemberNames[nameKey] = name
+        let work = await WorkFolders.prepare(project: project, member: name, run: request.envelope.chainID, root: root)
         return (work.url, WorkFolders.memberNote(work))
     }
 
