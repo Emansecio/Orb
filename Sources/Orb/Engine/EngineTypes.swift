@@ -437,6 +437,9 @@ protocol LLMClient: Sendable {
     /// This client for a short side request (the note on a stretch of the conversation, see `ChunkSummary`): the reply
     /// capped where the provider's API allows it, and no cache written for a tail that will never be read again.
     var forShortReply: any LLMClient { get }
+    /// This client for a run beside the conversation (the skill review) that must not touch the process the Claude Code
+    /// pipe keeps idle for the next message. Every other client is itself.
+    var withoutIdleProcess: any LLMClient { get }
     /// This client with one more cache marker, after the result of the call `toolCallID`: the end of what a long task
     /// has already shortened (`ContextWindow.stableToolCallID`). Clients that place no markers are themselves.
     func markingStable(upTo toolCallID: String?) -> any LLMClient
@@ -445,6 +448,7 @@ protocol LLMClient: Sendable {
 extension LLMClient {
     var arrangesPromptCache: Bool { false }
     var forShortReply: any LLMClient { self }
+    var withoutIdleProcess: any LLMClient { self }
     func markingStable(upTo toolCallID: String?) -> any LLMClient { self }
 
     func stream(model: String, messages: [ChatMessage], tools: [ToolSpec]) -> AsyncThrowingStream<LLMEvent, Error> {

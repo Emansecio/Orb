@@ -47,11 +47,13 @@ extension AppModel {
     /// cache is still warm).
     /// Not in an Orb that only reads and not while anything else
     /// has the Orb; a message from the user stops it (`send`).
-    func reviewSkillsIfDue(_ session: BotSession) {
+    /// `messages` are those of the conversation the turn worked on: when it ended in another one than the one on show,
+    /// `session.conversation` is already the other (`endWorkElsewhere`), and `reviewFrom` counts the turn's.
+    func reviewSkillsIfDue(_ session: BotSession, messages: [ChatMessage]?) {
         guard proposesSkills, session.stepsSinceSkill >= SkillReview.threshold, session.skillReview == nil,
               session.turnTask == nil, !isResetting, var request = session.reviewBase,
               let current = bot(session.id), current.permissionMode != .readOnly,
-              let messages = session.conversation?.messages, session.reviewFrom <= messages.count else { return }
+              let messages, session.reviewFrom <= messages.count else { return }
         session.stepsSinceSkill = 0
         // The history the turn sent (its summary and condensed stretch, not the raw messages) and what the turn added
         // to it: the prefix of the turn's last model call, which is what the provider has in its cache.
@@ -60,6 +62,7 @@ extension AppModel {
         request.maxSteps = SkillReview.maxSteps
         request.onlyTools = SkillReview.tools
         request.context.skillReview = true
+        request.client = request.client.withoutIdleProcess // never the conversation's idle Claude Code process
         // The prompt asks for no task: the turn's own request stays the start of the task in progress, so what the
         // turn's last call sent whole is sent whole again (and the provider's cache holds).
         request.promptOnlySteers = true

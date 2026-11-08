@@ -440,7 +440,11 @@ extension BotSession {
         } else {
             keepRequestedMemory(succeeded: succeeded)
             // Older turns left the model's view during this turn: what they held goes to the memory now, once.
-            if compacted { saveMemory(notes: notes) }
+            // Quitting: the page is written by a detached task the closing app does not wait for, and the mark of what is
+            // saved would already be persisted. The stretch stays unmarked (the next launch saves it) and the notes wait.
+            if compacted {
+                if model.delegation.isShuttingDown { keepNotes(notes) } else { saveMemory(notes: notes) }
+            }
             scheduleMemorySave()
             if succeeded { model.writeStretchNote(of: id) }
         }
@@ -491,6 +495,8 @@ extension BotSession {
         if !isOrbRun, !waits, model.selection != .bot(id) || !(NSApp?.isActive ?? false) {
             model.setUnread(model.live(id).unread + 1, for: id)
         }
+        // The messages of the conversation the turn worked on: `endWorkElsewhere` below puts the one on show in its place.
+        let reviewMessages = conversation?.messages
         if let working = workingChatID {
             model.markUnread(working, of: id) // it ended where you were not looking
             endWorkElsewhere() // the one on show takes the turn machinery back
@@ -511,7 +517,7 @@ extension BotSession {
         // (you asked for a skill, or the Orb proposed one) is told now; the review comes in the background.
         if !ranRoutine {
             Task { await model.collectSkillProposals(botID) }
-            if completed { model.reviewSkillsIfDue(self) } // a task left half way teaches little
+            if completed { model.reviewSkillsIfDue(self, messages: reviewMessages) } // a task left half way teaches little
             if completed { model.consolidateMemoryIfDue(self) }
             if completed { model.proposeMemoryMergeIfDue(self) }
         }

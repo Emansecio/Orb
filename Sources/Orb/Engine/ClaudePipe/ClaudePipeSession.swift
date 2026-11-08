@@ -190,7 +190,7 @@ enum ClaudePipeSession {
         var uses: [JSONValue] = []
         for call in message.toolCalls {
             if used.contains(call.id) {
-                uses.append(.object(["type": .string("tool_use"), "id": .string(call.id), "name": .string(toolPrefix + call.name),
+                uses.append(.object(["type": .string("tool_use"), "id": .string(AnthropicClient.safeToolID(call.id)), "name": .string(toolPrefix + call.name),
                                      "input": inputObject(call.arguments)]))
             } else {
                 text += (text.isEmpty ? "" : "\n") + describe(call, result: nil)
@@ -213,7 +213,7 @@ enum ClaudePipeSession {
         } else {
             content = .array((message.content.isEmpty ? [] : [textBlock(message.content)]) + images)
         }
-        return .object(["type": .string("tool_result"), "tool_use_id": .string(message.toolCallID ?? ""), "content": content,
+        return .object(["type": .string("tool_result"), "tool_use_id": .string(AnthropicClient.safeToolID(message.toolCallID ?? "")), "content": content,
                         "is_error": .bool(message.isError)])
     }
 

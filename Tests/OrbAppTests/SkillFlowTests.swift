@@ -359,6 +359,44 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
         #expect(conversation.messages.last?.content == "pronto")
     }
 
+    @Test @MainActor func theReviewReadsTheMessagesItIsGivenNotTheConversationOnShow() async throws {
+        // A turn that ended in conversation A while B is on show: `session.conversation` is B by then.
+        let script = CallScript([said("Nothing to save.")])
+        let (model, botID) = setUp(script)
+        let session = model.session(botID)
+        session.reviewBase = TurnRequest(bot: model.bots[0], model: "m", system: "s", history: [], prompt: "",
+                                         client: CallScriptModel(script: script), tools: [], context: ToolContext(workingDirectory: root))
+        session.stepsSinceSkill = SkillReview.threshold
+        session.reviewFrom = 0
+        var other = Conversation()
+        other.messages = [.user("da conversa B")]
+        model.seedConversation(other, for: botID)
+        let mine: [ChatMessage] = [.user("A1"), ChatMessage(role: .assistant, content: "A2"), .user("A3")]
+        model.reviewSkillsIfDue(session, messages: mine)
+        #expect(session.skillReview != nil)
+        await waitUntil("the review to end") { await script.calls.count == 1 && model.session(botID).skillReview == nil }
+        let sent = try #require(await script.calls.first).messages.map(\.content)
+        #expect(sent.contains("A1") && sent.contains("A2") && sent.contains("A3"))
+        #expect(!sent.contains("da conversa B"))
+    }
+
+    @Test @MainActor func aTurnThatCompactedAndEndsWhileQuittingKeepsItsNotesAndMarksNothingSaved() async {
+        let script = CallScript([said("ok")])
+        let (model, botID) = setUp(script)
+        let session = model.session(botID)
+        let turn = session.beginTurn()
+        session.turnTask = Task {}
+        model.apply(.message(.user("tarefa")), to: botID)
+        model.apply(.message(ChatMessage(role: .assistant, content: "feito")), to: botID)
+        session.compactedInTurn = true
+        session.foldedNotes = ["nota do modelo"]
+        model.delegation.isShuttingDown = true
+        model.finishTurn(botID, turn: turn)
+        // The page is written by a task the closing app does not wait for: no mark, and the notes wait for the next save.
+        #expect(session.conversation?.memorySavedCount ?? 0 == 0)
+        #expect(session.pendingNotes == ["nota do modelo"])
+    }
+
     @Test @MainActor func resettingStopsAReviewInProgress() async {
         let (model, botID) = setUp(CallScript([said("oi")]))
         let review = Task<Void, Never> { try? await Task.sleep(for: .seconds(30)) }

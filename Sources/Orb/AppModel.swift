@@ -1618,7 +1618,7 @@ final class AppModel {
         let result = compactNow(botID: botID, focus: focus)
         switch result.status {
         case .compacted: break
-        case .nothingToCompact, .busy, .unavailable: append(.notice(result.message), to: botID)
+        case .nothingToCompact, .busy, .unavailable: appendToChat(.notice(result.message), of: botID, in: session(botID).chatID)
         }
     }
 

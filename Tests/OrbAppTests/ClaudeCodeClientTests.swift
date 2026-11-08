@@ -524,6 +524,24 @@ struct ClaudeCodeClientTests {
         #expect(pool.count == 1)
     }
 
+    @Test func aSideRunWithoutTheIdleProcessLeavesTheConversationsOneAlone() async throws {
+        let rig = try Rig(scenario: "text")
+        defer { rig.cleanUp() }
+        let pool = ClaudePipeIdlePool()
+        _ = try await collect(rig.turnClient(pool: pool).stream(model: "m", messages: Array(answered.prefix(2)), tools: [readFile], toolChoice: .auto))
+        #expect(pool.count == 1 && rig.launches.count == 1)
+
+        // The skill review: same client as the turn's, a history of its own. It runs cold and keeps nothing in the pool.
+        let review = rig.turnClient(pool: pool).withoutIdleProcess
+        _ = try await collect(review.stream(model: "m", messages: answered + [.user("revise")], tools: [readFile], toolChoice: .auto))
+        #expect(rig.launches.count == 2 && pool.count == 1)
+
+        // The next message still continues the process the turn left idle.
+        _ = try await collect(rig.turnClient(pool: pool).stream(model: "m", messages: answered + [.user("E agora?")], tools: [readFile], toolChoice: .auto))
+        #expect(rig.launches.count == 2)
+        #expect(await waitUntil { rig.metricsText.contains(#""plan":"idle""#) })
+    }
+
     @Test func anEditedHistoryEndsTheIdleProcessAndStartsANewOne() async throws {
         let rig = try Rig(scenario: "text")
         defer { rig.cleanUp() }

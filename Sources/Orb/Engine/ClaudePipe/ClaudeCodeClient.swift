@@ -118,6 +118,14 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
     /// The cache is the provider's (the CLI marks the prompt itself), so a miss is worth a notice.
     var arrangesPromptCache: Bool { true }
 
+    /// The same CLI setup without the conversation's idle process: a side run (the skill review) that shared the key
+    /// would take the process the next message continues, and leave its own history in the pool in its place.
+    var withoutIdleProcess: any LLMClient {
+        ClaudeCodeClient(launch: launch, orbBinary: orbBinary, folders: folders, initializeTimeout: initializeTimeout,
+                         parkTimeout: parkTimeout, effort: effort, cacheTTL: cacheTTL, conversationID: nil,
+                         idlePool: idlePool, idleTimeout: idleTimeout, keepsIdleProcess: false)
+    }
+
     // MARK: Streaming
 
     private enum Plan {

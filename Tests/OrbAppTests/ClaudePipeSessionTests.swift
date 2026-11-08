@@ -162,6 +162,18 @@ struct ClaudePipeSessionTests {
         #expect(result[3]["message"]?["content"]?.array?.first?["text"]?.string == "pronto")
     }
 
+    @Test func toolIDsFromOtherProvidersAreMadeSafeOnBothSides() throws {
+        // `functions.bash:0` is not a valid Messages tool id; the pair must still match after the mapping.
+        let history: [ChatMessage] = [.user("lista"), assistant("vou", calls: [call("functions.bash:0")]),
+                                      .tool("functions.bash:0", "a.txt"), assistant("pronto")]
+        let result = try lines(history)
+        let use = try #require(result[1]["message"]?["content"]?.array?.first { $0["type"]?.string == "tool_use" })
+        let answer = try #require(result[2]["message"]?["content"]?.array?.first)
+        let id = try #require(use["id"]?.string)
+        #expect(id == "functions_bash_0")
+        #expect(answer["tool_use_id"]?.string == id)
+    }
+
     @Test func emptyArgumentsAreAnEmptyObject() throws {
         let result = try lines([.user("a"), assistant("", calls: [call("c1", "ls", "")]), .tool("c1", "x"), assistant("b")])
         #expect(result[1]["message"]?["content"]?.array?.first?["input"] == .object([:]))

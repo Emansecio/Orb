@@ -279,7 +279,7 @@ extension AppModel {
         // "/compactar" is a command of the composer, not a message: queued, it would reach the model as one. It waits in
         // the composer for the end of the turn, as `send` runs it (which it does only without attachments).
         if lane.files.isEmpty, lane.pictures.isEmpty, CompactionCommand.parse(text) != nil {
-            append(.notice(Self.compactionBusyMessage), to: botID)
+            appendToChat(.notice(Self.compactionBusyMessage), of: botID, in: session(botID).chatID) // the one on show, not the turn's
             return false
         }
         return queueMessage(text, to: botID, delivery: delivery)

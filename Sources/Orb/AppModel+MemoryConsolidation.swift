@@ -79,8 +79,8 @@ extension AppModel {
             guard !merged.isEmpty else { return }
             let pages = merged.reduce(0) { $0 + $1.sources.count }
             let titles = merged.map { "“\($0.title)”" }.joined(separator: ", ")
-            append(.notice("\(NoticeAction.memoryMergePrefix) \(pages) páginas parecidas viram \(merged.count): \(titles). "
-                           + "Os originais ficam no arquivo da memória."), to: botID)
+            appendToChat(.notice("\(NoticeAction.memoryMergePrefix) \(pages) páginas parecidas viram \(merged.count): \(titles). "
+                           + "Os originais ficam no arquivo da memória."), of: botID, in: session.chatID) // the one on show, not the turn's
         }
     }
 
@@ -99,7 +99,7 @@ extension AppModel {
         case let done? where done.groups == 0: "A memória mudou desde a proposta; nada foi unificado."
         case let done?: "Memória unificada: \(done.pages) páginas viraram \(done.groups). Os originais estão em _arquivo/consolidacoes."
         }
-        append(.notice(text), to: botID)
+        appendToChat(.notice(text), of: botID, in: session(botID).chatID) // where the button was: the one on show
         await refreshMemory(botID)
     }
 }
