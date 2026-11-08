@@ -683,7 +683,7 @@ struct Routine: Identifiable, Codable, Sendable {
     /// an hour the schedule leaves out, so the scheduler skips it. A slot may run up to one rhythm late: a daily one found
     /// in the afternoon still runs. Only clock schedules: an interval counts from the last run, and a single moment still
     /// runs late.
-    func missedSlot(now: Date, calendar: Calendar = .current) -> Date? {
+    func missedSlot(now: Date, calendar: Calendar = .autoupdatingCurrent) -> Date? {
         switch schedule {
         case .daily, .weekly, .cron: break
         case .everyHours, .everyMinutes, .once: return nil
@@ -827,7 +827,7 @@ enum Schedule: Codable, Hashable, Sendable {
         return next(after: first, calendar: calendar).timeIntervalSince(first) > 3600 ? "5m" : nil
     }
 
-    func next(after date: Date, calendar: Calendar = .current) -> Date {
+    func next(after date: Date, calendar: Calendar = .autoupdatingCurrent) -> Date {
         switch self {
         case .daily(let hour, let minute):
             calendar.nextDate(after: date, matching: DateComponents(hour: hour, minute: minute), matchingPolicy: .nextTime)
@@ -899,14 +899,14 @@ enum Schedule: Codable, Hashable, Sendable {
         guard case .cron(let expression, let timeZone) = self,
               let text = (try? CronExpression(expression))?.plainText() else { return label }
         // The Mac's own time zone goes without saying; another one is named by its city ("fuso de Lisboa").
-        guard let timeZone, let zone = TimeZone(identifier: timeZone), zone.identifier != TimeZone.current.identifier else { return text }
+        guard let timeZone, let zone = TimeZone(identifier: timeZone), zone.identifier != TimeZone.autoupdatingCurrent.identifier else { return text }
         let city = zone.identifier.split(separator: "/").last.map { String($0).replacing("_", with: " ") } ?? zone.identifier
         return text + " (fuso de \(city))"
     }
 
     /// "em 14/10/2026 às 09:00", on this Mac's clock.
     private static func dayAndTime(_ date: Date) -> String {
-        let parts = Calendar.current.dateComponents([.day, .month, .year, .hour, .minute], from: date)
+        let parts = Calendar.autoupdatingCurrent.dateComponents([.day, .month, .year, .hour, .minute], from: date)
         return String(format: "em %02d/%02d/%04d às ", parts.day ?? 0, parts.month ?? 0, parts.year ?? 0)
             + time(parts.hour ?? 0, parts.minute ?? 0)
     }

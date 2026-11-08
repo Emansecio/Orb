@@ -22,7 +22,7 @@ struct MacEnvironment: Sendable, Equatable {
                               macOS: "macOS \(version.majorVersion).\(version.minorVersion)\(patch)",
                               locale: Locale.current.identifier,
                               languages: Array(Locale.preferredLanguages.prefix(4)),
-                              timeZone: TimeZone.current.identifier)
+                              timeZone: TimeZone.autoupdatingCurrent.identifier)
     }
 }
 
@@ -135,7 +135,7 @@ struct WorkspaceSnapshot: Sendable, Equatable, Codable {
     static func stamp(_ date: Date) -> String {
         date.formatted(Date.VerbatimFormatStyle(
             format: "\(year: .defaultDigits)-\(month: .twoDigits)-\(day: .twoDigits) \(hour: .twoDigits(clock: .twentyFourHour, hourCycle: .zeroBased)):\(minute: .twoDigits)",
-            locale: Locale(identifier: "en_US_POSIX"), timeZone: .current, calendar: Calendar(identifier: .gregorian)))
+            locale: Locale(identifier: "en_US_POSIX"), timeZone: .autoupdatingCurrent, calendar: Calendar(identifier: .gregorian)))
     }
 
     // MARK: Capturing

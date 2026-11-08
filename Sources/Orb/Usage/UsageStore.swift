@@ -90,7 +90,7 @@ final class UsageRecorder {
     /// After "Redefinir o Orb" nothing more is kept.
     private var isClosed = false
 
-    init(store: Store, now: @escaping () -> Date = { .now }, calendar: Calendar = .current) {
+    init(store: Store, now: @escaping () -> Date = { .now }, calendar: Calendar = .autoupdatingCurrent) {
         self.store = store
         self.now = now
         self.calendar = calendar
