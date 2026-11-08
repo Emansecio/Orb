@@ -34,7 +34,7 @@ struct EventLineView: View {
             .accessibilityHint("Abre a troca, somente leitura")
             .accessibilityIdentifier("event-line")
             .sheet(isPresented: $showsExchange) {
-                let found = ExchangeSource.messages(chain: chain, of: asker.id, in: model)
+                let found = ExchangeSource.messages(chain: chain, request: event.requestID, of: asker.id, in: model)
                 ExchangeSheet(messages: found, parties: ExchangeSource.parties(of: found, event: event))
             }
         } else if event.kind == .routineRun {

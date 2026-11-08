@@ -44,12 +44,15 @@ struct ExchangeGlyph: View {
 
 /// The messages of one exchange, read from the chat of the Orb that holds them (its asks and their replies).
 enum ExchangeSource {
-    /// The messages of the exchange `chain` in `botID`'s chat, in order. Empty for an Orb that no longer exists.
+    /// The messages of the exchange `chain` in `botID`'s chat, in order. Empty for an Orb that no longer exists. `request`: only
+    /// that request and its reply (a woken Orb keeps the chain, so the chain alone also holds the other Orbs' requests).
     @MainActor
-    static func messages(chain: UUID, of botID: UUID, in model: AppModel) -> [OrbMessageItem] {
+    static func messages(chain: UUID, request: UUID? = nil, of botID: UUID, in model: AppModel) -> [OrbMessageItem] {
         guard model.bot(botID) != nil else { return [] }
         return model.orbTranscript(botID).items.compactMap { item in
-            if case .orbMessage(let message) = item.kind, message.chainID == chain { return message }
+            if case .orbMessage(let message) = item.kind, message.chainID == chain, request == nil || message.requestID == request {
+                return message
+            }
             return nil
         }
     }

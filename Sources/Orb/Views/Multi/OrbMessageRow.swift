@@ -90,7 +90,7 @@ struct OrbMessageRow: View {
         .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: awaits)
         .sheet(isPresented: $showsExchange) {
             // The chat's own copy of the exchange; this line alone when the Orb that holds the rest is gone.
-            let found = ExchangeSource.messages(chain: message.chainID, of: botID, in: model)
+            let found = ExchangeSource.messages(chain: message.chainID, request: message.requestID, of: botID, in: model)
             let messages = found.isEmpty ? [message] : found
             ExchangeSheet(messages: messages, parties: ExchangeSource.parties(of: messages))
         }

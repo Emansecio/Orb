@@ -111,6 +111,27 @@ struct ExchangePartiesTests {
     }
 }
 
+struct ExchangeRequestFilterTests {
+    private let root = TempFolder("OrbExchangeRequest", creating: true)
+
+    @Test @MainActor func seeingAnExchangeShowsOnlyTheRequestTouchedNotTheWholeChain() {
+        let model = AppModel(store: Store(directory: root.url), runsBackgroundWork: false)
+        let atlas = OrbRef(model.bots[0]), revisor = OrbRef(id: UUID(), name: "Revisor"), pesquisador = OrbRef(id: UUID(), name: "Pesquisador")
+        let chain = UUID(), first = UUID(), second = UUID()
+        func message(_ kind: OrbMessageItem.Kind, _ from: OrbRef, _ to: OrbRef, _ request: UUID) -> OrbMessageItem {
+            OrbMessageItem(direction: kind == .reply ? .reply : .sent, kind: kind, state: .replied, from: from, to: to,
+                           text: "x", requestID: request, chainID: chain)
+        }
+        // The same chain holds a request to Revisor and, after the woken Orb went on, another one to Pesquisador.
+        for item in [message(.ask, atlas, revisor, first), message(.reply, revisor, atlas, first), message(.ask, atlas, pesquisador, second)] {
+            model.appendToChat(.orbMessage(item), of: atlas.id)
+        }
+        #expect(ExchangeSource.messages(chain: chain, of: atlas.id, in: model).count == 3)
+        let touched = ExchangeSource.messages(chain: chain, request: first, of: atlas.id, in: model)
+        #expect(touched.count == 2 && ExchangeSource.parties(of: touched).map(\.name) == ["Atlas", "Revisor"])
+    }
+}
+
 struct CreatedByLineTests {
     @Test @MainActor func theLineNamesTheCreatorAsItIsCalledNowAndAsItWasOnceItIsGone() {
         var child = Bot(name: "Pesquisador", role: "", orb: OrbConfig())
