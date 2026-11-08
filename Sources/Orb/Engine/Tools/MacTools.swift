@@ -375,7 +375,14 @@ struct RememberTool: AgentTool {
             }
         }
         if context.skillReview { throw ToolError("This review only proposes skills: use tipo skill.") }
-        var kind = arguments["tipo"]?.string.flatMap(MemoryKind.init) ?? .fato
+        // An unknown tipo is an error the model can fix, not a fact it did not ask for.
+        var kind = MemoryKind.fato
+        if let raw = arguments["tipo"]?.string?.trimmingCharacters(in: .whitespaces).lowercased(), !raw.isEmpty {
+            guard let parsed = MemoryKind(rawValue: raw) else {
+                throw ToolError("Unknown tipo. Use fato, preferencia, procedimento, identidade or skill.")
+            }
+            kind = parsed
+        }
         if kind == .sessao { kind = .fato }
         // The bank cuts at its limit; never answer "saved" for a text that was not kept whole.
         guard fact.trimmingCharacters(in: .whitespacesAndNewlines).count <= MemoryBank.maximumLength else {

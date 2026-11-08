@@ -31,7 +31,8 @@ extension AppModel {
         guard let client = clientOverride?() ?? account.client(for: account.models.first { $0.id == model },
                                                                credentials: Self.credentials(for: ref.provider),
                                                                conversationID: botID.uuidString + "-ditado") else { return nil }
-        let context = session(botID).conversation?.messages ?? []
+        // The chat on show: while a turn or routine works elsewhere, `conversation` is that work, not what the user sees.
+        let context = (session(botID).parkedChat ?? session(botID).conversation)?.messages ?? []
         let result = await DictationReview.revise(text, context: Array(context.suffix(40)), vocabulary: vocabulary, client: client, model: model)
         if let usage = result.usage, !isResetting, self.bot(botID) != nil {
             // On the Uso page, apart from the chat: a call the app made for itself, billed whether or not its text was kept.
@@ -51,7 +52,8 @@ extension AppModel {
                                                                conversationID: botID.uuidString + "-lateral") else {
             return .failed("Não consegui falar com o modelo.")
         }
-        let context = session(botID).conversation?.messages ?? []
+        // The chat on show: while a turn or routine works elsewhere, `conversation` is that work, not what the user sees.
+        let context = (session(botID).parkedChat ?? session(botID).conversation)?.messages ?? []
         let result = await SideQuestion.ask(question, context: context, client: client, model: model, onText: onText)
         if let usage = result.usage, !isResetting, self.bot(botID) != nil {
             recordAuxiliaryUsage(usage, botID: botID, model: ModelRef(provider: ref.provider, model: model).text)

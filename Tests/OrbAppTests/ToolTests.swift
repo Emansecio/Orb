@@ -180,6 +180,16 @@ final class ToolTests {
         }
     }
 
+    @Test func rememberRefusesAnUnknownTipoInsteadOfSavingAFact() async throws {
+        let bank = MemoryBank(directory: directory.appending(path: "memoria"))
+        let context = ToolContext(workingDirectory: directory, memory: bank)
+        let error = await #expect(throws: ToolError.self) {
+            try await RememberTool().run(.object(["fact": .string("x"), "tipo": .string("lembrete")]), context: context)
+        }
+        #expect(error?.message.contains("preferencia") == true)
+        #expect(await bank.snapshot().items(.fato).isEmpty)
+    }
+
     @Test func catalogIsWellFormed() {
         let names = ToolBox.all.map(\.spec.name)
         #expect(Set(names).count == names.count)

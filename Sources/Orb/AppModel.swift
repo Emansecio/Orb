@@ -1363,6 +1363,8 @@ final class AppModel {
         let name = bot(botID)?.name ?? "Orb"
         let profile = bot(botID).map(KeptProfile.init)
         let session = session(botID)
+        // Read before `bots.removeAll`: `live(botID)` is an empty BotLive once the Orb is gone, and its chats with it.
+        let chatIDs = live(botID).chats?.list.map(\.id) ?? []
         liveBot(botID)?.stopComposing() // its watcher task ends with it
         if dictation.botID == botID { dictation.cancel() } // its field goes away: nothing to write the words into
         session.memoryRequest = nil
@@ -1418,7 +1420,7 @@ final class AppModel {
             let folder = library.directory(for: botID)
             Task.detached(priority: .utility) { try? FileManager.default.removeItem(at: folder) }
         }
-        for chat in live(botID).chats?.list.map(\.id) ?? [] { chatDrafts[chat] = nil } // read before the Orb is gone
+        for chat in chatIDs { chatDrafts[chat] = nil }
         leaveGroups(botID, name: name) // MultiOrb (WP5): before the Orb is gone, so the groups can say who left
         bots.removeAll { $0.id == botID } // `normalizeSkills` takes it out of the skills' scopes
         // A connector scoped to this Orb keeps its (maybe now empty) scope, like one with no Orb picked.
@@ -1429,9 +1431,11 @@ final class AppModel {
         InspectorTabMemory.remember(.general, for: botID) // .general is stored as no key at all
         // Its Claude Code processes, if any is idle: one per conversation, not only the one on show.
         if ClaudePipeIdlePool.shared.count > 0 {
-            let others = (live(botID).chats?.list.map { Optional($0.id) } ?? []) + [nil]
-            var ids = gatewaySessionIDs(of: botID, chats: others)
-            if let id = session.conversation?.gatewaySessionID { ids.append(id) }
+            var ids = gatewaySessionIDs(of: botID, chats: chatIDs.map { Optional($0) } + [nil])
+            // The chat on show is parked while a turn or routine works on `conversation`: both can hold a process.
+            for conversation in [session.conversation, session.parkedChat] {
+                if let id = conversation?.gatewaySessionID { ids.append(id) }
+            }
             for id in ids { ClaudePipeIdlePool.shared.stop(id) }
         }
         session.close()

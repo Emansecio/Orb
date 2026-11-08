@@ -114,8 +114,18 @@ enum KeptMemories {
 
     /// "<name> – ", the start of every folder kept for an Orb called `name` (slashes and colons cannot be in a folder name).
     static func namePrefix(for name: String) -> String {
-        let safe = String(name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-").prefix(60))
+        // A leading "." would make the folder hidden, and the listing skips hidden files.
+        var cleaned = name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+        cleaned = String(cleaned.drop { $0 == "." || $0.isWhitespace })
+        let safe = String(cleaned.prefix(60))
         return (safe.isEmpty ? "Orb" : safe) + separator
+    }
+
+    /// Whether `folderName` was kept for an Orb called exactly `name` ("<name> – <date>", maybe " (2)"). A longer
+    /// name that starts with the same words ("Ana – Sul") does not match.
+    static func isFolder(_ folderName: String, keptFor name: String) -> Bool {
+        let parsed = parse(folderName: folderName)
+        return parsed.date != nil && parsed.name + separator == namePrefix(for: name)
     }
 
     /// Moves `source` (an Orb's memory folder) to `_guardadas/<name> – <date>` under `root`, with `profile` written

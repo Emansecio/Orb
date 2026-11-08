@@ -234,9 +234,11 @@ extension AppModel {
 
     /// The folder `MemoryLibrary.keep` made for an Orb called `name` (`<name> – <date>`), newest first.
     nonisolated static func newestKeptFolder(named name: String, in directory: URL) -> URL? {
-        let prefix = KeptMemories.namePrefix(for: name)
         let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
-        return names.filter { $0.hasPrefix(prefix) }.max().map { directory.appending(path: $0) }
+        // Newest by the date in the name: comparing the whole text would rank a longer name first.
+        let newest = names.filter { KeptMemories.isFolder($0, keptFor: name) }
+            .max { (KeptMemories.parse(folderName: $0).date ?? .distantPast, $0) < (KeptMemories.parse(folderName: $1).date ?? .distantPast, $1) }
+        return newest.map { directory.appending(path: $0) }
     }
 
     // MARK: Menu bar

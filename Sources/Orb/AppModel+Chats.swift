@@ -80,7 +80,8 @@ extension AppModel {
         let session = session(botID)
         // Its Claude Code process, if one is idle, would keep the deleted conversation alive (and its session file) until it expires;
         // its tab in the Orb's browser would stay open until the next launch.
-        let ids = chat == session.chatID ? [session.conversation?.gatewaySessionID].compactMap { $0 }
+        // The chat on show is `parkedChat` while a turn or routine works on `conversation`.
+        let ids = chat == session.chatID ? [(session.parkedChat ?? session.conversation)?.gatewaySessionID].compactMap { $0 }
                                          : gatewaySessionIDs(of: botID, chats: [chat])
         for id in ids {
             ClaudePipeIdlePool.shared.stop(id)

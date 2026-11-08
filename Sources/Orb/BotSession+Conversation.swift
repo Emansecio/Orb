@@ -467,12 +467,16 @@ extension BotSession {
             return
         }
         let bank = model.memory.bank(for: id), botID = id
+        // The conversation of the request, taken now: after the await another one may be the `conversation` (the turn
+        // ended behind the chat on show), and the line would land there.
+        let chat = conversationChat
         Task { [weak self] in
             // The body is what you said, as when the model saves it (who asked stays in the origin), so the same fact
             // saved later is recognized as this one. The chat says it was kept once it was.
             let outcome = await bank.remember(content, kind: .fato, title: content, origin: .voce)
-            self?.append(.notice(outcome == .failed ? "Não consegui guardar na memória: \(MemoryText.clip(content, 160))"
-                                 : "\(NoticeAction.keptMemoryPrefix) \(MemoryText.clip(content, 160))"))
+            let notice = TranscriptItem.Kind.notice(outcome == .failed ? "Não consegui guardar na memória: \(MemoryText.clip(content, 160))"
+                                                    : "\(NoticeAction.keptMemoryPrefix) \(MemoryText.clip(content, 160))")
+            if let chat { model.appendToChat(notice, of: botID, in: chat) } else { self?.append(notice) }
             await model.refreshMemory(botID)
         }
     }

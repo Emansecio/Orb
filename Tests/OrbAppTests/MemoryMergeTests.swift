@@ -156,6 +156,15 @@ import Testing
         #expect(model.live(botID).memory.items.map(\.title) == ["Servidor de produção"])
     }
 
+    @Test @MainActor func unifyingInAReadOnlyOrbSaysWhyAndChangesNothing() async throws {
+        let model = AppModel(store: Store(directory: root.appending(path: "data")), runsBackgroundWork: false)
+        let botID = model.createBot(name: "Atlas", role: "Teste", orb: OrbConfig(), model: "", mode: .readOnly, identity: "",
+                                    interview: false, folder: .home).id
+        await model.applyMemoryMerge(botID)
+        let notices = (model.session(botID).conversation?.items ?? []).compactMap { if case .notice(let text) = $0.kind { text } else { nil } }
+        #expect(notices.contains { $0.contains("só leitura") })
+    }
+
     @Test @MainActor func comingBackToTheAppShowsWhatChangedInTheMemoryAndSkipsReadingItWhenNothingDid() async throws {
         let model = AppModel(store: Store(directory: root.appending(path: "data")), runsBackgroundWork: false)
         let botID = model.createBot(name: "Atlas", role: "Teste", orb: OrbConfig(), model: "", mode: .ask, identity: "",

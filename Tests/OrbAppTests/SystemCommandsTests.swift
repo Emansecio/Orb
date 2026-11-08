@@ -440,6 +440,21 @@ import Testing
         #expect(AppModel.newestKeptFolder(named: "Atlas", in: root)?.lastPathComponent == "Atlas – 2026-10-07 18.30")
         #expect(AppModel.newestKeptFolder(named: "Zeca", in: root) == nil)
     }
+
+    @Test func keptMemoryFolderOfALongerNameIsNotTakenForTheShorterOne() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "kept-\(UUID().uuidString)")
+        defer { removeTestFolder(root) }
+        for name in ["Ana – 2026-10-01 09.00", "Ana – Sul – 2026-10-07 18.30"] {
+            try FileManager.default.createDirectory(at: root.appending(path: name), withIntermediateDirectories: true)
+        }
+        #expect(AppModel.newestKeptFolder(named: "Ana", in: root)?.lastPathComponent == "Ana – 2026-10-01 09.00")
+        #expect(AppModel.newestKeptFolder(named: "Ana – Sul", in: root)?.lastPathComponent == "Ana – Sul – 2026-10-07 18.30")
+    }
+
+    @Test func keptFolderNameNeverStartsWithADot() {
+        #expect(!KeptMemories.folderName(for: ".secreto", at: .now).hasPrefix("."))
+        #expect(KeptMemories.folderName(for: "...", at: .now).hasPrefix("Orb – "))
+    }
 }
 
 /// A command that opens an Orb's chat leaves a request the chat takes when it is on screen.

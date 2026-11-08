@@ -22,7 +22,8 @@ extension AppModel {
                                                                    conversationID: botID.uuidString + "-memoria") else { return }
             session.memoryConsolidationTried = now
             let result = await MemoryConsolidation.consolidate(pinned, client: client, model: model)
-            guard !isResetting, self.bot(botID) != nil else { return }
+            // The Orb may have been switched to read-only while the model worked: it must not rewrite memory then.
+            guard !isResetting, let current = self.bot(botID), current.permissionMode != .readOnly else { return }
             if let usage = result.usage {
                 // On the Uso page, apart from the chat: a call the app made for itself.
                 recordAuxiliaryUsage(usage, botID: botID, model: ModelRef(provider: ref.provider, model: model).text)
@@ -93,7 +94,12 @@ extension AppModel {
 
     /// "Unificar": applies the proposal and says in the chat what was done.
     func applyMemoryMerge(_ botID: UUID) async {
-        guard sessions[botID] != nil, bot(botID)?.permissionMode != .readOnly else { return }
+        guard sessions[botID] != nil else { return }
+        guard bot(botID)?.permissionMode != .readOnly else {
+            appendToChat(.notice("Este Orb está em só leitura, então a memória não muda. Mude o modo de permissão para unificar."),
+                         of: botID, in: session(botID).chatID)
+            return
+        }
         let text = switch await memory.bank(for: botID).applyMerge() {
         case nil: "A proposta de unificação já não vale (foi aplicada ou expirou); nada mudou."
         case let done? where done.groups == 0: "A memória mudou desde a proposta; nada foi unificado."
