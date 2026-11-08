@@ -14,7 +14,7 @@ import SwiftUI
 /// - `delegation-group`: Atlas creates the group Lançamento, asks it from its chat and gets the group's answer, and a notice
 ///   from the Revisor arrives.
 /// - `delegation-deletion`: deletions Atlas asked for in turns nobody watched: two waiting (Apagar and Manter), one done,
-///   one kept, each with the line that tells Atlas.
+///   one kept, each with the line that tells Atlas, one whose target is gone ("não vale mais"), and one clicked too late.
 @MainActor
 enum DelegationSnapshots {
     static func view(_ screen: String, model: AppModel) -> AnyView? {
@@ -122,7 +122,8 @@ enum DelegationSnapshots {
         ]
     }
 
-    /// Atlas's chat after routine runs that wanted to delete: two asks waiting (Apagar and Manter), one done, one kept.
+    /// Atlas's chat after routine runs that wanted to delete: two asks waiting (Apagar and Manter), one done, one kept, one no
+    /// longer valid unanswered, and one answered after it stopped applying.
     private static func deletionLines(_ team: Team, group: UUID) -> [TranscriptItem] {
         let card = "Atlas quer apagar o Revisor. Motivo: faz o mesmo que o Pesquisador. A conversa, a memória e as rotinas dele vão embora."
         func ask(_ ask: DeletionAsk, _ outcome: OrbEvent.Outcome? = nil) -> OrbEvent {
@@ -133,6 +134,7 @@ enum DelegationSnapshots {
         func answer(_ asked: OrbEvent) -> OrbEvent { var line = asked; line.kind = .deletionAnswered; return line }
         let gone = OrbRef(id: UUID(), name: "Tradutor"), archive = UUID()
         let done = ask(.orb(gone), .finished), keptGroup = ask(.group(id: archive, name: "Arquivo"), .failed)
+        let late = ask(.orb(OrbRef(id: UUID(), name: "Redator")), .attention)
         return [
             TranscriptItem(.user(text: "Arruma o time quando der", attachments: [])),
             TranscriptItem(.event(ask(.orb(OrbRef(team.reviewer))))),
@@ -141,6 +143,9 @@ enum DelegationSnapshots {
             TranscriptItem(.event(answer(done))),
             TranscriptItem(.event(keptGroup)),
             TranscriptItem(.event(answer(keptGroup))),
+            TranscriptItem(.event(ask(.orb(OrbRef(id: UUID(), name: "Antigo"))))), // its target is gone: no buttons
+            TranscriptItem(.event(late)),
+            TranscriptItem(.event(answer(late))),
         ]
     }
 
