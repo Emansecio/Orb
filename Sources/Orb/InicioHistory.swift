@@ -93,6 +93,18 @@ struct InicioHistory: Codable, Equatable, Sendable {
         return entries.count != before
     }
 
+    /// A routine changed Orb: its rows follow it, so they open, show and are forgotten with the new Orb, not the old one.
+    @discardableResult
+    mutating func moveRoutine(_ routineID: UUID, to bot: UUID) -> Bool {
+        var changed = false
+        for index in entries.indices {
+            guard case .routine(let old, routineID, let run) = entries[index].origin, old != bot else { continue }
+            entries[index].origin = .routine(bot: bot, routine: routineID, run: run)
+            changed = true
+        }
+        return changed
+    }
+
     mutating func prune(now: Date = .now) {
         entries.removeAll { $0.date < now.addingTimeInterval(-Self.retention) }
         if entries.count > Self.limit { entries.removeFirst(entries.count - Self.limit) }

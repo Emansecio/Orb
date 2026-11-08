@@ -146,15 +146,23 @@ extension [Routine] {
     /// The routine with this name (case and accents aside), never a guess: deleting the wrong task is not undone. The
     /// refusal lists the names there are.
     func named(_ name: String) throws -> Routine {
-        if let found = first(where: { $0.name.sameName(as: name) }) { return found }
+        let matches = filter { $0.name.sameName(as: name) }
+        // Older data may hold two with one name: acting on the first could delete the wrong one.
+        if matches.count > 1 {
+            throw ToolError("Há \(matches.count) tarefas chamadas “\(name)”. Peça ao usuário para renomear uma na tela de Rotinas.")
+        }
+        if let found = matches.first { return found }
         throw ToolError("Não achei a tarefa “\(name)”. As deste Orb: \(isEmpty ? "nenhuma" : map { "“\($0.name)”" }.joined(separator: ", ")).")
     }
 }
 
-private extension String {
+extension String {
     /// Without the quotes the results put around names (“…”), which the model tends to copy.
     var foldedName: String { trimmingCharacters(in: Self.nameEdges).folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil) }
     static let nameEdges = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "“”\"'"))
     func sameName(as other: String) -> Bool { foldedName == other.foldedName }
+}
+
+private extension String {
     var lowercasedFirst: String { prefix(1).lowercased() + dropFirst() }
 }

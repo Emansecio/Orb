@@ -2233,6 +2233,8 @@ final class AppModel {
         guard !isRoutineHeld(routineID) else { return false }
         if let unsaved = unsavedRoutineConversations[routineID] { unsavedRoutineConversations[routineID] = (newBot, unsaved.conversation) }
         store.moveRoutineConversation(routine: routineID, from: oldBot, to: newBot)
+        // Novidades rows carry the Orb in their origin: left behind, they would say the routine is gone and vanish with the old Orb.
+        if inicio.moveRoutine(routineID, to: newBot) { store.saveInicioJournal(inicio) }
         return true
     }
 

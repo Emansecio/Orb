@@ -537,6 +537,74 @@ struct SchedulePermissionTests {
         #expect(throws: ToolError.self) { try ScheduleCommand(call("delete", name: "   ")) }
     }
 
+    @Test @MainActor func twoTasksWithOneNameAreNeverGuessed() throws {
+        let (model, atlas, _) = setUp()
+        // Older data (or the editor before it had the same rule) can hold two with one name.
+        model.routines = [Routine(name: "Manhã", botID: atlas.id, prompt: "a", schedule: .daily(hour: 9, minute: 0)),
+                          Routine(name: "manhã", botID: atlas.id, prompt: "b", schedule: .daily(hour: 9, minute: 0))]
+        for action in ["pause", "delete", "update"] {
+            let error = try #require(#expect(throws: ToolError.self, "\(action)") {
+                _ = try run(model, atlas, call(action, name: "Manhã", prompt: "novo"))
+            })
+            #expect(error.localizedDescription.contains("2 tarefas"))
+        }
+        #expect(model.routines.count == 2 && model.routines.allSatisfy(\.isEnabled) && model.routines[0].prompt == "a")
+    }
+
+    @Test @MainActor func theEditorAppliesTheToolsLimitsAndGivesBlankNamesAFreeOne() throws {
+        let (model, atlas, lia) = setUp()
+        let existing = Routine(name: "Manhã", botID: atlas.id, prompt: "a", schedule: .daily(hour: 9, minute: 0))
+        model.routines = [existing]
+        func draft(_ name: String, prompt: String = "x", bot: Bot? = nil) -> Routine {
+            Routine(name: name, botID: (bot ?? atlas).id, prompt: prompt, schedule: .daily(hour: 9, minute: 0))
+        }
+        #expect(model.routineEditProblem(draft("MANHA"), original: nil) != nil)
+        #expect(model.routineEditProblem(draft("Manhã"), original: nil) != nil)
+        #expect(model.routineEditProblem(draft("Manhã", bot: lia), original: nil) == nil) // another Orb's namespace
+        #expect(model.routineEditProblem(draft(""), original: nil) == nil)
+        #expect(model.routineEditProblem(existing, original: existing) == nil) // itself is no clash
+        #expect(model.routineEditProblem(draft("ok", prompt: String(repeating: "a", count: ScheduleCommand.promptLimit + 1)), original: nil) != nil)
+        #expect(model.routineEditProblem(draft("ok", prompt: String(repeating: "a", count: ScheduleCommand.promptLimit)), original: nil) == nil)
+
+        // Blank names from prompts that start alike do not repeat.
+        let first = draft("", prompt: "Leia meus e-mails não lidos agora")
+        model.routines.append(first)
+        var second = draft("", prompt: "Leia meus e-mails não lidos depois")
+        second.name = model.routineSaveName(second)
+        #expect(!second.name.sameName(as: first.name) && second.name.hasPrefix(RoutineText.defaultName(fromPrompt: second.prompt)))
+
+        // The limit counts the Orb's routines, for a new one and for one that moves in.
+        model.routines = (0..<AppModel.scheduledTaskLimit).map { draft("R\($0)") }
+        #expect(model.routineEditProblem(draft("novo"), original: nil) != nil)
+        let ofLia = draft("da Lia", bot: lia)
+        model.routines.append(ofLia)
+        var moved = ofLia
+        moved.botID = atlas.id
+        #expect(model.routineEditProblem(moved, original: ofLia) != nil)
+        #expect(model.routineEditProblem(model.routines[0], original: model.routines[0]) == nil) // staying put is fine
+    }
+
+    @Test func savingFromTheEditorKeepsWhatTheOrbChangedMeanwhile() {
+        let bot = UUID()
+        let original = Routine(name: "Resumo", botID: bot, prompt: "velho", schedule: .daily(hour: 9, minute: 0))
+        var current = original
+        current.prompt = "novo do Orb"
+        current.precheck = RoutinePrecheck(command: ["/bin/true"])
+        current.schedule = .everyHours(2)
+        current.goal = RoutineGoal(target: "meta do Orb")
+        var edited = original
+        edited.name = "Resumo da manhã" // the only thing the editor changed
+        let saved = Routine.merged(edited: edited, original: original, current: current)
+        #expect(saved.name == "Resumo da manhã")
+        #expect(saved.prompt == "novo do Orb" && saved.precheck != nil && saved.schedule == .everyHours(2))
+        #expect(saved.goal?.target == "meta do Orb" && saved.createdAt == current.createdAt)
+
+        edited.schedule = .daily(hour: 7, minute: 0)
+        let now = Date.now.addingTimeInterval(60)
+        let rescheduled = Routine.merged(edited: edited, original: original, current: current, now: now)
+        #expect(rescheduled.schedule == .daily(hour: 7, minute: 0) && rescheduled.createdAt == now && rescheduled.lastRun == nil)
+    }
+
     @Test @MainActor func twoTasksDoNotShareAName() throws {
         let (model, atlas, lia) = setUp()
         _ = try run(model, atlas, call("create", name: "Manhã", prompt: "x", when: daily9))

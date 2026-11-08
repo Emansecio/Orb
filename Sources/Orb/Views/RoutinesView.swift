@@ -903,6 +903,8 @@ struct RoutineEditor: View {
     /// Read once when the editor opens, so turning the goal on or off does not move the section.
     @State private var leadsWithGoal = false
     @State private var goalTarget = ""
+    /// The routine as the editor opened it: `save()` applies only what the editor changed over it (`Routine.merged`).
+    @State private var original: Routine?
 
     private var isStored: Bool { model.routines.contains { $0.id == routine.id } }
     /// Fixed when the editor opens: the routine may be deleted meanwhile (the Orb can do it from the chat) and it is
@@ -1084,7 +1086,7 @@ struct RoutineEditor: View {
                         destructive: { isConfirmingDelete = true },
                         cancel: { dismiss() },
                         primaryTitle: isNew ? "Criar rotina" : "Salvar",
-                        isPrimaryDisabled: !hasPrompt || lacksGoal || scheduleProblem != nil,
+                        isPrimaryDisabled: !hasPrompt || lacksGoal || scheduleProblem != nil || editProblem != nil,
                         primary: save)
         }
         .confirmationDialog("Apagar “\(RoutineText.resolvedName(routine.name, prompt: routine.prompt))”?",
@@ -1105,8 +1107,11 @@ struct RoutineEditor: View {
         if !hasPrompt { return "Escreva o que o Orb deve fazer." }
         if lacksGoal { return "Escreva como saber que a meta deu certo." }
         if let scheduleProblem { return scheduleProblem }
-        return nil
+        return editProblem
     }
+
+    /// The `schedule` tool's limits (unique name, task count, prompt size), which the tool applies to what an Orb creates.
+    private var editProblem: String? { model.routineEditProblem(routine, original: isNew ? nil : original) }
 
     private var preview: String {
         if !isNew, !routine.isEnabled { return "Esta rotina está pausada. Ative-a no cartão para voltar a rodar." }
@@ -1174,6 +1179,7 @@ struct RoutineEditor: View {
 
     private func load() {
         opensNew = !isStored
+        if original == nil { original = routine }
         let calendar = Calendar.current
         showsAdvanced = routine.permissionMode != nil
         tracksGoal = routine.goal != nil
@@ -1207,35 +1213,28 @@ struct RoutineEditor: View {
         let schedule = draftSchedule
         // Checked again here, not from `scheduleCheck`, which may still wait for the pause after a keystroke.
         guard hasPrompt, !lacksGoal, (!isNew && schedule == routine.schedule) || schedule.problem() == nil else { return }
-        routine.name = RoutineText.resolvedName(routine.name, prompt: routine.prompt)
+        guard editProblem == nil else { return }
+        routine.name = model.routineSaveName(routine)
         routine.goal = tracksGoal ? RoutineGoal(target: String(trimmedGoal.prefix(RoutineGoal.targetLimit))) : nil
-        if schedule != routine.schedule {
-            // Count the next run from now, not from when the routine was created.
-            routine.schedule = schedule
-            routine.createdAt = .now
-            routine.lastRun = nil
-        }
+        let scheduleChanged = schedule != routine.schedule
+        routine.schedule = schedule
         if let index = model.routines.firstIndex(where: { $0.id == routine.id }) {
-            // The Orb or a run may have changed it while the editor was open: its history and its on/off switch are
-            // not the editor's to overwrite.
+            // The Orb or a run may have changed it while the editor was open: only what this editor changed is written,
+            // so history, on/off switch, precheck and the Orb's own edits stay.
             let current = model.routines[index]
-            routine.runs = current.runs
-            routine.followUps = current.followUps
-            routine.lastResult = current.lastResult
-            routine.isEnabled = current.isEnabled
-            // The last check measured the goal as it was: a new target starts unmeasured.
-            if let goal = routine.goal, goal.target == current.goal?.target {
-                routine.goal?.check = current.goal?.check
-                routine.goal?.updatedAt = current.goal?.updatedAt
-            }
-            if routine.schedule == current.schedule { routine.lastRun = current.lastRun }
-            if routine.botID != current.botID,
-               !model.moveRoutineConversation(routine.id, from: current.botID, to: routine.botID) {
+            let merged = Routine.merged(edited: routine, original: original ?? current, current: current)
+            if merged.botID != current.botID,
+               !model.moveRoutineConversation(routine.id, from: current.botID, to: merged.botID) {
                 moveProblem = "Esta rotina está rodando ou na fila. Espere terminar para trocar o Orb."
                 return
             }
-            model.routines[index] = routine
+            model.routines[index] = merged
         } else if isNew {
+            if scheduleChanged {
+                // Count the next run from now, not from when the draft was created.
+                routine.createdAt = .now
+                routine.lastRun = nil
+            }
             model.routines.append(routine)
             if runsNow { model.runRoutine(routine.id, manual: true) }
         } // else deleted while open: saving does not bring it back

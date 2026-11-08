@@ -62,6 +62,17 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(store.readRoutineConversation(routine: routine.id, for: target).value?.items.count == 2)
     }
 
+    @Test @MainActor func movingARoutineMovesItsNewsToo() async {
+        let (model, first, routine) = setUp()
+        let target = UUID()
+        model.recordInicioRoutine(bot: first.id, routine: routine.id, run: RoutineRun(date: .now, succeeded: true, summary: "r"), outcome: .completed)
+        #expect(model.moveRoutineConversation(routine.id, from: first.id, to: target))
+        #expect(model.inicio.entries.map(\.botID) == [target])
+        // Deleting the old Orb no longer takes the routine's news with it.
+        model.forgetInicio { $0.botID == first.id }
+        #expect(model.inicio.entries.count == 1)
+    }
+
     @Test @MainActor func movingARunningRoutineIsRefusedAndLosesNothing() async {
         let gate = TestGate()
         let (model, first, routine) = setUp(StubModel(gate: gate))
