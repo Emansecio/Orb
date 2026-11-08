@@ -113,17 +113,29 @@ extension OrbProposal {
         return String(joined.prefix(OrbProposeTool.instructionsLimit)).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// A random look with whatever the model asked for that the catalog knows laid over it (an unknown id is left out).
+    /// A random look with whatever the model asked for that the catalog knows laid over it. The shape is the round one unless
+    /// asked otherwise, as the tool promises (an unknown id is left out; `lookIssues` tells the model which).
     static func look(from value: JSONValue?, catalog: OrbCatalog = .shared) -> OrbConfig {
         var config = OrbConfig.random()
+        config.shape = OrbConfig().shape
         guard let value, case .object = value else { return config }
-        let singles: [(String, OrbCategory)] = [("color", .color), ("shape", .shape), ("eyes", .eyes), ("mouth", .mouth), ("brows", .brows),
-                                                ("cheeks", .cheeks)]
-        for (key, category) in singles {
+        for (key, category) in lookFields {
             guard let id = value[key]?.string, catalog.ids(category).contains(id) else { continue }
             config.set(category, id)
         }
         return config
+    }
+
+    private static let lookFields: [(String, OrbCategory)] = [("color", .color), ("shape", .shape), ("eyes", .eyes), ("mouth", .mouth),
+                                                              ("brows", .brows), ("cheeks", .cheeks)]
+
+    /// The look fields the catalog did not accept, so the model hears about dropped ones instead of assuming them.
+    static func lookIssues(from value: JSONValue?, catalog: OrbCatalog = .shared) -> [String] {
+        guard let value, case .object = value else { return [] }
+        return lookFields.compactMap { key, category in
+            guard let raw = value[key], !(raw.string.map(catalog.ids(category).contains) ?? false) else { return nil }
+            return key
+        }
     }
 
     /// The proposal as it may be created: everything held to the rules again, since the card's fields are free text and the

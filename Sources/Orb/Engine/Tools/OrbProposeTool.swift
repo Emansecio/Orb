@@ -21,11 +21,26 @@ struct OrbProposeTool: AgentTool {
                                      "description": .string("Only what the role needs: each adds tools to every request. Empty: all of yours."),
                                      "items": .object(["type": .string("string"),
                                                        "enum": .array(["terminal", "browser", "computerUse"].map(JSONValue.string))])]),
-            "look": JSONValue.schema(Dictionary(uniqueKeysWithValues: OrbProposeTool.looks.map {
-                ($0, $0 == "shape" ? JSONValue.property("string", "Body shape; default round.") : JSONValue.property("string"))
-            })),
+            "look": JSONValue.schema(Dictionary(uniqueKeysWithValues: OrbProposeTool.looks.map { ($0, OrbProposeTool.lookProperty($0)) })),
             "reason": .property("string", "Why, in one sentence."),
         ], required: ["name", "role", "instructions"]))
+
+    /// A look field with the catalog's real ids as an enum: they are Portuguese ("circulo", "pilulas") and cannot be guessed.
+    private static func lookProperty(_ key: String) -> JSONValue {
+        let category: OrbCategory = switch key {
+        case "color": .color
+        case "shape": .shape
+        case "eyes": .eyes
+        case "mouth": .mouth
+        case "brows": .brows
+        default: .cheeks
+        }
+        var property: [String: JSONValue] = ["type": .string("string")]
+        if key == "shape" { property["description"] = .string("Default circulo.") }
+        let ids = OrbCatalog.shared.options(category).map(\.id)
+        if !ids.isEmpty { property["enum"] = .array(ids.map(JSONValue.string)) }
+        return .object(property)
+    }
 
     var kind: ToolCall.Kind { .orbs }
     var capability: Capability? { nil }
@@ -52,6 +67,8 @@ struct OrbProposeTool: AgentTool {
         let proposal = OrbProposal.make(from: support.creator, args: arguments, existingNames: support.existingNames)
         let outcome = await propose(proposal)
         if case .failed(let reason) = outcome { throw ToolError(reason) }
-        return outcome.modelText
+        let ignored = OrbProposal.lookIssues(from: arguments["look"])
+        let warning = ignored.isEmpty ? "" : "\nIgnored unknown look values (random ones used): \(ignored.joined(separator: ", "))."
+        return outcome.modelText + warning
     }
 }

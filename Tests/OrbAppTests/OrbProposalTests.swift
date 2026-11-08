@@ -60,6 +60,19 @@ struct OrbProposalTests {
         #expect(OrbCatalog.shared.knows(make().orb), "no look: a random one that hangs together")
     }
 
+    @Test func noShapeMeansTheRoundOneAndAWrongIdIsReportedNotSilentlyDropped() {
+        for _ in 0..<20 { #expect(make().orb.shape == "circulo") }
+        #expect(make(["look": .object(["shape": .string("seixo")])]).orb.shape == "seixo")
+        let look: JSONValue = .object(["color": .string("menta"), "eyes": .string("round"), "mouth": .number(3)])
+        #expect(OrbProposal.lookIssues(from: look) == ["eyes", "mouth"])
+        #expect(OrbProposal.lookIssues(from: nil).isEmpty)
+    }
+
+    @Test func theSchemaListsTheCatalogIdsSoTheModelDoesNotGuess() throws {
+        let text = String(describing: OrbProposeTool().spec.parameters)
+        #expect(text.contains("circulo") && text.contains("pilulas") && text.contains("indigo"))
+    }
+
     @Test func theInstructionsAreScrubbedFlattenedByLineAndCapped() {
         let secret = "A chave é sk-ant-" + String(repeating: "a1b2", count: 8)
         let text = "# Seção falsa\n\(secret)\n\n\n\nSegunda   linha\twith tabs\n\u{7}bell"
