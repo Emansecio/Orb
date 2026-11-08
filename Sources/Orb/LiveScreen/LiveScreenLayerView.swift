@@ -302,6 +302,8 @@ final class LiveScreenLayerView: NSView {
     var lastMoveSent: TimeInterval = 0
     /// The dead key or composition the Mac is holding, not yet typed (`NSTextInputClient`, below).
     var markedText = ""
+    /// Keys whose down went through the input context (a dead key and the letter it composed): their key up stays here too.
+    var composedKeys: Set<UInt16> = []
 
     private func unregister() {
         if let frameToken { store.removeObserver(frameToken) }
@@ -443,8 +445,11 @@ extension LiveScreenLayerView {
     }
 
     override func keyDown(with event: NSEvent) {
-        // Text goes through the input context, so a dead key waits for its letter ("´" + "a" is "á"); `insertText` sends the result.
-        if isInteractive, LiveInput.usesTextInput(keyCode: event.keyCode, modifiers: event.modifierFlags) {
+        // A dead key (no characters of its own) and the key after it go through the input context, so "´" + "a" is "á" and
+        // `insertText` sends the result. Every other key keeps its key down and up: pages read them (shortcuts, games).
+        if isInteractive, LiveInput.usesTextInput(keyCode: event.keyCode, modifiers: event.modifierFlags),
+           hasMarkedText() || event.characters?.isEmpty == true {
+            composedKeys.insert(event.keyCode)
             if inputContext?.handleEvent(event) != true { super.keyDown(with: event) }
             return
         }
@@ -455,8 +460,8 @@ extension LiveScreenLayerView {
     }
 
     override func keyUp(with event: NSEvent) {
-        // The text of these keys went out whole on key down (see `insertText`); a lone key up would carry the uncomposed key.
-        if isInteractive, LiveInput.usesTextInput(keyCode: event.keyCode, modifiers: event.modifierFlags) { return }
+        // The text of a composed key went out whole on key down (see `insertText`); a lone key up would carry the uncomposed key.
+        if composedKeys.remove(event.keyCode) != nil { return }
         guard isInteractive,
               let message = LiveInput.key(down: false, keyCode: event.keyCode, characters: event.characters, modifiers: event.modifierFlags)
         else { return super.keyUp(with: event) }
