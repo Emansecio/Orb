@@ -134,7 +134,7 @@ struct BrowserTabTool: AgentTool {
                 ?? "Nenhum navegador compatível (Safari, Chrome, Arc, Edge, Brave) está aberto."
         }
 
-        let includeText = arguments["include_text"]?.bool ?? false
+        let includeText = arguments.flag("include_text")
         let limit = arguments.integer("max_chars", default: 6000, in: 100...12_000)
         var sections: [String] = []
         for browser in running {

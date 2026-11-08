@@ -357,7 +357,7 @@ struct AppsListTool: AgentTool {
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) { ("Listando apps abertos", "") }
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
-        let background = arguments["include_background"]?.bool ?? false
+        let background = arguments.flag("include_background")
         let apps = await MainActor.run { RunningAppInfo.current(includeBackground: background) }
         // From the bundles only (cached): no Apple Event, no Accessibility call, nothing that wakes an app.
         var control: [Int32: AppControlInfo] = [:]
@@ -390,16 +390,16 @@ struct AppQuitTool: AgentTool {
 
     /// A forced quit loses unsaved work, so "Automático" still asks (and "Sempre permitir" never covers it).
     func danger(_ arguments: JSONValue) -> String? {
-        arguments["force"]?.bool == true ? "encerra o app à força, sem deixar salvar" : nil
+        arguments.flag("force") ? "encerra o app à força, sem deixar salvar" : nil
     }
 
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) {
-        (arguments["force"]?.bool == true ? "Forçando o encerramento" : "Encerrando app", arguments["app"]?.string ?? "")
+        (arguments.flag("force") ? "Forçando o encerramento" : "Encerrando app", arguments["app"]?.string ?? "")
     }
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
         let query = try arguments.requiredString("app")
-        let force = arguments["force"]?.bool ?? false
+        let force = arguments.flag("force")
         let apps = await MainActor.run { RunningAppInfo.current(includeBackground: true) }
         let targets = try Self.select(query, in: apps, ownPID: ProcessInfo.processInfo.processIdentifier)
 
