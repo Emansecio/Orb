@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Testing
 @testable import Orb
 
@@ -147,5 +148,17 @@ struct DictationRecognizerTests {
         #expect(final.lowercased().contains("planilha") && final.lowercased().contains("resumo"), "\(final)")
         #expect(!heard.text.settled.isEmpty && heard.text.quick.isEmpty, "the exact text is what stays")
         #expect(final.hasSuffix("."), "\(final)")
+    }
+}
+
+struct DictationMicrophoneChangeTests {
+    @Test func aChangedMicrophoneTellsTheOwnerExactlyOnce() {
+        guard #available(macOS 26, *) else { return }
+        let capture = SpeechCapture()
+        let calls = OSAllocatedUnfairLock(initialState: 0)
+        capture.onInterrupted = { calls.withLock { $0 += 1 } }
+        capture.configurationChanged()
+        capture.configurationChanged()
+        #expect(calls.withLock { $0 } == 1)
     }
 }

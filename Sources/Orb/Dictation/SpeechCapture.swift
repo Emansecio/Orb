@@ -106,6 +106,11 @@ final class SpeechCapture: @unchecked Sendable {
     private var inputs: [AsyncStream<AnalyzerInput>.Continuation] = []
     private var readers: [Task<Void, Never>] = []
     private var isTapped = false
+    private var configurationObserver: NSObjectProtocol?
+    private let interruption = OSAllocatedUnfairLock(initialState: false)
+    /// Called once when the microphone changed under the capture (headset unplugged, another input chosen): the engine
+    /// stops by itself then, so without this the dictation would stay "listening" to nothing.
+    var onInterrupted: (@Sendable () -> Void)?
 
     /// The system's language as the recognizer has it (pt-BR for a Mac in Portuguese), nil when it has none like it.
     static func locale() async -> Locale? {
@@ -165,8 +170,18 @@ final class SpeechCapture: @unchecked Sendable {
             self?.feed(buffer)
         }
         isTapped = true
+        configurationObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: audio,
+                                                                       queue: nil) { [weak self] _ in self?.configurationChanged() }
         audio.prepare()
         try audio.start()
+    }
+
+    /// The input device changed mid-dictation. The tap's format no longer matches the new device, so the microphone is
+    /// closed and the owner told once, which ends the dictation (keeping what was heard) instead of listening to nothing.
+    func configurationChanged() {
+        guard interruption.withLock({ taken in defer { taken = true }; return !taken }) else { return }
+        closeMicrophone()
+        onInterrupted?()
     }
 
     /// False for the tests, which `feed` the audio themselves.
@@ -215,6 +230,10 @@ final class SpeechCapture: @unchecked Sendable {
     }
 
     private func closeMicrophone() {
+        if let configurationObserver {
+            NotificationCenter.default.removeObserver(configurationObserver)
+            self.configurationObserver = nil
+        }
         guard isTapped else { return }
         isTapped = false
         audio.inputNode.removeTap(onBus: 0)

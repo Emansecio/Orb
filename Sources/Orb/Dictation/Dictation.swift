@@ -84,6 +84,9 @@ final class Dictation {
         phase = .starting
         let capture = SpeechCapture()
         self.capture = capture
+        capture.onInterrupted = { [weak self] in
+            Task { @MainActor in self?.microphoneChanged(capture) }
+        }
         starting = Task { [weak self] in
             do {
                 guard await Self.microphoneAllowed() else { throw DictationError(Self.deniedMessage) }
@@ -128,6 +131,17 @@ final class Dictation {
         }
         self.closing = closing
         await closing.value
+    }
+
+    /// The microphone was swapped or went away while listening: what was heard is kept and the dictation ends, with a
+    /// notice, so the button never keeps "listening" to a device that is gone.
+    private func microphoneChanged(_ capture: AnyObject) {
+        guard self.capture === capture, phase == .listening, let botID else { return }
+        let fail = fail
+        Task { @MainActor [weak self] in
+            await self?.finish()
+            fail(botID, "O microfone mudou durante o ditado, então ele foi encerrado. O que foi ouvido ficou no campo; toque no microfone para continuar.")
+        }
     }
 
     /// Esc while the text is being read over: it stays as dictated, and the closing ends now.
