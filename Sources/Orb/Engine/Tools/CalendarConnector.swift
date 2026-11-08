@@ -447,7 +447,15 @@ final class EventKitBackend: CalendarBackend, @unchecked Sendable {
         if let due = draft.due {
             reminder.dueDateComponents = Calendar.current.dateComponents(draft.dueHasTime ? [.year, .month, .day, .hour, .minute] : [.year, .month, .day], from: due)
         }
+        // A due time alone only sorts the reminder; the Reminders app adds an alarm when a time is set, so do the same.
+        Self.alarms(for: draft).forEach(reminder.addAlarm)
         try store.save(reminder, commit: true)
         return Self.info(reminder)
+    }
+
+    /// One alarm at the due time, only when the draft has a time of day (a date alone must not notify at midnight).
+    static func alarms(for draft: ReminderDraft) -> [EKAlarm] {
+        guard let due = draft.due, draft.dueHasTime else { return [] }
+        return [EKAlarm(absoluteDate: due)]
     }
 }

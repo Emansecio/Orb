@@ -404,6 +404,10 @@ struct CalendarConnectorTests {
         let allDay = try await call(connector, "create_reminder", ["title": .string("Renovar CNH"), "due": .string("2026-10-12")])
         #expect(fake.createdReminders.last?.dueHasTime == false && fake.createdReminders.first?.dueHasTime == true)
         #expect(allDay.contains("para: 2026-10-12") && !allDay.contains("00:00"))
+        // Only a reminder with a time gets an alarm; a date alone must not notify.
+        #expect(EventKitBackend.alarms(for: ReminderDraft(title: "x", due: at("2026-10-11T09:00"))).count == 1)
+        #expect(EventKitBackend.alarms(for: ReminderDraft(title: "x", due: at("2026-10-12"), dueHasTime: false)).isEmpty)
+        #expect(EventKitBackend.alarms(for: ReminderDraft(title: "x")).isEmpty)
         // There is no way to delete a reminder: the Orb can only add.
         #expect(!connector.tools.contains { $0.name.contains("delete") })
     }
