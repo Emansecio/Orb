@@ -10,7 +10,10 @@ extension AppModel {
 
     func refreshGroupBoard(_ id: UUID) async {
         guard group(id) != nil else { return }
-        groupBoards[id] = await memory.groupBank(for: id).snapshot()
+        let snapshot = await memory.groupBank(for: id).snapshot()
+        // The group may have been deleted while the bank was read: do not bring its board back into the dictionary.
+        guard group(id) != nil else { return }
+        groupBoards[id] = snapshot
     }
 
     /// Writes the objective (the board's identity note).
@@ -20,7 +23,9 @@ extension AppModel {
 
     /// The body of `setGroupObjective(_:to:)`: a refused or failed write says so (the field would otherwise look saved).
     func saveGroupObjective(_ text: String, of id: UUID) async {
-        if await !setGroupObjective(text, of: id) {
+        // A group deleted with the field still open (it saves on disappear) has nothing to say: no false "refused" notice.
+        guard group(id) != nil else { return }
+        if await !setGroupObjective(text, of: id), group(id) != nil {
             addNotice(StoreNotice(message: "Não consegui salvar o objetivo do grupo: o texto passa de \(MemoryBank.identityMaximumLength / 1000) mil caracteres ou a pasta não aceitou a gravação."))
         }
         await refreshGroupBoard(id)
@@ -41,25 +46,28 @@ extension AppModel {
     }
 
     /// "Esquecer" on the board; the page is kept for the "Desfazer" that follows.
-    func forgetGroupNote(_ item: MemorySnapshot.Item, of id: UUID) {
-        guard group(id) != nil else { return }
+    /// True when the page was forgotten (and can come back); false when it failed, after the notice, so no "Desfazer" is offered.
+    @discardableResult
+    func forgetGroupNote(_ item: MemorySnapshot.Item, of id: UUID) async -> Bool {
+        guard group(id) != nil else { return false }
         let bank = memory.groupBank(for: id)
         let directory = bank.directory
         let path = item.path, title = item.title
-        Task {
-            guard let forgotten = await Task.detached(operation: { ForgottenMemory.capture(path, title: title, in: directory) }).value,
-                  await bank.forget(path) else {
-                addNotice(StoreNotice(message: Self.couldNotForget(title)))
-                await refreshGroupBoard(id)
-                return
-            }
-            forgottenGroupNotes[id, default: [:]][path] = forgotten
-            // Few are kept: a board forgotten from all day does not hold every old page in memory (no date to tell the oldest).
-            while let extra = forgottenGroupNotes[id]?.keys.first(where: { $0 != path }), (forgottenGroupNotes[id]?.count ?? 0) > 20 {
-                forgottenGroupNotes[id]?[extra] = nil
-            }
+        guard let forgotten = await Task.detached(operation: { ForgottenMemory.capture(path, title: title, in: directory) }).value,
+              await bank.forget(path) else {
+            addNotice(StoreNotice(message: Self.couldNotForget(title)))
             await refreshGroupBoard(id)
+            return false
         }
+        // The group may have gone meanwhile: keep nothing for it.
+        guard group(id) != nil else { return false }
+        forgottenGroupNotes[id, default: [:]][path] = forgotten
+        // Few are kept: a board forgotten from all day does not hold every old page in memory (no date to tell the oldest).
+        while let extra = forgottenGroupNotes[id]?.keys.first(where: { $0 != path }), (forgottenGroupNotes[id]?.count ?? 0) > 20 {
+            forgottenGroupNotes[id]?[extra] = nil
+        }
+        await refreshGroupBoard(id)
+        return true
     }
 
     func restoreGroupNote(_ item: MemorySnapshot.Item, of id: UUID) {

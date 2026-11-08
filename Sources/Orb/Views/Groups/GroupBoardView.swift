@@ -6,7 +6,7 @@ struct GroupBoardView: View {
     let memory: MemorySnapshot
     let setObjective: (String) -> Void
     let remember: (String) -> Void
-    let forget: (MemorySnapshot.Item) -> Void
+    let forget: (MemorySnapshot.Item) async -> Bool
     let restore: (MemorySnapshot.Item) -> Void
 
     @State private var objective: String
@@ -21,7 +21,7 @@ struct GroupBoardView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(memory: MemorySnapshot, setObjective: @escaping (String) -> Void, remember: @escaping (String) -> Void,
-         forget: @escaping (MemorySnapshot.Item) -> Void, restore: @escaping (MemorySnapshot.Item) -> Void) {
+         forget: @escaping (MemorySnapshot.Item) async -> Bool, restore: @escaping (MemorySnapshot.Item) -> Void) {
         self.memory = memory
         self.setObjective = setObjective
         self.remember = remember
@@ -132,8 +132,8 @@ struct GroupBoardView: View {
     }
 
     private func forgetItem(_ item: MemorySnapshot.Item) {
-        forget(item)
-        forgotten = item
+        // The undo toast only appears once the note was really forgotten; a failure already raised its own notice.
+        Task { if await forget(item) { forgotten = item } }
     }
 }
 

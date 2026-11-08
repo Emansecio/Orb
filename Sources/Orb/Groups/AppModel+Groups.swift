@@ -257,6 +257,7 @@ extension AppModel {
         let pictures = images, groupID = group.id
         Task.detached(priority: .utility) { pictures.deleteAll(for: groupID) } // the thread's and the draft's pictures go with it
         forgottenGroupNotes[group.id] = nil
+        groupBoards[group.id] = nil
         store.deleteGroupConversation(group: group.id)
         memory.deleteGroup(group.id)
         for member in group.memberIDs { store.deleteGroupSideConversation(group: group.id, for: member) }
@@ -281,6 +282,9 @@ extension AppModel {
 
     /// Whether the group has a request going on (the header shows "Parar grupo").
     func isGroupWorking(_ groupID: UUID) -> Bool { groupHub.isActive(groupID) }
+
+    /// The Orb is in a turn of the group's running request: taking it out stops the request for everyone, so the panel asks first.
+    func isMemberWorking(_ botID: UUID, in groupID: UUID) -> Bool { groupHub.isWorking(botID, in: groupID) }
 
     // MARK: Pieces for the hub and the engines
 

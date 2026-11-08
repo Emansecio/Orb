@@ -22,7 +22,7 @@ enum GroupSnapshots {
             return AnyView(GroupPanel(groupID: sample.launch.id).frame(width: 360, height: 700))
         case "group-board":
             return AnyView(GroupBoardView(memory: SampleGroups.board, setObjective: { _ in }, remember: { _ in },
-                                          forget: { _ in }, restore: { _ in })
+                                          forget: { _ in true }, restore: { _ in })
                 .padding(.vertical, 8)
                 .frame(width: 360, height: 700)
                 .background(Palette.chrome))

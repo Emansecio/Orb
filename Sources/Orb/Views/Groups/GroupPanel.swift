@@ -153,6 +153,7 @@ private struct MemberRow: View {
     let group: OrbGroup
     let canRemove: Bool
     @State private var isHovering = false
+    @State private var isConfirmingRemoval = false
 
     var body: some View {
         let isOrchestrator = look.id == group.orchestratorID
@@ -202,7 +203,8 @@ private struct MemberRow: View {
             }
             // Readable at rest, red only under the pointer (it takes the Orb out of the group).
             Button("Remover do grupo", systemImage: "minus.circle") {
-                model.removeMember(look.id, from: group.id)
+                // A member in a turn takes the whole request with it (`leave` stops the group): say so first.
+                if model.isMemberWorking(look.id, in: group.id) { isConfirmingRemoval = true } else { model.removeMember(look.id, from: group.id) }
             }
             .labelStyle(.iconOnly)
             .buttonStyle(CircleGhostStyle(side: 26, fontSize: 12))
@@ -215,6 +217,11 @@ private struct MemberRow: View {
         .hoverFill(isHovering, in: .rect(cornerRadius: Radius.medium))
         .onHover { isHovering = $0 }
         .accessibilityElement(children: .contain)
+        .confirmationDialog("Tirar \(look.name) do grupo?", isPresented: $isConfirmingRemoval, titleVisibility: .visible) {
+            Button("Tirar e parar o pedido", role: .destructive) { model.removeMember(look.id, from: group.id) }
+        } message: {
+            Text("\(look.name) está trabalhando agora. Tirar o Orb para o pedido em andamento do grupo, para todos.")
+        }
     }
 }
 
@@ -229,9 +236,10 @@ private struct GroupBoardTab: View {
                        setObjective: { model.setGroupObjective(groupID, to: $0) },
                        remember: { model.rememberGroupAgreement(groupID, text: $0) },
                        forget: {
-                           model.forgetGroupNote($0, of: groupID)
+                           guard await model.forgetGroupNote($0, of: groupID) else { return false }
                            // The row just disappears; nothing else tells VoiceOver that there is a way back.
                            model.announceForAccessibility("Esqueceu “\(MemoryText.clip($0.title, 60))”. Para desfazer, use o botão Desfazer, por \(GroupBoardView.undoSeconds) segundos.")
+                           return true
                        },
                        restore: { model.restoreGroupNote($0, of: groupID) })
             .id(model.groupBoard(groupID).identity) // the objective field starts from the board once it is read
@@ -293,6 +301,8 @@ private struct GroupSettingsTab: View {
     private func commitName() {
         guard let name = GroupNameEdit.commit(draft: nameDraft, current: group.name) else { nameDraft = group.name; return }
         model.renameGroup(group.id, to: name)
+        // A name the model turned back into the current one (taken by an Orb, or cut) fires no `group.name` change: show the real one.
+        nameDraft = model.group(group.id)?.name ?? group.name
     }
 }
 

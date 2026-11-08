@@ -142,6 +142,14 @@ struct GroupLoopTests {
         #expect(world.events.filter { $0.kind == .groupRunDone }.count == 1)
     }
 
+    @Test @MainActor func theOpenBoardShowsTheFinishedRequestsPage() async {
+        let world = GroupWorld()
+        let turn = await startOrchestratorTurn(world, text: "Qual é a capital da França?")
+        world.fake.finish(turn, reply: "Paris.")
+        await world.waitForFinish()
+        await waitUntil("the board to read the session page") { !world.model.groupBoard(world.groupID).items.isEmpty }
+    }
+
     @Test @MainActor func aQuickAnswerFromTheOrchestratorAloneIsTheFinalAnswer() async {
         let world = GroupWorld()
         let turn = await startOrchestratorTurn(world, text: "Qual é a capital da França?")

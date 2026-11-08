@@ -87,6 +87,14 @@ struct GroupPresenceTests {
 
 @Suite("Novo grupo")
 struct NewGroupRulesTests {
+    @Test func aDeletedOrbLeavesTheChoiceAndTheOrchestratorMovesOn() {
+        let a = UUID(), b = UUID(), c = UUID()
+        let kept = NewGroupRules.pruned(chosen: [a, b, c], orchestrator: a, alive: [b, c])
+        #expect(kept.chosen == [b, c] && kept.orchestrator == b)
+        let same = NewGroupRules.pruned(chosen: [a, b, c], orchestrator: b, alive: [b, c])
+        #expect(same.chosen == [b, c] && same.orchestrator == b)
+    }
+
     private func look(_ name: String, _ role: String) -> BotLook {
         BotLook(Bot(id: UUID(), name: name, role: role, orb: OrbConfig()))
     }

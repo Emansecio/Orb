@@ -419,6 +419,8 @@ final class GroupHub: GroupTurnHooks {
             if await !bank.saveSession(page) {
                 session.append(.notice("Não consegui guardar este pedido no quadro do grupo (falta espaço ou permissão na pasta)."))
             }
+            // The open Quadro shows the new session page now, not only when the tab is reopened.
+            await model.refreshGroupBoard(groupID)
         }
         runs[groupID] = nil
         refreshLive(groupID)

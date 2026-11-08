@@ -378,6 +378,31 @@ struct GroupBoardSavingTests {
         #expect(world.model.groupBoard(world.groupID).identity.contains("Entregar o relatório."))
     }
 
+    @Test @MainActor func aDeletedGroupGetsNeitherAFalseNoticeNorABoardBack() async {
+        let world = GroupWorld()
+        await world.model.saveGroupAgreement("Escrever em tópicos.", of: world.groupID)
+        #expect(!world.model.groupBoard(world.groupID).items.isEmpty)
+        let id = world.groupID
+        world.model.deleteGroup(id)
+        #expect(world.model.groupBoard(id).items.isEmpty)
+        // The objective field saves on disappear, after the group is gone.
+        await world.model.saveGroupObjective("Entregar o relatório.", of: id)
+        await world.model.refreshGroupBoard(id)
+        #expect(world.model.dataNotices.isEmpty)
+        #expect(world.model.groupBoards[id] == nil)
+    }
+
+    @Test @MainActor func theUndoIsOfferedOnlyWhenTheNoteWasForgotten() async throws {
+        let world = GroupWorld()
+        await world.model.saveGroupAgreement("Escrever em tópicos.", of: world.groupID)
+        let item = try #require(world.model.groupBoard(world.groupID).items.first)
+        #expect(await world.model.forgetGroupNote(item, of: world.groupID))
+        #expect(world.model.dataNotices.isEmpty)
+        // The page is already gone: forgetting again fails, says so, and offers nothing to undo.
+        #expect(await !world.model.forgetGroupNote(item, of: world.groupID))
+        #expect(world.model.dataNotices.count == 1)
+    }
+
     @Test @MainActor func anAgreementThatCouldNotBeWrittenSaysSo() async {
         let world = GroupWorld()
         await world.model.saveGroupAgreement("Escrever em tópicos.", of: world.groupID)

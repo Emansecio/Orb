@@ -22,6 +22,13 @@ enum NewGroupRules {
         }
     }
 
+    /// The choice without the Orbs that no longer exist; the orchestrator falls to the first one left when it was among them.
+    static func pruned(chosen: [UUID], orchestrator: UUID?, alive: Set<UUID>) -> (chosen: [UUID], orchestrator: UUID?) {
+        let kept = chosen.filter { alive.contains($0) }
+        guard let orchestrator, kept.contains(orchestrator) else { return (kept, kept.first) }
+        return (kept, orchestrator)
+    }
+
     /// The orchestrator when the chosen one is taken off: the first of those still chosen (nil with none).
     static func orchestrator(afterRemoving removed: UUID, current: UUID?, selected: [UUID]) -> UUID? {
         guard current == removed else { return current }
@@ -145,7 +152,13 @@ struct NewGroupSheet: View {
     private func create() {
         guard canCreate, let orchestrator else { return }
         guard let group = model.createGroup(name: NewGroupRules.name(written: nameShown, suggested: suggested), members: chosen,
-                                            orchestrator: orchestrator, objective: objective) else { return }
+                                            orchestrator: orchestrator, objective: objective) else {
+            // An Orb chosen was deleted while the sheet was open: drop it from the choice, so the count and the button tell the truth.
+            let kept = NewGroupRules.pruned(chosen: chosen, orchestrator: orchestrator, alive: Set(model.botIDs))
+            chosen = kept.chosen
+            self.orchestrator = kept.orchestrator
+            return
+        }
         model.selection = .group(group.id)
         dismiss()
     }
