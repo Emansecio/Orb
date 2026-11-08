@@ -1987,8 +1987,10 @@ final class AppModel {
                                       prompt: TurnPreface.prepend(built.preface, to: message),
                                       client: client, tools: tools, context: context, budget: budget, ledger: ledger,
                                       chunks: chunks, maxSteps: .max, // no limit: the turn runs until the model answers or you stop it (⌘.)
+                                      // A group's turn of a chain no person began has nobody for a card. The chat an answer
+                                      // wakes is the person's own: it keeps cards and takes what they write meanwhile.
                                       unattended: (session.routineID != nil && session.sideKind != .group) || session.pulseInChat != nil
-                                          || delegation.isUnattended(chain: session.chain?.chainID ?? session.usageChain),
+                                          || (session.sideKind == .group && delegation.isUnattended(chain: session.chain?.chainID)),
                                       turnGrants: turnGrants, permissions: permissionSource(for: bot),
                                       images: pictures, requestItem: bubble, supportsImages: sees,
                                       onImagesRejected: { [weak self] in Task { @MainActor in self?.visionRejected.insert(ref.text) } },

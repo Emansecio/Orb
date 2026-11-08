@@ -528,7 +528,7 @@ extension BotSession {
         // The messages of the conversation the turn worked on: `endWorkElsewhere` below puts the one on show in its place.
         let reviewMessages = conversation?.messages
         if let working = workingChatID {
-            model.markUnread(working, of: id) // it ended where you were not looking
+            if pulseLeftLine { model.markUnread(working, of: id) } // it ended where you were not looking (a NOTHING left nothing)
             endWorkElsewhere() // the one on show takes the turn machinery back
         } else if routineID == nil {
             scheduleSave(delay: 0) // a routine's was written by `finishRoutineRun`

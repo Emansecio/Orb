@@ -311,9 +311,9 @@ leva a chamada ao `DelegationHub`. `orbs` (`ask`, `tell`, `list`), `group_create
   `confirm` é nil e a ferramenta usa `*_later`: uma linha `deletionAsked` no chat (`AppModel+PendingDeletion.swift`, `DeletionAsk`),
   respondida por `answerDeletion`, que vira `deletionAnswered` e chega ao Orb pelo `SinceLastTurn` (`<user_decision>`). Como as
   rodadas que pedem (rotina, pulso) não leem as linhas do chat, um Manter fica em `askedDeletions` (`kept`, e lido do chat na
-  abertura) e o `*_later` seguinte responde "already chose to keep it". `unattended` vale também para todo turno de cadeia que
-  nenhuma pessoa começou (`DelegationHub.isUnattended`: origem `.pulse` ou `.routine`), inclusive o turno de grupo e o chat
-  acordado por uma resposta.
+  abertura) e o `*_later` seguinte responde "already chose to keep it". `unattended` vale também para o turno de grupo de cadeia
+  que nenhuma pessoa começou (`DelegationHub.isUnattended`: origem `.pulse` ou `.routine`); o chat acordado por uma resposta é
+  da pessoa e fica com cartão e steering.
 - **Pulso** (`Pulse.swift`). `pulseTick` roda no agendador: com `pulseIsOn` (`pulseEnabled && orbsActOnOwn`), passado `pulseMinutes`, percorre
   os Orbs em rodízio (`PulseState.lastOrb`), pula o que não tem demanda nova e começa em `beginPulse`. A demanda sai de `Pulse.demands`
   (pura, sem modelo nem disco): plano parado há `planIdle` em qualquer conversa do Orb (`PulseState.plans`, gravado por `notePlan`

@@ -761,6 +761,9 @@ private final class PulseWorld {
         let world = PulseWorld(demand: false, rule: Self.nothing)
         defer { world.cleanUp() }
         let model = world.model, atlas = world.bot("Atlas").id, other = UUID()
+        var chats = model.live(atlas).chats ?? OrbChats(first: atlas, updated: world.t0)
+        chats.add(other, at: world.t0) // a real conversation: a plan of one that is gone wakes nothing
+        model.setChats(chats, for: atlas)
         var conversation = plan("Migrar o banco", at: world.t0.addingTimeInterval(-3_600))
         model.notePlan(conversation, chat: other, of: atlas)
         let found = model.newPulseDemands(for: atlas, now: world.t0)
@@ -1120,6 +1123,7 @@ private final class PulseWorld {
                                           groupID: group.id, askedBy: nil)
         #expect(request.state == .queued && request.envelope.pulseRun == nil)
         #expect(hub.pulseRun(ofChain: chain) == nil, "from here the group's work is the person's")
+        #expect(!hub.isUnattended(chain: chain), "and its turns may ask the person")
         hub.cancelChain(chain, by: .user)
     }
 
@@ -1254,5 +1258,60 @@ private final class PulseWorld {
         #expect(model.pulseState.notices[revisor.uuidString]?.count == 1)
         model.forgetPulseNotices(of: revisor, chat: chat, upTo: world.t0)
         #expect(model.pulseState.notices[revisor.uuidString] == nil)
+    }
+
+    /// The planted plan in the Orb's first conversation, with a line so it counts as written in, then a new conversation on show.
+    private func planElsewhere(_ world: PulseWorld, _ name: String) -> UUID {
+        let id = world.bot(name).id
+        world.plant(name, tag: 0)
+        world.model.session(id).conversation?.items.append(TranscriptItem(.notice("Começamos o relatório.")))
+        world.model.newChat(for: id)
+        return id // the first conversation's id is the Orb's
+    }
+
+    @Test func aNothingInAChatNotOnShowLeavesNoDot() async throws {
+        let world = PulseWorld(names: ["Atlas", "Revisor"], demand: false, rule: Self.nothing)
+        defer { world.cleanUp() }
+        let model = world.model, atlas = world.bot("Atlas").id
+        let first = planElsewhere(world, "Atlas")
+        try #require(model.session(atlas).chatID != first && model.pulseState.plans[atlas.uuidString]?.first?.chat == first)
+        await world.startInterval()
+        await model.pulseTick(now: world.at(minutes: 61))
+        await world.settle()
+        #expect(await world.log.count(by: "Atlas") == 1)
+        #expect(model.live(atlas).chats?.list.first { $0.id == first }?.unread != true, "nothing landed there to read")
+        #expect(model.live(atlas).unread == 0)
+    }
+
+    @Test func deletingTheChatOnShowForgetsItsPlan() {
+        let world = PulseWorld(names: ["Atlas", "Revisor"], demand: false, rule: Self.nothing)
+        defer { world.cleanUp() }
+        let model = world.model, atlas = world.bot("Atlas").id
+        let first = planElsewhere(world, "Atlas")
+        model.openChat(first, of: atlas)
+        model.ensureLoaded(atlas) // the chat on show reads it, as the view does
+        #expect(model.session(atlas).chatID == first && model.session(atlas).conversation?.activePlan != nil)
+        model.deleteChat(first, of: atlas)
+        #expect(model.pulseState.plans[atlas.uuidString] == nil, "its leaving wrote the plan once more: it is forgotten after")
+        #expect(!model.newPulseDemands(for: atlas, now: world.at(minutes: 61)).contains { $0.chat != nil })
+    }
+
+    @Test func stoppingThePulseTellsTheOrbWhoseChainStillWorked() async throws {
+        let gate = TestGate()
+        let world = PulseWorld(names: ["Atlas", "Revisor"], demand: false) { who, _, result in
+            if who == "Revisor" { await gate.wait(); return say("Conferido.") }
+            return result == nil ? ask("Revisor", "Confira a seção 2.") : say("Pedi ao Revisor.")
+        }
+        defer { world.cleanUp() }
+        let model = world.model, atlas = world.bot("Atlas").id
+        world.plant("Atlas", tag: 0)
+        await world.startInterval()
+        await model.pulseTick(now: world.at(minutes: 61))
+        await waitUntil("the Revisor to work for the pulse") { model.sessions[world.bot("Revisor").id]?.turnTask != nil }
+        model.pulseState.tokensToday = model.pulseDailyTokens
+        model.stopPulseWork()
+        await gate.open()
+        await world.settle()
+        #expect(world.events("Atlas").filter { $0.kind == .pulseStopped }.count == 1)
     }
 }

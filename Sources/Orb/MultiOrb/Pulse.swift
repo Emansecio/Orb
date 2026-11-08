@@ -377,7 +377,7 @@ extension AppModel {
 
     /// The Orb's open plans: the ones kept, with the conversation the turn machinery has in memory read as it is now.
     private func pulsePlans(of botID: UUID) -> [PulsePlan] {
-        var plans = pulseState.plans[botID.uuidString] ?? []
+        var plans = (pulseState.plans[botID.uuidString] ?? []).filter { isChat($0.chat, of: botID) } // a conversation gone wakes nothing
         if let session = sessions[botID], let chat = session.conversationChat, let conversation = session.conversation {
             plans.removeAll { $0.chat == chat }
             if let live = PulsePlan(conversation.activePlan, chat: chat, paused: conversation.taskPaused == true) { plans.insert(live, at: 0) }
@@ -494,7 +494,10 @@ extension AppModel {
         if session.isUnloaded { await loadedConversation(botID) }
         let read = await store.readSideConversationAsync(prefix: Store.pulsoPrefix, id: botID, for: botID)
         pulseStarting.remove(botID)
-        guard !isResetting, pulseIsOn, bot(botID) != nil, canTakeSideWork(botID), session.parkedChat == nil else { return .busy }
+        guard !isResetting, pulseIsOn, bot(botID) != nil, canTakeSideWork(botID), session.parkedChat == nil else {
+            pumpAfterPulse(botID)
+            return .busy
+        }
         ensureLoaded(botID)
         addNotice(Self.labeled(read.notice, for: bot(botID)))
         let started = Date.now
@@ -506,6 +509,7 @@ extension AppModel {
             pulseRuns[botID] = nil
             session.endSideRun()
             session.scheduleSave(delay: 0)
+            pumpAfterPulse(botID)
             return .unusable
         }
         workJournal.pulseBegan(bot: botID, at: started)
@@ -524,7 +528,8 @@ extension AppModel {
         pulseStarting.remove(botID)
         guard ready, !isResetting, pulseIsOn, let bot = bot(botID), session.turnTask == nil, session.routineID == nil,
               session.conversationChat == chat, session.conversation != nil else {
-            if ready { session.endWorkElsewhere() }
+            if ready, session.turnTask == nil { session.endWorkElsewhere() }
+            pumpAfterPulse(botID)
             return .busy
         }
         let runID = UUID(), started = Date.now
@@ -534,7 +539,9 @@ extension AppModel {
         session.pulseInChat = runID
         pulseRuns[botID] = PulseRun(id: runID, startedAt: started, reason: demands.first?.line ?? "", keys: demands.map(\.key),
                                     chatMark: mark)
-        let line = appendToChat(.event(OrbEvent(kind: .pulseResumed, actor: OrbRef(bot), detail: goal, runID: runID)), of: botID, in: chat)
+        // No dot yet: a run that finds nothing to do takes the line back; one that acts leaves its `pulseRan`, which marks it.
+        let line = appendToChat(.event(OrbEvent(kind: .pulseResumed, actor: OrbRef(bot), detail: goal, runID: runID)), of: botID, in: chat,
+                                marksUnread: false)
         guard send(Pulse.prompt(for: demands, inChat: true), to: botID, origin: .pulse) else {
             session.pulseInChat = nil
             pulseRuns[botID] = nil
@@ -544,11 +551,18 @@ extension AppModel {
                 session.changeChat(line.chat) { $0.items.removeAll { $0.id == item } }
             }
             if session.workingChatID != nil { session.endWorkElsewhere() }
+            pumpAfterPulse(botID)
             return .unusable
         }
         workJournal.pulseBegan(bot: botID, at: started)
         setStatus("Pulso: retomando o plano", of: botID)
         return .started
+    }
+
+    /// The pulse held the Orb while it read (`pulseStarting`) and then did not start: what queued for the Orb meanwhile (a
+    /// request, an answer, a routine) found it held and waits for this, as after a routine that did not start.
+    private func pumpAfterPulse(_ botID: UUID) {
+        if sessions[botID]?.turnTask == nil { startNextQueuedWork(for: botID) }
     }
 
     /// The pulse turn ended (`BotSession.finishTurn`): its conversation is kept, the chat comes back, and when the pulse did

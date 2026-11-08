@@ -76,7 +76,6 @@ extension AppModel {
     func deleteChat(_ chat: UUID, of botID: UUID) {
         guard canDeleteChat(chat, of: botID), var chats = live(botID).chats else { return }
         delegation.cancelChains(startedIn: chat, of: botID) // its "stopped" line lands in the conversation that is going away
-        forgetPulse(of: botID, chat: chat)
         chats.remove(chat)
         let session = session(botID)
         // Its Claude Code process, if one is idle, would keep the deleted conversation alive (and its session file) until it expires;
@@ -96,6 +95,8 @@ extension AppModel {
         } else {
             setChats(chats, for: botID)
         }
+        // After the one on show left (`leave` notes its plan as it is written): its plan and notices must not wake a pulse.
+        forgetPulse(of: botID, chat: chat)
         chatDrafts[chat] = nil
         forgetInicio {
             switch $0.origin {
@@ -140,13 +141,14 @@ extension AppModel {
 
     /// A line in one of the Orb's conversations (`chat`, or the latest) wherever it is (`BotSession.changeChat`): one that
     /// is not on show gets its dot.
+    /// `marksUnread` false: a line that may yet go with nothing to read (the pulse's `pulseResumed`).
     @discardableResult
-    func appendToChat(_ kind: TranscriptItem.Kind, of botID: UUID, in chat: UUID? = nil) -> (chat: UUID, item: UUID)? {
+    func appendToChat(_ kind: TranscriptItem.Kind, of botID: UUID, in chat: UUID? = nil, marksUnread: Bool = true) -> (chat: UUID, item: UUID)? {
         guard bot(botID) != nil else { return nil }
         let session = session(botID), target = chatOrLatest(chat, of: botID), item = TranscriptItem(kind)
         if target == session.conversationChat { session.ensureLoaded() } // read with the rest, as a line of the chat always was
         session.changeChat(target) { $0.items.append(item) }
-        markUnread(target, of: botID)
+        if marksUnread { markUnread(target, of: botID) }
         return (target, item.id)
     }
 

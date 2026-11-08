@@ -1626,8 +1626,7 @@ final class DelegationHub: DelegationService {
 
     func pulseRun(ofChain chainID: UUID) -> UUID? { chainStates[chainID]?.origin.pulseRun }
 
-    /// A chain no person began (the pulse's, a routine's run): its turns, the group's and the chat its answers wake, have
-    /// nobody to answer a card.
+    /// A chain no person began (the pulse's, a routine's run): a group's turn in it has nobody to answer a card.
     func isUnattended(chain chainID: UUID?) -> Bool {
         switch chainID.flatMap({ chainStates[$0]?.origin }) {
         case .pulse?, .routine?: true
