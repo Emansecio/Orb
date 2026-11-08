@@ -350,8 +350,12 @@ bloqueando o que ainda não rodou. Chamadas só de leitura do mesmo passo rodam 
 `group_create`, `group_edit` e `orb_delete` são `.sensitive` (seguem o modo do Orb e são recusadas em "Só leitura"); `orb_propose` é `.safe`, mas recusa quem está em "Só leitura".
 - **Cartão de apagar.** Apagar um grupo, tirar o membro de um grupo de dois (o que o desfaz) e apagar um Orb abrem sempre um cartão
   simples (`ApprovalGate.confirm`), "Confirmar mudança no grupo" ou "Apagar um Orb", **em qualquer modo**, sem "Sempre permitir". O modelo não
-  confirma por conta própria: o `confirmed` que ele manda é descartado, e só o cartão o liga. Sem ninguém para responder (sem cartão
-  possível), a ferramenta recusa e manda o Orb avisar você. As outras edições de `group_edit` (adicionar, tirar, orquestrador,
+  confirma por conta própria: o `confirmed` (e os `expect_group`/`expect_orb`) que ele manda são descartados, e só o cartão os liga.
+  O cartão abre com `onlyPerson`: a troca de modo (`ApprovalGate.applyModeChange`) não o responde. O sim vale para os ids que o
+  plano mostrou (`ConfirmedEdit`): se o nome levar a outro grupo ou Orb na hora de executar, a mudança é recusada
+  (`GroupEdit.changed`). Num turno sem ninguém (`TurnRequest.unattended`: rotina, pedido de outro Orb, pulso) não há cartão: as
+  ações `edit_group_later`/`delete_orb_later` gravam uma linha `deletionAsked` no chat do Orb com Apagar e Manter
+  (`AppModel+PendingDeletion.swift`), e só o clique apaga, revalidado pelo id e pelo nome. As outras edições de `group_edit` (adicionar, tirar, orquestrador,
   renomear, objetivo) não pedem cartão, e "Orbs organizam o time" desligado as recusa, assim como `orb_delete`.
 - **Criar sem cartão.** Com "Orbs criam Orbs sem perguntar" (padrão), `orb_propose` cria o Orb na hora, sem cartão e sem limite de
   quantidade (os limites antigos de 5 por criador e 12 no total saíram). A trava é o acesso: o Orb novo nunca passa do modo, das

@@ -305,18 +305,29 @@ leva a chamada ao `DelegationHub`. `orbs` (`ask`, `tell`, `list`), `group_create
 - **Preferências** (`AppModel+MultiOrbSettings.swift`, todas `UserDefaults`, ligadas por padrão): `orbsCanTalk`, `orbsCanStartGroups`,
   `orbsActOnOwn` (cria e aciona grupos e propõe Orbs fora do chat próprio: rotina, pedido, turno de grupo, pulso), `orbsCanManageGroups`
   (`group_edit` e `orb_delete`) e `orbsCreateWithoutAsking` (`orb_propose` cria na hora, sem teto de quantidade, e a linha do criador
-  oferece `undoCreation`). Apagar grupo ou Orb, e tirar o membro que desfaz um grupo de dois, passam por `ToolContext.confirm`
-  (`ApprovalGate.confirm`), nunca pelo `confirmed` do modelo.
+  oferece `undoCreation`; sem cartão, um papel igual ao de um colega é recusado, `OrbCreationSupport.sameRole`). Apagar grupo ou
+  Orb, e tirar o membro que desfaz um grupo de dois, passam por `ToolContext.confirm` (`ApprovalGate.confirm`, `onlyPerson`), nunca
+  pelo `confirmed` do modelo; o sim leva os ids do plano (`ConfirmedEdit`, `expect_group`/`expect_orb`). Num turno `unattended` o
+  `confirm` é nil e a ferramenta usa `*_later`: uma linha `deletionAsked` no chat (`AppModel+PendingDeletion.swift`, `DeletionAsk`),
+  respondida por `answerDeletion`, que vira `deletionAnswered` e chega ao Orb pelo `SinceLastTurn` (`<user_decision>`).
 - **Pulso** (`Pulse.swift`). `pulseTick` roda no agendador: com `pulseIsOn` (`pulseEnabled && orbsActOnOwn`), passado `pulseMinutes`, percorre
-  os Orbs em rodízio (`PulseState.lastOrb`), pula o que não tem demanda nova e começa em `beginPulse` um side run `.pulse`
-  (`BotSession.sideKind`) com o `Pulse.prompt(for:)`. A demanda sai de `Pulse.demands` (pura, sem modelo nem disco, sobre o que já está
-  na memória): plano da conversa aberta com passos por fazer e parado há `planIdle`; rotina do Orb cuja última execução recente
-  falhou ou pediu atenção; pedido do Orb que falhou fora de grupo; turno falho de grupo que ele orquestra (cadeias iniciadas pelo
-  próprio pulso ficam de fora). Cada `PulseDemand.key` entregue fica em `PulseState.delivered` (40 por Orb), então a mesma demanda
-  acorda o Orb uma vez; `finishPulse` o encerra e grava `pulseRan` no chat e em Início. O teto diário (`pulseDailyTokens`, `PulseState.tokensToday`)
-  conta pelo `AppModel.pulseCharge`, chamado da contabilidade de uso, o turno do pulso e toda cadeia de origem `.pulse`; ao estourar,
-  `stopPulseWork` cancela as cadeias com `CancelReason.budget` e grava `pulseStopped`; um grupo parado assim grava `groupStopped` com
-  `detail == OrbEvent.budgetStop`, e a frase diz que foi o teto do pulso.
+  os Orbs em rodízio (`PulseState.lastOrb`), pula o que não tem demanda nova e começa em `beginPulse`. A demanda sai de `Pulse.demands`
+  (pura, sem modelo nem disco): plano parado há `planIdle` em qualquer conversa do Orb (`PulseState.plans`, gravado por `notePlan`
+  em `BotSession.write` e ao estacionar o chat, até 3 por Orb; tarefa pausada não conta); rotina cuja última execução recente
+  falhou ou pediu atenção (a chave junta a sequência de falhas iguais); pedido do Orb que falhou fora de grupo; turno falho de grupo
+  que ele orquestra; aviso (`tell`) não lido há `noticeIdle` (`PulseState.notices`, de `notePulseNotice`). Trabalho com
+  `envelope.pulseRun` nunca é demanda. As chaves vão no `PulseRun` e só são entregues no fim (`settleDemands`): falha conta em
+  `PulseState.failures` e entrega após `failureLimit`; `delivered` guarda só chaves cujo trabalho ainda existe (teto 200).
+  Com um plano entre as demandas, `beginPulseInChat` roda na conversa dele (`prepareTurn`, `BotSession.pulseInChat`,
+  `SendOrigin.pulse`, linha `pulseResumed`, turno `unattended`, fora do `WorkJournal`); sem plano, um side run `.pulse`
+  (`BotSession.sideKind`) com o `RoutineBackground` do chat. Pedido feito no side run leva `servingPulse`: `finishPulse` segura o
+  run (`DelegationHub.holdPulse`, `waitingRoutines` com `pulse`) e a resposta o retoma (`resumePulse`); sem espera, vai ao chat.
+  **Linhagem:** `AppModel.pulseLineage(of:)` é a fonte única de "é trabalho do pulso" (side run, `pulseInChat`, cadeia de origem
+  `.pulse`, pedido servido com `envelope.pulseRun`), usada por `pulseCharge`, `DelegationHub.newChain`/`queueGroupTurn`/`submit`
+  (que recusam com `pulseBudget` depois do teto) e `stopPulseWork`. O teto diário (`pulseDailyTokens`, `PulseState.tokensToday`)
+  conta tudo da linhagem; ao estourar, ou ao desligar o pulso ou `orbsActOnOwn`, `stopPulseWork` cancela as cadeias, os turnos e os
+  pulsos que esperam e grava `pulseStopped` (`detail == OrbEvent.pulseOff` quando foi desligado); um grupo parado pelo teto grava
+  `groupStopped` com `detail == OrbEvent.budgetStop`.
 
 ### Uso e custos (`Usage/`)
 
