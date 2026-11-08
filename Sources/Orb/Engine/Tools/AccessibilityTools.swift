@@ -2973,6 +2973,9 @@ struct UIActTool: AgentTool {
                 }
                 for (index, step) in steps.enumerated() {
                     switch step.action {
+                    case .select where step.value != nil:
+                        // A real click only opens the menu; the option is never picked and the app is handed back with it closed.
+                        throw ToolError("select with a value does not work in takeover (the click would only open the menu). Click the control, then click the option by its reference or point, in the same takeover call.")
                     case .press, .focus, .select, .showMenu:
                         moves.append(.click(try center(step.reference, step.point), Clicking()))
                     case .click:

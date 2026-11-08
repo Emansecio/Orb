@@ -150,6 +150,16 @@ struct AccessibilityLadderTests {
         #expect(button.performed.isEmpty)
     }
 
+    @Test func takeoverSelectWithAValueRefusesInsteadOfOnlyOpeningTheMenu() async throws {
+        let popup = framed(fake("AXPopUpButton", title: "Formato"), CGRect(x: 200, y: 200, width: 100, height: 40))
+        let bench = Bench(windows: [framed(fake("AXWindow", title: "A", [popup]), windowFrame)])
+        try await bench.read()
+        let call: [String: JSONValue] = ["action": .string("select"), "id": .string("w1.1"), "value": .string("PDF"), "takeover": .bool(true)]
+        let message = await failureMessage { try await bench.act(call) }
+        #expect(message.contains("select with a value does not work in takeover"))
+        #expect(bench.system.screenOwner.hand.actions.isEmpty)
+    }
+
     @Test func aTakeoverThatStopsHalfwayNamesTheStepItStoppedIn() async throws {
         let first = framed(fakeButton("Um"), CGRect(x: 200, y: 200, width: 100, height: 40))
         let second = framed(fakeButton("Dois"), CGRect(x: 200, y: 300, width: 100, height: 40))
