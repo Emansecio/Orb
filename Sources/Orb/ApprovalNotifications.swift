@@ -79,6 +79,8 @@ enum ApprovalNotifications {
         case open(botID: UUID?)
         /// A group's banner (its pause, its end): show the group.
         case openGroup(UUID)
+        /// The banner of a routine run that ended or failed: its run (report, reason) opens on Rotinas, not the Orb's chat.
+        case openRoutineRun(botID: UUID, routineID: UUID, runID: UUID)
         /// "Parar" on a banner about a turn (`stopCategory`): stop the Orb's turn, as ⌘. would.
         case stop(botID: UUID)
         case ignore
@@ -86,6 +88,9 @@ enum ApprovalNotifications {
 
     /// The key a group's banner carries its group under.
     static let groupKey = "groupID"
+    /// The keys a routine run's banner carries its routine and run under.
+    static let routineKey = "routineID"
+    static let runKey = "runID"
 
     static func route(actionIdentifier: String, userInfo: [AnyHashable: Any]) -> Route {
         let botID = (userInfo[botKey] as? String).flatMap(UUID.init(uuidString:))
@@ -94,6 +99,10 @@ enum ApprovalNotifications {
         switch actionIdentifier {
         case UNNotificationDefaultActionIdentifier:
             if let groupID { return .openGroup(groupID) }
+            if let botID, let routineID = (userInfo[routineKey] as? String).flatMap(UUID.init(uuidString:)),
+               let runID = (userInfo[runKey] as? String).flatMap(UUID.init(uuidString:)) {
+                return .openRoutineRun(botID: botID, routineID: routineID, runID: runID)
+            }
             return .open(botID: botID)
         case allowAction, denyAction:
             guard let botID, let approvalID else { return .ignore }
@@ -178,9 +187,10 @@ enum ApprovalNotifications {
     }
 
     /// A plain banner about one Orb: a tap opens it (`route` reads the Orb back from `botKey`).
-    static func orbContent(botID: UUID, title: String, body: String) -> UNMutableNotificationContent {
+    static func orbContent(botID: UUID, title: String, body: String, run: (routine: UUID, run: UUID)? = nil) -> UNMutableNotificationContent {
         let content = plainContent(title: title, body: body)
         content.userInfo = [botKey: botID.uuidString]
+        if let run { content.userInfo[routineKey] = run.routine.uuidString; content.userInfo[runKey] = run.run.uuidString }
         return content
     }
 

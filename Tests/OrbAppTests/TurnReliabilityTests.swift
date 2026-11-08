@@ -1,6 +1,7 @@
 import Foundation
 import CoreGraphics
 import Testing
+import UserNotifications
 @testable import Orb
 
 // The turn without a step limit (docs/REVISAO-TURNO-2026-10-16.md): what the person sees of a turn that runs long or goes
@@ -423,6 +424,43 @@ private struct HangsAfterText: LLMClient {
         #expect(banner?.body.contains("modelo desconhecido") == true)
     }
 
+    @Test @MainActor func theBannerOfAFailedRunCarriesTheRunAndRoutesToIt() async throws {
+        let script = CallScript(replies: [.failing(LLMError.http(status: 400, message: "modelo desconhecido"))])
+        let (model, botID, routineID) = routineSetUp(script)
+        model.runRoutine(routineID)
+        await model.routineStarted()
+        await waitUntilIdle(model, botID)
+        let runID = try #require(model.routines[0].runs.first?.id)
+        #expect(model.lastBannerRun == RoutineRunTarget(routineID: routineID, runID: runID))
+        let info: [AnyHashable: Any] = [ApprovalNotifications.botKey: botID.uuidString,
+                                        ApprovalNotifications.routineKey: routineID.uuidString,
+                                        ApprovalNotifications.runKey: runID.uuidString]
+        let route = ApprovalNotifications.route(actionIdentifier: UNNotificationDefaultActionIdentifier, userInfo: info)
+        #expect(route == .openRoutineRun(botID: botID, routineID: routineID, runID: runID))
+        model.handle(route)
+        #expect(model.routineRunToShow == RoutineRunTarget(routineID: routineID, runID: runID))
+        #expect(model.selection == .routines)
+    }
+
+    @Test @MainActor func aRoutineCutByTheAppClosingKeepsItsSlotAndBanners() async throws {
+        let script = CallScript([said("fim")], holdsCall: 1)
+        let (model, botID, routineID) = routineSetUp(script)
+        let moment = Date.now.addingTimeInterval(-60)
+        model.routines[0].schedule = .once(moment)
+        model.routines[0].lastRun = moment.addingTimeInterval(-3600)
+        model.runRoutine(routineID)
+        await model.routineStarted()
+        await waitUntil("the call") { await script.calls.count == 1 }
+        model.stopTurnsForQuit()
+        await waitUntilIdle(model, botID)
+        #expect(model.routines[0].isEnabled) // a task for one moment is not spent by a run that never finished
+        #expect(model.routines[0].lastRun == moment.addingTimeInterval(-3600))
+        #expect(model.routines[0].nextRun <= .now) // due again on opening
+        #expect(model.routines[0].runs.count == 1 && model.routines[0].runs[0].succeeded == false)
+        #expect(model.lastBanner?.body.contains("roda de novo ao abrir") == true)
+        await script.release()
+    }
+
     @Test @MainActor func aRoutineYouStopSendsNoBanner() async {
         let script = CallScript([said("fim")], holdsCall: 1)
         let (model, botID, routineID) = routineSetUp(script)
@@ -528,6 +566,31 @@ private struct HangsAfterText: LLMClient {
         #expect(await script.calls.isEmpty)
         #expect(model.routines[0].runs.isEmpty)
         #expect(!FileManager.default.fileExists(atPath: file.path))
+    }
+
+    @Test @MainActor func aNameSharedWithAPausedRoutineRunsTheActiveOne() async throws {
+        let script = CallScript([said("ok")])
+        let (model, botID, routineID) = routineSetUp(script)
+        let paused = Routine(name: "resumo da manhã", botID: botID, prompt: "x", schedule: .everyHours(1), isEnabled: false)
+        model.routines.insert(paused, at: 0)
+        try Data().write(to: try wakeFolder(of: model).appending(path: "Resumo da manhã" + AppModel.wakeSuffix))
+        model.scanWakeFolder()
+        await model.routineStarted()
+        await waitUntilIdle(model, botID)
+        #expect(model.routines.first { $0.id == routineID }?.runs.count == 1)
+        #expect(model.routines.first { $0.id == paused.id }?.runs.isEmpty == true)
+    }
+
+    @Test @MainActor func aNameSharedByTwoActiveRoutinesRunsNeitherAndSaysSo() async throws {
+        let script = CallScript([said("ok")])
+        let (model, botID, _) = routineSetUp(script)
+        model.routines.append(Routine(name: "Resumo da manhã", botID: botID, prompt: "x", schedule: .everyHours(1)))
+        let file = try wakeFolder(of: model).appending(path: "Resumo da manhã" + AppModel.wakeSuffix)
+        try Data().write(to: file)
+        model.scanWakeFolder()
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(await script.calls.isEmpty)
+        #expect(model.lastBanner?.title == "Sinal ignorado")
     }
 
     @Test @MainActor func aBellForARoutineThatIsNotThereIsDropped() async throws {

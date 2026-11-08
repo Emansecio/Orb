@@ -57,8 +57,19 @@ extension AppModel {
     private func wakeRoutine(named key: String, note: String?) {
         let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { return }
-        let routine = UUID(uuidString: key).flatMap { id in routines.first { $0.id == id } }
-            ?? routines.first { $0.name.localizedCaseInsensitiveCompare(key) == .orderedSame }
+        var routine = UUID(uuidString: key).flatMap { id in routines.first { $0.id == id } }
+        if routine == nil {
+            // Names repeat across Orbs: a paused namesake must not shadow the active one. Two active ones are
+            // ambiguous, and a guess could wake the wrong Orb: nothing runs, and the banner says why.
+            let named = routines.filter { $0.name.localizedCaseInsensitiveCompare(key) == .orderedSame }
+            let active = named.filter(\.isEnabled)
+            if active.count > 1 {
+                notify(about: active[0].botID, "Sinal ignorado",
+                       "Mais de uma rotina ativa se chama “\(key)”. Use o id da rotina no nome do arquivo .wake.")
+                return
+            }
+            routine = active.first ?? named.first
+        }
         guard let routine, routine.isEnabled else { return }
         runRoutine(routine.id, wakeNote: note, queuesIfRunning: true)
     }

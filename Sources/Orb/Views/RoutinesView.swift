@@ -115,6 +115,7 @@ struct RoutinesView: View {
         }
         .onAppear(perform: takeRequest)
         .onChange(of: model.routineToShow) { takeRequest() }
+        .onChange(of: model.routineRunToShow) { takeRequest() }
         .sheet(item: $sheet) { sheet in
             switch sheet {
             case .edit(let routine):
@@ -153,6 +154,11 @@ struct RoutinesView: View {
 
     /// A routine waiting for an answer was asked for ("Ver pedido", its banner): its conversation opens.
     private func takeRequest() {
+        if let target = model.routineRunToShow {
+            model.routineRunToShow = nil
+            sheet = .run(routine: target.routineID, run: target.runID)
+            return
+        }
         guard let id = model.routineToShow else { return }
         model.routineToShow = nil
         sheet = .conversation(id)

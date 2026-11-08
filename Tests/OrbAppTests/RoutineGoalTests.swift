@@ -23,6 +23,13 @@ struct RoutineGoalTests {
         #expect(GoalCheck.parse("Progresso: 140% · em dia")?.progress == 100)
     }
 
+    @Test func aFigureBelowAHundredFollowedByTheWordIsProgressNotDone() {
+        #expect(GoalCheck.parse("Progresso: 40% concluído") == GoalCheck(progress: 40, status: .onTrack))
+        #expect(GoalCheck.parse("Progresso: 40 % concluída") == GoalCheck(progress: 40, status: .onTrack))
+        #expect(GoalCheck.parse("Progresso: 100% concluído")?.status == .done)
+        #expect(GoalCheck.parse("Progresso: 40 · concluído")?.status == .done)
+    }
+
     @Test func onlyTheReportsOwnLastLineClosesTheGoal() {
         // A quote or a code block is an example, not the report's line.
         #expect(GoalCheck.parse("> Progresso: 100% · concluída · exemplo anterior\nAinda falta verificar a entrega.") == nil)

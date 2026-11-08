@@ -75,6 +75,9 @@ final class AppModel {
     private var queuedManualRoutines: Set<UUID> = []
     /// The wake notes of queued runs (see `RoutineWake`): kept per routine so a run started later still says why it woke.
     private var queuedWakeNotes: [UUID: String] = [:]
+    /// A running routine's `lastRun` before its run began (`beginRoutine` moves it to the start): a run cut by the app closing
+    /// gives it back, so the slot is not spent.
+    @ObservationIgnored private var lastRunBeforeRun: [UUID: Date?] = [:]
     /// The routine each Orb is reading its conversation for before starting it (at most one per Orb): a second
     /// request waits for that one.
     @ObservationIgnored private var startingRoutines: [UUID: UUID] = [:]
@@ -176,6 +179,8 @@ final class AppModel {
     /// The routine whose conversation the Routines page opens when it appears (a routine waiting for an answer: "Ver pedido",
     /// a tap on its banner). Taken by the page, like `pendingChatRequest`.
     var routineToShow: UUID?
+    /// A routine run to open in its sheet when the Routines page appears (a tap on the banner of a run that ended or failed).
+    var routineRunToShow: RoutineRunTarget?
     /// The task the Orb just scheduled from the chat: its row in the panel is highlighted for a moment (`AppModel.schedule`).
     var freshRoutine: UUID?
     /// How long that highlight lasts.
@@ -2320,6 +2325,8 @@ final class AppModel {
         let routine = routines[index]
         ensureLoaded(botID)
         let started = Date.now
+        // Kept in memory so a run the app's closing cuts short can give the slot back (`recordRoutineRun`).
+        lastRunBeforeRun[routineID] = .some(routines[index].lastRun)
         routines[index].lastRun = started
         addNotice(Self.labeled(read.notice, for: bot(botID)))
 
@@ -2451,6 +2458,8 @@ final class AppModel {
         endBrowserConversation(own, of: botID) // the run is over: its tab in the Orb's browser goes
         guard let routine = routines.first(where: { $0.id == routineID }), let bot = bot(botID) else { return }
 
+        // The close of the app stops the run as "stopped by you", but nobody did: tell it apart.
+        let cutByQuit = userStopped && !succeeded && delegation.isShuttingDown
         var run = RoutineRun(date: started, finishedAt: finished, succeeded: succeeded, summary: "")
         run.openFollowUps = routine.followUps.filter { !$0.resolved }.map(\.id)
         if succeeded {
@@ -2468,21 +2477,33 @@ final class AppModel {
             run.summary = Conversation.clipped(why ?? "Não terminou.", to: RoutineRun.summaryLimit)
             // Nobody watched it fail: the banner says so, as one that worked brings its report (you stopped it yourself: none).
             if !userStopped, RoutineRun.isNews(failure: run.summary, afterLast: routine.runs.first) {
-                notify(about: bot.id, bot.name, RoutineRun.failureBanner(routine: routine.name, why: run.summary))
+                notify(about: bot.id, bot.name, RoutineRun.failureBanner(routine: routine.name, why: run.summary),
+                       run: (routineID, run.id))
             }
         }
         if let index = routines.firstIndex(where: { $0.id == routineID }) {
             // The report's progress line moves the goal, if the routine has one; a goal reached pauses the routine.
             if succeeded { run.check = routines[index].recordGoalCheck(from: reply, at: finished) }
             routines[index].lastResult = succeeded ? reply.map { String($0.prefix(160)) } : "Não terminou: veja a conversa."
-            // A run that outlasted its slot (every 15 minutes, taking 20) must not start the next one at once: count from now.
-            // A task for one moment counts only a run that began at it: a test run still going when the moment came
-            // leaves the moment due.
-            let testRunBeforeMoment = if case .once = routines[index].schedule { started < routines[index].nextRun } else { false }
-            if routines[index].nextRun <= finished, !testRunBeforeMoment { routines[index].lastRun = finished }
-            // A task for one moment is done once that moment has run (a test run before it is not): it stays in the
-            // list, switched off, with its history.
-            routines[index].closeIfOnceIsDone()
+            if cutByQuit, let before = lastRunBeforeRun[routineID] {
+                // The app's closing cut the run: the slot is not spent, so the routine is due again on opening (a task for one
+                // moment stays on). The run is in the history as "not finished".
+                routines[index].lastRun = before
+            } else {
+                // A run that outlasted its slot (every 15 minutes, taking 20) must not start the next one at once: count from now.
+                // A task for one moment counts only a run that began at it: a test run still going when the moment came
+                // leaves the moment due.
+                let testRunBeforeMoment = if case .once = routines[index].schedule { started < routines[index].nextRun } else { false }
+                if routines[index].nextRun <= finished, !testRunBeforeMoment { routines[index].lastRun = finished }
+                // A task for one moment is done once that moment has run (a test run before it is not): it stays in the
+                // list, switched off, with its history.
+                routines[index].closeIfOnceIsDone()
+            }
+        }
+        lastRunBeforeRun[routineID] = nil
+        if cutByQuit {
+            notify(about: bot.id, bot.name, "A rotina “\(routine.name)” foi interrompida porque o app fechou e roda de novo ao abrir.",
+                   run: (routineID, run.id))
         }
         recordRun(run, routineID: routineID)
         let outcome: OrbEvent.Outcome = !succeeded ? .failed : run.check?.status == .done ? .goalReached
@@ -2692,13 +2713,17 @@ final class AppModel {
 
     /// The last banner the app meant to post (whether or not the settings and focus let it out), for the tests.
     @ObservationIgnored private(set) var lastBanner: (title: String, body: String, botID: UUID)?
+    /// The routine run the last banner points at, if it was about one (for the tests).
+    @ObservationIgnored private(set) var lastBannerRun: RoutineRunTarget?
 
     /// Posts a banner about an Orb when the app is in the background (bundled app only). It carries the Orb, so a tap
     /// opens that Orb rather than whichever one was selected.
-    func notify(about botID: UUID, _ title: String, _ body: String) {
+    /// `run`: a banner about a routine run's end carries it, so the tap opens that run (report or reason) on Rotinas.
+    func notify(about botID: UUID, _ title: String, _ body: String, run: (routine: UUID, run: UUID)? = nil) {
         lastBanner = (title, body, botID)
+        lastBannerRun = run.map { RoutineRunTarget(routineID: $0.routine, runID: $0.run) }
         guard !(NSApp?.isActive ?? false), Self.notificationsEnabled, ApprovalNotifications.isAvailable else { return }
-        let content = ApprovalNotifications.orbContent(botID: botID, title: title, body: body)
+        let content = ApprovalNotifications.orbContent(botID: botID, title: title, body: body, run: run)
         Task { await ApprovalNotifications.send(content) }
     }
 

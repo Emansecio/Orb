@@ -487,7 +487,11 @@ extension BotSession {
             }
             // The row's second line, for every turn that ended with an answer (a routine's, an Orb's request too).
             if let reply, let preview = ReplyPreview.make(from: reply) { model.setLastReply(preview, for: id) }
-            if !isOrbRun, !waits, let bot = model.bot(id), let reply { model.notify(about: id, bot.name, RoutineRun.preview(of: reply)) }
+            if !isOrbRun, !waits, let bot = model.bot(id), let reply {
+                // A routine's banner opens its run (the report), recorded just above; a chat turn's opens the Orb.
+                let run = routineID.flatMap { routine in model.routines.first { $0.id == routine }?.runs.first.map { (routine, $0.id) } }
+                model.notify(about: id, bot.name, RoutineRun.preview(of: reply), run: run)
+            }
         } else {
             flash(\.hasFailed, seconds: 2.5)
         }

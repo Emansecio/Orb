@@ -113,7 +113,14 @@ extension GoalCheck {
               let number = Range(match.range(at: 1), in: line).flatMap({ Int(line[$0]) }),
               let word = Range(match.range(at: 2), in: line).map({ line[$0].folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil) })
         else { return nil }
-        let status: GoalStatus = word.hasPrefix("conclu") ? .done : word.hasPrefix("aten") ? .attention : .onTrack
+        // "Progresso: 40% concluído" is prose (a figure followed by a word, no separator), not the format's
+        // "Progresso: N% · concluída": below 100 it reads as progress, not as a finished goal.
+        let proseBelowHundred = number < 100 && Range(match.range(at: 1), in: line).map { digits in
+            let between = line[digits.upperBound..<(Range(match.range(at: 2), in: line)?.lowerBound ?? digits.upperBound)]
+            return between.contains("%") && between.allSatisfy { $0 == "%" || $0 == " " }
+        } == true
+        let status: GoalStatus = word.hasPrefix("conclu") ? (proseBelowHundred ? .onTrack : .done)
+            : word.hasPrefix("aten") ? .attention : .onTrack
         let note = Range(match.range(at: 3), in: line).map { String(line[$0]) } ?? ""
         return GoalCheck(progress: status == .done ? 100 : min(number, 100), status: status,
                          note: Conversation.clipped(note.trimmingCharacters(in: noteEdges), to: noteLimit))

@@ -198,6 +198,15 @@ extension AppModel {
         case .open(let botID):
             if let botID { showApprovalOwner(botID) }
             ApprovalNotifications.bringAppToFront()
+        case .openRoutineRun(let botID, let routineID, let runID):
+            // The run may be gone (trimmed, routine deleted): the Orb it came from is the fallback.
+            if routines.first(where: { $0.id == routineID })?.runs.contains(where: { $0.id == runID }) == true {
+                routineRunToShow = RoutineRunTarget(routineID: routineID, runID: runID)
+                selection = .routines
+            } else {
+                showApprovalOwner(botID)
+            }
+            ApprovalNotifications.bringAppToFront()
         case .openGroup(let groupID):
             if group(groupID) != nil { selection = .group(groupID) }
             ApprovalNotifications.bringAppToFront()
@@ -268,4 +277,10 @@ enum ApprovalWait {
         let minutes = Int(waited.components.seconds / 60)
         return "Esperando há " + (minutes >= 60 ? "\(minutes / 60) h" : "\(minutes) min") + " · "
     }
+}
+
+/// A run of a routine, to open in `RoutineRunSheet`.
+struct RoutineRunTarget: Equatable, Sendable {
+    let routineID: UUID
+    let runID: UUID
 }
