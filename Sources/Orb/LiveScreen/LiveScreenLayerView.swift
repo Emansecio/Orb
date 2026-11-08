@@ -386,15 +386,17 @@ extension LiveScreenLayerView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { isInteractive }
 
     /// Where an event is on the page, in its CSS pixels; nil off the picture or before the first one.
-    private func pagePoint(of event: NSEvent) -> CGPoint? {
+    private func pagePoint(of event: NSEvent, clamped: Bool = false) -> CGPoint? {
         guard let shown else { return nil }
         let local = convert(event.locationInWindow, from: nil)
         return LiveInput.pagePoint(CGPoint(x: local.x, y: bounds.height - local.y), layerSize: bounds.size,
-                                   imageSize: CGSize(width: shown.image.width, height: shown.image.height), viewport: shown.viewport)
+                                   imageSize: CGSize(width: shown.image.width, height: shown.image.height), viewport: shown.viewport,
+                                   clamped: clamped)
     }
 
     private func sendMouse(_ kind: LiveInput.MouseEvent, _ event: NSEvent, button: LiveInput.MouseButton, clickCount: Int = 0) {
-        guard isInteractive, let point = pagePoint(of: event) else { return }
+        // A release off the picture is clamped to its edge: dropping it would leave the page's button pressed.
+        guard isInteractive, let point = pagePoint(of: event, clamped: kind == .released) else { return }
         hub.send(LiveInput.mouse(kind, at: point, button: button, clickCount: clickCount, modifiers: event.modifierFlags), to: botID)
     }
 

@@ -11,9 +11,17 @@ enum LiveInput {
     /// The point of the page (its viewport's CSS pixels, from the top left) under `point` (from the top left of a layer of
     /// `layerSize` that shows the picture whole, as `resizeAspect` does). nil off the picture (the bars beside it) or
     /// without a usable picture.
-    static func pagePoint(_ point: CGPoint, layerSize: CGSize, imageSize: CGSize, viewport: CGSize) -> CGPoint? {
-        guard let shown = shownRect(layerSize: layerSize, imageSize: imageSize), viewport.width > 0, viewport.height > 0,
-              shown.contains(point) else { return nil }
+    /// `clamped`: a point off the picture is moved to its nearest edge instead of giving nil (a button released outside the picture
+    /// still has to reach the page, or it stays pressed).
+    static func pagePoint(_ point: CGPoint, layerSize: CGSize, imageSize: CGSize, viewport: CGSize, clamped: Bool = false) -> CGPoint? {
+        guard let shown = shownRect(layerSize: layerSize, imageSize: imageSize), viewport.width > 0, viewport.height > 0 else { return nil }
+        var point = point
+        if clamped {
+            // The far edges are exclusive in `contains`, so the clamp stops one step inside.
+            point.x = min(max(point.x, shown.minX), shown.maxX.nextDown)
+            point.y = min(max(point.y, shown.minY), shown.maxY.nextDown)
+        }
+        guard shown.contains(point) else { return nil }
         return CGPoint(x: ((point.x - shown.minX) / shown.width * viewport.width).rounded(),
                        y: ((point.y - shown.minY) / shown.height * viewport.height).rounded())
     }

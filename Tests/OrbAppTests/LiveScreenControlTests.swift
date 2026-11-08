@@ -35,6 +35,14 @@ struct LiveInputTests {
         #expect(LiveInput.pixelsPerPointForTests(layer) == 1280.0 / 480)
     }
 
+    @Test func aReleaseOffThePictureIsClampedToItsEdge() {
+        let layer = CGSize(width: 800, height: 300)
+        #expect(LiveInput.pagePoint(CGPoint(x: 100, y: 150), layerSize: layer, imageSize: image, viewport: viewport, clamped: true)
+                == CGPoint(x: 0, y: 400))
+        #expect(LiveInput.pagePoint(CGPoint(x: 5000, y: 9000), layerSize: layer, imageSize: image, viewport: viewport, clamped: true) != nil)
+        #expect(LiveInput.pagePoint(.zero, layerSize: .zero, imageSize: image, viewport: viewport, clamped: true) == nil)
+    }
+
     @Test func noPictureNoPoint() {
         #expect(LiveInput.pagePoint(.zero, layerSize: CGSize(width: 10, height: 10), imageSize: .zero, viewport: viewport) == nil)
         #expect(LiveInput.pagePoint(.zero, layerSize: .zero, imageSize: image, viewport: viewport) == nil)
