@@ -50,7 +50,7 @@ extension AppModel {
 
     /// The Orb's turn (or the next one) is its own chat's: not a routine's run, a request from another Orb or a group's turn.
     func isOwnChat(_ botID: UUID) -> Bool {
-        sessions[botID].map { $0.routineID == nil && $0.sideKind == nil } ?? true
+        sessions[botID].map { $0.routineID == nil && $0.sideKind == nil && $0.pulseInChat == nil } ?? true
     }
 
     /// The Orb may send requests to its groups from its chat ("Orbs podem acionar grupos", and it is in some group).

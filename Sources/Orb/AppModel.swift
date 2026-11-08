@@ -1985,7 +1985,7 @@ final class AppModel {
                                       prompt: TurnPreface.prepend(built.preface, to: message),
                                       client: client, tools: tools, context: context, budget: budget, ledger: ledger,
                                       chunks: chunks, maxSteps: .max, // no limit: the turn runs until the model answers or you stop it (⌘.)
-                                      unattended: session.routineID != nil && session.sideKind != .group,
+                                      unattended: (session.routineID != nil && session.sideKind != .group) || session.pulseInChat != nil,
                                       turnGrants: turnGrants, permissions: permissionSource(for: bot),
                                       images: pictures, requestItem: bubble, supportsImages: sees,
                                       onImagesRejected: { [weak self] in Task { @MainActor in self?.visionRejected.insert(ref.text) } },
@@ -2104,6 +2104,7 @@ final class AppModel {
         // A run that waits for other Orbs ends here: the answers will not come (nothing between Orbs survives the app closing).
         for (routineID, wait) in delegation.waitingRoutines {
             delegation.forgetWaitingRoutine(routineID)
+            guard wait.pulse == nil else { continue } // a pulse is not resumed after a quit: its conversation was saved when it began to wait
             closeRoutineRun(routineID, of: wait.botID, conversation: wait.conversation, started: wait.started,
                             why: "O app fechou antes da resposta do outro Orb.", quietly: true)
         }

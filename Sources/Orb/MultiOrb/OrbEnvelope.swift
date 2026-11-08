@@ -51,6 +51,9 @@ struct OrbEnvelope: Codable, Equatable, Sendable {
     /// The pulse run that asked, waiting in its own conversation (`DelegationHub.holdPulse`): its answer resumes that run, not
     /// the chat.
     var servingPulse: UUID?
+
+    /// The run that waits for this answer in its own conversation: a routine's or a pulse's (one of the two at most).
+    var servingRun: UUID? { servingRoutine ?? servingPulse }
 }
 
 extension OrbEnvelope {

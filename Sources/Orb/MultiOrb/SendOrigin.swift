@@ -9,13 +9,16 @@ enum SendOrigin: Sendable, Equatable {
     case orb(OrbEnvelope)
     /// The answers to requests this Orb made (`OrbEnvelopeText.reply`).
     case orbReply([OrbEnvelope])
+    /// The pulse taking up a dropped plan in the chat (`AppModel.beginPulse`): nobody wrote it, so no bubble; the chat shows
+    /// a `pulseResumed` line instead.
+    case pulse
 
     var isUser: Bool { if case .user = self { true } else { false } }
 
     /// The lines the conversation gets in place of the person's bubble.
     var items: [OrbMessageItem] {
         switch self {
-        case .user:
+        case .user, .pulse:
             return []
         case .orb(let envelope):
             return [OrbMessageItem(direction: .received, kind: envelope.kind == .tell ? .tell : .ask, state: .open,

@@ -169,10 +169,11 @@ private final class PulseWorld {
         await world.settle()
         let order = await world.log.seen.map { $0.who }
         #expect(order == ["Atlas", "Pesquisador", "Revisor", "Atlas"])
-        // Each run is in the Orb's own pulse conversation, and the chat came back untouched.
-        let saved = try #require(model.store.readSideConversation(prefix: Store.pulsoPrefix, id: world.bot("Atlas").id, for: world.bot("Atlas").id).value)
-        #expect(saved.items.contains { if case .bot(let text, _) = $0.kind { text == "NOTHING" } else { false } })
-        #expect(model.sessions[world.bot("Atlas").id]?.routineID == nil && model.sessions[world.bot("Atlas").id]?.parkedChat == nil)
+        // Each run took up the plan in its own conversation, and a run that found nothing to do left no trace there.
+        let chat = model.transcript(world.bot("Atlas").id)
+        #expect(!chat.contains { if case .bot(let text, _) = $0.kind { text == "NOTHING" } else { false } })
+        #expect(world.events("Atlas").isEmpty)
+        #expect(model.sessions[world.bot("Atlas").id]?.routineID == nil && model.sessions[world.bot("Atlas").id]?.pulseInChat == nil)
     }
 
     @Test func withNoDemandItNeverAsksTheModelEvenWithFilesChanging() async throws {
@@ -503,7 +504,7 @@ private final class PulseWorld {
         await model.pulseTick(now: world.at(minutes: 61))
         await world.settle()
         let call = try #require(await world.log.calls(by: "Atlas").first)
-        #expect(call.user.contains("[Pulse] Nobody asked for this run. Open work you could move forward:\n- Unfinished plan"))
+        #expect(call.user.contains("[Pulse] Nobody asked for this run, and nobody reads it while it works. Open work you could move forward:\n- Unfinished plan"))
         #expect(call.user.hasSuffix("reply only NOTHING."))
         for tool in ["orbs", "group_create", "group_edit", "orb_propose", "orb_delete"] { #expect(call.tools.contains(tool), "\(tool)") }
         #expect(!call.tools.contains("ask_user") && !call.tools.contains("request_access"), "nobody is there to answer")
@@ -535,7 +536,7 @@ private final class PulseWorld {
         let model = world.model
         await world.startInterval()
         await model.pulseTick(now: world.at(minutes: 61))
-        await waitUntil("the pulse to run") { model.sessions[world.bot("Atlas").id]?.sideKind == .pulse }
+        await waitUntil("the pulse to run") { model.sessions[world.bot("Atlas").id]?.pulseInChat != nil }
         #expect(model.workJournal.entries.contains { $0.kind == .pulse && $0.botID == world.bot("Atlas").id })
         await gate.open()
         await world.settle()
@@ -869,3 +870,82 @@ private final class PulseWorld {
         #expect(model.pulseState.delivered[atlas.uuidString]?.count == 44)
     }
 }
+
+// MARK: The pulse in the plan's chat, and answers that resume the pulse
+
+@Suite @MainActor struct PulseInChatTests {
+    @Test func aDroppedPlanIsTakenUpInItsOwnChatUnattendedAndPaidByThePulse() async throws {
+        let world = PulseWorld(names: ["Atlas", "Revisor"], demand: false) { who, _, _ in
+            say(who == "Atlas" ? "Retomei: escrevi a seção 2." : "NOTHING")
+        }
+        defer { world.cleanUp() }
+        let model = world.model, atlas = world.bot("Atlas").id
+        world.plant("Atlas", tag: 0)
+        await world.startInterval()
+        await model.pulseTick(now: world.at(minutes: 61))
+        await world.settle()
+        let call = try #require(await world.log.calls(by: "Atlas").first)
+        #expect(call.user.contains("This is the conversation of the plan") && call.user.contains("Unfinished plan"))
+        #expect(!call.tools.contains("ask_user") && !call.tools.contains("request_access"), "nobody is there to answer")
+        let chat = model.transcript(atlas)
+        #expect(!chat.contains { if case .user = $0.kind { true } else { false } }, "nobody wrote it: no bubble")
+        #expect(chat.contains { if case .bot(let text, _) = $0.kind { text == "Retomei: escrevi a seção 2." } else { false } })
+        let kinds = world.events("Atlas").map(\.kind)
+        #expect(kinds == [.pulseResumed, .pulseRan])
+        #expect(world.events("Atlas").first?.sentence == "Atlas retomou sozinho o plano “Entregar o relatório 0”")
+        #expect(model.pulseState.tokensToday == 1_000 && model.sessions[atlas]?.pulseInChat == nil)
+        #expect(!model.workJournal.entries.contains { $0.botID == atlas }, "a quit drops it, as any pulse")
+        #expect(model.pulseState.delivered[atlas.uuidString]?.count == 1)
+    }
+
+    @Test func anAnswerToThePulsesAskResumesThePulseNotTheChat() async throws {
+        let world = PulseWorld(names: ["Atlas", "Revisor"], demand: false) { who, user, result in
+            if who == "Revisor" { return say("Conferido.") }
+            if user.contains("<orb_reply") { return say("O Revisor conferiu a rotina.") }
+            return result == nil ? ask("Revisor", "Confira a rotina Faturas.") : say("Pedi ao Revisor.")
+        }
+        defer { world.cleanUp() }
+        let model = world.model, atlas = world.bot("Atlas").id
+        var routine = Routine(name: "Faturas", botID: atlas, prompt: "x", schedule: .everyHours(4))
+        routine.runs = [RoutineRun(date: world.t0.addingTimeInterval(-3_600), succeeded: false, summary: "Sem acesso")]
+        model.routines = [routine]
+        await world.startInterval()
+        await model.pulseTick(now: world.at(minutes: 61))
+        await world.settle()
+        let atlasCalls = await world.log.calls(by: "Atlas")
+        #expect(atlasCalls.count == 3)
+        #expect(atlasCalls.last?.user.contains("Continue the pulse's work") == true)
+        // One line for the whole run, with what it came to; the chat had no turn of its own.
+        let lines = world.events("Atlas").filter { $0.kind == .pulseRan }
+        #expect(lines.count == 1 && lines.first?.note == "O Revisor conferiu a rotina.")
+        #expect(!model.transcript(atlas).contains { if case .bot = $0.kind { true } else { false } })
+        #expect(!model.delegation.hasWaitingPulse(of: atlas))
+        #expect(model.pulseState.tokensToday == 4_000, "the pulse's three calls and the Revisor's")
+        let saved = try #require(model.store.readSideConversation(prefix: Store.pulsoPrefix, id: atlas, for: atlas).value)
+        #expect(saved.items.contains { if case .bot(let text, _) = $0.kind { text == "O Revisor conferiu a rotina." } else { false } })
+    }
+
+    @Test func aPulseWaitingForAnAnswerHoldsTheOrbFromAnotherPulse() async throws {
+        let gate = TestGate()
+        let world = PulseWorld(names: ["Atlas", "Revisor"], demand: false) { who, user, result in
+            if who == "Revisor" { await gate.wait(); return say("Conferido.") }
+            if user.contains("<orb_reply") { return say("Feito.") }
+            return result == nil ? ask("Revisor", "Confira.") : say("Pedi.")
+        }
+        defer { world.cleanUp() }
+        let model = world.model, atlas = world.bot("Atlas").id
+        var routine = Routine(name: "Faturas", botID: atlas, prompt: "x", schedule: .everyHours(4))
+        routine.runs = [RoutineRun(date: world.t0.addingTimeInterval(-3_600), succeeded: false, summary: "Sem acesso")]
+        model.routines = [routine]
+        await world.startInterval()
+        await model.pulseTick(now: world.at(minutes: 61))
+        await waitUntil("the pulse to wait") { model.delegation.hasWaitingPulse(of: atlas) }
+        world.plant("Atlas", tag: 1)
+        await model.pulseTick(now: world.at(minutes: 122))
+        #expect(await world.log.count(by: "Atlas") == 2, "no second pulse while one waits")
+        await gate.open()
+        await world.settle()
+        #expect(!model.delegation.hasWaitingPulse(of: atlas))
+    }
+}
+

@@ -27,8 +27,10 @@ extension AppModel {
             let background = RequestBackground.plan(chat: chat, asker: envelope.from, current: envelope.id)
             return background.isEmpty ? OutsideContext() : OutsideContext(kind: .request(background), room: RequestBackground.room)
         }
-        // A routine's run, once at its start (the answers that resume it come as they are).
-        if session.routineID != nil, session.sideKind == nil || session.sideKind == .routine, origin.isUser, let chat = session.parkedChat {
+        // A routine's run, once at its start (the answers that resume it come as they are); a pulse's too, so it knows what the
+        // chat was doing before it acts for it.
+        if session.routineID != nil, session.sideKind == nil || session.sideKind == .routine || session.sideKind == .pulse,
+           origin.isUser, let chat = session.parkedChat {
             let lines = RoutineBackground.lines(chat: chat)
             return lines.isEmpty ? OutsideContext() : OutsideContext(kind: .routine(lines), room: RoutineBackground.room)
         }

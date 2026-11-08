@@ -59,6 +59,8 @@ final class DelegationHub: DelegationService {
         var botID: UUID
         var conversation: Conversation
         var started: Date
+        /// A pulse's run waits (`holdPulse`), with what it had spent and why it woke; nil: a routine's.
+        var pulse: PulseRun?
     }
     private(set) var waitingRoutines: [UUID: RoutineWait] = [:]
 
@@ -146,6 +148,8 @@ final class DelegationHub: DelegationService {
         envelope.folder = folder
         // A routine's run that asks is resumed by the answer (`holdRoutine`), so the answer must say which run it is for.
         if session.routineID != nil, session.sideKind == nil { envelope.servingRoutine = session.routineID }
+        // A pulse's run too (`holdPulse`): its answer must not wake the chat, which knows nothing of what the pulse asked.
+        if session.sideKind == .pulse { envelope.servingPulse = session.routineID }
         requests[envelope.id] = DelegationRequest(envelope: envelope, state: .queued)
         model.workJournal.requestBegan(envelope) // a close of the app resumes it (`resubmit`)
         if let serving = envelope.servingRequest { requests[serving]?.openChildren.insert(envelope.id) }
@@ -547,6 +551,7 @@ final class DelegationHub: DelegationService {
                                 hop: envelope.hop, path: envelope.path, replyTo: envelope.id,
                                 servingRequest: envelope.servingRequest, status: status, groupID: envelope.groupID)
         reply.servingRoutine = envelope.servingRoutine
+        reply.servingPulse = envelope.servingPulse
         reply.fromChat = envelope.fromChat // the chat's line names the group that answered
         reply.chat = envelope.chat
         inbox[envelope.from.id, default: []].append(reply)
@@ -562,8 +567,8 @@ final class DelegationHub: DelegationService {
         let requestID = reply.replyTo ?? reply.id, state = SendOrigin.state(of: reply.status)
         if let serving = reply.servingRequest {
             suspended[serving]?.items.settingSent(requestID, to: state)
-        } else if let routine = reply.servingRoutine {
-            waitingRoutines[routine]?.conversation.items.settingSent(requestID, to: state)
+        } else if let run = reply.servingRun, waitingRoutines[run] != nil {
+            waitingRoutines[run]?.conversation.items.settingSent(requestID, to: state)
         } else {
             markSent(requestID, asker: reply.to.id, as: state, in: reply.chat)
         }
@@ -576,7 +581,7 @@ final class DelegationHub: DelegationService {
             let envelope = request.envelope
             return Self.isOpen(request.state) && envelope.kind == .ask && envelope.from.id == botID
                 && (envelope.from.id != envelope.to.id || envelope.fromChat)
-                && envelope.servingRequest == reply.servingRequest && envelope.servingRoutine == reply.servingRoutine
+                && envelope.servingRequest == reply.servingRequest && envelope.servingRun == reply.servingRun
                 && envelope.chat == reply.chat
         }
     }
@@ -593,7 +598,7 @@ final class DelegationHub: DelegationService {
         var held: [OrbEnvelope] = []
         while let first = waiting.first {
             let sameWork = waiting.filter {
-                $0.servingRequest == first.servingRequest && $0.servingRoutine == first.servingRoutine && $0.chat == first.chat
+                $0.servingRequest == first.servingRequest && $0.servingRun == first.servingRun && $0.chat == first.chat
             }
             let ids = Set(sameWork.map(\.id))
             waiting.removeAll { ids.contains($0.id) }
@@ -629,6 +634,20 @@ final class DelegationHub: DelegationService {
                 chainStates[first.chainID]?.touched = .now
                 if model.resumeRoutine(routine, of: botID, conversation: wait.conversation, started: wait.started, chain: chain,
                                        text: OrbEnvelopeText.reply(batch, inRoutine: true), origin: .orbReply(batch)) {
+                    refresh(botID)
+                    return true
+                }
+                continue
+            }
+            // A pulse's run that waits goes on in the pulse's conversation. With none waiting (it was stopped, the app
+            // reopened), the answer is not lost: it wakes the chat, as before the pulse could wait.
+            if let pulse = first.servingPulse, var wait = waitingRoutines[pulse], let run = wait.pulse {
+                waitingRoutines[pulse] = nil
+                for reply in batch { wait.conversation.items.settingSent(reply.replyTo ?? reply.id, to: SendOrigin.state(of: reply.status)) }
+                let chain = ChainContext(chainID: first.chainID, hop: max(0, first.hop - 1), path: first.path, groupID: nil)
+                chainStates[first.chainID]?.touched = .now
+                if model.resumePulse(run, of: botID, conversation: wait.conversation, chain: chain,
+                                     text: OrbEnvelopeText.reply(batch, inPulse: true), origin: .orbReply(batch)) {
                     refresh(botID)
                     return true
                 }
@@ -694,10 +713,22 @@ final class DelegationHub: DelegationService {
         return true
     }
 
-    /// The run of `routineID` asked something that is still open, or has an answer waiting to be handed to it.
-    private func routineAwaits(_ routineID: UUID, of botID: UUID) -> Bool {
-        requests.values.contains { Self.isOpen($0.state) && $0.envelope.servingRoutine == routineID && $0.envelope.from.id == botID }
-            || (inbox[botID] ?? []).contains { $0.servingRoutine == routineID && chainStates[$0.chainID]?.cancelled != true }
+    /// The pulse's run ended its turn having asked other Orbs: as a routine's (`holdRoutine`), it waits for the answers in its
+    /// own conversation, and they resume it (`AppModel.resumePulse`). True: the app does not close the run yet.
+    func holdPulse(_ run: PulseRun, of botID: UUID, conversation: Conversation) -> Bool {
+        guard !isShuttingDown, routineAwaits(run.id, of: botID) else { return false }
+        waitingRoutines[run.id] = RoutineWait(botID: botID, conversation: conversation, started: run.startedAt, pulse: run)
+        schedulePump(botID)
+        return true
+    }
+
+    /// A pulse of the Orb waits for answers: no other pulse may begin on it meanwhile.
+    func hasWaitingPulse(of botID: UUID) -> Bool { waitingRoutines.values.contains { $0.botID == botID && $0.pulse != nil } }
+
+    /// The run (a routine's or a pulse's) asked something that is still open, or has an answer waiting to be handed to it.
+    private func routineAwaits(_ runID: UUID, of botID: UUID) -> Bool {
+        requests.values.contains { Self.isOpen($0.state) && $0.envelope.servingRun == runID && $0.envelope.from.id == botID }
+            || (inbox[botID] ?? []).contains { $0.servingRun == runID && chainStates[$0.chainID]?.cancelled != true }
     }
 
     /// The routine's run waits for answers from other Orbs (`holdRoutine`).
@@ -709,8 +740,12 @@ final class DelegationHub: DelegationService {
         guard let model, !isShuttingDown else { return }
         for (routineID, wait) in waitingRoutines where !routineAwaits(routineID, of: wait.botID) {
             waitingRoutines[routineID] = nil
-            model.closeRoutineRun(routineID, of: wait.botID, conversation: wait.conversation, started: wait.started,
-                                  why: "A resposta do outro Orb não veio: a conversa entre Orbs foi interrompida.")
+            let why = "A resposta do outro Orb não veio: a conversa entre Orbs foi interrompida."
+            if let run = wait.pulse {
+                model.closePulseWait(run, of: wait.botID, conversation: wait.conversation, why: why)
+            } else {
+                model.closeRoutineRun(routineID, of: wait.botID, conversation: wait.conversation, started: wait.started, why: why)
+            }
         }
     }
 
@@ -1104,7 +1139,8 @@ final class DelegationHub: DelegationService {
                                           folder: folder)
                 return kind == .ask
                     ? "Pedido enviado a \(envelope.to.name) (id \(envelope.shortID)). A resposta chega sozinha como mensagem"
-                        + (envelope.servingRoutine != nil ? " e retoma esta execução da rotina" : "")
+                        + (envelope.servingRoutine != nil ? " e retoma esta execução da rotina"
+                            : envelope.servingPulse != nil ? " e retoma este pulso" : "")
                         + "; não espere nem repita o pedido. Termine o que puder sem ela."
                     : "Aviso deixado para \(envelope.to.name): \(envelope.groupID == nil ? "ele lê na próxima mensagem que receber" : "fica no fio do grupo, que ele lê no próximo turno"). tell não acorda; para acordar e ter resposta, use ask."
             } catch let refusal as DelegationRefusal {
@@ -1217,7 +1253,7 @@ final class DelegationHub: DelegationService {
             .sorted(by: Self.older)
             .map { request in
                 let envelope = request.envelope
-                let from = currentName(envelope.from) + (envelope.servingRoutine != nil ? " (rotina)" : "")
+                let from = currentName(envelope.from) + (envelope.servingRoutine != nil ? " (rotina)" : envelope.servingPulse != nil ? " (pulso)" : "")
                 let state: String = switch request.state {
                 case .queued: "na fila"
                 case .awaitingChildren:

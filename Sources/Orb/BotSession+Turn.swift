@@ -42,7 +42,8 @@ extension BotSession {
         planAtTurnStart = conversation?.taskPlan
         model?.workAnnouncer.reset()
         model?.live(id).setTurnSpend(nil)
-        if routineID == nil { model?.workJournal.chatTaskBegan(bot: id, chat: conversationChat ?? id) } // a quit or crash resumes it
+        // A quit or crash resumes it; not the pulse's turn in the chat, which a quit drops as it does any pulse.
+        if routineID == nil, pulseInChat == nil { model?.workJournal.chatTaskBegan(bot: id, chat: conversationChat ?? id) }
         // Written at once, with the message that opened the turn: a crash in the next seconds no longer loses it.
         if conversation != nil {
             conversation?.turnOpen = true
@@ -366,6 +367,7 @@ extension BotSession {
         // MARK: MultiOrb (WP1, WP5)
         // A turn of a member in a group is filed as the group's, and so is one of the side runs of a group's chain.
         let source: UsageSource = switch (routineID, sideKind) {
+        case _ where pulseInChat != nil: .pulse
         case _ where model.groupHub.activeGroup(of: id) != nil: .group
         case (nil, _): .chat
         case (_, .delegation): .delegation
@@ -427,7 +429,7 @@ extension BotSession {
         stopSpeaking()
         closeStreaming()
         closeBrowserView(succeeded ? .done : .failed)
-        if routineID == nil, let boundary = inicioTurnStart, let chat = conversationChat, let conversation {
+        if routineID == nil, pulseInChat == nil, let boundary = inicioTurnStart, let chat = conversationChat, let conversation {
             inicioTurnStart = nil
             let start = min(boundary, conversation.items.count)
             if let item = conversation.items[start...].last(where: {
@@ -479,6 +481,11 @@ extension BotSession {
         chain = nil
         usageChain = nil
         self.routineID = nil
+        let pulsedChat = pulseInChat // the pulse's turn in the chat: its line and its demands, as a pulse's own run
+        pulseInChat = nil
+        if routineID == nil, let pulsedChat {
+            model.finishPulse(id, runID: pulsedChat, succeeded: completed, userStopped: userStopped, reply: reply, inChat: turnChat)
+        }
         if let routineID {
             if kind == .pulse {
                 model.finishPulse(id, runID: routineID, succeeded: completed, userStopped: userStopped, reply: reply)
@@ -501,8 +508,10 @@ extension BotSession {
                                                selected: model.selection == .bot(id)))
             }
             // The row's second line, for every turn that ended with an answer (a routine's, an Orb's request too).
-            if kind != .pulse, let reply, let preview = ReplyPreview.make(from: reply) { model.setLastReply(preview, for: id) }
-            if !isOrbRun, kind != .pulse, !waits, let bot = model.bot(id), let reply {
+            if kind != .pulse, pulsedChat == nil || !Pulse.isNothing(reply), let reply, let preview = ReplyPreview.make(from: reply) {
+                model.setLastReply(preview, for: id)
+            }
+            if !isOrbRun, kind != .pulse, pulsedChat == nil, !waits, let bot = model.bot(id), let reply {
                 // A routine's banner opens its run (the report), recorded just above; a chat turn's opens the Orb.
                 let run = routineID.flatMap { routine in model.routines.first { $0.id == routine }?.runs.first.map { (routine, $0.id) } }
                 model.notify(about: id, bot.name, RoutineRun.preview(of: reply), run: run, chat: routineID == nil ? turnChat : nil)

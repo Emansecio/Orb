@@ -151,7 +151,7 @@ struct EventLineView: View {
         case .groupRunDone: "checkmark.circle"
         case .delegationReceived: "bubble.left"
         case .planDone: "checklist"
-        case .pulseRan: "waveform.path.ecg"
+        case .pulseRan, .pulseResumed: "waveform.path.ecg"
         case .pulseStopped: "stop.circle"
         case .deletionAsked, .deletionAnswered: "trash"
         case .unknown: "info.circle"

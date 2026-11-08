@@ -138,6 +138,10 @@ final class BotSession {
     /// The plan of the conversation the running turn works on: the routine's while it runs, the one on show otherwise.
     var shownPlan: TaskPlan? { (routineID != nil ? conversation : (parkedChat ?? conversation))?.activePlan }
 
+    /// The pulse run the chat's turn is (`AppModel.beginPulse` resumed a dropped plan in its own conversation): a turn of the chat
+    /// that nobody asked for and nobody watches, paid by the pulse. nil for every other turn.
+    @ObservationIgnored var pulseInChat: UUID?
+
     /// The routine whose run is the running turn. Setting it repaints the chat: the run's items start (or stop) being
     /// narrated after the parked chat (`shownItems`).
     var routineID: UUID? {

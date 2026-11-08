@@ -118,6 +118,14 @@ struct PulseRun: Equatable {
     /// The keys of the demands it was handed: marked delivered when it ends (`finishPulse`), not when it starts, so a run
     /// that fails or a quit in the middle leaves them for the next pulse.
     var keys: [String] = []
+    /// In the chat (`beginPulseInChat`): how many items and messages it had before the run, to take the run out again when
+    /// it found nothing to do.
+    var chatMark: (items: Int, messages: Int)?
+
+    static func == (a: PulseRun, b: PulseRun) -> Bool {
+        a.id == b.id && a.startedAt == b.startedAt && a.tokens == b.tokens && a.reason == b.reason && a.keys == b.keys
+            && a.chatMark?.items == b.chatMark?.items && a.chatMark?.messages == b.chatMark?.messages
+    }
 }
 
 /// Work waiting for an Orb, found without a model. `key` says which work and in what state (it changes when the work does), so
@@ -131,10 +139,14 @@ struct PulseDemand: Sendable, Equatable {
 
 enum Pulse {
     /// What the model is sent: the demands (short, in English: it goes in every pulse).
-    static func prompt(for demands: [PulseDemand]) -> String {
-        "[Pulse] Nobody asked for this run. Open work you could move forward:\n" + demands.map { "- " + $0.line }.joined(separator: "\n")
-            + "\nAct only on these: resume, ask a teammate, create an Orb or group, or adjust members. If none needs anything now, "
-            + "reply only NOTHING."
+    /// `inChat`: the run is in the conversation of the plan (the first demand), whose history it has.
+    static func prompt(for demands: [PulseDemand], inChat: Bool = false) -> String {
+        "[Pulse] Nobody asked for this run" + (inChat ? ", and nobody reads it while it works" : "") + ". Open work you could move forward:\n"
+            + demands.map { "- " + $0.line }.joined(separator: "\n")
+            + (inChat ? "\nThis is the conversation of the plan: resume its next step from where it stopped (check what is already done)."
+                + " Do not ask the user anything; if a step needs them, leave it blocked and say why." : "")
+            + "\nAct only on these: resume, ask a teammate, create an Orb or group, or adjust members (a new Orb only when no "
+            + "teammate can do it). If none needs anything now, reply only NOTHING."
     }
 
     static let defaultMinutes = 60
@@ -284,6 +296,7 @@ extension AppModel {
     func pulseLineage(of botID: UUID) -> UUID? {
         guard let session = sessions[botID] else { return nil }
         if session.sideKind == .pulse, let run = session.routineID { return run }
+        if let run = session.pulseInChat { return run }
         if let chain = session.chain?.chainID ?? session.usageChain, let run = delegation.pulseRun(ofChain: chain) { return run }
         if let serving = session.servingRequest, let run = delegation.requests[serving]?.envelope.pulseRun { return run }
         return nil
@@ -451,7 +464,7 @@ extension AppModel {
 
     /// Nothing holds the Orb or waits for it: a pulse never takes the place of a message, a routine or another Orb's request.
     private func isFreeForPulse(_ botID: UUID) -> Bool {
-        guard canTakeSideWork(botID), sessions[botID]?.parkedChat == nil, !isWorking(botID),
+        guard canTakeSideWork(botID), sessions[botID]?.parkedChat == nil, !isWorking(botID), !delegation.hasWaitingPulse(of: botID),
               delegation.queues[botID]?.isEmpty ?? true, delegation.inbox[botID]?.isEmpty ?? true else { return false }
         return !queuedRoutines.contains { id in routines.first { $0.id == id }?.botID == botID }
     }
@@ -460,9 +473,14 @@ extension AppModel {
 
     enum PulseStart { case started, busy, unusable }
 
-    /// Parks the Orb's chat, runs the pulse prompt in the Orb's own pulse conversation and returns once it has begun.
+    /// Parks the Orb's chat, runs the pulse prompt in the Orb's own pulse conversation and returns once it has begun. With a
+    /// dropped plan among the demands, the pulse runs in that plan's conversation instead (`beginPulseInChat`).
     func beginPulse(_ botID: UUID, demands: [PulseDemand], now: Date = .now) async -> PulseStart {
         guard canTakeSideWork(botID), bot(botID) != nil else { return .busy }
+        if let plan = demands.first(where: { $0.chat != nil }), let chat = plan.chat, isChat(chat, of: botID) {
+            let ordered = [plan] + demands.filter { $0.key != plan.key }
+            return await beginPulseInChat(botID, chat: chat, demands: ordered)
+        }
         let session = session(botID)
         pulseStarting.insert(botID) // the Orb is held while its files are read
         if session.isUnloaded { await loadedConversation(botID) }
@@ -487,22 +505,65 @@ extension AppModel {
         return .started
     }
 
+    /// The pulse in the conversation of a dropped plan: the turn has its history, the plan and what happened since (`SinceLastTurn`),
+    /// as the person's next message would. It is a turn nobody watches (no questions, no access cards) and paid by the pulse.
+    private func beginPulseInChat(_ botID: UUID, chat: UUID, demands: [PulseDemand]) async -> PulseStart {
+        let session = session(botID)
+        pulseStarting.insert(botID) // the Orb is held while its conversation is read
+        let ready = await prepareTurn(in: chat, of: botID)
+        pulseStarting.remove(botID)
+        guard ready, !isResetting, pulseIsOn, let bot = bot(botID), session.turnTask == nil, session.routineID == nil,
+              session.conversationChat == chat else {
+            if ready { session.endWorkElsewhere() }
+            return .busy
+        }
+        let runID = UUID(), started = Date.now
+        let goal = session.conversation?.activePlan.map { Pulse.clip($0.goal, 80) } ?? ""
+        let mark = (items: session.conversation?.items.count ?? 0, messages: session.conversation?.messages.count ?? 0)
+        session.pulseInChat = runID
+        pulseRuns[botID] = PulseRun(id: runID, startedAt: started, reason: demands.first?.line ?? "", keys: demands.map(\.key),
+                                    chatMark: mark)
+        appendToChat(.event(OrbEvent(kind: .pulseResumed, actor: OrbRef(bot), detail: goal, runID: runID)), of: botID, in: chat)
+        guard send(Pulse.prompt(for: demands, inChat: true), to: botID, origin: .pulse) else {
+            session.pulseInChat = nil
+            pulseRuns[botID] = nil
+            if session.workingChatID != nil { session.endWorkElsewhere() }
+            return .unusable
+        }
+        workJournal.pulseBegan(bot: botID, at: started)
+        setStatus("Pulso: retomando o plano", of: botID)
+        return .started
+    }
+
     /// The pulse turn ended (`BotSession.finishTurn`): its conversation is kept, the chat comes back, and when the pulse did
     /// something the chat and the home page say so. Whatever it asked of other Orbs goes on, and its answers wake the chat.
-    func finishPulse(_ botID: UUID, runID: UUID, succeeded: Bool, userStopped: Bool, reply: String?) {
+    func finishPulse(_ botID: UUID, runID: UUID, succeeded: Bool, userStopped: Bool, reply: String?, inChat chat: UUID? = nil) {
         let session = session(botID)
         let own = session.conversation ?? Conversation()
-        store.saveSideConversation(own, prefix: Store.pulsoPrefix, id: botID, for: botID)
-        session.unparkChat()
-        if session.hasUnsavedStretch() { session.scheduleMemorySave() } // the run cancelled the chat's pending save
+        if chat == nil {
+            store.saveSideConversation(own, prefix: Store.pulsoPrefix, id: botID, for: botID)
+            session.unparkChat()
+            if session.hasUnsavedStretch() { session.scheduleMemorySave() } // the run cancelled the chat's pending save
+        }
         workJournal.dropPulse(bot: botID)
         let run = pulseRuns.removeValue(forKey: botID)
         guard let bot = bot(botID), !isResetting else { return }
         let failed = !succeeded && !userStopped
         settleDemands(run?.keys ?? [], of: botID, succeeded: !failed)
+        // It asked other Orbs from its own conversation: the run waits for the answers there, and they resume it. (In the chat
+        // they come back to the chat, as any answer to it does.)
+        if chat == nil, !failed, !userStopped, var waiting = run {
+            waiting.keys = []
+            if delegation.holdPulse(waiting, of: botID, conversation: own) {
+                savePulseState()
+                return
+            }
+        }
 
-        // This run's items: after the marker that opens it.
-        let start = own.items.lastIndex { if case .notice(let text) = $0.kind { text.hasPrefix(Conversation.routineRunMarker) } else { false } } ?? 0
+        // This run's items: after the marker (or, in the chat, the line) that opens it.
+        let start = chat == nil
+            ? own.items.lastIndex { if case .notice(let text) = $0.kind { text.hasPrefix(Conversation.routineRunMarker) } else { false } } ?? 0
+            : own.items.lastIndex { if case .event(let event) = $0.kind { event.kind == .pulseResumed && event.runID == runID } else { false } } ?? 0
         let usedTools = own.items[start...].contains { if case .tool = $0.kind { true } else { false } }
         let said = Pulse.isNothing(reply) ? "" : MemoryText.clip(MemoryText.flatten(reply ?? ""), 200)
         // A failure always leaves its line: the person sees that the pulse tried and why it did not go.
@@ -511,19 +572,71 @@ extension AppModel {
             thisRun.items = Array(own.items[start...]) // the reason of this run, not of an earlier one in the same file
             let summary = failed ? "não deu certo: " + MemoryText.clip(DelegationHub.reason(in: thisRun), 160)
                 : said.isEmpty ? "usou ferramentas" : said
-            let tokens = run?.tokens ?? 0
-            let outcome: OrbEvent.Outcome = failed ? .failed : .finished
-            let appended = appendToChat(.event(OrbEvent(kind: .pulseRan, actor: OrbRef(bot), detail: String(tokens), note: summary,
-                                                        outcome: outcome, runID: runID)), of: botID)
-            pulseState.lastSummary = summary
-            pulseState.lastActed = .now
-            pulseState.lastReason = run?.reason
-            if let appended {
-                recordInicioPulse(bot: botID, chat: appended.chat, item: appended.item, summary: "\(bot.name): \(summary)",
-                                  outcome: outcome == .failed ? .failed : .completed)
+            recordPulseLine(bot, runID: runID, tokens: run?.tokens ?? 0, summary: summary, failed: failed, reason: run?.reason, in: chat)
+        } else if chat != nil, let mark = run?.chatMark {
+            // Nothing to do after all: the chat keeps no trace of the run (its line, the NOTHING), as the pulse's own
+            // conversation would. Only what the run added at the end goes; a fold during the run leaves the messages.
+            session.changeConversation { conversation in
+                // What the person wrote meanwhile stays, and with it the whole run.
+                guard conversation.items.count >= mark.items,
+                      !conversation.items[mark.items...].contains(where: { if case .user = $0.kind { true } else { false } }) else { return }
+                conversation.items.removeSubrange(mark.items...)
+                if conversation.messages.count >= mark.messages, (conversation.summaryCoveredCount ?? 0) <= mark.messages {
+                    conversation.messages.removeSubrange(mark.messages...)
+                }
             }
         }
         savePulseState()
+    }
+
+    /// A pulse that waited for answers that will not come ends here, failed, with `why` (its conversation keeps what it did).
+    func closePulseWait(_ run: PulseRun, of botID: UUID, conversation: Conversation, why: String) {
+        var own = conversation
+        own.items.append(TranscriptItem(.notice(why)))
+        store.saveSideConversation(own, prefix: Store.pulsoPrefix, id: botID, for: botID)
+        guard let bot = bot(botID), !isResetting else { return }
+        recordPulseLine(bot, runID: run.id, tokens: run.tokens, summary: "não deu certo: " + why, failed: true, reason: run.reason, in: nil)
+        savePulseState()
+    }
+
+    /// The answers a waiting pulse asked for came (`DelegationHub.deliverInbox`): the run goes on in the pulse's conversation.
+    /// False when it cannot (the pulse was switched off, the budget is spent, no model): the run then ends with the reason.
+    func resumePulse(_ run: PulseRun, of botID: UUID, conversation: Conversation, chain: ChainContext, text: String,
+                     origin: SendOrigin) -> Bool {
+        guard !isResetting, bot(botID) != nil else { return false }
+        guard pulseIsOn, !pulseBudgetSpent else {
+            closePulseWait(run, of: botID, conversation: conversation,
+                           why: pulseIsOn ? Self.pulseCappedNotice : "O pulso foi desligado antes da resposta.")
+            return false
+        }
+        let session = session(botID)
+        ensureLoaded(botID)
+        session.startRoutineRun(run.id, conversation: conversation, at: run.startedAt, kind: .pulse, chain: chain)
+        pulseRuns[botID] = run
+        if send(text, to: botID, origin: origin) {
+            workJournal.pulseBegan(bot: botID, at: run.startedAt)
+            setStatus("Pulso: pensando", of: botID)
+            return true
+        }
+        pulseRuns[botID] = nil
+        session.endSideRun()
+        session.scheduleSave(delay: 0)
+        closePulseWait(run, of: botID, conversation: conversation, why: "Não retomou com a resposta: conecte um modelo em Ajustes.")
+        return false
+    }
+
+    /// The chat's line of a pulse that did something (or failed), and the home page's row.
+    private func recordPulseLine(_ bot: Bot, runID: UUID, tokens: Int, summary: String, failed: Bool, reason: String?, in chat: UUID?) {
+        let outcome: OrbEvent.Outcome = failed ? .failed : .finished
+        let appended = appendToChat(.event(OrbEvent(kind: .pulseRan, actor: OrbRef(bot), detail: String(tokens), note: summary,
+                                                    outcome: outcome, runID: runID)), of: bot.id, in: chat)
+        pulseState.lastSummary = summary
+        pulseState.lastActed = .now
+        pulseState.lastReason = reason
+        if let appended {
+            recordInicioPulse(bot: bot.id, chat: appended.chat, item: appended.item, summary: "\(bot.name): \(summary)",
+                              outcome: failed ? .failed : .completed)
+        }
     }
 
     // MARK: The budget

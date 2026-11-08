@@ -6,6 +6,8 @@ struct OrbEvent: Codable, Equatable, Sendable {
     enum Kind: String, Codable, Sendable {
         case orbCreated, joinedGroup, leftGroup, groupCreated, routineCreated, renamed
         case orchestratorChanged, chainStopped, groupRunDone, groupStopped, delegationReceived, routineRun, tellFailed, groupWorked, planDone, pulseRan, pulseStopped
+        /// The pulse took up a dropped plan in its own conversation (`detail`: the plan's goal); the turn follows it.
+        case pulseResumed
         /// An Orb asked, in a turn nobody watched, to delete an Orb or a group (`DeletionAsk`): the line offers Apagar and
         /// Manter; `outcome` is set once the person answered (finished: deleted; failed: kept; attention: it no longer applied).
         case deletionAsked
@@ -100,6 +102,8 @@ struct OrbEvent: Codable, Equatable, Sendable {
             let cost = Int(detail).map { $0 > 0 ? " · " + GroupUsageText.tokens($0) : "" } ?? ""
             let lead = outcome == .failed ? "\(actorName) acordou sozinho e não terminou" : "\(actorName) acordou sozinho"
             return lead + (note.map { ": " + $0 } ?? "") + cost
+        case .pulseResumed:
+            return "\(actorName) retomou sozinho o plano “\(detail)”"
         case .pulseStopped:
             let budget = Int(detail).map { " (" + GroupUsageText.tokens($0) + " por dia)" } ?? ""
             return "O pulso parou: o teto diário de tokens\(budget) foi atingido"
