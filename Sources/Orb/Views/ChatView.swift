@@ -287,6 +287,21 @@ struct NewItemsLine: View {
     }
 }
 
+/// Draws day-relative words ("Hoje", "Ontem", "23:40" against a weekday) from the day of `now`, and draws them again at
+/// midnight and when the time zone changes, without a timer per view (a `TimelineView` wakes once a day). `now` is the
+/// timeline's midnight: only its day matters to the labels.
+struct DayAware<Content: View>: View {
+    @ViewBuilder let content: (Date) -> Content
+    /// Bumped when the zone changes: a new identity restarts the timeline from the new calendar's midnight.
+    @State private var zoneChanges = 0
+
+    var body: some View {
+        TimelineView(Midnights()) { context in content(context.date) }
+            .id(zoneChanges)
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name.NSSystemTimeZoneDidChange)) { _ in zoneChanges += 1 }
+    }
+}
+
 /// Every midnight from the start of today, by the calendar (a day of a change of clocks is not 24 hours long).
 private struct Midnights: TimelineSchedule {
     func entries(from startDate: Date, mode: TimelineScheduleMode) -> AnyIterator<Date> {

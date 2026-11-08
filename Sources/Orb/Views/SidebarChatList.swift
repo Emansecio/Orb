@@ -129,9 +129,11 @@ private struct SidebarChatRow: View {
                         .frame(width: 6, height: 6)
                         .frame(width: 10)
                 case nil:
-                    Text(ReplyTime.label(entry.updated))
-                        .font(Typography.small.monospacedDigit())
-                        .foregroundStyle(Palette.faint)
+                    DayAware { now in
+                        Text(ReplyTime.label(entry.updated, now: now))
+                            .font(Typography.small.monospacedDigit())
+                            .foregroundStyle(Palette.faint)
+                    }
                 }
             }
             .font(Typography.label.weight(isShown || isUnread ? .medium : .regular))

@@ -277,7 +277,7 @@ struct QuickAskView: View {
     private var selectedID: UUID? {
         if let botID, model.botIDs.contains(botID) { return botID }
         if case .bot(let id) = model.selection, model.botIDs.contains(id) { return id }
-        return model.botIDs.first
+        return model.sidebarBotIDs.first
     }
 
     private func send() {
@@ -306,7 +306,7 @@ struct QuickAskView: View {
     }
 
     private func openChat(_ id: UUID) {
-        model.selection = .bot(id)
+        model.selection = QuickAskSend.selection(after: id, current: model.selection, hasOpenSheet: model.hasOpenSheet)
         open()
     }
 
@@ -488,7 +488,9 @@ private struct PendingApprovalsSection: View {
                     ForEach(group) { entry in
                         QuickAskApprovalCard(entry: entry, showsHeading: false, openApp: {
                             // A sheet of the main window stays (switching the screen would close it with what was typed in it).
-                            if !model.hasOpenSheet { _ = model.openPending(entry.bot.id, approval: entry.request.id) }
+                            // An answered request has nothing to open (its card is leaving); a vanished chat still brings the app up.
+                            if !model.hasOpenSheet,
+                               model.openPending(entry.bot.id, approval: entry.request.id) == .answered { return }
                             openApp()
                         })
                         .transition(.quiet)

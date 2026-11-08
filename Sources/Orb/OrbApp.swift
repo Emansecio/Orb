@@ -197,7 +197,7 @@ struct AppCommands: Commands {
             .disabled(model.selectedBotID == nil || sheetOpen)
         }
         CommandGroup(after: .sidebar) {
-            Button(CommandName.toggleInspector) { model.toggleInspector() }
+            Button(CommandName.toggleInspector) { showMain(); model.toggleInspector() }
                 .keyboardShortcut(AppShortcut.toggleInspector)
                 .disabled(sheetOpen)
         }
@@ -226,10 +226,10 @@ struct AppCommands: Commands {
             Divider()
             // Disabled (not just ignored) with a sheet open: an enabled item would keep ⌥↓ and the like from the sheet's
             // text field, and switching the screen would close the sheet along with what was typed in it.
-            Button(CommandName.previousBot) { model.selectAdjacentBot(offset: -1) }
+            Button(CommandName.previousBot) { showMain(); model.selectAdjacentBot(offset: -1) }
                 .keyboardShortcut(AppShortcut.previousBot)
                 .disabled(sheetOpen)
-            Button(CommandName.nextBot) { model.selectAdjacentBot(offset: 1) }
+            Button(CommandName.nextBot) { showMain(); model.selectAdjacentBot(offset: 1) }
                 .keyboardShortcut(AppShortcut.nextBot)
                 .disabled(sheetOpen)
             Divider()

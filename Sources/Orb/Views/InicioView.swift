@@ -221,12 +221,16 @@ struct InicioView: View {
                     Button("Ver resultados recentes") { showingRecent = true }.buttonStyle(GhostStyle())
                 }
             } else {
-                ForEach(InicioDays.group(shown)) { day in
-                    Text(day.title).font(Typography.label.weight(.semibold)).foregroundStyle(Palette.secondary)
-                        .accessibilityAddTraits(.isHeader).padding(.top, Spacing.xs)
-                    ForEach(day.items) { item in
-                        eventRow(item)
-                        if item.id != day.items.last?.id { Divider() }
+                DayAware { now in
+                    VStack(alignment: .leading, spacing: Spacing.m) {
+                        ForEach(InicioDays.group(shown, now: now)) { day in
+                            Text(day.title).font(Typography.label.weight(.semibold)).foregroundStyle(Palette.secondary)
+                                .accessibilityAddTraits(.isHeader).padding(.top, Spacing.xs)
+                            ForEach(day.items) { item in
+                                eventRow(item)
+                                if item.id != day.items.last?.id { Divider() }
+                            }
+                        }
                     }
                 }
                 if news.count > Self.newsAtRest {
@@ -350,7 +354,7 @@ struct InicioView: View {
                         if let status { Text(status).font(Typography.small).foregroundStyle(Palette.muted).lineLimit(1) }
                         }
                         Spacer(minLength: 4)
-                        if let date { Text(ReplyTime.label(date)).font(Typography.small).foregroundStyle(Palette.muted) }
+                        if let date { DayAware { now in Text(ReplyTime.label(date, now: now)).font(Typography.small).foregroundStyle(Palette.muted) } }
                         Image(systemName: "chevron.right").font(Typography.small).foregroundStyle(Palette.faint)
                     }.contentShape(.rect)
                 }.buttonStyle(.plain)

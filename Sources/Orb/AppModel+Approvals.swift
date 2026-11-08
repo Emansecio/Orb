@@ -198,6 +198,11 @@ extension AppModel {
         case .open(let botID):
             if let botID { showApprovalOwner(botID) }
             ApprovalNotifications.bringAppToFront()
+        case .openChat(let botID, let chat):
+            // The chat may be gone by now (deleted): the Orb is the fallback. The Orb's first chat has the Orb's id.
+            showApprovalOwner(botID)
+            openChat(chat, of: botID) // ignored when the Orb keeps no list (one chat) or the chat is gone
+            ApprovalNotifications.bringAppToFront()
         case .openRoutineRun(let botID, let routineID, let runID):
             // The run may be gone (trimmed, routine deleted): the Orb it came from is the fallback.
             if routines.first(where: { $0.id == routineID })?.runs.contains(where: { $0.id == runID }) == true {

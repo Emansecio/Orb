@@ -70,7 +70,7 @@ enum Tip {
 
     // MARK: Orb panel
 
-    static let customizeOrb = "Muda cor, olhos, jeito e acessórios"
+    static let customizeOrb = "Muda cor, formato, olhos, boca e jeito"
     static let refreshFolder = "Lê a pasta de novo"
     static let removeGrant = "Remove esta liberação; o Orb volta a perguntar"
     static let removeAllGrants = "Remove todas as liberações; o Orb volta a perguntar"
@@ -121,7 +121,7 @@ enum Tip {
     static let denyWithNote = "Recusa o pedido e diz ao Orb o que fazer no lugar"
     static let routineUseAuto = "Muda a rotina para Automático: só pergunta em ações destrutivas"
     static let routineUseReadOnly = "Muda a rotina para Só leitura: não altera nada no Mac"
-    static let randomLook = "Sorteia cor, olhos e acessórios; o jeito fica"
+    static let randomLook = "Sorteia cor, formato, olhos e boca; o jeito fica"
     static let showAllActions = "Mostra todas as ações deste pedido"
     static let deny = "Recusa o pedido"
     static let allowOptions = "Permite só nesta tarefa ou sempre; remova depois em Liberações"

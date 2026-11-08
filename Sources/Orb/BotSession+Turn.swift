@@ -185,6 +185,11 @@ extension BotSession {
     nonisolated static let stoppedNotice = "Você interrompeu esta resposta"
     /// A task of your own chat that the app closed on (a quit, or a crash found at the next launch): "Continuar" picks it up.
     nonisolated static let quitNotice = "O app foi fechado no meio desta tarefa."
+    /// Left in the chat of an idle Orb whose background processes died when the app quit.
+    nonisolated static func quitJobsNotice(count: Int) -> String {
+        count == 1 ? "O app foi fechado e o processo em segundo plano deste Orb parou. Inicie de novo se ainda for preciso."
+            : "O app foi fechado e \(count) processos em segundo plano deste Orb pararam. Inicie de novo o que ainda for preciso."
+    }
     /// The same for a routine's run, another Orb's request or a group's turn: nothing picks those up by itself, and running
     /// one again could repeat what it already did.
     nonisolated static let quitSideNotice = "Interrompido: o app foi fechado no meio desta tarefa. Confira o que já foi feito antes de repetir."
@@ -490,7 +495,7 @@ extension BotSession {
             if !isOrbRun, !waits, let bot = model.bot(id), let reply {
                 // A routine's banner opens its run (the report), recorded just above; a chat turn's opens the Orb.
                 let run = routineID.flatMap { routine in model.routines.first { $0.id == routine }?.runs.first.map { (routine, $0.id) } }
-                model.notify(about: id, bot.name, RoutineRun.preview(of: reply), run: run)
+                model.notify(about: id, bot.name, RoutineRun.preview(of: reply), run: run, chat: routineID == nil ? turnChat : nil)
             }
         } else {
             flash(\.hasFailed, seconds: 2.5)

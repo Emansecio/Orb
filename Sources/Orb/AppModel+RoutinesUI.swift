@@ -125,7 +125,7 @@ extension AppModel {
     }
 
     /// The Orb a new routine starts with: the one you are looking at, or the first.
-    var routineDefaultBot: Bot? { selectedBot ?? bots.first }
+    var routineDefaultBot: Bot? { selectedBot ?? sidebarBotIDs.first.flatMap { id in bots.first { $0.id == id } } }
 
     /// A routine to open in the editor: blank, or from a template. nil when there is no Orb.
     func draftRoutine(from template: RoutineTemplate? = nil, botID: UUID? = nil) -> Routine? {

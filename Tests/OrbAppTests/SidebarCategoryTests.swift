@@ -462,6 +462,17 @@ struct SidebarCategoryLayoutTests {
         #expect(model.selection == .bot(try #require(model.sidebarBotIDs.first)))
     }
 
+    @Test @MainActor func commandsFromAPageActOnTheOrbAtTheTopOfTheSidebar() throws {
+        let world = CategoryWorld()
+        let model = world.model
+        // The oldest Orb goes into a category: the top of the sidebar is no longer the first in creation order.
+        _ = try #require(model.createCategory(named: "Arquivo", moving: world.ids[0]))
+        model.selection = .inicio
+        #expect(model.commandBotID == model.sidebarBotIDs.first)
+        #expect(model.commandBotID != world.ids[0])
+        #expect(model.routineDefaultBot?.id == model.sidebarBotIDs.first)
+    }
+
     @Test @MainActor func commandsDoNotJumpToAnOrbWhileAGroupIsOpen() {
         let world = CategoryWorld()
         let model = world.model

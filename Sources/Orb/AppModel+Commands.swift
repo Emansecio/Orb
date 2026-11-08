@@ -68,7 +68,7 @@ extension AppModel {
     /// none: the commands would act on an Orb that is not on screen (and swap the group for it), so they wait.
     var commandBotID: UUID? {
         if case .group? = selection { return nil }
-        return selectedBotID ?? botIDs.first
+        return selectedBotID ?? sidebarBotIDs.first // the top of the sidebar, like launch and `deleteBot`
     }
 
     /// Whose composer a proposed text goes to: the open group's (its draft is kept under the group id, like an Orb's),

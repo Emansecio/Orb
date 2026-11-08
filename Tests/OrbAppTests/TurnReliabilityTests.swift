@@ -442,6 +442,21 @@ private struct HangsAfterText: LLMClient {
         #expect(model.selection == .routines)
     }
 
+    @Test @MainActor func theBannerOfAChatTurnCarriesTheChatAndRoutesToIt() async throws {
+        let script = CallScript([[.text("Feito."), .finished(.done, nil)]])
+        let (model, botID) = setUp(script)
+        #expect(model.send("oi", to: botID))
+        await waitUntilIdle(model, botID)
+        let chat = try #require(model.lastBannerChat)
+        #expect(chat == botID) // the first conversation has the Orb's id
+        let info: [AnyHashable: Any] = [ApprovalNotifications.botKey: botID.uuidString, ApprovalNotifications.chatKey: chat.uuidString]
+        #expect(ApprovalNotifications.route(actionIdentifier: UNNotificationDefaultActionIdentifier, userInfo: info)
+                == .openChat(botID: botID, chat: chat))
+        // A banner without a chat still just opens the Orb.
+        #expect(ApprovalNotifications.route(actionIdentifier: UNNotificationDefaultActionIdentifier,
+                                            userInfo: [ApprovalNotifications.botKey: botID.uuidString]) == .open(botID: botID))
+    }
+
     @Test @MainActor func aRoutineCutByTheAppClosingKeepsItsSlotAndBanners() async throws {
         let script = CallScript([said("fim")], holdsCall: 1)
         let (model, botID, routineID) = routineSetUp(script)

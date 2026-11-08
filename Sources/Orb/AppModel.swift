@@ -2084,6 +2084,11 @@ final class AppModel {
             if let count = liveBot(id)?.jobs.count, count > 0 { lostJobs[id] = count }
         }
         workJournal.freeze(lostJobs: lostJobs)
+        // An idle Orb has no task entry to carry the count, and no turn to be cut off: its chat says on return that the
+        // processes it had left running died with the app (a running turn gets the same in its resume message).
+        for (id, count) in lostJobs where sessions[id]?.turnTask == nil {
+            appendToChat(.notice(BotSession.quitJobsNotice(count: count)), of: id)
+        }
         // A run that waits for other Orbs ends here: the answers will not come (nothing between Orbs survives the app closing).
         for (routineID, wait) in delegation.waitingRoutines {
             delegation.forgetWaitingRoutine(routineID)
@@ -2783,15 +2788,18 @@ final class AppModel {
     @ObservationIgnored private(set) var lastBanner: (title: String, body: String, botID: UUID)?
     /// The routine run the last banner points at, if it was about one (for the tests).
     @ObservationIgnored private(set) var lastBannerRun: RoutineRunTarget?
+    /// The conversation the last banner points at, if it was about a chat turn's end (for the tests).
+    @ObservationIgnored private(set) var lastBannerChat: UUID?
 
     /// Posts a banner about an Orb when the app is in the background (bundled app only). It carries the Orb, so a tap
     /// opens that Orb rather than whichever one was selected.
     /// `run`: a banner about a routine run's end carries it, so the tap opens that run (report or reason) on Rotinas.
-    func notify(about botID: UUID, _ title: String, _ body: String, run: (routine: UUID, run: UUID)? = nil) {
+    func notify(about botID: UUID, _ title: String, _ body: String, run: (routine: UUID, run: UUID)? = nil, chat: UUID? = nil) {
         lastBanner = (title, body, botID)
+        lastBannerChat = chat
         lastBannerRun = run.map { RoutineRunTarget(routineID: $0.routine, runID: $0.run) }
         guard !(NSApp?.isActive ?? false), Self.notificationsEnabled, ApprovalNotifications.isAvailable else { return }
-        let content = ApprovalNotifications.orbContent(botID: botID, title: title, body: body, run: run)
+        let content = ApprovalNotifications.orbContent(botID: botID, title: title, body: body, run: run, chat: chat)
         Task { await ApprovalNotifications.send(content) }
     }
 

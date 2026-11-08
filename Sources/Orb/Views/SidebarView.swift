@@ -521,7 +521,7 @@ struct SidebarBotRow: View {
         // The name and the reply under it are cut to one line each: the hover text has the name whole.
         VStack(alignment: .leading, spacing: 0) {
             SidebarRow(isSelected: isSelected, selectionSpace: selectionSpace, paintsSelection: chats == nil || folded, help: live.look.name,
-                       dragPayload: botID.uuidString) {
+                       dragPayload: live.look.name) { // the name, not the id: dropped in a text field or another app it reads as the Orb
                 model.selection = .bot(botID)
             } content: { isHovering in
                 BotRowContent(row: BotRow(look: live.look, workText: live.shownWork?.headline, shimmers: live.shownWork?.shimmers ?? false, activity: live.activity, isSelected: isSelected,
@@ -742,9 +742,11 @@ private struct BotRowContent: View, Equatable {
                             HStack(spacing: 4) {
                                 name.fixedSize()
                                 Spacer(minLength: 4)
-                                Text(replyTime)
-                                    .font(Typography.small.monospacedDigit())
-                                    .foregroundStyle(Palette.faint)
+                                DayAware { now in
+                                    Text(BotRow.time(of: row.reply, now: now) ?? replyTime)
+                                        .font(Typography.small.monospacedDigit())
+                                        .foregroundStyle(Palette.faint)
+                                }
                             }
                             HStack(spacing: 4) {
                                 name

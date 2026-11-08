@@ -77,6 +77,8 @@ enum ApprovalNotifications {
         case decide(ApprovalDecision, botID: UUID, approvalID: UUID)
         /// A plain click: show the Orb it came from (nil: any other banner of the app, just bring the app forward).
         case open(botID: UUID?)
+        /// The banner of a chat turn's end: the Orb, then the conversation the turn ended in (if it still exists).
+        case openChat(botID: UUID, chat: UUID)
         /// A group's banner (its pause, its end): show the group.
         case openGroup(UUID)
         /// The banner of a routine run that ended or failed: its run (report, reason) opens on Rotinas, not the Orb's chat.
@@ -91,6 +93,8 @@ enum ApprovalNotifications {
     /// The keys a routine run's banner carries its routine and run under.
     static let routineKey = "routineID"
     static let runKey = "runID"
+    /// The conversation a chat turn's end banner points at.
+    static let chatKey = "chatID"
 
     static func route(actionIdentifier: String, userInfo: [AnyHashable: Any]) -> Route {
         let botID = (userInfo[botKey] as? String).flatMap(UUID.init(uuidString:))
@@ -102,6 +106,9 @@ enum ApprovalNotifications {
             if let botID, let routineID = (userInfo[routineKey] as? String).flatMap(UUID.init(uuidString:)),
                let runID = (userInfo[runKey] as? String).flatMap(UUID.init(uuidString:)) {
                 return .openRoutineRun(botID: botID, routineID: routineID, runID: runID)
+            }
+            if let botID, let chat = (userInfo[chatKey] as? String).flatMap(UUID.init(uuidString:)) {
+                return .openChat(botID: botID, chat: chat)
             }
             return .open(botID: botID)
         case allowAction, denyAction:
@@ -187,9 +194,10 @@ enum ApprovalNotifications {
     }
 
     /// A plain banner about one Orb: a tap opens it (`route` reads the Orb back from `botKey`).
-    static func orbContent(botID: UUID, title: String, body: String, run: (routine: UUID, run: UUID)? = nil) -> UNMutableNotificationContent {
+    static func orbContent(botID: UUID, title: String, body: String, run: (routine: UUID, run: UUID)? = nil, chat: UUID? = nil) -> UNMutableNotificationContent {
         let content = plainContent(title: title, body: body)
         content.userInfo = [botKey: botID.uuidString]
+        if let chat { content.userInfo[chatKey] = chat.uuidString }
         if let run { content.userInfo[routineKey] = run.routine.uuidString; content.userInfo[runKey] = run.run.uuidString }
         return content
     }

@@ -84,12 +84,15 @@ struct SidebarDropDelegate: DropDelegate {
 
     func dropEntered(info: DropInfo) {
         aim(info)
-        // The row that started the drag said which Orb it is; text dragged in from elsewhere is no Orb and parts nothing.
+        // The row that started the drag set `draggedBotID` and carries that Orb's name as the text. Text dragged in from
+        // elsewhere (or a drag that was cancelled and left the id behind) does not match it, so it is no Orb and parts nothing.
         guard let provider = info.itemProviders(for: [.plainText]).first else { return }
         _ = provider.loadObject(ofClass: NSString.self) { [model] object, _ in
-            guard let text = object as? NSString else { return }
-            let botID = UUID(uuidString: text as String)
-            Task { @MainActor in if model.draggedBotID != botID { model.draggedBotID = botID } }
+            let text = (object as? NSString) as String?
+            Task { @MainActor in
+                guard let held = model.draggedBotID else { return }
+                if text == nil || text != model.liveBot(held)?.look.name { model.draggedBotID = nil }
+            }
         }
     }
 

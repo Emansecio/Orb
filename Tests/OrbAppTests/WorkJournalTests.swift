@@ -234,6 +234,22 @@ import Testing
         await waitUntil("the run to end") { model.session(atlas.id).turnTask == nil }
     }
 
+    @Test @MainActor func quittingWithAnIdleOrbsBackgroundProcessesLeavesANoticeInItsChat() throws {
+        writeState(bots: ["Atlas"])
+        let model = launch(held())
+        let atlas = model.bots[0]
+        model.live(atlas.id).setJobs([BackgroundJobs.Snapshot(id: "1", command: "make", directory: "/", logPath: "/x", startedAt: .now, state: .running)])
+        model.stopTurnsForQuit()
+        model.saveNow()
+        let notices = model.transcript(atlas.id).compactMap { item -> String? in
+            if case .notice(let text) = item.kind { text } else { nil }
+        }
+        #expect(notices == [BotSession.quitJobsNotice(count: 1)])
+        // Nothing was running: no task to resume, only the word on return.
+        #expect(model.workJournal.entries.isEmpty)
+        #expect(BotSession.quitJobsNotice(count: 3).contains("3 processos"))
+    }
+
     @Test @MainActor func quittingKeepsTheTaskAndTheNextLaunchGoesOnWithItOnce() async throws {
         writeState(bots: ["Atlas"])
         let first = held()
