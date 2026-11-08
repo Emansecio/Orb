@@ -14,6 +14,16 @@ import Testing
 
     func bank(_ name: String = "orb") -> MemoryBank { MemoryBank(directory: root.appending(path: name)) }
 
+    @Test func rememberRefusesATextOverTheLimitInsteadOfSavingItCut() async throws {
+        let bank = bank()
+        let context = ToolContext(workingDirectory: root, memory: bank)
+        let tooLong = JSONValue.object(["fact": .string(String(repeating: "a", count: MemoryBank.maximumLength + 1))])
+        await #expect(throws: ToolError.self) { _ = try await RememberTool().run(tooLong, context: context) }
+        #expect(await bank.snapshot().isEmpty)
+        let fits = JSONValue.object(["fact": .string(String(repeating: "b", count: MemoryBank.maximumLength))])
+        #expect(try await RememberTool().run(fits, context: context).hasPrefix("Guardado"))
+    }
+
     // MARK: Pages
 
     @Test func pagesRoundTripThroughMarkdown() {

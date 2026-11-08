@@ -332,7 +332,7 @@ struct RememberTool: AgentTool {
         name: "remember",
         description: """
         Save to long-term memory: a fact about the user or their work, a preference, a short rule, or how they want \
-        you to work. One short item per call; near-duplicates refresh it. Keep decisions and lessons, not events that \
+        you to work. One short item per call (max 2000 characters); near-duplicates refresh it. Keep decisions and lessons, not events that \
         logs or files already record; when something changes, rewrite its memory instead of adding a correction. \
         preferencia only for what applies to every message. tipo skill: after a multi-step task worth repeating, fact \
         is the whole SKILL.md the user approves.
@@ -377,6 +377,10 @@ struct RememberTool: AgentTool {
         if context.skillReview { throw ToolError("This review only proposes skills: use tipo skill.") }
         var kind = arguments["tipo"]?.string.flatMap(MemoryKind.init) ?? .fato
         if kind == .sessao { kind = .fato }
+        // The bank cuts at its limit; never answer "saved" for a text that was not kept whole.
+        guard fact.trimmingCharacters(in: .whitespacesAndNewlines).count <= MemoryBank.maximumLength else {
+            throw ToolError("Too long to save whole (max \(MemoryBank.maximumLength) characters). Shorten it or split it into separate items.")
+        }
         switch await memory.remember(fact, kind: kind, title: arguments["titulo"]?.string) {
         case .saved: return "Guardado na memória (\(kind.label.lowercased())): \(MemoryText.clip(MemoryText.flatten(fact), 200))" + (await overflowNote(kind, memory))
         case .updated: return "Atualizei uma lembrança parecida que já existia; agora ela diz: \(MemoryText.clip(MemoryText.flatten(fact), 200))" + (await overflowNote(kind, memory))
