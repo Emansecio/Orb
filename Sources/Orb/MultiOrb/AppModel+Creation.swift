@@ -8,12 +8,27 @@ extension AppModel {
         let creatorID = bot.id
         return OrbCreationSupport(
             creator: bot, existingNames: bots.map(\.name),
-            createdByCreator: bots.filter { $0.createdBy == creatorID }.count,
-            createdTotal: bots.filter { $0.createdBy != nil }.count,
+            withoutCard: orbsCreateWithoutAsking,
             create: { [weak self] approvalID, proposal in
                 guard let self else { return .failed("O app está fechando.") }
                 return await self.createProposedOrb(proposal, approvalID: approvalID, by: creatorID)
             })
+    }
+
+    /// The creator's "Desfazer": whether the Orb it made can still be taken back without losing anything: it exists, an Orb made
+    /// it, its own chat is empty and it is not working.
+    func canUndoCreation(of botID: UUID) -> Bool {
+        guard let created = bot(botID), created.createdBy != nil, liveBot(botID)?.isWorking != true else { return false }
+        // Its greeting is not talk: `messages` holds only what went to or came from the model.
+        return sessions[botID]?.conversation?.messages.isEmpty ?? true
+    }
+
+    /// Deletes the Orb the creator's line offers to undo (the click is the person's, so no card). Its memory goes too: it never
+    /// had a conversation to remember.
+    func undoCreation(of botID: UUID) {
+        sessions[botID]?.ensureLoaded() // the line may be shown before the conversation is read: check what is really there
+        guard canUndoCreation(of: botID) else { return }
+        deleteBot(botID)
     }
 
     /// The proposal as the card of `approvalID` holds it now (what "Editar antes" changed), nil when the card is gone.
@@ -72,11 +87,6 @@ extension AppModel {
         final.capabilities.formIntersection(creator.capabilities)
         final.modeCeiling = OrbProposal.lesser(final.modeCeiling, OrbProposal.ceiling(forCreatorMode: creator.permissionMode))
         if !final.allowedModes.contains(final.mode) { final.mode = final.allowedModes.last ?? .ask }
-        let own = bots.filter { $0.createdBy == creatorID }.count, total = bots.filter { $0.createdBy != nil }.count
-        if let limit = OrbProposal.refusal(creatorMode: .ask, createdByCreator: own, createdTotal: total) {
-            markNotCreated(approvalID, of: creatorID, reason: "Limite de Orbs criados por Orbs")
-            return .failed(limit)
-        }
 
         // The card waits for another name; this is for a decision that arrives anyway (a shortcut, an edit that raced).
         if isOrbNameTaken(final.name) {
@@ -93,7 +103,9 @@ extension AppModel {
             $0.createdByName = creator.name
             $0.createdAt = .now
         }
-        append(.event(OrbEvent(kind: .orbCreated, actor: OrbRef(creator), subject: OrbRef(bot))), to: creatorID)
+        // A routine's run, a request or a group's turn works on a conversation of its own: the line belongs in the creator's chat.
+        let line = TranscriptItem.Kind.event(OrbEvent(kind: .orbCreated, actor: OrbRef(creator), subject: OrbRef(bot)))
+        if isOwnChat(creatorID) { append(line, to: creatorID) } else { appendToChat(line, of: creatorID) }
         announceForAccessibility("\(creator.name) criou \(PortugueseArticle.article(for: bot.name)) \(bot.name)")
         landLater(bot.id)
 

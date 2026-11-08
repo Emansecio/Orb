@@ -312,9 +312,10 @@ extension AppModel {
         let role: GroupPrompt.Role = isOrchestrator ? .orchestrator : .member
         // A member may ask the others only when the group lets members talk; the orchestrator always may.
         // With "Orbs agem por conta própria" the orchestrator may also create groups (and ask the ones it is in, through `orbs`).
-        let offering = MultiOrbOffering(orbs: isOrchestrator || group.policy.membersMayTalk, propose: false, groupMemory: true,
+        let offering = MultiOrbOffering(orbs: isOrchestrator || group.policy.membersMayTalk, propose: isOrchestrator && orbsActOnOwn, groupMemory: true,
                                     groupCreate: isOrchestrator && orbsActOnOwn && orbsCanStartGroups && bots.count > 1,
-                                    groupEdit: isOrchestrator && orbsCanManageGroups)
+                                    groupEdit: isOrchestrator && orbsCanManageGroups,
+                                    orbDelete: isOrchestrator && orbsCanManageGroups && bots.count > 1)
         return GroupTurnExtras(
             groupID: group.id, runID: run.id, requestID: turn.requestID,
             groupName: group.name, role: role,

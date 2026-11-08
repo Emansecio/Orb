@@ -1790,7 +1790,7 @@ final class AppModel {
         // MARK: MultiOrb (WP1)
         // Asking and telling other Orbs needs no card per message (a mode that reads only still refuses it): the turn grants it.
         let multi = multiOrbOffering(for: botID)
-        if multi.orbs || multi.groupCreate || multi.groupEdit { turnGrants.append(PermissionRule(family: .delegation)) }
+        if multi.orbs || multi.groupCreate || multi.groupEdit || multi.orbDelete { turnGrants.append(PermissionRule(family: .delegation)) }
         for grant in groupTurn?.grants ?? [] where !turnGrants.contains(grant) { turnGrants.append(grant) }
         // MARK: end MultiOrb (WP1)
 
@@ -1835,7 +1835,7 @@ final class AppModel {
         context.stamps = stamps(for: botID)
         let userTurns = session.userTurnCount()
         // MARK: MultiOrb (WP1)
-        if multi.orbs || multi.groupCreate || multi.groupEdit { context.orbs = delegationHandler(for: botID) }
+        if multi.orbs || multi.groupCreate || multi.groupEdit || multi.orbDelete { context.orbs = delegationHandler(for: botID) }
         let teammates = multi.orbs ? orbsSection(for: bot) : ""
         if let routineID = session.routineID, session.sideKind == nil || session.sideKind == .routine {
             context.followUps = followUpHandler(routineID: routineID, botID: botID)

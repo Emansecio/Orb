@@ -1027,6 +1027,11 @@ final class DelegationHub: DelegationService {
             do { return try planGroupEdit(arguments, by: botID).confirmation ?? "" } catch let refusal as DelegationRefusal { throw refusal.toolError }
         case "edit_group":
             do { return try await editGroup(arguments, by: botID) } catch let refusal as DelegationRefusal { throw refusal.toolError }
+        case "delete_orb_plan":
+            // For the tool: the text of the user's card.
+            return try planOrbDelete(arguments, by: botID).confirmation
+        case "delete_orb":
+            return try deleteOrb(arguments, by: botID)
         case "ask", "tell":
             let kind: OrbEnvelope.Kind = arguments["action"]?.string?.lowercased() == "tell" ? .tell : .ask
             let name = arguments["to"]?.string ?? "", text = arguments["message"]?.string ?? ""
@@ -1076,8 +1081,10 @@ final class DelegationHub: DelegationService {
             return "- \(group.name): \(lead)" + (group.others.isEmpty ? "" : "; outros membros: " + group.others.joined(separator: ", "))
         }
         guard !groups.isEmpty else { return teammates }
-        let note = groupID == nil ? "o usuário inicia o trabalho de um grupo na tela dele; você não escreve no fio"
-            : "você pode acionar estes com ask, pelo nome"
+        // Outside a group's turn the Orb may start a group's work only with both switches on; else the user does it on the group's screen.
+        let mayAsk = groupID != nil || (model.orbsActOnOwn && model.orbsCanStartGroups)
+        let note = mayAsk ? "você pode acionar estes com ask, pelo nome"
+            : "o usuário inicia o trabalho de um grupo na tela dele; você não escreve no fio"
         return teammates + "\n\nSeus grupos (\(note)):\n" + groups.joined(separator: "\n")
     }
 
@@ -1423,6 +1430,40 @@ final class DelegationHub: DelegationService {
             model.deleteGroup(group.id)
             return "Grupo \(group.name) apagado; os Orbs continuam."
         }
+    }
+
+    /// Checks an `orb_delete` against the Orbs as they are now, changing nothing: the Orb to delete (by its whole name, never a
+    /// prefix) and the text of the user's card. A refusal says what to do instead.
+    private func planOrbDelete(_ arguments: JSONValue, by botID: UUID) throws -> (orb: OrbRef, confirmation: String) {
+        guard let model, !isShuttingDown else { throw ToolError("The app is closing.") }
+        guard model.orbsCanManageGroups else {
+            throw ToolError("The user switched off \"Orbs organizam o time\": tell them which Orb you would delete and why.")
+        }
+        let typed = (arguments["name"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let wanted = DelegationRules.fold(typed)
+        let matches = model.bots.filter { DelegationRules.fold($0.name) == wanted }
+        guard !wanted.isEmpty, matches.count == 1, let target = matches.first else {
+            throw ToolError(matches.count > 1 ? "More than one Orb is named \"\(typed)\": the user can delete it on their screen."
+                            : "No Orb is named \"\(typed)\" (use the whole name; orbs list shows them).")
+        }
+        guard target.id != botID else { throw ToolError("You cannot delete yourself: ask the user if you should go.") }
+        guard model.liveBot(target.id)?.isWorking != true, model.sessions[target.id]?.turnTask == nil else {
+            throw ToolError("\(target.name) is working right now: try again when it is free.")
+        }
+        let reason = String(MemoryText.flatten(MemorySanitizer.scrub(arguments["reason"]?.string ?? "")).prefix(200))
+        let who = model.bot(botID)?.name ?? "Um Orb"
+        let because = reason.isEmpty ? "" : " Motivo: \(reason)"
+        return (OrbRef(target), "\(who) quer apagar \(PortugueseArticle.article(for: target.name)) \(target.name).\(because) "
+            + "A conversa, a memória e as rotinas dele vão embora, e ele sai dos grupos.")
+    }
+
+    /// `orb_delete` once the user confirmed in the tool's card (`confirmed` is set by the tool alone).
+    private func deleteOrb(_ arguments: JSONValue, by botID: UUID) throws -> String {
+        guard let model else { throw ToolError("The app is closing.") }
+        let plan = try planOrbDelete(arguments, by: botID)
+        guard arguments["confirmed"]?.bool == true else { throw ToolError("The user did not confirm. Nothing changed.") }
+        model.deleteBot(plan.orb.id)
+        return "\(plan.orb.name) was deleted."
     }
 
     /// Who a request went to, as the asker reads it: the Orb, or the group for a request sent to one from a chat.

@@ -246,8 +246,10 @@ enum Tip {
     static let summarizeSessions = "Pede ao modelo um resumo das conversas longas guardadas; uma chamada curta por conversa"
     static let reviewDictation = "Corrige o texto ditado com o modelo do Orb antes de você enviar"
     static let orbsCanTalk = "Deixa os Orbs pedirem ajuda uns aos outros; Parar interrompe a conversa toda"
-    static let orbsCanManageGroups = "Deixa os Orbs mudarem os grupos sozinhos; apagar um grupo sempre pede a sua confirmação"
+    static let orbsCanManageGroups = "Deixa os Orbs mudarem grupos e proporem apagar Orbs; apagar sempre pede a sua confirmação"
+    static let orbsCreateWithoutAsking = "O Orb novo aparece na hora, com um aviso no chat de quem criou e um botão Desfazer"
     static let orbsCanStartGroups = "Deixa um Orb criar um grupo ou pedir a um grupo dele"
+    static let undoOrbCreation = "Apaga o Orb que acabou de ser criado; só vale enquanto ele não tem conversa"
     static let orbsActOnOwn = "Os Orbs criam e acionam grupos quando acham útil, sem você pedir"
     static let dataFolder = "Mostra no Finder a pasta com conversas, memórias e ajustes"
     static let keptMemoriesFolder = "Mostra no Finder as memórias guardadas de Orbs apagados"
@@ -372,7 +374,7 @@ enum Tip {
          createAtlas, startWithClaudeCode, otherWaysToConnect(isShowing: true), otherWaysToConnect(isShowing: false),
          newRoutineCreatingAtlas, newRoutineNeedingModel, routineTemplateCreatingAtlas, allKeptMemories, continueFromMemory, modelSettings, useClaudeCode, signInClaudeCode, signInChatGPT,
          pasteKey, stopConnecting, retryConnecting, useLocalServer("Ollama"), createOrbSheet(),
-         launchAtLogin, openLoginItems, notifyWhenDone, proposeSkills, summarizeSessions, reviewDictation, orbsCanTalk, orbsCanStartGroups, orbsActOnOwn, orbsCanManageGroups, dataFolder, keptMemoriesFolder, orbsFolder, resetOrb,
+         launchAtLogin, openLoginItems, notifyWhenDone, proposeSkills, summarizeSessions, reviewDictation, orbsCanTalk, orbsCanStartGroups, orbsActOnOwn, orbsCanManageGroups, orbsCreateWithoutAsking, undoOrbCreation, dataFolder, keptMemoriesFolder, orbsFolder, resetOrb,
          openSystemNotifications, askNotifications, globalShortcut,
          profilePhotoAvatar, profilePhotoChoose, profilePhotoRemove,
          addProvider, refreshModels, removeProvider, signOutChatGPT, replaceKey, deleteKey, saveKey, keepKey, getKey, listAllModels,

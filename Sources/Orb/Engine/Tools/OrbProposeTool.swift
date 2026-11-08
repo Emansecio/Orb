@@ -1,7 +1,7 @@
 import Foundation
 
-/// Lets an Orb propose a new Orb. The tool opens no permission card of its own: the engine shows the creation card
-/// (`ToolContext.proposeOrb`) and nothing exists until the person accepts.
+/// Lets an Orb create a new Orb. The tool opens no permission card of its own: `ToolContext.proposeOrb` either creates the Orb
+/// at once ("Orbs criam Orbs sem perguntar") or shows the creation card, and nothing exists until the person accepts.
 struct OrbProposeTool: AgentTool {
     static let name = "orb_propose"
     static let instructionsLimit = 1_500
@@ -10,8 +10,8 @@ struct OrbProposeTool: AgentTool {
     let spec = ToolSpec(
         name: OrbProposeTool.name,
         description: """
-        Propose a new Orb for the user to approve. Shows them a card; nothing exists until they accept. The new Orb inherits \
-        your model and never gets more access than you; it gets its own folder and no connectors.
+        Create a new Orb for the user's work. It inherits your model and never more access than you; it gets its own folder and \
+        no connectors. If the user must approve, they see a card.
         """,
         parameters: .schema([
             "name": .property("string"),
@@ -39,12 +39,9 @@ struct OrbProposeTool: AgentTool {
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
         guard let support = context.orbCreation, let propose = context.proposeOrb else {
-            throw ToolError("You cannot propose an Orb here: only in your own chat with the user, not in a routine, a request from another Orb or a group.")
+            throw ToolError("You cannot create an Orb here.")
         }
-        if let refusal = OrbProposal.refusal(creatorMode: support.creator.permissionMode, createdByCreator: support.createdByCreator,
-                                             createdTotal: support.createdTotal) {
-            throw ToolError(refusal)
-        }
+        if let refusal = OrbProposal.refusal(creatorMode: support.creator.permissionMode) { throw ToolError(refusal) }
         guard !OrbProposal.clippedName(arguments["name"]?.string ?? "").isEmpty else { throw ToolError("Give the Orb a name.") }
         guard !OrbProposal.cleanInstructions(arguments["instructions"]?.string ?? "").isEmpty else {
             throw ToolError("Say in instructions how the Orb should work.")

@@ -7,9 +7,8 @@ struct OrbCreationSupport: Sendable {
     var creator: Bot
     /// The names the Orbs have now, for the card's "another folder name" warning.
     var existingNames: [String] = []
-    /// How many Orbs this creator already made, and how many Orbs have been made by Orbs in all (`OrbProposal.perCreatorLimit`).
-    var createdByCreator = 0
-    var createdTotal = 0
+    /// "Orbs criam Orbs sem perguntar" is on: the engine creates the Orb at once instead of opening the creation card.
+    var withoutCard = false
     /// Creates the Orb for the card `approvalID` (the person said "Criar"). It reads the proposal as the card holds it, which
     /// is what "Editar antes" changed, and answers with what the model is told.
     var create: OrbCreationHandler = { _, _ in .failed("Não foi possível criar o Orb agora.") }
@@ -18,9 +17,6 @@ struct OrbCreationSupport: Sendable {
 typealias OrbCreationHandler = @Sendable (_ approvalID: UUID, _ proposal: OrbProposal) async -> ProposalOutcome
 
 extension OrbProposal {
-    /// At most this many Orbs per creator, and this many made by Orbs in all (the tool refuses past them).
-    static let perCreatorLimit = 5
-    static let totalLimit = 12
     static let roleLimit = 120
     /// The same limit `AppModel.clippedName` holds the Orb's name to.
     static let nameLimit = 60
@@ -57,18 +53,12 @@ extension OrbProposal {
         return Array(Self.modeOrder[...top])
     }
 
-    /// Why the tool refuses to propose, or nil when it may. The limits count Orbs that exist, so a declined card costs nothing.
-    static func refusal(creatorMode: PermissionMode, createdByCreator: Int, createdTotal: Int) -> String? {
-        if creatorMode == .readOnly {
-            return "You are in read-only mode, so you cannot create Orbs. Tell the user to change your mode if they want one."
-        }
-        if createdByCreator >= perCreatorLimit {
-            return "You already created \(perCreatorLimit) Orbs, which is the most one Orb may create. Use the ones that exist (orbs list)."
-        }
-        if createdTotal >= totalLimit {
-            return "Orbs have already created \(totalLimit) Orbs, which is the most allowed. Use the ones that exist (orbs list)."
-        }
-        return nil
+    /// Why the tool refuses to propose, or nil when it may. There is no count limit: what keeps the number in check is the
+    /// creator's own access, which the new Orb never exceeds, and the "Desfazer" on the line it leaves in the chat.
+    static func refusal(creatorMode: PermissionMode) -> String? {
+        creatorMode == .readOnly
+            ? "You are in read-only mode, so you cannot create Orbs. Tell the user to change your mode if they want one."
+            : nil
     }
 
     /// The proposal for `creator` and the arguments of `orb_propose` (the rules of docs/historico/MULTI-ORBS.md 4.2). Pure: whatever the

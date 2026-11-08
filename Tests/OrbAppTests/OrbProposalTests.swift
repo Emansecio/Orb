@@ -79,12 +79,10 @@ struct OrbProposalTests {
         #expect(!make(names: ["Atlas"]).nameTaken)
     }
 
-    @Test func theLimitsAndTheReadOnlyModeRefuse() {
-        #expect(OrbProposal.refusal(creatorMode: .ask, createdByCreator: 4, createdTotal: 11) == nil)
-        #expect(OrbProposal.refusal(creatorMode: .ask, createdByCreator: 5, createdTotal: 5) != nil)
-        #expect(OrbProposal.refusal(creatorMode: .ask, createdByCreator: 1, createdTotal: 12) != nil)
-        #expect(OrbProposal.refusal(creatorMode: .readOnly, createdByCreator: 0, createdTotal: 0) != nil)
-        #expect(OrbProposal.refusal(creatorMode: .bypass, createdByCreator: 0, createdTotal: 0) == nil)
+    @Test func onlyTheReadOnlyModeRefuses() {
+        #expect(OrbProposal.refusal(creatorMode: .ask) == nil)
+        #expect(OrbProposal.refusal(creatorMode: .readOnly) != nil)
+        #expect(OrbProposal.refusal(creatorMode: .bypass) == nil)
     }
 
     @Test func whatTheCardHoldsIsHeldToTheRulesAgainAndTheChangesAreSaid() {
@@ -107,11 +105,10 @@ struct OrbProposalTests {
 // MARK: - The tool
 
 struct OrbProposeToolTests {
-    private func context(_ bot: Bot, created: Int = 0, total: Int = 0,
-                         answer: ProposalOutcome? = .declined) -> (ToolContext, Recorder) {
+    private func context(_ bot: Bot, answer: ProposalOutcome? = .declined) -> (ToolContext, Recorder) {
         let recorder = Recorder()
         var context = ToolContext(workingDirectory: FileManager.default.temporaryDirectory)
-        context.orbCreation = OrbCreationSupport(creator: bot, existingNames: ["Atlas"], createdByCreator: created, createdTotal: total)
+        context.orbCreation = OrbCreationSupport(creator: bot, existingNames: ["Atlas"])
         if let answer {
             context.proposeOrb = { proposal in
                 await recorder.set(proposal)
@@ -136,16 +133,12 @@ struct OrbProposeToolTests {
         #expect(text.contains("Lia") && text.contains("~/Orbs/Lia") && text.contains("orbs"))
         #expect(await recorder.proposal?.creator.name == "Atlas")
         let (edited, _) = context(creator(), answer: .createdEdited(name: "Lia", folder: "~/Orbs/Lia", summary: "sem Web"))
-        #expect(try await OrbProposeTool().run(call, context: edited).contains("com ajustes: sem Web"))
+        #expect(try await OrbProposeTool().run(call, context: edited).contains("com ajustes do usuário: sem Web"))
     }
 
-    @Test func itRefusesInReadOnlyAtTheLimitsAndWithoutNameOrInstructions() async {
+    @Test func itRefusesInReadOnlyAndWithoutNameOrInstructions() async {
         let (readOnly, a) = context(creator(mode: .readOnly))
         await #expect(throws: ToolError.self) { try await OrbProposeTool().run(call, context: readOnly) }
-        let (own, _) = context(creator(), created: 5)
-        await #expect(throws: ToolError.self) { try await OrbProposeTool().run(call, context: own) }
-        let (all, _) = context(creator(), total: 12)
-        await #expect(throws: ToolError.self) { try await OrbProposeTool().run(call, context: all) }
         let (open, b) = context(creator())
         await #expect(throws: ToolError.self) { try await OrbProposeTool().run(args(["name": .string(" "), "instructions": .string("x")]), context: open) }
         await #expect(throws: ToolError.self) { try await OrbProposeTool().run(args(["name": .string("Lia")]), context: open) }
@@ -184,7 +177,7 @@ struct OrbProposeToolTests {
         return .toolCalls([ToolCallRequest(id: "c1", name: "orb_propose", arguments: arguments)])
     }
 
-    @MainActor private func setUp(mode: PermissionMode = .ask, extra: [String: JSONValue] = [:],
+    @MainActor private func setUp(mode: PermissionMode = .ask, extra: [String: JSONValue] = [:], direct: Bool = false,
                                   second: [LLMEvent] = [.text("Combinado."), .finished(.done, nil)]) -> (AppModel, Bot) {
         var state = AppState.initial
         state.bots[0].permissionMode = mode
@@ -193,6 +186,9 @@ struct OrbProposeToolTests {
         state.bots[0].workingDirectory = folder.path
         Store(directory: root).save(state)
         let model = AppModel(store: Store(directory: root), runsBackgroundWork: false)
+        // Its own preferences: the switch is read by the model, and the suites run side by side.
+        model.preferences = UserDefaults(suiteName: "OrbPropose-\(UUID().uuidString)") ?? .standard
+        model.orbsCreateWithoutAsking = direct
         model.providers = [ProviderAccount(kind: .custom)]
         model.defaultModel = "custom/modelo"
         model.proposedOrbFolderBase = root.appending(path: "Orbs")
@@ -233,7 +229,7 @@ struct OrbProposeToolTests {
         _ = await waitUntil("the turn to end") { !model.isWorking(atlas.id) }
         let events = model.transcript(atlas.id).compactMap { item -> OrbEvent? in if case .event(let event) = item.kind { event } else { nil } }
         #expect(events.map(\.kind) == [.orbCreated] && events.first?.subject?.id == child.id && events.first?.sentence == "Atlas criou o Pesquisador")
-        #expect(toolResult(model, atlas)?.contains("O usuário criou o Orb Pesquisador") == true)
+        #expect(toolResult(model, atlas)?.contains("O Orb Pesquisador foi criado") == true)
         #expect(toolResult(model, atlas)?.contains("Orbs/Pesquisador") == true)
         // The provenance survives the file.
         let saved = try JSONDecoder().decode(Bot.self, from: JSONEncoder().encode(child))
@@ -321,30 +317,113 @@ struct OrbProposeToolTests {
         #expect(toolResult(model, atlas)?.contains("already exists") == true)
     }
 
-    @Test @MainActor func theLimitsCountTheOrbsThatExist() async throws {
-        let (model, atlas) = setUp()
-        for index in 0..<OrbProposal.perCreatorLimit {
+    @Test @MainActor func thereIsNoLimitOnTheOrbsAnOrbMakes() async throws {
+        let (model, atlas) = setUp(direct: true)
+        for index in 0..<13 {
             var child = Bot(name: "Filho \(index)", role: "", orb: OrbConfig())
             child.createdBy = atlas.id
             model.bots.append(child)
         }
         #expect(model.send("crie mais um", to: atlas.id))
-        _ = await waitUntil("the turn to end") { toolResult(model, atlas) != nil && !model.isWorking(atlas.id) }
+        _ = await waitUntil("the Orb to exist") { model.bots.count == 15 }
+        _ = await waitUntil("the turn to end") { !model.isWorking(atlas.id) }
+        #expect(model.bots.last?.name == "Pesquisador" && model.bots.last?.createdBy == atlas.id)
         #expect(model.pendingApprovals(of: atlas.id).isEmpty)
-        #expect(toolResult(model, atlas)?.contains("already created 5") == true)
-        #expect(model.bots.count == 6)
     }
 
-    @Test @MainActor func theToolIsOfferedOnlyInTheOrbsOwnChat() {
+    @Test @MainActor func withoutAskingTheOrbExistsAtOnceWithNoCardAndALineInTheCreatorsChat() async throws {
+        let (model, atlas) = setUp(direct: true)
+        model.selection = .bot(atlas.id)
+        #expect(model.send("crie um pesquisador", to: atlas.id))
+        _ = await waitUntil("the Orb to exist") { model.bots.count == 2 }
+        _ = await waitUntil("the turn to end") { !model.isWorking(atlas.id) }
+        let child = try #require(model.bots.last)
+        #expect(child.name == "Pesquisador" && child.createdBy == atlas.id && child.createdByName == "Atlas")
+        #expect(child.permissionMode == .ask && !child.capabilities.contains(.connectors))
+        #expect(model.pendingApprovals(of: atlas.id).isEmpty)
+        #expect(model.transcript(atlas.id).allSatisfy { if case .approval = $0.kind { false } else { true } })
+        let events = model.transcript(atlas.id).compactMap { item -> OrbEvent? in if case .event(let event) = item.kind { event } else { nil } }
+        #expect(events.map(\.kind) == [.orbCreated] && events.first?.subject?.id == child.id)
+        #expect(toolResult(model, atlas)?.contains("O Orb Pesquisador foi criado") == true)
+        #expect(model.selection == .bot(atlas.id))
+    }
+
+    @Test @MainActor func withoutAskingStillHoldsTheChildToTheCreatorsAccess() async throws {
+        let (model, atlas) = setUp(mode: .ask, extra: ["capabilities": .array([.string("browser")])], direct: true)
+        model.update(atlas.id) { $0.capabilities = [.terminal] }
+        #expect(model.send("crie um pesquisador", to: atlas.id))
+        _ = await waitUntil("the Orb to exist") { model.bots.count == 2 }
+        #expect(model.bots.last?.capabilities.isSubset(of: [.terminal]) == true)
+    }
+
+    @Test @MainActor func inReadOnlyTheSwitchDoesNotCreateEither() async throws {
+        let (model, atlas) = setUp(mode: .readOnly, direct: true)
+        #expect(model.send("crie um pesquisador", to: atlas.id))
+        _ = await waitUntil("the turn to end") { toolResult(model, atlas) != nil && !model.isWorking(atlas.id) }
+        #expect(model.bots.count == 1 && toolResult(model, atlas)?.contains("read-only") == true)
+    }
+
+    @Test @MainActor func aSideRunCreatesWithoutACardToo() async throws {
+        let (model, atlas) = setUp(direct: true)
+        let session = model.session(atlas.id)
+        for kind in [SideRunKind.routine, .delegation, .group] {
+            session.sideKind = kind
+            #expect(model.multiOrbOffering(for: atlas.id).propose)
+            let before = model.bots.count
+            let proposal = OrbProposal.make(from: atlas, args: .object(["name": .string("Filho \(kind.rawValue)"), "role": .string("x"),
+                                                                        "instructions": .string("Ajude.")]))
+            let outcome = await model.orbCreationSupport(for: atlas).create(UUID(), proposal)
+            guard case .created = outcome else { Issue.record("\(kind): \(outcome)"); continue }
+            #expect(model.bots.count == before + 1 && model.pendingApprovals(of: atlas.id).isEmpty)
+        }
+        session.sideKind = nil
+        let created = model.bots.filter { $0.createdBy == atlas.id }
+        #expect(created.count == 3)
+        // The line is in the creator's chat, not lost with the run.
+        let lines = model.transcript(atlas.id).filter { if case .event(let event) = $0.kind { event.kind == .orbCreated } else { false } }
+        #expect(lines.count == 3)
+    }
+
+    @Test @MainActor func undoDeletesTheNewOrbAndTheButtonGoesAway() async throws {
+        let (model, atlas) = setUp(direct: true)
+        #expect(model.send("crie um pesquisador", to: atlas.id))
+        _ = await waitUntil("the Orb to exist") { model.bots.count == 2 }
+        _ = await waitUntil("the turn to end") { !model.isWorking(atlas.id) }
+        let child = try #require(model.bots.last)
+        #expect(model.canUndoCreation(of: child.id))
+        model.undoCreation(of: child.id)
+        #expect(model.bot(child.id) == nil && model.bots.count == 1)
+        #expect(!model.canUndoCreation(of: child.id), "the Orb is gone: so is the button")
+        model.undoCreation(of: child.id) // a second click is nothing
+        #expect(model.bots.count == 1)
+    }
+
+    @Test @MainActor func undoIsOnlyForAnOrbAnOrbMadeAndNobodyHasUsed() async throws {
+        let (model, atlas) = setUp(direct: true)
+        #expect(!model.canUndoCreation(of: atlas.id), "an Orb the person made")
+        #expect(model.send("crie um pesquisador", to: atlas.id))
+        _ = await waitUntil("the Orb to exist") { model.bots.count == 2 }
+        _ = await waitUntil("the turn to end") { !model.isWorking(atlas.id) }
+        let child = try #require(model.bots.last)
+        model.editConversation(child.id) { $0.messages.append(.user("oi")) }
+        #expect(!model.canUndoCreation(of: child.id), "it has a conversation now")
+        model.undoCreation(of: child.id)
+        #expect(model.bot(child.id) != nil)
+    }
+
+    @Test @MainActor func theToolIsOfferedByTheKindOfTurn() {
         let (model, atlas) = setUp()
         let session = model.session(atlas.id)
         #expect(model.multiOrbOffering(for: atlas.id).propose)
         session.routineID = UUID()
-        #expect(!model.multiOrbOffering(for: atlas.id).propose)
-        session.routineID = nil
+        #expect(model.multiOrbOffering(for: atlas.id).propose, "acting on its own is on")
         session.sideKind = .delegation
-        #expect(!model.multiOrbOffering(for: atlas.id).propose)
+        #expect(model.multiOrbOffering(for: atlas.id).propose)
+        model.orbsActOnOwn = false
+        #expect(!model.multiOrbOffering(for: atlas.id).propose, "off: the Orb's own chat only")
+        session.routineID = nil
         session.sideKind = nil
+        #expect(model.multiOrbOffering(for: atlas.id).propose)
     }
 
     @Test @MainActor func aCardLeftOpenWhenTheAppClosesIsRecordedAsNotCreated() async throws {

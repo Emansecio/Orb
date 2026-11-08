@@ -67,6 +67,19 @@ struct EventLineView: View {
             .accessibilityLabel(event.sentence)
             .accessibilityHint("Abre o grupo")
             .accessibilityIdentifier("event-line")
+        } else if event.kind == .orbCreated, !centered, let created = event.subject, model.canUndoCreation(of: created.id) {
+            // The Orb exists and nobody has used it: the creator's line offers to take it back. It goes away with the Orb.
+            HStack(spacing: Spacing.s) {
+                line(opens: false)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("event-line")
+                Button("Desfazer") { model.undoCreation(of: created.id) }
+                    .buttonStyle(.link)
+                    .font(Typography.label)
+                    .help(Tip.undoOrbCreation)
+                    .accessibilityLabel("Desfazer a criação de \(created.name)")
+                    .accessibilityIdentifier("undo-orb-creation")
+            }
         } else {
             line(opens: false)
                 .accessibilityElement(children: .combine)

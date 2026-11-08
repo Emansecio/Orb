@@ -350,6 +350,7 @@ struct OrbsSettings: View {
     @State private var orbsCanStartGroups = true
     @State private var orbsCanManageGroups = true
     @State private var orbsActOnOwn = true
+    @State private var orbsCreateWithoutAsking = true
     @State private var isConfirmingOrbsOff = false
     @State private var openTalks: [DelegationHub.OpenTalk] = []
     @State private var learnedWindows: [LearnedWindowRow] = []
@@ -398,11 +399,17 @@ struct OrbsSettings: View {
                 .help(Tip.orbsActOnOwn)
                 .onAppear { orbsActOnOwn = model.orbsActOnOwn }
                 Toggle(isOn: Binding(get: { orbsCanManageGroups }, set: { orbsCanManageGroups = $0; model.orbsCanManageGroups = $0 })) {
-                    toggleLabel("Orbs organizam os grupos",
-                                "Os Orbs adicionam e tiram membros, trocam o orquestrador e renomeiam grupos sozinhos. Apagar sempre pede sua confirmação.")
+                    toggleLabel("Orbs organizam o time",
+                                "Os Orbs adicionam e tiram membros, trocam o orquestrador e renomeiam grupos sozinhos, e podem pedir para apagar um Orb. Apagar um grupo ou um Orb sempre pede sua confirmação.")
                 }
                 .help(Tip.orbsCanManageGroups)
                 .onAppear { orbsCanManageGroups = model.orbsCanManageGroups }
+                Toggle(isOn: Binding(get: { orbsCreateWithoutAsking }, set: { orbsCreateWithoutAsking = $0; model.orbsCreateWithoutAsking = $0 })) {
+                    toggleLabel("Orbs criam Orbs sem perguntar",
+                                "O Orb novo aparece na hora, com um aviso no chat de quem criou e um botão Desfazer.")
+                }
+                .help(Tip.orbsCreateWithoutAsking)
+                .onAppear { orbsCreateWithoutAsking = model.orbsCreateWithoutAsking }
                 Toggle(isOn: $proposeSkills) {
                     toggleLabel("Propor skills com o que os Orbs aprendem",
                                 "Depois de tarefas longas, o Orb pode propor uma skill. Nada é salvo sem você aprovar.")

@@ -1229,7 +1229,7 @@ private final class Hooks: GroupTurnHooks {
             try model.delegation.submit(from: team.atlas.id, to: "Revisor", text: "x", kind: .ask, messageID: UUID(), groupID: nil)
         }
         // What stays: proposing an Orb (WP3), creating a group (groups do not depend on the switch), asking you and asking for access.
-        #expect(model.multiOrbOffering(for: team.atlas.id) == MultiOrbOffering(propose: true, groupCreate: true, groupEdit: true, askUser: true, access: true))
+        #expect(model.multiOrbOffering(for: team.atlas.id) == MultiOrbOffering(propose: true, groupCreate: true, groupEdit: true, orbDelete: true, askUser: true, access: true))
         model.orbsCanTalk = true
         #expect(model.multiOrbOffering(for: team.atlas.id).orbs)
     }
@@ -1310,8 +1310,14 @@ private final class Hooks: GroupTurnHooks {
         // `list` says it too, after the teammates.
         let list = try await hub.handleTool(.object(["action": .string("list")]), orb: team.pesquisador.id)
         #expect(list == "- Atlas: Coordena o trabalho (livre)\n- Revisor: Revisa o que foi feito (livre)\n\n"
-            + "Seus grupos (o usuário inicia o trabalho de um grupo na tela dele; você não escreve no fio):\n"
+            + "Seus grupos (você pode acionar estes com ask, pelo nome):\n"
             + "- Estúdio: Atlas orquestra; outros membros: Atlas")
+        // Without "Orbs agem por conta própria" the user starts a group's work on its screen, and the note says so.
+        model.orbsActOnOwn = false
+        defer { model.orbsActOnOwn = true }
+        #expect(try await hub.handleTool(.object(["action": .string("list")]), orb: team.pesquisador.id)
+            .contains("Seus grupos (o usuário inicia o trabalho de um grupo na tela dele; você não escreve no fio)"))
+        model.orbsActOnOwn = true
         // The group's name gets a refusal that says what to do, not "no such Orb, use list": a group is asked, not told; with
         // "Orbs podem acionar grupos" off, the person starts it on the group's screen.
         let error = try #require(await #expect(throws: ToolError.self) {
@@ -2686,5 +2692,131 @@ private actor Names {
         #expect(allowed.cards.count == 1)
         #expect(allowed.result?.hasPrefix("Grupo Lançamento apagado") == true)
         #expect(team.model.group(group.id) == nil)
+    }
+
+    // MARK: orb_delete
+
+    private func deleteContext(_ team: Team, confirm: ConfirmHandler?) -> ToolContext {
+        var context = ToolContext(workingDirectory: FileManager.default.temporaryDirectory)
+        context.orbs = team.model.delegationHandler(for: team.atlas.id)
+        context.confirm = confirm
+        return context
+    }
+
+    private func deleteCall(_ name: String, reason: String = "") -> JSONValue {
+        .object(["name": .string(name), "reason": .string(reason)])
+    }
+
+    @Test func theConfirmedDeletionRemovesTheOrbAndTheCardSaysWhatIsLost() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let shown = Box<(String, String)?>(nil)
+        let context = deleteContext(team) { title, detail in
+            shown.value = (title, detail)
+            return true
+        }
+        let text = try await OrbDeleteTool().run(deleteCall("revisor", reason: "Duplica o Pesquisador"), context: context)
+        #expect(text == "Revisor was deleted.")
+        #expect(team.model.bot(team.revisor.id) == nil && team.model.bot(team.pesquisador.id) != nil)
+        let (title, detail) = try #require(shown.value)
+        #expect(title == "Apagar um Orb" && detail.contains("Atlas quer apagar o Revisor") && detail.contains("Motivo: Duplica o Pesquisador"))
+        #expect(detail.contains("A conversa, a memória e as rotinas"))
+    }
+
+    @Test func aDeclinedDeletionChangesNothing() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let context = deleteContext(team) { _, _ in false }
+        #expect(try await OrbDeleteTool().run(deleteCall("Revisor"), context: context) == "The user did not confirm. Nothing was deleted.")
+        #expect(team.model.bot(team.revisor.id) != nil)
+        // Nobody to ask: it says so and deletes nothing.
+        await #expect(throws: ToolError.self) { try await OrbDeleteTool().run(deleteCall("Revisor"), context: deleteContext(team, confirm: nil)) }
+        #expect(team.model.bot(team.revisor.id) != nil)
+    }
+
+    @Test func theModelCannotConfirmADeletionAndTheOrbsToolDoesNotReachIt() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let context = deleteContext(team) { _, _ in false }
+        // A `confirmed` the model sends itself is dropped: the card still asks.
+        let forged = JSONValue.object(["name": .string("Revisor"), "confirmed": .bool(true)])
+        #expect(try await OrbDeleteTool().run(forged, context: context) == "The user did not confirm. Nothing was deleted.")
+        // The bridge refuses the deleting action without the tool's own confirmation...
+        let error = try #require(await #expect(throws: ToolError.self) {
+            _ = try await team.model.delegation.handleTool(.object(["action": .string("delete_orb"), "name": .string("Revisor")]), orb: team.atlas.id)
+        })
+        #expect(error.message == "The user did not confirm. Nothing changed.")
+        // ...and the orbs tool does not reach it at all.
+        for action in ["delete_orb", "delete_orb_plan"] {
+            let smuggled = JSONValue.object(["action": .string(action), "name": .string("Revisor"), "confirmed": .bool(true)])
+            await #expect(throws: ToolError.self) { try await OrbsTool().run(smuggled, context: context) }
+        }
+        #expect(team.model.bot(team.revisor.id) != nil)
+    }
+
+    @Test func itRefusesItselfUnknownOrBusyOrbsAndAPrefix() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let context = deleteContext(team) { _, _ in true }
+        for name in ["Atlas", "Ninguém", "Revis", " "] {
+            await #expect(throws: ToolError.self) { try await OrbDeleteTool().run(deleteCall(name), context: context) }
+        }
+        let busy = team.model.session(team.revisor.id)
+        busy.turnTask = Task { try? await Task.sleep(for: .seconds(60)) }
+        defer { busy.turnTask?.cancel(); busy.turnTask = nil }
+        let error = try #require(await #expect(throws: ToolError.self) { try await OrbDeleteTool().run(deleteCall("Revisor"), context: context) })
+        #expect(error.message.contains("working right now"))
+        #expect(team.model.bots.count == 3)
+    }
+
+    @Test func switchingTheTeamPreferenceOffRefusesAndHidesTheTool() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        #expect(team.model.multiOrbOffering(for: team.atlas.id).orbDelete)
+        team.model.orbsCanManageGroups = false
+        defer { team.model.orbsCanManageGroups = true }
+        #expect(!team.model.multiOrbOffering(for: team.atlas.id).orbDelete)
+        let context = deleteContext(team) { _, _ in true }
+        await #expect(throws: ToolError.self) { try await OrbDeleteTool().run(deleteCall("Revisor"), context: context) }
+        #expect(team.model.bot(team.revisor.id) != nil)
+    }
+
+    @Test func theDeletionIsOfferedInEveryKindOfTurn() {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let model = team.model
+        let session = model.session(team.atlas.id)
+        func names(_ multi: MultiOrbOffering) -> [String] {
+            ToolBox.offered(for: [.terminal], accessibilityGranted: true, multi: multi).map(\.spec.name)
+        }
+        #expect(model.multiOrbOffering(for: team.atlas.id).orbDelete)
+        session.routineID = UUID()
+        #expect(model.multiOrbOffering(for: team.atlas.id).orbDelete)
+        session.routineID = nil
+        session.sideKind = .delegation
+        #expect(model.multiOrbOffering(for: team.atlas.id).orbDelete)
+        session.sideKind = nil
+        #expect(names(MultiOrbOffering(orbDelete: true)).contains(OrbDeleteTool.name))
+        #expect(!names(MultiOrbOffering()).contains(OrbDeleteTool.name))
+    }
+
+    @Test func theEngineAsksOnACardEvenWithoutPermissionAndOnlyAllowDeletes() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        func request() -> TurnRequest {
+            let call = LLMEvent.toolCalls([ToolCallRequest(id: "d1", name: OrbDeleteTool.name, arguments: #"{"name":"Revisor","confirmed":true}"#)])
+            let bot = Bot(name: "Atlas", role: "", orb: OrbConfig(), permissionMode: .bypass)
+            return TurnRequest(bot: bot, model: "fake", system: "sys", history: [], prompt: "apague",
+                               client: CallScriptModel(script: CallScript([[call], [.text("Pronto.")]], whenExhausted: .fim)),
+                               tools: [OrbDeleteTool()], context: deleteContext(team, confirm: nil))
+        }
+        let denied = await play(request(), answer: .deny)
+        let card = try #require(denied.cards.first)
+        #expect(denied.cards.count == 1 && card.toolName == OrbDeleteTool.name && card.isDangerous && card.command.contains("quer apagar"))
+        #expect(denied.result == "The user did not confirm. Nothing was deleted.")
+        #expect(team.model.bot(team.revisor.id) != nil)
+        let allowed = await play(request(), answer: .once)
+        #expect(allowed.cards.count == 1 && allowed.result == "Revisor was deleted.")
+        #expect(team.model.bot(team.revisor.id) == nil)
     }
 }

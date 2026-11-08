@@ -29,6 +29,7 @@ enum ToolBox {
             case OrbProposeTool.name: multi.propose
             case GroupCreateTool.name: multi.groupCreate
             case GroupEditTool.name: multi.groupEdit
+            case OrbDeleteTool.name: multi.orbDelete
             case "group_remember": multi.groupMemory
             case "group_recall": multi.groupMemory || multi.groupRecall
             default: false
