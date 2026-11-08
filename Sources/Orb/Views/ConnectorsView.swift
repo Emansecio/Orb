@@ -1321,6 +1321,7 @@ struct ConnectorEditor: View {
 
         let before = alreadyUsing
         if let index = model.connectors.firstIndex(where: { $0.id == config.id }) {
+            model.migrateConnectorRules(from: model.connectors[index].name, to: config.name)
             model.connectors[index] = config
         } else {
             model.connectors.append(config)

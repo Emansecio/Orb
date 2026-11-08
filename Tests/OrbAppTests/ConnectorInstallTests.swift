@@ -146,6 +146,9 @@ struct ConnectorInstallPolicyTests {
         #expect(tool.summary(json(#"{"name":"football-docs","command":"npx","args":["-y","football-docs"]}"#))
             == ("Instalando o conector football-docs", "npx -y football-docs"))
         #expect(tool.summary(json(#"{"name":"L","url":"https://a.b/mcp"}"#)).detail == "https://a.b/mcp")
+        #expect(tool.summary(json(#"{"name":"L","url":"https://a.b/mcp","all_orbs":true}"#)).detail.contains("todos os Orbs"))
+        #expect(MCPConnection.initializeTimeout(for: MCPServerConfig(name: "n", command: "npx")) > .seconds(30))
+        #expect(MCPConnection.initializeTimeout(for: MCPServerConfig(name: "n", url: "https://a.b/mcp")) == .seconds(30))
         // What goes with it is named, never shown.
         let withEnv = tool.summary(json(#"{"name":"N","command":"npx -y n","env":{"TOKEN":"segredo","A":"1"}}"#)).detail
         #expect(withEnv == "npx -y n · env: A, TOKEN" && !withEnv.contains("segredo"))
@@ -207,6 +210,38 @@ struct ConnectorInstallPolicyTests {
         #expect(model.connectors.count == 1)
         #expect(model.connectors[0].orbIDs == [first.id, second])
         #expect(again.text.contains("already installed") && again.text.contains("Use it now"))
+    }
+
+    @Test @MainActor func switchOffIsNotTurnedOnWhenItWouldExposeOtherConnectors() async throws {
+        let model = model(), bot = try #require(model.bots.first), server = try installableServer()
+        model.connectors.append(MCPServerConfig(name: "Gmail", command: "x")) // applies to every Orb
+        model.bots[0].capabilities.remove(.connectors)
+        await #expect(throws: ToolError.self) {
+            try await model.installConnector(json(#"{"name":"Futebol","command":"/usr/bin/python3","args":["\#(server.path)"]}"#),
+                                             orb: bot.id, usableNow: false)
+        }
+        #expect(!model.bots[0].capabilities.contains(.connectors) && model.connectors.map(\.name) == ["Gmail"])
+    }
+
+    @Test @MainActor func reinstallingKeepsThePersonsKeysAndScope() async throws {
+        let model = model(), server = try installableServer()
+        let first = try #require(model.bots.first)
+        let second = model.createBot(name: "Segundo", role: "", orb: OrbConfig(), model: "", mode: .ask, interview: false, folder: .home).id
+        let path = server.path
+        _ = try await model.installConnector(json(#"{"name":"F","command":"/usr/bin/python3","args":["\#(path)"],"env":{"API_KEY":"meu"}}"#),
+                                             orb: first.id, usableNow: true)
+        _ = try await model.installConnector(json(#"{"name":"F","command":"/usr/bin/python3","args":["\#(path)"],"env":{"API_KEY":"outro","NEW":"1"},"all_orbs":true}"#),
+                                             orb: second, usableNow: true)
+        #expect(model.connectors.count == 1)
+        #expect(model.connectors[0].environment == ["API_KEY": "meu", "NEW": "1"])
+        #expect(model.connectors[0].orbIDs == [first.id, second])
+    }
+
+    @Test @MainActor func renamingMovesTheAlwaysAllowRules() throws {
+        let model = model()
+        model.bots[0].permissionRules = [.connector("GitHub__create_issue"), .shell("git")]
+        model.migrateConnectorRules(from: "GitHub", to: "Meu GitHub")
+        #expect(model.bots[0].permissionRules == [.connector("meu_github__create_issue"), .shell("git")])
     }
 
     @Test @MainActor func oneThatDoesNotStartLeavesNothingBehind() async throws {

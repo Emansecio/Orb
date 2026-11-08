@@ -64,6 +64,15 @@ struct PermissionRule: Codable, Hashable, Sendable {
 }
 
 extension PermissionRule {
+    /// This rule after a connector was renamed: a "Sempre permitir" on one of its tools is keyed by the connector's name, so
+    /// it follows the new name instead of being left behind (where a later connector with the old name would inherit it).
+    func renamingConnector(from old: String, to new: String) -> PermissionRule {
+        guard case .connectorTool(let key) = scope else { return self }
+        let oldPrefix = PermissionPolicy.connectorKey(old) + "__"
+        guard key.hasPrefix(oldPrefix) else { return self }
+        return PermissionRule(family: family, scope: .connectorTool(PermissionPolicy.connectorKey(new) + "__" + key.dropFirst(oldPrefix.count)))
+    }
+
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         family = try c.decode(PermissionFamily.self, forKey: .family)

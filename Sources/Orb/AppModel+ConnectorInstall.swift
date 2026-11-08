@@ -31,18 +31,24 @@ extension AppModel {
             config.url = request.url
             config.summary = request.summary
             config.orbIDs = request.allOrbs ? nil : [botID]
-        } else if !request.allOrbs, var orbs = config.orbIDs {
+        } else if var orbs = config.orbIDs {
+            // Never widened to every Orb from here (`all_orbs` on an installed connector): the approval card cannot show
+            // that scope change, so only this Orb joins the ones the person chose.
             orbs.insert(botID)
             config.orbIDs = orbs
-        } else if request.allOrbs {
-            config.orbIDs = nil
         }
-        // Values given now win; the ones it had stay (an installed connector keeps its keys).
-        config.environment.merge(request.environment) { _, new in new }
-        config.headers.merge(request.headers) { _, new in new }
+        // The person's own values stay: an install call only fills what is missing, it never swaps a key they set.
+        config.environment.merge(request.environment) { old, _ in old }
+        config.headers.merge(request.headers) { old, _ in old }
         config.secretKeys.formUnion(ConnectorSecrets.secretNames(of: config))
         config.isEnabled = true
 
+        // Turning "Conectores" on would also hand this Orb the other connectors that apply to every Orb. The card cannot say
+        // so, so refuse before saving anything and let the person flip the switch (the form warns about the same).
+        if let extra = extraConnectorAccess(ifEnabledFor: [botID], besides: config.id).first {
+            throw ToolError("O Orb está com \"Conectores\" desligado, e ligar daria acesso também a: \(extra.connectors.joined(separator: ", ")). "
+                + "Peça à pessoa para ligar \"Conectores\" neste Orb (ou escolher o escopo do conector) e tente de novo.")
+        }
         if let index = connectors.firstIndex(where: { $0.id == config.id }) { connectors[index] = config } else { connectors.append(config) }
         allowConnectors(for: [botID])
 

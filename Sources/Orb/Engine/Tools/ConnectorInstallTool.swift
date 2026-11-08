@@ -69,16 +69,17 @@ struct ConnectorInstallTool: AgentTool {
         let name = arguments["name"]?.string?.trimmingCharacters(in: .whitespaces) ?? ""
         let title = name.isEmpty ? "Instalando um conector" : "Instalando o conector \(name)"
         // The names of what goes with it (never the values: they may be keys), so the card hides nothing that changes the run.
+        let scope = arguments.flag("all_orbs") ? " · para todos os Orbs" : ""
         func names(_ key: String) -> String? {
             guard case .object(let object)? = arguments[key], !object.isEmpty else { return nil }
             return "\(key): " + object.keys.sorted().joined(separator: ", ")
         }
         if let url = arguments["url"]?.string, !url.trimmingCharacters(in: .whitespaces).isEmpty {
-            return (title, ([url] + [names("headers")].compactMap { $0 }).joined(separator: " · "))
+            return (title, ([url] + [names("headers")].compactMap { $0 }).joined(separator: " · ") + scope)
         }
         let args = arguments["args"]?.array?.compactMap(\.string) ?? arguments["args"]?.string.map { [$0] } ?? []
         let line = ([arguments["command"]?.string ?? ""] + args).joined(separator: " ").trimmingCharacters(in: .whitespaces)
-        return (title, ([line] + [names("env")].compactMap { $0 }).joined(separator: " · "))
+        return (title, ([line] + [names("env")].compactMap { $0 }).joined(separator: " · ") + scope)
     }
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {

@@ -9,6 +9,14 @@ extension AppModel {
         connectors.first { $0.local == kind.rawValue }
     }
 
+    /// A renamed connector is a new tool prefix for the model, so the Orbs' "Sempre permitir" rules for it move to the new name.
+    func migrateConnectorRules(from old: String, to new: String) {
+        guard PermissionPolicy.connectorKey(old) != PermissionPolicy.connectorKey(new) else { return }
+        for index in bots.indices where bots[index].permissionRules.contains(where: { $0.renamingConnector(from: old, to: new) != $0 }) {
+            bots[index].permissionRules = PermissionPolicy.unique(bots[index].permissionRules.map { $0.renamingConnector(from: old, to: new) })
+        }
+    }
+
     /// Installs the connector (or, when it is already there, changes which Orbs use it) and turns "Conectores" on for the Orbs
     /// that get it, like the editor of any other connector.
     @discardableResult

@@ -94,6 +94,13 @@ actor MCPConnection {
         onClosed = closed
     }
 
+    /// How long `initialize` may take. A local `npx`/`uvx` server downloads its package before it answers, which on a cold
+    /// cache and a slow network outlasts 30 s; a wrong command fails at once anyway (the process exits), so waiting longer
+    /// only costs time when the server hangs.
+    static func initializeTimeout(for config: MCPServerConfig) -> Duration {
+        config.local == nil && !config.isRemote ? .seconds(120) : .seconds(30)
+    }
+
     /// Connects to (or launches) the server, runs the MCP handshake and returns its tools.
     func start() async throws -> [ToolSpec] {
         guard !started else { throw ToolError("O conector \(config.name) já foi iniciado.") }
@@ -115,7 +122,7 @@ actor MCPConnection {
                 "protocolVersion": .string(MCPProtocol.preferred),
                 "capabilities": .object([:]),
                 "clientInfo": .object(["name": .string("Orb"), "version": .string("1.0")]),
-            ]), timeout: .seconds(30)))
+            ]), timeout: Self.initializeTimeout(for: config)))
             try await transport.send(notification("notifications/initialized"))
             return try await listTools()
         } catch {
