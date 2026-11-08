@@ -200,7 +200,9 @@ final class DelegationHub: DelegationService {
             chainStates[envelope.chainID]?.noticed[envelope.to.id, default: []].insert(chat)
             var received = line
             received.direction = .received
-            model.appendToChat(.orbMessage(received), of: envelope.to.id, in: chat)
+            if let landed = model.appendToChat(.orbMessage(received), of: envelope.to.id, in: chat) {
+                model.notePulseNotice(envelope, chat: landed.chat)
+            }
             model.live(envelope.to.id).poked()
         }
         model.live(envelope.from.id).poked()
@@ -1617,6 +1619,7 @@ final class DelegationHub: DelegationService {
         guard let model, model.bot(botID) != nil else { return }
         let session = model.session(botID), target = chat ?? session.chatID
         guard model.isChat(target, of: botID) else { return }
+        model.forgetPulseNotices(of: botID, chat: target, chain: chainID)
         session.changeChat(target) { conversation in
             for index in SinceLastTurn.pendingIndices(in: conversation.items, since: conversation.contextHandedAt) {
                 guard case .orbMessage(var message) = conversation.items[index].kind, message.kind == .tell,

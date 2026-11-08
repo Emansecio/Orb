@@ -151,7 +151,11 @@ extension BotSession {
         guard let current = conversation, let model else { return }
         let conversation = withLiveText(current)
         isDirty = false
-        guard let routineID else { return model.store.save(conversation, for: id, chat: workingChatID ?? chatID) }
+        guard let routineID else {
+            let chat = workingChatID ?? chatID
+            model.notePlan(conversation, chat: chat, of: id) // its open plan may wake the pulse once the chat is off screen
+            return model.store.save(conversation, for: id, chat: chat)
+        }
         // A running side run's conversation goes to its own file, never over the chat's.
         switch sideKind ?? .routine {
         case .routine:
@@ -194,7 +198,10 @@ extension BotSession {
         saveTask?.cancel()
         saveTask = nil
         isDirty = false
-        if !chat.items.isEmpty { model?.store.save(chat, for: id, chat: chatID) }
+        if !chat.items.isEmpty {
+            model?.notePlan(chat, chat: chatID, of: id)
+            model?.store.save(chat, for: id, chat: chatID)
+        }
         parkedChat = chat
         conversation = own
         sideKind = kind

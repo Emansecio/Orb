@@ -1396,6 +1396,7 @@ final class AppModel {
         for id in ownRoutines { unsavedRoutineConversations[id] = nil } // or `saveNow` writes the deleted Orb's folder back
         routines.removeAll { $0.botID == botID }
         delegation.orbDeleted(botID) // before the stop: whoever waited for this Orb is told, and what it asked is dropped
+        forgetPulse(of: botID)
         stop(botID)
         let jobs = jobs
         Task { await jobs.forget(botID: botID) }

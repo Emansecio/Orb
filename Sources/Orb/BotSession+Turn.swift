@@ -299,6 +299,8 @@ extension BotSession {
                 if let cursor = pendingContextCursor {
                     pendingContextCursor = nil
                     conversation?.contextHandedAt = cursor
+                    // The notices were handed to the chat: they no longer wait for the pulse.
+                    if let chat = conversationChat { model.forgetPulseNotices(of: id, chat: chat) }
                 }
             }
             scheduleSave(delay: Self.streamingSaveInterval)

@@ -18,6 +18,8 @@ private struct PulseBrain: LLMClient {
     /// Tokens every model call reports (input plus output).
     let tokens: Int
     let rule: @Sendable (_ who: String, _ user: String, _ toolResult: String?) async -> [LLMEvent]
+    /// What a rule answers for the provider to fail.
+    static let failure: [LLMEvent] = [.text("<<provider fails>>")]
 
     func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
         let system = messages.first { $0.role == .system }?.content ?? ""
@@ -30,6 +32,7 @@ private struct PulseBrain: LLMClient {
             Task {
                 await log.record(who, user, names, result)
                 let events = await rule(who, user, result)
+                if events == PulseBrain.failure { continuation.finish(throwing: LLMError.notConfigured); return }
                 for event in events { continuation.yield(event) }
                 let calls = events.contains { if case .toolCalls = $0 { true } else { false } }
                 continuation.yield(.finished(calls ? .toolUse : .done, TokenUsage(input: tokens / 2, output: tokens - tokens / 2)))
@@ -239,13 +242,14 @@ private final class PulseWorld {
         let me = UUID(), other = UUID(), now = Date(timeIntervalSinceReferenceDate: 800_000_000)
         func demands(plan: TaskPlan? = nil, routines: [Routine] = [], requests: [DelegationRequest] = [], groups: [OrbGroup] = [],
                      chains: Set<UUID> = []) -> [PulseDemand] {
-            Pulse.demands(for: me, plan: plan, routines: routines, requests: requests, groups: groups, pulseChains: chains, now: now)
+            let plans = PulsePlan(plan, chat: me, paused: false).map { [$0] } ?? []
+            return Pulse.demands(for: me, plans: plans, routines: routines, requests: requests, groups: groups, pulseChains: chains, now: now)
         }
         // Plan: steps left and untouched for a while.
         var plan = TaskPlan(goal: "Meta", steps: [TaskPlan.Step(text: "A", state: .done), TaskPlan.Step(text: "B")])
         plan.updatedAt = now.addingTimeInterval(-Pulse.planIdle - 1)
         #expect(demands(plan: plan).count == 1 && demands(plan: plan)[0].line == "Unfinished plan \"Meta\": 1/2 done, next \"B\".")
-        #expect(demands(plan: plan)[0].key.hasSuffix(":1"))
+        #expect(demands(plan: plan)[0].key.contains(":1:") && demands(plan: plan)[0].chat == me)
         var fresh = plan
         fresh.updatedAt = now.addingTimeInterval(-60)
         #expect(demands(plan: fresh).isEmpty, "the person may be about to answer")
@@ -265,7 +269,7 @@ private final class PulseWorld {
         }
         let failed = RoutineRun(date: now.addingTimeInterval(-60), succeeded: false, summary: "Deu erro")
         let found = demands(routines: [routine(failed)])
-        #expect(found.count == 1 && found[0].key.hasPrefix("routine:") && found[0].key.hasSuffix(failed.id.uuidString))
+        #expect(found.count == 1 && found[0].key.hasPrefix("routine:") && found[0].key.contains(failed.id.uuidString))
         #expect(demands(routines: [routine(failed, bot: other)]).isEmpty && demands(routines: [routine(failed, enabled: false)]).isEmpty)
         let stopped = RoutineRun(date: now, succeeded: false, summary: BotSession.stoppedNotice)
         let ok = RoutineRun(date: now, succeeded: true, summary: "Tudo certo")
@@ -700,7 +704,7 @@ private final class PulseWorld {
         var envelope = OrbEnvelope(kind: .ask, from: OrbRef(id: me, name: "Eu"), to: OrbRef(id: other, name: "Outro"), text: "Faça")
         envelope.pulseRun = UUID()
         let failed = DelegationRequest(envelope: envelope, state: .failed)
-        #expect(Pulse.demands(for: me, plan: nil, routines: [], requests: [failed], groups: [], pulseChains: [], now: .now).isEmpty)
+        #expect(Pulse.demands(for: me, plans: [], routines: [], requests: [failed], groups: [], pulseChains: [], now: .now).isEmpty)
     }
 
     /// The chat an answer of the pulse's chain woke stops at the budget too (no request holds it, so no chain stopped it).
@@ -736,5 +740,132 @@ private final class PulseWorld {
         let texts = model.transcript(atlas).compactMap { item -> String? in if case .bot(let text, _) = item.kind { text } else { nil } }
         #expect(!texts.contains("Continuei."))
         #expect(world.events("Atlas").contains { $0.kind == .pulseStopped })
+    }
+}
+
+// MARK: Demands that are not lost or repeated
+
+@Suite @MainActor struct PulseDemandTests {
+    private static func nothing(_ who: String, _ user: String, _ result: String?) async -> [LLMEvent] { say("NOTHING") }
+
+    private func plan(_ goal: String, at date: Date) -> Conversation {
+        var conversation = Conversation()
+        var plan = TaskPlan(goal: goal, steps: [TaskPlan.Step(text: "Ler", state: .done), TaskPlan.Step(text: "Escrever")])
+        plan.updatedAt = date
+        conversation.taskPlan = plan
+        return conversation
+    }
+
+    @Test func aPlanOfAConversationOffScreenOrAfterReopeningIsADemand() {
+        let world = PulseWorld(demand: false, rule: Self.nothing)
+        defer { world.cleanUp() }
+        let model = world.model, atlas = world.bot("Atlas").id, other = UUID()
+        var conversation = plan("Migrar o banco", at: world.t0.addingTimeInterval(-3_600))
+        model.notePlan(conversation, chat: other, of: atlas)
+        let found = model.newPulseDemands(for: atlas, now: world.t0)
+        #expect(found.count == 1 && found.first?.chat == other)
+        #expect(found.first?.line == "Unfinished plan \"Migrar o banco\": 1/2 done, next \"Escrever\".")
+        // The app reopened: the plan is read back with the rest of the pulse's state.
+        model.pulseState = model.loadPulseState()
+        #expect(model.newPulseDemands(for: atlas, now: world.t0).map(\.key) == found.map(\.key))
+        // Paused to wait for the person: no work for the pulse.
+        conversation.taskPaused = true
+        model.notePlan(conversation, chat: other, of: atlas)
+        #expect(model.newPulseDemands(for: atlas, now: world.t0).isEmpty)
+        // The newest plans are kept, a few per Orb.
+        for index in 0..<5 {
+            model.notePlan(plan("Meta \(index)", at: world.t0.addingTimeInterval(Double(index - 3_600))), chat: UUID(), of: atlas)
+        }
+        #expect(model.pulseState.plans[atlas.uuidString]?.map(\.goal) == ["Meta 4", "Meta 3", "Meta 2"])
+        model.forgetPulse(of: atlas)
+        #expect(model.pulseState.plans[atlas.uuidString] == nil && model.newPulseDemands(for: atlas, now: world.t0).isEmpty)
+    }
+
+    @Test func aDeletedConversationTakesItsPlanAndNoticesAlong() {
+        let world = PulseWorld(demand: false, rule: Self.nothing)
+        defer { world.cleanUp() }
+        let model = world.model, atlas = world.bot("Atlas").id, chat = UUID(), kept = UUID()
+        model.notePlan(plan("Some", at: world.t0.addingTimeInterval(-3_600)), chat: chat, of: atlas)
+        model.notePlan(plan("Fica", at: world.t0.addingTimeInterval(-3_600)), chat: kept, of: atlas)
+        model.forgetPulse(of: atlas, chat: chat)
+        #expect(model.pulseState.plans[atlas.uuidString]?.map(\.chat) == [kept])
+    }
+
+    @Test func aFailedPulseTriesItsDemandOnceMoreAndAlwaysLeavesALine() async throws {
+        let world = PulseWorld(names: ["Atlas", "Revisor"], demand: false) { _, _, _ in PulseBrain.failure }
+        defer { world.cleanUp() }
+        let model = world.model, atlas = world.bot("Atlas").id
+        world.plant("Atlas", tag: 0)
+        await world.startInterval()
+        await model.pulseTick(now: world.at(minutes: 61))
+        await world.settle()
+        #expect(await world.log.count(by: "Atlas") == 1)
+        let line = try #require(world.events("Atlas").first { $0.kind == .pulseRan })
+        #expect(line.outcome == .failed && line.note?.hasPrefix("não deu certo: ") == true)
+        #expect(model.pulseState.delivered[atlas.uuidString] == nil, "a failure does not use the demand up")
+        await model.pulseTick(now: world.at(minutes: 122))
+        await world.settle()
+        #expect(await world.log.count(by: "Atlas") == 2)
+        #expect(model.pulseState.delivered[atlas.uuidString]?.count == 1, "after the second failure it is handed over")
+        await model.pulseTick(now: world.at(minutes: 183))
+        await world.settle()
+        #expect(await world.log.count(by: "Atlas") == 2)
+        #expect(world.events("Atlas").filter { $0.kind == .pulseRan }.count == 2)
+    }
+
+    @Test func aRoutineFailingTheSameWayRunAfterRunIsOneDemand() {
+        let me = UUID(), now = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        var routine = Routine(name: "Faturas", botID: me, prompt: "x", schedule: .everyHours(1))
+        func key(_ runs: [RoutineRun]) -> String? {
+            routine.runs = runs
+            return Pulse.demands(for: me, plans: [], routines: [routine], requests: [], groups: [], pulseChains: [], now: now).first?.key
+        }
+        let first = RoutineRun(date: now.addingTimeInterval(-7_200), succeeded: false, summary: "Erro 503 às 10:01")
+        let again = RoutineRun(date: now.addingTimeInterval(-3_600), succeeded: false, summary: "Erro 503 às 11:02")
+        let other = RoutineRun(date: now.addingTimeInterval(-60), succeeded: false, summary: "Senha recusada")
+        let ok = RoutineRun(date: now.addingTimeInterval(-1_800), succeeded: true, summary: "Tudo certo")
+        let once = key([first])
+        #expect(once != nil && key([again, first]) == once, "the same trouble with other numbers is the same demand")
+        #expect(key([other, again, first]) != once, "new words are new work")
+        #expect(key([again, ok, first]) != once, "a run that went well starts a new streak")
+    }
+
+    @Test func aNoticeNobodyReadWakesTheOrbAfterHalfAnHourButNotAPulsesOwn() async throws {
+        let world = PulseWorld(demand: false, rule: Self.nothing)
+        defer { world.cleanUp() }
+        let model = world.model, revisor = world.bot("Revisor").id
+        _ = try await model.delegation.handleTool(.object(["action": .string("tell"), "to": .string("Revisor"),
+                                                           "message": .string("O contrato chegou.")]), orb: world.bot("Atlas").id)
+        let notices = model.pulseState.notices[revisor.uuidString] ?? []
+        #expect(notices.count == 1 && notices.first?.from == "Atlas" && notices.first?.at == world.t0)
+        #expect(model.newPulseDemands(for: revisor, now: world.t0.addingTimeInterval(29 * 60)).isEmpty, "its chat may read it soon")
+        let woken = model.newPulseDemands(for: revisor, now: world.t0.addingTimeInterval(31 * 60))
+        #expect(woken.map(\.line) == ["Unread notice from Atlas: \"O contrato chegou.\"."])
+        // The chat was handed it: it no longer waits.
+        model.forgetPulseNotices(of: revisor, chat: try #require(notices.first?.chat))
+        #expect(model.newPulseDemands(for: revisor, now: world.t0.addingTimeInterval(31 * 60)).isEmpty)
+        // A notice of the pulse's own work is never a demand: pulses would wake one another.
+        var envelope = OrbEnvelope(kind: .tell, from: OrbRef(world.bot("Atlas")), to: OrbRef(world.bot("Revisor")), text: "Feito.")
+        envelope.pulseRun = UUID()
+        model.notePulseNotice(envelope, chat: UUID())
+        #expect(model.pulseState.notices[revisor.uuidString] == nil)
+    }
+
+    @Test func manyDemandsHandedOverNeverComeBackAndGoneOnesAreForgotten() {
+        let world = PulseWorld(demand: false, rule: Self.nothing)
+        defer { world.cleanUp() }
+        let model = world.model, atlas = world.bot("Atlas").id
+        model.routines = (0..<45).map { index in
+            var routine = Routine(name: "R\(index)", botID: atlas, prompt: "x", schedule: .everyHours(1))
+            routine.runs = [RoutineRun(date: world.t0.addingTimeInterval(-60), succeeded: false, summary: "Falhou \(index)")]
+            return routine
+        }
+        let all = model.newPulseDemands(for: atlas, now: world.t0)
+        #expect(all.count == 45)
+        model.pulseState.delivered[atlas.uuidString] = all.map(\.key)
+        #expect(model.newPulseDemands(for: atlas, now: world.t0).isEmpty)
+        model.routines.removeFirst()
+        _ = model.newPulseDemands(for: atlas, now: world.t0)
+        #expect(model.pulseState.delivered[atlas.uuidString]?.count == 44)
     }
 }

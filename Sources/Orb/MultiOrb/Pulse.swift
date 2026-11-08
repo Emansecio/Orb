@@ -1,7 +1,7 @@
 import Foundation
 
 // The pulse: from time to time an Orb wakes by itself when there is concrete work waiting for it (a plan dropped half way, a
-// routine that failed, a request that failed, a group turn that failed) and acts if coordinating would help the person (ask a
+// routine that failed, a request that failed, a group turn that failed, a notice nobody read) and acts if coordinating would help the person (ask a
 // teammate, create Orbs or groups, move members). Nothing else wakes an Orb without a message or a routine. Three things keep
 // it cheap: the demand is found without a model (a pure function over state already in memory, so an Orb with none is skipped
 // for free and a demand is handed over once), one Orb per interval in turn, and a daily budget of tokens that counts the pulse
@@ -16,9 +16,17 @@ struct PulseState: Codable, Equatable, Sendable {
     var lastPulse: Date?
     /// The Orb examined last: the next pass starts after it (turn-taking, robust to Orbs added and deleted).
     var lastOrb: UUID?
-    /// By Orb id: the keys of the demands already handed to a pulse (oldest first, `Pulse.deliveredLimit` kept), so the same
-    /// work never wakes the Orb twice. Older versions kept a `fingerprints` map here; it is ignored when read.
+    /// By Orb id: the keys of the demands already handed to a pulse that ended (oldest first), so the same work never wakes the
+    /// Orb twice. Only keys whose work is still there are kept (`AppModel.newPulseDemands`), `Pulse.deliveredLimit` at most.
+    /// Older versions kept a `fingerprints` map here; it is ignored when read.
     var delivered: [String: [String]] = [:]
+    /// By Orb id: the open plans of its conversations (`AppModel.notePlan`), newest first. Kept here, not read from the
+    /// conversations: one off screen or not read since launch is not in memory, and its plan must still wake the Orb.
+    var plans: [String: [PulsePlan]] = [:]
+    /// By Orb id: notices (`tell`) its chats were not handed yet (`AppModel.notePulseNotice`), oldest first.
+    var notices: [String: [PulseNotice]] = [:]
+    /// By "Orb id|demand key": pulses that failed on that demand. A demand is handed over for good after `Pulse.failureLimit`.
+    var failures: [String: Int] = [:]
     /// By Orb id: when its last pulse began.
     var lastRunByOrb: [String: Date] = [:]
     /// What the last pulse that did something said, and when.
@@ -52,6 +60,9 @@ extension PulseState {
         lastPulse = (try? c.decodeIfPresent(Date.self, forKey: .lastPulse)) ?? nil
         lastOrb = (try? c.decodeIfPresent(UUID.self, forKey: .lastOrb)) ?? nil
         delivered = (try? c.decodeIfPresent([String: [String]].self, forKey: .delivered)) ?? [:]
+        plans = (try? c.decodeIfPresent([String: [PulsePlan]].self, forKey: .plans)) ?? [:]
+        notices = (try? c.decodeIfPresent([String: [PulseNotice]].self, forKey: .notices)) ?? [:]
+        failures = (try? c.decodeIfPresent([String: Int].self, forKey: .failures)) ?? [:]
         lastRunByOrb = (try? c.decodeIfPresent([String: Date].self, forKey: .lastRunByOrb)) ?? [:]
         lastSummary = (try? c.decodeIfPresent(String.self, forKey: .lastSummary)) ?? nil
         lastActed = (try? c.decodeIfPresent(Date.self, forKey: .lastActed)) ?? nil
@@ -62,6 +73,40 @@ extension PulseState {
     }
 }
 
+/// The open plan of one of an Orb's conversations, as the pulse keeps it (`PulseState.plans`).
+struct PulsePlan: Codable, Equatable, Sendable {
+    var chat: UUID
+    var goal: String
+    var goalHash: String
+    var done: Int
+    var total: Int
+    /// Steps still to do (pending or in progress; a blocked one waits for the person).
+    var open: Int
+    var next: String
+    var updatedAt: Date
+}
+
+extension PulsePlan {
+    /// nil when nothing is left for the Orb to do: no open step, or the task was paused to wait for the person.
+    init?(_ plan: TaskPlan?, chat: UUID, paused: Bool) {
+        guard let plan, !paused, let next = plan.openSteps.first else { return nil }
+        self.init(chat: chat, goal: Pulse.clip(plan.goal, 80), goalHash: Pulse.hash(plan.goal), done: plan.doneCount,
+                  total: plan.steps.count, open: plan.openSteps.count, next: Pulse.clip(plan.steps[next - 1].text, 80),
+                  updatedAt: plan.updatedAt)
+    }
+}
+
+/// A notice (`tell`) left in one of an Orb's chats, until that chat's turn is handed it (`PulseState.notices`).
+struct PulseNotice: Codable, Equatable, Sendable {
+    /// The envelope's id.
+    var id: UUID
+    var chat: UUID
+    var chain: UUID
+    var from: String
+    var text: String
+    var at: Date
+}
+
 /// A pulse run in progress, in memory only.
 struct PulseRun: Equatable {
     var id: UUID
@@ -70,6 +115,9 @@ struct PulseRun: Equatable {
     var tokens = 0
     /// The first demand the run was woken for.
     var reason = ""
+    /// The keys of the demands it was handed: marked delivered when it ends (`finishPulse`), not when it starts, so a run
+    /// that fails or a quit in the middle leaves them for the next pulse.
+    var keys: [String] = []
 }
 
 /// Work waiting for an Orb, found without a model. `key` says which work and in what state (it changes when the work does), so
@@ -77,6 +125,8 @@ struct PulseRun: Equatable {
 struct PulseDemand: Sendable, Equatable {
     var key: String
     var line: String
+    /// The conversation the work belongs to (a plan's).
+    var chat: UUID?
 }
 
 enum Pulse {
@@ -91,10 +141,12 @@ enum Pulse {
     static let minimumDailyTokens = 10_000
     static let defaultDailyTokens = 300_000
     /// Demands handed to one pulse, and keys remembered per Orb.
-    static let demandsPerPulse = 5, deliveredLimit = 40, lineLimit = 160
-    /// A plan must have been left alone this long to count as dropped (the person may be about to answer), and a routine run
-    /// this recent to count as news.
-    static let planIdle: TimeInterval = 10 * 60, runFreshness: TimeInterval = 24 * 3_600
+    static let demandsPerPulse = 5, deliveredLimit = 200, lineLimit = 160
+    /// Plans and notices kept per Orb, and failed pulses after which a demand is handed over anyway.
+    static let plansPerOrb = 3, noticesPerOrb = 10, failureLimit = 2
+    /// A plan must have been left alone this long to count as dropped (the person may be about to answer), a routine run
+    /// this recent to count as news, and a notice unread this long to wake the Orb (its chat may be about to read it).
+    static let planIdle: TimeInterval = 10 * 60, runFreshness: TimeInterval = 24 * 3_600, noticeIdle: TimeInterval = 30 * 60
 
     /// The reply that means "nothing to do" (any case, with or without a full stop or markdown around it).
     static func isNothing(_ reply: String?) -> Bool {
@@ -113,28 +165,46 @@ enum Pulse {
         return String(value, radix: 16)
     }
 
-    private static func clip(_ text: String, _ limit: Int) -> String { MemoryText.clip(MemoryText.flatten(text), limit) }
+    static func clip(_ text: String, _ limit: Int) -> String { MemoryText.clip(MemoryText.flatten(text), limit) }
+
+    /// What a routine's run calls for: nil when nothing (it went well, or the person stopped it).
+    private static func trouble(_ run: RoutineRun) -> (kind: String, text: String)? {
+        if !run.succeeded, !run.wasStopped { return ("failed", run.summary) }
+        if let check = run.check, check.status == .attention { return ("attention", check.note) }
+        return nil
+    }
 
     /// The work waiting for an Orb, from state already in memory (pure: no disk, no model).
-    /// - `plan`: the plan of the Orb's open conversation. Dropped = steps still to do (a blocked one waits for the person),
-    ///   untouched for `planIdle`.
+    /// - `plans`: the open plans of the Orb's conversations (`PulsePlan`). Dropped = untouched for `planIdle`. The key has the
+    ///   plan's last change, so a plan touched again and dropped again is new work.
+    /// - `notices`: notices its chats were not handed yet; one waiting `noticeIdle` is work.
     /// - `routines`: any; only this Orb's enabled ones whose newest run failed (a stop is not a failure) or asked for attention.
+    ///   The same trouble run after run is one demand: the key is the first run of the streak and the trouble's words
+    ///   (numbers left out, which change from run to run).
     /// - `requests`: any; this Orb's requests that failed outside a group, and failed turns of groups it orchestrates. Chains the
     ///   pulse itself started are left out (the Orb was told inside the chain, and pulsing on its own failures would loop).
-    static func demands(for botID: UUID, plan: TaskPlan?, routines: [Routine], requests: [DelegationRequest], groups: [OrbGroup],
-                        pulseChains: Set<UUID>, now: Date) -> [PulseDemand] {
+    static func demands(for botID: UUID, plans: [PulsePlan], notices: [PulseNotice] = [], routines: [Routine],
+                        requests: [DelegationRequest], groups: [OrbGroup], pulseChains: Set<UUID>, now: Date) -> [PulseDemand] {
         var found: [PulseDemand] = []
-        if let plan, now.timeIntervalSince(plan.updatedAt) >= planIdle, let next = plan.openSteps.first {
-            found.append(PulseDemand(key: "plan:\(hash(plan.goal)):\(plan.openSteps.count)",
-                                     line: "Unfinished plan \"\(clip(plan.goal, 80))\": \(plan.doneCount)/\(plan.steps.count) done, next \"\(clip(plan.steps[next - 1].text, 80))\"."))
+        for plan in plans where now.timeIntervalSince(plan.updatedAt) >= planIdle && plan.open > 0 {
+            let changed = Int(plan.updatedAt.timeIntervalSince1970)
+            found.append(PulseDemand(key: "plan:\(plan.chat.uuidString):\(plan.goalHash):\(plan.open):\(changed)",
+                                     line: "Unfinished plan \"\(plan.goal)\": \(plan.done)/\(plan.total) done, next \"\(plan.next)\".",
+                                     chat: plan.chat))
         }
         for routine in routines where routine.botID == botID && routine.isEnabled {
-            guard let run = routine.runs.first, now.timeIntervalSince(run.date) <= runFreshness else { continue }
-            let why: String
-            if !run.succeeded, !run.wasStopped { why = "failed: " + clip(run.summary, 100) }
-            else if let check = run.check, check.status == .attention { why = "needs attention" + (check.note.isEmpty ? "" : ": " + clip(check.note, 100)) }
-            else { continue }
-            found.append(PulseDemand(key: "routine:\(routine.id.uuidString):\(run.id.uuidString)", line: "Routine \"\(clip(routine.name, 40))\" \(why)."))
+            guard let run = routine.runs.first, now.timeIntervalSince(run.date) <= runFreshness, let trouble = trouble(run) else { continue }
+            let streak = routine.runs.prefix { Self.trouble($0)?.kind == trouble.kind }
+            let first = streak.last?.id ?? run.id
+            let words = hash(trouble.text.filter { !$0.isNumber })
+            let why = trouble.kind == "failed" ? "failed: " + clip(trouble.text, 100)
+                : "needs attention" + (trouble.text.isEmpty ? "" : ": " + clip(trouble.text, 100))
+            found.append(PulseDemand(key: "routine:\(routine.id.uuidString):\(first.uuidString):\(words)",
+                                     line: "Routine \"\(clip(routine.name, 40))\" \(why)."))
+        }
+        for notice in notices where now.timeIntervalSince(notice.at) >= noticeIdle {
+            found.append(PulseDemand(key: "notice:\(notice.id.uuidString)",
+                                     line: "Unread notice from \(clip(notice.from, 40)): \"\(clip(notice.text, 100))\"."))
         }
         // The envelope says it was the pulse's (it outlives the chain's state); the set covers envelopes from older versions.
         let failed = requests.filter {
@@ -252,8 +322,7 @@ extension AppModel {
                 continue
             }
             switch await beginPulse(botID, demands: demands, now: now) {
-            case .started:
-                markDelivered(demands, to: botID)
+            case .started: // the demands are marked delivered when the run ends (`finishPulse`)
                 pulseState.lastPulse = now
                 pulseState.lastRunByOrb[botID.uuidString] = now
                 return
@@ -268,18 +337,109 @@ extension AppModel {
         if !waiting { pulseState.lastPulse = now }
     }
 
-    /// The Orb's demands that no earlier pulse was handed.
+    /// The Orb's demands that no earlier pulse was handed. The keys remembered are cut down to the work still there: a key
+    /// is forgotten only once its work is gone, so no number of demands makes an old one wake the Orb again.
     func newPulseDemands(for botID: UUID, now: Date) -> [PulseDemand] {
-        let seen = Set(pulseState.delivered[botID.uuidString] ?? [])
+        let id = botID.uuidString
         let chains = Set(delegation.chainStates.filter { $0.value.origin.isPulse }.keys)
-        return Pulse.demands(for: botID, plan: sessions[botID]?.conversation?.activePlan, routines: routines,
-                             requests: Array(delegation.requests.values), groups: groups, pulseChains: chains, now: now)
-            .filter { !seen.contains($0.key) }
+        let all = Pulse.demands(for: botID, plans: pulsePlans(of: botID), notices: pulseState.notices[id] ?? [], routines: routines,
+                                requests: Array(delegation.requests.values), groups: groups, pulseChains: chains, now: now)
+        let current = Set(all.map(\.key))
+        if let seen = pulseState.delivered[id] {
+            let kept = Array(seen.filter(current.contains).suffix(Pulse.deliveredLimit))
+            pulseState.delivered[id] = kept.isEmpty ? nil : kept
+        }
+        let prefix = id + "|"
+        pulseState.failures = pulseState.failures.filter { !$0.key.hasPrefix(prefix) || current.contains(String($0.key.dropFirst(prefix.count))) }
+        let seen = Set(pulseState.delivered[id] ?? [])
+        return all.filter { !seen.contains($0.key) }
     }
 
-    private func markDelivered(_ demands: [PulseDemand], to botID: UUID) {
+    /// The Orb's open plans: the ones kept, with the conversation the turn machinery has in memory read as it is now.
+    private func pulsePlans(of botID: UUID) -> [PulsePlan] {
+        var plans = pulseState.plans[botID.uuidString] ?? []
+        if let session = sessions[botID], let chat = session.conversationChat, let conversation = session.conversation {
+            plans.removeAll { $0.chat == chat }
+            if let live = PulsePlan(conversation.activePlan, chat: chat, paused: conversation.taskPaused == true) { plans.insert(live, at: 0) }
+        }
+        return plans
+    }
+
+    /// The pulse ended: on success (or the person's stop) its demands are handed over; on failure each counts one more, and is
+    /// handed over after `Pulse.failureLimit` (a demand the model always fails on must not spend the budget every interval).
+    private func settleDemands(_ keys: [String], of botID: UUID, succeeded: Bool) {
         let id = botID.uuidString
-        pulseState.delivered[id] = Array(((pulseState.delivered[id] ?? []) + demands.map(\.key)).suffix(Pulse.deliveredLimit))
+        var done: [String] = []
+        for key in keys {
+            let counted = id + "|" + key
+            if succeeded {
+                done.append(key)
+                pulseState.failures[counted] = nil
+            } else {
+                let failures = (pulseState.failures[counted] ?? 0) + 1
+                if failures >= Pulse.failureLimit { done.append(key); pulseState.failures[counted] = nil } else { pulseState.failures[counted] = failures }
+            }
+        }
+        guard !done.isEmpty else { return }
+        pulseState.delivered[id] = Array(((pulseState.delivered[id] ?? []) + done).suffix(Pulse.deliveredLimit))
+    }
+
+    // MARK: What the pulse keeps of the Orb's conversations
+
+    /// A conversation of the Orb was written (`BotSession.write`): its open plan is kept for the pulse, the newest
+    /// `Pulse.plansPerOrb`. Saved only when it changed.
+    func notePlan(_ conversation: Conversation, chat: UUID, of botID: UUID) {
+        let id = botID.uuidString
+        let before = pulseState.plans[id] ?? []
+        var plans = before.filter { $0.chat != chat }
+        if let plan = PulsePlan(conversation.activePlan, chat: chat, paused: conversation.taskPaused == true) { plans.append(plan) }
+        plans = Array(plans.sorted { $0.updatedAt > $1.updatedAt }.prefix(Pulse.plansPerOrb))
+        guard plans != before else { return }
+        pulseState.plans[id] = plans.isEmpty ? nil : plans
+        savePulseState()
+    }
+
+    /// A notice landed in a chat of the Orb (`DelegationHub.leaveNotice`). One the pulse's own work sent is not kept: a pulse
+    /// woken by another pulse's notice would chain them.
+    func notePulseNotice(_ envelope: OrbEnvelope, chat: UUID) {
+        guard envelope.kind == .tell, envelope.groupID == nil, envelope.pulseRun == nil else { return }
+        let id = envelope.to.id.uuidString
+        let notice = PulseNotice(id: envelope.id, chat: chat, chain: envelope.chainID, from: envelope.from.name,
+                                 text: Pulse.clip(envelope.text, 100), at: pulseNow())
+        pulseState.notices[id] = Array(((pulseState.notices[id] ?? []) + [notice]).suffix(Pulse.noticesPerOrb))
+        savePulseState()
+    }
+
+    /// Notices that no longer wait: the chat's turn was handed them (`chat`), their chain was stopped (`chain` too), or their
+    /// conversation is gone.
+    func forgetPulseNotices(of botID: UUID, chat: UUID? = nil, chain: UUID? = nil) {
+        let id = botID.uuidString
+        guard let notices = pulseState.notices[id] else { return }
+        let left = notices.filter { notice in
+            if let chat, notice.chat != chat { return true }
+            if let chain, notice.chain != chain { return true }
+            return false
+        }
+        guard left != notices else { return }
+        pulseState.notices[id] = left.isEmpty ? nil : left
+        savePulseState()
+    }
+
+    /// A conversation of the Orb was deleted (`chat`), or the Orb itself (nil): nothing of it may wake a pulse.
+    func forgetPulse(of botID: UUID, chat: UUID? = nil) {
+        let id = botID.uuidString
+        if let chat {
+            pulseState.plans[id]?.removeAll { $0.chat == chat }
+            if pulseState.plans[id]?.isEmpty == true { pulseState.plans[id] = nil }
+            forgetPulseNotices(of: botID, chat: chat)
+        } else {
+            pulseState.delivered[id] = nil
+            pulseState.plans[id] = nil
+            pulseState.notices[id] = nil
+            pulseState.lastRunByOrb[id] = nil
+            pulseState.failures = pulseState.failures.filter { !$0.key.hasPrefix(id + "|") }
+        }
+        savePulseState()
     }
 
     /// The Orbs in the order of turns: the one after the last examined first.
@@ -315,7 +475,7 @@ extension AppModel {
         let own = (read.value?.closingInterruptedTurn(notice: BotSession.quitSideNotice) ?? Conversation()).startingRoutineRun(at: started)
         let runID = UUID()
         session.startRoutineRun(runID, conversation: own, at: started, kind: .pulse)
-        pulseRuns[botID] = PulseRun(id: runID, startedAt: started, reason: demands.first?.line ?? "")
+        pulseRuns[botID] = PulseRun(id: runID, startedAt: started, reason: demands.first?.line ?? "", keys: demands.map(\.key))
         guard send(Pulse.prompt(for: demands), to: botID) else {
             pulseRuns[botID] = nil
             session.endSideRun()
@@ -338,15 +498,21 @@ extension AppModel {
         workJournal.dropPulse(bot: botID)
         let run = pulseRuns.removeValue(forKey: botID)
         guard let bot = bot(botID), !isResetting else { return }
+        let failed = !succeeded && !userStopped
+        settleDemands(run?.keys ?? [], of: botID, succeeded: !failed)
 
         // This run's items: after the marker that opens it.
         let start = own.items.lastIndex { if case .notice(let text) = $0.kind { text.hasPrefix(Conversation.routineRunMarker) } else { false } } ?? 0
         let usedTools = own.items[start...].contains { if case .tool = $0.kind { true } else { false } }
         let said = Pulse.isNothing(reply) ? "" : MemoryText.clip(MemoryText.flatten(reply ?? ""), 200)
-        if usedTools || !said.isEmpty {
-            let summary = said.isEmpty ? "usou ferramentas" : said
+        // A failure always leaves its line: the person sees that the pulse tried and why it did not go.
+        if usedTools || !said.isEmpty || failed {
+            var thisRun = own
+            thisRun.items = Array(own.items[start...]) // the reason of this run, not of an earlier one in the same file
+            let summary = failed ? "não deu certo: " + MemoryText.clip(DelegationHub.reason(in: thisRun), 160)
+                : said.isEmpty ? "usou ferramentas" : said
             let tokens = run?.tokens ?? 0
-            let outcome: OrbEvent.Outcome = succeeded || userStopped ? .finished : .failed
+            let outcome: OrbEvent.Outcome = failed ? .failed : .finished
             let appended = appendToChat(.event(OrbEvent(kind: .pulseRan, actor: OrbRef(bot), detail: String(tokens), note: summary,
                                                         outcome: outcome, runID: runID)), of: botID)
             pulseState.lastSummary = summary
