@@ -1206,7 +1206,9 @@ final class AppModel {
     func createBot(name: String, role: String, orb: OrbConfig, model: String, mode: PermissionMode,
                    identity: String = "", interview: Bool = true, folder: OrbFolderChoice = .own,
                    base: URL = OrbFolder.defaultBase, adopting kept: KeptMemory? = nil, importing imported: OrbImport? = nil) -> Bot {
-        let name = Self.clippedName(name)
+        // The callers that ask the person refuse a taken name; this keeps the rest (Atlas, a wizard draft) from making two
+        // Orbs that delegation could not tell apart.
+        let name = uniqueOrbName(Self.clippedName(name))
         let kept = isResetting ? nil : kept // a kept memory is not moved while the reset walks through the folder
         let plan = kept == nil ? imported?.plan() : nil
         var bot = Bot(name: name, role: role, orb: orb, model: model, permissionMode: mode)

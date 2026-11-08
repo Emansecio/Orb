@@ -193,8 +193,8 @@ struct OrbFolderStateTests {
 
     @Test @MainActor func aNewOrbGetsItsOwnFolder() {
         let model = makeModel()
-        let bot = create(model)
-        #expect(bot.workingDirectory == OrbFolder.storedPath(sandbox.base.appending(path: "Atlas")))
+        let bot = create(model, "Nova") // (a new app already has an "Atlas")
+        #expect(bot.workingDirectory == OrbFolder.storedPath(sandbox.base.appending(path: "Nova")))
         #expect(model.bot(bot.id)?.workingURL.isExistingDirectory == true)
         #expect(model.bot(bot.id)?.workingURL.deletingLastPathComponent().lastPathComponent == "Orbs")
         // Not the home folder: the policy sees a folder of its own.
@@ -203,9 +203,9 @@ struct OrbFolderStateTests {
 
     @Test @MainActor func twoOrbsWithTheSameNameGetDifferentFolders() {
         let model = makeModel()
-        let first = create(model), second = create(model)
+        let first = create(model, "Nova"), second = create(model, "Nova")
         #expect(first.workingDirectory != second.workingDirectory)
-        #expect(URL(fileURLWithPath: second.workingDirectory).lastPathComponent == "Atlas 2")
+        #expect(URL(fileURLWithPath: second.workingDirectory).lastPathComponent == "Nova 2")
     }
 
     @Test @MainActor func theHomeChoiceKeepsTheOldBehavior() {
@@ -300,6 +300,22 @@ struct OrbFolderStateTests {
         // Two older Orbs sharing a name: each keeps its own without a refusal (leaving the field renames to the same).
         model.update(second.id) { $0.name = "JÚPITER" }
         #expect(model.rename(second.id, to: "JÚPITER"))
+    }
+
+    @Test @MainActor func aTakenNameCountsAccentsCaseAndSpacingLikeDelegation() {
+        let model = makeModel()
+        _ = create(model, "José Lima", folder: .home)
+        #expect(model.isOrbNameTaken("jose lima"))
+        #expect(model.isOrbNameTaken("  JOSÉ   LIMA "))
+        #expect(!model.isOrbNameTaken("José Lima Jr"))
+    }
+
+    @Test @MainActor func creatingTwoOrbsWithOneNameGivesTheSecondAFreeName() {
+        let model = makeModel()
+        let first = create(model, "Ana", folder: .home), second = create(model, "ana", folder: .home)
+        let third = create(model, "Ana", folder: .home)
+        #expect(first.name == "Ana" && second.name == "ana 2" && third.name == "Ana 3")
+        #expect(Set(model.bots.map { DelegationRules.fold($0.name) }).count == model.bots.count)
     }
 
     @Test @MainActor func aVeryLongNameIsCut() {

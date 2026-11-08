@@ -73,15 +73,15 @@ extension OrbProposal {
 
     /// The proposal for `creator` and the arguments of `orb_propose` (the rules of docs/historico/MULTI-ORBS.md 4.2). Pure: whatever the
     /// model sent, the result never has more than the creator, no connectors, and a look that exists.
-    /// `existingNames`: the Orbs there are now, to warn that the folder gets another name.
+    /// `existingNames`: the Orbs there are now, to warn that the name is taken (the card then waits for another).
     static func make(from creator: Bot, args: JSONValue, existingNames: [String] = []) -> OrbProposal {
         let name = Self.clippedName(args["name"]?.string ?? "")
         let requested = Set((args["capabilities"]?.array ?? []).compactMap { $0.string.flatMap(Capability.init(rawValue:)) })
             .subtracting([.connectors])
         let inheritable = creator.capabilities.subtracting([.connectors])
         let ceiling = ceiling(forCreatorMode: creator.permissionMode)
-        let folded = name.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
-        let taken = existingNames.contains { $0.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil) == folded }
+        let folded = DelegationRules.fold(name)
+        let taken = existingNames.contains { DelegationRules.fold($0) == folded }
         let reason = args["reason"]?.string.map { MemoryText.flatten(MemorySanitizer.scrub($0)) }.flatMap { $0.isEmpty ? nil : String($0.prefix(240)) }
         return OrbProposal(
             creator: OrbRef(creator),

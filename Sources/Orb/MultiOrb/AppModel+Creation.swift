@@ -39,12 +39,24 @@ extension AppModel {
         }
     }
 
-    /// An Orb already has this name (accents and case aside): the new Orb's folder then gets another name.
+    /// An Orb already has this name (accents, case and spacing aside, as delegation tells names apart): creating or renaming
+    /// to it is refused.
     /// `excluding`: the Orb being renamed, which may keep its own name (or change its case).
     func isOrbNameTaken(_ name: String, excluding: UUID? = nil) -> Bool {
-        let fold = { (text: String) in text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil) }
-        let wanted = fold(OrbProposal.clippedName(name))
-        return bots.contains { $0.id != excluding && fold($0.name) == wanted }
+        let wanted = DelegationRules.fold(OrbProposal.clippedName(name))
+        return bots.contains { $0.id != excluding && DelegationRules.fold($0.name) == wanted }
+    }
+
+    /// `name`, or "name 2", "name 3"… when it is taken: for Orbs nobody named by hand (Atlas, a draft), which must not fail.
+    func uniqueOrbName(_ name: String) -> String {
+        var candidate = name
+        var number = 2
+        while isOrbNameTaken(candidate) {
+            let suffix = " \(number)"
+            candidate = String(name.prefix(AppModel.nameLimit - suffix.count)).trimmingCharacters(in: .whitespaces) + suffix
+            number += 1
+        }
+        return candidate
     }
 
     /// Creates the Orb the person accepted, as the card holds it, and answers for the model. The Orb gets its own folder and no
@@ -66,6 +78,11 @@ extension AppModel {
             return .failed(limit)
         }
 
+        // The card waits for another name; this is for a decision that arrives anyway (a shortcut, an edit that raced).
+        if isOrbNameTaken(final.name) {
+            markNotCreated(approvalID, of: creatorID, reason: "Já existe um Orb com esse nome")
+            return .failed("An Orb named \"\(final.name)\" already exists. Propose another name.")
+        }
         let previous = selection
         let bot = createBot(name: final.name, role: final.role, orb: final.orb, model: final.model, mode: final.mode,
                             identity: final.instructions, interview: false, folder: .own, base: proposedOrbFolderBase)

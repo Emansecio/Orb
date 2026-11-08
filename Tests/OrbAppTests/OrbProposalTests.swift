@@ -305,16 +305,20 @@ struct OrbProposeToolTests {
         #expect(model.bots.count == 1)
     }
 
-    @Test @MainActor func aTakenNameFlagsTheCardAndTheFolderGetsAnotherName() async throws {
+    @Test @MainActor func aTakenNameFlagsTheCardAndCreatingWithItIsRefused() async throws {
         let (model, atlas) = setUp()
         model.createBot(name: "Pesquisador", role: "", orb: OrbConfig(), model: "", mode: .ask, interview: false,
                         folder: .own, base: root.appending(path: "Orbs"))
         model.selection = .bot(atlas.id)
         let card = try #require(await openCard(model, atlas))
         #expect(card.proposal?.nameTaken == true)
+        let before = model.bots.count
+        // Even if the decision arrives anyway (the card's button is off), the name stays one Orb's: renaming is refused alike.
         model.decide(.once, approvalID: card.id, botID: atlas.id)
-        _ = await waitUntil("the Orb to exist") { model.bots.count == 3 }
-        #expect(model.bots.last?.workingDirectory == root.appending(path: "Orbs/Pesquisador 2").path)
+        _ = await waitUntil("the card to be answered") { !model.isPending(card.id, of: atlas.id) }
+        #expect(model.bots.count == before)
+        _ = await waitUntil("the model to hear it") { toolResult(model, atlas)?.contains("already exists") == true }
+        #expect(toolResult(model, atlas)?.contains("already exists") == true)
     }
 
     @Test @MainActor func theLimitsCountTheOrbsThatExist() async throws {

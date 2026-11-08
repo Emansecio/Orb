@@ -305,7 +305,7 @@ struct OrbProposalCard: View {
             fact("Mesmo modelo que \(creator)", symbol: "cpu")
             if let folder { fact(folder, symbol: "folder") }
             if taken {
-                fact("Já existe um Orb com esse nome: a pasta ganha outro nome", symbol: "exclamationmark.circle", tint: Palette.warn)
+                fact(isPending ? "Já existe um Orb com esse nome: troque o nome para criar" : "Já existe um Orb com esse nome", symbol: "exclamationmark.circle", tint: Palette.warn)
             }
             fact("Sem conectores", symbol: "puzzlepiece.extension")
         }
@@ -461,6 +461,9 @@ struct OrbProposalCard: View {
         }
     }
 
+    /// A name another Orb has is refused, like renaming: delegation could not tell the two apart.
+    private var canCreateNow: Bool { draft.canCreate && !model.isOrbNameTaken(draft.name) }
+
     private var createButton: some View {
         Button(action: create) {
             HStack(spacing: 7) {
@@ -482,7 +485,7 @@ struct OrbProposalCard: View {
         .opacity(pressed == .allow ? 0.85 : 1)
         .scaleEffect(pressed == .allow ? ApprovalShortcut.pressScale : 1)
         .animation(Motion.press, value: pressed)
-        .disabled(!draft.canCreate)
+        .disabled(!canCreateNow)
         .help("Criar \(shown.name) (\(AppShortcut.commandReturn.label))")
         .accessibilityLabel("Criar")
         .accessibilityHint("Atalho: ⌘↩")
@@ -575,7 +578,7 @@ struct OrbProposalCard: View {
 
     /// "Criar": what was edited is kept on the card first, then the card is answered.
     private func create() {
-        guard isPending, draft.canCreate else { return }
+        guard isPending, canCreateNow else { return }
         if draft != proposal { model.updateProposal(draft, approvalID: request.id, botID: botID) }
         model.decide(.once, approvalID: request.id, botID: botID)
     }

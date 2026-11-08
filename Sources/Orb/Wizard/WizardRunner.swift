@@ -142,11 +142,14 @@ final class WizardRunner {
     /// "Criar": the Orb the draft describes, with the look the person chose (`look`: the assistant never designs it), as the
     /// person's own (`createdBy` stays nil). The assistant ends.
     @discardableResult
-    func create(look: OrbConfig = OrbConfig()) -> Bot? {
-        guard let model, !isFinished, draft.canCreate else { return nil }
+    /// `importing`, `adopting`, `modelName` and `folder`: what the sheet's form already held (an import the person confirmed,
+    /// a kept memory, the model, the folder), which the assistant does not ask about. A name another Orb has is refused.
+    func create(look: OrbConfig = OrbConfig(), importing: OrbImport? = nil, adopting kept: KeptMemory? = nil,
+                modelName: String = "", folder: OrbFolderChoice = .own) -> Bot? {
+        guard let model, !isFinished, draft.canCreate, !model.isOrbNameTaken(draft.name) else { return nil }
         let bot = model.createBot(name: draft.name, role: NewBotSheet.finalRole(draft.role), orb: look,
-                                  model: "", mode: draft.mode, identity: draft.instructions, interview: false, folder: .own,
-                                  base: orbsBase)
+                                  model: modelName, mode: draft.mode, identity: draft.instructions, interview: false, folder: folder,
+                                  base: orbsBase, adopting: kept, importing: importing)
         let capabilities = draft.capabilities.subtracting([.connectors])
         model.update(bot.id) { $0.capabilities = capabilities }
         finish()

@@ -115,6 +115,22 @@ private func drafting(_ json: String) -> [LLMEvent] {
         #expect(!runner.canGoBackToChatting, "the card must not offer a way back that leads nowhere")
     }
 
+    @MainActor @Test func creatingFromTheAssistantKeepsTheImportAndRefusesATakenName() async throws {
+        let (model, runner) = setUp(CallScript([said("ok")]))
+        _ = model.createBot(name: "Ana", role: "", orb: OrbConfig(), model: "", mode: .ask, folder: .home)
+        _ = runner.applyDraft(.object(["name": .string("ana")]))
+        #expect(runner.create() == nil, "a name another Orb has is refused, as renaming does")
+
+        _ = runner.applyDraft(.object(["name": .string("Maia")]))
+        var found = OrbImport(source: "ChatGPT")
+        found.facts = [ImportItem("Gosta de café."), ImportItem("Mora em Recife.")]
+        let bot = try #require(runner.create(importing: found, modelName: "custom/outro", folder: .home))
+        #expect(bot.model == "custom/outro" && bot.workingDirectory.isEmpty)
+        let bank = model.memory.bank(for: bot.id)
+        #expect(await waitUntil("the imported facts") { await bank.snapshot().items.count == 2 })
+        #expect(model.transcript(bot.id).contains { if case .notice(let text) = $0.kind { text.hasPrefix("Importei") } else { false } })
+    }
+
     @MainActor @Test func theThirtiethMessageClosesTheSession() async {
         let script = CallScript([said("Mais uma pergunta?")])
         let (model, runner) = setUp(script)

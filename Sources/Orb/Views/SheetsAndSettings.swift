@@ -103,12 +103,13 @@ struct NewBotSheet: View {
 
     private var trimmedName: String { name.trimmingCharacters(in: .whitespaces) }
 
+    /// Another Orb has the name (same rule as renaming): "Criar Orb" waits, because delegation finds Orbs by name.
+    private var isNameTaken: Bool { !trimmedName.isEmpty && model.isOrbNameTaken(trimmedName) }
+
     /// Why "Criar Orb" waits, or a gentle note; nil when there is nothing to say.
     private var hint: String? {
         if trimmedName.isEmpty { return "Dê um nome ao Orb para criar." }
-        if folder == .own, model.bots.contains(where: { $0.name.caseInsensitiveCompare(trimmedName) == .orderedSame }) {
-            return "Já existe um Orb com esse nome. A pasta ganha outro nome."
-        }
+        if isNameTaken { return "Já existe um Orb com esse nome. Escolha outro para criar." }
         return nil
     }
 
@@ -141,9 +142,14 @@ struct NewBotSheet: View {
         .padding(.bottom, Spacing.m)
     }
 
+    private var wizardNameTaken: Bool { !wizard.draft.name.isEmpty && model.isOrbNameTaken(wizard.draft.name) }
+
     /// "Criar" in the assistant: the Orb the draft describes, and the sheet closes.
     private func createFromAssistant() {
-        guard wizard.create(look: orb) != nil else { return } // the look is the person's (`orb`), never the assistant's
+        // The look is the person's (`orb`), never the assistant's. What the form held (an import, a kept memory, the model and
+        // the folder) goes along: going back to the assistant after "Usar esta importação" must not drop it silently.
+        guard wizard.create(look: orb, importing: imported, adopting: chosenMemory, modelName: modelName, folder: folder) != nil
+        else { return }
         dismiss()
     }
 
@@ -264,12 +270,12 @@ struct NewBotSheet: View {
             .motion(value: tab)
             Group {
                 if isAssistant {
-                    WizardFooter(canCreate: wizard.draft.canCreate, hitLimit: wizard.hitLimit, toForm: passDraftToForm,
+                    WizardFooter(canCreate: wizard.draft.canCreate && !wizardNameTaken, nameTaken: wizardNameTaken, hitLimit: wizard.hitLimit, toForm: passDraftToForm,
                                  cancel: requestClose, create: createFromAssistant)
                 } else {
                     SheetFooter(message: isImporting ? ImportText.notCreatedYet : hint, cancel: requestClose,
                                 primaryTitle: isImporting ? ImportText.confirm : "Criar Orb",
-                                isPrimaryDisabled: isImporting ? draft?.plan().isEmpty ?? true : trimmedName.isEmpty,
+                                isPrimaryDisabled: isImporting ? draft?.plan().isEmpty ?? true : trimmedName.isEmpty || isNameTaken,
                                 primary: isImporting ? useImport : create)
                 }
             }
@@ -493,7 +499,7 @@ struct NewBotSheet: View {
     }
 
     private func create() {
-        guard !trimmedName.isEmpty else { return }
+        guard !trimmedName.isEmpty, !isNameTaken else { return }
         let bot = model.createBot(name: trimmedName,
                                   role: Self.finalRole(role),
                                   orb: orb, model: modelName, mode: mode, identity: identity, interview: interview,
