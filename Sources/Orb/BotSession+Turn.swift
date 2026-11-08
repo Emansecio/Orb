@@ -396,7 +396,9 @@ extension BotSession {
     func finishTurn(_ turn: UUID, succeeded: Bool = true, userStopped: Bool = false, startsQueuedRoutines: Bool = true) {
         guard turnID == turn, turnTask != nil, let model else { return }
         conversation?.turnOpen = nil
-        if routineID == nil { model.workJournal.chatTaskEnded(bot: id) } // done, failed or stopped; a quit keeps it (the journal is frozen)
+        // Done, failed or stopped; a quit keeps it (the journal is frozen). Not the pulse's turn in a chat: it never wrote one,
+        // and the entry there may be a cut task waiting to resume (`resumeChatTask`), whose one resume it would undo.
+        if routineID == nil, pulseInChat == nil { model.workJournal.chatTaskEnded(bot: id) }
         let botID = id
         let ranRoutine = routineID != nil
         // Taken before the chain is cleared: a turn the pulse paid for (a chat an answer of its chain woke) leaves the work

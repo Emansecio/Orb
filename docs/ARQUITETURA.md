@@ -324,14 +324,16 @@ leva a chamada ao `DelegationHub`. `orbs` (`ask`, `tell`, `list`), `group_create
   `PulseState.failures` e entrega após `failureLimit`; `delivered` guarda só chaves cujo trabalho ainda existe (teto 200).
   Com um plano entre as demandas, `beginPulseInChat` roda na conversa dele (`prepareTurn`, `BotSession.pulseInChat`,
   `SendOrigin.pulse`, linha `pulseResumed`, turno `unattended`; no `WorkJournal` só a entrada `.pulse`, descartada na abertura,
-  nunca a tarefa do chat; o que a pessoa escreve nesse turno espera por ele, `canSteer` falso, e vira um turno dela; fechar o
+  nunca a tarefa do chat; o Orb com uma tarefa cortada esperando a retomada (`WorkJournal.awaitsChatResume`) fica fora do
+  pulso até ela; um pedido do pulso não é reenviado na abertura com o pulso desligado ou o teto gasto; o que a pessoa escreve nesse turno espera por ele, `canSteer` falso, e vira um turno dela; fechar o
   app no meio não entrega as demandas); sem plano, um side run `.pulse`
   (`BotSession.sideKind`) com o `RoutineBackground` do chat. Pedido feito no side run leva `servingPulse`: `finishPulse` segura o
   run (`DelegationHub.holdPulse`, `waitingRoutines` com `pulse`) e a resposta o retoma (`resumePulse`); sem espera, vai ao chat.
   **Linhagem:** `AppModel.pulseLineage(of:)` é a fonte única de "é trabalho do pulso" (side run, `pulseInChat`, cadeia de origem
   `.pulse`, pedido servido com `envelope.pulseRun`), usada por `pulseCharge`, `DelegationHub.newChain`/`queueGroupTurn`/`submit`
   (que recusam com `pulseBudget` depois do teto) e `stopPulseWork`. Fronteira com a pessoa: a mensagem dela num grupo que o pulso
-  pôs para trabalhar passa a cadeia a `.group` (o trabalho é dela, sem teto), e um pedido do pulso a um grupo que ela já pôs para
+  pôs para trabalhar passa a cadeia a `.group` (`handToPerson`: o trabalho é dela, sem teto, inclusive os turnos já em curso, e o
+  diário retoma a rodada como dela); a retomada do app (`GroupHub.resume`, `fromPerson` falso) não conta como mensagem dela, e um pedido do pulso a um grupo que ela já pôs para
   trabalhar entra na rodada dela, sem contar no teto (decisão: a rodada é uma só). O teto diário (`pulseDailyTokens`, `PulseState.tokensToday`)
   conta tudo da linhagem; ao estourar, ou ao desligar o pulso ou `orbsActOnOwn`, `stopPulseWork` cancela as cadeias, os turnos e os
   pulsos que esperam e grava `pulseStopped` (`detail == OrbEvent.pulseOff` quando foi desligado); um grupo parado pelo teto grava

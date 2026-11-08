@@ -102,6 +102,16 @@ struct EventLineView: View {
                     .accessibilityLabel("Manter e recusar o pedido: \(event.sentence)")
                     .accessibilityIdentifier("deletion-keep")
             }
+        } else if event.kind == .deletionAsked, event.outcome == nil, !centered, itemID != nil, botID != nil {
+            // Unanswered but no longer valid (renamed, gone, the group changed): said, so it does not look pending.
+            HStack(spacing: Spacing.s) {
+                line(opens: false)
+                Text("não vale mais")
+                    .font(Typography.label)
+                    .foregroundStyle(Palette.muted)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("event-line")
         } else {
             line(opens: false)
                 .accessibilityElement(children: .combine)

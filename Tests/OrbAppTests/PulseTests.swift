@@ -948,7 +948,8 @@ private final class PulseWorld {
         await waitUntil("the pulse to wait") { model.delegation.hasWaitingPulse(of: atlas) }
         world.plant("Atlas", tag: 1)
         await model.pulseTick(now: world.at(minutes: 122))
-        #expect(await world.log.count(by: "Atlas") == 2, "no second pulse while one waits")
+        #expect(model.pulseRuns.isEmpty, "no second pulse while one waits") // set as a pulse begins, before its call
+        #expect(await world.log.count(by: "Atlas") == 2)
         await gate.open()
         await world.settle()
         #expect(!model.delegation.hasWaitingPulse(of: atlas))
@@ -1360,5 +1361,41 @@ private final class PulseWorld {
         await waitUntil("the panel's message to be answered") {
             model.sessions[atlas]?.turnTask == nil && model.transcript(atlas).contains { if case .bot(let text, _) = $0.kind { text == "Olá." } else { false } }
         }
+    }
+
+    @Test func aCutTaskWaitingToResumeKeepsThePulseAway() async {
+        let world = PulseWorld(names: ["Atlas", "Revisor"], demand: false, rule: Self.nothing)
+        defer { world.cleanUp() }
+        let model = world.model, atlas = world.bot("Atlas").id
+        world.plant("Atlas", tag: 0)
+        // The app closed in the middle of the person's task: the new launch has it to resume.
+        let journal = WorkJournal(store: model.store)
+        journal.chatTaskBegan(bot: atlas, chat: atlas)
+        journal.freeze()
+        model.workJournal = WorkJournal(store: model.store)
+        #expect(model.workJournal.beginLaunch().count == 1 && model.workJournal.awaitsChatResume(bot: atlas))
+        await world.startInterval()
+        await model.pulseTick(now: world.at(minutes: 61))
+        #expect(model.pulseRuns.isEmpty && model.sessions[atlas]?.pulseInChat == nil, "the person's task goes on first, as their own turn")
+        await world.settle()
+        #expect(await world.log.count(by: "Atlas") == 0)
+        model.workJournal.chatTaskEnded(bot: atlas, chat: atlas)
+        await model.pulseTick(now: world.at(minutes: 62))
+        await world.settle()
+        #expect(await world.log.count(by: "Atlas") == 1)
+    }
+
+    @Test func aRequestOfThePulseIsNotResentWithTheBudgetSpent() {
+        let world = PulseWorld(names: ["Atlas", "Revisor"], demand: false, rule: Self.nothing)
+        defer { world.cleanUp() }
+        let model = world.model
+        var envelope = OrbEnvelope(kind: .ask, from: OrbRef(world.bot("Atlas")), to: OrbRef(world.bot("Revisor")), text: "Confira.")
+        envelope.pulseRun = UUID()
+        model.pulseState.roll(to: world.t0) // today's count
+        model.pulseState.tokensToday = model.pulseDailyTokens
+        #expect(!model.delegation.resubmit(envelope))
+        model.pulseState.tokensToday = 0
+        #expect(model.delegation.resubmit(envelope))
+        model.delegation.cancelChain(envelope.chainID, by: .user)
     }
 }

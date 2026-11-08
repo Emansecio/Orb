@@ -3097,6 +3097,24 @@ private actor Names {
         #expect(model.preferences.dictionary(forKey: AppModel.keptDeletionsKey) == nil)
     }
 
+    @Test func anAskFromAGroupsTurnMarksTheOrbUnreadAndAPendingOneIsFoundOnDisk() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let model = team.model, atlas = team.atlas.id
+        model.selection = .bot(team.revisor.id)
+        model.session(atlas).sideKind = .group // the ask comes from a group's turn: nobody is told when it ends
+        defer { model.session(atlas).sideKind = nil }
+        _ = try await OrbDeleteTool().run(deleteCall("Revisor"), context: unattendedContext(team))
+        #expect(model.live(atlas).unread == 1)
+        // Reopened, the chat not read yet: the pending line on disk is still found, not written twice.
+        model.session(atlas).write()
+        model.session(atlas).unload()
+        model.askedDeletions = [:]
+        #expect(try await OrbDeleteTool().run(deleteCall("Revisor"), context: unattendedContext(team)).hasPrefix("The user was already asked"))
+        model.ensureLoaded(atlas)
+        #expect(deletionLines(team).count == 1)
+    }
+
     @Test func takingOutAMemberNoLongerEndsTheGroupOnceAThirdCame() async throws {
         let team = Team { _ in say("?") }
         defer { team.cleanUp() }

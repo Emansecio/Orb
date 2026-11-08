@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 // A deletion an Orb asked for in a turn nobody watches (a routine's run, the pulse, another Orb's request): a card there would
 // hold the Orb for a day, so its chat gets a line with Apagar and Manter instead, and the turn goes on. Only that click
@@ -58,6 +58,12 @@ extension AppModel {
             return "The user could not be asked now: say in your reply what you would delete and why."
         }
         askedDeletions[key] = (line.chat, line.item, false)
+        // A group's turn or another Orb's request tells nobody when it ends (`finishTurn`'s unread is the asker's): the line
+        // would wait unseen in a chat the person is not looking at.
+        if let kind = sessions[botID]?.sideKind, kind == .delegation || kind == .group,
+           selection != .bot(botID) || !(NSApp?.isActive ?? false) {
+            setUnread(live(botID).unread + 1, for: botID)
+        }
         return "Asked the user in your chat (a line with Apagar and Manter); nothing was deleted. Do not ask again: go on with the rest."
     }
 
@@ -93,8 +99,10 @@ extension AppModel {
             return nil
         }
         let chat = latestChat(of: botID)
-        // The newest line about this ask decides: a later ask after a Manter is the one that counts.
-        guard let last = loadedChat(chat, of: botID)?.items.last(where: { item in
+        // The newest line about this ask decides: a later ask after a Manter is the one that counts. After a relaunch the
+        // conversation may not be read yet: its file is (an ask is rare, and a second identical line is worse).
+        let items = loadedChat(chat, of: botID)?.items ?? store.readConversation(botID, chat: chat == botID ? nil : chat).value?.items
+        guard let last = items?.last(where: { item in
             guard case .event(let event) = item.kind, event.actor?.id == botID,
                   event.kind == .deletionAsked || event.kind == .deletionAnswered else { return false }
             return DeletionAsk(event: event)?.key == ask.key

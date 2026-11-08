@@ -465,6 +465,7 @@ extension AppModel {
     /// Nothing holds the Orb or waits for it: a pulse never takes the place of a message, a routine or another Orb's request.
     private func isFreeForPulse(_ botID: UUID) -> Bool {
         guard canTakeSideWork(botID), sessions[botID]?.parkedChat == nil, !isWorking(botID), !delegation.hasWaitingPulse(of: botID),
+              !workJournal.awaitsChatResume(bot: botID), // the person's cut task goes on first, as its own turn
               delegation.queues[botID]?.isEmpty ?? true, delegation.inbox[botID]?.isEmpty ?? true else { return false }
         return !queuedRoutines.contains { id in routines.first { $0.id == id }?.botID == botID }
     }

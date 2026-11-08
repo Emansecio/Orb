@@ -182,6 +182,11 @@ final class WorkJournal {
         persist()
     }
 
+    /// A task of the Orb cut by the close waits to be resumed (`AppModel.resumeChatTask`): the pulse leaves the Orb to it.
+    func awaitsChatResume(bot: UUID) -> Bool {
+        live.contains { $0.kind == .chatTask && $0.botID == bot && $0.resumes > 0 }
+    }
+
     /// The turn ended, failed or was stopped. Without `chat`, any of the Orb's.
     func chatTaskEnded(bot: UUID, chat: UUID? = nil) {
         remove { $0.kind == .chatTask && $0.botID == bot && (chat == nil || $0.chatID == chat) }

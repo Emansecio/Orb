@@ -171,6 +171,8 @@ final class DelegationHub: DelegationService {
     func resubmit(_ original: OrbEnvelope) -> Bool {
         guard let model, !isShuttingDown, model.orbsCanTalk, model.bot(original.from.id) != nil, model.bot(original.to.id) != nil,
               requests[original.id] == nil else { return false }
+        // The pulse's, with the pulse off or the day's budget spent: nobody would pay for it, as `submit` refuses.
+        if original.pulseRun != nil, !model.pulseIsOn || model.pulseBudgetSpent { return false }
         var envelope = original
         envelope.text = Self.resumedPrefix + original.text
         envelope.sentAt = .now
@@ -267,8 +269,8 @@ final class DelegationHub: DelegationService {
         return request
     }
 
-    /// A chain of the pulse became the person's: no request of it is charged to the pulse any more (a turn serving one would
-    /// still be, through `pulseLineage`), and the journal resumes the group's run as theirs.
+    /// A chain of the pulse became the person's: no request of it is charged to the pulse any more, the turns already running
+    /// included (from the person's message on, the work is theirs), and the journal resumes the group's run as theirs.
     private func handToPerson(_ chainID: UUID) {
         for (id, request) in requests where request.envelope.chainID == chainID && request.envelope.pulseRun != nil {
             requests[id]?.envelope.pulseRun = nil
