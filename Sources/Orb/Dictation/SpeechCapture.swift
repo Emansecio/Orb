@@ -102,9 +102,17 @@ final class SpeechCapture: @unchecked Sendable {
     }
 
     private let audio = AVAudioEngine()
-    private var analyzers: [SpeechAnalyzer] = []
-    private var inputs: [AsyncStream<AnalyzerInput>.Continuation] = []
-    private var readers: [Task<Void, Never>] = []
+    /// The recognizers' pieces. `start` fills them off the main actor while `cancel`, `finish` and the audio thread's
+    /// `feed` read them, so they sit behind a lock (copies are taken out of it; nothing awaits inside).
+    private struct Parts {
+        var analyzers: [SpeechAnalyzer] = []
+        var inputs: [AsyncStream<AnalyzerInput>.Continuation] = []
+        var readers: [Task<Void, Never>] = []
+    }
+    private let parts = OSAllocatedUnfairLock(initialState: Parts())
+    private var analyzers: [SpeechAnalyzer] { parts.withLock { $0.analyzers } }
+    private var inputs: [AsyncStream<AnalyzerInput>.Continuation] { parts.withLock { $0.inputs } }
+    private var readers: [Task<Void, Never>] { parts.withLock { $0.readers } }
     private var isTapped = false
     private var configurationObserver: NSObjectProtocol?
     private let interruption = OSAllocatedUnfairLock(initialState: false)
@@ -145,18 +153,20 @@ final class SpeechCapture: @unchecked Sendable {
                 try? await analyzer.setContext(context)
             }
             let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
-            analyzers.append(analyzer)
+            parts.withLock { $0.analyzers.append(analyzer) }
             continuations.append(continuation)
-            readers.append(Task {
+            let reader = Task {
                 do {
                     for try await result in transcriber.results {
                         await heard(String(result.text.characters), result.isFinal, isExact, result.range.end.seconds)
                     }
                 } catch {}
-            })
+            }
+            parts.withLock { $0.readers.append(reader) }
             try await analyzer.start(inputSequence: stream)
         }
-        inputs = continuations
+        let opened = continuations
+        parts.withLock { $0.inputs = opened }
         recognizerFormat = format
         try Task.checkCancellation()
         guard listensToMicrophone else { return }

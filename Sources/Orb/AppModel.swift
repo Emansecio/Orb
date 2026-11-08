@@ -943,6 +943,9 @@ final class AppModel {
     func setDraft(_ text: String, for botID: UUID) {
         if text.isEmpty { liveBot(botID)?.stopComposing() }
         guard drafts[botID, default: ""] != text else { return }
+        // A dictation into this field keeps a fixed base: a change from outside (a message given back, a skill) ends it,
+        // or its next words would be written over the new text. Its own writes are told apart by `written`.
+        dictation.draftEdited(text, for: botID)
         drafts[botID] = text
     }
 

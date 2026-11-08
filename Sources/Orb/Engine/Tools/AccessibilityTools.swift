@@ -1356,7 +1356,12 @@ struct UIActTool: AgentTool {
                 if step.keys.isEmpty { throw ToolError(KeyStroke.ParseError.empty.errorDescription ?? "Atalho vazio.") }
             case .click:
                 try needSource()
-                step.button = MouseButton(rawValue: arguments.nonEmptyString("button")?.lowercased() ?? "left") ?? .left
+                let buttonName = arguments.nonEmptyString("button")?.lowercased() ?? "left"
+                // An unknown button is the model's to fix: a right click turned into a left one can act on the wrong thing.
+                guard let button = MouseButton(rawValue: buttonName) else {
+                    throw ToolError("Unknown button \"\(buttonName)\"; use left, right or middle.")
+                }
+                step.button = button
                 step.count = arguments.integer("count", default: 1, in: 1...3)
                 step.hold = .milliseconds(arguments.integer("hold", default: 0, in: 0...3000))
                 step.modifiers = try Self.modifiers(in: arguments)

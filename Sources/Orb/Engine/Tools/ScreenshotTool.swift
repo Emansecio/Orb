@@ -138,7 +138,9 @@ struct ScreenshotTool: AgentTool {
     private func captureDisplay(_ arguments: JSONValue, ocrMode: String?) async throws -> Capture {
         var captureArguments = ["-x", "-t", "png"]
         let display = arguments.integer("display", default: 1, in: 1...16)
-        let displayCount = await MainActor.run { max(NSScreen.screens.count, 1) }
+        let maxSide = arguments.integer("max_side", default: 1280, in: 640...1568)
+        let screens = await MainActor.run { NSScreen.screens.map(\.frame.width) }
+        let displayCount = max(screens.count, 1)
         guard display <= displayCount else {
             throw ToolError("Este Mac tem \(displayCount) \(displayCount == 1 ? "tela" : "telas"); a tela \(display) não existe.")
         }
@@ -164,12 +166,21 @@ struct ScreenshotTool: AgentTool {
                 text = try await Self.recognizeDisplay(file)
             } catch { ocrFailed = true }
         }
+        // The OCR above read the full-resolution PNG; the model gets the JPEG that fits max_side, as for a window.
+        var delivered = file
         var report = "Captura salva em \(file.path) (\(size.width)×\(size.height) px)."
+        if let small = try? await runDetached({ try ScreenshotImage.shrunkJPEG(from: file, maxSide: maxSide, into: folder) }) {
+            try? FileManager.default.removeItem(at: file)
+            delivered = small.file
+            let points = display <= screens.count ? Double(screens[display - 1]) : 0
+            let scale = points > 0 ? ", \(Self.format(Double(small.width) / points)) px/pt" : ""
+            report = "Captura salva em \(small.file.path) (\(small.width)×\(small.height) px\(scale), \((small.bytes + 500) / 1000) KB)."
+        }
         if !hadAccess {
             report += "\nWarning: Orb does not have Screen Recording yet, so the capture may show only the wallpaper, without "
                 + "windows. " + ScreenshotImage.permissionAdvice
         }
-        return Capture(header: report, ocr: text, file: file, ocrSkipped: !wantsText, ocrFailed: ocrFailed)
+        return Capture(header: report, ocr: text, file: delivered, ocrSkipped: !wantsText, ocrFailed: ocrFailed)
     }
 
     // MARK: A window
@@ -573,6 +584,18 @@ enum ScreenshotImage {
     static let blankAdvice = "The capture came out blank (a single flat colour). That usually means Orb lacks the Screen Recording "
         + "permission. " + MacPermissionProblem.screenRecording.instruction
         + " (If the screen or window really is a single colour, it is not a permission problem.)"
+
+    /// The picture at `url` as a JPEG whose longer side is at most `maxSide`, saved in `folder`.
+    static func shrunkJPEG(from url: URL, maxSide: Int, into folder: URL) throws -> (file: URL, width: Int, height: Int, bytes: Int) {
+        let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
+                                        kCGImageSourceThumbnailMaxPixelSize: maxSide]
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary),
+              let result = ScreenshotJPEG.encode(fitting: image) else { throw ToolError("Não consegui preparar a imagem da tela.") }
+        let saved = try ScreenshotTool.newFile(in: folder, extension: "jpg")
+        try result.data.write(to: saved, options: .atomic)
+        return (saved, result.image.width, result.image.height, result.data.count)
+    }
 
     static func pixelSize(of url: URL) -> (width: Int, height: Int)? {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),

@@ -307,9 +307,16 @@ final class EventKitBackend: CalendarBackend, @unchecked Sendable {
     }
 
     /// The calendar named by title or id among `calendars`.
-    private func calendar(_ name: String, among calendars: [EKCalendar]) throws -> EKCalendar {
+    func calendar(_ name: String, among calendars: [EKCalendar]) throws -> EKCalendar {
         let wanted = Self.fold(name)
-        if let found = calendars.first(where: { $0.calendarIdentifier == name }) ?? calendars.first(where: { Self.fold($0.title) == wanted }) { return found }
+        if let found = calendars.first(where: { $0.calendarIdentifier == name }) { return found }
+        let titled = calendars.filter { Self.fold($0.title) == wanted }
+        // The same title in two accounts: guessing could write the event into the wrong account.
+        if titled.count > 1 {
+            let options = titled.map { "\($0.title) (\($0.source?.title ?? "?"), id \($0.calendarIdentifier))" }.joined(separator: "; ")
+            throw ToolError("Há mais de uma agenda chamada \"\(name)\": \(options). Use o id da agenda.")
+        }
+        if let found = titled.first { return found }
         throw ToolError("Não achei a agenda \"\(name)\". As que existem: \(calendars.map(\.title).joined(separator: ", ")).")
     }
 

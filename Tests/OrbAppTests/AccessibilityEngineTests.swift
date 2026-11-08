@@ -1945,6 +1945,8 @@ struct AccessibilityMouseTests {
         #expect(try parse("click", id.merging(["modifiers": string("Command, alt")]) { $1 }).modifiers == [.command, .option])
         #expect(try parse("click", id.merging(["modifiers": .array([string("ctrl"), string("opt")])]) { $1 }).modifiers == [.control, .option])
         #expect(try parse("click", id).modifiers.isEmpty)
+        #expect(try parse("click", id.merging(["button": string("Right")]) { $1 }).button == .right)
+        #expect(throws: ToolError.self) { try parse("click", id.merging(["button": string("rigth")]) { $1 }) }
         #expect(try parse("click", id.merging(["modifiers": string(" ")]) { $1 }).modifiers.isEmpty)
         let unknown = refusal { _ = try parse("click", id.merging(["modifiers": string("cmd+hyper")]) { $1 }) }
         #expect(unknown.contains("Modificador desconhecido") && unknown.contains("hyper"))

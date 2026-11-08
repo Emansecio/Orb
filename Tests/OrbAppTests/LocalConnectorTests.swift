@@ -283,6 +283,16 @@ struct LocalConnectorManagerTests {
 // MARK: - Google Agenda and Lembretes
 
 struct CalendarConnectorTests {
+    @Test func aCalendarTitleInTwoAccountsIsNotGuessed() throws {
+        let store = EKEventStore()
+        let first = EKCalendar(for: .event, eventStore: store), second = EKCalendar(for: .event, eventStore: store)
+        first.title = "Trabalho"; second.title = "trabalho"
+        let backend = EventKitBackend()
+        let error = try #require(#expect(throws: ToolError.self) { _ = try backend.calendar("Trabalho", among: [first, second]) })
+        #expect(error.message.contains("Há mais de uma agenda"), "\(error.message)")
+        #expect(try backend.calendar("Trabalho", among: [first]) === first)
+    }
+
     @Test func listsTheCalendarsWithTheirAccounts() async throws {
         let connector = CalendarConnector(backend: FakeCalendar())
         let text = try await call(connector, "list_calendars")
@@ -462,6 +472,16 @@ struct GmailConnectorTests {
 
     private func row(_ fields: String...) -> String { fields.joined(separator: "\u{1F}") + "\u{1E}" }
 
+    @Test func twoAccountsWithTheSameNameAreAskedAboutNotGuessed() async throws {
+        let mail = FakeMail()
+        mail.reply(containing: "repeat with a in accounts", with: row("g1", "Google", "imap.gmail.com", "a@gmail.com") + row("g2", "Google", "imap.gmail.com", "b@gmail.com"))
+        let gmail = GmailConnector(backend: mail)
+        let error = try #require(await #expect(throws: ToolError.self) { _ = try await gmail.googleAccounts(named: "Google") })
+        #expect(error.message.contains("a@gmail.com") && error.message.contains("b@gmail.com"), "\(error.message)")
+        #expect(try await gmail.googleAccounts(named: "b@gmail.com").map(\.id) == ["g2"])
+        #expect(try await gmail.googleAccounts(named: "Google", all: true).count == 2)
+    }
+
     @Test func onlyGoogleAccountsCount() async throws {
         let mail = FakeMail()
         let gmail = connector(mail)
@@ -557,7 +577,7 @@ struct GmailConnectorTests {
         let gmail = connector(mail)
         mail.reply(containing: "make new outgoing message", with: "ok")
         #expect(try await call(gmail, "send_message", ["to": .string("ana@x.com"), "subject": .string("Oi"), "body": .string("Olá")])
-                == "E-mail enviado de maria@gmail.com para ana@x.com.")
+                == "E-mail entregue ao Mail para envio, de maria@gmail.com para ana@x.com. Sem rede, ele fica na Caixa de Saída até a conexão voltar.")
         #expect(mail.ran.last?.contains("send msg") == true)
         // The name is what makes it ask in every mode (see PermissionPolicy.connectorDanger).
         #expect(PermissionPolicy.connectorDanger(toolName: "send_message", annotations: .none) != nil)

@@ -271,6 +271,10 @@ struct GmailConnector: LocalConnector {
             let wanted = name.lowercased()
             let found = accounts.filter { $0.address.lowercased() == wanted || $0.name.lowercased() == wanted || $0.id == name }
             guard !found.isEmpty else { throw ToolError("Não achei a conta \"\(name)\". As contas Google no Mail: \(accounts.map(\.label).joined(separator: ", ")).") }
+            // Two accounts with the same name: taking the first could send from the wrong address.
+            if found.count > 1 && !all {
+                throw ToolError("Há mais de uma conta \"\(name)\" no Mail (\(found.map(\.label).joined(separator: ", "))). Diga o endereço ou o id em \"account\".")
+            }
             return found
         }
         if all || accounts.count == 1 { return accounts }
@@ -342,7 +346,8 @@ struct GmailConnector: LocalConnector {
             // The message may already have left: the model must not send it again without looking.
             throw ToolError("O Mail não confirmou o envio a tempo, mas o e-mail pode ter sido enviado. Confira a caixa Enviados de \(account.label) antes de tentar de novo.")
         }
-        return send ? "E-mail enviado de \(account.label) para \(to.joined(separator: ", "))."
+        // `send` only hands the message to Mail; offline it waits in the Outbox, so "sent" would be a claim Mail never made.
+        return send ? "E-mail entregue ao Mail para envio, de \(account.label) para \(to.joined(separator: ", ")). Sem rede, ele fica na Caixa de Saída até a conexão voltar."
                     : "Rascunho salvo em \(account.label) para \(to.joined(separator: ", ")). Nada foi enviado."
     }
 }

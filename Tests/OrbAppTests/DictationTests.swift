@@ -81,6 +81,23 @@ struct DictationTextTests {
         #expect(!dictation.isActive(for: botID) && dictation.level == 0)
     }
 
+    /// A draft changed from outside (a message given back, a skill inserted) ends the dictation: its base is fixed, so it
+    /// would write over the new text.
+    @Test func aDraftSetFromOutsideEndsTheDictationButItsOwnWritesDoNot() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "OrbDictSet-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        var state = AppState.initial
+        state.bots.append(Bot(name: "Luna", role: "", orb: OrbConfig()))
+        let store = Store(directory: root)
+        store.save(state)
+        store.flush()
+        let model = AppModel(store: Store(directory: root), runsBackgroundWork: false)
+        let botID = state.bots[0].id
+        model.dictation.pose(.listening, level: 0.5, for: botID)
+        model.setDraft("devolvida", for: botID)
+        #expect(!model.dictation.isActive(for: botID))
+    }
+
     /// The halo rises with the voice at once and falls back slowly: a pause between syllables does not drop it to nothing.
     @Test func theHaloRisesFastAndFallsSlowly() {
         let risen = Dictation.envelope(0, toward: 1)

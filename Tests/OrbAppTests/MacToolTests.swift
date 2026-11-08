@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Testing
+import UniformTypeIdentifiers
 @testable import Orb
 
 /// Parsing, formatting, error translation and wiring of the Mac tools. Anything that needs a system permission
@@ -533,6 +534,19 @@ struct MacToolTests {
                                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
         draw(context)
         return try #require(context.makeImage())
+    }
+
+    @Test func aDisplayCaptureIsShrunkToAJPEGThatFitsMaxSide() throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "OrbShrink-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let big = try image { $0.setFillColor(CGColor(red: 0.2, green: 0.4, blue: 0.9, alpha: 1)); $0.fill(CGRect(x: 0, y: 0, width: 64, height: 64)) }
+        let source = folder.appending(path: "in.png")
+        let destination = try #require(CGImageDestinationCreateWithURL(source as CFURL, UTType.png.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, big, nil)
+        #expect(CGImageDestinationFinalize(destination))
+        let result = try ScreenshotImage.shrunkJPEG(from: source, maxSide: 32, into: folder)
+        #expect(max(result.width, result.height) <= 32 && result.file.pathExtension == "jpg" && result.bytes > 0)
     }
 
     @Test func detectsBlankCaptures() throws {
