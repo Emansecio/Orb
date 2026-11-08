@@ -5,7 +5,7 @@ import Foundation
 struct OrbEvent: Codable, Equatable, Sendable {
     enum Kind: String, Codable, Sendable {
         case orbCreated, joinedGroup, leftGroup, groupCreated, routineCreated, renamed
-        case chainStopped, groupRunDone, groupStopped, delegationReceived, routineRun, tellFailed, groupWorked, planDone, unknown
+        case orchestratorChanged, chainStopped, groupRunDone, groupStopped, delegationReceived, routineRun, tellFailed, groupWorked, planDone, unknown
 
         /// A kind from a newer version reads as `unknown`.
         init(from decoder: Decoder) throws { self = try decoder.rawValue(Self.self, fallback: .unknown) }
@@ -49,6 +49,8 @@ struct OrbEvent: Codable, Equatable, Sendable {
             return "\(subject?.name ?? "Um Orb") entrou no grupo \(detail)"
         case .leftGroup:
             return "\(subject?.name ?? "Um Orb") saiu do grupo \(detail)"
+        case .orchestratorChanged:
+            return "\(subject?.name ?? "Um Orb") agora orquestra o grupo \(detail)"
         case .groupCreated:
             // `detail` is "Nome · n": the count is what follows the last separator.
             let parts = detail.components(separatedBy: " · ")

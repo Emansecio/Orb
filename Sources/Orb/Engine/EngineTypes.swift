@@ -661,6 +661,9 @@ struct ToolContext: Sendable {
     // MARK: MultiOrb (WP0)
     /// What `orbs` asks of the app on this Orb's behalf; nil where Orbs cannot talk (the tool then says so).
     var orbs: BridgeHandler?
+    /// Asks the person to confirm a change to their groups (`group_edit`): a card that always asks, true on "Permitir". The engine sets it
+    /// for the tool call; nil where nobody can answer.
+    var confirm: ConfirmHandler?
     /// Opens the creation card for `orb_propose` and waits for the answer; nil where nobody can answer (a routine, a request, a group turn).
     var proposeOrb: ProposalHandler?
     /// What `orb_draft` asks of the creation assistant; nil outside it.

@@ -5,6 +5,7 @@ import Foundation
 typealias BridgeHandler = @Sendable (JSONValue) async throws -> String
 
 /// Opens the creation card for a proposal and waits for the person's decision. The engine defines it, as it does `handoff`.
+typealias ConfirmHandler = @Sendable (_ title: String, _ detail: String) async -> Bool
 typealias ProposalHandler = @Sendable (OrbProposal) async -> ProposalOutcome
 
 /// A request between Orbs as the app keeps it while it is in flight (memory only; the `WorkJournal` keeps the envelope of one outside any group, to send it again after the app closed).
@@ -48,6 +49,27 @@ enum DelegationRefusal: Error, Equatable, Sendable {
     case groupDoor(String, GroupDoor)
     /// `group_create` was not let through (`DelegationHub.createGroup`).
     case groupSetup(GroupSetup)
+    /// `group_edit` was not let through (`DelegationHub.editGroup`).
+    case groupEdit(GroupEdit)
+
+    /// Why a group was not changed.
+    enum GroupEdit: Sendable, Equatable {
+        /// "Orbs organizam os grupos" is off.
+        case switchedOff
+        /// No group has that name; the names that exist.
+        case noGroup(String, [String])
+        case unknownEdit(String)
+        /// The edit needs `orb`, `name` or `objective` and it came empty.
+        case missing(String)
+        case alreadyMember(orb: String, group: String)
+        case notMember(orb: String, group: String)
+        case full(String)
+        case nameTaken(String)
+        /// Deleting, or taking out the member that dissolves the group, runs only after the user confirms.
+        case needsConfirmation
+        case objectiveRefused
+        case unavailable
+    }
 
     /// Why a group was not created.
     enum GroupSetup: Sendable, Equatable {
@@ -143,6 +165,31 @@ enum DelegationRefusal: Error, Equatable, Sendable {
                 "“\(name)” não está em members: o orquestrador é um dos membros."
             case .unavailable:
                 "Não consegui criar o grupo agora: diga isso ao usuário; ele cria em Novo grupo (⌥⌘G)."
+            }
+        case .groupEdit(let why):
+            switch why {
+            case .switchedOff:
+                "O usuário desligou “Orbs organizam os grupos” nos Ajustes: ele muda o grupo na tela dele. Diga o que você mudaria."
+            case .noGroup(let name, let known):
+                "Não há grupo chamado “\(name)”." + (known.isEmpty ? " O usuário não tem grupos." : " Grupos: " + known.joined(separator: ", ") + ".")
+            case .unknownEdit(let edit):
+                "“\(edit)” não é uma mudança: use add, remove, orchestrator, rename, objective ou delete."
+            case .missing(let field):
+                "Preencha \(field) para essa mudança."
+            case .alreadyMember(let orb, let group):
+                "\(orb) já é membro do grupo “\(group)”."
+            case .notMember(let orb, let group):
+                "\(orb) não é membro do grupo “\(group)”."
+            case .full(let group):
+                "O grupo “\(group)” já tem \(OrbGroup.memberLimits.upperBound) membros, o máximo. Tire alguém antes de pôr outro Orb."
+            case .nameTaken(let name):
+                "Já existe um Orb ou um grupo chamado “\(name)”: escolha outro nome."
+            case .needsConfirmation:
+                "Essa mudança só vale depois que o usuário confirma, e ele não confirmou. Nada mudou."
+            case .objectiveRefused:
+                "Não consegui gravar o objetivo (grande demais ou a pasta do grupo não aceita escrita): encurte o texto ou diga isso ao usuário."
+            case .unavailable:
+                "Não consegui mudar o grupo agora: diga isso ao usuário; ele muda na tela do grupo."
             }
         case .ownGroup(let name):
             "Você já está trabalhando no grupo “\(name)”: peça a um membro pelo nome (os membros estão no início da mensagem do "

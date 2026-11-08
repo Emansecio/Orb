@@ -348,6 +348,7 @@ struct OrbsSettings: View {
     @AppStorage(SessionNote.settingKey) private var summarizeSessions = false
     @State private var orbsCanTalk = true
     @State private var orbsCanStartGroups = true
+    @State private var orbsCanManageGroups = true
     @State private var isConfirmingOrbsOff = false
     @State private var openTalks: [DelegationHub.OpenTalk] = []
     @State private var learnedWindows: [LearnedWindowRow] = []
@@ -389,6 +390,12 @@ struct OrbsSettings: View {
                 }
                 .help(Tip.orbsCanStartGroups)
                 .onAppear { orbsCanStartGroups = model.orbsCanStartGroups }
+                Toggle(isOn: Binding(get: { orbsCanManageGroups }, set: { orbsCanManageGroups = $0; model.orbsCanManageGroups = $0 })) {
+                    toggleLabel("Orbs organizam os grupos",
+                                "Os Orbs adicionam e tiram membros, trocam o orquestrador e renomeiam grupos sozinhos. Apagar sempre pede sua confirmação.")
+                }
+                .help(Tip.orbsCanManageGroups)
+                .onAppear { orbsCanManageGroups = model.orbsCanManageGroups }
                 Toggle(isOn: $proposeSkills) {
                     toggleLabel("Propor skills com o que os Orbs aprendem",
                                 "Depois de tarefas longas, o Orb pode propor uma skill. Nada é salvo sem você aprovar.")

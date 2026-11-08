@@ -1071,6 +1071,16 @@ actor AgentEngine {
                     await propose(proposal, creation: support, resuming: summary.title, request: request, out: out)
                 }
             }
+            if tool.spec.name == GroupEditTool.name {
+                context.confirm = { [self] title, detail in
+                    let answered = await gate.confirm(toolName: GroupEditTool.name, title: title, detail: detail, botID: request.bot.id) { card in
+                        out.yield(.approval(card))
+                        out.yield(.status("Esperando sua resposta"))
+                    }
+                    out.yield(.status(summary.title))
+                    return answered
+                }
+            }
             // MARK: end MultiOrb (WP3)
             let result = try await tool.runWithImages(arguments, context: context)
             let files = (target.map { [ProducedFile(path: $0.url.path, created: !$0.existed)] } ?? [])

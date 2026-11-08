@@ -39,7 +39,8 @@ extension AppModel {
         let hasTeam = inGroup || (orbsCanTalk && bots.count > 1) || (ownChat && canStartGroups(botID))
         return MultiOrbOffering(orbs: hasTeam, propose: ownChat, groupMemory: false,
                                 groupRecall: ownChat && !groups(containing: botID).isEmpty,
-                                groupCreate: ownChat && orbsCanStartGroups && bots.count > 1, askUser: ownChat, access: ownChat,
+                                groupCreate: ownChat && orbsCanStartGroups && bots.count > 1,
+                                groupEdit: orbsCanManageGroups && (!groups.isEmpty || bots.count > 1), askUser: ownChat, access: ownChat,
                                 sideRun: !ownChat)
     }
 
@@ -61,7 +62,7 @@ extension AppModel {
         let teammates = OrbsPrompt.section(for: bot, roster: team, isGroup: group != nil)
         guard group == nil else { return teammates }
         let groups = OrbsPrompt.groups(groupLines(for: bot.id), canStart: isOwnChat(bot.id) && orbsCanStartGroups,
-                                       canRecall: isOwnChat(bot.id))
+                                       canRecall: isOwnChat(bot.id), canEdit: orbsCanManageGroups)
         return [teammates, groups].filter { !$0.isEmpty }.joined(separator: "\n\n")
     }
 

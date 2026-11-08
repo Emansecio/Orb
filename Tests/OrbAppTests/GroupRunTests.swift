@@ -269,6 +269,7 @@ struct GroupPolicyAndExtrasTests {
         }
         // And the Orb that cannot talk is not even offered the tool; the orchestrator is.
         #expect(world.model.groupTurnExtras(for: world.pesquisador.id)?.offering.orbs == false)
+        #expect(world.model.groupTurnExtras(for: world.pesquisador.id)?.offering.groupEdit == false) // only the orchestrator reorganizes
         world.fake.finish(toMember, reply: "feito")
         await world.fake.wake(first, reply: "ok")
         #expect(world.model.groupTurnExtras(for: world.atlas.id) == nil) // the turn ended
@@ -278,7 +279,7 @@ struct GroupPolicyAndExtrasTests {
         let world = GroupWorld()
         let first = await startOrchestratorTurn(world)
         let extras = try #require(world.model.groupTurnExtras(for: world.atlas.id))
-        #expect(extras.groupID == world.groupID && extras.offering == MultiOrbOffering(orbs: true, propose: false, groupMemory: true))
+        #expect(extras.groupID == world.groupID && extras.offering == MultiOrbOffering(orbs: true, propose: false, groupMemory: true, groupEdit: true))
         #expect(extras.grants == [PermissionRule(family: .delegation), PermissionRule(family: .groupMemory)])
         let names = ToolBox.offered(for: [], accessibilityGranted: true, multi: extras.offering).map(\.spec.name)
         #expect(names.contains("orbs") && names.contains("group_remember") && names.contains("group_recall") && !names.contains("orb_propose"))

@@ -275,7 +275,7 @@ struct OrbEventSentenceTests {
 
     @Test func missingPartsNeverCrashAndNeverLeaveAHole() {
         for kind in [OrbEvent.Kind.orbCreated, .joinedGroup, .leftGroup, .groupCreated, .routineCreated, .renamed, .chainStopped,
-                     .groupRunDone, .groupStopped, .delegationReceived] {
+                     .groupRunDone, .groupStopped, .delegationReceived, .orchestratorChanged] {
             #expect(!sentence(kind).isEmpty, "\(kind)")
         }
         #expect(sentence(.unknown) == "")

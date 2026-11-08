@@ -1018,6 +1018,11 @@ final class DelegationHub: DelegationService {
             return teammatesText(for: botID, groupID: groupID)
         case "create_group":
             do { return try createGroup(arguments, by: botID) } catch let refusal as DelegationRefusal { throw refusal.toolError }
+        case "edit_group_plan":
+            // For the tool: what the user must confirm first, "" when the edit needs nobody.
+            do { return try planGroupEdit(arguments, by: botID).confirmation ?? "" } catch let refusal as DelegationRefusal { throw refusal.toolError }
+        case "edit_group":
+            do { return try await editGroup(arguments, by: botID) } catch let refusal as DelegationRefusal { throw refusal.toolError }
         case "ask", "tell":
             let kind: OrbEnvelope.Kind = arguments["action"]?.string?.lowercased() == "tell" ? .tell : .ask
             let name = arguments["to"]?.string ?? "", text = arguments["message"]?.string ?? ""
@@ -1297,6 +1302,102 @@ final class DelegationHub: DelegationService {
             : "Você não é membro: o usuário manda os pedidos na tela do grupo."
         return "Grupo \(group.name) criado: \(lead.name) orquestra; os outros membros são \(Self.list(others)). O usuário vê o grupo "
             + "na lateral. " + (project.isEmpty ? "" : "Pasta do projeto: \(project); os membros (menos o orquestrador) trabalham cada um no seu ramo. ") + next
+    }
+
+    /// One checked `group_edit`: the group, the Orb it is about and what the user is asked first (nil when nobody is).
+    private struct GroupEditPlan {
+        enum Edit: String { case add, remove, orchestrator, rename, objective, delete }
+        var edit: Edit
+        var group: OrbGroup
+        var orb: OrbRef?
+        var text = ""
+        var confirmation: String?
+    }
+
+    /// Checks a `group_edit` against the groups as they are now, changing nothing. Deleting a group, or taking out a member of a group
+    /// of two (which dissolves it), carries the text of the user's card.
+    private func planGroupEdit(_ arguments: JSONValue, by botID: UUID) throws -> GroupEditPlan {
+        guard let model, !isShuttingDown else { throw DelegationRefusal.groupEdit(.unavailable) }
+        guard model.orbsCanManageGroups else { throw DelegationRefusal.groupEdit(.switchedOff) }
+        let typedGroup = (arguments["group"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let wanted = DelegationRules.fold(typedGroup)
+        guard !wanted.isEmpty, let group = model.groups.first(where: { DelegationRules.fold($0.name) == wanted }) else {
+            throw DelegationRefusal.groupEdit(.noGroup(typedGroup, model.groups.prefix(OrbsPrompt.groupLimit).map(\.name)))
+        }
+        let typedEdit = (arguments["edit"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard let edit = GroupEditPlan.Edit(rawValue: typedEdit) else { throw DelegationRefusal.groupEdit(.unknownEdit(typedEdit)) }
+        var plan = GroupEditPlan(edit: edit, group: group)
+        let orbs = model.bots.map(OrbRef.init)
+        switch edit {
+        case .add, .remove, .orchestrator:
+            let typed = (arguments["orb"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !typed.isEmpty else { throw DelegationRefusal.groupEdit(.missing("orb")) }
+            guard let orb = DelegationRules.resolve(typed, among: orbs) else { throw DelegationRefusal.unknownOrb(typed) }
+            plan.orb = orb
+            let isMember = group.memberIDs.contains(orb.id)
+            switch edit {
+            case .add:
+                guard !isMember else { throw DelegationRefusal.groupEdit(.alreadyMember(orb: orb.name, group: group.name)) }
+                guard group.memberIDs.count < OrbGroup.memberLimits.upperBound else { throw DelegationRefusal.groupEdit(.full(group.name)) }
+            case .remove:
+                guard isMember else { throw DelegationRefusal.groupEdit(.notMember(orb: orb.name, group: group.name)) }
+                if group.memberIDs.count <= OrbGroup.memberLimits.lowerBound {
+                    plan.confirmation = "\(model.bot(botID)?.name ?? "Um Orb") quer tirar \(orb.name) do grupo “\(group.name)”. "
+                        + "Com isso o grupo acaba (precisa de \(OrbGroup.memberLimits.lowerBound) Orbs, no mínimo); os Orbs ficam."
+                }
+            default:
+                guard isMember else { throw DelegationRefusal.groupEdit(.notMember(orb: orb.name, group: group.name)) }
+            }
+        case .rename:
+            let name = (arguments["name"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { throw DelegationRefusal.groupEdit(.missing("name")) }
+            // The same rule as `group_create`: a name an Orb or another group has would make `orbs ask` ambiguous.
+            guard DelegationRules.resolve(name, among: orbs) == nil,
+                  !model.groups.contains(where: { $0.id != group.id && DelegationRules.fold($0.name) == DelegationRules.fold(name) }) else {
+                throw DelegationRefusal.groupEdit(.nameTaken(name))
+            }
+            plan.text = name
+        case .objective:
+            let text = (arguments["objective"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { throw DelegationRefusal.groupEdit(.missing("objective")) }
+            plan.text = text
+        case .delete:
+            plan.confirmation = "\(model.bot(botID)?.name ?? "Um Orb") quer apagar o grupo “\(group.name)”: o fio, o quadro e as conversas dos "
+                + "membros nele vão embora. Os Orbs ficam."
+        }
+        return plan
+    }
+
+    /// `group_edit`: changes one of the user's groups. The refusals say what to do instead; nothing changes when one is thrown.
+    /// `confirmed` comes from the tool after the user's card; an edit that needs it is refused without.
+    private func editGroup(_ arguments: JSONValue, by botID: UUID) async throws -> String {
+        guard let model else { throw DelegationRefusal.groupEdit(.unavailable) }
+        let plan = try planGroupEdit(arguments, by: botID)
+        if plan.confirmation != nil, arguments["confirmed"]?.bool != true { throw DelegationRefusal.groupEdit(.needsConfirmation) }
+        let group = plan.group
+        switch plan.edit {
+        case .add:
+            guard let orb = plan.orb, model.addMember(orb.id, to: group.id) else { throw DelegationRefusal.groupEdit(.unavailable) }
+            return "\(orb.name) entrou no grupo \(group.name)."
+        case .remove:
+            guard let orb = plan.orb, model.removeMember(orb.id, from: group.id) else { throw DelegationRefusal.groupEdit(.unavailable) }
+            guard let left = model.group(group.id) else { return "\(orb.name) saiu e o grupo \(group.name) acabou (precisa de 2 Orbs, no mínimo)." }
+            let lead = left.orchestratorID != group.orchestratorID ? " \(model.bot(left.orchestratorID)?.name ?? "Outro Orb") passou a orquestrar." : ""
+            return "\(orb.name) saiu do grupo \(group.name)." + lead
+        case .orchestrator:
+            guard let orb = plan.orb, model.setOrchestrator(orb.id, of: group.id) else { throw DelegationRefusal.groupEdit(.unavailable) }
+            return "\(orb.name) agora orquestra o grupo \(group.name)."
+        case .rename:
+            model.renameGroup(group.id, to: plan.text)
+            guard let renamed = model.group(group.id) else { throw DelegationRefusal.groupEdit(.unavailable) }
+            return "O grupo \(group.name) agora se chama \(renamed.name)."
+        case .objective:
+            guard await model.setGroupObjective(plan.text, of: group.id) else { throw DelegationRefusal.groupEdit(.objectiveRefused) }
+            return "Objetivo do grupo \(group.name) gravado."
+        case .delete:
+            model.deleteGroup(group.id)
+            return "Grupo \(group.name) apagado; os Orbs continuam."
+        }
     }
 
     /// Who a request went to, as the asker reads it: the Orb, or the group for a request sent to one from a chat.

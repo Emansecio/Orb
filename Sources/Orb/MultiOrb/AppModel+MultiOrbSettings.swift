@@ -24,4 +24,14 @@ extension AppModel {
         get { preferences.object(forKey: Self.orbsCanStartGroupsKey) as? Bool ?? true }
         set { preferences.set(newValue, forKey: Self.orbsCanStartGroupsKey) }
     }
+
+    /// The preference behind Ajustes → Orbs → "Orbs organizam os grupos".
+    static let orbsCanManageGroupsKey = "orbsCanManageGroups"
+
+    /// Whether an Orb may change the user's groups on its own with `group_edit` (members, orchestrator, name, objective). On unless
+    /// switched off. Deleting a group, or taking out the member that would dissolve it, always asks the user, whatever this says.
+    var orbsCanManageGroups: Bool {
+        get { preferences.object(forKey: Self.orbsCanManageGroupsKey) as? Bool ?? true }
+        set { preferences.set(newValue, forKey: Self.orbsCanManageGroupsKey) }
+    }
 }

@@ -175,7 +175,10 @@ extension AppModel {
     @discardableResult
     func setOrchestrator(_ botID: UUID, of groupID: UUID) -> Bool {
         guard let index = groups.firstIndex(where: { $0.id == groupID }), groups[index].memberIDs.contains(botID) else { return false }
-        if groups[index].orchestratorID != botID { groups[index].orchestratorID = botID }
+        if groups[index].orchestratorID != botID {
+            groups[index].orchestratorID = botID
+            groupSession(groupID)?.append(.event(OrbEvent(kind: .orchestratorChanged, subject: orbRef(botID), detail: groups[index].name, groupID: groupID)))
+        }
         return true
     }
 
@@ -308,7 +311,8 @@ extension AppModel {
         let isOrchestrator = botID == group.orchestratorID
         let role: GroupPrompt.Role = isOrchestrator ? .orchestrator : .member
         // A member may ask the others only when the group lets members talk; the orchestrator always may.
-        let offering = MultiOrbOffering(orbs: isOrchestrator || group.policy.membersMayTalk, propose: false, groupMemory: true)
+        let offering = MultiOrbOffering(orbs: isOrchestrator || group.policy.membersMayTalk, propose: false, groupMemory: true,
+                                    groupEdit: isOrchestrator && orbsCanManageGroups)
         return GroupTurnExtras(
             groupID: group.id, runID: run.id, requestID: turn.requestID,
             groupName: group.name, role: role,

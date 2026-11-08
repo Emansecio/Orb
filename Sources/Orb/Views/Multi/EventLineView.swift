@@ -108,7 +108,7 @@ struct EventLineView: View {
     static func symbol(for kind: OrbEvent.Kind) -> String {
         switch kind {
         case .orbCreated: "sparkles"
-        case .joinedGroup, .leftGroup, .groupCreated, .groupWorked: "person.2"
+        case .joinedGroup, .leftGroup, .groupCreated, .groupWorked, .orchestratorChanged: "person.2"
         case .routineCreated, .routineRun: "clock.arrow.circlepath"
         case .renamed: "pencil"
         case .chainStopped, .groupStopped: "stop.circle"

@@ -13,6 +13,9 @@ struct MultiOrbOffering: Sendable, Equatable {
     var groupRecall = false
     /// `group_create`: in the Orb's own chat, with "Orbs podem acionar grupos" on.
     var groupCreate = false
+    /// `group_edit`: with "Orbs organizam os grupos" on, in every kind of turn, when there is a group or a second Orb to put in one;
+    /// in a group's turn, for its orchestrator.
+    var groupEdit = false
     /// `ask_user`: only in an Orb's own chat, where the person is to answer (a routine or a request reports what it needs).
     var askUser = false
     /// `request_access`: only in an Orb's own chat, for the same reason as `askUser`: the person is there to click the card.
