@@ -62,7 +62,7 @@ extension ModelPrice {
 }
 
 /// How the tokens of a model are paid for.
-enum UsageBilling: Equatable, Sendable {
+enum UsageBilling: String, Codable, Equatable, Sendable {
     /// By use: the provider bills the tokens (API keys, gateways, OpenRouter).
     case metered
     /// By a subscription (the ChatGPT or Claude plan, an OpenCode Go plan): the use is included up to the plan's limits.
@@ -314,7 +314,8 @@ struct PriceBook: Sendable {
 
     /// What `totals` of `model` used in the hour `hour` cost, and in which of the page's three ways to say it.
     func cost(of totals: UsageTotals, model: String, at hour: Date? = nil) -> UsageCost {
-        switch billing(for: model) {
+        // A row says how it was billed when it was used; only rows from before that was kept ask today's accounts.
+        switch totals.billing ?? billing(for: model) {
         case .local:
             return .free
         case .plan:

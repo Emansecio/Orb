@@ -272,7 +272,7 @@ struct UsageEventsTests {
         #expect(found.count == 1)
         #expect(found.first?.key.orb == id && found.first?.key.model == "openai/gpt-5" && found.first?.key.source == .chat)
         // `.usage` is the turn's sum, already counted call by call: it is not added again.
-        #expect(found.first?.totals == UsageTotals(requests: 2, input: 150, cacheRead: 8_100, cacheWrite: 30, output: 30))
+        #expect(found.first?.totals == UsageTotals(requests: 2, input: 150, cacheRead: 8_100, cacheWrite: 30, output: 30, billing: .metered))
     }
 
     /// The stopped stream drops what the engine would still say, so the input the provider announced is counted by the reader.
@@ -290,7 +290,7 @@ struct UsageEventsTests {
         session.stop()
         await playing.value
         let found = await rows(model, root: root)
-        #expect(found.first?.totals == UsageTotals(requests: 1, input: 150_000), "\(found)")
+        #expect(found.first?.totals == UsageTotals(requests: 1, input: 150_000, billing: .metered), "\(found)")
     }
 
     /// REVISAO-TOKENS-CONTAGEM P1-2: the provider's first report says a token or two of output; the words already
@@ -310,7 +310,7 @@ struct UsageEventsTests {
         session.stop()
         await playing.value
         let found = await rows(model, root: root)
-        #expect(found.first?.totals == UsageTotals(requests: 1, input: 150_000, output: ContextBudget.tokens(forCharacters: 3_500)), "\(found)")
+        #expect(found.first?.totals == UsageTotals(requests: 1, input: 150_000, output: ContextBudget.tokens(forCharacters: 3_500), billing: .metered), "\(found)")
     }
 
     @Test func aStoppedRoutinesCallKeepsItsSourceEvenWhenTheTurnIsClosedFirst() async {
@@ -346,7 +346,7 @@ struct UsageEventsTests {
         session.stop()
         await playing.value
         let found = await rows(model, root: root)
-        #expect(found.first?.totals == UsageTotals(requests: 1, input: 150_000, output: 20), "\(found)")
+        #expect(found.first?.totals == UsageTotals(requests: 1, input: 150_000, output: 20, billing: .metered), "\(found)")
     }
 
     @Test func theBatchIsWrittenWhenTheTurnEnds() {
@@ -377,7 +377,7 @@ struct UsageEventsTests {
         defer { removeTestFolder(root) }
         model.recordAuxiliaryUsage(TokenUsage(input: 800, output: 200), botID: id, model: "openai/gpt-5")
         let found = await rows(model, root: root)
-        #expect(found.count == 1 && found.first?.key.source == .auxiliary && found.first?.totals == UsageTotals(requests: 1, input: 800, output: 200))
+        #expect(found.count == 1 && found.first?.key.source == .auxiliary && found.first?.totals == UsageTotals(requests: 1, input: 800, output: 200, billing: .metered))
     }
 
     @Test func nothingIsRecordedForAnOrbThatDoesNotExistOrWhileResetting() async {

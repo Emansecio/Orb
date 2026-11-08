@@ -50,6 +50,9 @@ struct UsageTotals: Codable, Equatable, Sendable {
     var output = 0
     /// The cost the provider's own tool reported, in dollars (only old rows have one: Claude Code's `total_cost_usd`); nil when none did.
     var reportedCost: Double?
+    /// How the use was billed when it happened, so removing or repointing a provider later (a Custom one moved between
+    /// localhost and a paid host) does not reclassify the history. nil: a row from before this was kept.
+    var billing: UsageBilling?
 
     var tokens: Int { input + cacheRead + cacheWrite + output }
     /// What a budget between Orbs counts: the tokens charged in full or written to the cache. Reading the cache is left out:
@@ -58,7 +61,8 @@ struct UsageTotals: Codable, Equatable, Sendable {
     var isEmpty: Bool { requests == 0 && tokens == 0 && reportedCost == nil }
 
     init(requests: Int = 0, input: Int = 0, cacheRead: Int = 0, cacheWrite: Int = 0, cacheWrite1h: Int = 0, output: Int = 0,
-         reportedCost: Double? = nil) {
+         reportedCost: Double? = nil, billing: UsageBilling? = nil) {
+        self.billing = billing
         self.requests = Self.capped(requests)
         self.input = Self.capped(input)
         self.cacheRead = Self.capped(cacheRead)
@@ -68,10 +72,10 @@ struct UsageTotals: Codable, Equatable, Sendable {
         self.reportedCost = reportedCost
     }
 
-    init(_ usage: TokenUsage, requests: Int = 1, reportedCost: Double? = nil) {
+    init(_ usage: TokenUsage, requests: Int = 1, reportedCost: Double? = nil, billing: UsageBilling? = nil) {
         self.init(requests: requests, input: max(0, usage.input ?? 0), cacheRead: max(0, usage.cacheRead ?? 0),
                   cacheWrite: max(0, usage.cacheWrite ?? 0), cacheWrite1h: max(0, usage.cacheWrite1h ?? 0), output: max(0, usage.output ?? 0),
-                  reportedCost: reportedCost)
+                  reportedCost: reportedCost, billing: billing)
     }
 
     mutating func add(_ other: UsageTotals) {
@@ -82,6 +86,8 @@ struct UsageTotals: Codable, Equatable, Sendable {
         cacheWrite1h = min(Self.capped(cacheWrite1h + other.cacheWrite1h), cacheWrite)
         output = Self.capped(output + other.output)
         if let cost = other.reportedCost { reportedCost = (reportedCost ?? 0) + cost }
+        // Within one hour the latest classification wins (a row is per hour x model, and a change of provider is rare).
+        if let latest = other.billing { billing = latest }
     }
 
     /// A count that is missing, negative or not a number reads as zero, so one damaged row never breaks a sum.
@@ -96,6 +102,7 @@ struct UsageTotals: Codable, Equatable, Sendable {
         output = count(.output)
         let cost = (try? c.decodeIfPresent(Double.self, forKey: .reportedCost)) ?? nil
         reportedCost = cost.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+        billing = (try? c.decodeIfPresent(UsageBilling.self, forKey: .billing)) ?? nil
     }
 }
 

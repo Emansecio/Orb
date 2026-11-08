@@ -8,6 +8,8 @@ extension AppModel {
     /// Nothing is kept while the app is being reset.
     func recordUsage(_ totals: UsageTotals, botID: UUID, model: String, source: UsageSource) {
         guard !isResetting, let name = bot(botID)?.name else { return }
+        var totals = totals
+        totals.billing = priceBook.billing(for: model) // fixed now: the history keeps how it was billed at the time
         usageLog.record(totals, orb: botID, name: name, model: model, source: source)
         // What a group's turn costs goes to the request's count (what the provider charges in full or writes to its cache).
         if source == .group { groupHub.noteTokens(totals.budgetTokens, botID: botID) }

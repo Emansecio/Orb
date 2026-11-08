@@ -363,6 +363,8 @@ final class WizardRunner {
 
     private func record(_ totals: UsageTotals, model usedModel: String) {
         guard let model, !model.isResetting, !totals.isEmpty else { return }
+        var totals = totals
+        totals.billing = model.priceBook.billing(for: usedModel)
         model.usageLog.record(totals, orb: Self.usageOrbID, name: Self.usageName, model: usedModel, source: .creation)
     }
 }

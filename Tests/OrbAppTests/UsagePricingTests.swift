@@ -72,6 +72,25 @@ struct UsagePricingTests {
         #expect(abs(cost - 3.4) < 1e-9)
     }
 
+    @Test func aRowKeepsHowItWasBilledWhenItWasUsed() throws {
+        // The Custom gateway was on localhost then and is gone (or paid) now: the old use stays free.
+        var local = UsageTotals(requests: 1, input: 1_000_000, output: 1_000)
+        local.billing = .local
+        #expect(book().cost(of: local, model: "custom/modelo") == .free)
+        // A row from before the classification was kept still follows today's accounts.
+        var old = local
+        old.billing = nil
+        #expect(book().cost(of: old, model: "custom/modelo") == .unpriced)
+        // It survives the file, and a file without it (or with a value from a newer build) reads as nil.
+        let back = try JSONDecoder().decode(UsageTotals.self, from: JSONEncoder().encode(local))
+        #expect(back.billing == .local)
+        #expect(try JSONDecoder().decode(UsageTotals.self, from: Data(#"{"requests":1,"billing":"quantum"}"#.utf8)).billing == nil)
+        #expect(try JSONDecoder().decode(UsageTotals.self, from: Data(#"{"requests":1}"#.utf8)).billing == nil)
+        var merged = old
+        merged.add(local)
+        #expect(merged.billing == .local)
+    }
+
     @Test func aSubscriptionIsIncludedAndSaysWhatItWouldCost() {
         let totals = UsageTotals(requests: 1, input: 1_000_000, output: 100_000)
         // Worked out from the table (ChatGPT's login).
