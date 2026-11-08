@@ -268,6 +268,70 @@ struct OrbChatsListTests {
         #expect(model.live(orb).chats?.active == orb)
     }
 
+    @Test @MainActor func eachConversationKeepsTheModelItUsedLastAndItSurvivesALaunch() async throws {
+        let (model, orb) = setUp(Model())
+        #expect(model.send("primeiro assunto", to: orb, fromUser: true)) // an empty one is not left for a new one
+        await waitUntilIdle(model, orb)
+        model.update(orb) { $0.model = "custom/a" }
+        model.newChat(for: orb)
+        let second = try #require(model.live(orb).chats?.active)
+        #expect(model.bot(orb)?.model == "custom/a", "a new conversation goes on with the model in use")
+        model.update(orb) { $0.model = "custom/b" }
+
+        model.openChat(orb, of: orb)
+        #expect(model.bot(orb)?.model == "custom/a")
+        #expect(model.live(orb).modelID == "custom/a") // what the composer shows
+        model.openChat(second, of: orb)
+        #expect(model.bot(orb)?.model == "custom/b")
+
+        model.saveNow()
+        let relaunched = launch(Model())
+        #expect(relaunched.bot(orb)?.model == "custom/b", "the conversation on show when the app closed keeps its model")
+        relaunched.openChat(orb, of: orb)
+        #expect(relaunched.bot(orb)?.model == "custom/a")
+    }
+
+    @Test @MainActor func openingTheConversationOnShowAgainKeepsTheModelChosenInIt() async throws {
+        let (model, orb) = setUp(Model())
+        #expect(model.send("primeiro assunto", to: orb, fromUser: true)) // an empty one is not left for a new one
+        await waitUntilIdle(model, orb)
+        model.update(orb) { $0.model = "custom/a" }
+        model.newChat(for: orb)
+        model.openChat(orb, of: orb) // the second one noted "custom/a" as it left
+        model.update(orb) { $0.model = "custom/b" }
+        model.openChat(orb, of: orb) // a click on the row already on show
+        #expect(model.bot(orb)?.model == "custom/b")
+    }
+
+    @Test @MainActor func aConversationWhoseProviderIsGoneTakesTheOrbsModel() async throws {
+        let (model, orb) = setUp(Model())
+        #expect(model.send("primeiro assunto", to: orb, fromUser: true)) // an empty one is not left for a new one
+        await waitUntilIdle(model, orb)
+        model.update(orb) { $0.model = "anthropic/sumiu" } // no account for it in this app
+        model.newChat(for: orb)
+        let second = try #require(model.live(orb).chats?.active)
+        model.update(orb) { $0.model = "custom/b" }
+        model.openChat(orb, of: orb)
+        #expect(model.bot(orb)?.model == "custom/b")
+        #expect(model.modelRef(ofChat: orb, of: orb) == nil, "the one on show is the Orb's own")
+        #expect(model.modelRef(ofChat: second, of: orb)?.text == "custom/b")
+    }
+
+    @Test @MainActor func aTurnBehindTheOneOnShowUsesItsConversationsModel() async throws {
+        let (model, orb) = setUp(Model())
+        #expect(model.send("primeiro assunto", to: orb, fromUser: true)) // an empty one is not left for a new one
+        await waitUntilIdle(model, orb)
+        model.update(orb) { $0.model = "custom/a" }
+        model.newChat(for: orb)
+        model.update(orb) { $0.model = "" } // the second one follows the app's default
+        model.openChat(orb, of: orb)
+        let second = try #require(model.live(orb).chats?.list.first { $0.id != orb }?.id)
+        #expect(model.modelRef(ofChat: second, of: orb)?.text == "custom/modelo")
+        model.openChat(second, of: orb)
+        #expect(model.modelRef(ofChat: orb, of: orb)?.text == "custom/a")
+        #expect(model.bot(orb)?.model == "")
+    }
+
     @Test @MainActor func theComposerKeepsADraftPerConversationAndItSurvivesALaunch() async throws {
         let client = Model()
         let (model, orb) = setUp(client)

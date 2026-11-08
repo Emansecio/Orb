@@ -458,7 +458,7 @@ Pasta de dados: `~/Library/Application Support/Orb/` (a variável `ORB_DATA_DIR`
 ```
 state.json                       AppState: Orbs, rotinas, skills, conectores (segredos viram "@keychain"), provedores,
                                  modelo padrão, não lidas, nível de contexto das conversas, janelas aprendidas, correções de preço,
-                                 as conversas de cada Orb que tem mais de uma (`OrbChats`: a que está na tela, títulos, datas, não lidas)
+                                 as conversas de cada Orb que tem mais de uma (`OrbChats`: a que está na tela, títulos, datas, não lidas, o último modelo de cada uma)
 conversations/<Orb>.json         a primeira conversa do Orb (nunca some): itens da tela + mensagens do modelo + resumo/ledger + marcas
 conversations/<Orb>.meta.json    nota ao lado: quantos itens, quantos já foram para a memória, impressão digital do arquivo
 conversations/<Orb>/<id>.json    só de versões antigas ("Nova conversa"): `Store.mergeArchive` as junta à conversa na abertura, em ordem, e apaga

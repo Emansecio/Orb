@@ -269,7 +269,7 @@ Se o navegador não estiver instalado, o Orb fica só com `web_fetch` e `web_sea
   esperas de 5, 15, 30 e 60 s antes de desistir). Um provedor que fica 10 min mandando só sinais de vida, sem texto, é dado como
   parado ("Provedor sem resposta") e tentado mais uma vez. Se a resposta cai no meio do texto, o Orb grava o que saiu e segue dali uma
   vez; se cair de novo, avisa "O provedor cortou a resposta no meio" e você pede "continua".
-  **Outro modelo** refaz o pedido uma vez com o modelo padrão do app ou um dos usados há pouco, sem mudar o do Orb. A frase do
+  **Outro modelo** refaz o pedido com o modelo padrão do app ou um dos usados há pouco, e ele passa a ser o da conversa. A frase do
   aviso é do Orb; a mensagem do provedor fica recolhida em **Detalhes**. Uma resposta vazia ganha uma nova tentativa sozinha
   antes de virar falha.
 - **Quando o Orb anda em círculos** (a mesma chamada com o mesmo resultado três vezes, ou três falhas seguidas), o próprio
@@ -518,7 +518,9 @@ Quando ela cresce, o começo vira um resumo para o modelo (veja [Contexto da con
 no chat para você ler e buscar (⌘F).
 
 **Nova conversa** (⇧⌘N, o botão de lápis na barra do chat, o menu do Orb na lateral ou ⌘K) abre outra, vazia. Cada conversa
-tem o próprio histórico, e o modelo não vê o das outras; a memória, a pasta e as ferramentas são do Orb e valem para todas. O
+tem o próprio histórico, e o modelo não vê o das outras; a memória, a pasta e as ferramentas são do Orb e valem para todas.
+Cada conversa também guarda o último modelo usado nela: voltar a ela, ou abrir o app de novo, traz esse modelo de volta, e uma
+conversa nova começa com o que estava em uso. O
 que uma conversa disse vai para a memória quando você sai dela, e aí as outras encontram. Com mais de uma, a lateral lista as
 conversas do Orb aberto embaixo dele: as três mais recentes, a que está na tela e as que têm algo não lido ("N conversas mais antigas" mostra
 o resto), com o título tirado da primeira mensagem. O menu de cada uma renomeia ou apaga; o que ela guardou na memória fica.

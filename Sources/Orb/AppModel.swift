@@ -1754,7 +1754,7 @@ final class AppModel {
             runCompactionCommand(focus: focus, for: botID)
             return true
         }
-        guard let ref = override ?? modelRef(for: bot), let account = account(ref.provider), account.isEnabled, isUsable(account) else {
+        guard let ref = override ?? session.workingChatID.flatMap({ modelRef(ofChat: $0, of: botID) }) ?? modelRef(for: bot), let account = account(ref.provider), account.isEnabled, isUsable(account) else {
             if !hasCheckedConnections {
                 // `connected` is empty only because nobody has looked yet: no card, no notice. The composer waits for the
                 // look and sends then (`ComposerView.send`); what was typed stays.
@@ -1881,6 +1881,7 @@ final class AppModel {
         let tellsWhereLeftOff = (session.conversationChat ?? botID) == botID
 
         session.turnModel = ref.text
+        if let override, let chat = session.conversationChat { keepModel(override, ofChat: chat, of: botID) }
         let turn = session.beginTurn()
         let steering = composerLane(botID).queue // messages sent during the turn reach the model between its steps
         let release = CommandRelease(steering: steering) { [weak self] waited in

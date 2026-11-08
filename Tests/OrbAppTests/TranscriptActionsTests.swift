@@ -289,7 +289,7 @@ import Testing
         #expect(sent == 1)
     }
 
-    @MainActor @Test func anotherModelIsForThisTryOnly() async {
+    @MainActor @Test func anotherModelStaysTheConversationsModel() async {
         let failed = Conversation(items: [user("faça isso"), notice("Não deu certo: O modelo não respondeu.")],
                                   messages: [.user("faça isso")])
         let (model, id) = model(with: failed)
@@ -303,8 +303,14 @@ import Testing
         #expect(model.retryLastTurn(id, model: ModelRef("custom/outro")))
         await waitUntil("the Orb to finish") { !model.isWorking(id) && model.turns[id] == nil }
         #expect(model.session(id).turnModel == "custom/outro")
-        #expect(model.bots[0].model.isEmpty) // the Orb keeps following the default
+        #expect(model.bots[0].model == "custom/outro") // the next turn, and the app opened again, use it
         #expect(model.retryModels(for: id).contains { $0.ref == "custom/modelo" }) // now the default is the other one
+
+        // Going back to the app's default by the same menu follows the default again, not a copy of it.
+        model.append(.notice("Não deu certo: O modelo não respondeu."), to: id)
+        #expect(model.retryLastTurn(id, model: ModelRef("custom/modelo")))
+        await waitUntil("the Orb to finish") { !model.isWorking(id) && model.turns[id] == nil }
+        #expect(model.bots[0].model.isEmpty)
     }
 
     @MainActor @Test func retryingASkillMessageTakesTheExpandedOneBackAndCountsTheUseOnce() async {

@@ -191,7 +191,7 @@ extension AppModel {
     // MARK: Showing
 
     private func show(_ chat: UUID, of botID: UUID, in chats: OrbChats, fresh: Bool, read: StoreRead<Conversation>? = nil) {
-        let session = session(botID)
+        let session = session(botID), leaving = session.chatID
         selection = .bot(botID)
         session.opening = nil
         if chat != session.chatID {
@@ -224,8 +224,37 @@ extension AppModel {
             session.openChat(chat, fresh: fresh, read: read)
         }
         var chats = chats
+        // The Orb's model is the one of the conversation on show: the one leaving keeps it, the one arriving brings back its
+        // own (a new one, or one never left, goes on with the model in use).
+        // (`leaving` is the one on show before, not `chats.active`: a new or deleted conversation already moved that.)
+        if leaving != chat, let current = bot(botID)?.model { chats.setModel(current, of: leaving) }
         chats.active = chat
         setChats(chats, for: botID)
+        if leaving != chat, let saved = chats.model(of: chat), isModelAvailable(saved) { update(botID) { $0.model = saved } }
+    }
+
+    /// The model a conversation used last, when it is not the one on show and its model can still run: a turn that works
+    /// on it behind the one on show (a resumed task, an answer it waited for) runs with it, not with the one on show.
+    func modelRef(ofChat chat: UUID, of botID: UUID) -> ModelRef? {
+        guard chat != session(botID).chatID, let saved = live(botID).chats?.model(of: chat), isModelAvailable(saved) else { return nil }
+        return ModelRef(saved.isEmpty ? defaultModel : saved)
+    }
+
+    /// The model a turn ran with by your choice ("Outro modelo") stays the conversation's: the next turn, and the app opened
+    /// again, use it. The app's default is kept as "", so a conversation that followed it still does.
+    func keepModel(_ ref: ModelRef, ofChat chat: UUID, of botID: UUID) {
+        let kept = ref.text == ModelRef(defaultModel)?.text ? "" : ref.text
+        if chat == session(botID).chatID {
+            update(botID) { $0.model = kept }
+        } else if var chats = live(botID).chats {
+            chats.setModel(kept, of: chat)
+            setChats(chats, for: botID)
+        }
+    }
+
+    /// "" (the app's default) or a model whose provider is still set up; one removed since falls back to the Orb's model.
+    private func isModelAvailable(_ model: String) -> Bool {
+        model.isEmpty || ModelRef(model).flatMap { account($0.provider) } != nil
     }
 
     /// Whether the conversation is read before it shows: a turn or a side run holds the Orb (the conversation the turn works

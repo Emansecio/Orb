@@ -13,6 +13,10 @@ struct OrbChats: Codable, Equatable, Sendable {
         /// Something landed in it while another one was on show (an answer, a notice, the end of a turn): true until you
         /// open it. nil, not false, so the file only names the ones that have it.
         var unread: Bool?
+        /// The model the conversation used last ("provider/model", "" for the app's default), noted when another one is
+        /// opened over it: opening it again brings it back, so each conversation keeps its own. nil in older files and in a
+        /// conversation that has not left the screen yet (it follows the Orb's model).
+        var model: String?
     }
 
     /// The one the chat shows (`BotSession.chatID`): opening one reads it.
@@ -75,6 +79,13 @@ struct OrbChats: Codable, Equatable, Sendable {
     }
 
     func title(of id: UUID) -> String? { list.first { $0.id == id }?.title }
+
+    func model(of id: UUID) -> String? { list.first { $0.id == id }?.model }
+
+    mutating func setModel(_ model: String, of id: UUID) {
+        guard let index = list.firstIndex(where: { $0.id == id }) else { return }
+        list[index].model = model
+    }
 
     /// Nothing to choose between any more: only the Orb's first conversation is left (the app then keeps no list).
     func isOnlyFirst(of botID: UUID) -> Bool { list.count == 1 && list[0].id == botID }
