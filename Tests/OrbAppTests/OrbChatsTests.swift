@@ -574,6 +574,26 @@ struct OrbChatsListTests {
         #expect(model.gatewaySessionIDs(of: orb, chats: [UUID()]) == [])
     }
 
+    @Test @MainActor func deletingAConversationEndsItsBrowserTabAndNotTheOthers() async throws {
+        let client = Model()
+        let (model, orb) = setUp(client)
+        let hub = FakeBrowserSetup().hub
+        model.browserHub = hub
+        #expect(model.send("primeiro", to: orb, fromUser: true))
+        await waitUntilIdle(model, orb)
+        let firstScope = try #require(model.session(orb).conversation?.gatewaySessionID)
+        model.newChat(for: orb)
+        #expect(model.send("na nova", to: orb, fromUser: true))
+        await waitUntilIdle(model, orb)
+        let new = try #require(model.live(orb).chats?.active)
+        let newScope = try #require(model.session(orb).conversation?.gatewaySessionID)
+        for scope in [firstScope, newScope] { hub.setLabels(["e1": BrowserRef(role: "button", name: "Ok")], botID: orb, scope: scope) }
+
+        model.deleteChat(new, of: orb)
+        await waitUntil("its browser scope ends") { hub.label(ofRef: "e1", botID: orb, scope: newScope) == nil }
+        #expect(hub.label(ofRef: "e1", botID: orb, scope: firstScope) != nil)
+    }
+
     @Test @MainActor func deletingTheConversationOnShowOpensTheNewestLeftAndDropsTheList() async throws {
         let client = Model()
         let (model, orb) = setUp(client)

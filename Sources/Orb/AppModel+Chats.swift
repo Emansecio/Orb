@@ -78,11 +78,14 @@ extension AppModel {
         delegation.cancelChains(startedIn: chat, of: botID) // its "stopped" line lands in the conversation that is going away
         chats.remove(chat)
         let session = session(botID)
-        // Its Claude Code process, if one is idle, would keep the deleted conversation alive (and its session file) until it expires.
-        if ClaudePipeIdlePool.shared.count > 0 {
-            let ids = chat == session.chatID ? [session.conversation?.gatewaySessionID].compactMap { $0 }
-                                             : gatewaySessionIDs(of: botID, chats: [chat])
-            for id in ids { ClaudePipeIdlePool.shared.stop(id) }
+        // Its Claude Code process, if one is idle, would keep the deleted conversation alive (and its session file) until it expires;
+        // its tab in the Orb's browser would stay open until the next launch.
+        let ids = chat == session.chatID ? [session.conversation?.gatewaySessionID].compactMap { $0 }
+                                         : gatewaySessionIDs(of: botID, chats: [chat])
+        for id in ids {
+            ClaudePipeIdlePool.shared.stop(id)
+            let hub = browserHub
+            Task { await hub.endScope(botID: botID, scope: id) }
         }
         if chat == session.chatID {
             // Read now, not off the main thread: the one deleted is written as it leaves, before its file goes.
