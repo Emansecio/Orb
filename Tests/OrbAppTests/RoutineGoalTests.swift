@@ -17,6 +17,12 @@ struct RoutineGoalTests {
         #expect(GoalCheck.parse("Progresso: 7% · em dia · `nota`  ") == GoalCheck(progress: 7, status: .onTrack, note: "nota"))
     }
 
+    @Test func aDecimalFigureIsReadAndTruncated() {
+        #expect(GoalCheck.parse("Progresso: 66,7% · em dia") == GoalCheck(progress: 66, status: .onTrack))
+        #expect(GoalCheck.parse("Progresso: 99.9% · em dia")?.progress == 99)
+        #expect(GoalCheck.parse("Progresso: 100,0% · concluída · pronto") == GoalCheck(progress: 100, status: .done, note: "pronto"))
+    }
+
     @Test func aGoalReachedIsAlwaysAHundredAndANumberOverAHundredIsCapped() {
         #expect(GoalCheck.parse("Progresso: 90% · concluída · pronto") == GoalCheck(progress: 100, status: .done, note: "pronto"))
         #expect(GoalCheck.parse("Progresso: 100% · Concluido")?.status == .done)

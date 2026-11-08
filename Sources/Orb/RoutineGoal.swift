@@ -110,7 +110,8 @@ extension GoalCheck {
     private static func parse(line: String) -> GoalCheck? {
         let range = NSRange(line.startIndex..., in: line)
         guard let match = lineExpression.firstMatch(in: line, range: range),
-              let number = Range(match.range(at: 1), in: line).flatMap({ Int(line[$0]) }),
+              // "66,7%" / "100.0%": the fraction is dropped (truncated, so 99,9 never reads as finished).
+              let number = Range(match.range(at: 1), in: line).flatMap({ Double(line[$0].replacingOccurrences(of: ",", with: ".")) }).map(Int.init),
               let word = Range(match.range(at: 2), in: line).map({ line[$0].folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil) })
         else { return nil }
         // "Progresso: 40% concluído" is prose (a figure followed by a word, no separator), not the format's
@@ -129,7 +130,7 @@ extension GoalCheck {
     /// "Progresso", a number with or without "%", a status word, and the note after any separator. Markdown marks and
     /// list bullets before it are skipped.
     private static let lineExpression = try! NSRegularExpression(
-        pattern: #"^[\s*_`#\-•]*progresso[\s*_`:]*(\d{1,3})\s*%?[\s*_`·•|,;:\-–—]*(em\s+dia|aten[cç][aã]o|conclu[ií]d[ao])\b[\s*_`·•|,;:\-–—.]*(.*)$"#,
+        pattern: #"^[\s*_`#\-•]*progresso[\s*_`:]*(\d{1,3}(?:[.,]\d{1,2})?)\s*%?[\s*_`·•|,;:\-–—]*(em\s+dia|aten[cç][aã]o|conclu[ií]d[ao])\b[\s*_`·•|,;:\-–—.]*(.*)$"#,
         options: [.caseInsensitive])
 
     private static let noteEdges = CharacterSet.whitespaces.union(CharacterSet(charactersIn: "*_`"))

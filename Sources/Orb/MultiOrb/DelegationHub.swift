@@ -693,6 +693,19 @@ final class DelegationHub: DelegationService {
     @discardableResult
     func forgetWaitingRoutine(_ routineID: UUID) -> RoutineWait? { waitingRoutines.removeValue(forKey: routineID) }
 
+    /// The routine was deleted: what its run asked of other Orbs stops too (open requests and answers in the box), so the
+    /// target does not spend a turn on an answer nobody will read. Only the chains the routine's run started.
+    func cancelChains(servingRoutine routineID: UUID) {
+        var ids: [UUID] = []
+        for request in requests.values where Self.isOpen(request.state) && request.envelope.servingRoutine == routineID {
+            if !ids.contains(request.envelope.chainID) { ids.append(request.envelope.chainID) }
+        }
+        for envelope in inbox.values.joined() where envelope.servingRoutine == routineID && !ids.contains(envelope.chainID) {
+            ids.append(envelope.chainID)
+        }
+        for id in ids { cancelChain(id, by: .user) }
+    }
+
     // MARK: Stopping
 
     func cancelChain(_ id: UUID, by reason: CancelReason) {

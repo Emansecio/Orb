@@ -650,6 +650,61 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(model.session(bot.id).routineID == nil)
     }
 
+    @Test @MainActor func aPrecheckThatSkipsAPausedRoutineWritesNothing() async throws {
+        let stub = StubModel()
+        let (model, bot, routine) = setUp(stub)
+        model.routines[0].precheck = RoutinePrecheck(command: ["/bin/sh", "-c", #"sleep 0.3; echo '{"skip": true, "reason": "x"}'"#])
+        model.runRoutine(routine.id)
+        model.routines[0].isEnabled = false // paused while the check is under way
+        await model.routineStarted()
+        await waitUntilIdle(model, bot.id)
+
+        #expect(model.routines[0].runs.isEmpty && model.routines[0].lastRun == nil)
+    }
+
+    @Test @MainActor func aSkippedRunCarriesTheOpenFollowUps() async throws {
+        let (model, bot, routine) = setUp()
+        let open = RoutineFollowUp(subject: "A", channel: "x", nextStep: "y")
+        var done = RoutineFollowUp(subject: "B", channel: "z", nextStep: "y")
+        done.resolved = true
+        model.routines[0].followUps = [open, done]
+        model.routines[0].precheck = RoutinePrecheck(command: ["/bin/sh", "-c", #"echo '{"skip": true, "reason": "r"}'"#])
+        model.runRoutine(routine.id)
+        await model.routineStarted()
+        await waitUntilIdle(model, bot.id)
+
+        #expect(model.routines[0].runs.first?.openFollowUps == [open.id])
+    }
+
+    @Test @MainActor func aPrecheckForAnOrbWithoutAFolderRunsInTheHomeFolder() async throws {
+        let (model, bot, routine) = setUp()
+        model.bots[0].workingDirectory = ""
+        model.routines[0].precheck = RoutinePrecheck(command: ["/bin/sh", "-c", #"printf '{"skip": true, "reason": "%s"}' "$(pwd -P)""#])
+        model.runRoutine(routine.id)
+        await model.routineStarted()
+        await waitUntilIdle(model, bot.id)
+
+        let home = FileManager.default.homeDirectoryForCurrentUser.resolvingSymlinksInPath().path
+        #expect(model.routines[0].runs.first?.summary == "Dispensada pela pré-checagem: " + home)
+    }
+
+    @Test @MainActor func aQueuedSlotThatTheScheduleOvertookIsSkippedNotRunLate() async throws {
+        let gate = TestGate()
+        let stub = StubModel(gate: gate)
+        let (model, bot, routine) = setUp(stub)
+        // A daily slot found days late: the schedule has moved on, so running it now would act at the wrong hour.
+        // (80 days of half-hour slots: past `missedSlotScan`, so it counts as missed whatever the time of day.)
+        model.routines[0].schedule = .cron(expression: "*/30 8-22 * * *", timeZone: nil)
+        model.routines[0].lastRun = .now.addingTimeInterval(-80 * 86_400)
+        #expect(model.send("pergunta", to: bot.id))
+        model.runRoutine(routine.id) // busy Orb: it waits for the question
+        await gate.open()
+        await waitUntilIdle(model, bot.id)
+
+        #expect(await stub.calls.count == 1) // the question only
+        #expect(model.routines[0].runs.first?.summary.hasPrefix("Pulada") == true)
+    }
+
     @Test @MainActor func aPrecheckWithNoVerdictRunsTheRoutine() async throws {
         let stub = StubModel()
         let (model, bot, routine) = setUp(stub)

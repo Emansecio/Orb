@@ -480,6 +480,62 @@ private final class Hooks: GroupTurnHooks {
         #expect(await team.log.calls(by: "Pesquisador").count == 2)
     }
 
+    /// remocao.1: deleting a routine that waits for other Orbs also stops what it asked of them.
+    @Test func deletingAWaitingRoutineCancelsItsRequestsToOtherOrbs() async throws {
+        let valve = TestGate()
+        let team = Team { seen in
+            switch seen.who {
+            case "Pesquisador":
+                if seen.toolResult != nil { return say("Aguardo o Revisor.") }
+                return orbsCall("ask", to: "Revisor", "Revise o texto de hoje.")
+            case "Revisor":
+                await valve.wait()
+                return say("Achei 3 erros.")
+            default: return say("?")
+            }
+        }
+        defer { team.cleanUp() }
+        let model = team.model, hub = model.delegation
+        let routine = Routine(name: "Revisão diária", botID: team.pesquisador.id, prompt: "Peça a revisão do texto de hoje.",
+                              schedule: .daily(hour: 9, minute: 0))
+        model.routines = [routine]
+        model.runRoutine(routine.id)
+        await waitUntil("the run to wait") { hub.isWaiting(routine: routine.id) }
+        let request = try #require(team.request(from: team.pesquisador, to: team.revisor))
+        model.deleteRoutine(routine.id)
+        #expect(!hub.isWaiting(routine: routine.id))
+        #expect(hub.requests[request.envelope.id]?.state == .cancelled)
+        await valve.open()
+        await team.settle()
+    }
+
+    /// saturacao-multi.1: a ring from outside that finds the routine waiting for answers is kept for the run's end.
+    @Test func aWakeThatFindsTheRoutineWaitingIsQueued() async throws {
+        let valve = TestGate()
+        let team = Team { seen in
+            switch seen.who {
+            case "Pesquisador":
+                if seen.toolResult != nil { return say("Aguardo o Revisor.") }
+                return orbsCall("ask", to: "Revisor", "Revise o texto de hoje.")
+            case "Revisor":
+                await valve.wait()
+                return say("Achei 3 erros.")
+            default: return say("?")
+            }
+        }
+        defer { team.cleanUp() }
+        let model = team.model, hub = model.delegation
+        let routine = Routine(name: "Revisão diária", botID: team.pesquisador.id, prompt: "Peça a revisão do texto de hoje.",
+                              schedule: .daily(hour: 9, minute: 0))
+        model.routines = [routine]
+        model.runRoutine(routine.id)
+        await waitUntil("the run to wait") { hub.isWaiting(routine: routine.id) }
+        model.runRoutine(routine.id, wakeNote: "chegou", queuesIfRunning: true)
+        #expect(model.queuedRoutines == [routine.id])
+        await valve.open()
+        await team.settle()
+    }
+
     /// A waiting routine can end while its Orb works on another Orb's request: its line goes to the chat, not into the request.
     @Test func aRoutineEndingWhileItsOrbHandlesARequestTellsTheChat() async throws {
         let valve = TestGate(), busy = TestGate()

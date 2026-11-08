@@ -2205,7 +2205,14 @@ final class AppModel {
             return
         }
         // A run waiting for other Orbs' answers is still this routine's run: the next one waits for it to end.
-        guard !delegation.isWaiting(routine: routineID) else { return }
+        guard !delegation.isWaiting(routine: routineID) else {
+            // A ring from outside is not repeated (its file is already gone): it waits for the run's end, like one that finds it running.
+            if queuesIfRunning, !queuedRoutines.contains(routineID) {
+                queuedRoutines.append(routineID)
+                if let wakeNote { queuedWakeNotes[routineID] = wakeNote }
+            }
+            return
+        }
         guard !queuedRoutines.contains(routineID) else {
             startIdleQueuedRoutines() // waiting, but its Orb may be free by now (the routine was moved to another Orb)
             return
@@ -2267,6 +2274,7 @@ final class AppModel {
         queuedWakeNotes.removeValue(forKey: routineID)
         forgetInicio { if case .routine(_, let routine, _) = $0.origin { return routine == routineID } else { return false } }
         delegation.forgetWaitingRoutine(routineID)
+        delegation.cancelChains(servingRoutine: routineID) // a run waiting for answers: its requests to other Orbs stop too
         if let running = sessions[routine.botID], running.routineID == routineID {
             // Only this run and the chain it started: `stop(botID)` would also cancel the chat's own requests and the ones
             // other Orbs queued for this Orb. The user's Stop is what stops everything.
@@ -2283,15 +2291,26 @@ final class AppModel {
         let botID = routine.botID
         guard !isResetting, session(botID).turnTask == nil, startingRoutines[botID] == nil, bot(botID) != nil,
               routines.contains(where: { $0.id == routine.id }) else { return }
+        // A scheduled slot that waited in the queue (its Orb was busy) may have been overtaken by the schedule meanwhile:
+        // run late, it would act at an hour the schedule leaves out (see `runDueRoutines`). Rings from outside are off-schedule.
+        if gated, wakeNote == nil, routine.isEnabled, routine.nextRun <= .now, let missed = routine.missedSlot(now: .now) {
+            skippedMissedSlot(routine.id, missed)
+            return
+        }
         ensureLoaded(botID)
         startingRoutines[botID] = routine.id
         Task {
             // The deterministic check decides first: excusing a run costs a subprocess, never a model turn.
-            let folder = bot(botID)?.workingDirectory
-            let workingFolder = folder.flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
+            // Same folder the turn would use (an Orb without one works in the home folder), so a relative command means the same.
+            let workingFolder = bot(botID)?.workingURL
             if gated, let precheck = routine.precheck,
                case .skip(let reason) = await RoutinePrecheck.check(precheck, in: workingFolder) {
                 startingRoutines[botID] = nil
+                // Paused while the check ran (up to 90 s): an excuse for a routine that is off would only write to its history.
+                guard routines.first(where: { $0.id == routine.id })?.isEnabled != false else {
+                    if !isResetting, bot(botID) != nil, sessions[botID]?.turnTask == nil { startNextQueuedWork(for: botID) }
+                    return
+                }
                 skippedRoutine(routine.id, summary: "Dispensada pela pré-checagem: " + MemoryText.clip(reason, 300))
                 // The Orb was never taken: whatever else waits for it (queued routines, delegated work) goes on.
                 if !isResetting, bot(botID) != nil, sessions[botID]?.turnTask == nil { startNextQueuedWork(for: botID) }
@@ -2304,7 +2323,7 @@ final class AppModel {
                 if !isResetting, bot(botID) != nil, sessions[botID]?.turnTask == nil { startNextQueuedWork(for: botID) }
                 return
             }
-            beginRoutine(routine.id, of: botID, read: read, wakeNote: wakeNote)
+            beginRoutine(routine.id, of: botID, read: read, gated: gated, wakeNote: wakeNote)
             // It did not run (nothing to send, the routine or the Orb gone meanwhile): what waits for the Orb goes on now,
             // as after a turn, instead of waiting for the next message.
             if !isResetting, bot(botID) != nil, sessions[botID]?.turnTask == nil { startNextQueuedWork(for: botID) }
@@ -2318,21 +2337,35 @@ final class AppModel {
         routines[index].lastRun = skipped
         routines[index].lastResult = summary
         routines[index].closeIfOnceIsDone()
-        recordRun(RoutineRun(date: skipped, finishedAt: skipped, succeeded: true, summary: summary), routineID: routineID, skipped: true)
+        // Open follow-ups are carried so the next run's "since the previous run" comparison has a baseline.
+        var run = RoutineRun(date: skipped, finishedAt: skipped, succeeded: true, summary: summary)
+        run.openFollowUps = routines[index].followUps.filter { !$0.resolved }.map(\.id)
+        recordRun(run, routineID: routineID, skipped: true)
     }
 
-    private func beginRoutine(_ routineID: UUID, of botID: UUID, read: StoreRead<Conversation>, wakeNote: String? = nil) {
+    private func skippedMissedSlot(_ routineID: UUID, _ missed: Date, at now: Date = .now) {
+        skippedRoutine(routineID, summary: "Pulada: o horário de \(RoutineReport.moment(missed)) passou com o app fechado "
+                           + "ou o Mac dormindo, e a rotina segue no próximo horário.", at: now)
+    }
+
+    private func beginRoutine(_ routineID: UUID, of botID: UUID, read: StoreRead<Conversation>, gated: Bool = true, wakeNote: String? = nil) {
+        // Waiting again keeps what the run was asked with: "run now" stays ungated, a ring keeps its note.
+        func queue() {
+            if !queuedRoutines.contains(routineID) { queuedRoutines.append(routineID) }
+            if !gated { queuedManualRoutines.insert(routineID) }
+            if let wakeNote { queuedWakeNotes[routineID] = wakeNote }
+        }
         // The Orb or the routine is gone, or the routine was moved to another Orb: its file here is not the one to run.
         guard !isResetting, bot(botID) != nil, let index = routines.firstIndex(where: { $0.id == routineID }) else { return }
         guard routines[index].botID == botID else {
-            if !queuedRoutines.contains(routineID) { queuedRoutines.append(routineID) }
+            queue()
             startIdleQueuedRoutines() // it runs when its new Orb is free
             return
         }
         let session = session(botID)
         // A message (or a routine of its own) took the Orb meanwhile: this one waits for the turn to end, as any other.
         guard session.turnTask == nil else {
-            if !queuedRoutines.contains(routineID) { queuedRoutines.append(routineID) }
+            queue()
             return
         }
         let routine = routines[index]
@@ -2364,7 +2397,9 @@ final class AppModel {
         let reason = hasPrompt ? "Não rodou: conecte um modelo em Ajustes." : "Não rodou: a rotina está sem instruções."
         routines[index].lastResult = reason
         routines[index].closeIfOnceIsDone()
-        recordRun(RoutineRun(date: started, finishedAt: started, succeeded: false, summary: reason), routineID: routine.id)
+        var notRun = RoutineRun(date: started, finishedAt: started, succeeded: false, summary: reason)
+        notRun.openFollowUps = routine.followUps.filter { !$0.resolved }.map(\.id)
+        recordRun(notRun, routineID: routine.id)
     }
 
     // MARK: MultiOrb (WP1)
@@ -2388,7 +2423,10 @@ final class AppModel {
     /// Runs the routines that were waiting for this Orb, one at a time, as it becomes free.
     func startNextQueuedRoutine(for botID: UUID) {
         while sessions[botID]?.turnTask == nil, startingRoutines[botID] == nil,
-              let next = queuedRoutines.first(where: { id in routines.first { $0.id == id }?.botID == botID }) {
+              let next = queuedRoutines.first(where: { id in
+                  // One waiting for other Orbs' answers is still running: it starts when that run ends (`closeRoutineRun`).
+                  routines.first { $0.id == id }?.botID == botID && !delegation.isWaiting(routine: id)
+              }) {
             queuedRoutines.removeAll { $0 == next }
             let manual = queuedManualRoutines.remove(next) != nil
             let note = queuedWakeNotes.removeValue(forKey: next)
@@ -2462,6 +2500,7 @@ final class AppModel {
         if routines.contains(where: { $0.id == routineID }) { saveRoutineConversation(own, routine: routineID, for: botID) }
         recordRoutineRun(routineID, of: botID, conversation: own, started: started, finished: .now, succeeded: false, reply: nil,
                          userStopped: quietly)
+        startNextQueuedWork(for: botID) // what queued behind this run (a wake that found it waiting) goes on
     }
 
     /// The run goes into the routine's history (and, for an Orb with a folder of its own, its report into `Rotinas/`), and the
@@ -2629,8 +2668,7 @@ final class AppModel {
         if let wokeAt, now < wokeAt.addingTimeInterval(Self.wakeSettleTime) { return }
         for routine in routines where routine.isEnabled && routine.nextRun <= now {
             if let missed = routine.missedSlot(now: now), !isRoutineHeld(routine.id) {
-                skippedRoutine(routine.id, summary: "Pulada: o horário de \(RoutineReport.moment(missed)) passou com o app fechado "
-                                   + "ou o Mac dormindo, e a rotina segue no próximo horário.", at: now)
+                skippedMissedSlot(routine.id, missed, at: now)
             } else {
                 runRoutine(routine.id)
             }

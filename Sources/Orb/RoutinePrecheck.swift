@@ -33,34 +33,43 @@ extension RoutinePrecheck {
     /// scheduler ticks on the main actor and the check may take seconds.
     static func check(_ precheck: RoutinePrecheck, in folder: URL?) async -> Verdict {
         guard precheck.command.first?.isEmpty == false else { return .run }
-        return await Task.detached(priority: .utility) { () -> Verdict in
-            let process = Process()
-            // `env` resolves a bare program name; the app's own PATH plus the usual user tool dirs (a GUI
-            // app's PATH lacks Homebrew and ~/bin, where helpers like wacli live).
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = precheck.command
-            var environment = ProcessInfo.processInfo.environment
-            let home = environment["HOME"] ?? NSHomeDirectory()
-            environment["PATH"] = [home + "/bin", "/opt/homebrew/bin", "/usr/local/bin",
-                                   environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"].joined(separator: ":")
-            process.environment = environment
-            process.currentDirectoryURL = folder
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            process.standardError = FileHandle.nullDevice
-            let output = OutputBuffer(limit: outputLimit) { process.terminate() }
-            pipe.fileHandleForReading.readabilityHandler = { handle in output.append(handle.availableData) }
-            do { try process.run() } catch { return .run }
-            let deadline = Date.now.addingTimeInterval(timeout)
-            while process.isRunning && Date.now < deadline { usleep(50_000) }
-            if process.isRunning { Self.stop(process) }
-            process.waitUntilExit()
-            // The verdict may still be in flight when the process exits: give the handler a beat, then drain.
-            usleep(100_000)
-            output.append(pipe.fileHandleForReading.availableData)
-            pipe.fileHandleForReading.readabilityHandler = nil
-            return verdict(stdout: output.text, exit: process.terminationStatus)
-        }.value
+        // A thread of its own, not `Task.detached`: the polling below blocks for up to `timeout`, and several checks at once
+        // (the Mac waking with many routines due) would otherwise hold the whole cooperative pool.
+        return await withCheckedContinuation { (continuation: CheckedContinuation<Verdict, Never>) in
+            let thread = Thread { continuation.resume(returning: run(precheck, in: folder)) }
+            thread.qualityOfService = .utility
+            thread.start()
+        }
+    }
+
+    /// The blocking part of `check`: runs the process and waits for it. Never call it from the cooperative pool.
+    private static func run(_ precheck: RoutinePrecheck, in folder: URL?) -> Verdict {
+        let process = Process()
+        // `env` resolves a bare program name; the app's own PATH plus the usual user tool dirs (a GUI
+        // app's PATH lacks Homebrew and ~/bin, where helpers like wacli live).
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = precheck.command
+        var environment = ProcessInfo.processInfo.environment
+        let home = environment["HOME"] ?? NSHomeDirectory()
+        environment["PATH"] = [home + "/bin", "/opt/homebrew/bin", "/usr/local/bin",
+                               environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"].joined(separator: ":")
+        process.environment = environment
+        process.currentDirectoryURL = folder
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        let output = OutputBuffer(limit: outputLimit) { process.terminate() }
+        pipe.fileHandleForReading.readabilityHandler = { handle in output.append(handle.availableData) }
+        do { try process.run() } catch { return .run }
+        let deadline = Date.now.addingTimeInterval(timeout)
+        while process.isRunning && Date.now < deadline { usleep(50_000) }
+        if process.isRunning { Self.stop(process) }
+        process.waitUntilExit()
+        // The verdict may still be in flight when the process exits: give the handler a beat, then drain.
+        usleep(100_000)
+        output.append(pipe.fileHandleForReading.availableData)
+        pipe.fileHandleForReading.readabilityHandler = nil
+        return verdict(stdout: output.text, exit: process.terminationStatus)
     }
 
     /// SIGTERM, then SIGKILL after a grace period: a script that traps or ignores TERM would otherwise leave
