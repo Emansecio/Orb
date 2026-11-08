@@ -44,7 +44,9 @@ extension AppModel {
     /// `excluding`: the Orb being renamed, which may keep its own name (or change its case).
     func isOrbNameTaken(_ name: String, excluding: UUID? = nil) -> Bool {
         let wanted = DelegationRules.fold(OrbProposal.clippedName(name))
+        // A group is reached by name from the chat (`orbs ask`): an Orb with that name would shadow it.
         return bots.contains { $0.id != excluding && DelegationRules.fold($0.name) == wanted }
+            || groups.contains { DelegationRules.fold($0.name) == wanted }
     }
 
     /// `name`, or "name 2", "name 3"… when it is taken: for Orbs nobody named by hand (Atlas, a draft), which must not fail.

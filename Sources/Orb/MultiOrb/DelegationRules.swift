@@ -93,6 +93,14 @@ enum DelegationRules {
         return prefixed.count == 1 ? prefixed[0] : nil
     }
 
+    /// A reply above the limit is cut, and the model reading it is told so and by how much (a bare "…" hides the missing part).
+    static func clippedReply(_ text: String) -> String {
+        let limit = DelegationLimits.replyLimit
+        guard text.count > limit else { return text }
+        let note = "\n[Reply cut: first \(limit) of \(text.count) characters shown; ask for the rest if needed.]"
+        return String(text.prefix(limit - note.count)).trimmingCharacters(in: .whitespacesAndNewlines) + note
+    }
+
     static func fold(_ text: String) -> String {
         text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
             .split(whereSeparator: \.isWhitespace).joined(separator: " ")

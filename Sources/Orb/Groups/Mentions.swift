@@ -1,15 +1,17 @@
 import Foundation
 
 /// The @mentions in a message to a group: "@Pesquisador", "@pesquisador" or "@pesq" (a start that fits one member only) call
-/// that member directly, without passing through the orchestrator; "@todos" calls every member. Accents and case do not matter.
+/// that member directly, without passing through the orchestrator; "@todos" calls every member.
+/// Text in `code` is not read, and "@todo", "@all" and "@grupo" (a code marker, English, the group itself) call no one: the
+/// message goes to the orchestrator like any other. Accents and case do not matter.
 /// A start that fits two members, a name nobody has and an "@" inside a word (an e-mail) call no one.
 enum Mentions {
     /// Words that call every member (unless a member is named so).
-    static let everyone: Set<String> = ["todos", "todas", "todo", "all", "everyone", "grupo"]
+    static let everyone: Set<String> = ["todos", "todas", "everyone"]
 
     /// The members the text calls, in the order they are first mentioned ("@todos": the group's order). Empty when no one is.
     static func parse(_ text: String, members: [OrbRef]) -> [UUID] {
-        let chars = Array(text).map(fold)
+        let chars = maskingCode(Array(text)).map(fold)
         let keys = members.map { (id: $0.id, key: Array($0.name.trimmingCharacters(in: .whitespaces)).map(fold)) }
         var called: [UUID] = []
         var index = 0
@@ -44,6 +46,18 @@ enum Mentions {
             if fits.count == 1 { add(fits[0].id) }
         }
         return called
+    }
+
+    /// The characters with whatever sits between a pair of backticks (inline code or a fence) turned into spaces; a backtick
+    /// with no partner masks nothing.
+    private static func maskingCode(_ chars: [Character]) -> [Character] {
+        let ticks = chars.indices.filter { chars[$0] == "`" }
+        guard ticks.count >= 2 else { return chars }
+        var masked = chars
+        for pair in stride(from: 0, to: ticks.count - 1, by: 2) {
+            for i in ticks[pair]...ticks[pair + 1] { masked[i] = " " }
+        }
+        return masked
     }
 
     private static func isWordCharacter(_ c: Character) -> Bool { c.isLetter || c.isNumber || c == "_" || c == "-" }

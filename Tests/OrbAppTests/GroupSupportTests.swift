@@ -34,6 +34,15 @@ struct MentionsTests {
         #expect(Mentions.parse("@todos", members: [atlas, named]) == [named.id])
     }
 
+    @Test func codeMarkersAndTheWordsGrupoAndAllAreNotCalls() {
+        #expect(Mentions.parse("// @todo corrigir", members: team).isEmpty)
+        #expect(Mentions.parse("@all e @grupo", members: team).isEmpty)
+        #expect(Mentions.parse("veja `@pesquisador` no código", members: team).isEmpty)
+        #expect(Mentions.parse("```\n@julia\n```\n@atlas", members: team) == [atlas.id])
+        // A lone backtick masks nothing.
+        #expect(Mentions.parse("` @julia", members: team) == [julia.id])
+    }
+
     @Test func aStartThatFitsOneMemberCallsItButAnAmbiguousOneCallsNoOne() {
         #expect(Mentions.parse("@pesq", members: team) == [pesquisador.id])
         #expect(Mentions.parse("@a", members: team).isEmpty) // Atlas and Ana

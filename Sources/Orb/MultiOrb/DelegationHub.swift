@@ -516,11 +516,13 @@ final class DelegationHub: DelegationService {
     /// the member is the orchestrator itself.
     private func answer(_ request: DelegationRequest, status: OrbEnvelope.ReplyStatus, text: String) {
         let envelope = request.envelope
+        // Answered: the same ask again is a new request, not a repeat to hold back ("the answer arrives on its own").
+        if envelope.kind == .ask { forgetRepeat(request) }
         guard envelope.kind == .ask, envelope.from.id != envelope.to.id || envelope.fromChat, let model, !isShuttingDown,
               model.bot(envelope.from.id) != nil, chainStates[envelope.chainID]?.cancelled != true else { return }
         let name = displayName(of: envelope)
         var reply = OrbEnvelope(chainID: envelope.chainID, kind: .reply, from: OrbRef(id: envelope.to.id, name: name),
-                                to: envelope.from, text: Conversation.clipped(text, to: DelegationLimits.replyLimit),
+                                to: envelope.from, text: DelegationRules.clippedReply(text),
                                 hop: envelope.hop, path: envelope.path, replyTo: envelope.id,
                                 servingRequest: envelope.servingRequest, status: status, groupID: envelope.groupID)
         reply.servingRoutine = envelope.servingRoutine
@@ -1038,9 +1040,11 @@ final class DelegationHub: DelegationService {
                 // Outside a group's turn, a group's name (that no Orb has) is a request to that group.
                 if groupID == nil, let group = group(named: name) {
                     let envelope = try submitToGroup(group, from: botID, text: text, kind: kind, messageID: messageID)
+                    let ignoredFolder = arguments["folder"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
                     return "Pedido enviado ao grupo \(group.name) (id \(envelope.shortID)): \(envelope.to.name) orquestra, o grupo "
                         + "trabalha no fio dele e a resposta final chega sozinha como mensagem; não espere nem repita o pedido. "
                         + "O usuário acompanha na tela do grupo."
+                        + (ignoredFolder ? " Note: folder was ignored; a group works in its own project folder." : "")
                 }
                 // A project folder is for a plain request: a group's turns use the group's own (`OrbGroup.projectFolder`).
                 var folder: String?
@@ -1228,10 +1232,16 @@ final class DelegationHub: DelegationService {
 
     /// The group whose name this is, when no Orb has it.
     private func group(named name: String) -> OrbGroup? {
-        guard let model, DelegationRules.resolve(name, among: model.bots.map(OrbRef.init)) == nil else { return nil }
+        guard let model else { return nil }
         let wanted = DelegationRules.fold(name)
         guard !wanted.isEmpty else { return nil }
-        return model.groups.first { DelegationRules.fold($0.name) == wanted }
+        // An exact group name wins over a prefix of an Orb's ("Vendas" is the group, not "Vendas Sul"); an Orb with exactly
+        // that name wins over the group (the two cannot share a name, but older data may).
+        let group = model.groups.first { DelegationRules.fold($0.name) == wanted }
+        if let orb = DelegationRules.resolve(name, among: model.bots.map(OrbRef.init)) {
+            return DelegationRules.fold(orb.name) == wanted ? nil : group
+        }
+        return group
     }
 
     /// `orbs ask` with the name of a group the Orb is in, from its own chat and in a turn the person started: a new request of
@@ -1295,12 +1305,16 @@ final class DelegationHub: DelegationService {
             }
             lead = orb
         }
+        let objective = arguments["objective"]?.string ?? ""
+        guard objective.count <= MemoryBank.identityMaximumLength else {
+            throw ToolError("objective is too long (\(objective.count) characters; limit \(MemoryBank.identityMaximumLength)). Shorten it.")
+        }
         var project = ""
         if let path = arguments["folder"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty {
             project = try AccessRequest.checkedFolder(path, home: model.homeFolder)
         }
         guard let group = model.createGroup(name: name, members: members.map(\.id), orchestrator: lead.id,
-                                            objective: arguments["objective"]?.string ?? "", projectFolder: project,
+                                            objective: objective, projectFolder: project,
                                             createdBy: botID) else {
             throw DelegationRefusal.groupSetup(.unavailable)
         }

@@ -450,7 +450,7 @@ private final class Hooks: GroupTurnHooks {
         let team = Team { seen in
             switch seen.who {
             case "Pesquisador":
-                if seen.toolResult != nil { return say("Aguardo o Revisor.") }
+                if seen.toolResult != nil || seen.user.contains("<orb_reply") { return say("Aguardo o Revisor.") }
                 return orbsCall("ask", to: "Revisor", "Revise o texto de hoje.")
             case "Revisor":
                 await valve.wait()
@@ -486,7 +486,7 @@ private final class Hooks: GroupTurnHooks {
         let team = Team { seen in
             switch seen.who {
             case "Pesquisador":
-                if seen.toolResult != nil { return say("Aguardo o Revisor.") }
+                if seen.toolResult != nil || seen.user.contains("<orb_reply") { return say("Aguardo o Revisor.") }
                 return orbsCall("ask", to: "Revisor", "Revise o texto de hoje.")
             case "Revisor":
                 await valve.wait()
@@ -515,7 +515,7 @@ private final class Hooks: GroupTurnHooks {
         let team = Team { seen in
             switch seen.who {
             case "Pesquisador":
-                if seen.toolResult != nil { return say("Aguardo o Revisor.") }
+                if seen.toolResult != nil || seen.user.contains("<orb_reply") { return say("Aguardo o Revisor.") }
                 return orbsCall("ask", to: "Revisor", "Revise o texto de hoje.")
             case "Revisor":
                 await valve.wait()
@@ -546,7 +546,7 @@ private final class Hooks: GroupTurnHooks {
                     await busy.wait()
                     return say("Fiz o pedido do Atlas.")
                 }
-                if seen.toolResult != nil { return say("Aguardo o Revisor.") }
+                if seen.toolResult != nil || seen.user.contains("<orb_reply") { return say("Aguardo o Revisor.") }
                 return orbsCall("ask", to: "Revisor", "Revise o texto de hoje.")
             case "Revisor":
                 await valve.wait()
@@ -1038,10 +1038,10 @@ private final class Hooks: GroupTurnHooks {
         let team = Team { seen in
             switch seen.who {
             case "Atlas":
-                if seen.toolResult != nil { return say("Pedi.") }
+                if seen.toolResult != nil || seen.user.contains("<orb_reply") { return say("Pedi.") }
                 return orbsCall("ask", to: "Pesquisador", "Pesquise.")
             case "Pesquisador":
-                if seen.toolResult != nil { return say("Aguardo.") }
+                if seen.toolResult != nil || seen.user.contains("<orb_reply") { return say("Aguardo.") }
                 return orbsCall("ask", to: "Revisor", "Revise.")
             default:
                 await valve.wait()
@@ -1069,10 +1069,10 @@ private final class Hooks: GroupTurnHooks {
         Team { seen in
             switch seen.who {
             case "Atlas":
-                if seen.toolResult != nil { return say("Pedi.") }
+                if seen.toolResult != nil || seen.user.contains("<orb_reply") { return say("Pedi.") }
                 return orbsCall("ask", to: "Pesquisador", "Pesquise.")
             case "Pesquisador":
-                if seen.toolResult != nil { return say("Aguardo.") }
+                if seen.toolResult != nil || seen.user.contains("<orb_reply") { return say("Aguardo.") }
                 return orbsCall("ask", to: "Revisor", "Revise.")
             default:
                 await valve.wait()
@@ -1991,6 +1991,68 @@ private actor Names {
         await valve.open()
         await team.settle()
         #expect(model.groupHub.run(group.id) == nil && model.groupHub.run(other.id) == nil)
+    }
+
+    @Test func anExactGroupNameBeatsAPrefixOfAnOrbsName() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let model = team.model, hub = model.delegation
+        // "Pesq" is a prefix of the Orb "Pesquisador" only: the group of that name is the one asked.
+        _ = try #require(model.createGroup(name: "Pesq", members: [team.atlas.id, team.revisor.id]))
+        model.session(team.pesquisador.id).turnAskedByUser = true
+        do {
+            _ = try await hub.handleTool(.object(["action": .string("ask"), "to": .string("Pesq"), "message": .string("x")]),
+                                         orb: team.pesquisador.id)
+            Issue.record("a group it is not in took the request")
+        } catch { #expect((error as? ToolError)?.message.hasPrefix("Você não faz parte do grupo “Pesq”") == true) }
+        model.session(team.pesquisador.id).turnAskedByUser = false
+    }
+
+    @Test func orbsAndGroupsCannotShareAName() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let model = team.model
+        _ = try #require(model.createGroup(name: "Estúdio", members: [team.atlas.id, team.revisor.id]))
+        #expect(model.isOrbNameTaken("estudio"))
+        #expect(model.isOrbNameTaken("  ESTÚDIO "))
+        #expect(!model.isOrbNameTaken("Estúdio 2"))
+        #expect(model.uniqueOrbName("Estúdio") == "Estúdio 2")
+    }
+
+    @Test func aReplyAboveTheLimitSaysItWasCutAndByHowMuch() {
+        let short = String(repeating: "a", count: DelegationLimits.replyLimit)
+        #expect(DelegationRules.clippedReply(short) == short)
+        let long = String(repeating: "a", count: DelegationLimits.replyLimit + 500)
+        let clipped = DelegationRules.clippedReply(long)
+        #expect(clipped.count <= DelegationLimits.replyLimit)
+        #expect(clipped.contains("Reply cut") && clipped.contains("\(long.count)"))
+    }
+
+    @Test func theSameAskAgainAfterItWasAnsweredIsANewRequest() async throws {
+        let team = Team { _ in say("Pronto.") }
+        defer { team.cleanUp() }
+        let hub = team.model.delegation
+        let first = try hub.submit(from: team.atlas.id, to: "Pesquisador", text: "Pesquise", kind: .ask, messageID: UUID(), groupID: nil)
+        await team.settle()
+        #expect(hub.requests[first.id]?.state == .replied)
+        _ = try hub.submit(from: team.atlas.id, to: "Pesquisador", text: "Pesquise", kind: .ask, messageID: UUID(), groupID: nil)
+        await team.settle()
+    }
+
+    @Test func groupCreateRefusesAnObjectiveTooLong() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let model = team.model, hub = model.delegation
+        model.session(team.atlas.id).turnAskedByUser = true
+        let long = String(repeating: "a", count: MemoryBank.identityMaximumLength + 1)
+        do {
+            _ = try await hub.handleTool(.object(["action": .string("create_group"), "name": .string("Dupla"),
+                                                  "members": .array([.string("Atlas"), .string("Revisor")]),
+                                                  "objective": .string(long)]), orb: team.atlas.id)
+            Issue.record("a too long objective was accepted")
+        } catch { #expect((error as? ToolError)?.message.contains("objective is too long") == true) }
+        #expect(model.groups.isEmpty)
+        model.session(team.atlas.id).turnAskedByUser = false
     }
 
     @Test func aGroupAtWorkTakesTheChatsRequestAndMayHandTheAskerWork() async throws {
