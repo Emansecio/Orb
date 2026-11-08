@@ -589,6 +589,11 @@ final class AppModel {
                     Task { await self.refreshConnections() }
                 }
             }
+            NotificationCenter.default.addObserver(forName: .chatGPTSaveFailed, object: ChatGPTAuth.shared, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.addNotice(StoreNotice(message: "O Orb renovou o login do ChatGPT, mas o Keychain não guardou o novo. Ele funciona até você fechar o Orb; depois será preciso entrar de novo em Ajustes → Modelos."))
+                }
+            }
         }
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {

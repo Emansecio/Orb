@@ -206,9 +206,16 @@ struct ChatGPTAuthTests {
     private final class Disk: @unchecked Sendable {
         private let lock = NSLock()
         private var text: String?
+        var failsSaves = false
         init(_ credential: ChatGPTCredential?) { text = credential.flatMap { try? JSONEncoder().encode($0) }.map { String(decoding: $0, as: UTF8.self) } }
         var storage: ChatGPTAuth.Storage {
-            .init(load: { self.lock.withLock { self.text } }, save: { value in self.lock.withLock { self.text = value.isEmpty ? nil : value } })
+            .init(load: { self.lock.withLock { self.text } }, save: { value in
+                self.lock.withLock {
+                    if self.failsSaves { return false }
+                    self.text = value.isEmpty ? nil : value
+                    return true
+                }
+            })
         }
         var saved: String? { lock.withLock { text } }
     }
@@ -237,6 +244,21 @@ struct ChatGPTAuthTests {
         #expect(disk.saved?.contains("refresh-2") == true)
         #expect(try await auth.accessToken() == "access-2")
         #expect(StubProtocol.sent(to: "auth-expiring.test").count == 1)
+    }
+
+    @Test func aRefreshTheKeychainRefusesKeepsTheNewTokenAndTellsTheApp() async throws {
+        let disk = Disk(credential(expiresIn: 60))
+        disk.failsSaves = true
+        let auth = auth(host: "auth-keychain.test", disk: disk)
+        StubProtocol.queue(host: "auth-keychain.test", [.init(body: Self.tokenReply)])
+        let told = OSAllocatedUnfairLock(initialState: false)
+        let observer = NotificationCenter.default.addObserver(forName: .chatGPTSaveFailed, object: auth, queue: nil) { _ in told.withLock { $0 = true } }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        #expect(try await auth.accessToken() == "access-2")
+        #expect(told.withLock { $0 })
+        // The spent refresh token must not be asked for again: the new one is still in memory.
+        #expect(try await auth.accessToken() == "access-2")
+        #expect(StubProtocol.sent(to: "auth-keychain.test").count == 1)
     }
 
     @Test func concurrentCallersShareOneRefresh() async throws {

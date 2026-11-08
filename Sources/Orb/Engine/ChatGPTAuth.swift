@@ -26,6 +26,8 @@ extension Notification.Name {
     /// Posted when the login was turned down for good (the refresh token was revoked) and removed: the settings
     /// should offer "Entrar" again.
     static let chatGPTSessionEnded = Notification.Name("app.orb.chatgpt.sessionEnded")
+    /// Posted when a renewed login could not be written to the Keychain: it works until the app closes, then it is lost.
+    static let chatGPTSaveFailed = Notification.Name("app.orb.chatgpt.saveFailed")
 }
 
 actor ChatGPTAuth {
@@ -45,11 +47,11 @@ actor ChatGPTAuth {
     /// Where the credential is kept between launches (the Keychain, except in tests).
     struct Storage: Sendable {
         var load: @Sendable () -> String?
-        /// An empty value deletes it.
-        var save: @Sendable (String) -> Void
+        /// An empty value deletes it. False when the Keychain did not keep it.
+        var save: @Sendable (String) -> Bool
 
         static let keychain = Storage(load: { Keychain.get(ChatGPTAuth.keychainAccount) },
-                                      save: { Keychain.set($0, account: ChatGPTAuth.keychainAccount) })
+                                      save: { Keychain.store($0, account: ChatGPTAuth.keychainAccount) })
     }
 
     private let storage: Storage
@@ -86,7 +88,7 @@ actor ChatGPTAuth {
         refreshing?.cancel()
         refreshing = nil
         cached = nil
-        storage.save("")
+        _ = storage.save("")
     }
 
     /// A valid access token, refreshed shortly before it expires. `forceRefresh` is for a token the API just
@@ -129,7 +131,9 @@ actor ChatGPTAuth {
             }
             // Signed out while the token endpoint was answering: keep the credential gone.
             guard generation == started else { throw LLMError.notConfigured }
-            save(fresh)
+            // The new token stays in memory even if the Keychain refuses it (the old refresh token is spent, so dropping
+            // it would end the session now), but the user is told that the login will not survive a restart.
+            if !save(fresh) { NotificationCenter.default.post(name: .chatGPTSaveFailed, object: self) }
             lastRefresh = .now
             return fresh
         }
@@ -147,7 +151,7 @@ actor ChatGPTAuth {
             return
         }
         cached = nil
-        storage.save("")
+        _ = storage.save("")
         NotificationCenter.default.post(name: .chatGPTSessionEnded, object: self)
     }
 
@@ -188,7 +192,10 @@ actor ChatGPTAuth {
             "grant_type": "authorization_code", "client_id": clientID, "code": code,
             "code_verifier": verifier, "redirect_uri": redirect, "resource": Self.resource,
         ], clientID: clientID, previous: nil)
-        save(fresh)
+        guard save(fresh) else {
+            cached = nil // a login that would vanish on reopening is not shown as connected
+            throw ToolError("O login funcionou, mas o Keychain não guardou o acesso. Tente de novo; se continuar, feche e abra o Orb.")
+        }
         return fresh
     }
 
@@ -227,11 +234,11 @@ actor ChatGPTAuth {
             expiresAt: .now.addingTimeInterval(json["expires_in"]?.number ?? 3600), scopes: scopes)
     }
 
-    private func save(_ credential: ChatGPTCredential) {
+    /// Keeps the credential in memory and writes it; false when the write failed.
+    private func save(_ credential: ChatGPTCredential) -> Bool {
         cached = credential
-        if let data = try? JSONEncoder().encode(credential) {
-            storage.save(String(decoding: data, as: UTF8.self))
-        }
+        guard let data = try? JSONEncoder().encode(credential) else { return false }
+        return storage.save(String(decoding: data, as: UTF8.self))
     }
 
     // MARK: Helpers
