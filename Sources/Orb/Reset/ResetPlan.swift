@@ -137,8 +137,10 @@ enum ResetGuard {
     /// Whether the entry `name` of the data folder is the app's own (`state.json`, its set-aside copies, the unsent
     /// drafts and the folders above).
     static func removes(entry name: String) -> Bool {
-        name == "state.json" || name.hasPrefix("state.json.") || name == Store.draftsFileName
-            || name == Store.workJournalFileName || name == Store.inicioJournalFileName || name.hasPrefix(Store.inicioJournalFileName + ".") || ownedFolders.contains(name)
+        // `Store` sets an unreadable file aside as `<name>.corrupt-<date>`: the copy holds the same data and goes with it.
+        name == "state.json" || name.hasPrefix("state.json.")
+            || name == Store.draftsFileName || name.hasPrefix(Store.draftsFileName + ".corrupt-")
+            || name == Store.workJournalFileName || name.hasPrefix(Store.workJournalFileName + ".corrupt-") || name == Store.inicioJournalFileName || name.hasPrefix(Store.inicioJournalFileName + ".") || ownedFolders.contains(name)
     }
 
     /// Preferences that survive a reset: the note of which Keychain accounts were already dealt with, so a key the

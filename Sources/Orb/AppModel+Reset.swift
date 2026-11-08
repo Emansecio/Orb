@@ -1,5 +1,6 @@
 import Foundation
 import os
+import ServiceManagement
 
 // "Redefinir o Orb": the app back to its first use. The sheet asks (`ResetOrbSheet`), `ResetPlan` decides what goes,
 // `AppModel.stopForReset` stops the app, `ResetExecutor` removes the data off the main thread and the app quits and
@@ -27,6 +28,11 @@ struct ResetEnvironment {
     var warn: @MainActor (ResetReport) -> Void = { ResetWarning.present($0) }
     /// The last step: quit (and open the app again).
     var finish: @MainActor () -> Void = { AppRelaunch.finish() }
+    /// Takes "Abrir ao iniciar sessão" off: it lives in the system, not in the preferences, and the sheet says the settings reset.
+    var removeLoginItem: @MainActor () throws -> Void = {
+        let service = SMAppService.mainApp
+        if service.status == .enabled || service.status == .requiresApproval { try service.unregister() }
+    }
 
     static var inert: ResetEnvironment {
         var environment = ResetEnvironment()
@@ -35,6 +41,7 @@ struct ResetEnvironment {
         environment.waitForTurns = .milliseconds(200)
         environment.warn = { _ in }
         environment.finish = {}
+        environment.removeLoginItem = {}
         return environment
     }
 }
@@ -82,13 +89,14 @@ extension AppModel {
         let executor = ResetExecutor(directory: store.directory, vault: secretVault, preferences: environment.preferences,
                                      legacyFolder: environment.legacyFolder)
         let store = store, jobs = jobs
-        let report = await Task.detached(priority: .userInitiated) {
+        var report = await Task.detached(priority: .userInitiated) {
             store.flush() // the write that was running when the folder was sealed is over
             jobs.killAllNow() // the Orbs' background processes, and their logs
             return executor.run(plan)
         }.value
         // Last, and again: a preference an open window wrote meanwhile does not survive the reset.
         environment.preferences.removeAll(keeping: ResetGuard.keepsPreference)
+        do { try environment.removeLoginItem() } catch { report.failures.append("item de login") }
         if !report.isComplete { environment.warn(report) }
         environment.finish()
         return .done(report)

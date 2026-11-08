@@ -483,7 +483,23 @@ import Testing
         model.resetEnvironment.home = root
         model.resetEnvironment.standardFolder = data
         model.resetEnvironment.finish = { finished.raise() }
+        model.resetEnvironment.removeLoginItem = {} // never touch the real login item from a test
         return (model, finished)
+    }
+
+    @Test func copiesSetAsideAsCorruptGoWithTheFileTheyCameFrom() {
+        for base in [Store.workJournalFileName, Store.draftsFileName] {
+            #expect(ResetGuard.removes(entry: base + ".corrupt-20261107-101500"))
+        }
+        #expect(!ResetGuard.removes(entry: Store.workJournalFileName + ".txt"))
+    }
+
+    @Test @MainActor func resettingTheAppTakesTheLoginItemOff() async throws {
+        let (model, _) = try appModel(vault: MemoryVault())
+        let removed = RaisedFlag()
+        model.resetEnvironment.removeLoginItem = { removed.raise() }
+        _ = await model.resetEverything(ResetOptions(memories: .keep, leavesProviders: false))
+        #expect(removed.isRaised)
     }
 
     @Test @MainActor func resettingTheAppStopsItWipesTheDataAndQuits() async throws {
