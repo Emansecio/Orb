@@ -468,7 +468,8 @@ import Testing
         let plan = found.plan()
         #expect(plan.pages.filter { $0.kind == .fato }.count == ImportLimits.facts)
         #expect(plan.pages.filter { $0.kind == .procedimento }.count == ImportLimits.procedures)
-        #expect(plan.skills.count == ImportLimits.skills)
+        #expect(plan.skills.count == ImportLimits.skills && plan.droppedSkills == 4, "the preview says how many were left out")
+        #expect(ImportText.omittedSkills(4).contains("4 skills"))
     }
 
     @Test func aLongIdentityDoesNotTakeThePlacesOfTheCheckedFacts() throws {

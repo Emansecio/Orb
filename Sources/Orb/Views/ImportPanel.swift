@@ -31,6 +31,12 @@ enum ImportText {
         count == 1 ? "1 lembrança passa do limite de 60 e fica de fora." : "\(count) lembranças passam do limite de 60 e ficam de fora."
     }
 
+    /// Skills checked past the limit: each one's summary rides on every request, so only the first ones are written.
+    static func omittedSkills(_ count: Int) -> String {
+        count == 1 ? "1 skill passa do limite de \(ImportLimits.skills) e fica de fora."
+            : "\(count) skills passam do limite de \(ImportLimits.skills) e ficam de fora."
+    }
+
     /// The VoiceOver line once a reading is done.
     static func announcement(_ imported: OrbImport) -> String {
         let counts = imported.plan().summary
@@ -535,6 +541,9 @@ private struct ImportPreview: View, Equatable {
                 // What the limits cut must show here, so the preview says what will be written.
                 let cut = imported.omittedFacts + plan.droppedFacts
                 if cut > 0 { Text(ImportText.omittedFacts(cut)).font(Typography.small).foregroundStyle(Palette.warn) }
+                if plan.droppedSkills > 0 {
+                    Text(ImportText.omittedSkills(plan.droppedSkills)).font(Typography.small).foregroundStyle(Palette.warn)
+                }
                 ForEach(imported.notes, id: \.self) { Text($0).font(Typography.small).foregroundStyle(Palette.warn) }
             }
             if imported.isFreeText {

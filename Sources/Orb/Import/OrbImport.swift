@@ -99,6 +99,8 @@ struct ImportPlan: Equatable, Sendable {
     var skills: [ImportSkill] = []
     /// Checked facts that did not fit in `ImportLimits.facts` and are not written.
     var droppedFacts = 0
+    /// Checked skills past `ImportLimits.skills` (each adds its summary to every request) that are not written.
+    var droppedSkills = 0
 
     var instructionCount: Int { identity.isEmpty ? 0 : 1 }
     var memoryCount: Int { pages.count }
@@ -152,7 +154,9 @@ extension OrbImport {
         plan.droppedFacts = max(0, facts.count - ImportLimits.facts)
         plan.pages = preferences + identityPages + facts.prefix(ImportLimits.facts)
             + procedures.filter(\.isOn).prefix(ImportLimits.procedures).map { .init(kind: .procedimento, title: $0.title, text: $0.text) }
-        plan.skills = Array(skills.filter(\.isOn).prefix(ImportLimits.skills))
+        let checkedSkills = skills.filter(\.isOn)
+        plan.skills = Array(checkedSkills.prefix(ImportLimits.skills))
+        plan.droppedSkills = checkedSkills.count - plan.skills.count
         return plan
     }
 
