@@ -724,6 +724,12 @@ final class DelegationHub: DelegationService {
         return true
     }
 
+    /// A turn of the chain of a waiting pulse used the model: its line shows the whole run's cost.
+    func chargeWaitingPulse(_ runID: UUID, tokens: Int) {
+        guard waitingRoutines[runID]?.pulse != nil else { return }
+        waitingRoutines[runID]?.pulse?.tokens += tokens
+    }
+
     /// A pulse of the Orb waits for answers: no other pulse may begin on it meanwhile.
     func hasWaitingPulse(of botID: UUID) -> Bool { waitingRoutines.values.contains { $0.botID == botID && $0.pulse != nil } }
 
@@ -830,6 +836,12 @@ final class DelegationHub: DelegationService {
             groupHooks?.chainStopped(id, by: reason)
         }
         settleWaitingRoutines()
+    }
+
+    /// The chain still has work: a request open, or an answer not handed yet (a chain over is kept two hours for its repeats).
+    func chainHasWork(_ id: UUID) -> Bool {
+        requests.values.contains { $0.envelope.chainID == id && Self.isOpen($0.state) }
+            || inbox.values.contains { $0.contains { $0.chainID == id } }
     }
 
     /// A conversation of the Orb was deleted: what it asked of other Orbs stops, so the answers do not wake some other
@@ -1613,6 +1625,15 @@ final class DelegationHub: DelegationService {
     // MARK: The pulse's lineage
 
     func pulseRun(ofChain chainID: UUID) -> UUID? { chainStates[chainID]?.origin.pulseRun }
+
+    /// A chain no person began (the pulse's, a routine's run): its turns, the group's and the chat its answers wake, have
+    /// nobody to answer a card.
+    func isUnattended(chain chainID: UUID?) -> Bool {
+        switch chainID.flatMap({ chainStates[$0]?.origin }) {
+        case .pulse?, .routine?: true
+        case .chat?, .group?, nil: false
+        }
+    }
 
     func seedChain(_ chainID: UUID, pulseRun: UUID, originBot: UUID, groupID: UUID?) {
         guard chainStates[chainID] == nil else { return }

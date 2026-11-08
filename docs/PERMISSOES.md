@@ -355,7 +355,9 @@ bloqueando o que ainda não rodou. Chamadas só de leitura do mesmo passo rodam 
   plano mostrou (`ConfirmedEdit`): se o nome levar a outro grupo ou Orb na hora de executar, a mudança é recusada
   (`GroupEdit.changed`). Num turno sem ninguém (`TurnRequest.unattended`: rotina, pedido de outro Orb, pulso) não há cartão: as
   ações `edit_group_later`/`delete_orb_later` gravam uma linha `deletionAsked` no chat do Orb com Apagar e Manter
-  (`AppModel+PendingDeletion.swift`), e só o clique apaga, revalidado pelo id e pelo nome. As outras edições de `group_edit` (adicionar, tirar, orquestrador,
+  (`AppModel+PendingDeletion.swift`), e só o clique apaga, revalidado pelo id e pelo nome (e, para tirar um membro, pelo grupo
+  ainda acabar). Um Manter vale para as rodadas seguintes: o Orb não pede de novo. Turno de grupo e chat acordado por resposta de
+  uma cadeia do pulso ou de rotina também contam como sem ninguém. As outras edições de `group_edit` (adicionar, tirar, orquestrador,
   renomear, objetivo) não pedem cartão, e "Orbs organizam o time" desligado as recusa, assim como `orb_delete`.
 - **Criar sem cartão.** Com "Orbs criam Orbs sem perguntar" (padrão), `orb_propose` cria o Orb na hora, sem cartão e sem limite de
   quantidade (os limites antigos de 5 por criador e 12 no total saíram). A trava é o acesso: o Orb novo nunca passa do modo, das

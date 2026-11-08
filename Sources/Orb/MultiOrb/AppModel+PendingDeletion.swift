@@ -46,34 +46,55 @@ extension AppModel {
     func askDeletionLater(_ ask: DeletionAsk, by botID: UUID, text: String) -> String {
         guard let requester = bot(botID) else { return "This Orb no longer exists." }
         let key = botID.uuidString + "|" + ask.key
-        if isStillAsked(ask, key: key, of: botID) {
+        switch standingAnswer(ask, key: key, of: botID) {
+        case .waiting:
             return "The user was already asked in your chat; nothing was deleted yet. Do not ask again: go on with the rest."
+        case .kept:
+            return "The user already chose to keep it (Manter): nothing was deleted. Do not ask again unless the user asks."
+        case nil:
+            break
         }
         guard let line = appendToChat(.event(ask.event(by: OrbRef(requester), text: text)), of: botID) else {
             return "The user could not be asked now: say in your reply what you would delete and why."
         }
-        askedDeletions[key] = line
+        askedDeletions[key] = (line.chat, line.item, false)
         return "Asked the user in your chat (a line with Apagar and Manter); nothing was deleted. Do not ask again: go on with the rest."
     }
 
-    /// The same ask waits for the person on a line they can still answer. The line is looked at where it is in memory: one
-    /// answered, gone with its conversation or no longer valid (a rename) does not count, and after a relaunch (nothing
-    /// remembered) a pending line in the chat on show still does. A line in a conversation not in memory is trusted.
-    private func isStillAsked(_ ask: DeletionAsk, key: String, of botID: UUID) -> Bool {
+    /// Where an ask stands with the person: a line still waits for the click, or they chose Manter.
+    enum StandingAnswer { case waiting, kept }
+
+    /// The same ask waits for the person on a line they can still answer, or they answered Manter: the runs that ask (a
+    /// routine's, the pulse's) are never handed the chat's lines, so without this every run would ask again. The line is
+    /// looked at where it is in memory: one gone with its conversation, or no longer valid (a rename, the target gone), does
+    /// not count; after a relaunch (nothing remembered) the chat on show is read. A line in a conversation not in memory is trusted.
+    private func standingAnswer(_ ask: DeletionAsk, key: String, of botID: UUID) -> StandingAnswer? {
         if let line = askedDeletions[key] {
-            guard isChat(line.chat, of: botID) else { askedDeletions[key] = nil; return false }
-            guard let chat = loadedChat(line.chat, of: botID) else { return true }
-            if case .event(let event)? = chat.items.first(where: { $0.id == line.item })?.kind, canAnswerDeletion(event) { return true }
+            guard isChat(line.chat, of: botID), stillApplies(ask) else { askedDeletions[key] = nil; return nil }
+            guard let chat = loadedChat(line.chat, of: botID) else { return line.kept ? .kept : .waiting }
+            if case .event(let event)? = chat.items.first(where: { $0.id == line.item })?.kind, let standing = standing(event) {
+                return standing
+            }
             askedDeletions[key] = nil
-            return false
+            return nil
         }
         let chat = latestChat(of: botID)
-        guard let pending = loadedChat(chat, of: botID)?.items.first(where: { item in
-            guard case .event(let event) = item.kind, event.actor?.id == botID, DeletionAsk(event: event)?.key == ask.key else { return false }
-            return canAnswerDeletion(event)
-        }) else { return false }
-        askedDeletions[key] = (chat, pending.id)
-        return true
+        // The newest line about this ask decides: a later ask after a Manter is the one that counts.
+        guard let last = loadedChat(chat, of: botID)?.items.last(where: { item in
+            guard case .event(let event) = item.kind, event.actor?.id == botID,
+                  event.kind == .deletionAsked || event.kind == .deletionAnswered else { return false }
+            return DeletionAsk(event: event)?.key == ask.key
+        }), case .event(let event) = last.kind, let standing = standing(event) else { return nil }
+        askedDeletions[key] = (chat, last.id, standing == .kept)
+        return standing
+    }
+
+    /// What a line of the chat says of its ask: still waiting (and answerable), or kept by the person.
+    private func standing(_ event: OrbEvent) -> StandingAnswer? {
+        if event.kind == .deletionAnswered, event.outcome == .failed {
+            return DeletionAsk(event: event).map(stillApplies) == true ? .kept : nil
+        }
+        return canAnswerDeletion(event) ? .waiting : nil
     }
 
     /// The conversation `chat` of the Orb if it is in memory: the one the turn machinery has, or the one on show parked aside.
@@ -103,7 +124,9 @@ extension AppModel {
         case .orb(let orb): return same(bot(orb.id)?.name, orb.name)
         case .group(let id, let name): return same(group(id)?.name, name)
         case .removeMember(let orb, let id, let name):
-            guard let group = group(id), group.memberIDs.contains(orb.id) else { return false }
+            // The line says the group ends: with a third member come since, taking the Orb out would be another thing.
+            guard let group = group(id), group.memberIDs.contains(orb.id),
+                  group.memberIDs.count <= OrbGroup.memberLimits.lowerBound else { return false }
             return same(group.name, name) && same(bot(orb.id)?.name, orb.name)
         }
     }
@@ -149,7 +172,11 @@ extension AppModel {
         var answered = event
         answered.kind = .deletionAnswered
         answered.outcome = outcome
-        appendToChat(.event(answered), of: botID, in: chat)
-        if let actor = event.actor { askedDeletions[actor.id.uuidString + "|" + ask.key] = nil }
+        let line = appendToChat(.event(answered), of: botID, in: chat)
+        // Manter is remembered, so the Orb's next unattended run is told no instead of asking again.
+        if let actor = event.actor {
+            let key = actor.id.uuidString + "|" + ask.key
+            askedDeletions[key] = outcome == .failed ? line.map { ($0.chat, $0.item, true) } : nil
+        }
     }
 }

@@ -637,7 +637,7 @@ Com **Orbs podem conversar entre si** ligado em Ajustes → Orbs, um Orb pede aj
   Ali o Orb não espera: o chat dele ganha a linha "Atlas pede para apagar o Revisor" com **Apagar** e **Manter**, e o trabalho
   segue. Só o seu clique apaga, e o app confere de novo, pelo próprio Orb ou grupo e pelo nome que a linha mostra: se ele já não
   existe, mudou de nome ou está trabalhando, nada some. A linha guarda o que você decidiu, e o Orb fica sabendo na próxima
-  mensagem, sem pedir de novo.
+  mensagem; depois de um **Manter** ele não pede de novo, nem nas rotinas e pulsos seguintes.
 - **O time no prompt.** O Orb conhece até 12 colegas pelo nome e papel e sabe que há mais (o `orbs list` mostra todos); com
   **Orbs organizam o time** ligado, sabe também o nome dos grupos de que não é membro.
 - **Criar Orbs.** Com **Orbs criam Orbs sem perguntar** ligado (padrão), o Orb novo aparece na hora, sem cartão e sem limite de
@@ -685,8 +685,9 @@ ou grupos, ajusta membros. Se o trabalho não pede nada agora, não diz nada.
   pulso" mostra o motivo. Um Orb ocupado, ou com um pulso esperando resposta, espera a próxima volta.
 - **Plano retomado no chat.** Um plano largado é retomado na própria conversa dele, com o histórico: o chat mostra "Atlas
   retomou sozinho o plano “…”" e o trabalho em seguida, sem bolha sua. Nesse turno o Orb não faz perguntas nem pede acesso
-  (ninguém está olhando); se encontra nada a fazer, a conversa fica como estava. Fechar o app no meio descarta esse turno, como
-  qualquer pulso.
+  (ninguém está olhando); se encontra nada a fazer, a conversa fica como estava. O que você escrever enquanto ele trabalha
+  espera o fim e vai como uma mensagem sua. Fechar o app no meio descarta esse turno, como qualquer pulso, e a demanda volta
+  no pulso seguinte.
 - **Respostas voltam ao pulso.** Quando o pulso pede algo a um colega, a resposta retoma o próprio pulso, não o seu chat, e a
   linha "acordou sozinho" sai só no fim, com o que ele concluiu.
 - **Teto por dia.** O **Teto por dia** (padrão 300 mil tokens, mínimo 10 mil) conta o turno do pulso e tudo o que ele começa:

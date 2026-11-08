@@ -286,7 +286,8 @@ struct ComposerView: View {
         }
         if situation.live.isWorking {
             guard hasContent, model.canQueue(botID) else { return "" }
-            return situation.workingChat == nil ? "↩ envia quando a rotina terminar" : "↩ envia quando a outra conversa terminar"
+            if situation.workingChat != nil { return "↩ envia quando a outra conversa terminar" }
+            return model.runsPulse(botID) ? "↩ envia quando o pulso terminar" : "↩ envia quando a rotina terminar"
         }
         // "Esc cancela" is said once, in the banner above the field, with its button.
         if isEditing { return "↩ envia a edição" }

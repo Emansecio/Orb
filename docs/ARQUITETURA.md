@@ -309,7 +309,11 @@ leva a chamada ao `DelegationHub`. `orbs` (`ask`, `tell`, `list`), `group_create
   Orb, e tirar o membro que desfaz um grupo de dois, passam por `ToolContext.confirm` (`ApprovalGate.confirm`, `onlyPerson`), nunca
   pelo `confirmed` do modelo; o sim leva os ids do plano (`ConfirmedEdit`, `expect_group`/`expect_orb`). Num turno `unattended` o
   `confirm` é nil e a ferramenta usa `*_later`: uma linha `deletionAsked` no chat (`AppModel+PendingDeletion.swift`, `DeletionAsk`),
-  respondida por `answerDeletion`, que vira `deletionAnswered` e chega ao Orb pelo `SinceLastTurn` (`<user_decision>`).
+  respondida por `answerDeletion`, que vira `deletionAnswered` e chega ao Orb pelo `SinceLastTurn` (`<user_decision>`). Como as
+  rodadas que pedem (rotina, pulso) não leem as linhas do chat, um Manter fica em `askedDeletions` (`kept`, e lido do chat na
+  abertura) e o `*_later` seguinte responde "already chose to keep it". `unattended` vale também para todo turno de cadeia que
+  nenhuma pessoa começou (`DelegationHub.isUnattended`: origem `.pulse` ou `.routine`), inclusive o turno de grupo e o chat
+  acordado por uma resposta.
 - **Pulso** (`Pulse.swift`). `pulseTick` roda no agendador: com `pulseIsOn` (`pulseEnabled && orbsActOnOwn`), passado `pulseMinutes`, percorre
   os Orbs em rodízio (`PulseState.lastOrb`), pula o que não tem demanda nova e começa em `beginPulse`. A demanda sai de `Pulse.demands`
   (pura, sem modelo nem disco): plano parado há `planIdle` em qualquer conversa do Orb (`PulseState.plans`, gravado por `notePlan`
@@ -320,7 +324,8 @@ leva a chamada ao `DelegationHub`. `orbs` (`ask`, `tell`, `list`), `group_create
   `PulseState.failures` e entrega após `failureLimit`; `delivered` guarda só chaves cujo trabalho ainda existe (teto 200).
   Com um plano entre as demandas, `beginPulseInChat` roda na conversa dele (`prepareTurn`, `BotSession.pulseInChat`,
   `SendOrigin.pulse`, linha `pulseResumed`, turno `unattended`; no `WorkJournal` só a entrada `.pulse`, descartada na abertura,
-  nunca a tarefa do chat); sem plano, um side run `.pulse`
+  nunca a tarefa do chat; o que a pessoa escreve nesse turno espera por ele, `canSteer` falso, e vira um turno dela; fechar o
+  app no meio não entrega as demandas); sem plano, um side run `.pulse`
   (`BotSession.sideKind`) com o `RoutineBackground` do chat. Pedido feito no side run leva `servingPulse`: `finishPulse` segura o
   run (`DelegationHub.holdPulse`, `waitingRoutines` com `pulse`) e a resposta o retoma (`resumePulse`); sem espera, vai ao chat.
   **Linhagem:** `AppModel.pulseLineage(of:)` é a fonte única de "é trabalho do pulso" (side run, `pulseInChat`, cadeia de origem

@@ -3083,8 +3083,51 @@ private actor Names {
             if case .decision(let event) = source { SinceLastTurn.decision(event) } else { nil }
         }
         #expect(told.count == 2 && told[0].contains("said no") && told[1].contains("said yes"))
-        // Answered, the same ask may be written again.
-        #expect(try await OrbDeleteTool().run(deleteCall("Revisor"), context: context).hasPrefix("Asked the user in your chat"))
+        // Kept: the runs that ask are never handed the chat's lines, so the tool itself says no, and after a relaunch too.
+        #expect(try await OrbDeleteTool().run(deleteCall("Revisor"), context: context).hasPrefix("The user already chose to keep it"))
+        model.askedDeletions = [:]
+        #expect(try await OrbDeleteTool().run(deleteCall("Revisor"), context: context).hasPrefix("The user already chose to keep it"))
+        #expect(deletionLines(team).count == 2, "no new line")
+    }
+
+    @Test func takingOutAMemberNoLongerEndsTheGroupOnceAThirdCame() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let model = team.model
+        let group = newGroup(team)
+        let context = unattendedContext(team)
+        _ = try await GroupEditTool().run(.object(["group": .string("Lançamento"), "edit": .string("remove"),
+                                                   "orb": .string("Pesquisador")]), context: context)
+        let line = try #require(deletionLines(team).first)
+        #expect(model.canAnswerDeletion(line.event))
+        // The line says the group ends: with a third member it would not, so Apagar does nothing.
+        #expect(model.addMember(team.revisor.id, to: group.id))
+        #expect(!model.canAnswerDeletion(line.event))
+        model.answerDeletion(line.event, item: line.item, of: team.atlas.id, accept: true)
+        #expect(model.group(group.id)?.memberIDs.contains(team.pesquisador.id) == true)
+        #expect(deletionLines(team).first?.event.outcome == .attention)
+    }
+
+    @Test func apagarOnABusyOrbSaysSoOnce() async throws {
+        let gate = TestGate()
+        let team = Team { seen in
+            if seen.who == "Revisor" { await gate.wait() }
+            return say("Feito.")
+        }
+        defer { team.cleanUp() }
+        let model = team.model
+        _ = try await OrbDeleteTool().run(deleteCall("Revisor"), context: unattendedContext(team))
+        let line = try #require(deletionLines(team).first)
+        #expect(model.send("Oi", to: team.revisor.id))
+        await waitUntil("the Revisor to work") { model.sessions[team.revisor.id]?.turnTask != nil }
+        model.answerDeletion(line.event, item: line.item, of: team.atlas.id, accept: true)
+        model.answerDeletion(line.event, item: line.item, of: team.atlas.id, accept: true)
+        let busy = (model.session(team.atlas.id).conversation?.items ?? []).filter {
+            if case .notice(let text) = $0.kind { text.contains("está trabalhando agora") } else { false }
+        }
+        #expect(busy.count == 1 && model.bot(team.revisor.id) != nil && deletionLines(team).first?.event.outcome == nil)
+        await gate.open()
+        await waitUntil("the Revisor to finish") { model.sessions[team.revisor.id]?.turnTask == nil }
     }
 
     @Test func aLineNoLongerAppliesAfterARenameOrADeletion() async throws {

@@ -232,7 +232,9 @@ extension AppModel {
     /// conversation you left, `BotSession.workingChatID`).
     func canSteer(_ botID: UUID) -> Bool {
         guard let session = sessions[botID] else { return false }
-        return session.turnTask != nil && session.routineID == nil && session.workingChatID == nil
+        // Nor the pulse's turn in your chat: it began with nobody there (no questions, no cards, paid by the pulse), so
+        // what you write waits for it and starts a turn of yours.
+        return session.turnTask != nil && session.routineID == nil && session.workingChatID == nil && session.pulseInChat == nil
     }
 
     /// Whether a message written now can wait in the queue: while the Orb works on your chat (`canSteer`), and while it runs
@@ -241,7 +243,13 @@ extension AppModel {
     func canQueue(_ botID: UUID) -> Bool {
         if canSteer(botID) { return true }
         guard let session = sessions[botID], session.turnTask != nil else { return false }
-        return session.workingChatID != nil || (session.routineID != nil && (session.sideKind == nil || session.sideKind == .routine || session.sideKind == .pulse))
+        return session.workingChatID != nil || session.pulseInChat != nil || (session.routineID != nil && (session.sideKind == nil || session.sideKind == .routine || session.sideKind == .pulse))
+    }
+
+    /// Whether the pulse holds this Orb: its own run, or its turn in your chat (what you write waits for either).
+    func runsPulse(_ botID: UUID) -> Bool {
+        guard let session = sessions[botID], session.turnTask != nil else { return false }
+        return session.pulseInChat != nil || session.sideKind == .pulse
     }
 
     /// Whether a routine's run holds this Orb (its name may be unknown if the routine was deleted meanwhile).

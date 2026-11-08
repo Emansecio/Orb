@@ -484,12 +484,13 @@ extension BotSession {
         self.routineID = nil
         let pulsedChat = pulseInChat // the pulse's turn in the chat: its line and its demands, as a pulse's own run
         pulseInChat = nil
+        var pulseLeftLine = true // a pulse that answered NOTHING leaves nothing to read: no unread for it
         if routineID == nil, let pulsedChat {
-            model.finishPulse(id, runID: pulsedChat, succeeded: completed, userStopped: userStopped, reply: reply, inChat: turnChat)
+            pulseLeftLine = model.finishPulse(id, runID: pulsedChat, succeeded: completed, userStopped: userStopped, reply: reply, inChat: turnChat)
         }
         if let routineID {
             if kind == .pulse {
-                model.finishPulse(id, runID: routineID, succeeded: completed, userStopped: userStopped, reply: reply)
+                pulseLeftLine = model.finishPulse(id, runID: routineID, succeeded: completed, userStopped: userStopped, reply: reply)
             } else if isOrbRun {
                 model.delegation.finishSideRun(id, runID: routineID, kind: kind ?? .delegation, serving: serving,
                                                succeeded: completed, userStopped: userStopped, reply: reply)
@@ -521,7 +522,7 @@ extension BotSession {
             flash(\.hasFailed, seconds: 2.5)
         }
         // The one who asked is told, not the one who did the work (its unread count goes to the asker when the answer arrives).
-        if !isOrbRun, !waits, model.selection != .bot(id) || !(NSApp?.isActive ?? false) {
+        if !isOrbRun, !waits, pulseLeftLine, model.selection != .bot(id) || !(NSApp?.isActive ?? false) {
             model.setUnread(model.live(id).unread + 1, for: id)
         }
         // The messages of the conversation the turn worked on: `endWorkElsewhere` below puts the one on show in its place.
@@ -533,7 +534,9 @@ extension BotSession {
             scheduleSave(delay: 0) // a routine's was written by `finishRoutineRun`
         }
         if routineID == nil {
-            model.settleSteering(id, succeeded: succeeded) // what you said during the turn, if anything
+            // What you said during the turn, if anything. During the pulse's turn it only waited (`canSteer`): it goes
+            // whatever the run's outcome, unless you stopped it.
+            model.settleSteering(id, succeeded: pulsedChat == nil ? succeeded : !userStopped)
         } else if !isOrbRun {
             // What you wrote while a routine ran waited for it (`canQueue`): it goes now, as the chat is back, whatever the
             // run's outcome. Stopped by you, it comes back to the composer, as a stopped chat turn's queue does.

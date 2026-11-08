@@ -519,9 +519,11 @@ extension AppModel {
         let session = session(botID)
         pulseStarting.insert(botID) // the Orb is held while its conversation is read
         let ready = await prepareTurn(in: chat, of: botID)
+        // The chat on show may be unloaded (an idle Orb not selected): the run's mark and the plan's goal are read from it.
+        if ready, session.isUnloaded { await loadedConversation(botID) }
         pulseStarting.remove(botID)
         guard ready, !isResetting, pulseIsOn, let bot = bot(botID), session.turnTask == nil, session.routineID == nil,
-              session.conversationChat == chat else {
+              session.conversationChat == chat, session.conversation != nil else {
             if ready { session.endWorkElsewhere() }
             return .busy
         }
@@ -532,10 +534,15 @@ extension AppModel {
         session.pulseInChat = runID
         pulseRuns[botID] = PulseRun(id: runID, startedAt: started, reason: demands.first?.line ?? "", keys: demands.map(\.key),
                                     chatMark: mark)
-        appendToChat(.event(OrbEvent(kind: .pulseResumed, actor: OrbRef(bot), detail: goal, runID: runID)), of: botID, in: chat)
+        let line = appendToChat(.event(OrbEvent(kind: .pulseResumed, actor: OrbRef(bot), detail: goal, runID: runID)), of: botID, in: chat)
         guard send(Pulse.prompt(for: demands, inChat: true), to: botID, origin: .pulse) else {
             session.pulseInChat = nil
             pulseRuns[botID] = nil
+            // Nothing ran: the line saying it resumed goes, or every interval would add one to the person's chat.
+            if let line {
+                let item = line.item
+                session.changeChat(line.chat) { $0.items.removeAll { $0.id == item } }
+            }
             if session.workingChatID != nil { session.endWorkElsewhere() }
             return .unusable
         }
@@ -546,7 +553,9 @@ extension AppModel {
 
     /// The pulse turn ended (`BotSession.finishTurn`): its conversation is kept, the chat comes back, and when the pulse did
     /// something the chat and the home page say so. Whatever it asked of other Orbs goes on, and its answers wake the chat.
-    func finishPulse(_ botID: UUID, runID: UUID, succeeded: Bool, userStopped: Bool, reply: String?, inChat chat: UUID? = nil) {
+    /// True when the run left something to read (its line in the chat) or still waits for answers: the Orb's unread counts it.
+    @discardableResult
+    func finishPulse(_ botID: UUID, runID: UUID, succeeded: Bool, userStopped: Bool, reply: String?, inChat chat: UUID? = nil) -> Bool {
         let session = session(botID)
         let own = session.conversation ?? Conversation()
         if chat == nil {
@@ -556,16 +565,17 @@ extension AppModel {
         }
         workJournal.dropPulse(bot: botID)
         let run = pulseRuns.removeValue(forKey: botID)
-        guard let bot = bot(botID), !isResetting else { return }
+        guard let bot = bot(botID), !isResetting else { return false }
         let failed = !succeeded && !userStopped
-        settleDemands(run?.keys ?? [], of: botID, succeeded: !failed)
+        // The app closing stops the turn as a person's stop would: its demands are not done, and wake the next pulse.
+        if !delegation.isShuttingDown { settleDemands(run?.keys ?? [], of: botID, succeeded: !failed) }
         // It asked other Orbs from its own conversation: the run waits for the answers there, and they resume it. (In the chat
         // they come back to the chat, as any answer to it does.)
         if chat == nil, !failed, !userStopped, var waiting = run {
             waiting.keys = []
             if delegation.holdPulse(waiting, of: botID, conversation: own) {
                 savePulseState()
-                return
+                return true
             }
         }
 
@@ -576,7 +586,8 @@ extension AppModel {
         let usedTools = own.items[start...].contains { if case .tool = $0.kind { true } else { false } }
         let said = Pulse.isNothing(reply) ? "" : MemoryText.clip(MemoryText.flatten(reply ?? ""), 200)
         // A failure always leaves its line: the person sees that the pulse tried and why it did not go.
-        if usedTools || !said.isEmpty || failed {
+        let leavesLine = usedTools || !said.isEmpty || failed
+        if leavesLine {
             var thisRun = own
             thisRun.items = Array(own.items[start...]) // the reason of this run, not of an earlier one in the same file
             let summary = failed ? "não deu certo: " + MemoryText.clip(DelegationHub.reason(in: thisRun), 160)
@@ -605,6 +616,7 @@ extension AppModel {
             }
         }
         savePulseState()
+        return leavesLine
     }
 
     /// A pulse that waited for answers that will not come ends here, failed, with `why` (its conversation keeps what it did).
@@ -674,6 +686,8 @@ extension AppModel {
         // The run's own count has the whole chain's turns too (a teammate's, a group's), not only the Orb that pulsed.
         if let owner = pulseRuns.first(where: { $0.value.id == lineage || ($0.key == botID && source == .pulse) })?.key {
             pulseRuns[owner]?.tokens += tokens
+        } else if let lineage {
+            delegation.chargeWaitingPulse(lineage, tokens: tokens) // the run waits for these very answers
         }
         savePulseState()
         if pulseState.tokensToday >= pulseDailyTokens { Task { @MainActor [weak self] in self?.stopPulseWork() } }
@@ -694,8 +708,9 @@ extension AppModel {
             told.insert(wait.botID)
         }
         for (id, chain) in delegation.chainStates where chain.origin.isPulse && !chain.cancelled {
+            // A chain over (kept two hours) is closed quietly: only an Orb whose work was cut gets the line.
+            if delegation.chainHasWork(id) { told.insert(chain.originBot) }
             delegation.cancelChain(id, by: switchedOff ? .pulseOff : .budget)
-            told.insert(chain.originBot)
         }
         // The pulse's own turns, and the chat turns its answers woke (no request holds those, so no chain stops them).
         for (botID, session) in sessions where session.turnTask != nil

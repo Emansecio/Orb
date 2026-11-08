@@ -76,8 +76,9 @@ final class AppModel {
     @ObservationIgnored var pulseTask: Task<Void, Never>?
     @ObservationIgnored var pulseRuns: [UUID: PulseRun] = [:]
     @ObservationIgnored var pulseStarting: Set<UUID> = []
-    /// The deletions an Orb asked in its chat (`askDeletionLater`), by "Orb id|ask key": the line, so the same ask is written once.
-    @ObservationIgnored var askedDeletions: [String: (chat: UUID, item: UUID)] = [:]
+    /// The deletions an Orb asked in its chat (`askDeletionLater`), by "Orb id|ask key": the line, so the same ask is written
+    /// once, or the person's Manter (`kept`), so it is not asked again.
+    @ObservationIgnored var askedDeletions: [String: (chat: UUID, item: UUID, kept: Bool)] = [:]
     /// The clock the pulse's budget counts the day by (tests put their own).
     @ObservationIgnored var pulseNow: () -> Date = { .now }
     /// Routines that came due while their Orb was busy; each runs when the Orb is free. One entry per routine.
@@ -1986,7 +1987,8 @@ final class AppModel {
                                       prompt: TurnPreface.prepend(built.preface, to: message),
                                       client: client, tools: tools, context: context, budget: budget, ledger: ledger,
                                       chunks: chunks, maxSteps: .max, // no limit: the turn runs until the model answers or you stop it (⌘.)
-                                      unattended: (session.routineID != nil && session.sideKind != .group) || session.pulseInChat != nil,
+                                      unattended: (session.routineID != nil && session.sideKind != .group) || session.pulseInChat != nil
+                                          || delegation.isUnattended(chain: session.chain?.chainID ?? session.usageChain),
                                       turnGrants: turnGrants, permissions: permissionSource(for: bot),
                                       images: pictures, requestItem: bubble, supportsImages: sees,
                                       onImagesRejected: { [weak self] in Task { @MainActor in self?.visionRejected.insert(ref.text) } },
