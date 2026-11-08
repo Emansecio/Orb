@@ -9,7 +9,8 @@ extension AppModel {
         return OrbCreationSupport(
             creator: bot, existingNames: bots.map(\.name),
             withoutCard: orbsCreateWithoutAsking,
-            roles: Dictionary(bots.map { ($0.name, $0.role) }, uniquingKeysWith: { first, _ in first }),
+            // Not the creator's own: it cannot ask itself, and a second Orb like it is a choice it may make.
+            roles: Dictionary(bots.filter { $0.id != creatorID }.map { ($0.name, $0.role) }, uniquingKeysWith: { first, _ in first }),
             create: { [weak self] approvalID, proposal in
                 guard let self else { return .failed("O app está fechando.") }
                 return await self.createProposedOrb(proposal, approvalID: approvalID, by: creatorID)

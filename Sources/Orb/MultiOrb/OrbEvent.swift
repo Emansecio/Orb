@@ -23,8 +23,9 @@ struct OrbEvent: Codable, Equatable, Sendable {
     enum Outcome: String, Codable, Sendable {
         case finished, failed, attention, goalReached
 
-        /// One from a newer version reads as finished instead of losing the line.
-        init(from decoder: Decoder) throws { self = try decoder.rawValue(Self.self, fallback: .finished) }
+        /// One from a newer version reads as attention instead of losing the line: never as finished, which on a deletion's
+        /// line would say something was deleted.
+        init(from decoder: Decoder) throws { self = try decoder.rawValue(Self.self, fallback: .attention) }
     }
 
     /// The `detail` of a `groupStopped` the pulse's daily budget caused; without it the person stopped the group.
@@ -86,7 +87,8 @@ struct OrbEvent: Codable, Equatable, Sendable {
         case .groupRunDone:
             return "Pedido concluído: \(detail)"
         case .groupStopped:
-            return detail == Self.budgetStop ? "O teto diário do pulso parou o grupo" : "Você parou o grupo"
+            return detail == Self.budgetStop ? "O teto diário do pulso parou o grupo"
+                : detail == Self.pulseOff ? "O pulso foi desligado e parou o grupo" : "Você parou o grupo"
         case .delegationReceived:
             return "\(actorName) pediu ajuda \(PortugueseArticle.contraction(for: subjectName)) \(subjectName)"
         case .routineRun:

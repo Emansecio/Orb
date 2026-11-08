@@ -260,7 +260,7 @@ enum OrbsPrompt {
             return role.isEmpty ? "- \(teammate.name)" : "- \(teammate.name): \(role)"
         }
         // The rest are named by orbs list: without this line the Orb would think the team ends here and create a duplicate.
-        if everyone.count > teammates.count { lines.append("- and \(everyone.count - teammates.count) more: orbs list shows them all") }
+        if everyone.count > teammates.count { lines.append("- and \(everyone.count - teammates.count) more: orbs list shows more") }
         return """
         ## Teammates
         \(isGroup ? "Other members of this group:" : "Other Orbs on this Mac, the user's team:")

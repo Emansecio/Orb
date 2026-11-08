@@ -270,7 +270,7 @@ private final class PulseWorld {
         }
         let failed = RoutineRun(date: now.addingTimeInterval(-60), succeeded: false, summary: "Deu erro")
         let found = demands(routines: [routine(failed)])
-        #expect(found.count == 1 && found[0].key.hasPrefix("routine:") && found[0].key.contains(failed.id.uuidString))
+        #expect(found.count == 1 && found[0].key.hasPrefix("routine:") && found[0].key.contains(":kept:"))
         #expect(demands(routines: [routine(failed, bot: other)]).isEmpty && demands(routines: [routine(failed, enabled: false)]).isEmpty)
         let stopped = RoutineRun(date: now, succeeded: false, summary: BotSession.stoppedNotice)
         let ok = RoutineRun(date: now, succeeded: true, summary: "Tudo certo")
@@ -896,6 +896,8 @@ private final class PulseWorld {
         #expect(model.pulseState.tokensToday == 1_000 && model.sessions[atlas]?.pulseInChat == nil)
         #expect(!model.workJournal.entries.contains { $0.botID == atlas }, "a quit drops it, as any pulse")
         #expect(model.pulseState.delivered[atlas.uuidString]?.count == 1)
+        // Its session summary would call a model once nobody pays for it: the person's next turn does it.
+        #expect(model.sessions[atlas]?.memoryIdle == nil)
     }
 
     @Test func anAnswerToThePulsesAskResumesThePulseNotTheChat() async throws {
@@ -975,7 +977,7 @@ private final class PulseWorld {
         let me = Bot(name: "Atlas", role: "", orb: OrbConfig())
         let team = (0..<14).map { Bot(name: "Orb \($0)", role: "Papel", orb: OrbConfig()) }
         let section = OrbsPrompt.section(for: me, roster: [me] + team)
-        #expect(section.contains("- Orb 11: Papel") && !section.contains("- Orb 12") && section.contains("- and 2 more: orbs list shows them all"))
+        #expect(section.contains("- Orb 11: Papel") && !section.contains("- Orb 12") && section.contains("- and 2 more: orbs list shows more"))
         #expect(!OrbsPrompt.section(for: me, roster: Array(team.prefix(3))).contains("more:"))
 
         let mine = OrbsPrompt.GroupLine(name: "Vendas", orchestrator: "Atlas", youOrchestrate: true, others: ["Lia"])
@@ -992,6 +994,154 @@ private final class PulseWorld {
         support.roles = ["Revisor": "Confere o trabalho", "Atlas": ""]
         #expect(support.sameRole(as: "  confere o TRABALHO ") == "Revisor")
         #expect(support.sameRole(as: "Escreve textos") == nil && support.sameRole(as: "") == nil)
+    }
+}
+
+// MARK: What the review of the autonomy found
+
+@Suite @MainActor struct PulseReviewTests {
+    private static func nothing(_ who: String, _ user: String, _ result: String?) async -> [LLMEvent] { say("NOTHING") }
+
+    @Test func aRoutineFailingLongerThanItsKeptRunsStaysOneDemand() {
+        let me = UUID(), now = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        var routine = Routine(name: "Faturas", botID: me, prompt: "x", schedule: .everyHours(1))
+        func run(_ hoursAgo: Int) -> RoutineRun {
+            RoutineRun(date: now.addingTimeInterval(Double(-hoursAgo) * 3_600), succeeded: false, summary: "Erro \(hoursAgo)")
+        }
+        func key() -> String? {
+            Pulse.demands(for: me, plans: [], routines: [routine], requests: [], groups: [], pulseChains: [], now: now).first?.key
+        }
+        routine.runs = (0..<Routine.keptRuns).map(run)
+        let full = key()
+        // One more failure; the oldest is dropped as the app keeps only the newest.
+        routine.runs = Array(([run(0)] + (1...Routine.keptRuns).map(run)).prefix(Routine.keptRuns))
+        #expect(full != nil && key() == full)
+    }
+
+    @Test func aDeletedOrbLeavesNothingOfItsPulseBehind() async throws {
+        let gate = TestGate()
+        let world = PulseWorld(names: ["Atlas", "Revisor"]) { _, _, _ in
+            await gate.wait()
+            return say("Feito.")
+        }
+        defer { world.cleanUp() }
+        let model = world.model, atlas = world.bot("Atlas").id
+        await world.startInterval()
+        await model.pulseTick(now: world.at(minutes: 61))
+        await waitUntil("the pulse to run") { model.sessions[atlas]?.turnTask != nil }
+        _ = model.deleteBot(atlas)
+        await gate.open()
+        await world.settle()
+        let id = atlas.uuidString
+        #expect(model.pulseState.delivered[id] == nil && model.pulseState.plans[id] == nil && model.pulseState.notices[id] == nil)
+        #expect(!model.pulseState.failures.keys.contains { $0.hasPrefix(id) })
+    }
+
+    @Test func aRunStoppedByTheBudgetLeavesItsDemandForLater() async throws {
+        let world = PulseWorld(names: ["Atlas", "Revisor"], tokens: 400_000) { who, _, _ in say(who == "Atlas" ? "Feito." : "NOTHING") }
+        defer { world.cleanUp() }
+        let model = world.model, atlas = world.bot("Atlas").id
+        await world.startInterval()
+        await model.pulseTick(now: world.at(minutes: 61))
+        await world.settle()
+        #expect(model.pulseState.tokensToday >= model.pulseDailyTokens)
+        #expect(model.pulseState.delivered[atlas.uuidString] == nil, "the app stopped it: the work is still to do")
+    }
+
+    @Test func aWaitingPulseStoppedBySwitchingOffSaysSo() async throws {
+        let gate = TestGate()
+        let world = PulseWorld(names: ["Atlas", "Revisor"], demand: false) { who, user, result in
+            if who == "Revisor" { await gate.wait(); return say("Conferido.") }
+            return result == nil ? ask("Revisor", "Confira.") : say("Pedi.")
+        }
+        defer { world.cleanUp() }
+        let model = world.model, atlas = world.bot("Atlas").id
+        var routine = Routine(name: "Faturas", botID: atlas, prompt: "x", schedule: .everyHours(4))
+        routine.runs = [RoutineRun(date: world.t0.addingTimeInterval(-3_600), succeeded: false, summary: "Sem acesso")]
+        model.routines = [routine]
+        await world.startInterval()
+        await model.pulseTick(now: world.at(minutes: 61))
+        await waitUntil("the pulse to wait") { model.delegation.hasWaitingPulse(of: atlas) }
+        model.orbsActOnOwn = false
+        defer { model.orbsActOnOwn = true }
+        await gate.open()
+        await world.settle()
+        let line = try #require(world.events("Atlas").first { $0.kind == .pulseRan })
+        #expect(line.outcome == .failed && line.note == "não deu certo: " + AppModel.pulseOffNotice)
+        #expect(!model.delegation.hasWaitingPulse(of: atlas))
+        #expect(world.events("Atlas").contains { $0.kind == .pulseStopped && $0.detail == OrbEvent.pulseOff })
+    }
+
+    @Test func aNothingInTheChatKeepsANoticeThatLandedAndHandsTheContextAgain() async throws {
+        let gate = TestGate()
+        let world = PulseWorld(names: ["Atlas", "Revisor"], demand: false) { who, _, _ in
+            if who == "Atlas" { await gate.wait() }
+            return say("NOTHING")
+        }
+        defer { world.cleanUp() }
+        let model = world.model, atlas = world.bot("Atlas").id
+        world.plant("Atlas", tag: 0)
+        let handed = world.t0.addingTimeInterval(-7_200)
+        model.session(atlas).conversation?.contextHandedAt = handed
+        await world.startInterval()
+        await model.pulseTick(now: world.at(minutes: 61))
+        await waitUntil("the pulse to run in the chat") { model.sessions[atlas]?.pulseInChat != nil }
+        _ = try await model.delegation.handleTool(.object(["action": .string("tell"), "to": .string("Atlas"),
+                                                           "message": .string("Chegou o contrato.")]), orb: world.bot("Revisor").id)
+        await gate.open()
+        await world.settle()
+        let chat = model.transcript(atlas)
+        #expect(chat.contains { if case .orbMessage(let message) = $0.kind { message.text == "Chegou o contrato." } else { false } })
+
+        // Alone, the NOTHING goes and the chat is handed what it had not seen, as before the run.
+        let quiet = PulseWorld(names: ["Atlas", "Revisor"], demand: false, rule: Self.nothing)
+        defer { quiet.cleanUp() }
+        let other = quiet.bot("Atlas").id
+        quiet.plant("Atlas", tag: 0)
+        quiet.model.session(other).conversation?.contextHandedAt = handed
+        await quiet.startInterval()
+        await quiet.model.pulseTick(now: quiet.at(minutes: 61))
+        await quiet.settle()
+        #expect(quiet.model.session(other).conversation?.contextHandedAt == handed)
+        #expect(quiet.events("Atlas").isEmpty)
+    }
+
+    @Test func thePersonsMessageToAGroupThePulseStartedIsTheirs() {
+        let world = PulseWorld(names: ["Atlas", "Revisor"], demand: false, rule: Self.nothing)
+        defer { world.cleanUp() }
+        let model = world.model, hub = model.delegation
+        let group = try! #require(model.createGroup(name: "Time", members: [world.bot("Atlas").id, world.bot("Revisor").id]))
+        let chain = UUID()
+        hub.seedChain(chain, pulseRun: UUID(), originBot: world.bot("Atlas").id, groupID: group.id)
+        model.pulseState.tokensToday = model.pulseDailyTokens // the budget is spent
+        let request = hub.submitGroupTurn(member: world.bot("Revisor").id, text: "Oi, time.",
+                                          chain: ChainContext(chainID: chain, hop: 0, path: [], groupID: group.id, serving: nil),
+                                          groupID: group.id, askedBy: nil)
+        #expect(request.state == .queued && request.envelope.pulseRun == nil)
+        #expect(hub.pulseRun(ofChain: chain) == nil, "from here the group's work is the person's")
+        hub.cancelChain(chain, by: .user)
+    }
+
+    @Test func aToolCallOfAStoppedTurnIsRefused() async {
+        let world = PulseWorld(names: ["Atlas", "Revisor"], demand: false, rule: Self.nothing)
+        defer { world.cleanUp() }
+        await #expect(throws: ToolError.self) {
+            _ = try await world.model.delegation.handleTool(.object(["action": .string("list")]), orb: world.bot("Atlas").id, turn: UUID())
+        }
+    }
+
+    @Test func anOrbMayProposeOneLikeItselfButNotLikeATeammate() {
+        let world = PulseWorld(names: ["Atlas", "Revisor"], demand: false, rule: Self.nothing)
+        defer { world.cleanUp() }
+        let model = world.model
+        model.update(world.bot("Atlas").id) { $0.role = "Confere o trabalho" }
+        let support = model.orbCreationSupport(for: model.bot(world.bot("Atlas").id)!)
+        #expect(support.sameRole(as: "confere o trabalho") == nil, "its own role: it cannot ask itself")
+        #expect(support.sameRole(as: "Papel de Revisor") == "Revisor")
+    }
+
+    @Test func aGroupStoppedBySwitchingThePulseOffSaysSo() {
+        #expect(OrbEvent(kind: .groupStopped, detail: OrbEvent.pulseOff).sentence == "O pulso foi desligado e parou o grupo")
     }
 }
 

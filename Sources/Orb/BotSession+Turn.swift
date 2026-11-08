@@ -301,7 +301,7 @@ extension BotSession {
                     pendingContextCursor = nil
                     conversation?.contextHandedAt = cursor
                     // The notices were handed to the chat: they no longer wait for the pulse.
-                    if let chat = conversationChat { model.forgetPulseNotices(of: id, chat: chat) }
+                    if let chat = conversationChat { model.forgetPulseNotices(of: id, chat: chat, upTo: cursor) }
                 }
             }
             scheduleSave(delay: Self.streamingSaveInterval)
@@ -459,7 +459,8 @@ extension BotSession {
             if compacted {
                 if model.delegation.isShuttingDown { keepNotes(notes) } else { saveMemory(notes: notes) }
             }
-            scheduleMemorySave()
+            // Its summary calls a model once nobody pays for it (the turn's lineage is gone by then): the person's next turn does it.
+            if !paidByPulse { scheduleMemorySave() }
             if succeeded, !paidByPulse { model.writeStretchNote(of: id) }
         }
         let bank = model.memory.bank(for: botID)

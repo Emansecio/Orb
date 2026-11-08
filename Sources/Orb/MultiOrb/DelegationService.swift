@@ -7,6 +7,8 @@ enum CancelReason: String, Sendable, Equatable {
     case gaveUp
     /// The pulse's daily token budget ran out while the chain worked (`AppModel.stopPulseWork`).
     case budget
+    /// The pulse, or "Orbs agem por conta própria", was switched off while the chain worked (`AppModel.stopPulseWork`).
+    case pulseOff
 }
 
 /// What the app offers Orbs that ask each other for work. `DelegationHub` implements it; `FakeDelegationService` (tests) is the stand-in.

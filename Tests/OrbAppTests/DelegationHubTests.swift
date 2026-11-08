@@ -3103,4 +3103,33 @@ private actor Names {
         #expect(deletionLines(team).first?.event.outcome == .attention)
         #expect(deletionLines(team, .deletionAnswered).first?.event.sentence == "O pedido de Atlas para apagar o Revisor não vale mais")
     }
+
+    @Test func anAskWhoseLineNoLongerAppliesMayBeMadeAgainAndOneStillPendingIsFoundAfterARelaunch() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let model = team.model
+        let context = unattendedContext(team)
+        _ = try await OrbDeleteTool().run(deleteCall("Revisor"), context: context)
+        // Renamed: the line names a Revisor that is not there, so it cannot be answered; asking again writes a new one.
+        model.update(team.revisor.id) { $0.name = "Revisor Velho" }
+        #expect(try await OrbDeleteTool().run(deleteCall("Revisor Velho"), context: context).hasPrefix("Asked the user in your chat"))
+        #expect(deletionLines(team).count == 2)
+        // The app reopened (nothing remembered): the pending line in the chat is still found.
+        model.askedDeletions = [:]
+        #expect(try await OrbDeleteTool().run(deleteCall("Revisor Velho"), context: context).hasPrefix("The user was already asked"))
+        #expect(deletionLines(team).count == 2)
+    }
+
+    @Test func idsTheModelSendsItselfAreDroppedAndTheCardsOnesGoBack() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let model = team.model
+        let group = newGroup(team)
+        let other = try #require(model.createGroup(name: "Outro", members: [team.atlas.id, team.revisor.id]))
+        let context = deleteContext(team) { _, _ in true }
+        let forged = JSONValue.object(["group": .string("Lançamento"), "edit": .string("delete"),
+                                       "expect_group": .string(other.id.uuidString), "confirmed": .bool(true)])
+        #expect(try await GroupEditTool().run(forged, context: context).hasPrefix("Grupo Lançamento apagado"))
+        #expect(model.group(group.id) == nil && model.group(other.id) != nil)
+    }
 }

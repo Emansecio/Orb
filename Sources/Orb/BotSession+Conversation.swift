@@ -345,6 +345,7 @@ extension BotSession {
             persistStretch(Array(chat.items[saved...]), summarize: true)
             chat.memorySavedCount = chat.items.count
         }
+        model?.notePlan(chat, chat: chatID, of: id) // a plan changed just before you left must not wake the pulse as it was
         model?.store.save(chat, for: id, chat: chatID)
     }
 

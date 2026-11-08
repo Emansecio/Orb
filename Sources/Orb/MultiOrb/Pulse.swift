@@ -120,11 +120,12 @@ struct PulseRun: Equatable {
     var keys: [String] = []
     /// In the chat (`beginPulseInChat`): how many items and messages it had before the run, to take the run out again when
     /// it found nothing to do.
-    var chatMark: (items: Int, messages: Int)?
+    var chatMark: (items: Int, messages: Int, handedAt: Date?)?
 
     static func == (a: PulseRun, b: PulseRun) -> Bool {
         a.id == b.id && a.startedAt == b.startedAt && a.tokens == b.tokens && a.reason == b.reason && a.keys == b.keys
             && a.chatMark?.items == b.chatMark?.items && a.chatMark?.messages == b.chatMark?.messages
+            && a.chatMark?.handedAt == b.chatMark?.handedAt
     }
 }
 
@@ -207,11 +208,13 @@ enum Pulse {
         for routine in routines where routine.botID == botID && routine.isEnabled {
             guard let run = routine.runs.first, now.timeIntervalSince(run.date) <= runFreshness, let trouble = trouble(run) else { continue }
             let streak = routine.runs.prefix { Self.trouble($0)?.kind == trouble.kind }
-            let first = streak.last?.id ?? run.id
+            // A streak as long as the runs kept has lost its start (`Routine.keptRuns`): a fixed mark, or every new run
+            // would drop the oldest and make the same trouble new work again.
+            let first = streak.count == routine.runs.count ? "kept" : (streak.last?.id ?? run.id).uuidString
             let words = hash(trouble.text.filter { !$0.isNumber })
             let why = trouble.kind == "failed" ? "failed: " + clip(trouble.text, 100)
                 : "needs attention" + (trouble.text.isEmpty ? "" : ": " + clip(trouble.text, 100))
-            found.append(PulseDemand(key: "routine:\(routine.id.uuidString):\(first.uuidString):\(words)",
+            found.append(PulseDemand(key: "routine:\(routine.id.uuidString):\(first):\(words)",
                                      line: "Routine \"\(clip(routine.name, 40))\" \(why)."))
         }
         for notice in notices where now.timeIntervalSince(notice.at) >= noticeIdle {
@@ -427,14 +430,15 @@ extension AppModel {
         savePulseState()
     }
 
-    /// Notices that no longer wait: the chat's turn was handed them (`chat`), their chain was stopped (`chain` too), or their
-    /// conversation is gone.
-    func forgetPulseNotices(of botID: UUID, chat: UUID? = nil, chain: UUID? = nil) {
+    /// Notices that no longer wait: the chat's turn was handed them (`chat`, those up to `upTo`), their chain was stopped
+    /// (`chain` too), or their conversation is gone.
+    func forgetPulseNotices(of botID: UUID, chat: UUID? = nil, chain: UUID? = nil, upTo: Date? = nil) {
         let id = botID.uuidString
         guard let notices = pulseState.notices[id] else { return }
         let left = notices.filter { notice in
             if let chat, notice.chat != chat { return true }
             if let chain, notice.chain != chain { return true }
+            if let upTo, notice.at > upTo { return true } // landed after the turn's cut: the next turn is handed it
             return false
         }
         guard left != notices else { return }
@@ -523,7 +527,8 @@ extension AppModel {
         }
         let runID = UUID(), started = Date.now
         let goal = session.conversation?.activePlan.map { Pulse.clip($0.goal, 80) } ?? ""
-        let mark = (items: session.conversation?.items.count ?? 0, messages: session.conversation?.messages.count ?? 0)
+        let mark = (items: session.conversation?.items.count ?? 0, messages: session.conversation?.messages.count ?? 0,
+                    handedAt: session.conversation?.contextHandedAt)
         session.pulseInChat = runID
         pulseRuns[botID] = PulseRun(id: runID, startedAt: started, reason: demands.first?.line ?? "", keys: demands.map(\.key),
                                     chatMark: mark)
@@ -581,13 +586,22 @@ extension AppModel {
             // Nothing to do after all: the chat keeps no trace of the run (its line, the NOTHING), as the pulse's own
             // conversation would. Only what the run added at the end goes; a fold during the run leaves the messages.
             session.changeConversation { conversation in
-                // What the person wrote meanwhile stays, and with it the whole run.
+                // Only the run's own lines go: anything else that landed meanwhile (what the person wrote, another Orb's
+                // notice, an event) keeps the whole run, or it would be lost with it.
                 guard conversation.items.count >= mark.items,
-                      !conversation.items[mark.items...].contains(where: { if case .user = $0.kind { true } else { false } }) else { return }
+                      conversation.items[mark.items...].allSatisfy({ item in
+                          switch item.kind {
+                          case .bot, .tool: true
+                          case .event(let event): event.kind == .pulseResumed && event.runID == runID
+                          default: false
+                          }
+                      }) else { return }
                 conversation.items.removeSubrange(mark.items...)
                 if conversation.messages.count >= mark.messages, (conversation.summaryCoveredCount ?? 0) <= mark.messages {
                     conversation.messages.removeSubrange(mark.messages...)
                 }
+                // What happened since the last turn was handed to the run that is gone: the next turn is handed it again.
+                conversation.contextHandedAt = mark.handedAt
             }
         }
         savePulseState()
@@ -657,7 +671,10 @@ extension AppModel {
         guard source == .pulse || lineage != nil else { return }
         pulseState.roll(to: pulseNow())
         pulseState.tokensToday += tokens
-        if let run = pulseRuns[botID], source == .pulse || lineage == run.id { pulseRuns[botID]?.tokens += tokens }
+        // The run's own count has the whole chain's turns too (a teammate's, a group's), not only the Orb that pulsed.
+        if let owner = pulseRuns.first(where: { $0.value.id == lineage || ($0.key == botID && source == .pulse) })?.key {
+            pulseRuns[owner]?.tokens += tokens
+        }
         savePulseState()
         if pulseState.tokensToday >= pulseDailyTokens { Task { @MainActor [weak self] in self?.stopPulseWork() } }
     }
@@ -668,19 +685,23 @@ extension AppModel {
     func stopPulseWork(switchedOff: Bool = false) {
         guard switchedOff || pulseState.tokensToday >= pulseDailyTokens else { return }
         var told: Set<UUID> = []
-        for (id, chain) in delegation.chainStates where chain.origin.isPulse && !chain.cancelled {
-            delegation.cancelChain(id, by: switchedOff ? .user : .budget)
-            told.insert(chain.originBot)
-        }
         let why = switchedOff ? Self.pulseOffNotice : Self.pulseCappedNotice
+        // First the pulses that wait, with the real reason: stopping their chains below would close them as "the answer did not come".
         for (runID, wait) in delegation.waitingRoutines {
             guard let run = wait.pulse else { continue }
             delegation.forgetWaitingRoutine(runID)
             closePulseWait(run, of: wait.botID, conversation: wait.conversation, why: why)
+            told.insert(wait.botID)
+        }
+        for (id, chain) in delegation.chainStates where chain.origin.isPulse && !chain.cancelled {
+            delegation.cancelChain(id, by: switchedOff ? .pulseOff : .budget)
+            told.insert(chain.originBot)
         }
         // The pulse's own turns, and the chat turns its answers woke (no request holds those, so no chain stops them).
         for (botID, session) in sessions where session.turnTask != nil
             && (session.sideKind == .pulse || (session.routineID == nil && pulseLineage(of: botID) != nil)) {
+            // Stopped by the app, not by the person: its demands are neither done nor failed, and wake a later pulse.
+            pulseRuns[botID]?.keys = []
             session.stop(startsQueuedRoutines: true, notice: why)
             told.insert(botID)
         }

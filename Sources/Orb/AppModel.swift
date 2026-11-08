@@ -76,8 +76,8 @@ final class AppModel {
     @ObservationIgnored var pulseTask: Task<Void, Never>?
     @ObservationIgnored var pulseRuns: [UUID: PulseRun] = [:]
     @ObservationIgnored var pulseStarting: Set<UUID> = []
-    /// The deletions Orbs asked for in the chat and the person has not answered ("requester|target", `askDeletionLater`).
-    @ObservationIgnored var askedDeletions: Set<String> = []
+    /// The deletions an Orb asked in its chat (`askDeletionLater`), by "Orb id|ask key": the line, so the same ask is written once.
+    @ObservationIgnored var askedDeletions: [String: (chat: UUID, item: UUID)] = [:]
     /// The clock the pulse's budget counts the day by (tests put their own).
     @ObservationIgnored var pulseNow: () -> Date = { .now }
     /// Routines that came due while their Orb was busy; each runs when the Orb is free. One entry per routine.
@@ -1396,7 +1396,6 @@ final class AppModel {
         for id in ownRoutines { unsavedRoutineConversations[id] = nil } // or `saveNow` writes the deleted Orb's folder back
         routines.removeAll { $0.botID == botID }
         delegation.orbDeleted(botID) // before the stop: whoever waited for this Orb is told, and what it asked is dropped
-        forgetPulse(of: botID)
         stop(botID)
         let jobs = jobs
         Task { await jobs.forget(botID: botID) }
@@ -1442,6 +1441,8 @@ final class AppModel {
         for chat in chatIDs { chatDrafts[chat] = nil }
         leaveGroups(botID, name: name) // MultiOrb (WP5): before the Orb is gone, so the groups can say who left
         bots.removeAll { $0.id == botID } // `normalizeSkills` takes it out of the skills' scopes
+        forgetPulse(of: botID) // after the stop: a pulse it was running settles its demands as it ends
+        forgetAskedDeletions(of: botID)
         // A connector scoped to this Orb keeps its (maybe now empty) scope, like one with no Orb picked.
         for index in connectors.indices where connectors[index].orbIDs?.contains(botID) == true { connectors[index].orbIDs?.remove(botID) }
         forgetInicio { $0.botID == botID }

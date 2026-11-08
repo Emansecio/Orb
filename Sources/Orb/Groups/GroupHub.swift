@@ -359,7 +359,7 @@ final class GroupHub: GroupTurnHooks {
             if ownsTurn { model.session(member).stop(startsQueuedRoutines: false) }
         }
         if writesEvent {
-            model.groupSession(groupID)?.append(.event(OrbEvent(kind: .groupStopped, detail: reason == .budget ? OrbEvent.budgetStop : nil, chainID: run.id, groupID: groupID)))
+            model.groupSession(groupID)?.append(.event(OrbEvent(kind: .groupStopped, detail: reason == .budget ? OrbEvent.budgetStop : reason == .pulseOff ? OrbEvent.pulseOff : nil, chainID: run.id, groupID: groupID)))
         }
         // Same rule as a finished request: what is merged goes, the rest stays and is reported. A group already taken out of
         // the list (dissolved) is passed in, because its project folder is no longer readable from the model.

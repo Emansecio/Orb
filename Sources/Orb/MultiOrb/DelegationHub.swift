@@ -245,6 +245,8 @@ final class DelegationHub: DelegationService {
         let lineage = askedBy.flatMap { model.pulseLineage(of: $0) }
         var chain = chainStates[context.chainID] ?? ChainState(origin: lineage.map { .pulse($0) } ?? .group(context.chainID),
                                                                originBot: askedBy ?? member, groupID: groupID)
+        // The person wrote in a group the pulse set to work: from here the work is theirs, neither charged nor stopped by the budget.
+        if askedBy == nil, chain.origin.isPulse { chain.origin = .group(context.chainID) }
         chain.touched = .now
         chainStates[context.chainID] = chain
         envelope.pulseRun = chain.origin.pulseRun
@@ -812,7 +814,8 @@ final class DelegationHub: DelegationService {
             model.session(botID).stop(startsQueuedRoutines: false,
                                       notice: isShuttingDown ? BotSession.quitSideNotice
                                           : reason == .gaveUp ? ApprovalWait.gaveUpNotice
-                                          : reason == .budget ? AppModel.pulseCappedNotice : BotSession.stoppedNotice)
+                                          : reason == .budget ? AppModel.pulseCappedNotice
+                                          : reason == .pulseOff ? AppModel.pulseOffNotice : BotSession.stoppedNotice)
         }
         refresh(Array(touched))
         // A group's chain says it stopped in the group's own thread (`groupStopped`), never in its orchestrator's private chat.
@@ -823,7 +826,9 @@ final class DelegationHub: DelegationService {
         for botID in touched { schedulePump(botID) }
         // A group's chain stopped by the person from elsewhere (the Parar of whoever waits for it) stops the group.
         // Not while quitting: the run must stay in the journal and resume, not be written as stopped by the person.
-        if reason == .user || reason == .budget, !isShuttingDown, chain.groupID != nil, !alreadyCancelled { groupHooks?.chainStopped(id, by: reason) }
+        if reason == .user || reason == .budget || reason == .pulseOff, !isShuttingDown, chain.groupID != nil, !alreadyCancelled {
+            groupHooks?.chainStopped(id, by: reason)
+        }
         settleWaitingRoutines()
     }
 
@@ -1156,11 +1161,13 @@ final class DelegationHub: DelegationService {
     func teammatesText(for botID: UUID, groupID: UUID?) -> String {
         guard let model else { return "" }
         let team = roster(for: botID, groupID: groupID).compactMap { model.bot($0.id) }
-        let teammates = team.isEmpty ? "Não há outros Orbs." : team.prefix(DelegationLimits.rosterLimit * 4).map { orb in
+        let listed = team.prefix(DelegationLimits.rosterLimit * 4)
+        var teammates = team.isEmpty ? "Não há outros Orbs." : listed.map { orb in
             let role = MemoryText.clip(MemoryText.flatten(orb.role), DelegationLimits.roleClip)
             let state = groupID.map { groupStatus(of: orb.id, in: $0) } ?? status(of: orb.id)
             return "- \(orb.name)\(role.isEmpty ? "" : ": " + role) (\(state))"
         }.joined(separator: "\n")
+        if team.count > listed.count { teammates += "\n- e mais \(team.count - listed.count) Orbs (não listados)" }
         let lines = groupID == nil ? model.groupLines(for: botID) : model.otherGroupLines(for: botID, inTurnOf: groupID)
         let groups = lines.prefix(OrbsPrompt.groupLimit).map { group in
             let lead = group.youOrchestrate ? "você orquestra" : "\(group.orchestrator) orquestra"
@@ -1168,7 +1175,7 @@ final class DelegationHub: DelegationService {
         }
         // The groups it is not in, which group_edit may change: without their names it could only guess them.
         let elsewhere = model.orbsCanManageGroups
-            ? model.groups.filter { !$0.memberIDs.contains(botID) }.prefix(OrbsPrompt.groupLimit).map(\.name) : []
+            ? model.groups.filter { !$0.memberIDs.contains(botID) }.prefix(OrbsPrompt.groupLimit).map { GroupPrompt.label($0.name) } : []
         let otherText = elsewhere.isEmpty ? "" : "\n\nOutros grupos do usuário (você não é membro; group_edit muda): "
             + elsewhere.joined(separator: ", ") + "."
         guard !groups.isEmpty else { return teammates + otherText }
@@ -1546,9 +1553,12 @@ final class DelegationHub: DelegationService {
         guard let model else { throw DelegationRefusal.groupEdit(.unavailable) }
         let plan = try planGroupEdit(arguments, by: botID)
         guard let text = plan.confirmation else { throw DelegationRefusal.groupEdit(.unavailable) } // nothing to ask: edit_group does it
-        let ask: DeletionAsk = if plan.edit == .remove, let orb = plan.orb {
-            .removeMember(orb, groupID: plan.group.id, groupName: plan.group.name)
-        } else { .group(id: plan.group.id, name: plan.group.name) }
+        let ask: DeletionAsk
+        switch (plan.edit, plan.orb) {
+        case (.delete, _): ask = .group(id: plan.group.id, name: plan.group.name)
+        case (.remove, let orb?): ask = .removeMember(orb, groupID: plan.group.id, groupName: plan.group.name)
+        default: throw DelegationRefusal.groupEdit(.unavailable) // no other edit asks the user
+        }
         return model.askDeletionLater(ask, by: botID, text: text)
     }
 

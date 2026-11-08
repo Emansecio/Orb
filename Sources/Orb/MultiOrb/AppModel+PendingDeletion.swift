@@ -46,14 +46,48 @@ extension AppModel {
     func askDeletionLater(_ ask: DeletionAsk, by botID: UUID, text: String) -> String {
         guard let requester = bot(botID) else { return "This Orb no longer exists." }
         let key = botID.uuidString + "|" + ask.key
-        guard !askedDeletions.contains(key) else {
+        if isStillAsked(ask, key: key, of: botID) {
             return "The user was already asked in your chat; nothing was deleted yet. Do not ask again: go on with the rest."
         }
-        guard appendToChat(.event(ask.event(by: OrbRef(requester), text: text)), of: botID) != nil else {
+        guard let line = appendToChat(.event(ask.event(by: OrbRef(requester), text: text)), of: botID) else {
             return "The user could not be asked now: say in your reply what you would delete and why."
         }
-        askedDeletions.insert(key)
+        askedDeletions[key] = line
         return "Asked the user in your chat (a line with Apagar and Manter); nothing was deleted. Do not ask again: go on with the rest."
+    }
+
+    /// The same ask waits for the person on a line they can still answer. The line is looked at where it is in memory: one
+    /// answered, gone with its conversation or no longer valid (a rename) does not count, and after a relaunch (nothing
+    /// remembered) a pending line in the chat on show still does. A line in a conversation not in memory is trusted.
+    private func isStillAsked(_ ask: DeletionAsk, key: String, of botID: UUID) -> Bool {
+        if let line = askedDeletions[key] {
+            guard isChat(line.chat, of: botID) else { askedDeletions[key] = nil; return false }
+            guard let chat = loadedChat(line.chat, of: botID) else { return true }
+            if case .event(let event)? = chat.items.first(where: { $0.id == line.item })?.kind, canAnswerDeletion(event) { return true }
+            askedDeletions[key] = nil
+            return false
+        }
+        let chat = latestChat(of: botID)
+        guard let pending = loadedChat(chat, of: botID)?.items.first(where: { item in
+            guard case .event(let event) = item.kind, event.actor?.id == botID, DeletionAsk(event: event)?.key == ask.key else { return false }
+            return canAnswerDeletion(event)
+        }) else { return false }
+        askedDeletions[key] = (chat, pending.id)
+        return true
+    }
+
+    /// The conversation `chat` of the Orb if it is in memory: the one the turn machinery has, or the one on show parked aside.
+    private func loadedChat(_ chat: UUID, of botID: UUID) -> Conversation? {
+        guard let session = sessions[botID] else { return nil }
+        if chat == session.conversationChat, !session.isUnloaded { return session.conversation }
+        if chat == session.chatID { return session.parkedChat }
+        return nil
+    }
+
+    /// The Orb was deleted: what it asked, and what was asked about it, is not waited on any more.
+    func forgetAskedDeletions(of botID: UUID) {
+        let id = botID.uuidString
+        askedDeletions = askedDeletions.filter { !$0.key.contains(id) }
     }
 
     /// The line still waits for the person, and what it asks about is still there to delete.
@@ -92,8 +126,9 @@ extension AppModel {
                 case .orb(let orb):
                     // The same check as the card's: an Orb at work is not deleted under its feet.
                     guard liveBot(orb.id)?.isWorking != true, sessions[orb.id]?.turnTask == nil else {
-                        appendToChat(.notice("\(orb.name) está trabalhando agora: apague quando terminar."), of: botID,
-                                     in: chat)
+                        let busy = "\(orb.name) está trabalhando agora: apague quando terminar."
+                        // Said once, however many times Apagar is clicked meanwhile.
+                        if onShow?.items.last?.kind != .notice(busy) { appendToChat(.notice(busy), of: botID, in: chat) }
                         return
                     }
                     deleteBot(orb.id)
@@ -115,6 +150,6 @@ extension AppModel {
         answered.kind = .deletionAnswered
         answered.outcome = outcome
         appendToChat(.event(answered), of: botID, in: chat)
-        if let actor = event.actor { askedDeletions.remove(actor.id.uuidString + "|" + ask.key) }
+        if let actor = event.actor { askedDeletions[actor.id.uuidString + "|" + ask.key] = nil }
     }
 }

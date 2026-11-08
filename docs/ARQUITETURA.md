@@ -319,12 +319,15 @@ leva a chamada ao `DelegationHub`. `orbs` (`ask`, `tell`, `list`), `group_create
   `envelope.pulseRun` nunca é demanda. As chaves vão no `PulseRun` e só são entregues no fim (`settleDemands`): falha conta em
   `PulseState.failures` e entrega após `failureLimit`; `delivered` guarda só chaves cujo trabalho ainda existe (teto 200).
   Com um plano entre as demandas, `beginPulseInChat` roda na conversa dele (`prepareTurn`, `BotSession.pulseInChat`,
-  `SendOrigin.pulse`, linha `pulseResumed`, turno `unattended`, fora do `WorkJournal`); sem plano, um side run `.pulse`
+  `SendOrigin.pulse`, linha `pulseResumed`, turno `unattended`; no `WorkJournal` só a entrada `.pulse`, descartada na abertura,
+  nunca a tarefa do chat); sem plano, um side run `.pulse`
   (`BotSession.sideKind`) com o `RoutineBackground` do chat. Pedido feito no side run leva `servingPulse`: `finishPulse` segura o
   run (`DelegationHub.holdPulse`, `waitingRoutines` com `pulse`) e a resposta o retoma (`resumePulse`); sem espera, vai ao chat.
   **Linhagem:** `AppModel.pulseLineage(of:)` é a fonte única de "é trabalho do pulso" (side run, `pulseInChat`, cadeia de origem
   `.pulse`, pedido servido com `envelope.pulseRun`), usada por `pulseCharge`, `DelegationHub.newChain`/`queueGroupTurn`/`submit`
-  (que recusam com `pulseBudget` depois do teto) e `stopPulseWork`. O teto diário (`pulseDailyTokens`, `PulseState.tokensToday`)
+  (que recusam com `pulseBudget` depois do teto) e `stopPulseWork`. Fronteira com a pessoa: a mensagem dela num grupo que o pulso
+  pôs para trabalhar passa a cadeia a `.group` (o trabalho é dela, sem teto), e um pedido do pulso a um grupo que ela já pôs para
+  trabalhar entra na rodada dela, sem contar no teto (decisão: a rodada é uma só). O teto diário (`pulseDailyTokens`, `PulseState.tokensToday`)
   conta tudo da linhagem; ao estourar, ou ao desligar o pulso ou `orbsActOnOwn`, `stopPulseWork` cancela as cadeias, os turnos e os
   pulsos que esperam e grava `pulseStopped` (`detail == OrbEvent.pulseOff` quando foi desligado); um grupo parado pelo teto grava
   `groupStopped` com `detail == OrbEvent.budgetStop`.
