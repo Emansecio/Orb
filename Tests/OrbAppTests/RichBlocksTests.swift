@@ -282,6 +282,15 @@ struct AskUserRichTests {
         #expect(question.composed() == nil)
     }
 
+    @Test func anAnswerOverTheLimitIsNeverSentCut() {
+        let question = OrbQuestion(text: "?", options: [])
+        let limit = OrbQuestion.answerLimit
+        #expect(question.composed(reply: String(repeating: "a", count: limit))?.count == limit)
+        #expect(!question.exceedsLimit(reply: String(repeating: "a", count: limit)))
+        #expect(question.composed(reply: String(repeating: "a", count: limit + 1)) == nil)
+        #expect(question.exceedsLimit(reply: String(repeating: "a", count: limit + 1)))
+    }
+
     @Test func returnWalksTheFormToItsLastFieldToWrite() {
         let question = OrbQuestion(text: "?", fields: [OrbQuestion.Field(label: "Nome"), OrbQuestion.Field(label: "Cor", options: ["a"]),
                                                        OrbQuestion.Field(label: "Data")])

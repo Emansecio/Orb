@@ -574,20 +574,32 @@ struct OrbQuestion: Codable, Sendable, Equatable {
 
     /// The answer a card sends: the options picked in their order, or a line per field filled in, with the person's own words
     /// after them. Plain text, so the model reads it as any answer and the tool's result keeps its form.
+    /// Nil when nothing is written or the answer is over `answerLimit`: the card never sends a cut answer (see `exceedsLimit`).
     func composed(picked: Set<String> = [], values: [String] = [], reply: String = "") -> String? {
+        let text = joined(picked: picked, values: values, reply: reply)
+        guard text.count <= Self.answerLimit else { return nil }
+        return Self.clean(text)
+    }
+
+    /// Whether what is written is longer than an answer keeps; the card says so instead of cutting it in silence.
+    func exceedsLimit(picked: Set<String> = [], values: [String] = [], reply: String = "") -> Bool {
+        joined(picked: picked, values: values, reply: reply).count > Self.answerLimit
+    }
+
+    private func joined(picked: Set<String>, values: [String], reply: String) -> String {
         let words = reply.trimmingCharacters(in: .whitespacesAndNewlines)
         var parts: [String]
         if fields.isEmpty {
             parts = options.filter(picked.contains)
             if !words.isEmpty { parts.append(words) }
-            return Self.clean(parts.joined(separator: "; "))
+            return parts.joined(separator: "; ").trimmingCharacters(in: .whitespacesAndNewlines)
         }
         parts = zip(fields, values).compactMap { field, value in
             let value = value.trimmingCharacters(in: .whitespacesAndNewlines)
             return value.isEmpty ? nil : "\(field.label): \(value)"
         }
         if !words.isEmpty { parts.append(words) }
-        return Self.clean(parts.joined(separator: "\n"))
+        return parts.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// An answer as it is kept and sent: trimmed and capped; nil when nothing is left.

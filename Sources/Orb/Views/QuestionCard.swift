@@ -94,6 +94,12 @@ struct QuestionCard: View {
                 fieldRow(field, index: index, value: $values[index])
             }
             replyField
+            if question.exceedsLimit(picked: picked, values: values, reply: reply) {
+                Text("Resposta longa demais: o limite é \(OrbQuestion.answerLimit) caracteres. Encurte para enviar.")
+                    .font(Typography.small)
+                    .foregroundStyle(Palette.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             ActionRow {
                 Button(action: skip) {
                     HStack(spacing: 6) {
