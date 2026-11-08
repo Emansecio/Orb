@@ -2702,7 +2702,7 @@ final class AppModel {
     /// `slug` with a numeric suffix when another skill already has it.
     func uniqueSlug(_ slug: String) -> String {
         var unique = slug, suffix = 2
-        while skills.contains(where: { $0.slug == unique }) {
+        while skills.contains(where: { $0.slug == unique }) || CompactionCommand.isBuiltIn(slug: unique) {
             unique = "\(slug)-\(suffix)"
             suffix += 1
         }

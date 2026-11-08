@@ -56,6 +56,16 @@ extension MemoryBank {
         try? FileManager.default.removeItem(at: directory.appending(path: "\(Self.proposalsFolder)/\(slug).md"))
     }
 
+    /// The skill was renamed: its proposal follows (the file name and the `name:` inside it). Nothing moves when the new
+    /// command already has a proposal of its own.
+    func renameProposal(from old: String, to new: String) {
+        guard !isClosed, new == Skill.cleanSlug(new), var proposal = proposal(old), self.proposal(new) == nil else { return }
+        proposal.slug = new
+        let folder = directory.appending(path: Self.proposalsFolder)
+        guard (try? Data(proposal.markdown().utf8).write(to: folder.appending(path: new + ".md"), options: .atomic)) != nil else { return }
+        discardProposal(old)
+    }
+
     private static func readProposal(_ url: URL) -> SkillProposal? {
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
         let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .now

@@ -507,6 +507,39 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
         #expect(model.skills.count == before)
     }
 
+    @Test @MainActor func aCommandOfTheAppIsNeverAFreeSlugForASkill() async throws {
+        let (model, botID) = setUp(CallScript([said("oi")]))
+        #expect(model.uniqueSlug("compactar") == "compactar-2")
+        #expect(model.uniqueSlug("zzz-livre") == "zzz-livre")
+        let proposal = SkillSamples.good.replacingOccurrences(of: "publicar-site", with: "compactar")
+        await propose(proposal, in: model, botID)
+        let draft = try #require(await model.skillDraft("compactar", from: botID))
+        #expect(draft.skill.slug == "compactar-2")
+    }
+
+    @Test @MainActor func decidingDoesNotThrowAwayAProposalRewrittenWhileTheSheetWasOpen() async throws {
+        let (model, botID) = setUp(CallScript([said("oi")]))
+        await propose(SkillSamples.good, in: model, botID)
+        let draft = try #require(await model.skillDraft("publicar-site", from: botID))
+        // The review proposes again under the same command: a newer file than the one the sheet read.
+        await propose(SkillSamples.good, in: model, botID)
+        let file = model.memory.bank(for: botID).directory.appending(path: "\(MemoryBank.proposalsFolder)/publicar-site.md")
+        try FileManager.default.setAttributes([.modificationDate: Date.now.addingTimeInterval(60)], ofItemAtPath: file.path)
+        model.finishSkillDraft(draft)
+        await waitUntil("the warning") { model.notices(botID).contains { $0.contains("mudou enquanto") } }
+        #expect(await model.hasSkillProposal("publicar-site", of: botID))
+    }
+
+    @Test @MainActor func renamingASkillCarriesItsPendingProposal() async throws {
+        let (model, botID) = setUp(CallScript([said("oi")]))
+        await propose(SkillSamples.good, in: model, botID)
+        let bank = model.memory.bank(for: botID)
+        await bank.renameProposal(from: "publicar-site", to: "publicar-lp")
+        #expect(await bank.proposal("publicar-site") == nil)
+        let moved = try #require(await bank.proposal("publicar-lp"))
+        #expect(moved.slug == "publicar-lp" && moved.instructions.hasPrefix("## Quando usar"))
+    }
+
     // MARK: The Skills page
 
     @Test @MainActor func theSkillsPageListsTheProposalsOfEveryOrbEvenWithTheSameCommand() async throws {

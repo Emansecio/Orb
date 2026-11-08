@@ -409,6 +409,25 @@ struct SteeringEngineTests {
         #expect(model.drafts[bot.id, default: ""] == "")
     }
 
+    @Test @MainActor func stopAndSendKeepsASkillThatIsNotTheFirstLineForTheNextTurn() async throws {
+        let gate = TestGate()
+        let client = HeldModel(gate: gate)
+        let (model, bot) = setUp(client)
+        model.skills = [Skill(slug: "resumir", name: "Resumir", summary: "", instructions: "Resuma em 5 tópicos.", orbIDs: [bot.id])]
+        model.submit("primeiro", to: bot.id)
+        await waitUntil("the model call") { await client.seen.count >= 1 }
+        model.submit("olha isto", to: bot.id)
+        model.submit("/resumir o texto", to: bot.id)
+
+        model.stopAndSend(bot.id)
+        // The first goes now; the skill is not glued behind it as raw text, it waits to start the next turn.
+        #expect(userTexts(model, bot.id) == ["primeiro", "olha isto"])
+        #expect(model.composerLane(bot.id).queued.map(\.text) == ["/resumir o texto"])
+        #expect(model.skills[0].uses == 0)
+        await gate.open()
+        await waitUntilIdle(model, bot.id)
+    }
+
     @Test @MainActor func quittingMidTaskSaysTheAppClosedAndOffersToContinue() async throws {
         let gate = TestGate()
         let client = HeldModel(gate: gate)

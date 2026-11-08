@@ -130,6 +130,9 @@ struct CompactionResult: Sendable, Equatable {
 enum CompactionCommand {
     static let name = "/compactar"
 
+    /// A skill with this command would never run: `send` takes the built-in command first.
+    static func isBuiltIn(slug: String) -> Bool { "/" + slug.lowercased() == name }
+
     /// `.some(focus)` when `text` is the command (the focus is nil when none was given), nil for any other message.
     static func parse(_ text: String) -> String?? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)

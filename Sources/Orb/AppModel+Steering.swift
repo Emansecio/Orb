@@ -395,10 +395,16 @@ extension AppModel {
         stop(botID, startsQueuedRoutines: false)
         if !unanswered.isEmpty {
             session(botID).withdrawSteered(unanswered.map(\.id))
+            // Their skill use was counted when they reached the model; `send` (or the next turn) counts it again.
+            for message in unanswered { uncountSkillUse(in: message.text, for: botID) }
             waiting = unanswered + waiting
         }
-        if let message = SteeredMessage.merged(waiting),
+        // As in `settleSteering`: `send` expands a /skill only at the start of the text, so one that is not first
+        // starts the next turn instead of going to the model as raw text.
+        let (now, later) = splitAtSkill(waiting, for: botID)
+        if let message = SteeredMessage.merged(now),
            send(message.text, attachments: message.files, images: message.pictures, to: botID) {
+            for next in later { enqueue(next.text, files: next.files, pictures: next.pictures, delivery: .afterTask, to: botID) }
             live(botID).scrolled() // you asked for this send
             return
         }
@@ -416,6 +422,20 @@ extension AppModel {
         append(.user(text: message.text, attachments: message.attachmentPaths), to: botID, duringTask: true, id: id) // follows the end only if the chat was there
     }
 
+    /// The messages that go together as one, and those from the first later message that starts with a /skill on.
+    private func splitAtSkill(_ waiting: [SteeredMessage], for botID: UUID) -> ([SteeredMessage], [SteeredMessage]) {
+        let skills = skills(for: botID)
+        let split = waiting.indices.dropFirst().first { SystemPrompt.expandSkill(in: waiting[$0].text, skills: skills) != nil } ?? waiting.endIndex
+        return (Array(waiting[..<split]), Array(waiting[split...]))
+    }
+
+    /// Takes back the use `countSkillUse` counted, for a message that goes out again as a request.
+    private func uncountSkillUse(in text: String, for botID: UUID) {
+        guard let skill = SystemPrompt.expandSkill(in: text, skills: skills(for: botID))?.skill,
+              let index = skills.firstIndex(where: { $0.id == skill.id }), skills[index].uses > 0 else { return }
+        skills[index].uses -= 1
+    }
+
     /// Counts one use of the skill a message starts with (`/slug`), if it does and this Orb may use it.
     private func countSkillUse(in text: String, for botID: UUID) {
         guard let skill = SystemPrompt.expandSkill(in: text, skills: skills(for: botID))?.skill,
@@ -431,9 +451,7 @@ extension AppModel {
         let waiting = lane.takeAll()
         // `send` expands a /skill only at the start of the text, so a message that calls one cannot be glued after
         // another: it starts the next turn instead, and goes after this one as a message of its own.
-        let skills = skills(for: botID)
-        let split = waiting.indices.dropFirst().first { SystemPrompt.expandSkill(in: waiting[$0].text, skills: skills) != nil } ?? waiting.endIndex
-        let now = Array(waiting[..<split]), later = Array(waiting[split...])
+        let (now, later) = splitAtSkill(waiting, for: botID)
         guard succeeded, let message = SteeredMessage.merged(now),
               send(message.text, attachments: message.files, images: message.pictures, to: botID) else {
             giveBack(waiting, to: botID)

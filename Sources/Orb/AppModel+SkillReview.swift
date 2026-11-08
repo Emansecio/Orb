@@ -14,6 +14,8 @@ struct SkillDraft: Identifiable {
     var orbName: String
     /// It replaces the instructions of a skill that exists.
     var isUpdate: Bool
+    /// When the proposal file was written, as the editor read it: a deciding click only throws away that version.
+    var modified: Date?
 }
 
 extension AppModel {
@@ -102,6 +104,8 @@ extension AppModel {
             usageLog.flush()
             guard !Task.isCancelled else { return }
             session.skillReview = nil
+            // "Propor skills" was switched off while the review ran: its result is not announced.
+            guard proposesSkills else { return }
             await collectSkillProposals(botID)
         }
     }
@@ -141,6 +145,16 @@ extension AppModel {
         return drafts
     }
 
+    /// A skill was renamed: the proposal waiting under the old command moves to the new one, or `skillDraft` would make
+    /// a new skill with the old command next to the renamed one.
+    func carryProposals(from old: String, to new: String, orbs: Set<UUID>) {
+        guard old != new else { return }
+        for id in orbs where bot(id) != nil {
+            let bank = memory.bank(for: id)
+            Task { await bank.renameProposal(from: old, to: new) }
+        }
+    }
+
     private func skillDraft(_ proposal: SkillProposal, from botID: UUID) -> SkillDraft {
         let slug = proposal.slug
         let orb = bot(botID)?.name ?? "O Orb"
@@ -149,16 +163,12 @@ extension AppModel {
         if var current = skills.first(where: { $0.slug == slug && $0.isImprovable && $0.isAvailable(to: botID) }) {
             current.summary = proposal.summary
             current.instructions = proposal.instructions
-            return SkillDraft(skill: current, slug: slug, botID: botID, orbName: orb, isUpdate: true)
+            return SkillDraft(skill: current, slug: slug, botID: botID, orbName: orb, isUpdate: true, modified: proposal.modified)
         }
-        var command = slug, suffix = 2
-        while skills.contains(where: { $0.slug == command }) {
-            command = "\(slug)-\(suffix)"
-            suffix += 1
-        }
+        let command = uniqueSlug(slug)
         let skill = Skill(slug: command, name: proposal.name, summary: proposal.summary, instructions: proposal.instructions,
                           source: Skill.learnedSource, orbIDs: [botID], learnedBy: botID)
-        return SkillDraft(skill: skill, slug: slug, botID: botID, orbName: orb, isUpdate: false)
+        return SkillDraft(skill: skill, slug: slug, botID: botID, orbName: orb, isUpdate: false, modified: proposal.modified)
     }
 
     /// The gate's verdict on the turn: true or false, nil when there is none (no cheap model, a failure, an unreadable
@@ -188,7 +198,16 @@ extension AppModel {
     /// You decided: the proposal goes away. Saved, it is also said (VoiceOver) and the Orb is pleased.
     func finishSkillDraft(_ draft: SkillDraft, saved skill: Skill? = nil) {
         let bank = memory.bank(for: draft.botID)
-        Task { await bank.discardProposal(draft.slug) }
+        Task {
+            // The review may have rewritten the proposal while the sheet was open: that newer version was never read, so
+            // it stays for the next look instead of going with the one decided.
+            if let modified = draft.modified, let current = await bank.proposal(draft.slug), current.modified != modified {
+                append(.notice("A proposta /\(draft.slug) mudou enquanto você a revisava. A versão nova continua esperando sua decisão."),
+                       to: draft.botID)
+            } else {
+                await bank.discardProposal(draft.slug)
+            }
+        }
         guard let skill else { return }
         announceForAccessibility("Skill /\(skill.slug) salva")
         sessions[draft.botID]?.celebrate(.light)

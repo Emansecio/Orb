@@ -1547,6 +1547,8 @@ private struct NoticeLine: View {
     /// Whether the skill (or the memory merge) a notice proposes still waits for a decision, read for a notice that offers it.
     @State private var hasProposal = false
     @State private var reviewing: SkillDraft?
+    /// The proposal was decided elsewhere (the Skills page) since this notice was read: "Revisar" says so instead of staying mute.
+    @State private var alreadyDecided = false
     @State private var showsProviderDetail = false
     @State private var showsCompaction = false
 
@@ -1654,6 +1656,11 @@ private struct NoticeLine: View {
             Task { hasProposal = await model.hasSkillProposal(slug, of: botID) }
         }) { draft in
             SkillEditor(skill: draft.skill, proposal: draft)
+        }
+        .alert("Proposta já decidida", isPresented: $alreadyDecided) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Essa skill já foi salva ou descartada na página Skills.")
         }
     }
 
@@ -1771,7 +1778,13 @@ private struct NoticeLine: View {
         case .openMemory: model.showMemory(of: botID)
         case .reviewSkill:
             guard let slug = NoticeAction.proposedSlug(in: text) else { return }
-            Task { reviewing = await model.skillDraft(slug, from: botID) }
+            Task {
+                reviewing = await model.skillDraft(slug, from: botID)
+                if reviewing == nil {
+                    hasProposal = false
+                    alreadyDecided = true
+                }
+            }
         case .mergeMemory:
             hasProposal = false
             Task { await model.applyMemoryMerge(botID) }

@@ -799,6 +799,13 @@ struct SkillEditor: View {
     /// What the instructions area shows while an improvement is reviewed: the proposed text, the current one or the difference.
     enum ReviewView: String, CaseIterable { case new = "Nova", current = "Atual", changes = "Mudanças" }
     @State private var reviewView = ReviewView.new
+    /// Whether the skill was installed when the sheet opened (nil until it appears): a skill that is gone by Save was
+    /// deleted meanwhile, and saving would bring it back.
+    @State private var existedOnOpen: Bool?
+    /// Said in the footer when the skill changed under the sheet; saving again keeps what the sheet shows.
+    @State private var staleNote: String?
+    @State private var openedSlug: String
+    @State private var openedName: String
 
     /// Beyond this many characters the instructions weigh on every conversation that uses the skill.
     static let longInstructions = 4_000
@@ -806,6 +813,8 @@ struct SkillEditor: View {
     init(skill: Skill, proposal: SkillDraft? = nil) {
         _skill = State(initialValue: skill)
         _slugEdited = State(initialValue: !skill.slug.isEmpty)
+        _openedSlug = State(initialValue: skill.slug)
+        _openedName = State(initialValue: skill.name)
         self.proposal = proposal
     }
 
@@ -816,13 +825,17 @@ struct SkillEditor: View {
     }
     private var isNew: Bool { !model.skills.contains { $0.id == skill.id } }
     private var finalSlug: String { Skill.cleanSlug(skill.slug) }
-    private var slugTaken: Bool { model.skills.contains { $0.slug == finalSlug && $0.id != skill.id } }
+    private var slugTaken: Bool {
+        CompactionCommand.isBuiltIn(slug: finalSlug) || model.skills.contains { $0.slug == finalSlug && $0.id != skill.id }
+    }
     private var chosenNoOrb: Bool { skill.orbIDs.isEmpty }
     private var canSave: Bool {
         !skill.name.trimmingCharacters(in: .whitespaces).isEmpty && !finalSlug.isEmpty
             && !skill.instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !slugTaken && !chosenNoOrb
     }
     private var message: String? {
+        if let staleNote { return staleNote }
+        if CompactionCommand.isBuiltIn(slug: finalSlug) { return "/\(finalSlug) é um comando do Orb. Escolha outro." }
         if slugTaken { return "Já existe uma skill com /\(finalSlug)." }
         if chosenNoOrb { return "Marque ao menos um Orb em “Usar com”." }
         return nil
@@ -907,6 +920,7 @@ struct SkillEditor: View {
             }
         }
         .formStyle(.grouped)
+        .onAppear { if existedOnOpen == nil { existedOnOpen = !isNew } }
         .orbSheet(title, subtitle: subtitle, size: .medium) {
             if let proposal {
                 // Esc and "Fechar" leave the proposal waiting; only "Descartar" throws it away.
@@ -927,9 +941,31 @@ struct SkillEditor: View {
     }
 
     private func save() {
+        let current = model.skills.first { $0.id == skill.id }
+        if existedOnOpen == true {
+            guard let current else {
+                staleNote = "Esta skill foi apagada enquanto a folha estava aberta. Feche para não trazê-la de volta."
+                return
+            }
+            // Renamed meanwhile: keep the new command and name, not the ones this copy was opened with.
+            if staleNote == nil, current.slug != openedSlug || current.name != openedName {
+                skill.slug = current.slug
+                skill.name = current.name
+                openedSlug = current.slug
+                openedName = current.name
+                staleNote = "O nome ou o comando desta skill mudou enquanto a folha estava aberta. Confira e salve de novo."
+                return
+            }
+        }
         skill.slug = finalSlug
         skill.name = skill.name.trimmingCharacters(in: .whitespaces)
         if let index = model.skills.firstIndex(where: { $0.id == skill.id }) {
+            // A pending proposal of the renamed skill follows it. (Not when this sheet is that proposal: deciding it
+            // discards the file under the command it was read with.)
+            if proposal == nil {
+                let before = model.skills[index]
+                model.carryProposals(from: before.slug, to: finalSlug, orbs: before.orbIDs.union(skill.orbIDs))
+            }
             // Only what the editor edits: the count of uses and the rest may have changed while the sheet was open.
             model.skills[index] = model.skills[index].applyingEdits(from: skill)
         } else {
