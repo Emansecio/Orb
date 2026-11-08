@@ -177,6 +177,12 @@ struct PermissionState: Sendable, Equatable {
     /// the call against these instead: turning a switch off stops the tool on its next call.
     var capabilities: Set<Capability>? = nil
     var connectors: Set<UUID>? = nil
+    /// The user moved the Orb to another folder after the turn began. The turn's tools stay in the old one, which is no
+    /// longer the Orb's own: writing there must ask in "Perguntar antes".
+    var folderMoved = false
+
+    /// The folder that counts as the Orb's own for this call.
+    func ownWorkspace(_ turnFolder: URL) -> URL? { folderMoved ? nil : turnFolder }
 
     /// Whether the user turned the tool off since the turn began.
     func turnedOff(_ tool: any AgentTool) -> Bool {

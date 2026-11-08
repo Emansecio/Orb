@@ -680,6 +680,21 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
 
     // MARK: Permission mode
 
+    @Test @MainActor func movingTheOrbsFolderMidTurnStopsTheOldFolderCountingAsItsOwn() throws {
+        let (model, bot, _) = setUp(mode: .readOnly)
+        let started = model.bot(bot.id)?.workingDirectory
+        #expect(model.permissionState(of: bot.id, startedIn: started)?.folderMoved == false)
+        let index = try #require(model.bots.firstIndex { $0.id == bot.id })
+        model.bots[index].workingDirectory = "/tmp/outra-pasta"
+        let state = try #require(model.permissionState(of: bot.id, startedIn: started))
+        #expect(state.folderMoved)
+        let old = URL(fileURLWithPath: "/tmp/pasta-antiga")
+        #expect(state.ownWorkspace(old) == nil)
+        let write = PermissionCall(toolName: "write_file", family: .writeFiles, risk: .sensitive, paths: [old.appending(path: "a.txt")])
+        #expect(PermissionPolicy.evaluate(mode: .ask, call: write, rules: [], workspace: PermissionState(mode: .ask, rules: []).ownWorkspace(old)) == .allow)
+        #expect(PermissionPolicy.evaluate(mode: .ask, call: write, rules: [], workspace: state.ownWorkspace(old)) == .ask(.needsPermission))
+    }
+
     @Test @MainActor func aRoutinesOwnModeAppliesToItsRunOnly() async throws {
         let (model, bot, routine) = setUp(mode: .readOnly)
         #expect(model.bot(bot.id)?.permissionMode == .ask)

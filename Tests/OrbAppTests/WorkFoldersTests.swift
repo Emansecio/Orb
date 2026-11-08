@@ -65,6 +65,9 @@ struct WorkFolderNamesTests {
         #expect(WorkFolders.memberSlug(long + "1") != WorkFolders.memberSlug(long + "2"))
         #expect(WorkFolders.memberSlug("Revisão") == "revisao", "accents fold, nothing is lost")
         #expect(WorkFolders.memberSlug("🔎").hasPrefix("orb-"))
+        #expect(WorkFolders.memberSlug("Back-end") != WorkFolders.memberSlug("Back end"))
+        #expect(WorkFolders.memberSlug("C++") != WorkFolders.memberSlug("C#"))
+        #expect(WorkFolders.memberSlug("Back end") == "back-end", "words split by spaces keep their folder")
     }
 
     @Test func theHashTellsTwoFoldersWithTheSameNameApart() {
@@ -118,6 +121,33 @@ struct WorkFolderNamesTests {
         // Work there does not touch the project.
         try "dois\n".write(to: made.url.appending(path: "b.txt"), atomically: true, encoding: .utf8)
         #expect(!FileManager.default.fileExists(atPath: repo.project.appending(path: "b.txt").path))
+    }
+
+    @Test(.enabled(if: gitReady)) func aWorktreeLeftHalfMadeIsRebuiltInsteadOfHandedOver() async throws {
+        let repo = try await Repo()
+        let run = UUID()
+        let first = await repo.prepare("Atlas", run: run)
+        let gitDir = try await repo.git(["rev-parse", "--path-format=absolute", "--git-dir"], in: first.url)
+        // What a git killed during checkout leaves: the worktree is registered and holds a stale lock.
+        try "".write(to: URL(fileURLWithPath: gitDir).appending(path: "index.lock"), atomically: true, encoding: .utf8)
+        let again = await repo.prepare("Atlas", run: run)
+        #expect(again.problem == nil && again.branch == first.branch)
+        let lock = try await repo.git(["rev-parse", "--path-format=absolute", "--git-path", "index.lock"], in: again.url)
+        #expect(!FileManager.default.fileExists(atPath: lock))
+        #expect(FileManager.default.fileExists(atPath: again.url.appending(path: "a.txt").path))
+    }
+
+    @Test(.enabled(if: gitReady)) func aFailedAddLeavesNoBranchOrFolderBehind() async throws {
+        let repo = try await Repo()
+        let run = UUID()
+        // A file where the worktree folder must go makes the add fail after the branch name is chosen.
+        let slot = repo.work.appending(path: "\(WorkFolders.slug("projeto"))-\(WorkFolders.hash(repo.project.standardizedFileURL.path))")
+            .appending(path: "atlas-\(WorkFolders.shortID(run))")
+        try FileManager.default.createDirectory(at: slot.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "x".write(to: slot, atomically: true, encoding: .utf8)
+        let made = await repo.prepare("Atlas", run: run)
+        #expect(made.problem != nil && made.branch == nil)
+        #expect(try await repo.branches() == ["main"])
     }
 
     @Test func theSameMemberAndRunGetTheSameWorktreeAgain() async throws {

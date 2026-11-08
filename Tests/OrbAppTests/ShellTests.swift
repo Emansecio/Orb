@@ -661,6 +661,16 @@ final class BackgroundJobsTests {
         }
     }
 
+    @Test func idsStartAboveTheLogsLeftOnDiskByAnEarlierRun() async throws {
+        // After a crash the old process may still write to 7.log: a fresh registry must not reuse the id and truncate it.
+        let folder = jobs.logFolder(for: bot)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try "orphan output\n".write(to: folder.appending(path: "7.log"), atomically: true, encoding: .utf8)
+        let (job, _) = try await start("echo novo")
+        #expect(job.id == "8")
+        #expect(try String(contentsOf: folder.appending(path: "7.log"), encoding: .utf8) == "orphan output\n")
+    }
+
     @Test func oldEndedJobsAndTheirLogsArePrunedButRecentOnesStayReadable() async throws {
         let pruning = BackgroundJobs(directory: directory.appending(path: "prune"), keptEnded: 1, endedGrace: .seconds(0))
         let graceful = BackgroundJobs(directory: directory.appending(path: "grace"), keptEnded: 1, endedGrace: .seconds(600))

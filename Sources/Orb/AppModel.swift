@@ -1298,10 +1298,13 @@ final class AppModel {
 
     /// The mode and "Sempre permitir" rules of an Orb as they are now; the engines read this at every tool call,
     /// so a change (or a revoked grant) applies to the turn already running.
-    func permissionState(of botID: UUID) -> PermissionState? {
+    /// `startedIn`: the Orb's saved folder when the turn began; if it differs now, the turn's tools still work in the old one.
+    func permissionState(of botID: UUID, startedIn: String? = nil) -> PermissionState? {
         effectiveBot(botID).map {
-            PermissionState(mode: $0.permissionMode, rules: $0.permissionRules, capabilities: $0.capabilities,
-                            connectors: Set(connectors(for: botID).map(\.id)))
+            var state = PermissionState(mode: $0.permissionMode, rules: $0.permissionRules, capabilities: $0.capabilities,
+                                        connectors: Set(connectors(for: botID).map(\.id)))
+            if let startedIn, bot(botID)?.workingDirectory != startedIn { state.folderMoved = true }
+            return state
         }
     }
 
@@ -1330,7 +1333,8 @@ final class AppModel {
 
     private func permissionSource(for bot: Bot) -> PermissionSource {
         let botID = bot.id, fallback = PermissionState(mode: bot.permissionMode, rules: bot.permissionRules)
-        return { [weak self] in await self?.permissionState(of: botID) ?? fallback }
+        let startedIn = self.bot(botID)?.workingDirectory
+        return { [weak self] in await self?.permissionState(of: botID, startedIn: startedIn) ?? fallback }
     }
 
     /// Changing the mode while the Orb waits for an answer answers the open cards: "Sem pedir permissão" allows

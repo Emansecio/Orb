@@ -120,7 +120,7 @@ actor BackgroundJobs {
             throw ToolError("Já há \(running) processos em segundo plano rodando. Pare algum com job_stop antes de iniciar outro.")
         }
         pruneEnded(botID)
-        let id = String((lastID[botID] ?? 0) + 1)
+        let id = nextID(botID)
         let botDirectory = logFolder(for: botID)
         let log = botDirectory.appending(path: "\(id).log")
         do { try FileManager.default.createDirectory(at: botDirectory, withIntermediateDirectories: true) } catch {
@@ -145,7 +145,6 @@ actor BackgroundJobs {
         SpawnedProcess.watch(pid) { [weak self] exit in
             Task { await self?.ended(botID: botID, id: id, exit: exit) }
         }
-        lastID[botID] = (lastID[botID] ?? 0) + 1
         let snapshot = Snapshot(id: id, command: command, directory: workingDirectory.path, logPath: log.path,
                                 startedAt: .now, state: .running)
         var job = Job(snapshot: snapshot, pid: pid)
@@ -173,13 +172,23 @@ actor BackgroundJobs {
     }
 
     /// Where the logs of an Orb's jobs go (deleted with them by `forget` and when the app quits).
+    /// Reserves the next job id. The first id of an Orb in this run starts above every log already on disk: after a
+    /// crash or kill, orphaned jobs may still be writing to `<id>.log`, and reusing an id would truncate it under them.
+    private func nextID(_ botID: UUID) -> String {
+        if lastID[botID] == nil {
+            let names = (try? FileManager.default.contentsOfDirectory(atPath: logFolder(for: botID).path)) ?? []
+            lastID[botID] = names.compactMap { $0.hasSuffix(".log") ? Int($0.dropLast(4)) : nil }.max() ?? 0
+        }
+        lastID[botID, default: 0] += 1
+        return String(lastID[botID] ?? 1)
+    }
+
     nonisolated func logFolder(for botID: UUID) -> URL { directory.appending(path: botID.uuidString) }
 
     /// Takes over a command `run_command` stopped waiting for (`ProcessRunner.Detach`): from now on it is one of the Orb's
     /// jobs, its output going on into `process.log`. Not held to `maxRunningPerOrb`, since it is running already.
     func adopt(botID: UUID, command: String, directory workingDirectory: URL, startedAt: Date, process: DetachedProcess) -> Snapshot {
-        let id = String((lastID[botID] ?? 0) + 1)
-        lastID[botID] = (lastID[botID] ?? 0) + 1
+        let id = nextID(botID)
         let pid = process.pid
         liveGroups.withLock { _ = $0.insert(pid) }
         let snapshot = Snapshot(id: id, command: command, directory: workingDirectory.path, logPath: process.log.path,

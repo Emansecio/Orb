@@ -52,14 +52,35 @@ enum WorkFolders {
         let wanted = canonical(folder)
         let listed = await worktrees(in: project, git: git)
         if listed.contains(where: { canonical(URL(fileURLWithPath: $0.path)) == wanted }) {
-            return WorkFolder(url: inside(folder, relative), branch: branch)
+            if await isIntact(folder, git: git) { return WorkFolder(url: inside(folder, relative), branch: branch) }
+            // A checkout that died halfway is registered but unusable: drop it (the branch stays) and make it again.
+            _ = await git.run(["worktree", "remove", "--force", folder.path], in: project)
+            try? FileManager.default.removeItem(at: folder)
+            _ = await git.run(["worktree", "prune"], in: project)
         }
         // The branch survives a pruned worktree: reuse it (its commits are the member's work) instead of failing on the name.
         let known = await git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(branch)"], in: project).output != nil
         let arguments = known ? ["worktree", "add", folder.path, branch] : ["worktree", "add", folder.path, "-b", branch, "HEAD"]
         let added = await git.run(arguments, in: project)
-        guard added.succeeded else { return shared(Self.firstLine(added.text)) }
+        guard added.succeeded else {
+            // A failed or timed-out add can leave a half-registered worktree (and a new branch) that the next turn would
+            // find and hand over as ready.
+            _ = await git.run(["worktree", "remove", "--force", folder.path], in: project)
+            try? FileManager.default.removeItem(at: folder)
+            _ = await git.run(["worktree", "prune"], in: project)
+            if !known { _ = await git.run(["branch", "-D", branch], in: project) }
+            return shared(Self.firstLine(added.text))
+        }
         return WorkFolder(url: inside(folder, relative), branch: branch)
+    }
+
+    /// A listed worktree is ready when its folder exists, git can read its HEAD there and no checkout lock is left behind.
+    private static func isIntact(_ folder: URL, git: Git) async -> Bool {
+        guard FileManager.default.fileExists(atPath: folder.path),
+              await git.run(["rev-parse", "--verify", "--quiet", "HEAD"], in: folder).output != nil,
+              let lock = await git.run(["rev-parse", "--path-format=absolute", "--git-path", "index.lock"], in: folder).output
+        else { return false }
+        return !FileManager.default.fileExists(atPath: lock)
     }
 
     // MARK: Telling the Orb
@@ -235,12 +256,16 @@ enum WorkFolders {
         return trimmed.isEmpty ? "orb" : trimmed
     }
 
-    /// `slug` of a member's name, made unique when the slug lost information (a name in another alphabet, an emoji, or one cut
+    /// `slug` of a member's name, made unique when the slug lost information (a name in another alphabet, an emoji, punctuation, or one cut
     /// at 24 characters): two such members must not share one worktree. Plain names keep their old folder, so a resumed run finds it.
     static func memberSlug(_ name: String) -> String {
         let base = slug(name)
         let folded = name.folding(options: [.diacriticInsensitive], locale: .init(identifier: "en_US_POSIX"))
-        let lossy = folded.unicodeScalars.contains { !$0.isASCII } || base.count >= 24
+        // Only plain words joined by single spaces map to a slug one-to-one: "Back-end", "Back end" and "C++"/"C#" would
+        // otherwise share a slug (and so a worktree and a branch).
+        let words = folded.lowercased().split(separator: " ", omittingEmptySubsequences: false)
+        let plain = words.allSatisfy { !$0.isEmpty && $0.unicodeScalars.allSatisfy { $0.isASCII && CharacterSet.alphanumerics.contains($0) } }
+        let lossy = !plain || base.count >= 24
         guard lossy else { return base }
         return base.prefix(19).trimmingCharacters(in: CharacterSet(charactersIn: "-")) + "-" + String(hash(name).prefix(4))
     }

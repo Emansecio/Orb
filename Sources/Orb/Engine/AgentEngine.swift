@@ -985,7 +985,7 @@ actor AgentEngine {
                                                                      shown: "Bloqueado: essa permissão foi desligada para este Orb.") }
         let permission = PermissionPolicy.call(for: tool, arguments: arguments, context: request.context)
         var verdict = PermissionPolicy.evaluate(mode: live.mode, call: permission, rules: live.rules, turnGrants: allowed,
-                                                workspace: request.context.workingDirectory)
+                                                workspace: live.ownWorkspace(request.context.workingDirectory))
         // The card already answered "ask": only that. A mode that blocks (read-only) still does, even for a call approved before.
         if approved, case .ask(.needsPermission) = verdict { verdict = .allow }
         switch verdict {
@@ -1001,7 +1001,7 @@ actor AgentEngine {
                 toolName: call.name, title: summary.title, command: summary.detail,
                 reason: why.explanation ?? (reason.isEmpty ? "\(request.bot.name) precisa da sua permissão para continuar." : ""),
                 suggestions: PermissionPolicy.suggestions(for: permission, existing: live.rules + allowed,
-                                                          workspace: request.context.workingDirectory),
+                                                          workspace: live.ownWorkspace(request.context.workingDirectory)),
                 isDangerous: why.isDangerous)
             await gate.open(approval.id, botID: request.bot.id, alwaysAsks: why != .needsPermission)
             out.yield(.approval(approval))
