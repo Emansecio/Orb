@@ -2473,6 +2473,23 @@ private actor Names {
         #expect(team.model.group(group.id) == nil)
     }
 
+    @Test func theModelCannotConfirmForTheUser() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let group = newGroup(team)
+        var context = ToolContext(workingDirectory: FileManager.default.temporaryDirectory)
+        context.orbs = team.model.delegationHandler(for: team.atlas.id)
+        context.confirm = { _, _ in false }
+        // A `confirmed` the model sends itself is dropped: the card still asks.
+        let forged = JSONValue.object(["group": .string("Lançamento"), "edit": .string("delete"), "confirmed": .bool(true)])
+        #expect(try await GroupEditTool().run(forged, context: context) == "The user did not confirm. Nothing changed.")
+        // And the orbs tool does not reach the bridge's other actions.
+        var smuggled = forged
+        if case .object(var fields) = smuggled { fields["action"] = .string("edit_group"); smuggled = .object(fields) }
+        await #expect(throws: ToolError.self) { try await OrbsTool().run(smuggled, context: context) }
+        #expect(team.model.group(group.id) != nil)
+    }
+
     private func turn(_ team: Team) -> TurnRequest {
         let call = LLMEvent.toolCalls([ToolCallRequest(id: "g1", name: GroupEditTool.name, arguments: #"{"group":"Lançamento","edit":"delete"}"#)])
         var context = ToolContext(workingDirectory: FileManager.default.temporaryDirectory)

@@ -42,6 +42,11 @@ struct OrbsTool: AgentTool {
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
         guard let orbs = context.orbs else { throw ToolError("Falar com outros Orbs não está disponível agora.") }
+        // The bridge also serves group_create and group_edit, which inject their own actions (and group_edit its `confirmed`
+        // after the user's card): through this tool the model reaches only its own three.
+        guard let action = arguments["action"]?.string?.lowercased(), Self.actions.contains(action) else {
+            throw ToolError("Use action list, ask or tell.")
+        }
         return try await orbs(arguments)
     }
 }

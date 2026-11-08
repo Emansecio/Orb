@@ -35,6 +35,8 @@ struct GroupEditTool: AgentTool {
         guard let orbs = context.orbs, case .object(var fields) = arguments else {
             throw ToolError("Editar grupos não está disponível agora.")
         }
+        // Only the user's card below may confirm: whatever the model sent as `confirmed` is dropped.
+        fields["confirmed"] = nil
         // The app checks the edit first and says whether it needs the user; asking happens here, where the turn's card can be shown.
         fields["action"] = .string("edit_group_plan")
         let needed = try await orbs(.object(fields))
