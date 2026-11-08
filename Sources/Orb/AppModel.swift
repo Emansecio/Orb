@@ -1926,6 +1926,7 @@ final class AppModel {
             let browserStatus = bot.capabilities.contains(.browser) ? await browserHub.status() : nil
             let browserAvailability = BrowserAvailability(capabilities: bot.capabilities, status: browserStatus)
             var context = baseContext
+            if context.orbs != nil { context.orbs = delegationHandler(for: botID, turn: turn) } // bound to this turn
             // A run nobody watches (a routine, a request from another Orb) waits for its commands to the end.
             if session.routineID == nil || session.sideKind == .group { context.release = release }
             // The password of the proxy, when it has one, is read from the Keychain off the main thread.

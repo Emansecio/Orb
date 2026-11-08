@@ -5,11 +5,12 @@ import Foundation
 // `startNextQueuedWork` (who runs next on a free Orb) are in `AppModel.swift`, beside the routines' queue they extend.
 
 extension AppModel {
-    /// What `orbs` asks of the app for `botID`, for a native turn (`ToolContext.orbs`).
-    func delegationHandler(for botID: UUID) -> BridgeHandler {
+    /// What `orbs` asks of the app for `botID`, for a native turn (`ToolContext.orbs`). `turn`: the turn it serves; a call that
+    /// arrives once that turn was stopped or replaced acts on nothing (its chain and grants are gone).
+    func delegationHandler(for botID: UUID, turn: UUID? = nil) -> BridgeHandler {
         { [weak self] arguments in
             guard let model = self else { throw ToolError("O app está fechando.") }
-            return try await model.delegation.handleTool(arguments, orb: botID)
+            return try await model.delegation.handleTool(arguments, orb: botID, turn: turn)
         }
     }
 

@@ -87,7 +87,8 @@ extension AppModel {
         let recovery = "The app closed during this request. Assignments marked lost: "
             + (lost.isEmpty ? "none" : lost.joined(separator: "; "))
             + ". Check what is already done, then reassign what is left."
-        if !groupHub.resume(groupID, runID: entry.runID, request: entry.text ?? "", recovery: recovery, notice: Self.groupResumedNotice) {
+        if !groupHub.resume(groupID, runID: entry.runID, request: entry.text ?? "", recovery: recovery, notice: Self.groupResumedNotice,
+                            pulseRun: entry.pulseRun) {
             workJournal.dropGroupRun(groupID)
             // The run will never end by itself, so nobody else would remove its worktrees.
             if let runID = entry.runID, let group = group(groupID), !group.projectFolder.isEmpty {

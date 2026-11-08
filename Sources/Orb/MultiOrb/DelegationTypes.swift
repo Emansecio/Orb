@@ -51,6 +51,8 @@ enum DelegationRefusal: Error, Equatable, Sendable {
     case groupSetup(GroupSetup)
     /// `group_edit` was not let through (`DelegationHub.editGroup`).
     case groupEdit(GroupEdit)
+    /// The work the pulse pays for asked for more after the day's budget ran out (`AppModel.pulseBudgetSpent`).
+    case pulseBudget
 
     /// Why a group was not changed.
     enum GroupEdit: Sendable, Equatable {
@@ -204,6 +206,9 @@ enum DelegationRefusal: Error, Equatable, Sendable {
             case .unavailable:
                 "Não consegui mudar o grupo agora: diga isso ao usuário; ele muda na tela do grupo."
             }
+        case .pulseBudget:
+            "O teto diário de tokens do pulso acabou: não peça mais nada nesta conversa. Termine com o que tem e diga o que "
+                + "ficou faltando."
         case .ownGroup(let name):
             "Você já está trabalhando no grupo “\(name)”: peça a um membro pelo nome (os membros estão no início da mensagem do "
                 + "grupo)."

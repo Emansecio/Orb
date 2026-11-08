@@ -45,6 +45,12 @@ struct OrbEnvelope: Codable, Equatable, Sendable {
     var chat: UUID?
     /// A project folder the receiver should work in (a worktree of it when it is a git repository). ask only.
     var folder: String?
+    /// The pulse run this request is charged to (`AppModel.pulseLineage`): kept with the envelope, so the daily budget still
+    /// holds it after the chain's state is forgotten or the app reopened, and its failure never wakes a pulse again.
+    var pulseRun: UUID?
+    /// The pulse run that asked, waiting in its own conversation (`DelegationHub.holdPulse`): its answer resumes that run, not
+    /// the chat.
+    var servingPulse: UUID?
 }
 
 extension OrbEnvelope {
@@ -68,5 +74,7 @@ extension OrbEnvelope {
         servingRoutine = (try? c.decodeIfPresent(UUID.self, forKey: .servingRoutine)) ?? nil
         chat = (try? c.decodeIfPresent(UUID.self, forKey: .chat)) ?? nil
         folder = (try? c.decodeIfPresent(String.self, forKey: .folder)) ?? nil
+        pulseRun = (try? c.decodeIfPresent(UUID.self, forKey: .pulseRun)) ?? nil
+        servingPulse = (try? c.decodeIfPresent(UUID.self, forKey: .servingPulse)) ?? nil
     }
 }

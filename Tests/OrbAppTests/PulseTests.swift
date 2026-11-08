@@ -591,3 +591,150 @@ private final class PulseWorld {
         for reply in ["Nothing to report, but I asked the Revisor.", "Criei o grupo Time."] { #expect(!Pulse.isNothing(reply)) }
     }
 }
+
+// MARK: - The lineage: every way the pulse's work goes on stays on its budget
+
+@Suite @MainActor struct PulseLineageTests {
+    private static func nothing(_ who: String, _ user: String, _ result: String?) async -> [LLMEvent] { say("NOTHING") }
+
+    /// The pulse asks a teammate, and the teammate, serving that request, asks a group it is in: the group's turns are the
+    /// pulse's work too.
+    @Test func aGroupATeammateAsksForThePulseCountsAgainstTheBudget() async throws {
+        let world = PulseWorld { who, user, result in
+            switch who {
+            case "Atlas":
+                if user.contains("<orb_reply") { return say("Pronto.") }
+                if result != nil { return say("Pedi ao Pesquisador.") }
+                return ask("Pesquisador", "Veja o que falta.")
+            case "Pesquisador":
+                if user.contains("<orb_reply") { return say("O time terminou.") }
+                if result != nil { return say("Pedi ao time.") }
+                return ask("Time", "Revisem o texto.")
+            default: return say("Revisado.")
+            }
+        }
+        defer { world.cleanUp() }
+        let model = world.model
+        let group = try #require(model.createGroup(name: "Time", members: [world.bot("Pesquisador").id, world.bot("Revisor").id],
+                                                   orchestrator: world.bot("Revisor").id))
+        await world.startInterval()
+        await model.pulseTick(now: world.at(minutes: 61))
+        await world.settle()
+        #expect(await world.log.count(by: "Revisor") >= 1, "the group worked")
+        let calls = await world.log.count
+        #expect(model.pulseState.tokensToday == calls * 1_000, "every call of the chain, the group's included")
+        #expect(model.delegation.chainStates.values.contains { $0.groupID == group.id && $0.origin.isPulse })
+    }
+
+    /// The pulse's answer wakes the chat, and the chat asks a group: still the pulse's.
+    @Test func aGroupTheChatAnAnswerWokeAsksIsChargedToo() async throws {
+        let world = PulseWorld { who, user, result in
+            switch who {
+            case "Atlas":
+                if user.contains("Revisado") { return say("O time revisou.") }
+                if user.contains("<orb_reply") { return result == nil ? ask("Time", "Revisem o relatório.") : say("Pedi ao time.") }
+                if result != nil { return say("Pedi ao Pesquisador.") }
+                return ask("Pesquisador", "Veja o que falta.")
+            case "Pesquisador": return say("Falta revisar.")
+            default: return say("Revisado.")
+            }
+        }
+        defer { world.cleanUp() }
+        let model = world.model
+        let group = try #require(model.createGroup(name: "Time", members: [world.bot("Atlas").id, world.bot("Revisor").id],
+                                                   orchestrator: world.bot("Revisor").id))
+        await world.startInterval()
+        await model.pulseTick(now: world.at(minutes: 61))
+        await world.settle()
+        await waitUntil("the group's answer to wake the chat") { await world.log.calls(by: "Atlas").contains { $0.user.contains("Revisado") } }
+        await world.settle()
+        #expect(await world.log.count(by: "Revisor") >= 1)
+        let calls = await world.log.count
+        #expect(model.pulseState.tokensToday == calls * 1_000)
+        #expect(model.delegation.chainStates.values.contains { $0.groupID == group.id && $0.origin.isPulse })
+    }
+
+    /// A request the pulse paid for, redone after the app closed, is still the pulse's.
+    @Test func aRequestRedoneAfterAClosedAppStaysOnThePulsesBudget() async throws {
+        let world = PulseWorld(demand: false, rule: Self.nothing)
+        defer { world.cleanUp() }
+        let model = world.model
+        var envelope = OrbEnvelope(kind: .ask, from: OrbRef(world.bot("Atlas")), to: OrbRef(world.bot("Pesquisador")), text: "Veja.")
+        envelope.pulseRun = UUID()
+        #expect(model.delegation.resubmit(envelope))
+        #expect(model.delegation.chainStates[envelope.chainID]?.origin.pulseRun == envelope.pulseRun)
+        await world.settle()
+        #expect(await world.log.count(by: "Pesquisador") == 1)
+        // The Pesquisador's turn and the turn of Atlas' chat its answer woke.
+        let calls = await world.log.count
+        #expect(calls == 2 && model.pulseState.tokensToday == calls * 1_000)
+    }
+
+    /// With the day's budget spent, the work the pulse pays for asks for nothing more; the person's own work is never refused.
+    @Test func aSpentBudgetRefusesNewWorkOnlyInThePulsesLineage() async throws {
+        let world = PulseWorld(demand: false, rule: Self.nothing)
+        defer { world.cleanUp() }
+        let model = world.model
+        let atlas = world.bot("Atlas").id
+        model.pulseDailyTokens = 10_000
+        model.pulseState.day = PulseState.dayKey(world.t0)
+        model.pulseState.tokensToday = 10_000
+        let chain = UUID()
+        model.delegation.seedChain(chain, pulseRun: UUID(), originBot: atlas, groupID: nil)
+        model.session(atlas).usageChain = chain
+        #expect(model.pulseLineage(of: atlas) != nil)
+        #expect(throws: DelegationRefusal.pulseBudget) {
+            try model.delegation.submit(from: atlas, to: "Pesquisador", text: "Mais uma coisa", kind: .ask, messageID: UUID(), groupID: nil)
+        }
+        #expect(model.delegation.requests.isEmpty)
+        model.session(atlas).usageChain = nil
+        #expect(model.pulseLineage(of: atlas) == nil)
+        _ = try model.delegation.submit(from: atlas, to: "Pesquisador", text: "Pedido meu", kind: .ask, messageID: UUID(), groupID: nil)
+        await world.settle()
+        #expect(model.pulseState.tokensToday == 10_000, "the person's request is not the pulse's")
+    }
+
+    /// A failure in a chain the pulse paid for never wakes a pulse, even once the chain's state is forgotten.
+    @Test func aFailureOfThePulsesOwnWorkIsNeverADemand() {
+        let me = UUID(), other = UUID()
+        var envelope = OrbEnvelope(kind: .ask, from: OrbRef(id: me, name: "Eu"), to: OrbRef(id: other, name: "Outro"), text: "Faça")
+        envelope.pulseRun = UUID()
+        let failed = DelegationRequest(envelope: envelope, state: .failed)
+        #expect(Pulse.demands(for: me, plan: nil, routines: [], requests: [failed], groups: [], pulseChains: [], now: .now).isEmpty)
+    }
+
+    /// The chat an answer of the pulse's chain woke stops at the budget too (no request holds it, so no chain stopped it).
+    @Test func theChatAnAnswerWokeStopsAtTheBudget() async throws {
+        let secondStep = TestGate(), gate = TestGate()
+        let world = PulseWorld(tokens: 3_000) { who, user, result in
+            switch who {
+            case "Atlas":
+                if user.contains("<orb_reply") {
+                    guard result != nil else { return ask("Revisor", "E agora?") }
+                    await secondStep.open()
+                    await gate.wait()
+                    return say("Continuei.")
+                }
+                if result != nil { return say("Pedi ao Pesquisador.") }
+                return ask("Pesquisador", "Veja o que falta.")
+            default: return say("Falta revisar.")
+            }
+        }
+        defer { world.cleanUp() }
+        let model = world.model
+        model.pulseDailyTokens = 10_000
+        let atlas = world.bot("Atlas").id
+        await world.startInterval()
+        await model.pulseTick(now: world.at(minutes: 61))
+        // 3k + 3k (pulse) + 3k (Pesquisador) + 3k (the woken chat's first step): over the 10k while the chat still works. It
+        // stops then, or at the latest while its second step waits (the gate keeps that one from ending by itself).
+        await waitUntil("the woken chat to begin") { await world.log.calls(by: "Atlas").contains { $0.user.contains("<orb_reply") } }
+        await waitUntil("the budget to stop the woken chat") { model.sessions[atlas]?.turnTask == nil }
+        await secondStep.open()
+        await gate.open()
+        await world.settle()
+        let texts = model.transcript(atlas).compactMap { item -> String? in if case .bot(let text, _) = item.kind { text } else { nil } }
+        #expect(!texts.contains("Continuei."))
+        #expect(world.events("Atlas").contains { $0.kind == .pulseStopped })
+    }
+}

@@ -395,6 +395,10 @@ extension BotSession {
         if routineID == nil { model.workJournal.chatTaskEnded(bot: id) } // done, failed or stopped; a quit keeps it (the journal is frozen)
         let botID = id
         let ranRoutine = routineID != nil
+        // Taken before the chain is cleared: a turn the pulse paid for (a chat an answer of its chain woke) leaves the work
+        // that follows a turn (the stretch's note, the reviews) to your next turn, which is due for them all the same: the
+        // budget counts only what the pulse started.
+        let paidByPulse = model.pulseLineage(of: id) != nil
         // Taken now: the next turn starts clean, and the chat is the one this turn worked on (it may not be the one on show).
         let grantedAccess = accessGranted
         accessGranted = false
@@ -452,7 +456,7 @@ extension BotSession {
                 if model.delegation.isShuttingDown { keepNotes(notes) } else { saveMemory(notes: notes) }
             }
             scheduleMemorySave()
-            if succeeded { model.writeStretchNote(of: id) }
+            if succeeded, !paidByPulse { model.writeStretchNote(of: id) }
         }
         let bank = model.memory.bank(for: botID)
         Task {
@@ -530,9 +534,9 @@ extension BotSession {
         // (you asked for a skill, or the Orb proposed one) is told now; the review comes in the background.
         if !ranRoutine {
             Task { await model.collectSkillProposals(botID) }
-            if completed { model.reviewSkillsIfDue(self, messages: reviewMessages) } // a task left half way teaches little
-            if completed { model.consolidateMemoryIfDue(self) }
-            if completed { model.proposeMemoryMergeIfDue(self) }
+            if completed, !paidByPulse { model.reviewSkillsIfDue(self, messages: reviewMessages) } // a task left half way teaches little
+            if completed, !paidByPulse { model.consolidateMemoryIfDue(self) }
+            if completed, !paidByPulse { model.proposeMemoryMergeIfDue(self) }
         }
     }
 

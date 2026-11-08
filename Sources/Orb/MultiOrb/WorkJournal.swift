@@ -34,6 +34,9 @@ struct WorkEntry: Codable, Equatable, Sendable, Identifiable {
     var text: String?
     /// `request`: the message as it was sent.
     var envelope: OrbEnvelope?
+    /// `groupRun`: the pulse run the group's work is charged to, so a group resumed after a close still counts against the
+    /// pulse's daily budget.
+    var pulseRun: UUID?
 }
 
 extension WorkEntry {
@@ -51,6 +54,7 @@ extension WorkEntry {
         runID = (try? c.decodeIfPresent(UUID.self, forKey: .runID)) ?? nil
         text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? nil
         envelope = (try? c.decodeIfPresent(OrbEnvelope.self, forKey: .envelope)) ?? nil
+        pulseRun = (try? c.decodeIfPresent(UUID.self, forKey: .pulseRun)) ?? nil
     }
 }
 
@@ -187,20 +191,28 @@ final class WorkJournal {
 
     /// The group runs open now (called whenever the hub's runs change). A group has one open run: the entry follows it, keeping its
     /// count when a resumed run takes the place of the interrupted one.
-    func syncGroupRuns(_ open: [GroupRun]) {
+    /// `pulseRuns`: by run id, the pulse run a run is charged to (its chain is made just after the run, so a later sync fills it).
+    func syncGroupRuns(_ open: [GroupRun], pulseRuns: [UUID: UUID] = [:]) {
         guard !frozen else { return }
         var changed = false
         for run in open {
             awaitingGroupResume.remove(run.groupID)
             let text = run.request.clipped(to: 2_000)
+            let pulse = pulseRuns[run.id]
             if let index = live.firstIndex(where: { $0.kind == .groupRun && $0.groupID == run.groupID }) {
-                guard live[index].runID != run.id else { continue }
+                if live[index].runID == run.id {
+                    // Once charged to a pulse, always: a sync from before the chain existed must not clear it.
+                    if let pulse, live[index].pulseRun != pulse { live[index].pulseRun = pulse; changed = true }
+                    continue
+                }
                 live[index].runID = run.id
                 live[index].text = text
                 live[index].startedAt = run.startedAt
+                live[index].pulseRun = pulse
                 changed = true
             } else {
-                live.append(WorkEntry(kind: .groupRun, startedAt: run.startedAt, groupID: run.groupID, runID: run.id, text: text))
+                live.append(WorkEntry(kind: .groupRun, startedAt: run.startedAt, groupID: run.groupID, runID: run.id, text: text,
+                                      pulseRun: pulse))
                 changed = true
             }
         }

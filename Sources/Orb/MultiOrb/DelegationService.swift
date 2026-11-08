@@ -31,6 +31,15 @@ protocol DelegationService: AnyObject {
     func openRequests(from botID: UUID) -> [DelegationRequest]
     /// The teammates the Orb is told about (all other Orbs, or the members of the group).
     func roster(for botID: UUID, groupID: UUID?) -> [OrbRef]
+    /// The pulse run a chain is charged to (`AppModel.pulseLineage`); nil for a chain the pulse did not start.
+    func pulseRun(ofChain chainID: UUID) -> UUID?
+    /// A group's run resumed after a close was charged to a pulse: its chain is charged again before its first turn is asked.
+    func seedChain(_ chainID: UUID, pulseRun: UUID, originBot: UUID, groupID: UUID?)
+}
+
+extension DelegationService {
+    func pulseRun(ofChain chainID: UUID) -> UUID? { nil }
+    func seedChain(_ chainID: UUID, pulseRun: UUID, originBot: UUID, groupID: UUID?) {}
 }
 
 /// What a group's runtime does around the turns the hub runs for its members (implemented by the group hub, called by the

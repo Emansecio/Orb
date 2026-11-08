@@ -136,7 +136,10 @@ enum Pulse {
             else { continue }
             found.append(PulseDemand(key: "routine:\(routine.id.uuidString):\(run.id.uuidString)", line: "Routine \"\(clip(routine.name, 40))\" \(why)."))
         }
-        let failed = requests.filter { $0.state == .failed && $0.envelope.kind != .reply && !pulseChains.contains($0.envelope.chainID) }
+        // The envelope says it was the pulse's (it outlives the chain's state); the set covers envelopes from older versions.
+        let failed = requests.filter {
+            $0.state == .failed && $0.envelope.kind != .reply && $0.envelope.pulseRun == nil && !pulseChains.contains($0.envelope.chainID)
+        }
             .sorted { ($0.finishedAt ?? .distantPast) < ($1.finishedAt ?? .distantPast) }
         for request in failed {
             let envelope = request.envelope
@@ -197,6 +200,23 @@ extension AppModel {
     /// Tokens the pulse's work has spent today (for Ajustes).
     func pulseTokensToday(now: Date = .now) -> Int {
         pulseState.day == PulseState.dayKey(now) ? pulseState.tokensToday : 0
+    }
+
+    /// The day's budget is spent: work the pulse pays for asks for nothing more (`DelegationRefusal.pulseBudget`).
+    var pulseBudgetSpent: Bool { pulseTokensToday(now: pulseNow()) >= pulseDailyTokens }
+
+    // MARK: The lineage
+
+    /// The pulse run the Orb's current turn is paid by, if any: its own pulse run; a request or a group's turn of a chain the
+    /// pulse started; the chat an answer of such a chain woke; a request whose envelope says so (its chain's state may be
+    /// forgotten). The one place that decides it: the budget (`pulseCharge`), the chains (`DelegationHub.newChain`,
+    /// `queueGroupTurn`) and the stop (`stopPulseWork`) all ask here, so a new way for work to go on cannot leave the budget.
+    func pulseLineage(of botID: UUID) -> UUID? {
+        guard let session = sessions[botID] else { return nil }
+        if session.sideKind == .pulse, let run = session.routineID { return run }
+        if let chain = session.chain?.chainID ?? session.usageChain, let run = delegation.pulseRun(ofChain: chain) { return run }
+        if let serving = session.servingRequest, let run = delegation.requests[serving]?.envelope.pulseRun { return run }
+        return nil
     }
 
     // MARK: The pass
@@ -349,13 +369,11 @@ extension AppModel {
     func pulseCharge(_ totals: UsageTotals, botID: UUID, source: UsageSource) {
         let tokens = totals.budgetTokens
         guard tokens > 0 else { return }
-        let session = sessions[botID]
-        let chain = session?.chain?.chainID ?? session?.usageChain
-        let inPulseChain = chain.flatMap { delegation.chainStates[$0]?.origin.isPulse } ?? false
-        guard source == .pulse || inPulseChain else { return }
+        let lineage = pulseLineage(of: botID)
+        guard source == .pulse || lineage != nil else { return }
         pulseState.roll(to: pulseNow())
         pulseState.tokensToday += tokens
-        if source == .pulse { pulseRuns[botID]?.tokens += tokens }
+        if let run = pulseRuns[botID], source == .pulse || lineage == run.id { pulseRuns[botID]?.tokens += tokens }
         savePulseState()
         if pulseState.tokensToday >= pulseDailyTokens { Task { @MainActor [weak self] in self?.stopPulseWork() } }
     }
@@ -369,7 +387,9 @@ extension AppModel {
             delegation.cancelChain(id, by: .budget)
             told.insert(chain.originBot)
         }
-        for (botID, session) in sessions where session.sideKind == .pulse && session.turnTask != nil {
+        // The pulse's own turns, and the chat turns its answers woke (no request holds those, so no chain stops them).
+        for (botID, session) in sessions where session.turnTask != nil
+            && (session.sideKind == .pulse || (session.routineID == nil && pulseLineage(of: botID) != nil)) {
             session.stop(startsQueuedRoutines: true, notice: Self.pulseCappedNotice)
             told.insert(botID)
         }
@@ -380,5 +400,7 @@ extension AppModel {
 }
 
 extension DelegationHub.ChainState.Origin {
-    var isPulse: Bool { if case .pulse = self { true } else { false } }
+    var isPulse: Bool { pulseRun != nil }
+    /// The pulse run a chain of this origin is charged to.
+    var pulseRun: UUID? { if case .pulse(let run) = self { run } else { nil } }
 }

@@ -124,6 +124,8 @@ final class DelegationHub: DelegationService {
         // MARK: end MultiOrb (WP5)
 
         var chain = chainStates[plan.chainID] ?? newChain(startedBy: sender, session: session, groupID: groupID ?? context?.groupID)
+        // Work the pulse pays for does not grow once the day's budget is spent: refused here, before it costs a turn.
+        if kind == .ask, chain.origin.pulseRun != nil, model.pulseBudgetSpent { throw DelegationRefusal.pulseBudget }
         let repeatKey = DelegationRules.repeatKey(to: plan.target.id, text: plan.text)
         chain.recent[repeatKey] = now
         if context == nil {
@@ -139,6 +141,7 @@ final class DelegationHub: DelegationService {
                                    text: plan.text, hop: plan.hop, path: plan.path, servingRequest: session.servingRequest,
                                    groupID: groupID ?? context?.groupID, sentAt: now)
         envelope.chat = session.conversationChat
+        envelope.pulseRun = chain.origin.pulseRun
         if kind == .tell { return leaveNotice(envelope, session: session) }
         envelope.folder = folder
         // A routine's run that asks is resumed by the answer (`holdRoutine`), so the answer must say which run it is for.
@@ -167,8 +170,10 @@ final class DelegationHub: DelegationService {
         var envelope = original
         envelope.text = Self.resumedPrefix + original.text
         envelope.sentAt = .now
+        // A request the pulse paid for is still the pulse's after the close: its envelope says so.
         var chain = chainStates[envelope.chainID]
-            ?? ChainState(origin: .chat(envelope.from.id), originBot: envelope.from.id, groupID: nil, chat: envelope.chat)
+            ?? ChainState(origin: envelope.pulseRun.map { .pulse($0) } ?? .chat(envelope.from.id), originBot: envelope.from.id,
+                          groupID: nil, chat: envelope.chat)
         chain.touched = .now
         chainStates[envelope.chainID] = chain
         requests[envelope.id] = DelegationRequest(envelope: envelope, state: .queued)
@@ -228,14 +233,17 @@ final class DelegationHub: DelegationService {
             servingRequest: serving, groupID: groupID)
         envelope.fromChat = fromChat
         if fromChat { envelope.chat = askedBy.flatMap { model?.sessions[$0]?.conversationChat } }
-        guard model != nil, target != nil, !isShuttingDown else { return DelegationRequest(envelope: envelope, state: .failed) }
-        // A group the pulse starts from its Orb's pulse run is charged to the pulse (`AppModel.pulseCharge`).
-        let pulseRun = fromChat ? askedBy.flatMap { model?.sessions[$0] }.flatMap { $0.sideKind == .pulse ? $0.routineID : nil } : nil
-        var chain = chainStates[context.chainID] ?? ChainState(origin: pulseRun.map { .pulse($0) } ?? .group(context.chainID),
+        guard let model, target != nil, !isShuttingDown else { return DelegationRequest(envelope: envelope, state: .failed) }
+        // A group started by work the pulse pays for (its own run, a teammate serving its request, the chat its answer woke)
+        // is charged to the pulse too (`AppModel.pulseLineage`): the budget holds the whole chain, however far it goes.
+        let lineage = askedBy.flatMap { model.pulseLineage(of: $0) }
+        var chain = chainStates[context.chainID] ?? ChainState(origin: lineage.map { .pulse($0) } ?? .group(context.chainID),
                                                                originBot: askedBy ?? member, groupID: groupID)
         chain.touched = .now
         chainStates[context.chainID] = chain
+        envelope.pulseRun = chain.origin.pulseRun
         guard !chain.cancelled else { return DelegationRequest(envelope: envelope, state: .cancelled) }
+        if chain.origin.pulseRun != nil, model.pulseBudgetSpent { return DelegationRequest(envelope: envelope, state: .cancelled) }
         let request = DelegationRequest(envelope: envelope, state: .queued)
         requests[envelope.id] = request
         if let serving = envelope.servingRequest { requests[serving]?.openChildren.insert(envelope.id) }
@@ -1038,8 +1046,11 @@ final class DelegationHub: DelegationService {
     // MARK: The tool
 
     /// One call of the `orbs` tool for `botID` (both engines end up here). `ask` returns at once: the answer wakes the Orb later.
-    func handleTool(_ arguments: JSONValue, orb botID: UUID, messageID: UUID = UUID()) async throws -> String {
+    func handleTool(_ arguments: JSONValue, orb botID: UUID, messageID: UUID = UUID(), turn: UUID? = nil) async throws -> String {
         guard let model, model.bot(botID) != nil else { throw ToolError("Este Orb não existe mais.") }
+        // A call still in flight when its turn was stopped would otherwise act with what the next turn left in the session (no
+        // chain: a new one, outside the pulse's budget and the stop).
+        if let turn, model.sessions[botID]?.turnID != turn { throw ToolError("Esta resposta foi interrompida: nada foi feito.") }
         let groupID = model.session(botID).chain?.groupID
         switch arguments["action"]?.string?.lowercased() {
         case "list":
@@ -1299,6 +1310,7 @@ final class DelegationHub: DelegationService {
         guard !text.isEmpty else { throw DelegationRefusal.emptyMessage }
         guard text.count <= DelegationLimits.messageLimit else { throw DelegationRefusal.tooLong }
         guard !seenMessageIDs.contains(messageID) else { throw DelegationRefusal.duplicate }
+        if model.pulseLineage(of: botID) != nil, model.pulseBudgetSpent { throw DelegationRefusal.pulseBudget }
         guard let request = model.groupHub.postOrbRequest(from: botID, text: text, to: group.id, messageID: messageID) else {
             throw DelegationRefusal.groupDoor(name, .unavailable)
         }
@@ -1509,15 +1521,25 @@ final class DelegationHub: DelegationService {
         return model?.bot(envelope.to.id)?.name ?? envelope.to.name
     }
 
+    // MARK: The pulse's lineage
+
+    func pulseRun(ofChain chainID: UUID) -> UUID? { chainStates[chainID]?.origin.pulseRun }
+
+    func seedChain(_ chainID: UUID, pulseRun: UUID, originBot: UUID, groupID: UUID?) {
+        guard chainStates[chainID] == nil else { return }
+        chainStates[chainID] = ChainState(origin: .pulse(pulseRun), originBot: originBot, groupID: groupID)
+    }
+
     // MARK: Helpers
 
     /// The Orb's name now (it may have been renamed since the envelope was written).
     private func currentName(_ ref: OrbRef) -> String { model?.bot(ref.id)?.name ?? ref.name }
 
     private func newChain(startedBy sender: Bot, session: BotSession, groupID: UUID?) -> ChainState {
-        let origin: ChainState.Origin = if let groupID { .group(groupID) }
+        // The pulse's lineage first: whatever turn asks, work the pulse pays for stays on its budget.
+        let origin: ChainState.Origin = if let run = model?.pulseLineage(of: sender.id) { .pulse(run) }
+            else if let groupID { .group(groupID) }
             else if session.sideKind == .routine, let routine = session.routineID { .routine(routine) }
-            else if session.sideKind == .pulse, let run = session.routineID { .pulse(run) }
             else { .chat(sender.id) }
         return ChainState(origin: origin, originBot: sender.id, groupID: groupID, chat: session.conversationChat)
     }
