@@ -100,3 +100,10 @@ Correções que o usuário já fez mais de uma vez e decisões dele que já est�
 26. O Claude Code é só o cano até o modelo (`Engine/ClaudePipe/`), com o motor do Orb no comando: nunca reintroduza o harness dele (prompt, ferramentas, sessões, compactação) nem OAuth direto.
 27. Não mude como a memória trata páginas escritas fora do padrão sem pedido: Orbs antigos do usuário dependem disso.
 28. Nunca remova um recurso existente sem pedido explícito (as várias conversas por Orb saíram em `e3f90ba` sem aval e tiveram de voltar).
+
+### Qualidade de código
+
+29. Escreva o mínimo de código que resolve, e de forma eficiente. Antes de criar algo, procure o que já existe no projeto, na biblioteca padrão ou na plataforma. Sem overcoding: nenhuma abstração, camada, opção ou caso hipotético que a tarefa não pede. Ser enxuto não justifica cortar validação, tratamento de erro, proteção de dados ou acessibilidade.
+30. Depois de cada feature implementada ou alterada, rode as suítes afetadas (`scripts/test.sh --filter`) antes de passar à próxima.
+31. Toda correção de bug ganha um teste de regressão, e você confere que ele falha sem a correção (dois testes já passavam mesmo sem ela). Lógica nova com ramificação, laço ou parsing ganha testes do caminho principal e dos casos de borda.
+32. Antes de dar por pronto, revise o diff inteiro procurando bug, caso de borda, código morto ou duplicado e gargalo (trabalho no `body`, loop ou leitura repetida, I/O na thread principal). Corrija o que achar e diga no relatório o que a revisão encontrou.
