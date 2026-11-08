@@ -67,6 +67,20 @@ struct SearchResultsParserTests {
         #expect(SearchResultsParser.isDuckDuckGoBlock(html: "<div class=\"anomaly-modal__title\">Unfortunately, bots use DuckDuckGo too.</div>"))
         #expect(!SearchResultsParser.isDuckDuckGoBlock(html: duckDuckGoPage))
     }
+
+    @Test func aResultThatTalksAboutUnusualTrafficIsNotABlock() {
+        let page = duckDuckGoPage + "<a class=\"result__a\" href=\"https://a.test/\">Fix the unusual traffic error</a><div>unusual traffic</div>"
+        #expect(!SearchResultsParser.isDuckDuckGoBlock(html: page))
+        #expect(!SearchResultsParser.isDuckDuckGoBlock(html: "<html>unusual traffic from your network</html>"))
+    }
+
+    @Test func googleAsksForAsManyResultsAsTheCountAllows() {
+        func num(_ count: Int) -> String? {
+            let url = WebSearchTool.address(for: .init(query: "x", count: count, site: nil, news: false), provider: .google)
+            return URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "num" }?.value
+        }
+        #expect(num(15) == "15" && num(3) == "10")
+    }
 }
 
 /// `web_search`, with every network answer made up. They share one stub, so they run one at a time.

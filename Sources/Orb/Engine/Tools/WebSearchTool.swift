@@ -78,8 +78,11 @@ enum SearchResultsParser {
 
     /// DuckDuckGo's page for a search it refuses to answer (it asks for a human).
     static func isDuckDuckGoBlock(html: String) -> Bool {
+        // Only the block page's own markup counts: a result that merely talks about "unusual traffic" is not a block.
+        // The phrase alone is trusted only when the page has no result links.
         let lowered = html.lowercased()
-        return lowered.contains("anomaly-modal") || lowered.contains("unusual traffic") || lowered.contains("bots use duckduckgo too")
+        if lowered.contains("class=\"anomaly-modal") { return true }
+        return lowered.contains("bots use duckduckgo too") && !lowered.contains("result__a")
     }
 
     // MARK: Pieces
@@ -444,7 +447,7 @@ struct WebSearchTool: AgentTool {
         case .google:
             components = URLComponents(string: "https://www.google.com/search")!
             components.queryItems = [URLQueryItem(name: "q", value: search.text), URLQueryItem(name: "hl", value: "pt-BR"),
-                                     URLQueryItem(name: "num", value: "10")]
+                                     URLQueryItem(name: "num", value: String(max(10, search.count)))]
             if search.news { components.queryItems?.append(URLQueryItem(name: "tbm", value: "nws")) }
         }
         TinyFishSearch.encodePlus(in: &components)
