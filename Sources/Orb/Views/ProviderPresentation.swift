@@ -194,7 +194,12 @@ enum GatewayForm {
 
     /// What is stored for the typed URL: `urlState` validates the trimmed text, so the stored one must be trimmed too
     /// (a trailing space would reach the request as `%20`).
-    static func storedURL(_ text: String) -> String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+    /// An emptied field goes back to the provider's address (what the placeholder shows) instead of storing "", which
+    /// would leave Ollama or LM Studio "without a model" with no hint why; the Custom gateway has none and stays empty.
+    static func storedURL(_ text: String, for kind: ProviderKind) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? kind.defaultBaseURL : trimmed
+    }
 
     static func urlState(_ text: String) -> URLState {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -577,7 +577,11 @@ struct ModelRefreshBackoffTests {
     }
 
     @Test func theStoredBaseURLHasNoSpacesAtTheEnds() {
-        #expect(GatewayForm.storedURL(" http://localhost:11434/v1 \n") == "http://localhost:11434/v1")
-        #expect(GatewayForm.urlState(GatewayForm.storedURL("http://localhost:11434/v1 ")) == .valid)
+        #expect(GatewayForm.storedURL(" http://localhost:11434/v1 \n", for: .custom) == "http://localhost:11434/v1")
+        #expect(GatewayForm.urlState(GatewayForm.storedURL("http://localhost:11434/v1 ", for: .custom)) == .valid)
+        // An emptied field goes back to the provider's address; the Custom gateway has none.
+        #expect(GatewayForm.storedURL("  ", for: .ollama) == ProviderKind.ollama.defaultBaseURL && !ProviderKind.ollama.defaultBaseURL.isEmpty)
+        #expect(GatewayForm.storedURL("", for: .lmstudio) == ProviderKind.lmstudio.defaultBaseURL)
+        #expect(GatewayForm.storedURL("", for: .custom).isEmpty)
     }
 }

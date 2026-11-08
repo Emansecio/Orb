@@ -330,7 +330,7 @@ private struct ProviderRow: View {
     private func commitURL() {
         guard let draft = urlDraft else { return }
         urlDraft = nil
-        let url = GatewayForm.storedURL(draft)
+        let url = GatewayForm.storedURL(draft, for: kind)
         if url != account?.baseURL { model.updateProvider(kind) { $0.baseURL = url } }
     }
 
