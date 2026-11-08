@@ -21,14 +21,23 @@ extension OrbDraft {
         let before = self
 
         if let value = arguments["name"]?.string {
-            let name = String(MemoryText.flatten(MemorySanitizer.scrub(value)).prefix(Self.nameLimit)).trimmingCharacters(in: .whitespaces)
+            let full = MemoryText.flatten(MemorySanitizer.scrub(value))
+            let name = String(full.prefix(Self.nameLimit)).trimmingCharacters(in: .whitespaces)
             if name.isEmpty { report.rejected.append("name: empty") } else { self.name = name }
+            // A cut is told to the model: it would otherwise call the draft ready with a half-sentence in it.
+            if full.count > Self.nameLimit { report.rejected.append("name: cut to \(Self.nameLimit) characters; shorten it") }
         }
         if let value = arguments["role"]?.string {
-            role = String(MemoryText.flatten(MemorySanitizer.scrub(value)).prefix(Self.roleLimit))
+            let full = MemoryText.flatten(MemorySanitizer.scrub(value))
+            role = String(full.prefix(Self.roleLimit))
+            if full.count > Self.roleLimit { report.rejected.append("role: cut to \(Self.roleLimit) characters; shorten it") }
         }
         if let value = arguments["instructions"]?.string {
+            let full = Self.cleanedInstructions(value)
             instructions = Self.sanitizedInstructions(value)
+            if full.count > Self.instructionsLimit {
+                report.rejected.append("instructions: cut to \(Self.instructionsLimit) characters, mid-text; rewrite them shorter")
+            }
         }
         if let listed = arguments["capabilities"]?.array {
             var kept: Set<Capability> = []
@@ -87,12 +96,17 @@ extension OrbDraft {
     /// Secrets removed, control characters out, each line's spaces collapsed, line breaks kept (no runs of blank lines),
     /// at most `instructionsLimit` characters.
     static func sanitizedInstructions(_ text: String) -> String {
+        String(cleanedInstructions(text).prefix(instructionsLimit)).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// `sanitizedInstructions` before the cap, so the caller can tell the model when the cap cut something.
+    private static func cleanedInstructions(_ text: String) -> String {
         var kept: [String] = []
         for raw in MemorySanitizer.scrub(text).components(separatedBy: .newlines) {
             let line = MemoryText.flatten(raw)
             if line.isEmpty, kept.last?.isEmpty ?? true { continue }
             kept.append(line)
         }
-        return String(kept.joined(separator: "\n").prefix(instructionsLimit)).trimmingCharacters(in: .whitespacesAndNewlines)
+        return kept.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

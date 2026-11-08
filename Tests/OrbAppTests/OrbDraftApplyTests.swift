@@ -18,6 +18,16 @@ import Testing
         #expect(second.changed == [.instructions, .mode] && draft.revision == 2)
     }
 
+    @Test func aCutNameRoleOrInstructionsComesBackAsRejected() {
+        var draft = OrbDraft()
+        let long = String(repeating: "palavra ", count: 300)
+        let report = draft.apply(.object(["name": .string(String(repeating: "N", count: 80)), "role": .string(long), "instructions": .string(long)]))
+        #expect(draft.instructions.count <= OrbDraft.instructionsLimit)
+        #expect(report.rejected.count == 3 && report.rejected.allSatisfy { $0.contains("cut to") })
+        var fine = OrbDraft()
+        #expect(fine.apply(args(#"{"name":"Maia","role":"Agenda","instructions":"Ajuda."}"#)).rejected.isEmpty)
+    }
+
     @Test func theDraftStartsWithWhatTheFormStartsWith() {
         var draft = OrbDraft()
         #expect(draft.capabilities == Bot(name: "x", role: "", orb: OrbConfig()).capabilities, "never a toolless Orb by omission")
