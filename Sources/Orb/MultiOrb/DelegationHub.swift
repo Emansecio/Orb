@@ -214,8 +214,9 @@ final class DelegationHub: DelegationService {
                                 fromChat: Bool) -> DelegationRequest {
         let from = askedBy.flatMap { model?.bot($0) } ?? model?.bot(member)
         let target = model?.bot(member)
-        // From the asker's own chat there is no request it serves: the answer wakes that chat.
-        let serving = fromChat ? nil : context.serving ?? askedBy.flatMap { model?.session($0).servingRequest }
+        // From the asker's own chat there is no request it serves: the answer wakes that chat. An asker in a side run (a group's
+        // turn, another Orb's request) is serving a request, and the answer resumes that one instead.
+        let serving = context.serving ?? askedBy.flatMap { model?.session($0).servingRequest }
         var envelope = OrbEnvelope(
             id: id, chainID: context.chainID, kind: .ask, from: from.map(OrbRef.init) ?? OrbRef(id: askedBy ?? member, name: ""),
             to: target.map(OrbRef.init) ?? OrbRef(id: member, name: ""), text: text, hop: context.hop + 1,
@@ -1060,7 +1061,7 @@ final class DelegationHub: DelegationService {
     }
 
     /// "- Pesquisador: Pesquisa na web e resume (livre)": the teammates, without ids or folders. Outside a group's turn, the
-    /// groups the Orb is in come after them.
+    /// groups the Orb is in come after them; in one, the other groups its orchestrator may ask.
     func teammatesText(for botID: UUID, groupID: UUID?) -> String {
         guard let model else { return "" }
         let team = roster(for: botID, groupID: groupID).compactMap { model.bot($0.id) }
@@ -1069,14 +1070,15 @@ final class DelegationHub: DelegationService {
             let state = groupID.map { groupStatus(of: orb.id, in: $0) } ?? status(of: orb.id)
             return "- \(orb.name)\(role.isEmpty ? "" : ": " + role) (\(state))"
         }.joined(separator: "\n")
-        guard groupID == nil else { return teammates }
-        let groups = model.groupLines(for: botID).prefix(OrbsPrompt.groupLimit).map { group in
+        let lines = groupID == nil ? model.groupLines(for: botID) : model.otherGroupLines(for: botID, inTurnOf: groupID)
+        let groups = lines.prefix(OrbsPrompt.groupLimit).map { group in
             let lead = group.youOrchestrate ? "você orquestra" : "\(group.orchestrator) orquestra"
             return "- \(group.name): \(lead)" + (group.others.isEmpty ? "" : "; outros membros: " + group.others.joined(separator: ", "))
         }
         guard !groups.isEmpty else { return teammates }
-        return teammates + "\n\nSeus grupos (o usuário inicia o trabalho de um grupo na tela dele; você não escreve no fio):\n"
-            + groups.joined(separator: "\n")
+        let note = groupID == nil ? "o usuário inicia o trabalho de um grupo na tela dele; você não escreve no fio"
+            : "você pode acionar estes com ask, pelo nome"
+        return teammates + "\n\nSeus grupos (\(note)):\n" + groups.joined(separator: "\n")
     }
 
     /// "livre", "ocupado", or "espera aprovação do usuário": a card of its turn is open, so whoever waits for it waits for the

@@ -62,7 +62,12 @@ extension AppModel {
         let group = turnGroup(of: bot.id)
         let team = delegation.roster(for: bot.id, groupID: group).compactMap { self.bot($0.id) }
         let teammates = OrbsPrompt.section(for: bot, roster: team, isGroup: group != nil)
-        guard group == nil else { return teammates }
+        guard group == nil else {
+            // The orchestrator of a group's turn is told which other groups it can ask, or it would not know their names.
+            let others = otherGroupLines(for: bot.id, inTurnOf: group)
+            let list = OrbsPrompt.groups(others, canStart: true, actsOnOwn: true, canEdit: orbsCanManageGroups)
+            return [teammates, list].filter { !$0.isEmpty }.joined(separator: "\n\n")
+        }
         let groups = OrbsPrompt.groups(groupLines(for: bot.id), canStart: (isOwnChat(bot.id) || orbsActOnOwn) && orbsCanStartGroups,
                                        actsOnOwn: orbsActOnOwn,
                                        canRecall: isOwnChat(bot.id), canEdit: orbsCanManageGroups)
@@ -76,6 +81,14 @@ extension AppModel {
                                  youOrchestrate: group.orchestratorID == botID,
                                  others: group.memberIDs.filter { $0 != botID }.compactMap { bot($0)?.name })
         }
+    }
+
+    /// The other groups an orchestrator may ask or create from a group's turn (`DelegationHub.submitToGroup`): empty for a
+    /// member that does not orchestrate, without "Orbs agem por conta própria" and "Orbs podem acionar grupos", or outside a turn.
+    func otherGroupLines(for botID: UUID, inTurnOf groupID: UUID?) -> [OrbsPrompt.GroupLine] {
+        guard let groupID, orbsActOnOwn, orbsCanStartGroups, group(groupID)?.orchestratorID == botID else { return [] }
+        let own = group(groupID)?.name
+        return groupLines(for: botID).filter { $0.name != own }
     }
 
     /// Who asked the request the Orb is working on, for the working line ("Pedido de Atlas"); nil outside a request.

@@ -2128,6 +2128,69 @@ private actor Names {
         #expect(await askGroup(hub, "Segundo", by: team.atlas).hasPrefix("“Segundo” é um grupo, não um Orb"))
     }
 
+    @Test func aGroupsOrchestratorAsksAnotherGroupAndTheAnswerWakesItInsideTheGroupsRequest() async throws {
+        let team = Team { seen in
+            switch seen.who {
+            case "Atlas":
+                if seen.user.contains("<orb_reply") { return say("Primeiro pronto: o Segundo disse que o texto está bom.") }
+                if seen.toolResult != nil { return say("Pedi ao grupo Segundo.") }
+                return orbsCall("ask", to: "Segundo", "Revisem o texto.")
+            case "Revisor": return say("Texto bom.")
+            default: return say("?")
+            }
+        }
+        defer { team.cleanUp() }
+        let model = team.model
+        model.groupHub.settle = .zero
+        model.groupHub.isAppActive = { false }
+        let first = try #require(model.createGroup(name: "Primeiro", members: [team.atlas.id, team.revisor.id], orchestrator: team.atlas.id))
+        let second = try #require(model.createGroup(name: "Segundo", members: [team.atlas.id, team.revisor.id], orchestrator: team.revisor.id))
+        #expect(model.postUserMessage("Preparar o texto", to: first.id))
+        await waitUntil("the first group's request to end") {
+            model.groupHub.run(first.id) == nil && self.finalPosts(team, first, "Primeiro pronto: o Segundo disse que o texto está bom.") > 0
+        }
+        await team.settle()
+        // The second group answered, and the answer reached the first group's orchestrator in that request, not in its own chat.
+        #expect(finalPosts(team, second, "Texto bom.") == 1)
+        let atlas = await team.log.calls(by: "Atlas")
+        #expect(atlas.contains { $0.user.contains("<orb_reply") && $0.user.contains("Texto bom.") })
+        #expect(team.botTexts(team.atlas).isEmpty, "the answer must not wake the Orb's own chat")
+        #expect(model.groupHub.run(first.id) == nil && model.groupHub.run(second.id) == nil)
+        #expect(model.delegation.requests.values.allSatisfy { !DelegationHub.isOpen($0.state) } && model.delegation.inbox.isEmpty)
+    }
+
+    @Test func inAGroupsTurnTheOrchestratorSeesTheOtherGroupsInThePromptAndInOrbsList() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let model = team.model, hub = model.delegation
+        let first = try #require(model.createGroup(name: "Primeiro", members: [team.atlas.id, team.revisor.id], orchestrator: team.atlas.id))
+        try #require(model.createGroup(name: "Segundo", members: [team.atlas.id, team.revisor.id], orchestrator: team.revisor.id))
+        func inTurn(_ bot: Bot, of group: OrbGroup) {
+            let session = model.session(bot.id)
+            session.sideKind = .group
+            session.chain = ChainContext(chainID: UUID(), hop: 1, path: [], groupID: group.id)
+        }
+        // The orchestrator of the first group is told about the second, not about its own group.
+        inTurn(team.atlas, of: first)
+        let prompt = model.orbsSection(for: team.atlas)
+        #expect(prompt.contains("## Your groups") && prompt.contains("Segundo") && !prompt.contains("Primeiro:"), "\(prompt)")
+        #expect(prompt == model.orbsSection(for: team.atlas)) // the same bytes for the same groups
+        let list = hub.teammatesText(for: team.atlas.id, groupID: first.id)
+        #expect(list.contains("Seus grupos") && list.contains("- Segundo: Revisor orquestra") && !list.contains("Primeiro"), "\(list)")
+        // A member that does not orchestrate sees none.
+        inTurn(team.revisor, of: first)
+        #expect(!model.orbsSection(for: team.revisor).contains("## Your groups"))
+        #expect(!hub.teammatesText(for: team.revisor.id, groupID: first.id).contains("Seus grupos"))
+        // Neither without the switches.
+        inTurn(team.atlas, of: first)
+        model.orbsCanStartGroups = false
+        #expect(!model.orbsSection(for: team.atlas).contains("## Your groups"))
+        model.orbsCanStartGroups = true
+        model.orbsActOnOwn = false
+        #expect(!model.orbsSection(for: team.atlas).contains("## Your groups"))
+        #expect(!hub.teammatesText(for: team.atlas.id, groupID: first.id).contains("Seus grupos"))
+    }
+
     @Test func inItsChatAnOrbReadsTheBoardOfItsGroups() async throws {
         let team = Team { seen in
             guard seen.who == "Atlas" else { return say("?") }
