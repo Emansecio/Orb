@@ -777,6 +777,15 @@ struct SchedulePermissionTests {
         #expect(!model.routines[0].isEnabled)
     }
 
+    @Test @MainActor func updatingAPausedTaskSaysItNeedsToBeResumed() throws {
+        let (model, atlas, _) = setUp()
+        model.routines.append(Routine(name: "Passada", botID: atlas.id, prompt: "x", schedule: .once(.now.addingTimeInterval(-3600)),
+                                      isEnabled: false, createdAt: .now.addingTimeInterval(-86_400)))
+        let said = try run(model, atlas, call("update", name: "Passada", when: .object(["kind": .string("once"), "at": .string("2099-01-02T09:00")])))
+        #expect(!model.routines[0].isEnabled && said.contains("retome (resume)"))
+        #expect(try run(model, atlas, call("resume", name: "Passada")).hasPrefix("Retomei"))
+    }
+
     @Test @MainActor func theHighlightGoesAwayByItself() async throws {
         let (model, atlas, _) = setUp()
         model.selection = .bot(atlas.id)

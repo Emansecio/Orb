@@ -66,6 +66,8 @@ extension AppModel {
             show(routine, of: botID)
             return "Alterei “\(routine.name)”: \(routine.schedule.label.lowercasedFirst), "
                 + (routine.isEnabled ? RoutineText.preview(nextRun: routine.nextRun).lowercasedFirst : "pausada") + "."
+                // A new date does not switch a paused task on; the refusal of `resume` sends the Orb here, so say what is next.
+                + (!routine.isEnabled && routine.canBeEnabled() ? " Ela continua pausada: retome (resume) para voltar a rodar." : "")
                 + (routine.goal.map { " Meta: \(MemoryText.clip($0.target, 120))." } ?? "")
         case .list:
             guard !own.isEmpty else { return "Nenhuma tarefa agendada." }
