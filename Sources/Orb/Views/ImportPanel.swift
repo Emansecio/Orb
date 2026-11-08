@@ -553,9 +553,6 @@ private struct ImportPreview: View, Equatable {
                             if identity.text.count > ImportLimits.identity {
                                 Text(ImportText.overflow).font(Typography.small).foregroundStyle(Palette.faint)
                             }
-                            if identity.omitted > 0 {
-                                Text(ImportText.omitted(identity.omitted)).font(Typography.small).foregroundStyle(Palette.warn)
-                            }
                         }
                     }
                 }
@@ -624,6 +621,10 @@ private struct ImportRow: View {
                 if item.isSuspicious {
                     Text(ImportText.suspicious).font(Typography.small).foregroundStyle(Palette.warn)
                 }
+                // Identity, procedures: whatever the reading limit cut must show as cut.
+                if item.omitted > 0 {
+                    Text(ImportText.omitted(item.omitted)).font(Typography.small).foregroundStyle(Palette.warn)
+                }
             }
         }
         .toggleStyle(.checkbox)
@@ -655,6 +656,9 @@ private struct ImportSkillRow: View {
                         Text(skill.summary).font(Typography.label).foregroundStyle(Palette.secondary).lineLimit(2)
                         if skill.isSuspicious {
                             Text(ImportText.suspicious).font(Typography.small).foregroundStyle(Palette.warn)
+                        }
+                        if skill.omitted > 0 {
+                            Text(ImportText.omitted(skill.omitted)).font(Typography.small).foregroundStyle(Palette.warn)
                         }
                     }
                 }

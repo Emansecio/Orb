@@ -32,6 +32,8 @@ struct ImportSkill: Identifiable, Equatable, Sendable {
     var instructions: String
     var isSuspicious: Bool
     var isOn: Bool
+    /// Characters of the instructions that reading left out (`ImportLimits.skillInstructions`).
+    var omitted = 0
 
     init(slug: String, name: String, summary: String, instructions: String, isOn: Bool = true) {
         self.slug = slug
@@ -185,6 +187,12 @@ enum ImportSanitizer {
         let lines = withoutTags(MemorySanitizer.scrub(text)).components(separatedBy: .newlines)
             .map { MemoryText.flatten($0) }.filter { !$0.isEmpty }
         return String(lines.joined(separator: "\n").prefix(limit)).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// `block` plus how many characters the limit cut, for the preview to say.
+    static func clippedBlock(_ text: String, limit: Int) -> (text: String, omitted: Int) {
+        let whole = block(text, limit: .max)
+        return (String(whole.prefix(limit)).trimmingCharacters(in: .whitespacesAndNewlines), max(0, whole.count - limit))
     }
 
     /// Instructions of a skill: secrets and control characters out, lines and indentation kept (they run only when the

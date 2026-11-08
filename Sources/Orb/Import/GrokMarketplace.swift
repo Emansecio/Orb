@@ -338,6 +338,8 @@ enum GrokMarketplace {
         let credit = bot.creatorName.isEmpty ? "" : ", de \(ImportSanitizer.line(bot.creatorName, limit: 80))"
         let origin = ImportItem("Este Orb veio do bot \(name.isEmpty ? "sem nome" : name)\(credit), do marketplace do Grok Bot: \(link.url.absoluteString)",
                                 title: "Origem")
+        // The memories were cut at `listed` already; what the "Origem" slot pushes out counts too.
+        found.omittedFacts = max(0, bot.memories.count - ImportLimits.listed) + max(0, found.facts.count - (ImportLimits.listed - 1))
         found.facts = Array(found.facts.prefix(ImportLimits.listed - 1)) + [origin]
         return found
     }

@@ -95,16 +95,29 @@ extension OrbImportReader {
         card.role = ImportSanitizer.line(role, limit: 120)
         card.identity = identity(from: (lines[.how] ?? []).joined(separator: "\n"))
         card.preferences = items(self.entries((lines[.preferences] ?? []).joined(separator: "\n")), allowsLinks: false)
-        card.facts = items(self.entries((lines[.facts] ?? []).joined(separator: "\n")))
+        let facts = self.entries((lines[.facts] ?? []).joined(separator: "\n"))
+        card.facts = items(facts)
+        card.omittedFacts = omittedCount(facts)
         card.procedures = (entries[.procedures] ?? []).prefix(ImportLimits.procedures).compactMap { title, body in
-            let text = ImportSanitizer.block(body.joined(separator: "\n"), limit: MemoryBank.maximumLength)
-            return text.isEmpty ? nil : ImportItem(text, title: ImportSanitizer.line(title, limit: 80))
+            procedure(title: title, body: body.joined(separator: "\n"))
         }
         card.skills = limitSkills((entries[.skills] ?? []).prefix(ImportLimits.listedSkills).compactMap { title, body in
             skill(title: title, summary: "", body: body.joined(separator: "\n"))
         })
         return card
     }
+
+    /// A procedure (an AGENTS.md or a card's `###` entry): the text up to one memory page; what passes it is counted.
+    static func procedure(title: String, body: String) -> ImportItem? {
+        let (text, omitted) = ImportSanitizer.clippedBlock(body, limit: MemoryBank.maximumLength)
+        guard !text.isEmpty else { return nil }
+        var item = ImportItem(text, title: ImportSanitizer.line(title, limit: 80))
+        item.omitted = omitted
+        return item
+    }
+
+    /// How many entries `items` leaves out.
+    static func omittedCount(_ entries: [String]) -> Int { max(0, entries.count - ImportLimits.listed) }
 
     /// "Orb: Atlas" or "Atlas": the card's title is the name; the prompt's `<placeholder>` is not one.
     private static func cardName(_ title: String) -> String {
@@ -125,13 +138,16 @@ extension OrbImportReader {
         }
         let slug = Skill.cleanSlug(head)
         let instructions = ImportSanitizer.instructions(body)
+        let omitted = max(0, ImportSanitizer.instructions(body, limit: .max).count - instructions.count)
         guard !slug.isEmpty, !instructions.isEmpty else { return nil }
         let spaced = slug.replacingOccurrences(of: "-", with: " ")
         let name = isCommand ? spaced.prefix(1).uppercased() + spaced.dropFirst() : ImportSanitizer.line(head, limit: 60)
         let shown = ImportSanitizer.line(about)
         let first = ImportSanitizer.line(instructions.components(separatedBy: .newlines).first ?? "")
-        return ImportSkill(slug: slug, name: name, summary: MemoryText.clip(shown.isEmpty ? first : shown, ImportLimits.skillSummary),
-                           instructions: instructions)
+        var result = ImportSkill(slug: slug, name: name, summary: MemoryText.clip(shown.isEmpty ? first : shown, ImportLimits.skillSummary),
+                                 instructions: instructions)
+        result.omitted = omitted
+        return result
     }
 
     /// At most `ImportLimits.skills` of them start checked.
@@ -207,7 +223,10 @@ extension OrbImportReader {
         found.isFreeText = true
         found.freeText = text
         found.asInstructions = asInstructions ?? guess
-        if found.asInstructions { found.identity = identity(from: text) } else { found.facts = items(entries(text)) }
+        if found.asInstructions { found.identity = identity(from: text) } else { let all = entries(text)
+            found.facts = items(all)
+            found.omittedFacts = omittedCount(all)
+        }
         return found
     }
 
@@ -247,7 +266,9 @@ extension OrbImportReader {
         found.role = MemoryText.clip(description.range(of: ". ").map { String(description[..<$0.lowerBound]) } ?? description, 80)
         found.identity = identity(from: ["system_prompt", "personality", "scenario", "description"].map(value).filter { !$0.isEmpty }.joined(separator: "\n"))
         let entries = ((card["character_book"] as? [String: Any])?["entries"] as? [[String: Any]]) ?? []
-        found.facts = entries.filter { $0["enabled"] as? Bool == true }.prefix(ImportLimits.listed).compactMap { entry in
+        let active = entries.filter { $0["enabled"] as? Bool == true }
+        found.omittedFacts = max(0, active.count - ImportLimits.listed)
+        found.facts = active.prefix(ImportLimits.listed).compactMap { entry in
             let content = ImportSanitizer.line((entry["content"] as? String) ?? "")
             let title = (entry["comment"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? (entry["keys"] as? [String])?.first ?? ""
             return content.isEmpty ? nil : ImportItem(content, title: ImportSanitizer.line(title, limit: 80))

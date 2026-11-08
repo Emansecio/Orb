@@ -581,7 +581,7 @@ import Testing
         // The notice, then the greeting: the new Orb still says hello last.
         let kinds = model.transcript(bot.id).map(\.kind)
         #expect(kinds.contains(.notice("Importei de ChatGPT: 1 instrução, 16 lembranças e 2 skills. Veja na aba Memória.")))
-        #expect(kinds.last == .greeting(OrbGreeting.text(name: "Atlas", temperament: OrbConfig().temperament, returning: false)))
+        #expect(kinds.last == .greeting(OrbGreeting.text(name: bot.name, temperament: OrbConfig().temperament, returning: false)))
     }
 
     @Test @MainActor func longInstructionsReachTheMemoryWhole() async throws {
@@ -632,6 +632,31 @@ import Testing
         #expect(await bank.snapshot().items.isEmpty)
         #expect(model.skills.allSatisfy { $0.source != Skill.importedSource })
         #expect(!model.transcript(bot.id).contains { if case .notice(let text) = $0.kind { text.hasPrefix("Importei de") } else { false } })
+    }
+
+    @Test func whatTheLimitsCutShowsAsCutOnEveryPath() throws {
+        let hundred = (1...100).map { "- fato \($0)" }.joined(separator: "\n")
+        let free = try OrbImportReader.read(text: hundred, asInstructions: false)
+        #expect(free.facts.count == ImportLimits.listed && free.omittedFacts == 100 - ImportLimits.listed)
+
+        let card = try OrbImportReader.read(text: "# Orb: Atlas\n\n## Sobre mim\n" + hundred)
+        #expect(card.facts.count == ImportLimits.listed && card.omittedFacts == 100 - ImportLimits.listed)
+
+        let book = (1...70).map { ["content": "fato \($0)", "enabled": true] as [String: Any] }
+        let lore = try OrbImportReader.read(text: json(["name": "Ana", "description": "x", "character_book": ["entries": book]]))
+        #expect(lore.facts.count == ImportLimits.listed && lore.omittedFacts == 70 - ImportLimits.listed)
+    }
+
+    @Test func longProceduresAndSkillsSayHowMuchWasCut() throws {
+        try write(String(repeating: "Regra de operação importante.\n", count: 200), to: "pasta/AGENTS.md")
+        try write("---\nname: longa\ndescription: d\n---\n" + String(repeating: "Passo a passo detalhado.\n", count: 400),
+                  to: "pasta/skills/longa/SKILL.md")
+        let found = try OrbImportReader.read(folder: root.appending(path: "pasta"))
+        #expect(try #require(found.procedures.first).omitted > 0)
+        #expect(try #require(found.skills.first).omitted > 0)
+
+        let short = try OrbImportReader.read(text: "# Orb: Atlas\n\n## Procedimentos\n### Curto\nFaça isto.\n")
+        #expect(short.procedures.first?.omitted == 0)
     }
 
     @Test @MainActor func aHugeImportKeepsThePromptWithinItsBudgets() async throws {

@@ -134,8 +134,7 @@ enum OrbImportReader {
         found.facts = Array(found.facts.prefix(ImportLimits.listed))
         found.notes = contents.tooLarge.map { ImportText.tooLargeFile($0) }
         if let agents = files["AGENTS.md"] {
-            let body = ImportSanitizer.block(agents, limit: MemoryBank.maximumLength)
-            if !body.isEmpty { found.procedures = [ImportItem(body, title: "Regras de operação (AGENTS.md)")] }
+            found.procedures = procedure(title: "Regras de operação (AGENTS.md)", body: agents).map { [$0] } ?? []
         }
         found.skills = limitSkills(contents.skills.compactMap { directory, text in
             let (fields, body) = SkillCatalog.parse(text)
