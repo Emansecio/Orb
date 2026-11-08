@@ -1299,7 +1299,7 @@ struct ConnectorEditor: View {
             }
             return (key, value)
         }.filter { !$0.0.isEmpty }
-        let dictionary = Dictionary(pairs, uniquingKeysWith: { _, last in last })
+        let dictionary = ConnectorEditing.droppingBlankOptional(Dictionary(pairs, uniquingKeysWith: { _, last in last }), inputs: inputsByName)
         if isRemote {
             config.command = ""
             config.arguments = []

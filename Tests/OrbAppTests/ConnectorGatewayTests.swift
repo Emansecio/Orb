@@ -130,7 +130,7 @@ struct ConnectorGatewayTests {
         let all = try await tool.run(.object(["connector": .string("github")]), context: context)
         let blocks = all.components(separatedBy: "\n\n")
         #expect(blocks[0] == "create_issue — Opens an issue. Second line\nargs: " + CatalogFixture.tool("x", schema: .schema(["title": .property("string")], required: ["title"])).inputSchema.jsonString)
-        #expect(blocks[1].hasPrefix("list_issues — " + String(repeating: "d", count: 299) + "…\nargs: "))
+        #expect(blocks[1].hasPrefix("list_issues — " + String(repeating: "d", count: 299) + "…(cut)\nargs: "))
 
         let some = try await tool.run(.object(["connector": .string("GitHub"), "tools": .array([.string("list_issues"), .string("nope")])]), context: context)
         #expect(some.hasPrefix("list_issues — ") && !some.contains("create_issue") && some.hasSuffix("GitHub não tem: nope."))
@@ -141,6 +141,11 @@ struct ConnectorGatewayTests {
         #expect(commas.hasPrefix("list_issues — ") && !commas.contains("create_issue") && commas.hasSuffix("GitHub não tem: nope."))
         // It read the catalog: no server was started.
         #expect(await !fixture.manager.isRunning(github.id))
+    }
+
+    @Test func aLongToolDescriptionIsCutWithAMark() {
+        let text = ConnectorGateway.render(CatalogFixture.catalog([CatalogFixture.tool("t", String(repeating: "palavra ", count: 80), schema: .schema([:]))]), connector: "C")
+        #expect(text.contains("…(cut)\nargs:"))
     }
 
     @Test func aHugeListingFallsBackToShorterAndAsksForTheArguments() {

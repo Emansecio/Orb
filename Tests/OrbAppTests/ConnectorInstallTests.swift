@@ -47,6 +47,21 @@ struct ConnectorInstallRequestTests {
         #expect(request.summary == "Páginas do Notion." && request.allOrbs)
     }
 
+    @Test func numbersInArgsAreTextAndAnArrayIsNeverSplit() throws {
+        let request = try ConnectorInstallRequest(json(#"{"name":"S","command":"node","args":["server.js","--port",8080,"--q=a b","-n hello world"]}"#), fileExists: noFiles)
+        #expect(request.arguments == ["server.js", "--port", "8080", "--q=a b", "-n hello world"])
+        // A lone string is still read like a line of the form.
+        let line = try ConnectorInstallRequest(json(#"{"name":"S","command":"node","args":"--port 8080"}"#), fileExists: noFiles)
+        #expect(line.arguments == ["--port", "8080"])
+        #expect(ConnectorArguments.parse(command: "x", arguments: ["--q=a b", "--port 1"], fileExists: noFiles).arguments == ["--q=a b", "--port", "1"])
+    }
+
+    @Test func envWithAnAddressIsRefusedInsteadOfDropped() {
+        #expect(throws: ToolError.self) {
+            try ConnectorInstallRequest(json(#"{"name":"L","url":"https://x.test/mcp","env":{"TOKEN":"x"}}"#))
+        }
+    }
+
     @Test func aRemoteServerTakesAnAddressAndHeaders() throws {
         let request = try ConnectorInstallRequest(json(#"{"name":"Linear","url":" https://mcp.linear.app/mcp ","headers":{"Authorization":"Bearer x"}}"#))
         #expect(request.isRemote && request.url == "https://mcp.linear.app/mcp" && request.command.isEmpty)

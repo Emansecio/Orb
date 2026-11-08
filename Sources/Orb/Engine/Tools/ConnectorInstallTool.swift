@@ -77,7 +77,7 @@ struct ConnectorInstallTool: AgentTool {
         if let url = arguments["url"]?.string, !url.trimmingCharacters(in: .whitespaces).isEmpty {
             return (title, ([url] + [names("headers")].compactMap { $0 }).joined(separator: " · ") + scope)
         }
-        let args = arguments["args"]?.array?.compactMap(\.string) ?? arguments["args"]?.string.map { [$0] } ?? []
+        let args = arguments["args"]?.array?.compactMap(ConnectorInstallRequest.text) ?? arguments["args"]?.string.map { [$0] } ?? []
         let line = ([arguments["command"]?.string ?? ""] + args).joined(separator: " ").trimmingCharacters(in: .whitespaces)
         return (title, ([line] + [names("env")].compactMap { $0 }).joined(separator: " · ") + scope)
     }
@@ -109,17 +109,22 @@ struct ConnectorInstallRequest: Equatable {
         name = String(name.prefix(ConnectorGateway.nameLimit))
         url = (arguments["url"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let command = (arguments["command"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let args = arguments["args"]?.array?.compactMap(\.string) ?? arguments["args"]?.string.map { [$0] } ?? []
+        // Numbers and booleans in args count as text; an array is an argv, a lone string is read like a line of the form.
+        let argsArray = arguments["args"]?.array
+        let args = argsArray?.compactMap(Self.text) ?? arguments["args"]?.string.map { [$0] } ?? []
         if !url.isEmpty {
             guard command.isEmpty else { throw ToolError("Use command (servidor local) ou url (remoto), não os dois.") }
             guard let parsed = URL(string: url), ["https", "http"].contains(parsed.scheme?.lowercased() ?? ""), parsed.host != nil else {
                 throw ToolError("url precisa ser um endereço http(s) completo, como https://exemplo.com/mcp.")
             }
+            guard try Self.pairs(arguments["env"], what: "env").isEmpty else {
+                throw ToolError("env só vale para servidor local (command). Em um servidor remoto (url), passe as chaves em headers.")
+            }
             headers = try Self.pairs(arguments["headers"], what: "headers")
         } else {
             guard !command.isEmpty else { throw ToolError("Diga command (e args) de um servidor local, ou url de um remoto.") }
             // As a README writes it ("npx -y pkg" in one line) works too, the same way the Conectores form reads it.
-            let parsed = ConnectorArguments.parse(command: command, arguments: args, fileExists: fileExists)
+            let parsed = ConnectorArguments.parse(command: command, arguments: args, literalArguments: argsArray != nil, fileExists: fileExists)
             self.command = parsed.command
             self.arguments = parsed.arguments
             environment = try Self.pairs(arguments["env"], what: "env")
@@ -128,6 +133,12 @@ struct ConnectorInstallRequest: Equatable {
             .trimmingCharacters(in: .whitespaces)
         self.summary = summary.isEmpty ? nil : String(summary.prefix(200))
         allOrbs = arguments.flag("all_orbs")
+    }
+
+    /// A string, number or boolean as the text a program receives.
+    fileprivate static func text(_ item: JSONValue) -> String? {
+        let number = item.number.map { $0 == $0.rounded() && abs($0) < 1e15 ? String(Int($0)) : String($0) }
+        return item.string ?? number ?? item.bool.map(String.init)
     }
 
     /// A `{"NAME": "value"}` object; names are what a variable or a header can be called.
@@ -140,8 +151,7 @@ struct ConnectorInstallRequest: Equatable {
             guard !name.isEmpty, name.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" }) else {
                 throw ToolError("Nome inválido em \(what): \(key.prefix(60)).")
             }
-            let number = item.number.map { $0 == $0.rounded() && abs($0) < 1e15 ? String(Int($0)) : String($0) }
-            guard let text = item.string ?? number ?? item.bool.map(String.init)
+            guard let text = Self.text(item)
             else { throw ToolError("O valor de \(name) em \(what) precisa ser texto.") }
             pairs[name] = text
         }

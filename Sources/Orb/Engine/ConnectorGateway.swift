@@ -58,11 +58,11 @@ enum ConnectorGateway {
         return String(flat[..<end.lowerBound])
     }
 
-    /// The text on one line, shortened with "…" past `limit` characters.
-    private static func oneLine(_ text: String, limit: Int) -> String {
+    /// The text on one line, shortened with `mark` past `limit` characters.
+    private static func oneLine(_ text: String, limit: Int, mark: String = "…") -> String {
         let flat = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         guard flat.count > limit else { return flat }
-        return String(flat.prefix(max(limit - 1, 0))).trimmingCharacters(in: .whitespaces) + "…"
+        return String(flat.prefix(max(limit - 1, 0))).trimmingCharacters(in: .whitespaces) + mark
     }
 
     // MARK: Listing
@@ -78,7 +78,7 @@ enum ConnectorGateway {
             missing = names.filter { name in !catalog.tools.contains { $0.name == name } }
         }
         var text = tools.map { tool in
-            "\(tool.name) — \(oneLine(tool.description, limit: descriptionLimit))\nargs: \(tool.inputSchema.jsonString)"
+            "\(tool.name) — \(oneLine(tool.description, limit: descriptionLimit, mark: "…(cut)"))\nargs: \(tool.inputSchema.jsonString)"
         }.joined(separator: "\n\n")
         let room = ToolOutputBudget.pageCharacters - 300
         if text.count > room {

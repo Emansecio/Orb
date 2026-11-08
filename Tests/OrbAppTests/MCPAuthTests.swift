@@ -481,6 +481,24 @@ struct MCPRenewalTests {
         #expect(kept.accessToken == "at-2" && kept.refreshToken == "rt-2" && kept.clientID == "client")
     }
 
+    @Test func aRenewedTokenTheKeychainRefusesIsKeptInMemoryAndAnnounced() async throws {
+        let service = FakeOAuthService { $0.onToken = { _ in .json(#"{"access_token":"at-2","refresh_token":"rt-2","expires_in":3600}"#) } }
+        let vault = MemoryVault()
+        let auth = MCPAuth(vault: vault, session: service.session)
+        let id = UUID()
+        try seed(vault, id, service, expiresIn: 30)
+        vault.rejectsWrites = true
+        let announced = OSAllocatedUnfairLock(initialState: 0)
+        let observer = NotificationCenter.default.addObserver(forName: .connectorLoginSaveFailed, object: auth, queue: nil) { _ in
+            announced.withLock { $0 += 1 }
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        #expect(try await auth.accessToken(id) == "at-2")
+        #expect(announced.withLock { $0 } == 1)
+        #expect(try await auth.accessToken(id) == "at-2") // still in memory, no second renewal
+        #expect(try stored(vault, id).accessToken == "at-0")
+    }
+
     @Test func aTokenWithTimeLeftIsUsedWithoutTouchingTheNetwork() async throws {
         let service = FakeOAuthService()
         let vault = MemoryVault()

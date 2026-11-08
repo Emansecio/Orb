@@ -598,6 +598,11 @@ final class AppModel {
                 }
             }
         }
+        NotificationCenter.default.addObserver(forName: .connectorLoginSaveFailed, object: connectorAuth, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.addNotice(StoreNotice(message: "O Orb renovou o login de um conector, mas o Keychain não guardou o novo. Ele funciona até você fechar o Orb; depois será preciso entrar de novo em Conectores."))
+            }
+        }
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 ApprovalNotifications.clear(self?.pendingApprovals.map(\.id) ?? [])

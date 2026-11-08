@@ -251,7 +251,9 @@ actor MCPAuth {
             }
             guard generation[id, default: 0] == started else { throw MCPAuthRequired(reason: .signIn) }
             cache[id] = fresh
-            _ = persist(fresh, id)
+            // Kept in memory either way; a Keychain that refuses the renewed token must not fail silently, or the
+            // login drops after the next launch with no visible cause.
+            if !persist(fresh, id) { NotificationCenter.default.post(name: .connectorLoginSaveFailed, object: self) }
             lastRefresh[id] = .now
             return fresh
         }
@@ -734,4 +736,9 @@ private extension MCPOAuthCredential {
 
 private extension String {
     var nonEmpty: String? { isEmpty ? nil : self }
+}
+
+extension Notification.Name {
+    /// Posted when a renewed connector login could not be written to the Keychain: it works until the app closes, then it is lost.
+    static let connectorLoginSaveFailed = Notification.Name("app.orb.connector.loginSaveFailed")
 }

@@ -166,18 +166,33 @@ extension ConnectorTemplate {
     /// The template an installed connector came from (same name and same server), so that editing it keeps the guided
     /// form. Retired models count: a connector installed from one is still edited with its form.
     /// A remote one is known by its address, whatever the connector was renamed to, and the query of the address does not
-    /// count (`?read_only=true` is something the person may take out); a local one by its name and command.
+    /// count (`?read_only=true` is something the person may take out); a local one by its command and package (the first two
+    /// arguments, "-y pkg": what follows, like the folder of Arquivos, is the person's), or by its name and command. A local
+    /// server renamed, or installed by the Orb under another name, is still the template's.
     static func matching(_ config: MCPServerConfig) -> ConnectorTemplate? {
         func address(_ url: String) -> Substring { url.prefix { $0 != "?" } }
+        func samePackage(_ template: MCPServerConfig) -> Bool {
+            let package = template.arguments.prefix(2)
+            return !package.isEmpty && config.arguments.starts(with: package)
+        }
         return (all + retired).first {
             $0.config.command == config.command && address($0.config.url) == address(config.url)
-                && (!config.isRemote ? $0.config.name == config.name : true)
+                && (config.isRemote || $0.config.name == config.name || samePackage($0.config))
         }
     }
 }
 
 /// What the editor knows about a connector that is already installed.
 enum ConnectorEditing {
+    /// `values` without the optional variables or headers left blank: sent as `NAME=""` they would override the server's own
+    /// default (and `docker -e NAME` would hand the container an empty value). Required ones and the person's own rows stay.
+    static func droppingBlankOptional(_ values: [String: String], inputs: [String: RegistryServer.Input]) -> [String: String] {
+        values.filter { name, value in
+            guard let input = inputs[name], !input.isRequired else { return true }
+            return !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
     /// Fields for an installed registry connector, rebuilt from what it holds (the registry's own descriptions are not
     /// kept): every variable or header, secret when it is marked so or looks like a key, and a "Bearer " lead kept
     /// out of the field.
@@ -252,7 +267,8 @@ enum ConnectorArguments {
     /// README writes it. A command with spaces ("npx -y football-docs") is split when it is not a file that exists, and a line
     /// that starts with a dash and has spaces ("-y football-docs", "--port 8080") is split too, quotes kept together as a
     /// shell does. Any other line stays whole, so a path with spaces in it ("/Users/ana/Meus Documentos") is one argument.
-    static func parse(command: String, arguments: [String],
+    /// `literalArguments`: the list is already an argv (the model sent a JSON array), so no line is split.
+    static func parse(command: String, arguments: [String], literalArguments: Bool = false,
                       fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) -> (command: String, arguments: [String]) {
         var program = command.trimmingCharacters(in: .whitespacesAndNewlines)
         var leading: [String] = []
@@ -264,7 +280,10 @@ enum ConnectorArguments {
         let rest = arguments.flatMap { line -> [String] in
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty else { return [] }
-            return trimmed.hasPrefix("-") && trimmed.contains(where: \.isWhitespace) ? shellWords(trimmed) : [trimmed]
+            // "--q=a b" is one option with a value that has a space; "--port 8080" is two words.
+            let firstWord = trimmed.prefix { !$0.isWhitespace }
+            let splits = !literalArguments && trimmed.hasPrefix("-") && trimmed.contains(where: \.isWhitespace) && !firstWord.contains("=")
+            return splits ? shellWords(trimmed) : [trimmed]
         }
         return (program, leading + rest)
     }

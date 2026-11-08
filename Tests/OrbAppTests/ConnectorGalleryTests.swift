@@ -75,6 +75,30 @@ struct ConnectorGalleryTests {
         #expect(ConnectorTemplate.matching(old)?.id == "slack")
     }
 
+    @Test func aRenamedLocalServerIsStillItsTemplate() throws {
+        let memory = try #require(ConnectorTemplate.all.first { $0.id == "memoria" })
+        var renamed = memory.config.withNewID()
+        renamed.name = "Meu grafo"
+        #expect(ConnectorTemplate.matching(renamed)?.id == "memoria")
+        // The folder of Arquivos is the person's: another folder is the same template.
+        var files = try #require(ConnectorTemplate.all.first { $0.config.arguments.contains("@modelcontextprotocol/server-filesystem") }).config.withNewID()
+        files.name = "Documentos"
+        files.arguments[files.arguments.count - 1] = "/tmp/outra"
+        #expect(ConnectorTemplate.matching(files) != nil)
+        var other = memory.config.withNewID()
+        other.name = "Outro"
+        other.arguments = ["-y", "outro-pacote"]
+        #expect(ConnectorTemplate.matching(other) == nil)
+    }
+
+    @Test func blankOptionalInputsAreDroppedButRequiredOnesStay() {
+        let inputs = ["KEY": RegistryServer.Input(name: "KEY", summary: "", isSecret: true, isRequired: true),
+                      "REGION": RegistryServer.Input(name: "REGION", summary: "", isSecret: false, isRequired: false)]
+        let kept = ConnectorEditing.droppingBlankOptional(["KEY": "", "REGION": " ", "EXTRA": ""], inputs: inputs)
+        #expect(kept == ["KEY": "", "EXTRA": ""])
+        #expect(ConnectorEditing.droppingBlankOptional(["REGION": "eu"], inputs: inputs) == ["REGION": "eu"])
+    }
+
     @Test func slackAndSupabaseAreTheOfficialServers() throws {
         let slack = try #require(ConnectorTemplate.all.first { $0.id == "slack-oficial" })
         #expect(slack.config.url == "https://mcp.slack.com/mcp" && slack.isRemote && slack.guide == .slack)
