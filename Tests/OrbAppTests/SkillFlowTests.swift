@@ -175,8 +175,10 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
             buckets.filter { $0.key.source == source && $0.key.orb == botID && $0.key.model == "custom/modelo" }
                 .reduce(into: UsageTotals()) { $0.add($1.totals) }
         }
-        #expect(total(.chat) == UsageTotals(requests: 11, input: 110, output: 55))
-        #expect(total(.auxiliary) == UsageTotals(requests: 2, input: 20, output: 10))
+        // Only the counts: how each was billed is `UsagePricingTests`' business.
+        func counts(_ source: UsageSource) -> UsageTotals { var totals = total(source); totals.billing = nil; return totals }
+        #expect(counts(.chat) == UsageTotals(requests: 11, input: 110, output: 55))
+        #expect(counts(.auxiliary) == UsageTotals(requests: 2, input: 20, output: 10))
     }
 
     @Test @MainActor func aShortTurnHasNoReview() async {

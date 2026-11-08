@@ -122,7 +122,7 @@ struct DictationReviewTests {
         let buckets = await model.store.readUsage(from: .now.addingTimeInterval(-86_400), to: .now.addingTimeInterval(86_400)).buckets
         #expect(buckets.count == 1)
         #expect(buckets.first?.key.source == .auxiliary && buckets.first?.key.model == "claudeCode/haiku")
-        #expect(buckets.first?.totals == UsageTotals(requests: 1, input: 400, output: 15))
+        #expect(buckets.first?.totals == UsageTotals(requests: 1, input: 400, output: 15, billing: .plan)) // Claude Code is billed by plan
     }
 
     @Test @MainActor func anOrbThatIsGoneGetsNoRequest() async {

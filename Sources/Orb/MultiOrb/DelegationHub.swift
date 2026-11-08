@@ -516,8 +516,6 @@ final class DelegationHub: DelegationService {
     /// the member is the orchestrator itself.
     private func answer(_ request: DelegationRequest, status: OrbEnvelope.ReplyStatus, text: String) {
         let envelope = request.envelope
-        // Answered: the same ask again is a new request, not a repeat to hold back ("the answer arrives on its own").
-        if envelope.kind == .ask { forgetRepeat(request) }
         guard envelope.kind == .ask, envelope.from.id != envelope.to.id || envelope.fromChat, let model, !isShuttingDown,
               model.bot(envelope.from.id) != nil, chainStates[envelope.chainID]?.cancelled != true else { return }
         let name = displayName(of: envelope)

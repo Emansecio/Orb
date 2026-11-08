@@ -2028,15 +2028,21 @@ private actor Names {
         #expect(clipped.contains("Reply cut") && clipped.contains("\(long.count)"))
     }
 
-    @Test func theSameAskAgainAfterItWasAnsweredIsANewRequest() async throws {
+    @Test func theSameAskRightAfterItWasAnsweredIsStillHeldBackAndSaysTheAnswerMayBeHere() async throws {
         let team = Team { _ in say("Pronto.") }
         defer { team.cleanUp() }
         let hub = team.model.delegation
         let first = try hub.submit(from: team.atlas.id, to: "Pesquisador", text: "Pesquise", kind: .ask, messageID: UUID(), groupID: nil)
         await team.settle()
         #expect(hub.requests[first.id]?.state == .replied)
-        _ = try hub.submit(from: team.atlas.id, to: "Pesquisador", text: "Pesquise", kind: .ask, messageID: UUID(), groupID: nil)
-        await team.settle()
+        // A model that repeats the ask once the reply came would loop: the hold stays, and its words no longer say the answer is still to come.
+        do {
+            _ = try hub.submit(from: team.atlas.id, to: "Pesquisador", text: "Pesquise", kind: .ask, messageID: UUID(), groupID: nil)
+            Issue.record("the same ask was sent again at once")
+        } catch {
+            #expect(error as? DelegationRefusal == .duplicate)
+            #expect(DelegationRefusal.duplicate.message.contains("já chegou"))
+        }
     }
 
     @Test func groupCreateRefusesAnObjectiveTooLong() async throws {

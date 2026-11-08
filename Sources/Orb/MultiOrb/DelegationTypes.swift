@@ -97,7 +97,7 @@ enum DelegationRefusal: Error, Equatable, Sendable {
             "\(name) já está esperando a resposta desta conversa: não peça de volta. Termine o turno com o que tem; sua resposta "
                 + "final segue para quem pediu."
         case .stopped: "O usuário interrompeu esta conversa entre Orbs: não peça mais nada nela; termine com o que tem."
-        case .duplicate: "Pedido idêntico já enviado: a resposta chega sozinha como mensagem; não repita."
+        case .duplicate: "Pedido idêntico enviado há menos de um minuto: a resposta chega sozinha como mensagem (ou já chegou nesta conversa); não repita."
         case .emptyMessage: "A mensagem está vazia: escreva o pedido em message."
         case .tooLong: "A mensagem passa de \(DelegationLimits.messageLimit) caracteres: resuma."
         case .orbBusyDeleting: "Esse Orb está sendo apagado: peça a outro colega ou faça você mesmo."
