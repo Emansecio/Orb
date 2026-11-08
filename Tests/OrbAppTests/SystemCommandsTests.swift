@@ -344,6 +344,7 @@ import Testing
         #expect(QuickAskSend.hint(isWorking: false, canSteer: false).hasPrefix("↩ envia"))
         #expect(QuickAskSend.hint(isWorking: true, canSteer: true).hasPrefix("↩ envia agora"))
         #expect(QuickAskSend.hint(isWorking: true, canSteer: false).hasPrefix("Orb ocupado"))
+        #expect(QuickAskSend.hint(isWorking: true, canSteer: false, afterPulse: true).hasPrefix("↩ envia depois do pulso"))
     }
 
     @Test func theMenuBarPanelDoesNotSwitchTheScreenUnderAnOpenSheet() {

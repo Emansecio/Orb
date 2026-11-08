@@ -139,9 +139,11 @@ enum QuickAskSend: Equatable {
     }
 
     /// The panel's key hint.
-    static func hint(isWorking: Bool, canSteer: Bool) -> String {
+    /// `afterPulse`: the message waits for the pulse's turn in the chat, then goes (`AppModel.canQueueOutsideComposer`).
+    static func hint(isWorking: Bool, canSteer: Bool, afterPulse: Bool = false) -> String {
         let newLine = "\(CommandName.newLineKeys) nova linha"
         if !isWorking { return "↩ envia · \(newLine)" }
+        if afterPulse { return "↩ envia depois do pulso · \(newLine)" }
         guard canSteer else { return "Orb ocupado · \(newLine)" }
         return "↩ envia agora · \(newLine)"
     }
@@ -244,7 +246,8 @@ struct QuickAskView: View {
                     .help(Tip.openMainWindow)
                 Spacer()
                 Text(QuickAskSend.hint(isWorking: selectedID.map(model.isWorking) ?? false,
-                                       canSteer: selectedID.map(model.canSteer) ?? false))
+                                       canSteer: selectedID.map(model.canSteer) ?? false,
+                                       afterPulse: selectedID.map { !model.canSteer($0) && model.canQueueOutsideComposer($0) } ?? false))
                     .font(Typography.small)
                     .foregroundStyle(Palette.muted)
             }

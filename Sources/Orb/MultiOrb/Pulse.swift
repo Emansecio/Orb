@@ -108,10 +108,10 @@ struct PulseNotice: Codable, Equatable, Sendable {
 }
 
 /// A pulse run in progress, in memory only.
-struct PulseRun: Equatable {
+struct PulseRun {
     var id: UUID
     var startedAt: Date
-    /// Tokens the pulse turn itself spent (the day's count also has its chain's).
+    /// Tokens the run spent, its chain's turns included (a teammate's, a group's): the cost its line shows.
     var tokens = 0
     /// The first demand the run was woken for.
     var reason = ""
@@ -121,12 +121,6 @@ struct PulseRun: Equatable {
     /// In the chat (`beginPulseInChat`): how many items and messages it had before the run, to take the run out again when
     /// it found nothing to do.
     var chatMark: (items: Int, messages: Int, handedAt: Date?)?
-
-    static func == (a: PulseRun, b: PulseRun) -> Bool {
-        a.id == b.id && a.startedAt == b.startedAt && a.tokens == b.tokens && a.reason == b.reason && a.keys == b.keys
-            && a.chatMark?.items == b.chatMark?.items && a.chatMark?.messages == b.chatMark?.messages
-            && a.chatMark?.handedAt == b.chatMark?.handedAt
-    }
 }
 
 /// Work waiting for an Orb, found without a model. `key` says which work and in what state (it changes when the work does), so
@@ -342,11 +336,9 @@ extension AppModel {
                 continue
             }
             switch await beginPulse(botID, demands: demands, now: now) {
-            case .started: // the demands are marked delivered when the run ends (`finishPulse`)
-                pulseState.lastPulse = now
-                pulseState.lastRunByOrb[botID.uuidString] = now
-                return
-            case .unusable: // no usable model: the window is spent too, or the pass would repeat every 30 s
+            // Started: the demands are marked delivered when the run ends (`finishPulse`). No usable model: the window is
+            // spent too, or the pass would repeat every 30 s.
+            case .started, .unusable:
                 pulseState.lastPulse = now
                 pulseState.lastRunByOrb[botID.uuidString] = now
                 return

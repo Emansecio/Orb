@@ -1324,7 +1324,22 @@ private final class PulseWorld {
                                       pulseRun: pulse))
         #expect(hub.pulseRun(ofChain: run) == pulse, "the app resumed it: nobody wrote")
         #expect(hub.requests.values.contains { $0.envelope.chainID == run && $0.envelope.pulseRun == pulse })
+        #expect(model.workJournal.entries.first { $0.runID == run }?.pulseRun == pulse)
+        // The person writes before the turn began: it joins it, and the run is theirs, in the journal too.
+        #expect(model.groupHub.postUserMessage("Priorize a seção 2.", to: group.id))
+        #expect(hub.pulseRun(ofChain: run) == nil)
+        #expect(!hub.requests.values.contains { $0.envelope.chainID == run && $0.envelope.pulseRun != nil })
+        #expect(model.workJournal.entries.first { $0.runID == run }?.pulseRun == nil, "a relaunch resumes it as theirs")
         hub.cancelChain(run, by: .user)
+    }
+
+    @Test func aRequestOfThePulsesOwnRunIsNotJournaled() {
+        let world = PulseWorld(names: ["Atlas", "Revisor"], demand: false, rule: Self.nothing)
+        defer { world.cleanUp() }
+        var envelope = OrbEnvelope(kind: .ask, from: OrbRef(world.bot("Atlas")), to: OrbRef(world.bot("Revisor")), text: "Confira.")
+        envelope.servingPulse = UUID()
+        world.model.workJournal.requestBegan(envelope)
+        #expect(!world.model.workJournal.entries.contains { $0.kind == .request }, "a pulse is not resumed: its ask would wake the chat")
     }
 
     @Test func theMenuBarPanelQueuesBehindThePulseInTheChat() async throws {

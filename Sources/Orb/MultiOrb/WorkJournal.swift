@@ -201,7 +201,7 @@ final class WorkJournal {
             let pulse = pulseRuns[run.id]
             if let index = live.firstIndex(where: { $0.kind == .groupRun && $0.groupID == run.groupID }) {
                 if live[index].runID == run.id {
-                    // Once charged to a pulse, always: a sync from before the chain existed must not clear it.
+                    // A sync from before the chain existed must not clear it; the person taking over does (`groupRunIsThePersons`).
                     if let pulse, live[index].pulseRun != pulse { live[index].pulseRun = pulse; changed = true }
                     continue
                 }
@@ -222,6 +222,13 @@ final class WorkJournal {
         if changed || live.count != before { persist() }
     }
 
+    /// The person took over the run the pulse began (`DelegationHub.handToPerson`): a relaunch resumes it as theirs.
+    func groupRunIsThePersons(_ runID: UUID) {
+        guard !frozen, let index = live.firstIndex(where: { $0.kind == .groupRun && $0.runID == runID }), live[index].pulseRun != nil else { return }
+        live[index].pulseRun = nil
+        persist()
+    }
+
     func dropGroupRun(_ groupID: UUID) {
         awaitingGroupResume.remove(groupID)
         remove { $0.kind == .groupRun && $0.groupID == groupID }
@@ -229,10 +236,11 @@ final class WorkJournal {
 
     // MARK: Requests between Orbs
 
-    /// An Orb asked another (outside any group). Nested requests (made while serving another request or a routine) are not kept:
-    /// whoever asked is redone from the start, and asks again.
+    /// An Orb asked another (outside any group). Nested requests (made while serving another request, a routine or a pulse's
+    /// own run) are not kept: whoever asked is redone from the start, and asks again (a pulse, by the next one).
     func requestBegan(_ envelope: OrbEnvelope, at date: Date = .now) {
         guard !frozen, envelope.kind == .ask, envelope.groupID == nil, envelope.servingRequest == nil, envelope.servingRoutine == nil,
+              envelope.servingPulse == nil,
               !live.contains(where: { $0.kind == .request && $0.envelope?.id == envelope.id }) else { return }
         live.append(WorkEntry(kind: .request, startedAt: date, envelope: envelope))
         persist()

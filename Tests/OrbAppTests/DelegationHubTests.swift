@@ -3092,6 +3092,9 @@ private actor Names {
         model.newChat(for: team.atlas.id)
         model.askedDeletions = [:]
         #expect(try await OrbDeleteTool().run(deleteCall("Revisor"), context: context).hasPrefix("The user already chose to keep it"))
+        // An Orb deleted takes its answers along (here the one asked about, as if it had been deleted and made again).
+        model.forgetAskedDeletions(of: team.revisor.id)
+        #expect(model.preferences.dictionary(forKey: AppModel.keptDeletionsKey) == nil)
     }
 
     @Test func takingOutAMemberNoLongerEndsTheGroupOnceAThirdCame() async throws {

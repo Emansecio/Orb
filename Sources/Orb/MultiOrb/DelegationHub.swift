@@ -249,7 +249,10 @@ final class DelegationHub: DelegationService {
                                                                originBot: askedBy ?? member, groupID: groupID)
         // The person wrote in a group the pulse set to work: from here the work is theirs, neither charged nor stopped by the budget.
         // Not the app resuming the pulse's run after a relaunch (`GroupHub.resume`): that stays the pulse's.
-        if fromPerson, chain.origin.isPulse { chain.origin = .group(context.chainID) }
+        if fromPerson, chain.origin.isPulse {
+            chain.origin = .group(context.chainID)
+            handToPerson(context.chainID)
+        }
         chain.touched = .now
         chainStates[context.chainID] = chain
         envelope.pulseRun = chain.origin.pulseRun
@@ -264,6 +267,15 @@ final class DelegationHub: DelegationService {
         return request
     }
 
+    /// A chain of the pulse became the person's: no request of it is charged to the pulse any more (a turn serving one would
+    /// still be, through `pulseLineage`), and the journal resumes the group's run as theirs.
+    private func handToPerson(_ chainID: UUID) {
+        for (id, request) in requests where request.envelope.chainID == chainID && request.envelope.pulseRun != nil {
+            requests[id]?.envelope.pulseRun = nil
+        }
+        model?.workJournal.groupRunIsThePersons(chainID)
+    }
+
     func joinQueuedGroupTurn(member: UUID, chainID: UUID, text: String) -> DelegationRequest? {
         // Only the last in the member's queue: what others asked it in between keeps its place.
         guard let id = queues[member]?.last, let request = requests[id], request.state == .queued,
@@ -273,7 +285,7 @@ final class DelegationHub: DelegationService {
         // Only the person's messages join (`GroupHub.enqueue`): as in `queueGroupTurn`, the work becomes theirs.
         if chainStates[chainID]?.origin.isPulse == true {
             chainStates[chainID]?.origin = .group(chainID)
-            requests[id]?.envelope.pulseRun = nil
+            handToPerson(chainID)
         }
         return requests[id]
     }
