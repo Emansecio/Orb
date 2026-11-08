@@ -272,6 +272,24 @@ import Testing
         #expect(fileManager.fileExists(atPath: oldLogins.appending(path: "Cookies").path), "the logins of the Orbs are theirs")
     }
 
+    @Test func aRecordsFileThatCannotBeReadIsNotWrittenOver() throws {
+        let fileManager = FileManager.default
+        try fileManager.createDirectory(at: layout.binDirectory, withIntermediateDirectories: true)
+        try Data("obscura".utf8).write(to: layout.binDirectory.appending(path: "obscura"))
+        let (installer, _) = makeInstaller()
+        // Unreadable: a folder where the file should be.
+        try fileManager.createDirectory(at: layout.recordsFile, withIntermediateDirectories: true)
+        installer.removeLegacyEngines()
+        var isFolder: ObjCBool = false
+        #expect(fileManager.fileExists(atPath: layout.recordsFile.path, isDirectory: &isFolder) && isFolder.boolValue)
+        try fileManager.removeItem(at: layout.recordsFile)
+        // Not valid JSON: kept aside, not erased.
+        try Data("{broken".utf8).write(to: layout.recordsFile)
+        installer.removeLegacyEngines()
+        let aside = layout.recordsFile.appendingPathExtension("ilegivel")
+        #expect(try String(contentsOf: aside, encoding: .utf8) == "{broken")
+    }
+
     // MARK: Updates
 
     @Test func newerReleasesAreLookedForOnceADay() async throws {

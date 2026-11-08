@@ -53,8 +53,22 @@ final class BrowserInstaller: Sendable {
         try encoder.encode(records).write(to: layout.recordsFile, options: .atomic)
     }
 
+    /// The records as they are on disk, for read-modify-write. Unlike `records()`, a file that exists but cannot be read is an error
+    /// (writing `[:]` over it would erase the other component's record); one that is not valid JSON is kept aside before starting over.
+    private func recordsForUpdate() throws -> InstalledRecords {
+        guard FileManager.default.fileExists(atPath: layout.recordsFile.path) else { return [:] }
+        let data = try Data(contentsOf: layout.recordsFile)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        if let decoded = try? decoder.decode(InstalledRecords.self, from: data) { return decoded }
+        let aside = layout.recordsFile.appendingPathExtension("ilegivel")
+        try? FileManager.default.removeItem(at: aside)
+        try FileManager.default.moveItem(at: layout.recordsFile, to: aside)
+        return [:]
+    }
+
     private func record(_ component: BrowserComponent, _ value: InstalledComponent?) throws {
-        var all = records()
+        var all = try recordsForUpdate()
         all[component.rawValue] = value
         try save(all)
     }
@@ -270,7 +284,7 @@ final class BrowserInstaller: Sendable {
                     layout.root.appending(path: "cloak", directoryHint: .isDirectory)] where fileManager.fileExists(atPath: url.path) {
             try? fileManager.removeItem(at: url)
         }
-        var all = records()
+        guard var all = try? recordsForUpdate() else { return }
         guard all["obscura"] != nil || all["cloak"] != nil else { return }
         all["obscura"] = nil
         all["cloak"] = nil
