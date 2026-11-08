@@ -169,6 +169,16 @@ struct WebSearchToolTests {
         #expect(!calls.contains { $0.hasPrefix("open ") })
     }
 
+    @Test func aSearchThroughAProxyWithALoginNeverOpensNorClosesATab() async throws {
+        let setup = FakeBrowserSetup()
+        setup.hub.setProxy("http://user:senha@proxy.test:8080", botID: setup.botID)
+        setup.driver.state.withLock { $0.evaluation = duckDuckGoPage }
+        _ = try await WebSearchTool().run(.object(["query": .string("swift")]), context: setup.context())
+        let calls = setup.driver.calls
+        #expect(calls.contains { $0.hasPrefix("open https://html.duckduckgo.com/") })
+        #expect(!calls.contains { $0.hasPrefix("newTab") || $0.hasPrefix("closeTab") }, "closing a tab loses the browser with this proxy")
+    }
+
     @Test func googleIsSearchedInTheBrowserWithNewsAndSiteMapped() async throws {
         let setup = FakeBrowserSetup()
         setup.driver.state.withLock {

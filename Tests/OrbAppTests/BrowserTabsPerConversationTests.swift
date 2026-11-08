@@ -42,6 +42,18 @@ struct BrowserTabsPerConversationTests {
         #expect(calls[switchIndex + 1].hasPrefix("scroll"))
     }
 
+    @Test func aSearchRunsFromTheTabOfTheConversationAndLeavesItCurrent() async throws {
+        try await scroll("chat-A")
+        try await scroll("chat-B")
+        setup.driver.state.withLock { $0.evaluation = "<html></html>" }
+        _ = try await WebSearchTool().run(.object(["query": .string("swift")]), context: context("chat-A"))
+        let calls = setup.driver.calls
+        let switchIndex = try #require(calls.lastIndex(of: "command tab t1"))
+        let newIndex = try #require(calls.firstIndex { $0.hasPrefix("newTab") })
+        #expect(switchIndex < newIndex, "the search starts from chat-A's tab, not chat-B's")
+        #expect(Array(calls.suffix(2)) == ["closeTab -", "selectTab t1"], "after closing the search tab the browser goes back to chat-A's")
+    }
+
     @Test func theViewsOfOneBrowserShareTheDriverButNotWhatTheyRemember() async throws {
         let a = try await setup.hub.session(botID: setup.botID, mode: .background, scope: "A")
         let b = try await setup.hub.session(botID: setup.botID, mode: .background, scope: "B")

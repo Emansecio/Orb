@@ -390,7 +390,8 @@ struct WebSearchTool: AgentTool {
         if context.browser.drivesABrowser, let hub = context.browser.hub, let botID = context.botID {
             // The person has the browser (the live screen's window): the search waits for it back (it has no refs to go stale).
             _ = await hub.control.waitWhileHeld(botID)
-            let browser = try await hub.session(botID: botID, mode: context.browser.mode)
+            // This conversation's view, like the other browser tools: its tab is made current before the search, and kept after.
+            let browser = try await hub.session(botID: botID, mode: context.browser.mode, scope: context.browser.scope)
             return try await Self.searchInBrowser(request, provider: provider, session: browser, note: note, http: session)
         }
         return try await searchByFetch(request, note: note)
@@ -490,7 +491,8 @@ struct WebSearchTool: AgentTool {
             // A new tab, so the page the Orb is working on stays where it was.
             let hadPage = ((try? await session.driver.currentURL()) ?? "about:blank") != "about:blank"
             var usedTab = false
-            if hadPage, (try? await session.driver.newTab(address)) != nil { usedTab = true } else { _ = try await session.driver.open(address) }
+            // With a proxy that needs a login a tab is never closed (it would lose the browser), so no tab is opened for the search.
+            if hadPage, session.closesTabs, (try? await session.driver.newTab(address)) != nil { usedTab = true } else { _ = try await session.driver.open(address) }
             if !usedTab { session.forgetPage() }
             let report: String
             do {
@@ -502,14 +504,21 @@ struct WebSearchTool: AgentTool {
                         // Stopped: this task cannot run the command that closes the tab, one of its own does (once the browser is free).
                         Task.detached { _ = try? await session.exclusive { try await session.driver.closeTab(nil) } }
                     } else {
-                        try? await session.driver.closeTab(nil)
+                        await closeSearchTab(session)
                     }
                 }
                 throw error
             }
-            if usedTab { try? await session.driver.closeTab(nil) }
+            if usedTab { await closeSearchTab(session) }
             return report
         }
+    }
+
+    /// Closes the search tab, then goes back to the conversation's own tab: the browser would pick another one, and the tab book
+    /// still says this conversation is the current one.
+    private static func closeSearchTab(_ session: BrowserSession) async {
+        try? await session.driver.closeTab(nil)
+        if let own = session.tabName { try? await session.driver.selectTab(own) }
     }
 
     /// Reads the results page that is open.
