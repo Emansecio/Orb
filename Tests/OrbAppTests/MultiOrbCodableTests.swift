@@ -263,6 +263,7 @@ struct OrbEventSentenceTests {
         #expect(sentence(.chainStopped) == "Você parou a conversa entre Orbs")
         #expect(sentence(.groupRunDone, detail: "5 turnos · 42 mil tokens") == "Pedido concluído: 5 turnos · 42 mil tokens")
         #expect(sentence(.groupStopped) == "Você parou o grupo")
+        #expect(sentence(.groupStopped, detail: OrbEvent.budgetStop) == "O teto diário do pulso parou o grupo")
         #expect(sentence(.delegationReceived, actor: atlas, subject: revisor) == "Atlas pediu ajuda ao Revisor")
         #expect(sentence(.delegationReceived, actor: revisor, subject: lia) == "Revisor pediu ajuda à Lia")
     }

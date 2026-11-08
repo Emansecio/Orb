@@ -50,7 +50,7 @@ protocol GroupTurnHooks: AnyObject {
     // MARK: end MultiOrb (WP5)
     /// A group's chain was stopped by the person from outside the group's screen (the Parar of an Orb that waits for it, or of a
     /// member at work): the group stops as with "Parar grupo".
-    func chainStopped(_ chainID: UUID)
+    func chainStopped(_ chainID: UUID, by reason: CancelReason)
     /// A member left a notice (`tell`) inside the group's chain: it is a post in the thread and runs no turn.
     func noticePosted(_ envelope: OrbEnvelope)
 }
@@ -60,7 +60,7 @@ protocol GroupTurnHooks: AnyObject {
 extension GroupTurnHooks {
     func images(for request: DelegationRequest) -> [ImageAttachment] { [] }
     func refusal(forRequestFrom asker: UUID, to member: UUID, chain: UUID) -> DelegationRefusal? { nil }
-    func chainStopped(_ chainID: UUID) {}
+    func chainStopped(_ chainID: UUID, by reason: CancelReason) {}
     func noticePosted(_ envelope: OrbEnvelope) {}
 }
 // MARK: end MultiOrb (WP5)

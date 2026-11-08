@@ -14,6 +14,9 @@ struct OrbEvent: Codable, Equatable, Sendable {
     /// How a routine's run ended (`routineRun`): an ordinary run stays gray, the others are marked.
     enum Outcome: String, Codable, Sendable { case finished, failed, attention, goalReached }
 
+    /// The `detail` of a `groupStopped` the pulse's daily budget caused; without it the person stopped the group.
+    static let budgetStop = "budget"
+
     var kind: Kind
     /// Who did it.
     var actor: OrbRef?
@@ -68,7 +71,7 @@ struct OrbEvent: Codable, Equatable, Sendable {
         case .groupRunDone:
             return "Pedido concluído: \(detail)"
         case .groupStopped:
-            return "Você parou o grupo"
+            return detail == Self.budgetStop ? "O teto diário do pulso parou o grupo" : "Você parou o grupo"
         case .delegationReceived:
             return "\(actorName) pediu ajuda \(PortugueseArticle.contraction(for: subjectName)) \(subjectName)"
         case .routineRun:

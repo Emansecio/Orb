@@ -296,6 +296,25 @@ O que deixa um Orb (ou um grupo) programar, testar e entregar sem cliques além 
 - **Trava de escrita velha (`Engine/Tools/FileStamps.swift`).** Por Orb, até 500 caminhos: depois de ler ou gravar, guarda data e
   tamanho; `write_file`/`edit_file` recusam quando o arquivo mudou desde então (outro Orb ou você).
 
+### Orbs juntos (`MultiOrb/`, `Groups/`)
+
+Fora de `ToolBox.all`: `MultiOrbOffering` (`AppModel.multiOrbOffering`) decide por turno quais destas o Orb recebe, e a ponte `ToolContext.orbs`
+leva a chamada ao `DelegationHub`. `orbs` (`ask`, `tell`, `list`), `group_create`, `group_edit`, `group_recall`, `orb_propose` e `orb_delete`.
+- **Pedidos e grupos.** `DelegationHub` (pedidos, cadeias, filas, recusas) e `GroupHub` (a run de cada grupo, o fio). Um grupo acionado por
+  outro devolve a resposta ao turno do grupo que pediu, e `ChainState.groupsVisited` barra o laço grupo → grupo.
+- **Preferências** (`AppModel+MultiOrbSettings.swift`, todas `UserDefaults`, ligadas por padrão): `orbsCanTalk`, `orbsCanStartGroups`,
+  `orbsActOnOwn` (cria e aciona grupos e propõe Orbs fora do chat próprio: rotina, pedido, turno de grupo, pulso), `orbsCanManageGroups`
+  (`group_edit` e `orb_delete`) e `orbsCreateWithoutAsking` (`orb_propose` cria na hora, sem teto de quantidade, e a linha do criador
+  oferece `undoCreation`). Apagar grupo ou Orb, e tirar o membro que desfaz um grupo de dois, passam por `ToolContext.confirm`
+  (`ApprovalGate.confirm`), nunca pelo `confirmed` do modelo.
+- **Pulso** (`Pulse.swift`). `pulseTick` roda no agendador: com `pulseIsOn` (`pulseEnabled && orbsActOnOwn`), passado `pulseMinutes`, percorre
+  os Orbs em rodízio (`PulseState.lastOrb`), pula o que tem a mesma impressão digital (`pulseFingerprint`: conversas, memória, pasta e fio dos grupos,
+  lidos fora da main, sem modelo) e começa em `beginPulse` um side run `.pulse` (`BotSession.sideKind`) com o `Pulse.prompt`; `finishPulse` o
+  encerra, grava `pulseRan` no chat e em Início, e guarda a impressão nova. O teto diário (`pulseDailyTokens`, `PulseState.tokensToday`)
+  conta pelo `AppModel.pulseCharge`, chamado da contabilidade de uso, o turno do pulso e toda cadeia de origem `.pulse`; ao estourar,
+  `stopPulseWork` cancela as cadeias com `CancelReason.budget` e grava `pulseStopped`; um grupo parado assim grava `groupStopped` com
+  `detail == OrbEvent.budgetStop`, e a frase diz que foi o teto do pulso.
+
 ### Uso e custos (`Usage/`)
 
 | Arquivo | Papel |
@@ -423,6 +442,7 @@ conversations/<Orb>/conversa-<id>.json      cada conversa aberta com "Nova conve
                                  de conversa grava a que sai e lê a outra (`BotSession.openChat`); o que chega numa que não está
                                  na memória é gravado direto nela (`Store.amend`)
 conversations/<Orb>/routine-<rotina>.json   a conversa de cada rotina
+conversations/<Orb>/pulso-<id do Orb>.json  a conversa do pulso do Orb (uma só; o pulso começa de onde parou)
 wake/<nome ou id>.wake           a campainha de fora: um processo externo grava o arquivo e a rotina roda na hora
                                  (`RoutineWake`; consumido ao ser lido, o texto vira o motivo na execução)
 rascunhos.json                   o que cada compositor guarda sem enviar (`ComposerDraft`: texto e caminhos de arquivos e imagens); gravado ao sair, depois que o turno interrompido devolveu a fila, e a cada rodada do agendador; lido na abertura
@@ -449,12 +469,13 @@ Uma tarefa interrompida por sair do app ou por uma queda continua sozinha na abe
 - **Pedido a um grupo**: o fio ganha "O app fechou no meio deste pedido; retomando." e o orquestrador recebe um turno com as atribuições marcadas como perdidas (`GroupHub.resume`).
 - **Pedido de um Orb a outro**: reenviado ao mesmo destino, na mesma cadeia, com o aviso para conferir o que já foi feito (`DelegationHub.resubmit`); a resposta acorda quem pediu como sempre. Um pedido feito enquanto o Orb atendia outro pedido ou uma rotina não é guardado: quem pediu é refeito do começo e pergunta de novo.
 - **Rotinas**: não são retomadas; o agendamento as roda de novo.
+- **Pulso**: não é retomado; a abertura descarta a entrada (`dropPulse`) e o próximo pulso cobre o que faltou.
 
 Cada entrada retoma uma vez (`resumes`); a que já foi retomada é descartada e fica o "Continuar" do aviso. Guarda contra ciclo de quedas: `cleanQuit` fica falso ao abrir e verdadeiro no `willTerminate`; duas aberturas depois de queda em menos de 10 minutos não retomam nada e limpam o diário. A retomada espera a primeira checagem das conexões e, para a tarefa do chat, até um minuto por um Orb que outra coisa tomou na abertura.
 
 Fora dela: o **Keychain** (serviço `app.orb.mac`; uma conta por provedor com chave, `chatgpt` com o JSON do login e
 `mcp.<id do conector>.<NOME>` para segredos de conectores e `mcp.<id>.oauth` para o login de um conector), as **preferências** (`UserDefaults`: `notifyWhenDone`,
-`quickAskGlobalShortcut`, `keychainAccountsFromOpenBot`, aba de Ajustes e do painel de cada Orb, modelos recentes…) e a **pasta de cada Orb**
+`quickAskGlobalShortcut`, `keychainAccountsFromOpenBot`, as chaves multi-Orb (`orbsActOnOwn`…) e do pulso (`pulseEnabled`, `pulseMinutes`, `pulseDailyTokens` e o `pulseState` em JSON), aba de Ajustes e do painel de cada Orb, modelos recentes…) e a **pasta de cada Orb**
 (`~/Orbs/<Nome>/`, com `Rotinas/<nome>/…md`), que o app não apaga ao apagar o Orb.
 
 ### Redefinir o Orb
@@ -818,6 +839,7 @@ Duplicações conhecidas que ficaram para depois:
 - **Novo provedor.** Um `case` em `ProviderKind` com `label`, `summary`, `defaultBaseURL`, `keyPage`, `shortName`, `tagline` e
   `group`; a lista de modelos em `ModelCatalog.fetch`; o formato de cada modelo decide o cliente (`ProviderAccount.client`).
 - **Novo bloco de resposta.** Um `case` em `MarkdownBlock`, lido em `richBlock` só com o fence fechado (aberto, ele fica `.code` e troca uma vez), texto puro em `plainText` e vista em `MarkdownBlockView`, com `RichBlockFrame`. O desenho nunca é salvo: a resposta guarda o Markdown. Web só por `PageSandbox`, e fora do `LazyVStack`. Texto novo no prompt é fixo (`SystemPrompt.richReplies`).
+- **Nova ferramenta multi-Orb.** Além da receita acima: o `struct` fica em `Engine/Tools/` mas entra por `MultiOrbOffering`, não em `ToolBox.all`; a ação nova vai ao `DelegationHub` pelo `action` de `ToolContext.orbs` (uma ação `…_plan` quando há cartão: o app confere, a ferramenta pergunta por `context.confirm` e só então confirma). Preferência nova em `AppModel+MultiOrbSettings`, com padrão e linha em Ajustes → Orbs.
 - **Novo campo persistido.** Valor padrão na decodificação tolerante; nunca renomeie nem remova uma chave sem migração.
 - **Nova tela para revisar.** Um `case` em `Snapshot.render` (ou em um dos auxiliares), com dados de exemplo, nunca reais.
 - **Novo comando de teclado.** Nome em `CommandName`, tecla em `AppShortcut` (o teste confere que nenhuma tecla se repete),

@@ -759,7 +759,7 @@ final class DelegationHub: DelegationService {
         for botID in touched { schedulePump(botID) }
         // A group's chain stopped by the person from elsewhere (the Parar of whoever waits for it) stops the group.
         // Not while quitting: the run must stay in the journal and resume, not be written as stopped by the person.
-        if reason == .user || reason == .budget, !isShuttingDown, chain.groupID != nil, !alreadyCancelled { groupHooks?.chainStopped(id) }
+        if reason == .user || reason == .budget, !isShuttingDown, chain.groupID != nil, !alreadyCancelled { groupHooks?.chainStopped(id, by: reason) }
         settleWaitingRoutines()
     }
 

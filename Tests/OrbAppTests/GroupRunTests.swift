@@ -335,6 +335,17 @@ struct GroupNoLimitTests {
 }
 
 struct GroupStopTests {
+    @Test @MainActor func theDailyPulseBudgetStopsTheGroupAndTheLineSaysSo() async throws {
+        let world = GroupWorld()
+        _ = await startOrchestratorTurn(world)
+        let chain = try #require(world.hub.run(world.groupID)?.id)
+        world.hub.chainStopped(chain, by: .budget)
+        #expect(world.fake.cancelled.first?.reason == .budget)
+        let event = try #require(world.events.last)
+        #expect(event.kind == .groupStopped && event.sentence == "O teto diário do pulso parou o grupo")
+        #expect(world.hub.run(world.groupID) == nil)
+    }
+
     @Test @MainActor func stoppingTheGroupCancelsTheChainAndEveryTurnInProgress() async throws {
         let world = GroupWorld()
         let first = await startOrchestratorTurn(world)
