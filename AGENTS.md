@@ -53,7 +53,7 @@ Os caminhos de código abreviados são relativos a `Sources/Orb/`. Caminhos inic
 
 ## Regras fixas
 
-Correções que o usuário já fez mais de uma vez. Valem em toda tarefa, inclusive para subagentes.
+Correções que o usuário já fez mais de uma vez e decisões dele que já estão fechadas. Valem em toda tarefa, inclusive para subagentes.
 
 ### Interface
 
@@ -72,12 +72,31 @@ Correções que o usuário já fez mais de uma vez. Valem em toda tarefa, inclus
 ### Foco e máquina
 
 9. Não roube o foco do usuário: nada de trazer apps para a frente, abrir abas do Chrome por AppleScript/`open` ou ativar janelas enquanto ele trabalha. Para links, entregue um arquivo ou a lista clicável.
-10. A suíte inteira só roda com o Orb fechado (os testes de navegador real falham com ele aberto); no dia a dia, rode apenas as suítes filtradas da área.
+10. A suíte padrão pode rodar com o Orb aberto; só os testes ligados por `ORB_REAL_BROWSER_TESTS=1` exigem o Orb fechado (ele limpa os navegadores ao sair). No dia a dia, rode apenas as suítes filtradas da área.
 11. Nada pago: nenhuma API ou serviço cobrado sem pedido explícito. Erro 429 significa esperar, não trocar para uma API paga.
 12. Espere com `waitUntil`, `TestGate`, `Monitor` ou um processo em segundo plano; nunca com `sleep N` (nem em subagentes, que deixam `sleep` órfãos).
+13. Antes de algo que ocupe a máquina por minutos (render, benchmark, lote longo), diga o que muda e quanto leva, e espere o ok. Itere com testes curtos e encerre no fim todo loop de CPU que um benchmark abriu.
+14. Suíte que passa de ~2 min está presa: rode `sample` no `swiftpm-testing-helper` para achar o teste, encerre, rode de novo com `--skip` nele, rode-o sozinho e diga no relatório que foi pulado. Rode a suíte com `caffeinate -i`.
+15. Imagem para o usuário vai por link ou anexo (`SendUserFile` com `display: "attach"`), nunca por algo que abra janela ou painel sozinho.
 
 ### Agentes e forma de trabalho
 
-13. Subagentes que escrevem código são Sonnet, cada um em sua worktree, no máximo 3 compilando ao mesmo tempo (com `nice -n 15`). A worktree nasce de `origin/main`: o agente roda `git merge --ff-only main` antes de começar. A revisão final dos diffs é da sessão principal.
-14. Depois de levar o commit do agente para a `main`, remova a worktree e o branch dele.
-15. Não repita o que o usuário já recusou ou desfez (ex.: a janela de Ajustes mudando de altura entre abas). Antes de corrigir, confirme a causa no código e nas capturas, não na suposição.
+16. Subagentes que escrevem código são Sonnet, cada um em sua worktree, no máximo 3 compilando ao mesmo tempo (com `nice -n 15`). A worktree nasce de `origin/main`: o agente roda `git merge --ff-only main` antes de começar. A revisão final dos diffs é da sessão principal.
+17. Depois de levar o commit do agente para a `main`, remova a worktree e o branch dele.
+18. Não repita o que o usuário já recusou ou desfez (ex.: a janela de Ajustes mudando de altura entre abas). Antes de corrigir, confirme a causa no código e nas capturas, não na suposição.
+19. Nenhum subagente Opus, a menos que o usuário peça o modelo pelo nome. Agentes só de leitura podem ir em maior número; o teto de 3 vale para quem compila, mesmo quando o pedido é "paralelize o quanto puder".
+20. Opção técnica com recomendação clara: escolha, registre a decisão e siga. Pergunte ao usuário só o que é gosto dele ou exige ação dele (login, instalação, pagamento).
+
+### Git e CI
+
+21. Trabalho direto na `main`, com push liberado. Use worktree quando outra sessão estiver mexendo na `main`.
+22. Push só depois da suíte completa e do bundle passarem; nunca encadeie o push aos testes com `&&` frouxo (já subiu push com teste falhando).
+23. O CI usa Swift 6.3.3, mais estrito que o Swift local: erros que passam aqui quebram lá. Depois do push, confira com `gh run list --branch main`.
+
+### Decisões de produto
+
+24. Recurso que mexe em janela, app ou navegador trabalha em segundo plano por padrão; vai para a frente só com pedido explícito ou quando a tarefa não anda de outro jeito.
+25. Entregas arredondadas: cada etapa é usável sozinha, com padrão seguro (sem a pré-condição, o comportamento é o de hoje), avisos, travas e um toggle em Ajustes quando houver custo ou risco. Nunca obrigue a etapa seguinte.
+26. O Claude Code é só o cano até o modelo (`Engine/ClaudePipe/`), com o motor do Orb no comando: nunca reintroduza o harness dele (prompt, ferramentas, sessões, compactação) nem OAuth direto.
+27. Não mude como a memória trata páginas escritas fora do padrão sem pedido: Orbs antigos do usuário dependem disso.
+28. Nunca remova um recurso existente sem pedido explícito (as várias conversas por Orb saíram em `e3f90ba` sem aval e tiveram de voltar).
