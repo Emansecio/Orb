@@ -66,6 +66,24 @@ import Testing
         #expect(NoticeAction.actions(for: "Não deu certo: O provedor está sobrecarregado ou instável (503); tente de novo em instantes.") == [.retry])
     }
 
+    @Test func theProvidersFreeTextNeverDecidesTheButtons() {
+        // Words like "chave", "ajustes" or "(401)" in the provider's own text must not take away "Tentar de novo".
+        let words = "verifique a chave nas configurações, ajustes (401) (403)"
+        for error in [LLMError.network(code: -1, message: words), .invalidResponse(words), .stream(type: "weird_error", message: words),
+                      .http(status: 404, message: words)] {
+            #expect(NoticeAction.actions(for: notice(error)) == [.retry], "\(error)")
+        }
+        // The Claude Code client's own timeouts keep it too; a missing install still goes to Ajustes.
+        #expect(NoticeAction.actions(for: notice(.invalidResponse("o Claude Code não respondeu à inicialização a tempo."))) == [.retry])
+        #expect(NoticeAction.actions(for: notice(.invalidResponse("o Claude Code não tem ferramentas neste passo."))) == [.retry])
+        #expect(NoticeAction.actions(for: notice(.invalidResponse("o Claude Code encerrou antes de responder. Detalhe do Claude Code: chave inválida"))) == [.retry])
+    }
+
+    @Test func aRefusedModelDoesNotVouchForTheKey() {
+        let text = LLMError.http(status: 401, message: "Model foo is disabled").errorDescription ?? ""
+        #expect(text.contains("recusou este modelo") && !text.contains("a chave está certa"))
+    }
+
     @Test func aProviderOrKeyProblemOpensAjustesFirst() {
         #expect(NoticeAction.actions(for: "Não deu certo: A chave ou o login foi recusado (401).") == [.openSettings])
         #expect(NoticeAction.actions(for: "Não deu certo: Nenhum modelo configurado. Abra Ajustes → Modelos.") == [.openSettings])

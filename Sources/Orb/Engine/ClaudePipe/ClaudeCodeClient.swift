@@ -55,6 +55,7 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
     private let folders: ClaudePipeFolders
     private let initializeTimeout: Duration
     private let parkTimeout: Duration
+    private let stepIdleTimeout: Duration
     /// Sent as `--effort` (a level the model lists, see `ReasoningEffort.sent`); nil leaves the CLI's default.
     private let effort: String?
     /// Sent as `CLAUDE_CODE_PROMPT_CACHE_TTL` ("5m" or "1h"); nil leaves the CLI's own choice (an hour on a subscription).
@@ -89,7 +90,8 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
          folders: ClaudePipeFolders = .standard, initializeTimeout: Duration = .seconds(60), parkTimeout: Duration = .seconds(30 * 60),
          effort: String? = nil, cacheTTL: String? = nil, conversationID: String? = nil,
          idlePool: ClaudePipeIdlePool = .shared, idleTimeout: Duration = ClaudePipeIdlePool.defaultTimeout,
-         keepsIdleProcess: Bool = true) {
+         keepsIdleProcess: Bool = true, stepIdleTimeout: Duration = .seconds(300)) {
+        self.stepIdleTimeout = stepIdleTimeout
         self.conversationID = keepsIdleProcess ? conversationID : nil
         self.idlePool = idlePool
         self.idleTimeout = idleTimeout
@@ -123,7 +125,8 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
     var withoutIdleProcess: any LLMClient {
         ClaudeCodeClient(launch: launch, orbBinary: orbBinary, folders: folders, initializeTimeout: initializeTimeout,
                          parkTimeout: parkTimeout, effort: effort, cacheTTL: cacheTTL, conversationID: nil,
-                         idlePool: idlePool, idleTimeout: idleTimeout, keepsIdleProcess: false)
+                         idlePool: idlePool, idleTimeout: idleTimeout, keepsIdleProcess: false,
+                         stepIdleTimeout: stepIdleTimeout)
     }
 
     // MARK: Streaming
@@ -402,7 +405,8 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
             let firstLine = try ClaudePipeSession.userLine(prompt, images: split.images)
             let process = try LineProcess(executable: launch.executable, arguments: arguments, directory: folders.workingDirectory,
                                           environment: Self.environment(launch.environment, cacheTTL: cacheTTL))
-            let run = ClaudePipeRun(process: process, mailbox: mailbox, cleanup: created, firstLine: firstLine)
+            let run = ClaudePipeRun(process: process, mailbox: mailbox, cleanup: created, firstLine: firstLine,
+                                  stepIdleTimeout: stepIdleTimeout)
             do {
                 try await run.initialize(timeout: initializeTimeout)
             } catch {
@@ -462,7 +466,12 @@ actor ClaudePipeRun {
     /// Tool calls whose results are delivered: their permission requests are answered at once.
     private var approved: Set<String> = []
 
-    init(process: LineProcess, mailbox: ClaudePipeMailbox?, cleanup: [URL], firstLine: String) {
+    /// How long a step may go without a single byte from the CLI before the process is considered stuck. Generous on purpose:
+    /// a long answer keeps sending lines, so only real silence trips it.
+    private nonisolated let stepIdleTimeout: Duration
+
+    init(process: LineProcess, mailbox: ClaudePipeMailbox?, cleanup: [URL], firstLine: String, stepIdleTimeout: Duration = .seconds(300)) {
+        self.stepIdleTimeout = stepIdleTimeout
         self.process = process
         self.mailbox = mailbox
         self.cleanup = cleanup
@@ -503,6 +512,8 @@ actor ClaudePipeRun {
         throw await Self.died(process, assistantError: nil)
     }
 
+    private static func minutes(_ duration: Duration) -> Int { max(1, Int((Double(duration.components.seconds) / 60).rounded())) }
+
     /// The user message that starts the turn (after `initialize`).
     func sendFirstMessage() {
         process.send(firstLine)
@@ -535,7 +546,25 @@ actor ClaudePipeRun {
     /// (after the CLI's `result` line).
     func readStep(emit: @Sendable (LLMEvent) -> Void) async throws -> ClaudePipeStep {
         var state = ClaudePipeStepState()
+        // A CLI that stays silent with its process alive would hang the turn (routines and delegations have nobody to press
+        // Stop): end it after `stepIdleTimeout` without any line.
+        let lastLine = OSAllocatedUnfairLock(initialState: ContinuousClock.now)
+        let stalled = OSAllocatedUnfairLock(initialState: false)
+        let limit = stepIdleTimeout
+        let watchdog = Task { [process] in
+            while !Task.isCancelled {
+                let deadline = lastLine.withLock { $0 } + limit
+                if ContinuousClock.now >= deadline {
+                    stalled.withLock { $0 = true }
+                    process.terminate(after: 0)
+                    return
+                }
+                try? await Task.sleep(until: deadline, clock: .continuous)
+            }
+        }
+        defer { watchdog.cancel() }
         while let line = await reader.next() {
+            lastLine.withLock { $0 = .now }
             guard let json = JSONValue.parse(line), let type = json["type"]?.string else { continue }
             if let parent = json["parent_tool_use_id"], parent != .null { continue } // a subagent's traffic
             switch type {
@@ -554,6 +583,7 @@ actor ClaudePipeRun {
             }
         }
         try Task.checkCancellation()
+        if stalled.withLock({ $0 }) { throw LLMError.invalidResponse("o Claude Code ficou em silêncio por \(Self.minutes(stepIdleTimeout)) min e foi encerrado. Tente de novo.") }
         // The CLI ended without a `result`: fine after a complete answer, a failure otherwise.
         if state.stop != nil { return state.step }
         throw await Self.died(process, assistantError: state.assistantError)
@@ -583,7 +613,7 @@ actor ClaudePipeRun {
     private static func died(_ process: LineProcess, assistantError: (code: String, text: String)?) async -> Error {
         if let assistantError { return ClaudePipeErrors.error(code: assistantError.code, text: assistantError.text, status: nil) }
         let detail = await process.finalErrorOutput()
-        return LLMError.invalidResponse("o Claude Code encerrou antes de responder." + (detail.isEmpty ? "" : " " + detail))
+        return LLMError.invalidResponse("o Claude Code encerrou antes de responder." + (detail.isEmpty ? "" : " Detalhe do Claude Code: " + detail))
     }
 }
 

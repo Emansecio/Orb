@@ -172,9 +172,9 @@ enum NoticeAction: Equatable, Sendable {
     /// limit (429), a missing balance or a server error (5xx) is not one. (`reason` is lowercased and is only the
     /// app's own sentence, see `ourSentence`.)
     static func isSettingsProblem(_ reason: String) -> Bool {
-        // A model the provider refused while the key is fine is not a key problem (its sentence says "a chave está certa").
+        // A refused model is not (only) a key problem: another model is a way out, so "Tentar de novo" stays.
         if reason.contains("recusou este modelo") { return false }
-        if ["ajustes", "chave", "nenhum modelo", "claude code não"].contains(where: { reason.contains($0) }) { return true }
+        if ["ajustes", "chave", "nenhum modelo"].contains(where: { reason.contains($0) }) { return true }
         return reason.contains("(401)") || reason.contains("(403)")
     }
 

@@ -481,11 +481,19 @@ enum LLMError: LocalizedError, Equatable {
             if type == Self.stalledType { "O provedor parou de responder (\(message)). Tente de novo em instantes." }
             else if Self.rateLimitTypes.contains(type) { Self.describe(status: 429, message: message) }
             else if Self.retryableStreamErrors.contains(type) { Self.describe(status: 503, message: message) }
-            else { "O provedor devolveu um erro (\(type)): \(message)" }
-        case .network(_, let message): "Sem conexão com o provedor: \(message)"
-        case .invalidResponse(let detail): "Resposta inválida do provedor: \(detail)"
+            else { "O provedor devolveu um erro (\(type)). Detalhe do provedor: \(message)" }
+        case .network(_, let message): "Sem conexão com o provedor. Detalhe do provedor: \(message)"
+        case .invalidResponse(let detail):
+            // The client's own sentences stay readable; anything else is the provider's free text, which must not steer
+            // the buttons of the failure notice (it only reads the app's sentence before "Detalhe do provedor:").
+            detail.hasPrefix(Self.ownDetailPrefix) ? "Resposta inválida do provedor: \(detail)"
+                : "Resposta inválida do provedor. Detalhe do provedor: \(detail)"
         }
     }
+
+    /// How the Claude Code client starts the `invalidResponse` sentences it wrote itself (timeouts, start-up), as opposed to
+    /// the CLI's or a provider's own words.
+    static let ownDetailPrefix = "o Claude Code "
 
     /// Seconds the provider asked us to wait (`Retry-After`), when it did.
     var retryAfter: TimeInterval? {
@@ -539,7 +547,7 @@ enum LLMError: LocalizedError, Equatable {
         case 401 where isModelRefused(lowered), 403 where isModelRefused(lowered):
             // OpenCode: a model the workspace turned off, the gateway does not serve, that needs a data-use
             // opt-in (Muse Spark Contributor, DeepSeek in the Go plan) or that is closed to the country.
-            "O provedor recusou este modelo (\(status)), mas a chave está certa. Ele pode estar desativado no espaço de trabalho da OpenCode, exigir aceite de uso de dados no console da OpenCode ou não estar liberado no seu país. Escolha outro modelo ou confira o console. Detalhe do provedor: \(message)"
+            "O provedor recusou este modelo (\(status)). Ele pode estar desativado no espaço de trabalho da OpenCode, exigir aceite de uso de dados no console da OpenCode ou não estar liberado no seu país; se o console mostrar a chave desativada, gere outra. Escolha outro modelo ou confira o console. Detalhe do provedor: \(message)"
         case 401 where isAboutMoney, 403 where isAboutMoney:
             // OpenCode answers a missing balance or a spent monthly limit with 401, which is not a bad key.
             "Sem saldo ou limite de gasto liberado no provedor (\(status)). Confira o saldo e o plano no console do provedor. Detalhe do provedor: \(message)"
@@ -550,7 +558,7 @@ enum LLMError: LocalizedError, Equatable {
         case 402: "O provedor pede pagamento ou mais saldo (402). Confira seu plano. Detalhe do provedor: \(message)"
         case 429: "Você atingiu o limite de uso do provedor (429); espere um pouco ou confira seu plano. Detalhe do provedor: \(message)"
         case 500...599: "O provedor está sobrecarregado ou instável (\(status)); tente de novo em instantes. Detalhe do provedor: \(message)"
-        default: "O provedor respondeu \(status): \(message)"
+        default: "O provedor respondeu \(status). Detalhe do provedor: \(message)"
         }
     }
 

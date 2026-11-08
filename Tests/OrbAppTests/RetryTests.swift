@@ -209,7 +209,7 @@ struct LLMErrorTests {
         for status in [500, 502, 503, 529] {
             #expect(describe(status).contains("sobrecarregado") && describe(status).contains("detalhe X"))
         }
-        #expect(describe(404) == "O provedor respondeu 404: detalhe X")
+        #expect(describe(404) == "O provedor respondeu 404. Detalhe do provedor: detalhe X")
         #expect(LLMError.contextExceeded("detalhe X").errorDescription?.contains("grande demais") == true)
         #expect(LLMError.stream(type: "overloaded_error", message: "detalhe X").errorDescription?.contains("sobrecarregado") == true)
         #expect(LLMError.network(code: URLError.timedOut.rawValue, message: "detalhe X").errorDescription?.contains("detalhe X") == true)

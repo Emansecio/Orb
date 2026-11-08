@@ -211,10 +211,12 @@ private struct Rig {
                        "FAKE_PROJECT_DIR": folders.projectDirectory.path]
     }
 
-    func client(initializeTimeout: Duration = .seconds(20), parkTimeout: Duration = .seconds(60), effort: String? = nil) -> ClaudeCodeClient {
+    func client(initializeTimeout: Duration = .seconds(20), parkTimeout: Duration = .seconds(60), effort: String? = nil,
+                stepIdleTimeout: Duration = .seconds(300)) -> ClaudeCodeClient {
         let launch = ClaudePipeLaunch(executable: script, environment: environment)
         return ClaudeCodeClient(launch: { launch }, orbBinary: URL(fileURLWithPath: "/fake/Orb"), folders: folders,
-                                initializeTimeout: initializeTimeout, parkTimeout: parkTimeout, effort: effort)
+                                initializeTimeout: initializeTimeout, parkTimeout: parkTimeout, effort: effort,
+                                stepIdleTimeout: stepIdleTimeout)
     }
 
     /// A client per turn, as the app makes them, sharing `pool` (the process a turn leaves idle) for the conversation.
@@ -747,6 +749,23 @@ struct ClaudeCodeClientTests {
         #expect(detail.contains("inicialização"))
         #expect(ContinuousClock.now - started < .seconds(15))
         #expect(await waitUntil { rig.scratchEntries.isEmpty })
+    }
+
+    @Test func aCLIThatGoesSilentMidStepIsEndedWithAnHonestError() async throws {
+        let rig = try Rig(scenario: "hang")
+        defer { rig.cleanUp() }
+        let started = ContinuousClock.now
+        let error = try #require(await #expect(throws: LLMError.self) {
+            _ = try await collect(rig.client(stepIdleTimeout: .milliseconds(600)).stream(model: "m", messages: [.system("s"), .user("Oi")],
+                                                                                            tools: [], toolChoice: .auto))
+        })
+        guard case .invalidResponse(let detail) = error else { Issue.record("wrong error \(error)"); return }
+        #expect(detail.contains("silêncio"))
+        #expect(ContinuousClock.now - started < .seconds(15))
+        #expect(await waitUntil { rig.scratchEntries.isEmpty })
+        // Our own sentence keeps "Tentar de novo": it is not a Ajustes problem.
+        let notice = NoticeAction.failurePrefix + (error.errorDescription ?? "")
+        #expect(NoticeAction.actions(for: notice) == [.retry])
     }
 
     // MARK: Cancellation
