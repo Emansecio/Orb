@@ -325,7 +325,7 @@ extension AppModel {
         if last > now { pulseState.lastPulse = now; return } // the clock went back: the interval counts from here
         guard now.timeIntervalSince(last) >= Double(pulseMinutes) * 60, pulseState.tokensToday < pulseDailyTokens else { return }
 
-        var waiting = false // an Orb with a demand but busy: the pass is tried again at the next tick
+        var waiting = false // an Orb busy (it may have a demand: it is not looked at): the pass is tried again at the next tick
         for botID in pulseOrder() {
             guard !isResetting, pulseIsOn, bot(botID) != nil else { continue }
             guard isFreeForPulse(botID) else { waiting = true; continue }

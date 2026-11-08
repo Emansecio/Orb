@@ -1034,10 +1034,17 @@ private final class PulseWorld {
         await world.startInterval()
         await model.pulseTick(now: world.at(minutes: 61))
         await waitUntil("the pulse to run") { model.sessions[atlas]?.turnTask != nil }
+        // Something of each kind the pulse keeps for the Orb, so its going away is seen.
+        let id = atlas.uuidString
+        model.notePlan(model.session(atlas).conversation ?? Conversation(), chat: atlas, of: atlas)
+        model.notePulseNotice(OrbEnvelope(kind: .tell, from: OrbRef(world.bot("Revisor")), to: OrbRef(world.bot("Atlas")), text: "Oi."),
+                              chat: atlas)
+        model.pulseState.failures[id + "|routine:x"] = 1
+        model.pulseState.delivered[id] = ["routine:y"]
+        try #require(model.pulseState.plans[id] != nil && model.pulseState.notices[id] != nil)
         _ = model.deleteBot(atlas)
         await gate.open()
         await world.settle()
-        let id = atlas.uuidString
         #expect(model.pulseState.delivered[id] == nil && model.pulseState.plans[id] == nil && model.pulseState.notices[id] == nil)
         #expect(!model.pulseState.failures.keys.contains { $0.hasPrefix(id) })
     }
@@ -1103,10 +1110,12 @@ private final class PulseWorld {
         defer { quiet.cleanUp() }
         let other = quiet.bot("Atlas").id
         quiet.plant("Atlas", tag: 0)
+        try #require(quiet.model.session(other).conversation != nil)
         quiet.model.session(other).conversation?.contextHandedAt = handed
         await quiet.startInterval()
         await quiet.model.pulseTick(now: quiet.at(minutes: 61))
         await quiet.settle()
+        #expect(await quiet.log.count(by: "Atlas") == 1, "the run happened (its turn hands the context on, the cleanup takes it back)")
         #expect(quiet.model.session(other).conversation?.contextHandedAt == handed)
         #expect(quiet.events("Atlas").isEmpty)
     }
