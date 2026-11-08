@@ -1,11 +1,12 @@
 import Foundation
 
-// The pulse: from time to time one Orb wakes by itself, looks at its team, its groups and its memory, and acts if coordinating
-// would help the person (ask a teammate, create Orbs or groups, move members). Nothing else wakes an Orb without a message or a
-// routine. Three things keep it cheap: a check with no model (the Orb's fingerprint did not change since its last pulse, so it
-// is skipped for free), one Orb per interval in turn, and a daily budget of tokens that counts the pulse turn and everything
-// the chain it starts spends (requests to other Orbs, group turns). When the budget runs out the pulse waits for the next day and
-// the chain that was working is stopped.
+// The pulse: from time to time an Orb wakes by itself when there is concrete work waiting for it (a plan dropped half way, a
+// routine that failed, a request that failed, a group turn that failed) and acts if coordinating would help the person (ask a
+// teammate, create Orbs or groups, move members). Nothing else wakes an Orb without a message or a routine. Three things keep
+// it cheap: the demand is found without a model (a pure function over state already in memory, so an Orb with none is skipped
+// for free and a demand is handed over once), one Orb per interval in turn, and a daily budget of tokens that counts the pulse
+// turn and everything the chain it starts spends (requests to other Orbs, group turns). When the budget runs out the pulse
+// waits for the next day and the chain that was working is stopped.
 
 /// What the pulse remembers between launches (one small value in the preferences). Tolerant: a missing or unreadable field
 /// reads as its default, and the whole value as a fresh one.
@@ -15,14 +16,17 @@ struct PulseState: Codable, Equatable, Sendable {
     var lastPulse: Date?
     /// The Orb examined last: the next pass starts after it (turn-taking, robust to Orbs added and deleted).
     var lastOrb: UUID?
-    /// By Orb id: what the Orb could see when its last pulse ended. Equal again means nothing happened since.
-    var fingerprints: [String: String] = [:]
+    /// By Orb id: the keys of the demands already handed to a pulse (oldest first, `Pulse.deliveredLimit` kept), so the same
+    /// work never wakes the Orb twice. Older versions kept a `fingerprints` map here; it is ignored when read.
+    var delivered: [String: [String]] = [:]
     /// By Orb id: when its last pulse began.
     var lastRunByOrb: [String: Date] = [:]
     /// What the last pulse that did something said, and when.
     var lastSummary: String?
     var lastActed: Date?
-    /// Passes over an Orb that were skipped because nothing changed (they cost no token).
+    /// The first demand of the pulse that last did something.
+    var lastReason: String?
+    /// Passes over an Orb that were skipped because it had no new demand (they cost no token).
     var skipped = 0
     /// The local day (`yyyy-MM-dd`) the counter is for, and the tokens the pulse and its chains spent in it.
     var day = ""
@@ -47,10 +51,11 @@ extension PulseState {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         lastPulse = (try? c.decodeIfPresent(Date.self, forKey: .lastPulse)) ?? nil
         lastOrb = (try? c.decodeIfPresent(UUID.self, forKey: .lastOrb)) ?? nil
-        fingerprints = (try? c.decodeIfPresent([String: String].self, forKey: .fingerprints)) ?? [:]
+        delivered = (try? c.decodeIfPresent([String: [String]].self, forKey: .delivered)) ?? [:]
         lastRunByOrb = (try? c.decodeIfPresent([String: Date].self, forKey: .lastRunByOrb)) ?? [:]
         lastSummary = (try? c.decodeIfPresent(String.self, forKey: .lastSummary)) ?? nil
         lastActed = (try? c.decodeIfPresent(Date.self, forKey: .lastActed)) ?? nil
+        lastReason = (try? c.decodeIfPresent(String.self, forKey: .lastReason)) ?? nil
         skipped = (try? c.decodeIfPresent(Int.self, forKey: .skipped)) ?? 0
         day = (try? c.decodeIfPresent(String.self, forKey: .day)) ?? ""
         tokensToday = max(0, (try? c.decodeIfPresent(Int.self, forKey: .tokensToday)) ?? 0)
@@ -63,17 +68,33 @@ struct PulseRun: Equatable {
     var startedAt: Date
     /// Tokens the pulse turn itself spent (the day's count also has its chain's).
     var tokens = 0
+    /// The first demand the run was woken for.
+    var reason = ""
+}
+
+/// Work waiting for an Orb, found without a model. `key` says which work and in what state (it changes when the work does), so
+/// a demand is handed to one pulse only; `line` is what the model reads.
+struct PulseDemand: Sendable, Equatable {
+    var key: String
+    var line: String
 }
 
 enum Pulse {
-    /// What the model is sent. Short, in English: it goes in every pulse.
-    static let prompt = "[Pulse] Nobody asked for this run. Check your team, your groups and your memory. If coordinating would "
-        + "help the user's goals, act now: ask teammates, create Orbs or groups, adjust members. If nothing is worth doing, "
-        + "reply only NOTHING."
+    /// What the model is sent: the demands (short, in English: it goes in every pulse).
+    static func prompt(for demands: [PulseDemand]) -> String {
+        "[Pulse] Nobody asked for this run. Open work you could move forward:\n" + demands.map { "- " + $0.line }.joined(separator: "\n")
+            + "\nAct only on these: resume, ask a teammate, create an Orb or group, or adjust members. If none needs anything now, "
+            + "reply only NOTHING."
+    }
 
     static let defaultMinutes = 60
     static let minimumDailyTokens = 10_000
     static let defaultDailyTokens = 300_000
+    /// Demands handed to one pulse, and keys remembered per Orb.
+    static let demandsPerPulse = 5, deliveredLimit = 40, lineLimit = 160
+    /// A plan must have been left alone this long to count as dropped (the person may be about to answer), and a routine run
+    /// this recent to count as news.
+    static let planIdle: TimeInterval = 10 * 60, runFreshness: TimeInterval = 24 * 3_600
 
     /// The reply that means "nothing to do" (any case, with or without a full stop or markdown around it).
     static func isNothing(_ reply: String?) -> Bool {
@@ -82,7 +103,7 @@ enum Pulse {
         return letters.isEmpty || letters == "NOTHING"
     }
 
-    /// A stable 64-bit FNV-1a, in hex: `Hasher` changes between launches, and the fingerprints are kept.
+    /// A stable 64-bit FNV-1a, in hex: `Hasher` changes between launches, and the keys are kept.
     static func hash(_ text: String) -> String {
         var value: UInt64 = 0xcbf2_9ce4_8422_2325
         for byte in text.utf8 {
@@ -92,29 +113,43 @@ enum Pulse {
         return String(value, radix: 16)
     }
 
-    /// The files and folders an Orb's fingerprint reads, as one line each (size and modification time; a missing one is "-").
-    /// Pure disk reads, so it runs off the main thread. `memory`: the Orb's memory folder, walked whole (a page edit changes the
-    /// time of the page, not of the folder). `folder`: the Orb's other conversations and side runs, minus the pulse's own file
-    /// (the pulse must not see itself).
-    nonisolated static func disk(files: [URL], folder: URL, memory: URL) -> String {
-        let manager = FileManager.default
-        let keys: Set<URLResourceKey> = [.contentModificationDateKey, .fileSizeKey]
-        func mark(_ url: URL) -> String {
-            guard let values = try? url.resourceValues(forKeys: keys) else { return "-" }
-            return "\(values.fileSize ?? 0)@\(values.contentModificationDate?.timeIntervalSinceReferenceDate ?? 0)"
+    private static func clip(_ text: String, _ limit: Int) -> String { MemoryText.clip(MemoryText.flatten(text), limit) }
+
+    /// The work waiting for an Orb, from state already in memory (pure: no disk, no model).
+    /// - `plan`: the plan of the Orb's open conversation. Dropped = steps still to do (a blocked one waits for the person),
+    ///   untouched for `planIdle`.
+    /// - `routines`: any; only this Orb's enabled ones whose newest run failed (a stop is not a failure) or asked for attention.
+    /// - `requests`: any; this Orb's requests that failed outside a group, and failed turns of groups it orchestrates. Chains the
+    ///   pulse itself started are left out (the Orb was told inside the chain, and pulsing on its own failures would loop).
+    static func demands(for botID: UUID, plan: TaskPlan?, routines: [Routine], requests: [DelegationRequest], groups: [OrbGroup],
+                        pulseChains: Set<UUID>, now: Date) -> [PulseDemand] {
+        var found: [PulseDemand] = []
+        if let plan, now.timeIntervalSince(plan.updatedAt) >= planIdle, let next = plan.openSteps.first {
+            found.append(PulseDemand(key: "plan:\(hash(plan.goal)):\(plan.openSteps.count)",
+                                     line: "Unfinished plan \"\(clip(plan.goal, 80))\": \(plan.doneCount)/\(plan.steps.count) done, next \"\(clip(plan.steps[next - 1].text, 80))\"."))
         }
-        var lines = files.map { $0.lastPathComponent + "=" + mark($0) }
-        let own = Store.pulsoPrefix + "-"
-        for url in ((try? manager.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? [])
-            .filter({ !$0.lastPathComponent.hasPrefix(own) }).sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
-            lines.append(url.lastPathComponent + "=" + mark(url))
+        for routine in routines where routine.botID == botID && routine.isEnabled {
+            guard let run = routine.runs.first, now.timeIntervalSince(run.date) <= runFreshness else { continue }
+            let why: String
+            if !run.succeeded, !run.wasStopped { why = "failed: " + clip(run.summary, 100) }
+            else if let check = run.check, check.status == .attention { why = "needs attention" + (check.note.isEmpty ? "" : ": " + clip(check.note, 100)) }
+            else { continue }
+            found.append(PulseDemand(key: "routine:\(routine.id.uuidString):\(run.id.uuidString)", line: "Routine \"\(clip(routine.name, 40))\" \(why)."))
         }
-        if let walk = manager.enumerator(at: memory, includingPropertiesForKeys: Array(keys)) {
-            var pages: [String] = []
-            for case let url as URL in walk { pages.append(url.path.replacingOccurrences(of: memory.path, with: "") + "=" + mark(url)) }
-            lines += pages.sorted()
+        let failed = requests.filter { $0.state == .failed && $0.envelope.kind != .reply && !pulseChains.contains($0.envelope.chainID) }
+            .sorted { ($0.finishedAt ?? .distantPast) < ($1.finishedAt ?? .distantPast) }
+        for request in failed {
+            let envelope = request.envelope
+            if let groupID = envelope.groupID {
+                guard let group = groups.first(where: { $0.id == groupID }), group.orchestratorID == botID else { continue }
+                found.append(PulseDemand(key: "group:\(envelope.id.uuidString)",
+                                         line: "In group \"\(clip(group.name, 40))\" the turn of \(envelope.to.name) failed: \"\(clip(envelope.text, 80))\"."))
+            } else if envelope.from.id == botID {
+                found.append(PulseDemand(key: "request:\(envelope.id.uuidString)",
+                                         line: "Your request to \(envelope.to.name) failed: \"\(clip(envelope.text, 80))\"."))
+            }
         }
-        return lines.joined(separator: "\n")
+        return found
     }
 }
 
@@ -176,8 +211,8 @@ extension AppModel {
         }
     }
 
-    /// One pass: when the interval is up and the day's budget is not spent, looks at the Orbs in turn, skips the ones whose
-    /// fingerprint did not change (no model, no token) and starts a pulse on the first free one that changed.
+    /// One pass: when the interval is up and the day's budget is not spent, looks at the Orbs in turn, skips the ones with no new
+    /// demand (no model, no token) and starts a pulse on the first free one that has some, telling it which.
     func pulseTick(now: Date = .now) async {
         guard pulseIsOn, bots.count > 1, !isResetting else { return }
         pulseState.roll(to: now)
@@ -186,18 +221,23 @@ extension AppModel {
         if last > now { pulseState.lastPulse = now; return } // the clock went back: the interval counts from here
         guard now.timeIntervalSince(last) >= Double(pulseMinutes) * 60, pulseState.tokensToday < pulseDailyTokens else { return }
 
-        var waiting = false // an Orb that changed but was busy: the pass is tried again at the next tick
+        var waiting = false // an Orb with a demand but busy: the pass is tried again at the next tick
         for botID in pulseOrder() {
             guard !isResetting, pulseIsOn, bot(botID) != nil else { continue }
             guard isFreeForPulse(botID) else { waiting = true; continue }
-            let print = await pulseFingerprint(of: botID)
+            let demands = Array(newPulseDemands(for: botID, now: now).prefix(Pulse.demandsPerPulse))
             pulseState.lastOrb = botID
-            if pulseState.fingerprints[botID.uuidString] == print {
+            if demands.isEmpty {
                 pulseState.skipped += 1
                 continue
             }
-            switch await beginPulse(botID, now: now) {
-            case .started, .unusable: // no usable model: the window is spent too, or the pass would repeat every 30 s
+            switch await beginPulse(botID, demands: demands, now: now) {
+            case .started:
+                markDelivered(demands, to: botID)
+                pulseState.lastPulse = now
+                pulseState.lastRunByOrb[botID.uuidString] = now
+                return
+            case .unusable: // no usable model: the window is spent too, or the pass would repeat every 30 s
                 pulseState.lastPulse = now
                 pulseState.lastRunByOrb[botID.uuidString] = now
                 return
@@ -206,6 +246,20 @@ extension AppModel {
             }
         }
         if !waiting { pulseState.lastPulse = now }
+    }
+
+    /// The Orb's demands that no earlier pulse was handed.
+    func newPulseDemands(for botID: UUID, now: Date) -> [PulseDemand] {
+        let seen = Set(pulseState.delivered[botID.uuidString] ?? [])
+        let chains = Set(delegation.chainStates.filter { $0.value.origin.isPulse }.keys)
+        return Pulse.demands(for: botID, plan: sessions[botID]?.conversation?.activePlan, routines: routines,
+                             requests: Array(delegation.requests.values), groups: groups, pulseChains: chains, now: now)
+            .filter { !seen.contains($0.key) }
+    }
+
+    private func markDelivered(_ demands: [PulseDemand], to botID: UUID) {
+        let id = botID.uuidString
+        pulseState.delivered[id] = Array(((pulseState.delivered[id] ?? []) + demands.map(\.key)).suffix(Pulse.deliveredLimit))
     }
 
     /// The Orbs in the order of turns: the one after the last examined first.
@@ -222,31 +276,12 @@ extension AppModel {
         return !queuedRoutines.contains { id in routines.first { $0.id == id }?.botID == botID }
     }
 
-    // MARK: Fingerprint
-
-    /// What the Orb could see now, as a short hash: how many Orbs and groups there are, its groups and who is in them, and the
-    /// files of its conversations, its groups' threads and its memory (which carry its routines' runs and the requests it
-    /// closed). Cheap: a few `stat` calls, off the main thread.
-    func pulseFingerprint(of botID: UUID) async -> String {
-        let mine = groups(containing: botID)
-        let team = ["orbs=\(bots.count)", "groups=\(groups.count)"]
-            + mine.map { "\($0.id.uuidString):\($0.name):\($0.orchestratorID.uuidString):" + $0.memberIDs.map(\.uuidString).joined(separator: ",") }
-        let sources = store.pulseSources(of: botID, groups: mine.map(\.id))
-        let memory = self.memory.bank(for: botID).directory
-        let store = self.store
-        let disk = await Task.detached {
-            store.flush() // what was just saved is on disk before it is read
-            return Pulse.disk(files: sources.files, folder: sources.folder, memory: memory)
-        }.value
-        return Pulse.hash((team + [disk]).joined(separator: "\n"))
-    }
-
     // MARK: A pulse run
 
     enum PulseStart { case started, busy, unusable }
 
     /// Parks the Orb's chat, runs the pulse prompt in the Orb's own pulse conversation and returns once it has begun.
-    func beginPulse(_ botID: UUID, now: Date = .now) async -> PulseStart {
+    func beginPulse(_ botID: UUID, demands: [PulseDemand], now: Date = .now) async -> PulseStart {
         guard canTakeSideWork(botID), bot(botID) != nil else { return .busy }
         let session = session(botID)
         pulseStarting.insert(botID) // the Orb is held while its files are read
@@ -260,8 +295,8 @@ extension AppModel {
         let own = (read.value?.closingInterruptedTurn(notice: BotSession.quitSideNotice) ?? Conversation()).startingRoutineRun(at: started)
         let runID = UUID()
         session.startRoutineRun(runID, conversation: own, at: started, kind: .pulse)
-        pulseRuns[botID] = PulseRun(id: runID, startedAt: started)
-        guard send(Pulse.prompt, to: botID) else {
+        pulseRuns[botID] = PulseRun(id: runID, startedAt: started, reason: demands.first?.line ?? "")
+        guard send(Pulse.prompt(for: demands), to: botID) else {
             pulseRuns[botID] = nil
             session.endSideRun()
             session.scheduleSave(delay: 0)
@@ -296,22 +331,13 @@ extension AppModel {
                                                         outcome: outcome, runID: runID)), of: botID)
             pulseState.lastSummary = summary
             pulseState.lastActed = .now
+            pulseState.lastReason = run?.reason
             if let appended {
                 recordInicioPulse(bot: botID, chat: appended.chat, item: appended.item, summary: "\(bot.name): \(summary)",
                                   outcome: outcome == .failed ? .failed : .completed)
             }
         }
         savePulseState()
-        // What the Orb could see when it ended (its own effects included) is the new baseline: only what changes from outside,
-        // or the answers of the Orbs it asked, make the next pulse worth its tokens. A failed run keeps the old one and tries again.
-        guard succeeded || userStopped else { return }
-        Task { @MainActor [weak self] in
-            guard let self, self.bot(botID) != nil else { return }
-            self.sessions[botID]?.saveNow() // the line the pulse left in the chat is written before the baseline is read
-            let print = await self.pulseFingerprint(of: botID)
-            self.pulseState.fingerprints[botID.uuidString] = print
-            self.savePulseState()
-        }
     }
 
     // MARK: The budget

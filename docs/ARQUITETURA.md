@@ -308,9 +308,12 @@ leva a chamada ao `DelegationHub`. `orbs` (`ask`, `tell`, `list`), `group_create
   oferece `undoCreation`). Apagar grupo ou Orb, e tirar o membro que desfaz um grupo de dois, passam por `ToolContext.confirm`
   (`ApprovalGate.confirm`), nunca pelo `confirmed` do modelo.
 - **Pulso** (`Pulse.swift`). `pulseTick` roda no agendador: com `pulseIsOn` (`pulseEnabled && orbsActOnOwn`), passado `pulseMinutes`, percorre
-  os Orbs em rodízio (`PulseState.lastOrb`), pula o que tem a mesma impressão digital (`pulseFingerprint`: conversas, memória, pasta e fio dos grupos,
-  lidos fora da main, sem modelo) e começa em `beginPulse` um side run `.pulse` (`BotSession.sideKind`) com o `Pulse.prompt`; `finishPulse` o
-  encerra, grava `pulseRan` no chat e em Início, e guarda a impressão nova. O teto diário (`pulseDailyTokens`, `PulseState.tokensToday`)
+  os Orbs em rodízio (`PulseState.lastOrb`), pula o que não tem demanda nova e começa em `beginPulse` um side run `.pulse`
+  (`BotSession.sideKind`) com o `Pulse.prompt(for:)`. A demanda sai de `Pulse.demands` (pura, sem modelo nem disco, sobre o que já está
+  na memória): plano da conversa aberta com passos por fazer e parado há `planIdle`; rotina do Orb cuja última execução recente
+  falhou ou pediu atenção; pedido do Orb que falhou fora de grupo; turno falho de grupo que ele orquestra (cadeias iniciadas pelo
+  próprio pulso ficam de fora). Cada `PulseDemand.key` entregue fica em `PulseState.delivered` (40 por Orb), então a mesma demanda
+  acorda o Orb uma vez; `finishPulse` o encerra e grava `pulseRan` no chat e em Início. O teto diário (`pulseDailyTokens`, `PulseState.tokensToday`)
   conta pelo `AppModel.pulseCharge`, chamado da contabilidade de uso, o turno do pulso e toda cadeia de origem `.pulse`; ao estourar,
   `stopPulseWork` cancela as cadeias com `CancelReason.budget` e grava `pulseStopped`; um grupo parado assim grava `groupStopped` com
   `detail == OrbEvent.budgetStop`, e a frase diz que foi o teto do pulso.

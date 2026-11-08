@@ -397,12 +397,6 @@ struct Store: Sendable {
 
     // MARK: Side conversations (requests from other Orbs, turns in groups)
 
-    /// What the pulse's fingerprint reads for an Orb (`Pulse.swift`): its first conversation, the folder of its other
-    /// conversations and side runs, and the threads of its groups. Paths only; the pulse reads them off the main thread.
-    func pulseSources(of botID: UUID, groups: [UUID]) -> (files: [URL], folder: URL) {
-        (files: [conversationURL(botID)] + groups.map(groupConversationURL), folder: archiveFolder(botID))
-    }
-
     private func sideConversationURL(_ botID: UUID, _ prefix: String, _ id: UUID) -> URL {
         archiveFolder(botID).appendingPathComponent("\(prefix)-\(id.uuidString).json")
     }
