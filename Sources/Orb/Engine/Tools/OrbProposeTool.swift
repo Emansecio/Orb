@@ -68,7 +68,7 @@ struct OrbProposeTool: AgentTool {
         let outcome = await propose(proposal)
         if case .failed(let reason) = outcome { throw ToolError(reason) }
         let ignored = OrbProposal.lookIssues(from: arguments["look"])
-        let warning = ignored.isEmpty ? "" : "\nIgnored unknown look values (random ones used): \(ignored.joined(separator: ", "))."
+        let warning = ignored.isEmpty ? "" : "\nIgnored unknown look values (shape stays circulo, others random): \(ignored.joined(separator: ", "))."
         return outcome.modelText + warning
     }
 }
