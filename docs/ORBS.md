@@ -2,7 +2,7 @@
 
 No app Orb, cada assistente é um **Orb**: uma bola de **pelúcia**, de pelo fino e denso com a borda felpuda, iluminada
 como um objeto 3D (luz do alto à esquerda) e animada ao vivo no app. O pelo é pré-renderizado no Blender (`art/pelucia.py`);
-até 2026-11 o corpo era uma esfera acetinada do orbgen. Todos os Orbs têm o mesmo formato redondo; a identidade vem da cor e do rosto.
+até 2026-11 o corpo era uma esfera acetinada do orbgen. A identidade vem do formato (8, ver a tabela abaixo), da cor e do rosto.
 
 Este documento cobre o lado do app: opções, atividades, jeito, movimento, onde os Orbs aparecem e o sistema de animação
 (desempenho incluído). **A arte e o gerador estão descritos em [art/README.md](../art/README.md)**; é lá que se vê como as
@@ -97,12 +97,12 @@ orb.mouth = "sorriso"; orb.temperament = .curioso
 - O editor (`OrbEditor`) tem um palco ao vivo de 144 pt com holofote neutro (clicável, com prévia de
   cada atividade), categorias em dois grupos (**Corpo**: Cor, Formato, Jeito; **Rosto**: Olhos, Boca, Sobrancelhas,
   Bochechas), miniaturas que enquadram o que mudam (close do rosto para os traços; animam ao passar o mouse),
-  **Sortear** (sorteio harmonioso que mantém o jeito, `OrbConfig.random(using:)`), **Pular** e **Desfazer** pelo gerenciador de desfazer da janela
+  **Sortear** (sorteio harmonioso que mantém o jeito, `OrbConfig.random(using:)`), **Dar um pulo** e **Desfazer** pelo gerenciador de desfazer da janela
   (`OrbEditUndo`: ⌘Z, ⇧⌘Z e Editar ▸ Desfazer). As categorias quebram em duas linhas quando o editor é estreito.
   Em Cor, Formato e Olhos, a seção **No app** mostra o Orb em linhas de 24, 32 e 40 pt com o nome (anima sob o ponteiro).
   O VoiceOver lê o visual inteiro do palco (`OrbConfig.summary`).
 - **Palco compacto** (folha Novo Orb, ou o editor com menos de 680 pt de altura): Orb de 112 pt, Sortear,
-  Desfazer e Pular no alto, ao lado da cabeça (onde nem o pulo chega), a prévia de atividade num menu no
+  Desfazer e Dar um pulo no alto, ao lado da cabeça (onde nem o pulo chega), a prévia de atividade num menu no
   canto de baixo, sem o nome (o formulário ao lado já mostra) e as categorias numa linha de ícones (a escolhida com o
   nome). Assim as opções ficam com ~180 pt na folha de 520 pt e ~360 pt na de 700 pt.
 - **Espaço para o Orb** (`OrbStageRoom`): o palco deixa 0,82 do tamanho do Orb em cima e 0,2 embaixo. Pulos que se
@@ -312,7 +312,7 @@ Tudo em [`Orbs/OrbMotion.swift`](../Sources/Orb/Orbs/OrbMotion.swift) (funções
 | Estado vazio do chat | 96 | sim, interativo |
 | Linha “trabalhando” | 30 | sim |
 | Mensagens do Orb | 30 | não (estático) |
-| Painel do Orb | 60 | sim, interativo |
+| Painel do Orb | 46 | sim, interativo |
 | Editor | 144 palco (112 no compacto) / miniaturas 44–80 (close do rosto) | palco sempre (com prévia de “Falando” e do jeito); miniaturas ao passar o mouse |
 | Rotinas (cartões) | 30 | não; `sleepy` se a rotina está pausada |
 | Pergunta rápida (barra de menus) | 28 seletor / 18 status e cartões | só o escolhido e os que estão trabalhando se mexem |
