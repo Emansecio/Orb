@@ -104,12 +104,15 @@ final class BrowserSetup {
     @ObservationIgnored let installer: BrowserInstaller
     @ObservationIgnored private let status: @Sendable () async -> BrowserStatus
     @ObservationIgnored private let closeBrowsers: @Sendable () async -> Void
+    /// Tells the Orbs' browser hub that components are being replaced: it refuses to open browsers until told otherwise.
+    @ObservationIgnored private let holdBrowsers: @Sendable (Bool) -> Void
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var progress: BrowserInstallProgress?
     @ObservationIgnored private var failures: [BrowserComponent: String] = [:]
 
     init(installer: BrowserInstaller, status: @escaping @Sendable () async -> BrowserStatus,
-         closeBrowsers: @escaping @Sendable () async -> Void = {}) {
+         closeBrowsers: @escaping @Sendable () async -> Void = {}, holdBrowsers: @escaping @Sendable (Bool) -> Void = { _ in }) {
+        self.holdBrowsers = holdBrowsers
         self.installer = installer
         self.status = status
         self.closeBrowsers = closeBrowsers
@@ -188,10 +191,12 @@ final class BrowserSetup {
         progress = BrowserInstallProgress(component: components.first ?? component, phase: .preparing, steps: max(components.count, 1))
         showWorking()
         let installer = installer, closeBrowsers = closeBrowsers
+        let replacing = components.contains { installer.isInstalled($0) }
+        // Held from here to the end, so no Orb reopens the browser between the close and the replacement.
+        if replacing { holdBrowsers(true) }
         let sink: @Sendable (BrowserInstallProgress) -> Void = { [weak self] update in
             Task { @MainActor in self?.receive(update, for: component) }
         }
-        let replacing = components.contains { installer.isInstalled($0) }
         task = Task { [weak self] in
             do {
                 // A browser that is running holds the files that are about to be replaced.
@@ -225,6 +230,7 @@ final class BrowserSetup {
     }
 
     private func finishWork() {
+        holdBrowsers(false)
         working = nil
         progress = nil
         task = nil
@@ -243,6 +249,7 @@ final class BrowserSetup {
         working = component
         failures[component] = nil
         let installer = installer, closeBrowsers = closeBrowsers
+        holdBrowsers(true)
         showWorking()
         task = Task { [weak self] in
             await closeBrowsers()

@@ -153,6 +153,12 @@ struct BrowserDriverRealityTests {
         #expect(setup.row(.chrome)?.statusText == "Nenhum navegador encontrado")
     }
 
+    @MainActor @Test func theHubRefusesToOpenABrowserWhileComponentsAreReplaced() async {
+        let hub = BrowserHub(profilesDirectory: nil, locate: { BrowserStatus() }, makeDriver: { _ in fatalError("no browser may start") })
+        hub.setMaintenance(true)
+        await #expect(throws: BrowserDriverError.self) { _ = try await hub.session(botID: UUID(), mode: .background) }
+    }
+
     @MainActor @Test func aChromeFoundOnTheMacIsUsableAndNotTheAppsToRemove() async {
         let setup = BrowserSetup(installer: installer(), status: status(agentBrowser: true, browser: Self.chrome))
         await setup.refresh()

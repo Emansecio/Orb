@@ -495,6 +495,10 @@ final class BrowserHub: Sendable {
     /// The close of the browser an Orb's session replaced, until it is done.
     private let closings = OSAllocatedUnfairLock<[UUID: Task<Void, Never>]>(initialState: [:])
     private let scoped = OSAllocatedUnfairLock<[UUID: [String: BrowserSession]]>(initialState: [:])
+    /// True while the browser components are being installed, updated or removed: no Orb opens the browser then (it would hold
+    /// the files that are about to be replaced).
+    private let maintenance = OSAllocatedUnfairLock(initialState: false)
+    func setMaintenance(_ on: Bool) { maintenance.withLock { $0 = on } }
     /// The Orbs whose profile caches are being emptied now (`cleanCachesIfDue`): their browser waits.
     private let cleaning = OSAllocatedUnfairLock<Set<UUID>>(initialState: [])
     /// Where the live screen hears about the Orb's pointer (`setPointerHandler`), and for which Orb (nil: any); nil while no one
@@ -593,6 +597,9 @@ final class BrowserHub: Sendable {
 
     /// The Orb's browser, started on first use. Throws what is missing when it is not installed.
     func session(botID: UUID, mode: BrowserMode) async throws -> BrowserSession {
+        if maintenance.withLock({ $0 }) {
+            throw BrowserDriverError.notInstalled("The browser is being installed or updated. Try again in a minute.")
+        }
         // The profile's caches are being emptied (a moment): the browser opens after, not on top of it.
         while cleaning.withLock({ $0.contains(botID) }) { try await Task.sleep(for: .milliseconds(100)) }
         if let existing = sessions.withLock({ $0[botID] }), existing.mode == mode, existing.proxy == proxy(botID: botID) {
