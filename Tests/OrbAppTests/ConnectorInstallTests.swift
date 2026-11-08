@@ -54,6 +54,7 @@ struct ConnectorInstallRequestTests {
         let line = try ConnectorInstallRequest(json(#"{"name":"S","command":"node","args":"--port 8080"}"#), fileExists: noFiles)
         #expect(line.arguments == ["--port", "8080"])
         #expect(ConnectorArguments.parse(command: "x", arguments: ["--q=a b", "--port 1"], fileExists: noFiles).arguments == ["--q=a b", "--port", "1"])
+        #expect(ConnectorArguments.parse(command: "x", arguments: ["--a=1 --b=2"], fileExists: noFiles).arguments == ["--a=1", "--b=2"])
     }
 
     @Test func envWithAnAddressIsRefusedInsteadOfDropped() {

@@ -280,10 +280,11 @@ enum ConnectorArguments {
         let rest = arguments.flatMap { line -> [String] in
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty else { return [] }
-            // "--q=a b" is one option with a value that has a space; "--port 8080" is two words.
-            let firstWord = trimmed.prefix { !$0.isWhitespace }
-            let splits = !literalArguments && trimmed.hasPrefix("-") && trimmed.contains(where: \.isWhitespace) && !firstWord.contains("=")
-            return splits ? shellWords(trimmed) : [trimmed]
+            guard !literalArguments, trimmed.hasPrefix("-"), trimmed.contains(where: \.isWhitespace) else { return [trimmed] }
+            // "--port 8080" and "--a=1 --b=2" are several words, but "--q=a b" is one option whose value has a space.
+            let words = shellWords(trimmed)
+            let valueHasSpace = words.first?.contains("=") == true && !words.dropFirst().allSatisfy { $0.hasPrefix("-") }
+            return valueHasSpace ? [trimmed] : words
         }
         return (program, leading + rest)
     }
