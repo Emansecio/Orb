@@ -11,6 +11,8 @@ final class BrowserControl: Sendable {
 
     private struct State {
         var held: Set<UUID> = []
+        /// Orbs whose browser was handed back and no tool has noticed yet.
+        var handedBack: Set<UUID> = []
         var waiters: [UUID: [UUID: CheckedContinuation<Void, Never>]] = [:]
     }
     private let state = OSAllocatedUnfairLock(initialState: State())
@@ -28,11 +30,15 @@ final class BrowserControl: Sendable {
     /// The person handed it back (or closed the window): every tool waiting for it goes on.
     func giveBack(_ botID: UUID) {
         let waiting = state.withLock { state -> [CheckedContinuation<Void, Never>] in
-            state.held.remove(botID)
+            if state.held.remove(botID) != nil { state.handedBack.insert(botID) }
             return state.waiters.removeValue(forKey: botID).map { Array($0.values) } ?? []
         }
         for continuation in waiting { continuation.resume() }
     }
+
+    /// Whether the person took the browser and gave it back since a tool last asked; asking clears it. Covers the case where no tool
+    /// was waiting while they had it: the page can have changed all the same.
+    func consumeHandBack(_ botID: UUID) -> Bool { state.withLock { $0.handedBack.remove(botID) != nil } }
 
     /// Waits while the person has this Orb's browser; true when it waited. Cancelling the task (Parar) ends the wait at once.
     func waitWhileHeld(_ botID: UUID) async -> Bool {

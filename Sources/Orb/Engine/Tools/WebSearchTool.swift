@@ -370,7 +370,7 @@ struct WebSearchTool: AgentTool {
             .split(separator: "/").first.map(String.init)
         let request = Request(query: query, count: arguments.integer("count", default: Self.defaultResults, in: 1...Self.maxResults),
                               site: site, news: arguments.flag("news"))
-        var provider = context.browser.searchProvider
+        var provider = await context.browser.liveSearchProvider()
         var note: String?
 
         if provider == .tinyfish {
@@ -390,8 +390,9 @@ struct WebSearchTool: AgentTool {
         if context.browser.drivesABrowser, let hub = context.browser.hub, let botID = context.botID {
             // The person has the browser (the live screen's window): the search waits for it back (it has no refs to go stale).
             _ = await hub.control.waitWhileHeld(botID)
+            try Task.checkCancellation() // Stop ends the wait too: no browser is opened after it
             // This conversation's view, like the other browser tools: its tab is made current before the search, and kept after.
-            let browser = try await hub.session(botID: botID, mode: context.browser.mode, scope: context.browser.scope)
+            let browser = try await hub.session(botID: botID, mode: await context.browser.liveMode(), scope: context.browser.scope)
             return try await Self.searchInBrowser(request, provider: provider, session: browser, note: note, http: session)
         }
         return try await searchByFetch(request, note: note)

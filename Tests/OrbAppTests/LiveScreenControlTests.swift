@@ -193,6 +193,49 @@ struct BrowserControlTests {
         _ = try await BrowseSnapshotTool().run(.object([:]), context: context)
         #expect(!setup.driver.calls.isEmpty)
     }
+
+    @Test func pararWhileWaitingOpensNoBrowserAndChangesNoProxy() async throws {
+        let setup = FakeBrowserSetup()
+        setup.hub.control.take(setup.botID)
+        let context = setup.context()
+        let snapshot = Task { () -> Bool in
+            do { _ = try await BrowseSnapshotTool().run(.object([:]), context: context); return false } catch { return error is CancellationError }
+        }
+        let proxy = Task { () -> Bool in
+            do {
+                _ = try await BrowseProxyTool().run(.object(["action": .string("set"), "proxy": .string("socks5://127.0.0.1:1080")]), context: context)
+                return false
+            } catch { return error is CancellationError }
+        }
+        await waitUntil("both wait") { setup.hub.control.waitingCount(setup.botID) == 2 }
+        snapshot.cancel()
+        proxy.cancel()
+        #expect(await snapshot.value)
+        #expect(await proxy.value)
+        #expect(setup.configs.withLock { $0.isEmpty })
+        #expect(setup.hub.proxy(botID: setup.botID) == nil)
+    }
+
+    @Test func aTakeoverBetweenTwoCallsStillTellsTheModelToLookAgain() async throws {
+        let setup = FakeBrowserSetup()
+        let context = setup.context()
+        _ = try await BrowseSnapshotTool().run(.object([:]), context: context)
+        // Taken and returned with no tool waiting in between.
+        setup.hub.control.take(setup.botID)
+        setup.hub.control.giveBack(setup.botID)
+        await #expect(throws: ToolError.self) { _ = try await BrowseSnapshotTool().run(.object([:]), context: context) }
+        _ = try await BrowseSnapshotTool().run(.object([:]), context: context)
+    }
+
+    @Test func theBrowserOpensInTheModeTheOrbHasWhenItIsNeeded() async throws {
+        let setup = FakeBrowserSetup(mode: .background)
+        var context = setup.context()
+        // The panel changed the mode after the turn began.
+        context.browser.current = { (mode: .visible, searchProvider: .google) }
+        _ = try await BrowseSnapshotTool().run(.object([:]), context: context)
+        #expect(setup.configs.withLock { $0.map(\.visibleByDefault) } == [true])
+        #expect(await context.browser.liveSearchProvider() == .google)
+    }
 }
 
 // MARK: - The hub while the person has the browser

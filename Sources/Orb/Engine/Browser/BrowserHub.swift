@@ -10,6 +10,9 @@ struct BrowserAccess: Sendable {
     /// Background or visible (the Orb's own setting).
     var mode: BrowserMode = .background
     var searchProvider: SearchProvider = .duckduckgo
+    /// The Orb's mode and search provider as they are now. The turn's copy above is from its start; a change made in the middle
+    /// (the Orb's panel) must apply to the next browser use, not only to the next turn. Nil (tests): the copy.
+    var current: (@Sendable () async -> (mode: BrowserMode, searchProvider: SearchProvider)?)?
     /// The keys of the providers that need one (TinyFish), read when a search needs them.
     var searchKeys: SearchKeys?
     /// The Orb's proxy as saved (nil: direct), and how `browse_proxy` saves a new one in the Orb.
@@ -18,6 +21,11 @@ struct BrowserAccess: Sendable {
     /// What the Orb is doing this browser work for (a chat, a routine run, a group turn): each gets a tab of its own, so two of them
     /// at once on the same Orb do not take the page from each other. Nil: the browser's current tab, as it is.
     var scope: String?
+
+    /// The mode to open the browser in, read when it is needed.
+    func liveMode() async -> BrowserMode { await current?()?.mode ?? mode }
+    /// The search provider, read when the search runs.
+    func liveSearchProvider() async -> SearchProvider { await current?()?.searchProvider ?? searchProvider }
 
     /// Whether the Orb has a browser to drive (installed, and a hub that can start it).
     var drivesABrowser: Bool { hub != nil && available }

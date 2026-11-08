@@ -53,7 +53,9 @@ struct BrowseProxyTool: BrowseTool {
     private func apply(_ proxy: String?, replacing old: String?, hub: BrowserHub, botID: UUID, context: ToolContext) async throws -> String {
         // The person has the browser (the live screen's window): it is not relaunched under them.
         _ = await hub.control.waitWhileHeld(botID)
-        let scope = context.browser.scope, mode = context.browser.mode
+        // Stop ends the wait too: the browser is not relaunched (or the proxy changed) after it.
+        try Task.checkCancellation()
+        let scope = context.browser.scope, mode = await context.browser.liveMode()
         let (returnTo, others) = await Self.openPages(hub: hub, botID: botID, mode: mode, scope: scope)
         hub.setProxy(proxy, botID: botID)
         let address: String

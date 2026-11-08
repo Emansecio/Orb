@@ -1916,6 +1916,10 @@ final class AppModel {
                                                 await MainActor.run { self?.saveBrowserProxy(proxy, for: bot.id) }
                                             },
                                             scope: sessionID)
+            let botID = bot.id
+            context.browser.current = { [weak self] in
+                await MainActor.run { self?.bot(botID).map { ($0.browserMode, $0.searchProvider) } }
+            }
             // MARK: MultiOrb (WP3)
             if multi.propose { context.orbCreation = orbCreationSupport(for: bot) }
             if multi.access { context.accessSupport = accessSupport(for: bot) }
@@ -2853,6 +2857,15 @@ final class AppModel {
         for id in sessions.keys.filter({ !botIDs.contains($0) }) {
             stop(id, startsQueuedRoutines: false) // a turn left running would go on with no session to show or stop it
             sessions[id]?.write()
+            // What deleting the Orb frees besides the session: its browser, its background jobs and an idle Claude Code process.
+            let jobs = jobs, hub = browserHub
+            Task { await jobs.forget(botID: id) }
+            Task { _ = await hub.close(botID: id) }
+            sessions[id]?.memoryIdle?.cancel()
+            sessions[id]?.memoryIdle = nil
+            if ClaudePipeIdlePool.shared.count > 0, let gateway = sessions[id]?.conversation?.gatewaySessionID {
+                ClaudePipeIdlePool.shared.stop(gateway)
+            }
             sessions[id]?.close()
             sessions[id] = nil
         }

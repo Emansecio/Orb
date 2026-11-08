@@ -22,8 +22,12 @@ enum BrowseSupport {
         }
         // The person has the browser (the live screen's window): wait for it back, then look again rather than act on refs
         // of a page they may have changed.
-        if await hub.control.waitWhileHeld(botID) { throw ToolError(BrowserControl.handedBack) }
-        return try await hub.session(botID: botID, mode: context.browser.mode, scope: context.browser.scope)
+        let waited = await hub.control.waitWhileHeld(botID)
+        // Stop ends the wait too: that is a cancellation, not a hand-back, and nothing may be opened after it.
+        try Task.checkCancellation()
+        // The person may also have taken and returned it between two calls, with nothing waiting: the refs are as stale all the same.
+        if hub.control.consumeHandBack(botID) || waited { throw ToolError(BrowserControl.handedBack) }
+        return try await hub.session(botID: botID, mode: await context.browser.liveMode(), scope: context.browser.scope)
     }
 
     /// The names this conversation kept for its refs go with the page they were read in.
