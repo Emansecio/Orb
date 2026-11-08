@@ -298,8 +298,8 @@ Só usa tokens que já existem; o fundo é estático (um gradiente desenhado uma
   começar", em `WelcomeOffer.swift`) ou o cartão aparece uma vez e fica. Enquanto o clique cria o Atlas (`isStarting`) o estágio segue
   `.connect`: sem o "Pronto" de 1,4 s e sem piscar "Criar meu primeiro Orb". "Outras formas de conectar" abre com `Motion.panel` e
   `.unfold` (só opacidade sob Reduzir movimento). Um aviso (`WelcomeReason`) sobe junto com o cartão quando algo mandou a pessoa para cá.
-- **Botão Novo Orb da barra lateral.** Sai com a lista vazia (o convite faz o mesmo papel) e volta com `.rise` em `Motion.enter`
-  quando nasce o primeiro Orb; Ajustes fica no canto direito nos dois casos.
+- **Novo Orb na barra lateral.** Fica no "+" do título "Orbs" (`NewOrbMenu`), com ou sem Orbs; com a lista vazia, a linha
+  tracejada do convite (`FirstOrbInvitation`) ocupa o lugar dos Orbs. O rodapé tem só o perfil e a engrenagem de Ajustes.
 - **Memória guardada que chega depois.** Ao apagar o último Orb guardando a memória, a cópia roda em segundo plano. A lista é lida
   de novo quando ela termina (`keptMemoriesVersion`), e o cartão entra por transição.
 - **Texto da lista esvaziada.** A marca `orb.welcome.criouOrb` também é gravada quando o app abre com Orbs que já existem (feitos por

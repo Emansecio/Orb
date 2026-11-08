@@ -60,13 +60,12 @@ memórias guardadas, o botão só conecta e a tela segue para elas. Com um model
 Com [memórias guardadas](#memória) de Orbs apagados, um cartão "Começar de uma memória guardada" lista as três mais novas
 ("Continuar" abre a folha Novo Orb já com a memória escolhida; "Ver todas" mostra a lista completa). Depois de criar um Orb
 e apagar todos, o título vira "Hora de um Orb novo". A barra lateral mostra "Criar seu primeiro Orb" onde os Orbs ficam, e o
-clique nela traz a tela de volta (e "Novo Orb" no pé da barra lateral só aparece quando há Orbs: sem eles, a linha
-"Criar seu primeiro Orb" é o caminho; o ⌘N continua valendo). Com Orbs, o app sempre abre em um deles ("Escolha um Orb" deixou de existir). Sob os botões,
+clique nela traz a tela de volta (o "+" ao lado do título "Orbs" e o ⌘N continuam valendo). Com Orbs, o app sempre abre em um deles ("Escolha um Orb" deixou de existir). Sob os botões,
 "Importar de outro assistente" abre a folha Novo Orb já no painel de [importação](#criar-um-orb).
 
 ## A janela
 
-A **barra lateral** tem **Início**, os seus Orbs, o **Espaço de trabalho** (Rotinas, Conectores, Skills), **Novo Orb** (só com Orbs na lista) e, embaixo, a sua foto com o seu nome (abre o perfil) e **Ajustes**. Uma
+A **barra lateral** tem, no topo, **Início**, **Rotinas**, **Conectores** e **Skills**; depois os seus Orbs (o "+" do título "Orbs" cria um **Novo Orb** ou uma categoria) e os grupos; embaixo, a sua foto com o seu nome (abre o perfil) e a engrenagem de **Ajustes**. Uma
 linha mostra o que o Orb está fazendo ("Pensando…"), "Precisa de você" quando ele espera uma permissão e um ponto quando há
 mensagens não lidas; um anel em volta do rosto diz o mesmo de relance (azul trabalhando, âmbar esperando você). O título da
 janela traz, sob o nome do Orb, o que ele está fazendo, ou o modelo quando está livre. O botão direito abre o menu do Orb (abrir pasta, personalizar, ver
