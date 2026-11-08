@@ -10,6 +10,8 @@ struct WorkEntry: Codable, Equatable, Sendable, Identifiable {
         case groupRun
         /// A request one Orb made of another outside any group.
         case request
+        /// An Orb's pulse run (`botID`). Never resumed: the next pulse covers it (`AppModel.resumeInterruptedWork` drops it).
+        case pulse
         case unknown
 
         init(from decoder: Decoder) throws { self = try decoder.rawValue(Self.self, fallback: .unknown) }
@@ -225,6 +227,19 @@ final class WorkJournal {
 
     func dropRequest(_ id: UUID) {
         remove { $0.kind == .request && $0.envelope?.id == id }
+    }
+
+    // MARK: The pulse
+
+    /// An Orb's pulse run begins. Kept so a close does not lose track of it; the next launch drops it (`dropPulse`).
+    func pulseBegan(bot: UUID, at date: Date = .now) {
+        guard !frozen, !live.contains(where: { $0.kind == .pulse && $0.botID == bot }) else { return }
+        live.append(WorkEntry(kind: .pulse, startedAt: date, botID: bot))
+        persist()
+    }
+
+    func dropPulse(bot: UUID) {
+        remove { $0.kind == .pulse && $0.botID == bot }
     }
 
     // MARK: Writing

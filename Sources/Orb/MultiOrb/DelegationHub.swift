@@ -17,7 +17,8 @@ final class DelegationHub: DelegationService {
     /// A chain of requests: where it began, whether the person stopped it and what was just sent (to tell a repeat). It outlives
     /// its last request (a woken asker that asks again is still in it).
     struct ChainState {
-        enum Origin: Equatable { case chat(UUID), routine(UUID), group(UUID) }
+        /// `pulse`: begun by an Orb's pulse run (its id); everything the chain spends counts against the pulse's daily budget.
+        enum Origin: Equatable { case chat(UUID), routine(UUID), group(UUID), pulse(UUID) }
 
         var origin: Origin
         /// The Orb that began the chain: where "Você parou a conversa" is written.
@@ -225,8 +226,10 @@ final class DelegationHub: DelegationService {
         envelope.fromChat = fromChat
         if fromChat { envelope.chat = askedBy.flatMap { model?.sessions[$0]?.conversationChat } }
         guard model != nil, target != nil, !isShuttingDown else { return DelegationRequest(envelope: envelope, state: .failed) }
-        var chain = chainStates[context.chainID] ?? ChainState(origin: .group(context.chainID), originBot: askedBy ?? member,
-                                                               groupID: groupID)
+        // A group the pulse starts from its Orb's pulse run is charged to the pulse (`AppModel.pulseCharge`).
+        let pulseRun = fromChat ? askedBy.flatMap { model?.sessions[$0] }.flatMap { $0.sideKind == .pulse ? $0.routineID : nil } : nil
+        var chain = chainStates[context.chainID] ?? ChainState(origin: pulseRun.map { .pulse($0) } ?? .group(context.chainID),
+                                                               originBot: askedBy ?? member, groupID: groupID)
         chain.touched = .now
         chainStates[context.chainID] = chain
         guard !chain.cancelled else { return DelegationRequest(envelope: envelope, state: .cancelled) }
@@ -498,7 +501,7 @@ final class DelegationHub: DelegationService {
         switch kind {
         case .delegation: model.store.saveSideConversation(conversation, prefix: Store.pedidoPrefix, id: runID, for: botID)
         case .group: model.store.saveSideConversation(conversation, prefix: Store.grupoPrefix, id: runID, for: botID)
-        case .routine: break
+        case .routine, .pulse: break // the pulse writes its own file (`AppModel.finishPulse`)
         }
     }
 
@@ -647,6 +650,7 @@ final class DelegationHub: DelegationService {
         // A group's answer to the chat (`OrbEnvelope.fromChat`) does not make the chat a turn of the group: what it asks next
         // begins a chain of its own.
         session.chain = first.groupID != nil ? nil : ChainContext(chainID: first.chainID, hop: hop, path: first.path, groupID: nil)
+        session.usageChain = first.chainID
         session.servingRequest = nil
         for reply in batch {
             session.changeConversation { $0.items.settingSent(reply.replyTo ?? reply.id, to: SendOrigin.state(of: reply.status)) }
@@ -658,6 +662,7 @@ final class DelegationHub: DelegationService {
             return true
         }
         session.chain = nil // no model: the notice says so, and the answers have nobody to wake
+        session.usageChain = nil
         return false
     }
 
@@ -742,7 +747,8 @@ final class DelegationHub: DelegationService {
         for botID in running {
             model.session(botID).stop(startsQueuedRoutines: false,
                                       notice: isShuttingDown ? BotSession.quitSideNotice
-                                          : reason == .gaveUp ? ApprovalWait.gaveUpNotice : BotSession.stoppedNotice)
+                                          : reason == .gaveUp ? ApprovalWait.gaveUpNotice
+                                          : reason == .budget ? AppModel.pulseCappedNotice : BotSession.stoppedNotice)
         }
         refresh(Array(touched))
         // A group's chain says it stopped in the group's own thread (`groupStopped`), never in its orchestrator's private chat.
@@ -753,7 +759,7 @@ final class DelegationHub: DelegationService {
         for botID in touched { schedulePump(botID) }
         // A group's chain stopped by the person from elsewhere (the Parar of whoever waits for it) stops the group.
         // Not while quitting: the run must stay in the journal and resume, not be written as stopped by the person.
-        if reason == .user, !isShuttingDown, chain.groupID != nil, !alreadyCancelled { groupHooks?.chainStopped(id) }
+        if reason == .user || reason == .budget, !isShuttingDown, chain.groupID != nil, !alreadyCancelled { groupHooks?.chainStopped(id) }
         settleWaitingRoutines()
     }
 
@@ -1480,6 +1486,7 @@ final class DelegationHub: DelegationService {
     private func newChain(startedBy sender: Bot, session: BotSession, groupID: UUID?) -> ChainState {
         let origin: ChainState.Origin = if let groupID { .group(groupID) }
             else if session.sideKind == .routine, let routine = session.routineID { .routine(routine) }
+            else if session.sideKind == .pulse, let run = session.routineID { .pulse(run) }
             else { .chat(sender.id) }
         return ChainState(origin: origin, originBot: sender.id, groupID: groupID, chat: session.conversationChat)
     }

@@ -351,6 +351,11 @@ struct OrbsSettings: View {
     @State private var orbsCanManageGroups = true
     @State private var orbsActOnOwn = true
     @State private var orbsCreateWithoutAsking = true
+    @State private var pulseEnabled = true
+    @State private var pulseMinutes = Pulse.defaultMinutes
+    @State private var pulseDailyTokens = Pulse.defaultDailyTokens
+    @State private var pulseUsed = 0
+    @State private var pulseLast: String?
     @State private var isConfirmingOrbsOff = false
     @State private var openTalks: [DelegationHub.OpenTalk] = []
     @State private var learnedWindows: [LearnedWindowRow] = []
@@ -369,6 +374,48 @@ struct OrbsSettings: View {
     private func applyOrbsCanTalk(_ on: Bool) {
         orbsCanTalk = on
         model.orbsCanTalk = on
+    }
+
+    /// "Pulso": a Orb wakes by itself now and then. Read again each time the tab opens and every few seconds with it (the
+    /// day's count moves while Orbs work).
+    @ViewBuilder private var pulseSection: some View {
+        Section("Pulso") {
+            Toggle(isOn: Binding(get: { pulseEnabled }, set: { pulseEnabled = $0; model.pulseEnabled = $0 })) {
+                toggleLabel("Pulso dos Orbs",
+                            "De tempos em tempos um Orb acorda sozinho para ver se há algo a coordenar. Para no teto do dia.")
+            }
+            .help(Tip.pulseEnabled)
+            if pulseEnabled {
+                if !orbsActOnOwn {
+                    Text("O pulso só age com “Orbs agem por conta própria” ligado.").capabilityCaption()
+                }
+                Stepper(value: Binding(get: { pulseMinutes }, set: { pulseMinutes = $0; model.pulseMinutes = $0 }),
+                        in: Schedule.minuteRange, step: 15) {
+                    toggleLabel("Intervalo", "A cada \(Self.minutesText(pulseMinutes)), um Orb por vez.")
+                }
+                .help(Tip.pulseMinutes)
+                Stepper(value: Binding(get: { pulseDailyTokens }, set: { pulseDailyTokens = $0; model.pulseDailyTokens = $0 }),
+                        in: Pulse.minimumDailyTokens...5_000_000, step: 50_000) {
+                    toggleLabel("Teto por dia", "\(GroupUsageText.tokens(pulseDailyTokens)), contando o pulso e o trabalho que ele começa.")
+                }
+                .help(Tip.pulseDailyTokens)
+                LabeledContent("Usados hoje", value: GroupUsageText.tokens(pulseUsed))
+                LabeledContent("Último pulso", value: pulseLast ?? "Nenhum ainda")
+            }
+        }
+        .onAppear { loadPulse() }
+    }
+
+    private func loadPulse() {
+        pulseEnabled = model.pulseEnabled
+        pulseMinutes = model.pulseMinutes
+        pulseDailyTokens = model.pulseDailyTokens
+        pulseUsed = model.pulseTokensToday()
+        pulseLast = model.pulseState.lastActed.map { RoutineText.stamp($0) + ((model.pulseState.lastSummary).map { ": " + $0 } ?? "") }
+    }
+
+    static func minutesText(_ minutes: Int) -> String {
+        minutes < 60 ? "\(minutes) min" : minutes % 60 == 0 ? "\(minutes / 60) h" : "\(minutes / 60) h \(minutes % 60) min"
     }
 
     var body: some View {
@@ -421,6 +468,7 @@ struct OrbsSettings: View {
                 }
                 .help(Tip.summarizeSessions)
             }
+            pulseSection
             OpenTalksSection(talks: $openTalks)
             ContextMemorySettings()
             LearnedWindowsSettings(rows: $learnedWindows)
@@ -434,6 +482,7 @@ struct OrbsSettings: View {
             while !Task.isCancelled {
                 let now = model.delegation.openTalks()
                 if now != openTalks { openTalks = now }
+                if model.pulseTokensToday() != pulseUsed { pulseUsed = model.pulseTokensToday() }
                 try? await Task.sleep(for: .seconds(2))
             }
         }

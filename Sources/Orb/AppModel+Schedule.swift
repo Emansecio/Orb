@@ -112,6 +112,8 @@ extension AppModel {
         case .delegation:
             return ToolError("Num pedido de outro Orb não se agenda nem se muda tarefa: sugira a rotina no seu resultado, e o "
                 + "usuário decide.")
+        case .pulse:
+            return ToolError("In a pulse run you do not schedule or change tasks: say in your reply what routine would help, and the user decides.")
         case .routine, nil:
             return ToolError(routine)
         }

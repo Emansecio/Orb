@@ -222,7 +222,8 @@ struct ChainContext: Sendable, Equatable {
     var serving: UUID?
 }
 
-/// What `BotSession.routineID` stands for when it is set: a routine's run, a request from another Orb, or a turn in a group.
+/// What `BotSession.routineID` stands for when it is set: a routine's run, a request from another Orb, a turn in a group, or the
+/// pulse (an Orb waking itself, `Pulse.swift`).
 enum SideRunKind: String, Sendable, Equatable {
-    case routine, delegation, group
+    case routine, delegation, group, pulse
 }

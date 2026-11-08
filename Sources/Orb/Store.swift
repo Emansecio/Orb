@@ -126,7 +126,7 @@ struct Store: Sendable {
     /// The prefixes of the conversations an Orb keeps in its archive folder besides the earlier chats (a routine's run, a
     /// request from another Orb, a turn in a group, a conversation of its own made with "Nova conversa"): not the earlier
     /// chats `mergeArchive` folds back, so no index of the archive lists them.
-    static var sideConversationPrefixes: [String] { [routinePrefix, pedidoPrefix, grupoPrefix, conversaPrefix].map { $0 + "-" } }
+    static var sideConversationPrefixes: [String] { [routinePrefix, pedidoPrefix, grupoPrefix, conversaPrefix, pulsoPrefix].map { $0 + "-" } }
 
     /// Whether `file` is where a chat of this Orb is saved (its first one, or one made later), or the conversation of one
     /// of its side runs (a routine's, a request's, a group's).
@@ -135,7 +135,7 @@ struct Store: Sendable {
             || (file.deletingLastPathComponent() == archiveFolder(botID) && Self.isSideConversationName(file.lastPathComponent))
     }
 
-    static let routinePrefix = "routine", pedidoPrefix = "pedido", grupoPrefix = "grupo", conversaPrefix = "conversa"
+    static let routinePrefix = "routine", pedidoPrefix = "pedido", grupoPrefix = "grupo", conversaPrefix = "conversa", pulsoPrefix = "pulso"
 
     /// `routine-…`, `pedido-…`, `grupo-…` and `conversa-…`: the conversations that are not "earlier conversations" of the Orb.
     static func isSideConversationName(_ name: String) -> Bool {
@@ -396,6 +396,12 @@ struct Store: Sendable {
     private func archiveIndexURL(_ botID: UUID) -> URL { archiveFolder(botID).appendingPathComponent("index.json") }
 
     // MARK: Side conversations (requests from other Orbs, turns in groups)
+
+    /// What the pulse's fingerprint reads for an Orb (`Pulse.swift`): its first conversation, the folder of its other
+    /// conversations and side runs, and the threads of its groups. Paths only; the pulse reads them off the main thread.
+    func pulseSources(of botID: UUID, groups: [UUID]) -> (files: [URL], folder: URL) {
+        (files: [conversationURL(botID)] + groups.map(groupConversationURL), folder: archiveFolder(botID))
+    }
 
     private func sideConversationURL(_ botID: UUID, _ prefix: String, _ id: UUID) -> URL {
         archiveFolder(botID).appendingPathComponent("\(prefix)-\(id.uuidString).json")

@@ -19,6 +19,8 @@ enum UsageSource: String, Codable, Sendable, CaseIterable {
     case group
     /// The "Criar conversando" assistant.
     case creation
+    /// A turn of an Orb's pulse (its own wake-up); the work its chain starts is filed under its own source.
+    case pulse
 
     /// A source from a newer build reads as chat.
     init(from decoder: Decoder) throws { self = try decoder.rawValue(Self.self, fallback: .chat) }

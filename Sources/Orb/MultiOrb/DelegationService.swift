@@ -5,6 +5,8 @@ enum CancelReason: String, Sendable, Equatable {
     case user, switchOff, orbDeleted
     /// A card waited a day with no answer and the Orb gave up (`AppModel.giveUpWaiting`): nobody stopped it.
     case gaveUp
+    /// The pulse's daily token budget ran out while the chain worked (`AppModel.stopPulseWork`).
+    case budget
 }
 
 /// What the app offers Orbs that ask each other for work. `DelegationHub` implements it; `FakeDelegationService` (tests) is the stand-in.

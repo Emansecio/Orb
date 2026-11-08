@@ -23,6 +23,9 @@ extension AppModel {
                 switch entry.kind {
                 case .groupRun: resumeGroupRun(entry)
                 case .request: resumeRequest(entry)
+                case .pulse:
+                    // A pulse is opportunistic: the next one looks again, so a cut one is dropped instead of resumed.
+                    if let botID = entry.botID { workJournal.dropPulse(bot: botID) }
                 case .chatTask, .unknown: break
                 }
             }

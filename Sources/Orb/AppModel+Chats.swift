@@ -92,7 +92,12 @@ extension AppModel {
             setChats(chats, for: botID)
         }
         chatDrafts[chat] = nil
-        forgetInicio { if case .chat(_, let origin, _) = $0.origin { return origin == chat } else { return false } }
+        forgetInicio {
+            switch $0.origin {
+            case .chat(_, let origin, _), .pulse(_, let origin, _): return origin == chat
+            case .routine: return false
+            }
+        }
         store.deleteConversation(botID, chat: chat) // after the write of it leaving, on the same queue
     }
 
@@ -130,12 +135,14 @@ extension AppModel {
 
     /// A line in one of the Orb's conversations (`chat`, or the latest) wherever it is (`BotSession.changeChat`): one that
     /// is not on show gets its dot.
-    func appendToChat(_ kind: TranscriptItem.Kind, of botID: UUID, in chat: UUID? = nil) {
-        guard bot(botID) != nil else { return }
+    @discardableResult
+    func appendToChat(_ kind: TranscriptItem.Kind, of botID: UUID, in chat: UUID? = nil) -> (chat: UUID, item: UUID)? {
+        guard bot(botID) != nil else { return nil }
         let session = session(botID), target = chatOrLatest(chat, of: botID), item = TranscriptItem(kind)
         if target == session.conversationChat { session.ensureLoaded() } // read with the rest, as a line of the chat always was
         session.changeChat(target) { $0.items.append(item) }
         markUnread(target, of: botID)
+        return (target, item.id)
     }
 
     /// Something landed in one of the Orb's conversations: when it is not the one on show, its row gets a dot until you

@@ -5,7 +5,7 @@ import Foundation
 struct OrbEvent: Codable, Equatable, Sendable {
     enum Kind: String, Codable, Sendable {
         case orbCreated, joinedGroup, leftGroup, groupCreated, routineCreated, renamed
-        case orchestratorChanged, chainStopped, groupRunDone, groupStopped, delegationReceived, routineRun, tellFailed, groupWorked, planDone, unknown
+        case orchestratorChanged, chainStopped, groupRunDone, groupStopped, delegationReceived, routineRun, tellFailed, groupWorked, planDone, pulseRan, pulseStopped, unknown
 
         /// A kind from a newer version reads as `unknown`.
         init(from decoder: Decoder) throws { self = try decoder.rawValue(Self.self, fallback: .unknown) }
@@ -81,6 +81,14 @@ struct OrbEvent: Codable, Equatable, Sendable {
             // A version that does not know this kind reads it as `unknown` and shows `detail`, so it carries the same words.
             guard let count = plan?.steps.count else { return detail.isEmpty ? "Plano concluído" : detail }
             return "Plano concluído · \(count) \(count == 1 ? "etapa" : "etapas")"
+        case .pulseRan:
+            // `detail` holds the tokens the pulse turn spent; `note` what it said or did.
+            let cost = Int(detail).map { $0 > 0 ? " · " + GroupUsageText.tokens($0) : "" } ?? ""
+            let lead = outcome == .failed ? "\(actorName) acordou sozinho e não terminou" : "\(actorName) acordou sozinho"
+            return lead + (note.map { ": " + $0 } ?? "") + cost
+        case .pulseStopped:
+            let budget = Int(detail).map { " (" + GroupUsageText.tokens($0) + " por dia)" } ?? ""
+            return "O pulso parou: o teto diário de tokens\(budget) foi atingido"
         case .unknown:
             return detail
         }

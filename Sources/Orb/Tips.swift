@@ -250,6 +250,9 @@ enum Tip {
     static let orbsCreateWithoutAsking = "O Orb novo aparece na hora, com um aviso no chat de quem criou e um botão Desfazer"
     static let orbsCanStartGroups = "Deixa um Orb criar um grupo ou pedir a um grupo dele"
     static let undoOrbCreation = "Apaga o Orb que acabou de ser criado; só vale enquanto ele não tem conversa"
+    static let pulseEnabled = "Um Orb por vez acorda sozinho de tempos em tempos; para no teto de tokens do dia"
+    static let pulseMinutes = "Tempo entre dois pulsos, de 15 minutos a 12 horas"
+    static let pulseDailyTokens = "O pulso e o trabalho que ele começa param quando passam disso no dia"
     static let orbsActOnOwn = "Os Orbs criam e acionam grupos quando acham útil, sem você pedir"
     static let dataFolder = "Mostra no Finder a pasta com conversas, memórias e ajustes"
     static let keptMemoriesFolder = "Mostra no Finder as memórias guardadas de Orbs apagados"
@@ -374,7 +377,7 @@ enum Tip {
          createAtlas, startWithClaudeCode, otherWaysToConnect(isShowing: true), otherWaysToConnect(isShowing: false),
          newRoutineCreatingAtlas, newRoutineNeedingModel, routineTemplateCreatingAtlas, allKeptMemories, continueFromMemory, modelSettings, useClaudeCode, signInClaudeCode, signInChatGPT,
          pasteKey, stopConnecting, retryConnecting, useLocalServer("Ollama"), createOrbSheet(),
-         launchAtLogin, openLoginItems, notifyWhenDone, proposeSkills, summarizeSessions, reviewDictation, orbsCanTalk, orbsCanStartGroups, orbsActOnOwn, orbsCanManageGroups, orbsCreateWithoutAsking, undoOrbCreation, dataFolder, keptMemoriesFolder, orbsFolder, resetOrb,
+         launchAtLogin, openLoginItems, notifyWhenDone, proposeSkills, summarizeSessions, reviewDictation, orbsCanTalk, orbsCanStartGroups, orbsActOnOwn, pulseEnabled, pulseMinutes, pulseDailyTokens, orbsCanManageGroups, orbsCreateWithoutAsking, undoOrbCreation, dataFolder, keptMemoriesFolder, orbsFolder, resetOrb,
          openSystemNotifications, askNotifications, globalShortcut,
          profilePhotoAvatar, profilePhotoChoose, profilePhotoRemove,
          addProvider, refreshModels, removeProvider, signOutChatGPT, replaceKey, deleteKey, saveKey, keepKey, getKey, listAllModels,
