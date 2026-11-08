@@ -129,6 +129,26 @@ import Testing
         #expect(AppModel.resumeMessage(lostJobs: 0) == NoticeAction.continueMessage(after: BotSession.quitNotice))
     }
 
+    @Test @MainActor func aGroupRunWaitingToResumeSurvivesAnotherGroupOpeningFirst() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let a = OrbGroup(name: "A", memberIDs: [], orchestratorID: UUID()), b = OrbGroup(name: "B", memberIDs: [], orchestratorID: UUID())
+        let oldA = GroupRun.new(group: a, request: "a", now: now), oldB = GroupRun.new(group: b, request: "b", now: now)
+        store.saveWorkJournal(WorkJournalFile(entries: [
+            WorkEntry(kind: .groupRun, startedAt: now, groupID: a.id, runID: oldA.id, text: "a"),
+            WorkEntry(kind: .groupRun, startedAt: now, groupID: b.id, runID: oldB.id, text: "b")], lastLaunch: now, cleanQuit: true))
+        store.flush()
+        let journal = WorkJournal(store: store)
+        #expect(journal.beginLaunch(now: now.addingTimeInterval(60)).count == 2)
+        // The hub resumes group A first: B's entry (resumes == 1) must not be dropped by the sync.
+        journal.syncGroupRuns([GroupRun.new(group: a, request: "a", now: now, id: oldA.id)])
+        #expect(journal.entries.count == 2 && journal.entries.allSatisfy { $0.resumes == 1 })
+        journal.syncGroupRuns([GroupRun.new(group: a, request: "a", now: now, id: oldA.id), GroupRun.new(group: b, request: "b", now: now, id: oldB.id)])
+        #expect(journal.entries.count == 2 && journal.entries.allSatisfy { $0.resumes == 1 })
+        // Once resumed, a group with no open run is over as before.
+        journal.syncGroupRuns([GroupRun.new(group: a, request: "a", now: now, id: oldA.id)])
+        #expect(journal.entries.count == 1)
+    }
+
     // MARK: The guard against a loop of crashes
 
     @Test @MainActor func aSingleCrashStillResumesButTwoInTenMinutesDoNot() {
@@ -398,6 +418,36 @@ import Testing
         // Answered, so over: nothing left to resume, and the asker's chat is woken by the answer as it always is.
         await waitUntil("the journal to empty") { after.workJournal.entries.isEmpty }
         #expect(onDisk().entries.isEmpty)
+    }
+
+    @Test(.enabled(if: WorkFolders.Git.make() != nil)) @MainActor func aRequestThatCannotBeResumedCleansUpItsWorktree() async throws {
+        writeState(bots: ["Pesquisador"])
+        let project = root.url.appending(path: "projeto")
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        try "um\n".write(to: project.appending(path: "a.txt"), atomically: true, encoding: .utf8)
+        let tool = try #require(WorkFolders.Git.make())
+        let identity = ["-c", "user.name=Teste", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"]
+        for arguments in [["init", "-b", "main"], ["add", "-A"], ["commit", "-m", "primeiro"]] {
+            #expect(await tool.run(identity + arguments, in: project).succeeded)
+        }
+        // The asker was deleted while the app was closed: the request cannot be sent again, and its worktree (made before the
+        // close, already merged) would stay forever.
+        var envelope = OrbEnvelope(kind: .ask, from: OrbRef(id: UUID(), name: "Apagado"), to: OrbRef(id: UUID(), name: "Pesquisador"),
+                                   text: "Levante os preços")
+        envelope.folder = project.path
+        let made = await WorkFolders.prepare(project: project, member: "Pesquisador", run: envelope.id, root: WorkFolders.root(in: root.url))
+        #expect(made.branch != nil && FileManager.default.fileExists(atPath: made.url.path))
+        let now = Date(timeIntervalSince1970: 10_000)
+        store.saveWorkJournal(WorkJournalFile(entries: [WorkEntry(kind: .request, startedAt: now, envelope: envelope)],
+                                              lastLaunch: now, cleanQuit: true))
+        store.flush()
+
+        let after = launch(held())
+        await after.resumeInterruptedWork()?.value
+        await waitUntil("the worktree to go") { !FileManager.default.fileExists(atPath: made.url.path) }
+        let branches = await tool.run(["branch", "--format=%(refname:short)"], in: project)
+        #expect(!branches.text.contains("orb/"))
+        #expect(after.workJournal.entries.isEmpty)
     }
 
     @Test @MainActor func stoppingTheChainOrAnAnswerRemovesTheRequest() async throws {

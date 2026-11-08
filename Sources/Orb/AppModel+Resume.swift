@@ -86,12 +86,35 @@ extension AppModel {
             + ". Check what is already done, then reassign what is left."
         if !groupHub.resume(groupID, runID: entry.runID, request: entry.text ?? "", recovery: recovery, notice: Self.groupResumedNotice) {
             workJournal.dropGroupRun(groupID)
+            // The run will never end by itself, so nobody else would remove its worktrees.
+            if let runID = entry.runID, let group = group(groupID), !group.projectFolder.isEmpty {
+                cleanUpAbandonedWork(project: URL(fileURLWithPath: group.projectFolder), run: runID, notify: nil)
+            }
         }
     }
 
     /// An Orb's request to another: sent again with a note, in the same chain, so the answer wakes the asker as it would have.
     private func resumeRequest(_ entry: WorkEntry) {
         guard let envelope = entry.envelope else { return }
-        if !delegation.resubmit(envelope) { workJournal.dropRequest(envelope.id) }
+        if !delegation.resubmit(envelope) {
+            workJournal.dropRequest(envelope.id)
+            // A request with a folder worked in a worktree named after its id; it will not run again, so nobody else cleans it.
+            if let folder = envelope.folder, !folder.isEmpty {
+                cleanUpAbandonedWork(project: URL(fileURLWithPath: folder), run: envelope.id, notify: envelope.from.id)
+            }
+        }
+    }
+
+    /// Work that was cut off and cannot be resumed (its asker or group is gone): the worktrees whose branch is already merged
+    /// are removed, like at the end of a run. Never forced: a worktree with uncommitted or unmerged work stays, and `notify` is told.
+    private func cleanUpAbandonedWork(project: URL, run: UUID, notify: UUID?) {
+        let root = WorkFolders.root(in: store.directory)
+        Task { @MainActor [weak self] in
+            let report = await WorkFolders.cleanUp(project: project, run: run, root: root)
+            guard !report.kept.isEmpty, let self, let notify, bot(notify) != nil else { return }
+            let lines = report.kept.map { "\($0.branch) (\($0.path))" }.joined(separator: "; ")
+            appendToChat(.notice("Ficaram ramos de trabalho sem merge em \(project.lastPathComponent): \(lines). "
+                + "Junte com git merge ou apague com git worktree remove."), of: notify)
+        }
     }
 }

@@ -96,6 +96,9 @@ final class WorkJournal {
 
     private let store: Store
     private var live: [WorkEntry] = []
+    /// Groups whose interrupted run was inherited and has not been resumed yet: another group's run opening first must not make
+    /// `syncGroupRuns` drop the entry (it would come back later with `resumes` at 0 and could resume again).
+    private var awaitingGroupResume: Set<UUID> = []
     private(set) var inherited: [WorkEntry]
     private var lastLaunch: Date?
     private var cleanQuit: Bool
@@ -138,6 +141,7 @@ final class WorkJournal {
             for var entry in previous where entry.kind != .unknown && entry.resumes < 1 {
                 entry.resumes += 1
                 resumed.append(entry)
+                if entry.kind == .groupRun, let group = entry.groupID { awaitingGroupResume.insert(group) }
             }
         }
         live += resumed
@@ -185,6 +189,7 @@ final class WorkJournal {
         guard !frozen else { return }
         var changed = false
         for run in open {
+            awaitingGroupResume.remove(run.groupID)
             let text = run.request.clipped(to: 2_000)
             if let index = live.firstIndex(where: { $0.kind == .groupRun && $0.groupID == run.groupID }) {
                 guard live[index].runID != run.id else { continue }
@@ -199,11 +204,12 @@ final class WorkJournal {
         }
         let groups = Set(open.map(\.groupID))
         let before = live.count
-        live.removeAll { $0.kind == .groupRun && !groups.contains($0.groupID ?? UUID()) }
+        live.removeAll { $0.kind == .groupRun && !groups.contains($0.groupID ?? UUID()) && !awaitingGroupResume.contains($0.groupID ?? UUID()) }
         if changed || live.count != before { persist() }
     }
 
     func dropGroupRun(_ groupID: UUID) {
+        awaitingGroupResume.remove(groupID)
         remove { $0.kind == .groupRun && $0.groupID == groupID }
     }
 
