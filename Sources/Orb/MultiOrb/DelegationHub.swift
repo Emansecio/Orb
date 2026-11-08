@@ -378,6 +378,10 @@ final class DelegationHub: DelegationService {
     private func startRun(_ request: DelegationRequest, conversation: Conversation, text: String, origin: SendOrigin,
                           resuming: Bool, images: [ImageAttachment] = [], workFolder: URL? = nil) -> Bool {
         guard let model else { return false }
+        if leftItsGroup(request) {
+            dropLeftMember(request)
+            return false
+        }
         let envelope = request.envelope
         let botID = envelope.to.id
         let session = model.session(botID)
@@ -581,6 +585,10 @@ final class DelegationHub: DelegationService {
             if let serving = first.servingRequest {
                 guard var request = requests[serving], request.state == .awaitingChildren, var conversation = suspended[serving] else {
                     continue // the request it belonged to is gone (stopped, timed out): nobody waits for this answer
+                }
+                if leftItsGroup(request) {
+                    dropLeftMember(request) // taken out of the group while it waited: it must not speak again
+                    continue
                 }
                 suspended[serving] = nil
                 request.openChildren.subtract(batch.compactMap(\.replyTo))
@@ -805,6 +813,20 @@ final class DelegationHub: DelegationService {
         for (routineID, wait) in waitingRoutines where wait.botID == id { waitingRoutines[routineID] = nil }
         refresh(Array(Set(affected.flatMap { [$0.envelope.from.id, $0.envelope.to.id] })))
         settleWaitingRoutines()
+    }
+
+    /// A group request whose target is no longer a member (removed while the request waited or queued).
+    private func leftItsGroup(_ request: DelegationRequest) -> Bool {
+        guard let groupID = request.envelope.groupID else { return false }
+        return model?.group(groupID)?.memberIDs.contains(request.envelope.to.id) != true
+    }
+
+    /// Ends such a request as failed without resuming it. Its kept conversation is thrown away, not closed on disk: writing it
+    /// would recreate the side file that leaving the group deleted.
+    private func dropLeftMember(_ request: DelegationRequest) {
+        suspended[request.id] = nil
+        fail(request, "Esse Orb saiu do grupo")
+        groupHooks?.turnFinished(requests[request.id] ?? request, reply: nil, outcome: .failed)
     }
 
     /// The request waited for its children and will not resume: the conversation kept in memory for it is closed on disk, its

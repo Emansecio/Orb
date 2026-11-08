@@ -2234,7 +2234,12 @@ final class AppModel {
         queuedWakeNotes.removeValue(forKey: routineID)
         forgetInicio { if case .routine(_, let routine, _) = $0.origin { return routine == routineID } else { return false } }
         delegation.forgetWaitingRoutine(routineID)
-        if sessions[routine.botID]?.routineID == routineID { stop(routine.botID) }
+        if let running = sessions[routine.botID], running.routineID == routineID {
+            // Only this run and the chain it started: `stop(botID)` would also cancel the chat's own requests and the ones
+            // other Orbs queued for this Orb. The user's Stop is what stops everything.
+            if let chain = running.chain?.chainID { delegation.cancelChain(chain, by: .user) }
+            running.stop(startsQueuedRoutines: true, notice: BotSession.stoppedNotice)
+        }
         store.deleteRoutineConversation(routine: routineID, for: routine.botID)
     }
 

@@ -860,6 +860,27 @@ private final class Hooks: GroupTurnHooks {
         await team.settle()
     }
 
+    @Test func deletingARunningRoutineKeepsTheRequestsOtherOrbsQueuedForThatOrb() async throws {
+        let valve = TestGate()
+        let team = Team { seen in
+            if seen.who == "Pesquisador", !seen.user.contains("<orb_request from") { await valve.wait() }
+            return say("Ok.")
+        }
+        defer { team.cleanUp() }
+        let model = team.model, hub = model.delegation
+        let routine = Routine(name: "Diária", botID: team.pesquisador.id, prompt: "Faça a rotina.", schedule: .daily(hour: 9, minute: 0))
+        model.routines = [routine]
+        model.runRoutine(routine.id)
+        await waitUntil("the routine to run") { model.sessions[team.pesquisador.id]?.routineID == routine.id }
+        let asked = try hub.submit(from: team.atlas.id, to: "Pesquisador", text: "Pesquise", kind: .ask, messageID: UUID(), groupID: nil)
+        model.deleteRoutine(routine.id)
+        #expect(hub.requests[asked.id].map { DelegationHub.isOpen($0.state) } == true, "the other Orb's request survives")
+        #expect(hub.chainStates[asked.chainID]?.cancelled != true)
+        await valve.open()
+        await team.settle()
+        #expect(hub.requests[asked.id]?.state == .replied)
+    }
+
     @Test func aGroupObjectiveTooLongToSaveSaysSoInsteadOfVanishing() async throws {
         let team = Team { _ in say("x") }
         defer { team.cleanUp() }
@@ -1552,6 +1573,65 @@ private actor Names {
         #expect(team.botTexts(team.atlas).isEmpty)
         // The stop is told in the group's thread; the orchestrator's private chat gets no "conversa entre Orbs" line.
         #expect(!team.events(team.atlas).contains { $0.kind == .chainStopped })
+    }
+
+    @Test func stoppingTheGroupClosesTheAssignmentCardsInsteadOfLeavingThemOpen() async throws {
+        let valve = TestGate()
+        let team = Team { seen in
+            switch seen.who {
+            case "Atlas":
+                if seen.toolResult != nil { return say("Pedi aos dois.") }
+                return twoCalls([("Pesquisador", "Levante o mercado."), ("Revisor", "Revise o texto.")])
+            default:
+                await valve.wait()
+                return say("Tarde demais.")
+            }
+        }
+        defer { team.cleanUp() }
+        let group = group(team)
+        team.model.postUserMessage("Preparar o lançamento", to: group.id)
+        await waitUntil("both members to work") { team.model.isWorking(team.pesquisador.id) && team.model.isWorking(team.revisor.id) }
+        func cards() -> [OrbMessageItem.State] {
+            (team.model.groupSession(group.id)?.items ?? []).compactMap {
+                if case .orbMessage(let m) = $0.kind, m.direction == .post, m.kind == .ask { m.state } else { nil }
+            }
+        }
+        #expect(!cards().isEmpty && cards().allSatisfy { $0 == .open }, "\(cards())")
+        team.model.stopGroup(group.id)
+        #expect(!cards().isEmpty && cards().allSatisfy { $0 == .cancelled }, "\(cards())")
+        await valve.open()
+        await team.settle()
+    }
+
+    @Test func aMemberTakenOutWhileItWaitsForAnswersDoesNotSpeakAgainNorRecreateItsFile() async throws {
+        let valve = TestGate()
+        let team = Team { seen in
+            switch seen.who {
+            case "Atlas":
+                if seen.user.contains("<orb_reply") { return say("Fechado.") }
+                if seen.toolResult != nil { return say("Pedi ao Pesquisador.") }
+                return orbsCall("ask", to: "Pesquisador", "Pesquise.")
+            case "Pesquisador":
+                if seen.user.contains("<orb_reply") { return say("Voltei a falar.") }
+                if seen.toolResult != nil { return say("Aguardo o Revisor.") }
+                return orbsCall("ask", to: "Revisor", "Revise.")
+            default:
+                await valve.wait()
+                return say("Revisado.")
+            }
+        }
+        defer { team.cleanUp() }
+        let group = group(team)
+        team.model.postUserMessage("Descubra", to: group.id)
+        let hub = team.model.delegation
+        await waitUntil("the member to wait for its helper") {
+            hub.requests.values.contains { $0.envelope.to.id == team.pesquisador.id && $0.state == .awaitingChildren }
+        }
+        #expect(team.model.removeMember(team.pesquisador.id, from: group.id))
+        await valve.open()
+        await team.settle()
+        #expect(await team.log.count(by: "Pesquisador") == 2, "no turn after it left (the two before: the ask and the wait)")
+        #expect(team.model.store.readSideConversation(prefix: Store.grupoPrefix, id: group.id, for: team.pesquisador.id).value == nil)
     }
 
     @Test func listInTheGroupSaysWhatEachMemberIsDoingAndForWhom() async throws {

@@ -20,6 +20,13 @@ enum ReviewVerdict: String, Equatable, Sendable {
         }
     }
 
+    /// Whether a request asks for a review (the group has no fixed reviewer: the orchestrator picks one and asks it to review),
+    /// so only the reply to such a request can be a verdict.
+    static func isReviewRequest(_ text: String) -> Bool {
+        let folded = text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+        return ["review", "revis", "approv", "aprov", "verify", "verifi", "valid"].contains { folded.contains($0) }
+    }
+
     /// Leading Markdown/space, the word, then the end of the line or a separator (":", "-", ".", etc.).
     private static let pattern: NSRegularExpression = {
         let words = "approved|aprovad[oa]|changes|alteracoes|mudancas"

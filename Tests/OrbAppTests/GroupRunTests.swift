@@ -218,6 +218,16 @@ struct GroupLoopTests {
         #expect(!page.body.contains("Revisão:")) // nobody reviewed
     }
 
+    @Test @MainActor func aBuildersSummaryStartingWithAlteracoesIsNotAVerdict() async throws {
+        let world = GroupWorld()
+        let first = await startOrchestratorTurn(world, text: "Faça um app de notas")
+        let build = try world.fake.ask(from: world.atlas.id, to: world.pesquisador.id, text: "construa o app", parent: first)
+        world.fake.finish(first, reply: "Delego.")
+        await world.fake.run(build, reply: "Alterações: criei a tela de notas e o botão salvar.")
+        #expect(world.hub.run(world.groupID)?.round == 0 && world.hub.run(world.groupID)?.verdict == nil)
+        #expect(!world.items.contains { if case .notice(let text) = $0.kind { text.hasPrefix("Revisão:") } else { false } })
+    }
+
     @Test @MainActor func aReviewersVerdictCountsTheRoundShowsALineAndGoesToTheBoard() async throws {
         let world = GroupWorld()
         let first = await startOrchestratorTurn(world, text: "Faça um app de notas")

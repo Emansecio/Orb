@@ -250,7 +250,9 @@ final class GroupHub: GroupTurnHooks {
                 update(group.id) { run in
                     run.lastText = text
                     if !interim, member == group.orchestratorID, fromUser { run.finalText = text }
-                    if !interim, member != group.orchestratorID, let verdict = ReviewVerdict.read(text) {
+                    // Only a reply to a review request is a verdict: a builder's summary may well start with "Alterações:".
+                    if !interim, member != group.orchestratorID, ReviewVerdict.isReviewRequest(request.envelope.text),
+                       let verdict = ReviewVerdict.read(text) {
                         run.round += 1
                         run.verdict = verdict
                         review = (verdict, run.round)
@@ -324,6 +326,20 @@ final class GroupHub: GroupTurnHooks {
         }
         runs[groupID]?.asked = [:]
         delegation.cancelChain(run.id, by: reason)
+        // The phase above is already `.stopped`, so `turnFinished` for the cancelled requests exits early in `lookup` and never
+        // closes their cards: close here every assignment of this run still open, or they stay "em andamento" until reloaded.
+        if let session = model.groupSession(groupID) {
+            let chain = run.id
+            session.updateAll(where: { kind in
+                if case .orbMessage(let m) = kind { return m.chainID == chain && m.direction == .post && m.kind != .reply && m.state == .open }
+                return false
+            }, { kind in
+                if case .orbMessage(var m) = kind {
+                    m.state = .cancelled
+                    kind = .orbMessage(m)
+                }
+            })
+        }
         // Only this run's turn is stopped: `model.stop` would cancel every chain of the member, including another group's.
         // `cancelChain` above already stopped the sessions running this chain's requests.
         for member in members {
