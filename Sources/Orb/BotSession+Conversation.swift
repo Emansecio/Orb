@@ -187,7 +187,7 @@ extension BotSession {
                          chain: ChainContext? = nil, serving: UUID? = nil) {
         cancelChunkNote() // the note being written is about the chat that is parked now
         chunkAttempts = [:] // the counts are by message index: another conversation must not inherit them
-        model?.cancelEditing(id) // the edit belongs to the chat that is parked now
+        model?.cancelEditing(id, keepingEditedText: true) // the edit belongs to the chat that is parked now
         let chat = conversation ?? Conversation()
         saveTask?.cancel()
         saveTask = nil

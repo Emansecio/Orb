@@ -591,6 +591,29 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
         #expect(users(model.transcript(id)) == ["a", "b", "c"])
     }
 
+    @MainActor @Test func anEditEndedByAnotherOrbKeepsTheWordsTheUserChanged() async throws {
+        let (model, id) = model(with: conversation(["a", "b", "c"]))
+        await model.loadedConversation(id)
+        model.setDraft("rascunho", for: id)
+        let target = try #require(row("b", in: model, id))
+        #expect(model.beginEditing(itemID: target.id, of: id))
+
+        // Untouched: nothing to keep, the composer is what it held.
+        model.cancelEditing(id, keepingEditedText: true)
+        #expect(model.drafts[id] == "rascunho")
+
+        #expect(model.beginEditing(itemID: target.id, of: id))
+        model.setDraft("b, mais uma frase", for: id)
+        model.cancelEditing(id, keepingEditedText: true)
+        #expect(!model.isEditing(id) && model.drafts[id] == "rascunho\n\nb, mais uma frase")
+
+        // The person's own Esc still drops the edit.
+        #expect(model.beginEditing(itemID: target.id, of: id))
+        model.setDraft("outra coisa", for: id)
+        model.cancelEditing(id)
+        #expect(model.drafts[id] == "rascunho\n\nb, mais uma frase")
+    }
+
     @MainActor @Test func editingFromTheMenuSaysWhyWhenTheMessageCannotBeEdited() async throws {
         var chat = conversation(["a", "b"])
         let index = try #require(chat.items.firstIndex { if case .user("b", _) = $0.kind { true } else { false } })

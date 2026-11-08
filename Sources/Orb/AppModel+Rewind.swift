@@ -147,10 +147,16 @@ extension AppModel {
     }
 
     /// The edit is given up (Esc, the banner's button, another chat opening): the composer gets back what it held.
-    func cancelEditing(_ botID: UUID) {
+    /// `keepingEditedText`: the end was not the person's own (another Orb's request or answer arrived), so words they changed in
+    /// the edit are not lost: they go after what the composer held.
+    func cancelEditing(_ botID: UUID, keepingEditedText: Bool = false) {
         guard let lane = sessions[botID]?.lane, let edit = lane.editing else { return }
+        let edited = (drafts[botID] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         lane.editing = nil
         restore(edit.stash, in: lane, of: botID)
+        if keepingEditedText, !edited.isEmpty, edited != edit.originalText.trimmingCharacters(in: .whitespacesAndNewlines) {
+            setDraft([edit.stash.text, edited].filter { !$0.isEmpty }.joined(separator: "\n\n"), for: botID)
+        }
     }
 
     /// What is in the composer is sent in place of the message being edited: the message and everything after it leave

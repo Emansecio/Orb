@@ -1760,7 +1760,8 @@ final class AppModel {
         // chat first and passes `endsEdit: false`): a notice's "Continuar", a greeting's reply, the menu bar panel. The edit
         // would otherwise outlive a chat it no longer fits (the cut point moves with the new turn, and what comes back to the
         // composer would mix with the edit), so it is given up and the composer gets back what it held.
-        if endsEdit { cancelEditing(botID) }
+        // Another Orb's words must not eat what the person was editing: their changes go back to the composer.
+        if endsEdit { cancelEditing(botID, keepingEditedText: !origin.isUser) }
         session.memoryIdle?.cancel()
         session.memoryIdle = nil
         session.skillReview?.cancel() // a review gives way to anything the user or a routine sends
