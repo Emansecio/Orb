@@ -72,7 +72,8 @@ extension AppModel {
         }
         let groups = OrbsPrompt.groups(groupLines(for: bot.id), canStart: (isOwnChat(bot.id) || orbsActOnOwn) && orbsCanStartGroups,
                                        actsOnOwn: orbsActOnOwn,
-                                       canRecall: isOwnChat(bot.id), canEdit: orbsCanManageGroups)
+                                       canRecall: isOwnChat(bot.id), canEdit: orbsCanManageGroups,
+                                       elsewhere: self.groups.filter { !$0.memberIDs.contains(bot.id) }.map(\.name))
         return [teammates, groups].filter { !$0.isEmpty }.joined(separator: "\n\n")
     }
 

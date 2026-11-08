@@ -15,7 +15,7 @@ struct MultiOrbOffering: Sendable, Equatable {
     /// `group_create`: with "Orbs podem acionar grupos" on, in the Orb's own chat; with "Orbs agem por conta própria" also in a
     /// routine, a request and a group's turn (its orchestrator).
     var groupCreate = false
-    /// `group_edit`: with "Orbs organizam os grupos" on, in every kind of turn, when there is a group or a second Orb to put in one;
+    /// `group_edit`: with "Orbs organizam o time" on, in every kind of turn, when there is a group or a second Orb to put in one;
     /// in a group's turn, for its orchestrator.
     var groupEdit = false
     /// `orb_delete`: with "Orbs organizam o time" on, in every kind of turn, when there is a second Orb; in a group's turn, for

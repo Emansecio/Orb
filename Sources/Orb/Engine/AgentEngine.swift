@@ -1069,7 +1069,13 @@ actor AgentEngine {
                 let support = creation
                 context.proposeOrb = { [self] proposal in
                     // "Orbs criam Orbs sem perguntar": no card; the creator's chat gets a line with "Desfazer" instead.
-                    if support.withoutCard { return await support.create(UUID(), proposal) }
+                    if support.withoutCard {
+                        // Nobody sees this creation before it happens: a teammate who already does the work is asked instead.
+                        if let other = support.sameRole(as: proposal.role) {
+                            return .failed("\(other) already has this role: ask \(other) with orbs instead of creating another Orb.")
+                        }
+                        return await support.create(UUID(), proposal)
+                    }
                     return await propose(proposal, creation: support, resuming: summary.title, request: request, out: out)
                 }
             }

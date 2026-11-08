@@ -949,3 +949,49 @@ private final class PulseWorld {
     }
 }
 
+// MARK: Switching off, the team in the prompt, no repeated roles
+
+@Suite @MainActor struct PulseTeamTests {
+    @Test func switchingThePulseOffStopsWhatItIsDoing() async throws {
+        let gate = TestGate()
+        let world = PulseWorld(names: ["Atlas", "Revisor"]) { _, _, _ in
+            await gate.wait()
+            return say("Feito.")
+        }
+        defer { world.cleanUp() }
+        let model = world.model, atlas = world.bot("Atlas").id
+        await world.startInterval()
+        await model.pulseTick(now: world.at(minutes: 61))
+        await waitUntil("the pulse to run") { model.sessions[atlas]?.turnTask != nil }
+        model.pulseEnabled = false
+        await gate.open()
+        await world.settle()
+        let stopped = try #require(world.events("Atlas").first { $0.kind == .pulseStopped })
+        #expect(stopped.sentence == "O pulso parou: foi desligado nos Ajustes")
+        #expect(model.sessions[atlas]?.pulseInChat == nil && model.pulseRuns.isEmpty)
+    }
+
+    @Test func theRosterSaysThereAreMoreAndTheOtherGroupsAreNamed() {
+        let me = Bot(name: "Atlas", role: "", orb: OrbConfig())
+        let team = (0..<14).map { Bot(name: "Orb \($0)", role: "Papel", orb: OrbConfig()) }
+        let section = OrbsPrompt.section(for: me, roster: [me] + team)
+        #expect(section.contains("- Orb 11: Papel") && !section.contains("- Orb 12") && section.contains("- and 2 more: orbs list shows them all"))
+        #expect(!OrbsPrompt.section(for: me, roster: Array(team.prefix(3))).contains("more:"))
+
+        let mine = OrbsPrompt.GroupLine(name: "Vendas", orchestrator: "Atlas", youOrchestrate: true, others: ["Lia"])
+        let editing = OrbsPrompt.groups([mine], canEdit: true, elsewhere: ["Arquivo"])
+        #expect(editing.contains("Other groups of the user (you are not a member; group_edit can change them): “Arquivo”.")
+                || editing.contains("Other groups of the user (you are not a member; group_edit can change them): Arquivo."))
+        #expect(!OrbsPrompt.groups([mine], canEdit: false, elsewhere: ["Arquivo"]).contains("Arquivo"))
+        #expect(OrbsPrompt.groups([], canEdit: true, elsewhere: ["Arquivo"]).hasPrefix("## The user's groups"))
+        #expect(OrbsPrompt.groups([], canEdit: true, elsewhere: []).isEmpty)
+    }
+
+    @Test func anOrbCreatedWithoutACardMustNotRepeatARole() {
+        var support = OrbCreationSupport(creator: Bot(name: "Atlas", role: "", orb: OrbConfig()))
+        support.roles = ["Revisor": "Confere o trabalho", "Atlas": ""]
+        #expect(support.sameRole(as: "  confere o TRABALHO ") == "Revisor")
+        #expect(support.sameRole(as: "Escreve textos") == nil && support.sameRole(as: "") == nil)
+    }
+}
+

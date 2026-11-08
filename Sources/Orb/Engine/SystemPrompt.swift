@@ -252,12 +252,15 @@ enum BrowserPrompt {
 enum OrbsPrompt {
     /// Teammates listed at most; the role is cut at `DelegationLimits.roleClip` characters.
     static func section(for bot: Bot, roster: [Bot], isGroup: Bool = false) -> String {
-        let teammates = roster.filter { $0.id != bot.id }.prefix(DelegationLimits.rosterLimit)
+        let everyone = roster.filter { $0.id != bot.id }
+        let teammates = everyone.prefix(DelegationLimits.rosterLimit)
         guard !teammates.isEmpty else { return "" }
-        let lines = teammates.map { teammate -> String in
+        var lines = teammates.map { teammate -> String in
             let role = MemoryText.clip(MemoryText.flatten(teammate.role), DelegationLimits.roleClip)
             return role.isEmpty ? "- \(teammate.name)" : "- \(teammate.name): \(role)"
         }
+        // The rest are named by orbs list: without this line the Orb would think the team ends here and create a duplicate.
+        if everyone.count > teammates.count { lines.append("- and \(everyone.count - teammates.count) more: orbs list shows them all") }
         return """
         ## Teammates
         \(isGroup ? "Other members of this group:" : "Other Orbs on this Mac, the user's team:")
@@ -284,9 +287,15 @@ enum OrbsPrompt {
     /// What the Orb is told, outside a group's turn, about the groups it is in: their names and members, and what it can do
     /// about them (empty without groups). `canStart`: with "Orbs podem acionar grupos" on (its own chat, or any turn with `actsOnOwn`). The same bytes for the
     /// same groups, so the provider's cache holds.
+    /// `elsewhere`: the names of the user's groups the Orb is not in, told when it may change them (`canEdit`).
     static func groups(_ groups: [GroupLine], canStart: Bool = false, actsOnOwn: Bool = false, canRecall: Bool = false,
-                       canEdit: Bool = false) -> String {
-        guard !groups.isEmpty else { return "" }
+                       canEdit: Bool = false, elsewhere: [String] = []) -> String {
+        let others = canEdit ? elsewhere.prefix(groupLimit).map(GroupPrompt.label) : []
+        let otherLine = others.isEmpty ? "" : "Other groups of the user (you are not a member; group_edit can change them): "
+            + others.joined(separator: ", ") + "."
+        guard !groups.isEmpty else {
+            return otherLine.isEmpty ? "" : "## The user's groups\n" + otherLine
+        }
         let lines = groups.prefix(groupLimit).map { "- " + line($0) }
         let how = canStart && actsOnOwn
             ? "When a group would help the user's work, use orbs ask with the group's name as to, or group_create to make one; no need "
@@ -308,7 +317,7 @@ enum OrbsPrompt {
         Groups of the user you are a member of (each has a shared thread on its own screen):
         \(lines.joined(separator: "\n"))
         \(how)\(recall)\(edit)
-        """
+        """ + (otherLine.isEmpty ? "" : "\n" + otherLine)
     }
 
     /// "Lançamento: you orchestrate; other members: Pesquisador, Revisor".

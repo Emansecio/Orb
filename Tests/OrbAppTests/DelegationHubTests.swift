@@ -1353,8 +1353,12 @@ private final class Hooks: GroupTurnHooks {
         defer { team.cleanUp() }
         let model = team.model, hub = model.delegation
         _ = try #require(model.createGroup(name: "Estúdio", members: [team.atlas.id, team.pesquisador.id]))
-        // An Orb without groups is told exactly what it was told before.
+        // An Orb without groups is told its teammates and, as it may change them, the names of the user's groups.
+        #expect(model.orbsSection(for: team.revisor) == OrbsPrompt.section(for: team.revisor, roster: [team.atlas, team.pesquisador])
+                + "\n\n" + OrbsPrompt.groups([], canEdit: true, elsewhere: ["Estúdio"]))
+        model.orbsCanManageGroups = false
         #expect(model.orbsSection(for: team.revisor) == OrbsPrompt.section(for: team.revisor, roster: [team.atlas, team.pesquisador]))
+        model.orbsCanManageGroups = true
         model.send("manda uma mensagem pro grupo Estúdio", to: team.atlas.id, fromUser: true)
         model.send("oi", to: team.revisor.id, fromUser: true)
         await team.settle()
@@ -2729,7 +2733,7 @@ private actor Names {
         team.model.orbsCanManageGroups = false
         defer { team.model.orbsCanManageGroups = true }
         #expect(team.model.multiOrbOffering(for: team.atlas.id).groupEdit == false)
-        #expect(await edit(team, ["group": "Lançamento", "edit": "rename", "name": "Novo"]).hasPrefix("O usuário desligou “Orbs organizam os grupos”"))
+        #expect(await edit(team, ["group": "Lançamento", "edit": "rename", "name": "Novo"]).hasPrefix("O usuário desligou “Orbs organizam o time”"))
         #expect(team.model.group(group.id)?.name == "Lançamento")
     }
 

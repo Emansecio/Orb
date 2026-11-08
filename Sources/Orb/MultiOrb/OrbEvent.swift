@@ -29,6 +29,8 @@ struct OrbEvent: Codable, Equatable, Sendable {
 
     /// The `detail` of a `groupStopped` the pulse's daily budget caused; without it the person stopped the group.
     static let budgetStop = "budget"
+    /// The `detail` of a `pulseStopped` because the pulse (or "Orbs agem por conta própria") was switched off.
+    static let pulseOff = "off"
 
     var kind: Kind
     /// Who did it.
@@ -105,6 +107,7 @@ struct OrbEvent: Codable, Equatable, Sendable {
         case .pulseResumed:
             return "\(actorName) retomou sozinho o plano “\(detail)”"
         case .pulseStopped:
+            if detail == Self.pulseOff { return "O pulso parou: foi desligado nos Ajustes" }
             let budget = Int(detail).map { " (" + GroupUsageText.tokens($0) + " por dia)" } ?? ""
             return "O pulso parou: o teto diário de tokens\(budget) foi atingido"
         case .deletionAsked:

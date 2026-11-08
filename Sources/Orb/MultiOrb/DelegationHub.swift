@@ -1166,12 +1166,17 @@ final class DelegationHub: DelegationService {
             let lead = group.youOrchestrate ? "você orquestra" : "\(group.orchestrator) orquestra"
             return "- \(group.name): \(lead)" + (group.others.isEmpty ? "" : "; outros membros: " + group.others.joined(separator: ", "))
         }
-        guard !groups.isEmpty else { return teammates }
+        // The groups it is not in, which group_edit may change: without their names it could only guess them.
+        let elsewhere = model.orbsCanManageGroups
+            ? model.groups.filter { !$0.memberIDs.contains(botID) }.prefix(OrbsPrompt.groupLimit).map(\.name) : []
+        let otherText = elsewhere.isEmpty ? "" : "\n\nOutros grupos do usuário (você não é membro; group_edit muda): "
+            + elsewhere.joined(separator: ", ") + "."
+        guard !groups.isEmpty else { return teammates + otherText }
         // Outside a group's turn the Orb may start a group's work only with both switches on; else the user does it on the group's screen.
         let mayAsk = groupID != nil || (model.orbsActOnOwn && model.orbsCanStartGroups)
         let note = mayAsk ? "você pode acionar estes com ask, pelo nome"
             : "o usuário inicia o trabalho de um grupo na tela dele; você não escreve no fio"
-        return teammates + "\n\nSeus grupos (\(note)):\n" + groups.joined(separator: "\n")
+        return teammates + "\n\nSeus grupos (\(note)):\n" + groups.joined(separator: "\n") + otherText
     }
 
     /// "livre", "ocupado", or "espera aprovação do usuário": a card of its turn is open, so whoever waits for it waits for the

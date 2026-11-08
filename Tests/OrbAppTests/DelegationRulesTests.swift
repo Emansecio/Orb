@@ -209,8 +209,8 @@ struct OrbsPromptTests {
         let me = bot("Atlas", "x")
         let many = (1...20).map { bot("Orb\($0)", String(repeating: "r", count: 200)) }
         let lines = OrbsPrompt.section(for: me, roster: many).split(separator: "\n").filter { $0.hasPrefix("- ") }
-        #expect(lines.count == DelegationLimits.rosterLimit)
-        #expect(lines.allSatisfy { $0.count <= 9 + DelegationLimits.roleClip + 1 })
+        #expect(lines.count == DelegationLimits.rosterLimit + 1 && lines.last == "- and 8 more: orbs list shows them all")
+        #expect(lines.dropLast().allSatisfy { $0.count <= 9 + DelegationLimits.roleClip + 1 })
     }
 
     @Test func aGroupSaysSoAndARoleLessTeammateHasNoColon() {

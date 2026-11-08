@@ -10,7 +10,7 @@ struct OrbProposeTool: AgentTool {
     let spec = ToolSpec(
         name: OrbProposeTool.name,
         description: """
-        Create a new Orb for the user's work. It inherits your model and never more access than you; it gets its own folder and \
+        Create a new Orb, only when no teammate fits. It inherits your model and never more access than you; it gets its own folder and \
         no connectors. If the user must approve, they see a card.
         """,
         parameters: .schema([

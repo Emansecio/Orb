@@ -9,9 +9,21 @@ struct OrbCreationSupport: Sendable {
     var existingNames: [String] = []
     /// "Orbs criam Orbs sem perguntar" is on: the engine creates the Orb at once instead of opening the creation card.
     var withoutCard = false
+    /// By name, the role of each Orb there is now: an Orb created without a card must not repeat one (`sameRole`).
+    var roles: [String: String] = [:]
     /// Creates the Orb for the card `approvalID` (the person said "Criar"). It reads the proposal as the card holds it, which
     /// is what "Editar antes" changed, and answers with what the model is told.
     var create: OrbCreationHandler = { _, _ in .failed("Não foi possível criar o Orb agora.") }
+}
+
+extension OrbCreationSupport {
+    /// The Orb that already has this role (the same words, any case or accent), if any. Only for a creation without a card:
+    /// with one, the person sees the team and decides.
+    func sameRole(as role: String) -> String? {
+        let wanted = DelegationRules.fold(role)
+        guard !wanted.isEmpty else { return nil }
+        return roles.filter { DelegationRules.fold($0.value) == wanted }.keys.sorted().first
+    }
 }
 
 typealias OrbCreationHandler = @Sendable (_ approvalID: UUID, _ proposal: OrbProposal) async -> ProposalOutcome

@@ -33,10 +33,13 @@ extension AppModel {
     /// permission of its own: "Orbs podem acionar grupos" still has to be on.
     var orbsActOnOwn: Bool {
         get { preferences.object(forKey: Self.orbsActOnOwnKey) as? Bool ?? true }
-        set { preferences.set(newValue, forKey: Self.orbsActOnOwnKey) }
+        set {
+            preferences.set(newValue, forKey: Self.orbsActOnOwnKey)
+            if !newValue { stopPulseWork(switchedOff: true) } // the pulse stands on it: what it started stops now
+        }
     }
 
-    /// The preference behind Ajustes → Orbs → "Orbs organizam os grupos".
+    /// The preference behind Ajustes → Orbs → "Orbs organizam o time".
     static let orbsCanManageGroupsKey = "orbsCanManageGroups"
 
     /// Whether an Orb may change the user's groups on its own with `group_edit` (members, orchestrator, name, objective), and

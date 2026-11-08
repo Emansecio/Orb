@@ -247,7 +247,11 @@ extension AppModel {
     /// Ajustes → Orbs → "Pulso dos Orbs". On unless switched off.
     var pulseEnabled: Bool {
         get { preferences.object(forKey: Self.pulseEnabledKey) as? Bool ?? true }
-        set { preferences.set(newValue, forKey: Self.pulseEnabledKey); syncActivities() }
+        set {
+            preferences.set(newValue, forKey: Self.pulseEnabledKey)
+            syncActivities()
+            if !newValue { stopPulseWork(switchedOff: true) } // what the pulse started does not go on after it was switched off
+        }
     }
 
     /// Minutes between two pulses, `Schedule.minuteRange` like the routines' interval.
@@ -642,6 +646,7 @@ extension AppModel {
     // MARK: The budget
 
     static let pulseCappedNotice = "O pulso parou: o teto diário de tokens foi atingido."
+    static let pulseOffNotice = "O pulso parou: ele foi desligado nos Ajustes."
 
     /// Called by `recordUsage` for every use of a model: the pulse's own turn, and any turn of a chain the pulse started, add to
     /// the day's count. Over the budget, the chain stops (and the pulse turn, if it still runs).
@@ -657,23 +662,31 @@ extension AppModel {
         if pulseState.tokensToday >= pulseDailyTokens { Task { @MainActor [weak self] in self?.stopPulseWork() } }
     }
 
-    /// The day's budget is spent: every chain the pulse started stops, and so does a pulse turn still running. Each Orb whose
-    /// work was cut gets one line in its chat.
-    func stopPulseWork() {
-        guard pulseState.tokensToday >= pulseDailyTokens else { return }
+    /// The day's budget is spent, or the pulse (or "Orbs agem por conta própria") was switched off (`switchedOff`): every chain
+    /// the pulse started stops, and so do a pulse turn still running and a pulse waiting for answers. Each Orb whose work was cut
+    /// gets one line in its chat.
+    func stopPulseWork(switchedOff: Bool = false) {
+        guard switchedOff || pulseState.tokensToday >= pulseDailyTokens else { return }
         var told: Set<UUID> = []
         for (id, chain) in delegation.chainStates where chain.origin.isPulse && !chain.cancelled {
-            delegation.cancelChain(id, by: .budget)
+            delegation.cancelChain(id, by: switchedOff ? .user : .budget)
             told.insert(chain.originBot)
+        }
+        let why = switchedOff ? Self.pulseOffNotice : Self.pulseCappedNotice
+        for (runID, wait) in delegation.waitingRoutines {
+            guard let run = wait.pulse else { continue }
+            delegation.forgetWaitingRoutine(runID)
+            closePulseWait(run, of: wait.botID, conversation: wait.conversation, why: why)
         }
         // The pulse's own turns, and the chat turns its answers woke (no request holds those, so no chain stops them).
         for (botID, session) in sessions where session.turnTask != nil
             && (session.sideKind == .pulse || (session.routineID == nil && pulseLineage(of: botID) != nil)) {
-            session.stop(startsQueuedRoutines: true, notice: Self.pulseCappedNotice)
+            session.stop(startsQueuedRoutines: true, notice: why)
             told.insert(botID)
         }
         for botID in told where bot(botID) != nil {
-            appendToChat(.event(OrbEvent(kind: .pulseStopped, actor: bot(botID).map(OrbRef.init), detail: String(pulseDailyTokens))), of: botID)
+            let detail = switchedOff ? OrbEvent.pulseOff : String(pulseDailyTokens)
+            appendToChat(.event(OrbEvent(kind: .pulseStopped, actor: bot(botID).map(OrbRef.init), detail: detail)), of: botID)
         }
     }
 }
