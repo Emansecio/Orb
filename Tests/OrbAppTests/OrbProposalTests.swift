@@ -68,9 +68,14 @@ struct OrbProposalTests {
         #expect(OrbProposal.lookIssues(from: nil).isEmpty)
     }
 
-    @Test func theSchemaListsTheCatalogIdsSoTheModelDoesNotGuess() throws {
-        let text = String(describing: OrbProposeTool().spec.parameters)
-        #expect(text.contains("circulo") && text.contains("pilulas") && text.contains("indigo"))
+    @Test func theCatalogIdsComeWithAWrongLookNotWithEveryRequest() throws {
+        let schema = String(describing: OrbProposeTool().spec.parameters)
+        #expect(!schema.contains("pilulas"), "the ids would go with every request")
+        #expect(OrbProposeTool.lookIDs("shape").contains("circulo"))
+        #expect(OrbProposeTool.lookIDs("color").contains("indigo"))
+        let warning = OrbProposeTool.lookWarning(.object(["shape": .string("round"), "color": .string("indigo")]))
+        #expect(warning.contains("shape: ") && warning.contains("circulo") && !warning.contains("color: "))
+        #expect(OrbProposeTool.lookWarning(nil).isEmpty)
     }
 
     @Test func theInstructionsAreScrubbedFlattenedByLineAndCapped() {

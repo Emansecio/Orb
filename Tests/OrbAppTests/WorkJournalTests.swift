@@ -460,9 +460,11 @@ import Testing
 
         let after = launch(held())
         await after.resumeInterruptedWork()?.value
-        await waitUntil("the worktree to go") { !FileManager.default.fileExists(atPath: made.url.path) }
-        let branches = await tool.run(["branch", "--format=%(refname:short)"], in: project)
-        #expect(!branches.text.contains("orb/"))
+        // The folder goes first and the branch right after it, so wait for both.
+        await waitUntil("the worktree and its branch to go") {
+            guard !FileManager.default.fileExists(atPath: made.url.path) else { return false }
+            return await !tool.run(["branch", "--format=%(refname:short)"], in: project).text.contains("orb/")
+        }
         #expect(after.workJournal.entries.isEmpty)
     }
 

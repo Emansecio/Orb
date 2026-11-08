@@ -21,12 +21,23 @@ struct OrbProposeTool: AgentTool {
                                      "description": .string("Only what the role needs: each adds tools to every request. Empty: all of yours."),
                                      "items": .object(["type": .string("string"),
                                                        "enum": .array(["terminal", "browser", "computerUse"].map(JSONValue.string))])]),
-            "look": JSONValue.schema(Dictionary(uniqueKeysWithValues: OrbProposeTool.looks.map { ($0, OrbProposeTool.lookProperty($0)) })),
+            "look": JSONValue.schema(Dictionary(uniqueKeysWithValues: OrbProposeTool.looks.map {
+                ($0, $0 == "shape" ? JSONValue.property("string", "Body shape; default circulo.") : JSONValue.property("string"))
+            })),
             "reason": .property("string", "Why, in one sentence."),
         ], required: ["name", "role", "instructions"]))
 
-    /// A look field with the catalog's real ids as an enum: they are Portuguese ("circulo", "pilulas") and cannot be guessed.
-    private static func lookProperty(_ key: String) -> JSONValue {
+    /// The catalog's ids are Portuguese ("circulo", "pilulas") and cannot be guessed, but they stay out of the schema (it goes
+    /// with every request): a wrong look field is answered with its list instead.
+    static func lookWarning(_ look: JSONValue?) -> String {
+        let ignored = OrbProposal.lookIssues(from: look)
+        guard !ignored.isEmpty else { return "" }
+        return "\nIgnored unknown look values (shape stays circulo, others random); valid ids: "
+            + ignored.map { "\($0): \(lookIDs($0).joined(separator: ", "))" }.joined(separator: "; ") + "."
+    }
+
+    /// The catalog's ids for a look field.
+    static func lookIDs(_ key: String) -> [String] {
         let category: OrbCategory = switch key {
         case "color": .color
         case "shape": .shape
@@ -35,11 +46,7 @@ struct OrbProposeTool: AgentTool {
         case "brows": .brows
         default: .cheeks
         }
-        var property: [String: JSONValue] = ["type": .string("string")]
-        if key == "shape" { property["description"] = .string("Default circulo.") }
-        let ids = OrbCatalog.shared.options(category).map(\.id)
-        if !ids.isEmpty { property["enum"] = .array(ids.map(JSONValue.string)) }
-        return .object(property)
+        return OrbCatalog.shared.options(category).map(\.id)
     }
 
     var kind: ToolCall.Kind { .orbs }
@@ -67,8 +74,6 @@ struct OrbProposeTool: AgentTool {
         let proposal = OrbProposal.make(from: support.creator, args: arguments, existingNames: support.existingNames)
         let outcome = await propose(proposal)
         if case .failed(let reason) = outcome { throw ToolError(reason) }
-        let ignored = OrbProposal.lookIssues(from: arguments["look"])
-        let warning = ignored.isEmpty ? "" : "\nIgnored unknown look values (shape stays circulo, others random): \(ignored.joined(separator: ", "))."
-        return outcome.modelText + warning
+        return outcome.modelText + Self.lookWarning(arguments["look"])
     }
 }
