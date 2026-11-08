@@ -25,7 +25,7 @@ struct ToolSpecEconomyTests {
     /// Raised to 19,200 for the `description` of `run_command` and `applescript` (~315): what the action is for, in words, which the
     /// working line and the folded lines of the chat say instead of the raw command. Measured at 19,180.
     /// Raised to 19,600 for `precheck` on `schedule` (~340): the argv a routine runs before each run, printed `{"skip": true}`
-    /// excusing it (docs/PLANO-INICIO-ORBS.md). Measured at 19,520.
+    /// excusing it. Measured at 19,520.
     /// Raised to 20,000 for `regions` and `root` on `ui_read` and the `frontmost` of its `app`: reading a dense app by parts spends
     /// far less per request than these sentences cost (docs/USO-DO-COMPUTADOR.md). Measured at 19,956.
     /// Raised to 20,400 for `request_access` (the access card asked from the chat, instead of sending the person to the panel)
