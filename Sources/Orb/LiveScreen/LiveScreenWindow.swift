@@ -81,6 +81,9 @@ struct LiveScreenWindow: View {
                     Button("Terminei") { model.decide(.once, approvalID: handoff.id, botID: botID) }
                         .buttonStyle(PrimaryPillStyle()).help(Tip.handoffDone)
                 }
+            case .failed where store.isUserInControl:
+                Button("Devolver ao Orb") { model.liveScreens.giveBackControl(botID) }
+                    .buttonStyle(PrimaryPillStyle()).help(Tip.giveBackBrowser)
             case .privateView:
                 Button("Mostrar tela") { store.isPrivate = false }.buttonStyle(SecondaryPillStyle()).help(Tip.revealScreen)
             default:

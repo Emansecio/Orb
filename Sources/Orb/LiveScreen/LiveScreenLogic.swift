@@ -46,7 +46,8 @@ enum LiveCardState: Equatable, Sendable {
                    handoff: Bool, userControls: Bool = false) -> LiveCardState {
         guard outcome == .running else { return .ended }
         if handoff { return .needsYou }
-        if userControls { return .youControl }
+        // A broken stream under the person's hands is shown: they would type into a dead picture otherwise.
+        if userControls { return phase == .failed ? .failed : .youControl }
         if isProtected { return .protected }
         if isPrivate { return .privateView }
         if phase == .failed { return .failed }

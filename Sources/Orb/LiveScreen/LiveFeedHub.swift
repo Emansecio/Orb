@@ -262,7 +262,9 @@ final class LiveFeedHub {
     /// last frame); an Orb whose views left keeps its stream until its grace ends.
     private func reconcile() {
         updatePointerHandler()
-        guard let wanted = recency.last(where: { !failed.contains($0) && (holds[$0]?.total ?? 0) > 0 }) else { return }
+        let candidates = recency.filter { !failed.contains($0) && (holds[$0]?.total ?? 0) > 0 }
+        // The Orb the person controls keeps the stream: another Orb's card coming into view must not freeze the page they type in.
+        guard let wanted = candidates.last(where: { stores[$0]?.isUserInControl == true }) ?? candidates.last else { return }
         if connection?.botID == wanted { return }
         if let old = connection {
             stopConnection()
