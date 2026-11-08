@@ -661,13 +661,17 @@ Com **Orbs podem conversar entre si** ligado em Ajustes → Orbs, um Orb pede aj
 
 ### O pulso
 
-Nada acordava um Orb sem uma mensagem ou uma rotina. Com **Pulso dos Orbs** ligado em Ajustes → Orbs → Pulso (padrão), de tempos em
-tempos um Orb acorda sozinho, olha o time, os grupos e a memória e, se coordenar ajudar, age: pede a um colega, cria Orbs ou grupos,
-ajusta membros. Se não há nada a fazer, não diz nada.
+Nada acordava um Orb sem uma mensagem ou uma rotina. Com **Pulso dos Orbs** ligado em Ajustes → Orbs → Pulso (padrão), um Orb
+acorda sozinho quando tem trabalho pendente, recebe a lista do que é e, se coordenar ajudar, age: retoma, pede a um colega, cria Orbs
+ou grupos, ajusta membros. Se o trabalho não pede nada agora, não diz nada.
 - **Quem e quando.** Um Orb por vez, em rodízio, a cada **Intervalo** (padrão 60 min). O primeiro intervalo só começa depois que o
   pulso olha pela primeira vez, então uma instalação nova não gasta nada de imediato.
-- **Sem gastar à toa.** Antes de acordar um Orb, o app confere, sem modelo e sem tokens, se algo mudou para ele desde o último
-  pulso (conversa, pasta, memória, grupos). Se nada mudou, ele é pulado. Um Orb ocupado espera a próxima volta.
+- **Só com demanda.** Antes de acordar um Orb, o app procura, sem modelo e sem tokens, trabalho pendente dele: um plano da conversa
+  aberta largado no meio (parado há 10 min ou mais, com passos por fazer que não esperam você), uma rotina cuja última execução
+  (das últimas 24 h) falhou ou pediu atenção, um pedido seu a outro Orb que falhou, ou um turno que falhou num grupo que ele
+  orquestra. Sem demanda nova, o Orb é pulado: conversar, mexer em arquivos ou na memória não acorda ninguém. Cada demanda vale um
+  pulso só; se ela muda (um passo a menos no plano, outra execução), vale de novo. O "Último pulso" mostra o motivo. Um Orb ocupado
+  espera a próxima volta.
 - **Teto por dia.** O **Teto por dia** (padrão 300 mil tokens, mínimo 10 mil) conta o turno do pulso e tudo o que ele começa:
   pedidos a outros Orbs e turnos de grupo. Ao chegar nele, o trabalho que o pulso começou para, o chat de cada Orb afetado diz "O
   pulso parou: o teto diário de tokens foi atingido", o grupo parado mostra "O teto diário do pulso parou o grupo" e nada

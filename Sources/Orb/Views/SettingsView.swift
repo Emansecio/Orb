@@ -382,7 +382,7 @@ struct OrbsSettings: View {
         Section("Pulso") {
             Toggle(isOn: Binding(get: { pulseEnabled }, set: { pulseEnabled = $0; model.pulseEnabled = $0 })) {
                 toggleLabel("Pulso dos Orbs",
-                            "De tempos em tempos um Orb acorda sozinho para ver se há algo a coordenar. Para no teto do dia.")
+                            "Um Orb acorda sozinho só quando há trabalho pendente: plano largado, rotina ou pedido que falhou. Para no teto do dia.")
             }
             .help(Tip.pulseEnabled)
             if pulseEnabled {
@@ -411,7 +411,10 @@ struct OrbsSettings: View {
         pulseMinutes = model.pulseMinutes
         pulseDailyTokens = model.pulseDailyTokens
         pulseUsed = model.pulseTokensToday()
-        pulseLast = model.pulseState.lastActed.map { RoutineText.stamp($0) + ((model.pulseState.lastSummary).map { ": " + $0 } ?? "") }
+        pulseLast = model.pulseState.lastActed.map {
+            RoutineText.stamp($0) + ((model.pulseState.lastSummary).map { ": " + $0 } ?? "")
+                + ((model.pulseState.lastReason).map { " (por: " + $0 + ")" } ?? "")
+        }
     }
 
     static func minutesText(_ minutes: Int) -> String {

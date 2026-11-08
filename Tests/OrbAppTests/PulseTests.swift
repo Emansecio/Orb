@@ -56,7 +56,8 @@ private final class PulseWorld {
     /// The start of the injected clock: eight in the morning today, so the hours the tests add never cross midnight.
     let t0 = Calendar.current.startOfDay(for: .now).addingTimeInterval(8 * 3_600)
 
-    init(names: [String] = ["Atlas", "Pesquisador", "Revisor"], tokens: Int = 1_000,
+    /// `demand`: every Orb starts with a plan dropped half way, the demand that makes a pulse worth its tokens.
+    init(names: [String] = ["Atlas", "Pesquisador", "Revisor"], tokens: Int = 1_000, demand: Bool = true,
          rule: @escaping @Sendable (String, String, String?) async -> [LLMEvent]) {
         QuietNotifications.hold()
         let root = self.root
@@ -80,6 +81,7 @@ private final class PulseWorld {
         model.defaultModel = "custom/modelo"
         model.clientOverride = { [log] in PulseBrain(log: log, names: names, tokens: tokens, rule: rule) }
         model.pulseNow = { [t0 = t0] in t0 }
+        if demand { for bot in bots { plant(bot.name, tag: 0) } }
     }
 
     deinit { QuietNotifications.release() }
@@ -101,14 +103,19 @@ private final class PulseWorld {
                 && !hub.requests.values.contains { DelegationHub.isOpen($0.state) } && hub.inbox.isEmpty
                 && self.model.pulseRuns.isEmpty && self.model.pulseTask == nil
         }
-        // The baseline of a pulse that just ended is read off the main thread. (It is not compared with the files now: the
-        // answers of the Orbs it asked arrive after it and rightly change what the Orb sees.)
-        for bot in bots where model.pulseState.lastRunByOrb[bot.id.uuidString] != nil {
-            await waitUntil("the baseline of \(bot.name)") { self.model.pulseState.fingerprints[bot.id.uuidString] != nil }
-        }
     }
 
-    /// Something changes in the Orb's memory folder: its fingerprint no longer matches the last pulse's.
+    /// The Orb has a plan with two of three steps left, untouched for an hour. A new `tag` is a new plan (a new demand).
+    func plant(_ name: String, tag: Int) {
+        var conversation = Conversation()
+        var plan = TaskPlan(goal: "Entregar o relatório \(tag)", steps: [TaskPlan.Step(text: "Reunir dados", state: .done),
+                                                                      TaskPlan.Step(text: "Escrever"), TaskPlan.Step(text: "Revisar")])
+        plan.updatedAt = t0.addingTimeInterval(-3_600)
+        conversation.taskPlan = plan
+        model.session(bot(name).id).conversation = conversation
+    }
+
+    /// Something changes in the Orb's memory folder (files change; that alone is no demand).
     func changeMemory(of name: String) throws {
         let folder = model.memory.bank(for: bot(name).id).directory
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -149,13 +156,12 @@ private final class PulseWorld {
         let atlasCalls = await world.log.count(by: "Atlas"), allCalls = await world.log.count
         #expect(atlasCalls == 1 && allCalls == 1)
 
-        for name in ["Atlas", "Pesquisador", "Revisor"] { try world.changeMemory(of: name) }
+        // The others have their demand; Atlas gets a new plan, which is a new demand.
         await model.pulseTick(now: world.at(minutes: 122))
         await world.settle()
-        for name in ["Atlas", "Pesquisador", "Revisor"] { try world.changeMemory(of: name) }
         await model.pulseTick(now: world.at(minutes: 183))
         await world.settle()
-        for name in ["Atlas", "Pesquisador", "Revisor"] { try world.changeMemory(of: name) }
+        world.plant("Atlas", tag: 1)
         await model.pulseTick(now: world.at(minutes: 244))
         await world.settle()
         let order = await world.log.seen.map { $0.who }
@@ -166,31 +172,129 @@ private final class PulseWorld {
         #expect(model.sessions[world.bot("Atlas").id]?.routineID == nil && model.sessions[world.bot("Atlas").id]?.parkedChat == nil)
     }
 
-    @Test func skipsWithoutAskingTheModelWhenNothingChanged() async throws {
-        let world = PulseWorld(rule: Self.nothing)
+    @Test func withNoDemandItNeverAsksTheModelEvenWithFilesChanging() async throws {
+        let world = PulseWorld(demand: false, rule: Self.nothing)
         defer { world.cleanUp() }
         let model = world.model
-        for bot in world.bots { model.pulseState.fingerprints[bot.id.uuidString] = await model.pulseFingerprint(of: bot.id) }
+        for name in ["Atlas", "Pesquisador", "Revisor"] { try world.changeMemory(of: name) }
+        model.send("oi", to: world.bot("Atlas").id, fromUser: true) // the person talking is no demand either
+        await world.settle()
+        let before = await world.log.count
         await world.startInterval()
+        try world.changeMemory(of: "Atlas")
         await model.pulseTick(now: world.at(minutes: 61))
-        #expect(await world.log.count == 0)
+        #expect(await world.log.count == before)
         #expect(model.pulseState.skipped == 3)
         #expect(model.pulseState.lastPulse == world.at(minutes: 61), "a pass that found nothing spends the window")
-        // A change wakes only the Orb that can see it.
-        try world.changeMemory(of: "Revisor")
+        // A demand wakes only the Orb that has it, and the model is told which.
+        world.plant("Revisor", tag: 7)
         await model.pulseTick(now: world.at(minutes: 122))
         await world.settle()
-        #expect(await world.log.seen.map { $0.who } == ["Revisor"])
+        let calls = await world.log.calls(by: "Revisor").filter { $0.user.contains("[Pulse]") }
+        #expect(calls.count == 1 && calls[0].user.contains("Unfinished plan \"Entregar o relatório 7\": 1/3 done, next \"Escrever\"."))
+        #expect(await world.log.seen.map { $0.who }.filter { $0 != "Atlas" } == ["Revisor"])
     }
 
-    @Test func aChangeInTheTeamIsSeenByEveryOrb() async {
-        let world = PulseWorld(rule: Self.nothing)
+    @Test func theSameDemandIsHandedOnlyOnceAndAChangedOneAgain() async throws {
+        let world = PulseWorld(names: ["Atlas", "Pesquisador"], rule: Self.nothing)
         defer { world.cleanUp() }
         let model = world.model
-        let before = await model.pulseFingerprint(of: world.bot("Atlas").id)
-        let group = OrbGroup(name: "Time", memberIDs: [world.bot("Atlas").id, world.bot("Revisor").id], orchestratorID: world.bot("Atlas").id)
-        model.groups = [group]
-        #expect(await model.pulseFingerprint(of: world.bot("Atlas").id) != before)
+        await world.startInterval()
+        await model.pulseTick(now: world.at(minutes: 61))
+        await world.settle()
+        await model.pulseTick(now: world.at(minutes: 122))
+        await world.settle()
+        #expect(await world.log.seen.map { $0.who } == ["Atlas", "Pesquisador"])
+        await model.pulseTick(now: world.at(minutes: 183)) // both already handed their demand
+        await world.settle()
+        #expect(await world.log.count == 2 && model.pulseState.skipped >= 2)
+        // The plan moves on (one step fewer): another key.
+        var conversation = try #require(model.sessions[world.bot("Atlas").id]?.conversation)
+        conversation.taskPlan?.steps[1].state = .done
+        model.session(world.bot("Atlas").id).conversation = conversation
+        await model.pulseTick(now: world.at(minutes: 244))
+        await world.settle()
+        let atlas = await world.log.calls(by: "Atlas")
+        #expect(atlas.count == 2 && atlas[1].user.contains("2/3 done, next \"Revisar\""))
+    }
+
+    @Test func aRoutineThatFailedIsADemandAndItsLineIsInThePrompt() async throws {
+        let world = PulseWorld(demand: false, rule: Self.nothing)
+        defer { world.cleanUp() }
+        let model = world.model
+        var routine = Routine(name: "Faturas", botID: world.bot("Revisor").id, prompt: "x", schedule: .everyHours(4))
+        routine.runs = [RoutineRun(date: world.t0.addingTimeInterval(-3_600), succeeded: false, summary: "Sem acesso ao banco")]
+        model.routines = [routine]
+        await world.startInterval()
+        await model.pulseTick(now: world.at(minutes: 61))
+        await world.settle()
+        let call = try #require(await world.log.calls(by: "Revisor").first)
+        #expect(call.user.contains("- Routine \"Faturas\" failed: Sem acesso ao banco."))
+        #expect(model.pulseState.delivered[world.bot("Revisor").id.uuidString]?.first?.hasPrefix("routine:") == true)
+    }
+
+    // MARK: What counts as a demand (pure)
+
+    @Test func eachSignalIsADemandAndTheOthersAreNot() {
+        let me = UUID(), other = UUID(), now = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        func demands(plan: TaskPlan? = nil, routines: [Routine] = [], requests: [DelegationRequest] = [], groups: [OrbGroup] = [],
+                     chains: Set<UUID> = []) -> [PulseDemand] {
+            Pulse.demands(for: me, plan: plan, routines: routines, requests: requests, groups: groups, pulseChains: chains, now: now)
+        }
+        // Plan: steps left and untouched for a while.
+        var plan = TaskPlan(goal: "Meta", steps: [TaskPlan.Step(text: "A", state: .done), TaskPlan.Step(text: "B")])
+        plan.updatedAt = now.addingTimeInterval(-Pulse.planIdle - 1)
+        #expect(demands(plan: plan).count == 1 && demands(plan: plan)[0].line == "Unfinished plan \"Meta\": 1/2 done, next \"B\".")
+        #expect(demands(plan: plan)[0].key.hasSuffix(":1"))
+        var fresh = plan
+        fresh.updatedAt = now.addingTimeInterval(-60)
+        #expect(demands(plan: fresh).isEmpty, "the person may be about to answer")
+        var waiting = plan
+        waiting.steps[1].state = .blocked
+        #expect(demands(plan: waiting).isEmpty, "a blocked step waits for the person")
+        var finished = plan
+        finished.steps[1].state = .done
+        #expect(demands(plan: finished).isEmpty && demands().isEmpty)
+
+        // Routine: this Orb's, enabled, newest run failed or asks attention, recent; a stop is not a failure.
+        func routine(_ run: RoutineRun, bot: UUID? = nil, enabled: Bool = true) -> Routine {
+            var routine = Routine(name: "R", botID: bot ?? me, prompt: "x", schedule: .everyHours(1))
+            routine.isEnabled = enabled
+            routine.runs = [run]
+            return routine
+        }
+        let failed = RoutineRun(date: now.addingTimeInterval(-60), succeeded: false, summary: "Deu erro")
+        let found = demands(routines: [routine(failed)])
+        #expect(found.count == 1 && found[0].key.hasPrefix("routine:") && found[0].key.hasSuffix(failed.id.uuidString))
+        #expect(demands(routines: [routine(failed, bot: other)]).isEmpty && demands(routines: [routine(failed, enabled: false)]).isEmpty)
+        let stopped = RoutineRun(date: now, succeeded: false, summary: BotSession.stoppedNotice)
+        let ok = RoutineRun(date: now, succeeded: true, summary: "Tudo certo")
+        let old = RoutineRun(date: now.addingTimeInterval(-Pulse.runFreshness - 1), succeeded: false, summary: "Antigo")
+        #expect(demands(routines: [routine(stopped), routine(ok), routine(old)]).isEmpty)
+        var attention = RoutineRun(date: now, succeeded: true, summary: "Feito")
+        attention.check = GoalCheck(progress: 10, status: .attention, note: "Atrasada")
+        #expect(demands(routines: [routine(attention)]).first?.line == "Routine \"R\" needs attention: Atrasada.")
+
+        // Requests: mine that failed; a group turn that failed in a group I orchestrate; not cancelled, not replies, not the pulse's own chains.
+        func request(from: UUID, to: UUID, state: DelegationRequest.State = .failed, group: UUID? = nil, kind: OrbEnvelope.Kind = .ask,
+                     chain: UUID = UUID()) -> DelegationRequest {
+            var envelope = OrbEnvelope(chainID: chain, kind: kind, from: OrbRef(id: from, name: "De"), to: OrbRef(id: to, name: "Para"), text: "Faça isso")
+            envelope.groupID = group
+            return DelegationRequest(envelope: envelope, state: state)
+        }
+        let mine = request(from: me, to: other)
+        #expect(demands(requests: [mine]).map(\.line) == ["Your request to Para failed: \"Faça isso\"."])
+        #expect(demands(requests: [mine]).first?.key == "request:\(mine.envelope.id.uuidString)")
+        #expect(demands(requests: [request(from: other, to: me), request(from: me, to: other, state: .cancelled),
+                                   request(from: me, to: other, state: .replied), request(from: me, to: other, kind: .reply)]).isEmpty)
+        let pulseChain = UUID()
+        #expect(demands(requests: [request(from: me, to: other, chain: pulseChain)], chains: [pulseChain]).isEmpty)
+        let group = OrbGroup(name: "Time", memberIDs: [me, other], orchestratorID: me)
+        let turn = request(from: UUID(), to: other, group: group.id)
+        #expect(demands(requests: [turn], groups: [group]).map(\.line) == ["In group \"Time\" the turn of Para failed: \"Faça isso\"."])
+        var theirs = group
+        theirs.orchestratorID = other
+        #expect(demands(requests: [turn], groups: [theirs]).isEmpty && demands(requests: [turn]).isEmpty)
     }
 
     @Test func respectsTheInterval() async {
@@ -395,10 +499,11 @@ private final class PulseWorld {
         await model.pulseTick(now: world.at(minutes: 61))
         await world.settle()
         let call = try #require(await world.log.calls(by: "Atlas").first)
-        #expect(call.user.contains("[Pulse] Nobody asked for this run."))
+        #expect(call.user.contains("[Pulse] Nobody asked for this run. Open work you could move forward:\n- Unfinished plan"))
+        #expect(call.user.hasSuffix("reply only NOTHING."))
         for tool in ["orbs", "group_create", "group_edit", "orb_propose", "orb_delete"] { #expect(call.tools.contains(tool), "\(tool)") }
         #expect(!call.tools.contains("ask_user") && !call.tools.contains("request_access"), "nobody is there to answer")
-        #expect(Pulse.prompt.count < 320, "the prompt goes in every pulse")
+        #expect(Pulse.prompt(for: [PulseDemand(key: "k", line: "l")]).count < 320, "the prompt goes in every pulse")
     }
 
     @Test func offeringForAPulseIsTheOneOfAnyOtherSideRun() {
@@ -449,9 +554,12 @@ private final class PulseWorld {
     @Test func theStateAndTheNewKindsReadTolerantly() throws {
         let empty = try JSONDecoder().decode(PulseState.self, from: Data("{}".utf8))
         #expect(empty == PulseState())
-        let damaged = try JSONDecoder().decode(PulseState.self, from: Data(#"{"lastPulse":"x","skipped":"many","tokensToday":-5,"fingerprints":{"a":"b"},"future":1}"#.utf8))
-        #expect(damaged.skipped == 0 && damaged.tokensToday == 0 && damaged.lastPulse == nil && damaged.fingerprints == ["a": "b"])
-        let state = PulseState(lastPulse: .now, lastOrb: UUID(), fingerprints: ["x": "y"], lastSummary: "ok", skipped: 2, day: "2026-11-08", tokensToday: 7)
+        let damaged = try JSONDecoder().decode(PulseState.self, from: Data(#"{"lastPulse":"x","skipped":"many","tokensToday":-5,"delivered":"no","future":1}"#.utf8))
+        #expect(damaged.skipped == 0 && damaged.tokensToday == 0 && damaged.lastPulse == nil && damaged.delivered.isEmpty)
+        // A state saved before demands (with the old fingerprints) still reads, and the old map is dropped.
+        let old = try JSONDecoder().decode(PulseState.self, from: Data(#"{"skipped":3,"fingerprints":{"a":"b"},"day":"2026-11-08","tokensToday":9}"#.utf8))
+        #expect(old.skipped == 3 && old.tokensToday == 9 && old.delivered.isEmpty)
+        let state = PulseState(lastPulse: .now, lastOrb: UUID(), delivered: ["x": ["plan:1:2"]], lastSummary: "ok", lastReason: "r", skipped: 2, day: "2026-11-08", tokensToday: 7)
         #expect(try JSONDecoder().decode(PulseState.self, from: JSONEncoder().encode(state)) == state)
 
         #expect(try JSONDecoder().decode(UsageSource.self, from: Data(#""pulse""#.utf8)) == .pulse)
