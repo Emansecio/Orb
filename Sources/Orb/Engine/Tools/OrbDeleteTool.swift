@@ -27,16 +27,22 @@ struct OrbDeleteTool: AgentTool {
         guard let orbs = context.orbs, case .object(var fields) = arguments else {
             throw ToolError("Deleting Orbs is not available now.")
         }
-        // Only the user's card below may confirm: whatever the model sent as `confirmed` is dropped.
-        fields["confirmed"] = nil
+        // Only the user's card below may confirm, and only the Orb the app checked: whatever the model sent is dropped.
+        for key in ConfirmedEdit.reservedKeys { fields[key] = nil }
         fields["action"] = .string("delete_orb_plan")
-        let detail = try await orbs(.object(fields))
+        let plan = ConfirmedEdit(try await orbs(.object(fields)))
         guard let confirm = context.confirm else {
-            throw ToolError("This needs the user's confirmation and none can be asked here: tell the user in your reply.")
+            // Nobody watches this turn: the user is asked in the chat instead, and the turn goes on.
+            guard context.unattended else {
+                throw ToolError("This needs the user's confirmation and none can be asked here: tell the user in your reply.")
+            }
+            fields["action"] = .string("delete_orb_later")
+            return try await orbs(.object(fields))
         }
-        guard await confirm("Apagar um Orb", detail) else { return "The user did not confirm. Nothing was deleted." }
+        guard await confirm("Apagar um Orb", plan.confirmation ?? "") else { return "The user did not confirm. Nothing was deleted." }
         fields["action"] = .string("delete_orb")
         fields["confirmed"] = .bool(true)
+        plan.bind(&fields)
         return try await orbs(.object(fields))
     }
 }

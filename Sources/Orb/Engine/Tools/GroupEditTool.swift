@@ -35,21 +35,60 @@ struct GroupEditTool: AgentTool {
         guard let orbs = context.orbs, case .object(var fields) = arguments else {
             throw ToolError("Editar grupos não está disponível agora.")
         }
-        // Only the user's card below may confirm: whatever the model sent as `confirmed` is dropped.
-        fields["confirmed"] = nil
+        // Only the user's card below may confirm, and only the target the app checked: whatever the model sent is dropped.
+        for key in ConfirmedEdit.reservedKeys { fields[key] = nil }
         // The app checks the edit first and says whether it needs the user; asking happens here, where the turn's card can be shown.
         fields["action"] = .string("edit_group_plan")
-        let needed = try await orbs(.object(fields))
-        if !needed.isEmpty {
+        let plan = ConfirmedEdit(try await orbs(.object(fields)))
+        if let needed = plan.confirmation {
             guard let confirm = context.confirm else {
-                throw ToolError("This needs the user's confirmation and none can be asked here: tell the user in your reply.")
+                // Nobody watches this turn: the user is asked in the chat instead, and the turn goes on.
+                guard context.unattended else {
+                    throw ToolError("This needs the user's confirmation and none can be asked here: tell the user in your reply.")
+                }
+                fields["action"] = .string("edit_group_later")
+                return try await orbs(.object(fields))
             }
             guard await confirm("Confirmar mudança no grupo", needed) else {
                 return "The user did not confirm. Nothing changed."
             }
             fields["confirmed"] = .bool(true)
+            plan.bind(&fields)
         }
         fields["action"] = .string("edit_group")
         return try await orbs(.object(fields))
+    }
+}
+
+/// What the app's check of a deletion (`edit_group_plan`, `delete_orb_plan`) hands the tool: the text of the user's card, and the
+/// ids of what it is about. After the card, the tool sends those ids back (`expect_group`, `expect_orb`): the app does the change
+/// only if the names still lead to the same group and Orb, so a rename meanwhile cannot turn the yes into another deletion.
+struct ConfirmedEdit {
+    /// Keys only the tool writes; the model's are dropped.
+    static let reservedKeys = ["confirmed", "expect_group", "expect_orb"]
+
+    var confirmation: String?
+    var group: String?
+    var orb: String?
+
+    init(_ text: String) {
+        let value = JSONValue.parse(text)
+        let confirmation = value?["confirmation"]?.string ?? ""
+        self.confirmation = confirmation.isEmpty ? nil : confirmation
+        group = value?["group"]?.string
+        orb = value?["orb"]?.string
+    }
+
+    func bind(_ fields: inout [String: JSONValue]) {
+        if let group { fields["expect_group"] = .string(group) }
+        if let orb { fields["expect_orb"] = .string(orb) }
+    }
+
+    /// The bridge's answer to a check: the card's text and the ids.
+    static func answer(confirmation: String?, group: UUID?, orb: UUID?) -> String {
+        var fields: [String: JSONValue] = ["confirmation": .string(confirmation ?? "")]
+        if let group { fields["group"] = .string(group.uuidString) }
+        if let orb { fields["orb"] = .string(orb.uuidString) }
+        return JSONValue.object(fields).jsonString
     }
 }

@@ -76,6 +76,8 @@ final class AppModel {
     @ObservationIgnored var pulseTask: Task<Void, Never>?
     @ObservationIgnored var pulseRuns: [UUID: PulseRun] = [:]
     @ObservationIgnored var pulseStarting: Set<UUID> = []
+    /// The deletions Orbs asked for in the chat and the person has not answered ("requester|target", `askDeletionLater`).
+    @ObservationIgnored var askedDeletions: Set<String> = []
     /// The clock the pulse's budget counts the day by (tests put their own).
     @ObservationIgnored var pulseNow: () -> Date = { .now }
     /// Routines that came due while their Orb was busy; each runs when the Orb is free. One entry per routine.

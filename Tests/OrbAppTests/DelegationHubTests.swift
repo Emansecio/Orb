@@ -2601,11 +2601,20 @@ private actor Names {
 
 @Suite @MainActor struct GroupEditTests {
     /// One `group_edit` through the hub, as the tool sends it after the user's card (`confirmed`); a refusal comes back as its text.
+    /// `edit_group_plan` answers its card's text (`ConfirmedEdit`), "" when the edit needs nobody.
     private func edit(_ team: Team, _ fields: [String: String], confirmed: Bool = true, action: String = "edit_group") async -> String {
         var arguments = fields.mapValues(JSONValue.string)
-        arguments["action"] = .string(action)
-        if confirmed { arguments["confirmed"] = .bool(true) }
-        do { return try await team.model.delegation.handleTool(.object(arguments), orb: team.atlas.id) } catch {
+        do {
+            if confirmed {
+                // As the tool does: the ids the check named go back with the yes.
+                arguments["action"] = .string("edit_group_plan")
+                ConfirmedEdit(try await team.model.delegation.handleTool(.object(arguments), orb: team.atlas.id)).bind(&arguments)
+                arguments["confirmed"] = .bool(true)
+            }
+            arguments["action"] = .string(action)
+            let text = try await team.model.delegation.handleTool(.object(arguments), orb: team.atlas.id)
+            return action == "edit_group_plan" ? ConfirmedEdit(text).confirmation ?? "" : text
+        } catch {
             return (error as? ToolError)?.message ?? "\(error)"
         }
     }
@@ -2942,5 +2951,152 @@ private actor Names {
         let allowed = await play(request(), answer: .once)
         #expect(allowed.cards.count == 1 && allowed.result == "Revisor was deleted.")
         #expect(team.model.bot(team.revisor.id) == nil)
+    }
+
+    // MARK: confirmation bound to the target, and asks left in the chat
+
+    @Test func switchingToNoQuestionsDoesNotAnswerTheDeletionCard() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let group = newGroup(team)
+        let engine = AgentEngine()
+        let request = turn(team)
+        var answeredByMode: [UUID] = []
+        for await event in engine.run(request) {
+            if case .approval(let card) = event {
+                answeredByMode = await engine.gate.applyModeChange(to: .bypass, for: request.bot.id).map(\.approvalID)
+                #expect(await engine.gate.openIDs(for: request.bot.id) == [card.id])
+                await engine.gate.resolve(approvalID: card.id, decision: .deny)
+            }
+        }
+        #expect(answeredByMode.isEmpty)
+        #expect(team.model.group(group.id) != nil)
+    }
+
+    @Test func aRenameBetweenTheCardAndTheYesIsRefused() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let model = team.model
+        let first = newGroup(team)
+        var arguments: [String: JSONValue] = ["group": .string("Lançamento"), "edit": .string("delete"), "action": .string("edit_group_plan")]
+        let plan = ConfirmedEdit(try await model.delegation.handleTool(.object(arguments), orb: team.atlas.id))
+        #expect(plan.group == first.id.uuidString && plan.confirmation?.contains("quer apagar o grupo") == true)
+        // Meanwhile the name moves to another group.
+        model.renameGroup(first.id, to: "Antigo")
+        let second = try #require(model.createGroup(name: "Lançamento", members: [team.atlas.id, team.revisor.id]))
+        plan.bind(&arguments)
+        arguments["confirmed"] = .bool(true)
+        arguments["action"] = .string("edit_group")
+        let error = try #require(await #expect(throws: ToolError.self) {
+            _ = try await model.delegation.handleTool(.object(arguments), orb: team.atlas.id)
+        })
+        #expect(error.message.hasPrefix("O grupo ou o Orb mudou desde que o usuário confirmou"))
+        #expect(model.group(first.id) != nil && model.group(second.id) != nil)
+
+        // The same for an Orb: the yes was for this Revisor, not for the one who took the name.
+        var delete: [String: JSONValue] = ["name": .string("Revisor"), "action": .string("delete_orb_plan")]
+        let orbPlan = ConfirmedEdit(try await model.delegation.handleTool(.object(delete), orb: team.atlas.id))
+        #expect(orbPlan.orb == team.revisor.id.uuidString)
+        model.update(team.revisor.id) { $0.name = "Revisor Velho" }
+        model.update(team.pesquisador.id) { $0.name = "Revisor" }
+        orbPlan.bind(&delete)
+        delete["confirmed"] = .bool(true)
+        delete["action"] = .string("delete_orb")
+        await #expect(throws: ToolError.self) { _ = try await model.delegation.handleTool(.object(delete), orb: team.atlas.id) }
+        #expect(model.bot(team.revisor.id) != nil && model.bot(team.pesquisador.id) != nil)
+    }
+
+    @Test func theDeletionCardNamesTheGroupsThatEnd() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        _ = newGroup(team, members: [team.atlas, team.revisor])
+        let arguments: JSONValue = .object(["name": .string("Revisor"), "action": .string("delete_orb_plan")])
+        let plan = ConfirmedEdit(try await team.model.delegation.handleTool(arguments, orb: team.atlas.id))
+        #expect(plan.confirmation?.hasSuffix("O grupo “Lançamento” acaba.") == true)
+    }
+
+    /// The tools in a turn nobody watches (a routine, the pulse): no card.
+    private func unattendedContext(_ team: Team) -> ToolContext {
+        var context = deleteContext(team, confirm: nil)
+        context.unattended = true
+        return context
+    }
+
+    private func deletionLines(_ team: Team, _ kind: OrbEvent.Kind = .deletionAsked) -> [(item: UUID, event: OrbEvent)] {
+        let items = team.model.session(team.atlas.id).conversation?.items ?? []
+        return items.compactMap { item in
+            if case .event(let event) = item.kind, event.kind == kind { (item.id, event) } else { nil }
+        }
+    }
+
+    @Test func anUnattendedTurnAsksInTheChatOnceAndDoesNotWait() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let model = team.model
+        let group = newGroup(team)
+        let context = unattendedContext(team)
+        let asked = try await OrbDeleteTool().run(deleteCall("Revisor"), context: context)
+        #expect(asked.hasPrefix("Asked the user in your chat"))
+        #expect(try await OrbDeleteTool().run(deleteCall("Revisor"), context: context).hasPrefix("The user was already asked"))
+        let groupAsk = try await GroupEditTool().run(.object(["group": .string("Lançamento"), "edit": .string("delete")]), context: context)
+        #expect(groupAsk.hasPrefix("Asked the user in your chat"))
+        // A change that needs nobody is still done at once.
+        #expect(try await GroupEditTool().run(.object(["group": .string("Lançamento"), "edit": .string("objective"),
+                                                         "objective": .string("Lançar")]), context: context).hasPrefix("Objetivo do grupo"))
+        let lines = deletionLines(team)
+        #expect(lines.count == 2 && lines.allSatisfy { $0.event.outcome == nil })
+        #expect(lines[0].event.sentence == "Atlas pede para apagar o Revisor")
+        #expect(lines[1].event.sentence == "Atlas pede para apagar o grupo “Lançamento”")
+        #expect(model.bot(team.revisor.id) != nil && model.group(group.id) != nil)
+        #expect(lines.allSatisfy { model.canAnswerDeletion($0.event) })
+    }
+
+    @Test func keepAndDeleteAnswerTheLineAndTheOrbHearsIt() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let model = team.model
+        let group = newGroup(team)
+        let context = unattendedContext(team)
+        _ = try await OrbDeleteTool().run(deleteCall("Revisor"), context: context)
+        _ = try await GroupEditTool().run(.object(["group": .string("Lançamento"), "edit": .string("delete")]), context: context)
+        let lines = deletionLines(team)
+        try #require(lines.count == 2)
+
+        model.answerDeletion(lines[0].event, item: lines[0].item, of: team.atlas.id, accept: false)
+        model.answerDeletion(lines[1].event, item: lines[1].item, of: team.atlas.id, accept: true)
+        #expect(model.bot(team.revisor.id) != nil && model.group(group.id) == nil)
+        #expect(deletionLines(team).map(\.event.outcome) == [.failed, .finished])
+        #expect(deletionLines(team).allSatisfy { !model.canAnswerDeletion($0.event) })
+        // A second click on an answered line does nothing.
+        model.answerDeletion(lines[0].event, item: lines[0].item, of: team.atlas.id, accept: true)
+        #expect(model.bot(team.revisor.id) != nil)
+
+        let answers = deletionLines(team, .deletionAnswered)
+        #expect(answers.map(\.event.sentence) == ["Você não deixou Atlas apagar o Revisor", "Você apagou o grupo “Lançamento”, como Atlas pediu"])
+        // The next turn of the chat is told, so the Orb does not ask again.
+        let items = model.session(team.atlas.id).conversation?.items ?? []
+        let told = SinceLastTurn.pending(in: items, since: nil).compactMap { source -> String? in
+            if case .decision(let event) = source { SinceLastTurn.decision(event) } else { nil }
+        }
+        #expect(told.count == 2 && told[0].contains("said no") && told[1].contains("said yes"))
+        // Answered, the same ask may be written again.
+        #expect(try await OrbDeleteTool().run(deleteCall("Revisor"), context: context).hasPrefix("Asked the user in your chat"))
+    }
+
+    @Test func aLineNoLongerAppliesAfterARenameOrADeletion() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let model = team.model
+        let context = unattendedContext(team)
+        _ = try await OrbDeleteTool().run(deleteCall("Revisor"), context: context)
+        let line = try #require(deletionLines(team).first)
+        // Another Orb takes the name: the line is not about it, and the renamed one is not what the line names.
+        model.update(team.revisor.id) { $0.name = "Revisor Velho" }
+        model.update(team.pesquisador.id) { $0.name = "Revisor" }
+        #expect(!model.canAnswerDeletion(line.event))
+        model.answerDeletion(line.event, item: line.item, of: team.atlas.id, accept: true)
+        #expect(model.bot(team.revisor.id) != nil && model.bot(team.pesquisador.id) != nil)
+        #expect(deletionLines(team).first?.event.outcome == .attention)
+        #expect(deletionLines(team, .deletionAnswered).first?.event.sentence == "O pedido de Atlas para apagar o Revisor não vale mais")
     }
 }

@@ -5,14 +5,25 @@ import Foundation
 struct OrbEvent: Codable, Equatable, Sendable {
     enum Kind: String, Codable, Sendable {
         case orbCreated, joinedGroup, leftGroup, groupCreated, routineCreated, renamed
-        case orchestratorChanged, chainStopped, groupRunDone, groupStopped, delegationReceived, routineRun, tellFailed, groupWorked, planDone, pulseRan, pulseStopped, unknown
+        case orchestratorChanged, chainStopped, groupRunDone, groupStopped, delegationReceived, routineRun, tellFailed, groupWorked, planDone, pulseRan, pulseStopped
+        /// An Orb asked, in a turn nobody watched, to delete an Orb or a group (`DeletionAsk`): the line offers Apagar and
+        /// Manter; `outcome` is set once the person answered (finished: deleted; failed: kept; attention: it no longer applied).
+        case deletionAsked
+        /// The person answered a `deletionAsked`: the Orb that asked is told in its next turn.
+        case deletionAnswered
+        case unknown
 
         /// A kind from a newer version reads as `unknown`.
         init(from decoder: Decoder) throws { self = try decoder.rawValue(Self.self, fallback: .unknown) }
     }
 
     /// How a routine's run ended (`routineRun`): an ordinary run stays gray, the others are marked.
-    enum Outcome: String, Codable, Sendable { case finished, failed, attention, goalReached }
+    enum Outcome: String, Codable, Sendable {
+        case finished, failed, attention, goalReached
+
+        /// One from a newer version reads as finished instead of losing the line.
+        init(from decoder: Decoder) throws { self = try decoder.rawValue(Self.self, fallback: .finished) }
+    }
 
     /// The `detail` of a `groupStopped` the pulse's daily budget caused; without it the person stopped the group.
     static let budgetStop = "budget"
@@ -92,8 +103,41 @@ struct OrbEvent: Codable, Equatable, Sendable {
         case .pulseStopped:
             let budget = Int(detail).map { " (" + GroupUsageText.tokens($0) + " por dia)" } ?? ""
             return "O pulso parou: o teto diário de tokens\(budget) foi atingido"
+        case .deletionAsked:
+            let how = switch outcome {
+            case .finished: " · feito"
+            case .failed: " · mantido"
+            case .attention: " · não vale mais"
+            case .goalReached, nil: ""
+            }
+            return "\(actorName) pede para \(deletionWhat)" + how
+        case .deletionAnswered:
+            switch outcome {
+            case .finished: return "Você \(deletionDone), como \(actorName) pediu"
+            case .attention: return "O pedido de \(actorName) para \(deletionWhat) não vale mais"
+            default: return "Você não deixou \(actorName) \(deletionWhat)"
+            }
         case .unknown:
             return detail
+        }
+    }
+
+    /// "apagar o Revisor", "apagar o grupo “Vendas”", "tirar o Revisor do grupo “Vendas”".
+    private var deletionWhat: String {
+        let group = "o grupo “\(detail ?? "")”"
+        switch (subject, groupID) {
+        case (let orb?, _?): return "tirar \(PortugueseArticle.article(for: orb.name)) \(orb.name) do grupo “\(detail ?? "")”"
+        case (let orb?, nil): return "apagar \(PortugueseArticle.article(for: orb.name)) \(orb.name)"
+        default: return "apagar " + group
+        }
+    }
+
+    /// "apagou o Revisor", "apagou o grupo “Vendas”", "tirou o Revisor do grupo “Vendas”".
+    private var deletionDone: String {
+        switch (subject, groupID) {
+        case (let orb?, _?): "tirou \(PortugueseArticle.article(for: orb.name)) \(orb.name) do grupo “\(detail ?? "")”"
+        case (let orb?, nil): "apagou \(PortugueseArticle.article(for: orb.name)) \(orb.name)"
+        default: "apagou o grupo “\(detail ?? "")”"
         }
     }
 

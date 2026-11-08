@@ -67,6 +67,8 @@ extension AppModel {
                 if let work = event.context, !work.isEmpty { entries.append(.group(name: event.detail ?? "", work: work)) }
             case .notice(let message):
                 if bot(message.from.id) != nil { entries.append(.notice(from: message.from.name, text: message.text)) }
+            case .decision(let event):
+                if let text = SinceLastTurn.decision(event) { entries.append(.decision(text)) }
             }
         }
         return entries

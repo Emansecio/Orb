@@ -13,13 +13,15 @@ import SwiftUI
 /// - `sidebar-talking`: the sidebar while Atlas talks with Pesquisador: the rings and the phrases of both sides.
 /// - `delegation-group`: Atlas creates the group Lançamento, asks it from its chat and gets the group's answer, and a notice
 ///   from the Revisor arrives.
+/// - `delegation-deletion`: deletions Atlas asked for in turns nobody watched: two waiting (Apagar and Manter), one done,
+///   one kept, each with the line that tells Atlas.
 @MainActor
 enum DelegationSnapshots {
     static func view(_ screen: String, model: AppModel) -> AnyView? {
         guard let atlas = model.bots.first else { return nil }
         switch screen {
         case "events", "events-folded", "delegation-thread", "delegation-waiting", "delegation-folded", "delegation-exchange",
-             "sidebar-talking", "delegation-group":
+             "sidebar-talking", "delegation-group", "delegation-deletion":
             break
         default:
             return nil
@@ -42,6 +44,10 @@ enum DelegationSnapshots {
                                  orchestratorID: team.researcher.id)
             model.groups = [group]
             return chat(model, atlas, groupLines(team, group: group.id))
+        case "delegation-deletion":
+            let group = OrbGroup(name: "Vendas", memberIDs: [atlas.id, team.lia.id], orchestratorID: atlas.id)
+            model.groups = [group]
+            return chat(model, atlas, deletionLines(team, group: group.id))
         case "delegation-folded":
             return AnyView(foldedPreview(team))
         case "delegation-exchange":
@@ -113,6 +119,28 @@ enum DelegationSnapshots {
             say("O grupo respondeu: o TickTick é o mais barato no plano anual."),
             line(.received, .tell, from: OrbRef(team.reviewer), to: OrbRef(team.atlas), "O Things mudou o preço ontem.",
                  fromChat: nil),
+        ]
+    }
+
+    /// Atlas's chat after routine runs that wanted to delete: two asks waiting (Apagar and Manter), one done, one kept.
+    private static func deletionLines(_ team: Team, group: UUID) -> [TranscriptItem] {
+        let card = "Atlas quer apagar o Revisor. Motivo: faz o mesmo que o Pesquisador. A conversa, a memória e as rotinas dele vão embora."
+        func ask(_ ask: DeletionAsk, _ outcome: OrbEvent.Outcome? = nil) -> OrbEvent {
+            var event = ask.event(by: OrbRef(team.atlas), text: card)
+            event.outcome = outcome
+            return event
+        }
+        func answer(_ asked: OrbEvent) -> OrbEvent { var line = asked; line.kind = .deletionAnswered; return line }
+        let gone = OrbRef(id: UUID(), name: "Tradutor"), archive = UUID()
+        let done = ask(.orb(gone), .finished), keptGroup = ask(.group(id: archive, name: "Arquivo"), .failed)
+        return [
+            TranscriptItem(.user(text: "Arruma o time quando der", attachments: [])),
+            TranscriptItem(.event(ask(.orb(OrbRef(team.reviewer))))),
+            TranscriptItem(.event(ask(.removeMember(OrbRef(team.lia), groupID: group, groupName: "Vendas")))),
+            TranscriptItem(.event(done)),
+            TranscriptItem(.event(answer(done))),
+            TranscriptItem(.event(keptGroup)),
+            TranscriptItem(.event(answer(keptGroup))),
         ]
     }
 

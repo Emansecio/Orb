@@ -52,7 +52,7 @@ extension ApprovalGate {
     /// and this waits for "Pronto" (true) or "Cancelar" and Parar (false). A change of permission mode never answers it.
     func handoff(page: String, botName: String, botID: UUID, show: (ApprovalRequest) -> Void) async -> Bool {
         let card = ApprovalRequest.handoff(botName: botName, page: page)
-        open(card.id, botID: botID, alwaysAsks: true, isHandoff: true)
+        open(card.id, botID: botID, alwaysAsks: true, onlyPerson: true)
         show(card)
         return await wait(for: card.id).decision != .deny
     }
@@ -63,7 +63,7 @@ extension ApprovalGate {
     /// skipped the question or pressed Parar. Like a hand-off, a change of permission mode never answers it.
     func ask(_ question: OrbQuestion, botName: String, botID: UUID, show: (ApprovalRequest) -> Void) async -> String? {
         let card = ApprovalRequest.question(question, botName: botName)
-        open(card.id, botID: botID, alwaysAsks: true, isHandoff: true)
+        open(card.id, botID: botID, alwaysAsks: true, onlyPerson: true)
         show(card)
         let answer = await wait(for: card.id)
         return answer.decision == .deny ? nil : answer.reply
@@ -78,7 +78,7 @@ extension ApprovalGate {
                        show: (ApprovalRequest) -> Void) async -> AccessOutcome {
         let card = ApprovalRequest(toolName: AccessTool.name, title: "\(botName) precisa de acesso", command: asked.items.joined(separator: ", "),
                                    reason: asked.reason, access: asked)
-        open(card.id, botID: botID, alwaysAsks: true, isHandoff: true)
+        open(card.id, botID: botID, alwaysAsks: true, onlyPerson: true)
         show(card)
         let answer = await wait(for: card.id)
         guard answer.decision != .deny, !Task.isCancelled else { return .declined }
@@ -97,7 +97,7 @@ extension ApprovalGate {
                  show: (ApprovalRequest) -> Void) async -> (card: ApprovalRequest, answer: ApprovalAnswer) {
         let card = ApprovalRequest(toolName: OrbProposeTool.name, title: "\(botName) quer criar um Orb", command: proposal.name,
                                    reason: proposal.reason ?? "", proposal: proposal)
-        open(card.id, botID: botID, alwaysAsks: true, isHandoff: true)
+        open(card.id, botID: botID, alwaysAsks: true, onlyPerson: true)
         show(card)
         return (card, await wait(for: card.id))
     }
@@ -106,7 +106,8 @@ extension ApprovalGate {
     /// mode is. False on "Negar" or Parar. It has no rules to grant: "Sempre" makes no sense for a deletion.
     func confirm(toolName: String, title: String, detail: String, botID: UUID, show: (ApprovalRequest) -> Void) async -> Bool {
         let card = ApprovalRequest(toolName: toolName, title: title, command: detail, reason: "", isDangerous: true)
-        open(card.id, botID: botID, alwaysAsks: true)
+        // Only the person's click answers it: "Sem pedir permissão" must not delete an Orb or a group by itself.
+        open(card.id, botID: botID, alwaysAsks: true, onlyPerson: true)
         show(card)
         let answer = await wait(for: card.id)
         return answer.decision != .deny && answer.decision != .review && !Task.isCancelled
@@ -131,8 +132,9 @@ actor ApprovalGate {
         var botID: UUID
         /// Still needs the user's eyes whatever the mode (destructive, or changes the Orb's instructions).
         var alwaysAsks: Bool
-        /// The Orb waits for the person to finish something in the browser (not a permission): no mode answers it.
-        var isHandoff = false
+        /// Only the person answers it, never a change of mode: a hand-off (finishing something in the browser), a question, an
+        /// access or creation card, a deletion's confirmation.
+        var onlyPerson = false
         var answer: ApprovalAnswer?
         var continuation: CheckedContinuation<ApprovalAnswer, Never>?
     }
@@ -140,8 +142,8 @@ actor ApprovalGate {
     private var entries: [UUID: Entry] = [:]
 
     /// Registers a card before it is shown, so an answer can never get ahead of the wait.
-    func open(_ approvalID: UUID, botID: UUID, alwaysAsks: Bool = false, isHandoff: Bool = false) {
-        entries[approvalID] = Entry(botID: botID, alwaysAsks: alwaysAsks, isHandoff: isHandoff)
+    func open(_ approvalID: UUID, botID: UUID, alwaysAsks: Bool = false, onlyPerson: Bool = false) {
+        entries[approvalID] = Entry(botID: botID, alwaysAsks: alwaysAsks, onlyPerson: onlyPerson)
     }
 
     /// Suspends until the card is answered. A cancelled task (the user pressed Parar) leaves as a denial.
@@ -193,8 +195,8 @@ actor ApprovalGate {
     func applyModeChange(to mode: PermissionMode, for botID: UUID) -> [(approvalID: UUID, decision: ApprovalDecision)] {
         var answered: [(UUID, ApprovalDecision)] = []
         for id in openIDs(for: botID) {
-            // A hand-off is not a permission: only the person answers it (or Parar, which cancels it).
-            guard let entry = entries[id], !entry.isHandoff else { continue }
+            // A hand-off, a question or a deletion is not a permission: only the person answers it (or Parar, which cancels it).
+            guard let entry = entries[id], !entry.onlyPerson else { continue }
             switch mode {
             case .bypass: answered.append((id, .once))
             case .auto where !entry.alwaysAsks: answered.append((id, .once))

@@ -1059,13 +1059,23 @@ final class DelegationHub: DelegationService {
         case "create_group":
             do { return try createGroup(arguments, by: botID) } catch let refusal as DelegationRefusal { throw refusal.toolError }
         case "edit_group_plan":
-            // For the tool: what the user must confirm first, "" when the edit needs nobody.
-            do { return try planGroupEdit(arguments, by: botID).confirmation ?? "" } catch let refusal as DelegationRefusal { throw refusal.toolError }
+            // For the tool: what the user must confirm first (none when the edit needs nobody) and the ids it is about.
+            do {
+                let plan = try planGroupEdit(arguments, by: botID)
+                return ConfirmedEdit.answer(confirmation: plan.confirmation, group: plan.group.id,
+                                            orb: plan.confirmation == nil ? nil : plan.orb?.id)
+            } catch let refusal as DelegationRefusal { throw refusal.toolError }
+        case "edit_group_later":
+            do { return try askGroupEditLater(arguments, by: botID) } catch let refusal as DelegationRefusal { throw refusal.toolError }
         case "edit_group":
             do { return try await editGroup(arguments, by: botID) } catch let refusal as DelegationRefusal { throw refusal.toolError }
         case "delete_orb_plan":
-            // For the tool: the text of the user's card.
-            return try planOrbDelete(arguments, by: botID).confirmation
+            // For the tool: the text of the user's card and the Orb it is about.
+            let plan = try planOrbDelete(arguments, by: botID)
+            return ConfirmedEdit.answer(confirmation: plan.confirmation, group: nil, orb: plan.orb.id)
+        case "delete_orb_later":
+            let plan = try planOrbDelete(arguments, by: botID)
+            return model.askDeletionLater(.orb(plan.orb), by: botID, text: plan.confirmation)
         case "delete_orb":
             return try deleteOrb(arguments, by: botID)
         case "ask", "tell":
@@ -1454,7 +1464,14 @@ final class DelegationHub: DelegationService {
     private func editGroup(_ arguments: JSONValue, by botID: UUID) async throws -> String {
         guard let model else { throw DelegationRefusal.groupEdit(.unavailable) }
         let plan = try planGroupEdit(arguments, by: botID)
-        if plan.confirmation != nil, arguments["confirmed"]?.bool != true { throw DelegationRefusal.groupEdit(.needsConfirmation) }
+        if plan.confirmation != nil {
+            guard arguments["confirmed"]?.bool == true else { throw DelegationRefusal.groupEdit(.needsConfirmation) }
+            // The yes was for this group and this Orb: a rename since the card must not turn it into another deletion.
+            guard arguments["expect_group"]?.string == plan.group.id.uuidString,
+                  plan.orb.map({ arguments["expect_orb"]?.string == $0.id.uuidString }) ?? true else {
+                throw DelegationRefusal.groupEdit(.changed)
+            }
+        }
         let group = plan.group
         switch plan.edit {
         case .add:
@@ -1481,6 +1498,17 @@ final class DelegationHub: DelegationService {
         }
     }
 
+    /// `group_edit` in a turn nobody watches, for an edit the user must confirm: the ask goes to the chat (`askDeletionLater`).
+    private func askGroupEditLater(_ arguments: JSONValue, by botID: UUID) throws -> String {
+        guard let model else { throw DelegationRefusal.groupEdit(.unavailable) }
+        let plan = try planGroupEdit(arguments, by: botID)
+        guard let text = plan.confirmation else { throw DelegationRefusal.groupEdit(.unavailable) } // nothing to ask: edit_group does it
+        let ask: DeletionAsk = if plan.edit == .remove, let orb = plan.orb {
+            .removeMember(orb, groupID: plan.group.id, groupName: plan.group.name)
+        } else { .group(id: plan.group.id, name: plan.group.name) }
+        return model.askDeletionLater(ask, by: botID, text: text)
+    }
+
     /// Checks an `orb_delete` against the Orbs as they are now, changing nothing: the Orb to delete (by its whole name, never a
     /// prefix) and the text of the user's card. A refusal says what to do instead.
     private func planOrbDelete(_ arguments: JSONValue, by botID: UUID) throws -> (orb: OrbRef, confirmation: String) {
@@ -1502,8 +1530,12 @@ final class DelegationHub: DelegationService {
         let reason = String(MemoryText.flatten(MemorySanitizer.scrub(arguments["reason"]?.string ?? "")).prefix(200))
         let who = model.bot(botID)?.name ?? "Um Orb"
         let because = reason.isEmpty ? "" : " Motivo: \(reason)"
+        // The groups of two it is in end with it (`AppModel.leaveGroups`): the card says so.
+        let ending = model.groups.filter { $0.memberIDs.contains(target.id) && $0.memberIDs.count <= OrbGroup.memberLimits.lowerBound }
+            .map { "“\($0.name)”" }
+        let groupsEnd = ending.isEmpty ? "" : (ending.count == 1 ? " O grupo \(ending[0]) acaba." : " Os grupos \(Self.list(ending)) acabam.")
         return (OrbRef(target), "\(who) quer apagar \(PortugueseArticle.article(for: target.name)) \(target.name).\(because) "
-            + "A conversa, a memória e as rotinas dele vão embora, e ele sai dos grupos.")
+            + "A conversa, a memória e as rotinas dele vão embora, e ele sai dos grupos.\(groupsEnd)")
     }
 
     /// `orb_delete` once the user confirmed in the tool's card (`confirmed` is set by the tool alone).
@@ -1511,6 +1543,10 @@ final class DelegationHub: DelegationService {
         guard let model else { throw ToolError("The app is closing.") }
         let plan = try planOrbDelete(arguments, by: botID)
         guard arguments["confirmed"]?.bool == true else { throw ToolError("The user did not confirm. Nothing changed.") }
+        // The yes was for this Orb: another one that took the name since must not go.
+        guard arguments["expect_orb"]?.string == plan.orb.id.uuidString else {
+            throw ToolError("The Orb changed since the user confirmed: nothing was deleted. Check with orbs list and ask again.")
+        }
         model.deleteBot(plan.orb.id)
         return "\(plan.orb.name) was deleted."
     }

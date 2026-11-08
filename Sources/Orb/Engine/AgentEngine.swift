@@ -1073,7 +1073,8 @@ actor AgentEngine {
                     return await propose(proposal, creation: support, resuming: summary.title, request: request, out: out)
                 }
             }
-            if tool.spec.name == GroupEditTool.name || tool.spec.name == OrbDeleteTool.name {
+            // A run nobody watches gets no card (it would hold the Orb a day): the tools ask in the chat instead (`*_later`).
+            if tool.spec.name == GroupEditTool.name || tool.spec.name == OrbDeleteTool.name, !request.unattended {
                 let toolName = tool.spec.name
                 context.confirm = { [self] title, detail in
                     let answered = await gate.confirm(toolName: toolName, title: title, detail: detail, botID: request.bot.id) { card in

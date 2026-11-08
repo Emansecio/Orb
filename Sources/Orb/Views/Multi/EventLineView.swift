@@ -8,6 +8,9 @@ struct EventLineView: View {
     let event: OrbEvent
     /// Centred in a group's thread, where notices sit centred among the bubbles; on the replies' left edge in an Orb's chat.
     var centered = false
+    /// The line's item and the Orb whose chat shows it: what a `deletionAsked` line's buttons answer.
+    var itemID: UUID?
+    var botID: UUID?
     @State private var showsExchange = false
     @State private var showsPlan = false
 
@@ -80,6 +83,25 @@ struct EventLineView: View {
                     .accessibilityLabel("Desfazer a criação de \(created.name)")
                     .accessibilityIdentifier("undo-orb-creation")
             }
+        } else if event.kind == .deletionAsked, !centered, let itemID, let botID, model.canAnswerDeletion(event) {
+            // An Orb asked to delete something in a turn nobody watched: only this click deletes it.
+            HStack(spacing: Spacing.s) {
+                line(opens: false)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("event-line")
+                    .help(event.note ?? "")
+                Button("Apagar", role: .destructive) { model.answerDeletion(event, item: itemID, of: botID, accept: true) }
+                    .buttonStyle(.link)
+                    .font(Typography.label)
+                    .help(event.note ?? "")
+                    .accessibilityLabel("Apagar, como pedido: \(event.sentence)")
+                    .accessibilityIdentifier("deletion-accept")
+                Button("Manter") { model.answerDeletion(event, item: itemID, of: botID, accept: false) }
+                    .buttonStyle(.link)
+                    .font(Typography.label)
+                    .accessibilityLabel("Manter e recusar o pedido: \(event.sentence)")
+                    .accessibilityIdentifier("deletion-keep")
+            }
         } else {
             line(opens: false)
                 .accessibilityElement(children: .combine)
@@ -131,6 +153,7 @@ struct EventLineView: View {
         case .planDone: "checklist"
         case .pulseRan: "waveform.path.ecg"
         case .pulseStopped: "stop.circle"
+        case .deletionAsked, .deletionAnswered: "trash"
         case .unknown: "info.circle"
         }
     }

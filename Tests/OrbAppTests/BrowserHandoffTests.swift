@@ -203,7 +203,7 @@ struct BrowserHandoffEngineTests {
         let model = model()
         let botID = model.bots[0].id
         let handoff = card()
-        await model.gate.open(handoff.id, botID: botID, alwaysAsks: true, isHandoff: true)
+        await model.gate.open(handoff.id, botID: botID, alwaysAsks: true, onlyPerson: true)
         model.apply(.approval(handoff), to: botID)
         #expect(model.needsYou(botID) && model.waitingIDs.contains(botID))
         #expect(model.pendingApprovals.map(\.request.id) == [handoff.id] && model.pendingApprovals.first?.request.isHandoff == true)
@@ -215,7 +215,7 @@ struct BrowserHandoffEngineTests {
         let botID = model.bots[0].id
         let done = card(), cancelled = card()
         for card in [done, cancelled] {
-            await model.gate.open(card.id, botID: botID, alwaysAsks: true, isHandoff: true)
+            await model.gate.open(card.id, botID: botID, alwaysAsks: true, onlyPerson: true)
             model.apply(.approval(card), to: botID)
         }
         let waitingForDone = Task { await model.gate.wait(for: done.id) }

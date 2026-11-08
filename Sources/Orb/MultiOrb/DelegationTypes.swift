@@ -69,6 +69,8 @@ enum DelegationRefusal: Error, Equatable, Sendable {
         case nameTaken(String)
         /// Deleting, or taking out the member that dissolves the group, runs only after the user confirms.
         case needsConfirmation
+        /// The group or the Orb behind the names changed between the user's card and the edit.
+        case changed
         case objectiveRefused
         case unavailable
     }
@@ -201,6 +203,8 @@ enum DelegationRefusal: Error, Equatable, Sendable {
                 "Já existe um Orb ou um grupo chamado “\(name)”: escolha outro nome."
             case .needsConfirmation:
                 "Essa mudança só vale depois que o usuário confirma, e ele não confirmou. Nada mudou."
+            case .changed:
+                "O grupo ou o Orb mudou desde que o usuário confirmou (outro nome, outro membro): nada mudou. Confira com orbs list e peça de novo."
             case .objectiveRefused:
                 "Não consegui gravar o objetivo (grande demais ou a pasta do grupo não aceita escrita): encurte o texto ou diga isso ao usuário."
             case .unavailable:

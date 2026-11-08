@@ -80,7 +80,7 @@ struct TranscriptRow: View, Equatable {
             if event.kind == .routineRun {
                 RoutineRunMessage(event: event, date: item.date).alignedWithReplyText()
             } else {
-                EventLineView(event: event).alignedWithReplyText()
+                EventLineView(event: event, itemID: item.id, botID: botID).alignedWithReplyText()
             }
         case .orbMessage(let message):
             // A card: from the gutter, as wide as the others (`cardWidth`), not narrowed by the text's right margin.
