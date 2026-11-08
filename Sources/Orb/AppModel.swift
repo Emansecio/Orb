@@ -961,9 +961,20 @@ final class AppModel {
     func removeProvider(_ kind: ProviderKind) {
         signOut(kind)
         providers.removeAll { $0.kind == kind }
-        if ModelRef(defaultModel)?.provider == kind { defaultModel = "" }
+        if ModelRef(defaultModel)?.provider == kind {
+            defaultModel = ""
+            adoptDefaultModelFromRemaining()
+        }
         // Orbs that used one of its models go back to the default model instead of asking to connect one.
         for id in Self.bots(using: kind, in: bots) { update(id) { $0.model = "" } }
+    }
+
+    /// When the default model cannot be used any more (its provider was removed or turned off), the first model of another
+    /// provider that is on and usable takes its place, so the Orbs keep answering instead of asking to connect one.
+    /// Providers the user switched off stay off.
+    @discardableResult
+    func adoptDefaultModelFromRemaining() -> Bool {
+        providers.contains { adoptDefaultModel(from: $0.kind, turningOn: false) }
     }
 
     /// The Orbs whose own model is one of `kind`'s.

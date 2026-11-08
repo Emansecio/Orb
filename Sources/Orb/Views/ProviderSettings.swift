@@ -221,6 +221,7 @@ private struct ProviderRow: View {
         Menu {
             Button(account.isEnabled ? "Desativar este provedor" : "Usar este provedor") {
                 model.updateProvider(kind) { $0.isEnabled.toggle() }
+                model.adoptDefaultModelFromRemaining() // the default may have been this provider's
             }
             // Destruction lives in the row's menu, in neutral text: the red is for the confirmation only.
             Divider()

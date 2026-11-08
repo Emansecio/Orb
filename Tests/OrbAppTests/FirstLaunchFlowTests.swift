@@ -169,6 +169,28 @@ import Testing
         #expect(model.defaultModel == "ollama/qwen3")
     }
 
+    @Test @MainActor func removingOrSwitchingOffTheDefaultsProviderPicksAnotherUsableOne() {
+        let model = makeModel()
+        model.providers = []
+        let list = [ProviderModel(id: "m", name: "m", format: .chat)]
+        for kind in [ProviderKind.ollama, .lmstudio] {
+            model.addProvider(kind)
+            model.updateProvider(kind) { $0.models = list }
+        }
+        model.defaultModel = "ollama/m"
+        model.updateProvider(.ollama) { $0.isEnabled = false }
+        #expect(model.adoptDefaultModelFromRemaining())
+        #expect(model.defaultModel == "lmstudio/m")
+        #expect(model.account(.ollama)?.isEnabled == false) // never switched back on
+        model.updateProvider(.ollama) { $0.isEnabled = true }
+        model.defaultModel = "lmstudio/m"
+        model.removeProvider(.lmstudio)
+        #expect(model.defaultModel == "ollama/m")
+        #expect(model.isProviderReady)
+        model.removeProvider(.ollama)
+        #expect(model.defaultModel.isEmpty)
+    }
+
     // MARK: Trying ChatGPT again
 
     /// A browser login that works and a model list that fails the first `failures` times.
