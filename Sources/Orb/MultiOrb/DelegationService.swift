@@ -18,8 +18,8 @@ protocol DelegationService: AnyObject {
     /// Sends a request or a notice; throws a `DelegationRefusal` and changes nothing when it cannot.
     func submit(from: UUID, to name: String, text: String, kind: OrbEnvelope.Kind, messageID: UUID,
                 groupID: UUID?) throws -> OrbEnvelope
-    /// Asks a member of a group for a turn.
-    func submitGroupTurn(member: UUID, text: String, chain: ChainContext, groupID: UUID, askedBy: UUID?) -> DelegationRequest
+    /// Asks a member of a group for a turn. `fromPerson`: the person wrote it (not the app resuming a run after a relaunch).
+    func submitGroupTurn(member: UUID, text: String, chain: ChainContext, groupID: UUID, askedBy: UUID?, fromPerson: Bool) -> DelegationRequest
     /// A member asks its group from its own chat, at the person's request: the orchestrator gets a turn whose final answer goes
     /// back to the asker's chat (`OrbEnvelope.fromChat`). `id` is the message id of the call.
     func submitGroupRequest(from asker: UUID, text: String, chain: ChainContext, groupID: UUID, orchestrator: UUID,

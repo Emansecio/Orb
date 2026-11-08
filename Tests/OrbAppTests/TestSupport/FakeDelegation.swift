@@ -41,7 +41,7 @@ final class FakeDelegationService: DelegationService {
         return try ask(from: from, to: target, text: text, parent: parent, kind: kind, messageID: messageID).envelope
     }
 
-    func submitGroupTurn(member: UUID, text: String, chain: ChainContext, groupID: UUID, askedBy: UUID?) -> DelegationRequest {
+    func submitGroupTurn(member: UUID, text: String, chain: ChainContext, groupID: UUID, askedBy: UUID?, fromPerson: Bool) -> DelegationRequest {
         let envelope = OrbEnvelope(chainID: chain.chainID, kind: .ask, from: ref(askedBy ?? member), to: ref(member), text: text,
                                    hop: chain.hop, path: chain.path, groupID: groupID)
         let request = DelegationRequest(envelope: envelope, state: failsGroupTurns ? .failed : .queued)

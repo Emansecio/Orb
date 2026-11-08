@@ -103,7 +103,7 @@ final class GroupHub: GroupTurnHooks {
             live.setRunState(.running)
             refreshLive(groupID)
         }
-        for member in targets { enqueue(member, text: text, shown: typed, images: images, in: groupID) }
+        for member in targets { enqueue(member, text: text, shown: typed, images: images, in: groupID, fromPerson: true) }
         return true
     }
 
@@ -153,13 +153,13 @@ final class GroupHub: GroupTurnHooks {
         session.append(.notice(notice))
         model.groupLive(groupID).setRunState(.running)
         refreshLive(groupID)
-        enqueue(group.orchestratorID, text: recovery, shown: recovery, images: [], in: groupID)
+        enqueue(group.orchestratorID, text: recovery, shown: recovery, images: [], in: groupID, fromPerson: false)
         return true
     }
 
     /// Asks `member` for a turn on behalf of the person. `shown` is the message as typed (empty for pictures alone): what the
     /// thread has of it, so the preface can leave it out.
-    private func enqueue(_ member: UUID, text: String, shown: String, images: [ImageAttachment], in groupID: UUID) {
+    private func enqueue(_ member: UUID, text: String, shown: String, images: [ImageAttachment], in groupID: UUID, fromPerson: Bool) {
         guard let model, let run = activeRun(groupID), model.group(groupID)?.memberIDs.contains(member) == true else { return }
         // A message right after another, before the member's turn for it began, goes with it: one turn reads both.
         if let joined = delegation.joinQueuedGroupTurn(member: member, chainID: run.id, text: text) {
@@ -168,7 +168,8 @@ final class GroupHub: GroupTurnHooks {
             return
         }
         let chain = ChainContext(chainID: run.id, hop: 1, path: [], groupID: groupID, serving: nil)
-        let request = delegation.submitGroupTurn(member: member, text: text, chain: chain, groupID: groupID, askedBy: nil)
+        let request = delegation.submitGroupTurn(member: member, text: text, chain: chain, groupID: groupID, askedBy: nil,
+                                                 fromPerson: fromPerson)
         switch request.state {
         case .failed, .cancelled:
             model.groupSession(groupID)?.append(.notice("\(name(of: member)) não pôde responder agora."))

@@ -216,17 +216,19 @@ final class DelegationHub: DelegationService {
     /// A turn of a member of a group: the group's runtime asks the hub for it so the target's queue, its own conversation and the
     /// limits are the same as for any request. `askedBy` nil: the person asked (nobody gets a reply).
     func submitGroupTurn(member: UUID, text: String, chain context: ChainContext, groupID: UUID,
-                         askedBy: UUID?) -> DelegationRequest {
-        queueGroupTurn(member: member, text: text, chain: context, groupID: groupID, askedBy: askedBy, id: UUID(), fromChat: false)
+                         askedBy: UUID?, fromPerson: Bool = true) -> DelegationRequest {
+        queueGroupTurn(member: member, text: text, chain: context, groupID: groupID, askedBy: askedBy, id: UUID(), fromChat: false,
+                       fromPerson: askedBy == nil && fromPerson)
     }
 
     func submitGroupRequest(from asker: UUID, text: String, chain context: ChainContext, groupID: UUID, orchestrator: UUID,
                             id: UUID) -> DelegationRequest {
-        queueGroupTurn(member: orchestrator, text: text, chain: context, groupID: groupID, askedBy: asker, id: id, fromChat: true)
+        queueGroupTurn(member: orchestrator, text: text, chain: context, groupID: groupID, askedBy: asker, id: id, fromChat: true,
+                       fromPerson: false)
     }
 
     private func queueGroupTurn(member: UUID, text: String, chain context: ChainContext, groupID: UUID, askedBy: UUID?, id: UUID,
-                                fromChat: Bool) -> DelegationRequest {
+                                fromChat: Bool, fromPerson: Bool) -> DelegationRequest {
         let from = askedBy.flatMap { model?.bot($0) } ?? model?.bot(member)
         let target = model?.bot(member)
         // From the asker's own chat there is no request it serves: the answer wakes that chat. An asker in a side run (a group's
@@ -246,7 +248,8 @@ final class DelegationHub: DelegationService {
         var chain = chainStates[context.chainID] ?? ChainState(origin: lineage.map { .pulse($0) } ?? .group(context.chainID),
                                                                originBot: askedBy ?? member, groupID: groupID)
         // The person wrote in a group the pulse set to work: from here the work is theirs, neither charged nor stopped by the budget.
-        if askedBy == nil, chain.origin.isPulse { chain.origin = .group(context.chainID) }
+        // Not the app resuming the pulse's run after a relaunch (`GroupHub.resume`): that stays the pulse's.
+        if fromPerson, chain.origin.isPulse { chain.origin = .group(context.chainID) }
         chain.touched = .now
         chainStates[context.chainID] = chain
         envelope.pulseRun = chain.origin.pulseRun
@@ -267,6 +270,11 @@ final class DelegationHub: DelegationService {
               request.envelope.chainID == chainID, request.envelope.groupID != nil, request.envelope.from.id == member,
               !request.envelope.fromChat else { return nil }
         requests[id]?.envelope.text = request.envelope.text + "\n\n" + text
+        // Only the person's messages join (`GroupHub.enqueue`): as in `queueGroupTurn`, the work becomes theirs.
+        if chainStates[chainID]?.origin.isPulse == true {
+            chainStates[chainID]?.origin = .group(chainID)
+            requests[id]?.envelope.pulseRun = nil
+        }
         return requests[id]
     }
 

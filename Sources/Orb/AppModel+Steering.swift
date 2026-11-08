@@ -315,9 +315,14 @@ extension AppModel {
     @discardableResult
     func queueOutsideComposer(_ text: String, to botID: UUID) -> Bool {
         let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard canSteer(botID), !typed.isEmpty else { return false }
-        enqueue(typed, files: [], pictures: [], delivery: .steer, to: botID)
+        guard canQueueOutsideComposer(botID), !typed.isEmpty else { return false }
+        enqueue(typed, files: [], pictures: [], delivery: canSteer(botID) ? .steer : .afterTask, to: botID)
         return true
+    }
+
+    /// The menu bar panel queues into the turn on your chat (`canSteer`), and behind the pulse's turn there, as the composer does.
+    func canQueueOutsideComposer(_ botID: UUID) -> Bool {
+        canSteer(botID) || (sessions[botID]?.turnTask != nil && sessions[botID]?.pulseInChat != nil)
     }
 
     private func enqueue(_ typed: String, files: [URL], pictures: [ImageAttachment], delivery: SteeringDelivery, to botID: UUID) {

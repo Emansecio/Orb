@@ -287,7 +287,7 @@ struct QuickAskView: View {
             note = QuickAskSend.checkingNote // what was typed stays
             return
         }
-        switch QuickAskSend.action(isWorking: model.isWorking(id), canSteer: model.canSteer(id), isReady: model.hasUsableModel(id) || model.isProviderReady,
+        switch QuickAskSend.action(isWorking: model.isWorking(id), canSteer: model.canQueueOutsideComposer(id), isReady: model.hasUsableModel(id) || model.isProviderReady,
                                    hasText: !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                                    orbHasModel: model.hasUsableModel(id)) {
         case .nothing: return

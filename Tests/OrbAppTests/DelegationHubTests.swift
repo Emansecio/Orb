@@ -3088,6 +3088,10 @@ private actor Names {
         model.askedDeletions = [:]
         #expect(try await OrbDeleteTool().run(deleteCall("Revisor"), context: context).hasPrefix("The user already chose to keep it"))
         #expect(deletionLines(team).count == 2, "no new line")
+        // Reopened with another conversation in front: the Manter is not in what is read, and still holds.
+        model.newChat(for: team.atlas.id)
+        model.askedDeletions = [:]
+        #expect(try await OrbDeleteTool().run(deleteCall("Revisor"), context: context).hasPrefix("The user already chose to keep it"))
     }
 
     @Test func takingOutAMemberNoLongerEndsTheGroupOnceAThirdCame() async throws {

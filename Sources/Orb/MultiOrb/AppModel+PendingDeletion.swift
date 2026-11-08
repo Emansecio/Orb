@@ -46,7 +46,7 @@ extension AppModel {
     func askDeletionLater(_ ask: DeletionAsk, by botID: UUID, text: String) -> String {
         guard let requester = bot(botID) else { return "This Orb no longer exists." }
         let key = botID.uuidString + "|" + ask.key
-        switch standingAnswer(ask, key: key, of: botID) {
+        switch isKept(key) && stillApplies(ask) ? .kept : standingAnswer(ask, key: key, of: botID) {
         case .waiting:
             return "The user was already asked in your chat; nothing was deleted yet. Do not ask again: go on with the rest."
         case .kept:
@@ -63,6 +63,20 @@ extension AppModel {
 
     /// Where an ask stands with the person: a line still waits for the click, or they chose Manter.
     enum StandingAnswer { case waiting, kept }
+
+    /// The Manter answers, by "Orb id|ask key", kept across launches: the line may be in a conversation not read after a
+    /// relaunch, and the runs that ask would ask again. Each lasts `keptFor`; a reset clears them with the preferences.
+    static let keptDeletionsKey = "keptDeletions"
+    static let keptFor: TimeInterval = 30 * 86_400
+
+    private var keptDeletions: [String: Date] {
+        get { preferences.dictionary(forKey: Self.keptDeletionsKey) as? [String: Date] ?? [:] }
+        set { preferences.set(newValue.isEmpty ? nil : newValue, forKey: Self.keptDeletionsKey) }
+    }
+
+    private func isKept(_ key: String, now: Date = .now) -> Bool {
+        keptDeletions[key].map { now.timeIntervalSince($0) < Self.keptFor } ?? false
+    }
 
     /// The same ask waits for the person on a line they can still answer, or they answered Manter: the runs that ask (a
     /// routine's, the pulse's) are never handed the chat's lines, so without this every run would ask again. The line is
@@ -109,6 +123,8 @@ extension AppModel {
     func forgetAskedDeletions(of botID: UUID) {
         let id = botID.uuidString
         askedDeletions = askedDeletions.filter { !$0.key.contains(id) }
+        let kept = keptDeletions
+        if kept.keys.contains(where: { $0.contains(id) }) { keptDeletions = kept.filter { !$0.key.contains(id) } }
     }
 
     /// The line still waits for the person, and what it asks about is still there to delete.
@@ -177,6 +193,10 @@ extension AppModel {
         if let actor = event.actor {
             let key = actor.id.uuidString + "|" + ask.key
             askedDeletions[key] = outcome == .failed ? line.map { ($0.chat, $0.item, true) } : nil
+            let now = Date.now
+            var kept = keptDeletions.filter { now.timeIntervalSince($0.value) < Self.keptFor } // the old ones go as a new one comes
+            kept[key] = outcome == .failed ? now : nil
+            keptDeletions = kept
         }
     }
 }

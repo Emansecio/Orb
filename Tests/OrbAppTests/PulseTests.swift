@@ -1110,11 +1110,11 @@ private final class PulseWorld {
         #expect(quiet.events("Atlas").isEmpty)
     }
 
-    @Test func thePersonsMessageToAGroupThePulseStartedIsTheirs() {
+    @Test func thePersonsMessageToAGroupThePulseStartedIsTheirs() throws {
         let world = PulseWorld(names: ["Atlas", "Revisor"], demand: false, rule: Self.nothing)
         defer { world.cleanUp() }
         let model = world.model, hub = model.delegation
-        let group = try! #require(model.createGroup(name: "Time", members: [world.bot("Atlas").id, world.bot("Revisor").id]))
+        let group = try #require(model.createGroup(name: "Time", members: [world.bot("Atlas").id, world.bot("Revisor").id]))
         let chain = UUID()
         hub.seedChain(chain, pulseRun: UUID(), originBot: world.bot("Atlas").id, groupID: group.id)
         model.pulseState.tokensToday = model.pulseDailyTokens // the budget is spent
@@ -1313,5 +1313,37 @@ private final class PulseWorld {
         await gate.open()
         await world.settle()
         #expect(world.events("Atlas").filter { $0.kind == .pulseStopped }.count == 1)
+    }
+
+    @Test func aGroupRunOfThePulseResumedAfterARelaunchStaysThePulses() throws {
+        let world = PulseWorld(names: ["Atlas", "Revisor"], demand: false, rule: Self.nothing)
+        defer { world.cleanUp() }
+        let model = world.model, hub = model.delegation, run = UUID(), pulse = UUID()
+        let group = try #require(model.createGroup(name: "Time", members: [world.bot("Atlas").id, world.bot("Revisor").id]))
+        #expect(model.groupHub.resume(group.id, runID: run, request: "Revisar", recovery: "O app fechou; retome.", notice: "Retomando.",
+                                      pulseRun: pulse))
+        #expect(hub.pulseRun(ofChain: run) == pulse, "the app resumed it: nobody wrote")
+        #expect(hub.requests.values.contains { $0.envelope.chainID == run && $0.envelope.pulseRun == pulse })
+        hub.cancelChain(run, by: .user)
+    }
+
+    @Test func theMenuBarPanelQueuesBehindThePulseInTheChat() async throws {
+        let gate = TestGate()
+        let world = PulseWorld(names: ["Atlas", "Revisor"], demand: false) { who, user, _ in
+            if who == "Atlas", user.contains("Do painel") { return say("Olá.") }
+            await gate.wait()
+            return say("Retomei.")
+        }
+        defer { world.cleanUp() }
+        let model = world.model, atlas = world.bot("Atlas").id
+        world.plant("Atlas", tag: 0)
+        await world.startInterval()
+        await model.pulseTick(now: world.at(minutes: 61))
+        await waitUntil("the pulse to run in the chat") { model.sessions[atlas]?.pulseInChat != nil }
+        #expect(model.queueOutsideComposer("Do painel", to: atlas))
+        await gate.open()
+        await waitUntil("the panel's message to be answered") {
+            model.sessions[atlas]?.turnTask == nil && model.transcript(atlas).contains { if case .bot(let text, _) = $0.kind { text == "Olá." } else { false } }
+        }
     }
 }
