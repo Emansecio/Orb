@@ -333,6 +333,22 @@ final class PhoneClient: Sendable {
         #expect(phone.token != nil && !phone.canRenewAfterFailure && memory.box.value.writes == 1)
     }
 
+    @Test @MainActor func aCodeThatCannotBeSavedLeavesTheAccessRecoverable() async {
+        let memory = MemoryTokenVault()
+        let (_, _, phone) = setUp([], vault: memory.vault)
+        defer { phone.stop() }
+        phone.start(port: 0)
+        _ = await waitUntil("the phone access listening") { phone.status == .listening }
+        let old = phone.token
+        memory.box.withLock { $0.writeSucceeds = false }
+        phone.renewToken()
+        #expect(phone.status == .failed("Não consegui guardar o código de pareamento no Keychain."))
+        #expect(phone.canRenewAfterFailure && phone.token == old && phone.port == nil && !phone.isRetryPending)
+        phone.start(port: 0)
+        _ = await waitUntil("the phone access listening again") { phone.status == .listening }
+        #expect(phone.token == old)
+    }
+
     @Test @MainActor func aFailedServerComesBackByItself() async {
         let (_, _, phone) = setUp([], retryDelays: [.milliseconds(20)])
         defer { phone.stop() }

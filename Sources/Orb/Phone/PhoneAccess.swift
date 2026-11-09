@@ -128,7 +128,17 @@ final class PhoneAccess {
     func renewToken() {
         let fresh = PhonePairing.newToken()
         guard vault.write(fresh) else {
+            // The server goes away with the failure: the screen must not say "failed" over a server that still listens,
+            // and "Tentar de novo" only works with no server. `wantsServer` stays, so it brings the access back with the
+            // saved code.
+            retry?.cancel()
+            retry = nil
+            server?.stop()
+            server = nil
+            devices = []
+            syncAwake()
             status = .failed("Não consegui guardar o código de pareamento no Keychain.")
+            canRenewAfterFailure = true
             return
         }
         vault.markCreated()
