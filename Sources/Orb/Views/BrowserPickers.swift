@@ -129,11 +129,18 @@ struct BrowserPickerRows: View {
                 proxyRow(proxy)
                     .transition(.quiet)
             }
+            let withPerson = model.browserWithPerson.contains(botID)
+            if isOn, status?.isReady == true {
+                personBrowserRow(withPerson: withPerson)
+                    .transition(.quiet)
+            }
             if isOpen {
                 picker("Navegador", selection: modeBinding) {
                     ForEach(BrowserMode.allCases) { Text($0.label).tag($0) }
                 }
-                .help(Tip.browserMode)
+                // Another mode closes the browser: not the window the person is using.
+                .disabled(withPerson)
+                .help(withPerson ? Tip.browserModeWhilePerson : Tip.browserMode)
                 .padding(.leading, Self.indent)
                 .foldContent()
                 if let line = problemLine(BrowserPickerCopy.browserLine(status: status, orbName: bot.name)) {
@@ -275,6 +282,22 @@ struct BrowserPickerRows: View {
         .padding(.leading, Self.indent)
         .help("Escolhido pelo Orb. O navegador dele passa por esse proxy; remover o deixa direto")
         .accessibilityElement(children: .contain)
+    }
+
+    /// "Abrir o navegador": the Orb's browser in its window, for the person; while they have it, bringing it forward and handing
+    /// it back. The same quiet links as the proxy row's "Remover".
+    private func personBrowserRow(withPerson: Bool) -> some View {
+        HStack(spacing: 12) {
+            Button(withPerson ? "Mostrar o navegador" : "Abrir o navegador") { model.openBrowserForPerson(botID) }
+                .help(withPerson ? Tip.showPersonBrowser : Tip.openPersonBrowser)
+            if withPerson {
+                Button("Devolver ao Orb") { model.giveBrowserBack(botID) }
+                    .help(Tip.giveBackBrowser)
+            }
+        }
+        .buttonStyle(QuietTextStyle())
+        .font(Typography.small)
+        .padding(.leading, Self.indent)
     }
 
     private var modeBinding: Binding<BrowserMode> {

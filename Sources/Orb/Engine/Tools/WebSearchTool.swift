@@ -386,11 +386,15 @@ struct WebSearchTool: AgentTool {
                 provider = .duckduckgo
             }
         }
-        if provider == .google, !context.browser.drivesABrowser {
-            note = "Google is searched through the Orb's own browser, which is not available; this search went to DuckDuckGo."
+        // The person has the browser and nobody watches this run (a routine, the pulse): it searches by plain HTTP instead of waiting.
+        let personHasIt = context.botID.map { context.browser.hub?.control.refusesRun($0, unattended: context.unattended) == true } ?? false
+        if provider == .google, !context.browser.drivesABrowser || personHasIt {
+            note = personHasIt
+                ? "The person is using the Orb's browser now, which Google is searched through; this search went to DuckDuckGo."
+                : "Google is searched through the Orb's own browser, which is not available; this search went to DuckDuckGo."
             provider = .duckduckgo
         }
-        if context.browser.drivesABrowser, let hub = context.browser.hub, let botID = context.botID {
+        if !personHasIt, context.browser.drivesABrowser, let hub = context.browser.hub, let botID = context.botID {
             // The person has the browser (the live screen's window): the search waits for it back (it has no refs to go stale).
             _ = await hub.control.waitWhileHeld(botID)
             try Task.checkCancellation() // Stop ends the wait too: no browser is opened after it

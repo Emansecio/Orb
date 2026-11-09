@@ -20,8 +20,9 @@ enum BrowseSupport {
         guard context.browser.drivesABrowser, let hub = context.browser.hub, let botID = context.botID else {
             throw ToolError("The Orb's browser is not available here. Use web_fetch to read a page and web_search to search.")
         }
-        // The person has the browser (the live screen's window): wait for it back, then look again rather than act on refs
-        // of a page they may have changed.
+        if hub.control.refusesRun(botID, unattended: context.unattended) { throw ToolError(BrowserControl.inUseByPerson) }
+        // The person has the browser (the live screen's window, or its own window they opened): wait for it back, then look
+        // again rather than act on refs of a page they may have changed.
         let waited = await hub.control.waitWhileHeld(botID)
         // Stop ends the wait too: that is a cancellation, not a hand-back, and nothing may be opened after it.
         try Task.checkCancellation()

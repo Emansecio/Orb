@@ -350,6 +350,7 @@ struct ComposerView: View {
         return HStack(spacing: Spacing.hairline) {
             ComposerPlusMenu(botID: botID, attach: { isImporting = true }) { draft.wrappedValue = AppModel.draft(inserting: $0, into: draft.wrappedValue); isFocused = true }
             PermissionChip(botID: botID, compact: isCompact) { isFocused = true }
+            if model.browserWithPerson.contains(botID) { PersonBrowserChip(botID: botID, compact: isCompact) }
             Spacer(minLength: 8)
             ContextMeterChip(botID: botID, gauge: gauge, compact: isCompact)
             ModelChip(botID: botID, isOpen: $isModelOpen)

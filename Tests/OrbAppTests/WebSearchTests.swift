@@ -113,6 +113,20 @@ struct WebSearchToolTests {
 
     // MARK: Over HTTP
 
+    @Test func aRunNobodyWatchesSearchesByHTTPWhileThePersonHasTheBrowser() async throws {
+        // A routine or the pulse would otherwise wait for as long as the person browses in the Orb's window.
+        let setup = FakeBrowserSetup()
+        setup.hub.control.take(setup.botID)
+        var context = setup.context(provider: .google)
+        context.unattended = true
+        let tool = WebSearchTool(session: SearchStubProtocol.session(duck), retryDelay: .milliseconds(1))
+        let text = try await tool.run(.object(["query": .string("swift")]), context: context)
+        #expect(text.contains("The person is using the Orb's browser now") && text.contains("DuckDuckGo"))
+        #expect(hosts() == ["html.duckduckgo.com"])
+        #expect(setup.driver.calls.isEmpty)
+        #expect(setup.hub.control.waitingCount(setup.botID) == 0)
+    }
+
     @Test func theSimpleEngineAsksDuckDuckGosPlainPage() async throws {
         let text = try await search(["query": .string("swift concorrência"), "site": .string("https://docs.swift.org/x")], answer: duck)
         #expect(text.contains("DuckDuckGo") && text.contains("3 results") && text.contains("1. Exemplo A & mais") && text.contains("https://example.org/a?x=1&y=2"))

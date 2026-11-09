@@ -8,6 +8,12 @@ import os
 final class BrowserControl: Sendable {
     /// What a tool that waited answers the model.
     static let handedBack = "The person took over your browser and has handed it back. The page may have changed: take a new browse_snapshot before acting."
+    /// What a run nobody watches (a routine, the pulse) is told instead of waiting: the person may keep the browser for an hour.
+    static let inUseByPerson = "The person is using your browser right now, and this run does not wait for it. Skip the web step and say so in your report."
+
+    /// Whether a tool must not wait for the browser: the person has it and nobody watches this run, which would hang for as long as
+    /// they browse.
+    func refusesRun(_ botID: UUID, unattended: Bool) -> Bool { unattended && isHeld(botID) }
 
     private struct State {
         var held: Set<UUID> = []

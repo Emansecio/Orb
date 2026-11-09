@@ -63,8 +63,21 @@ enum BrowserProfileCache {
         guard let target = try? FileManager.default.destinationOfSymbolicLink(atPath: lock) else {
             return FileManager.default.fileExists(atPath: lock)
         }
-        guard let pid = target.split(separator: "-").last.flatMap({ pid_t($0) }), pid > 0 else { return true }
+        guard let pid = pid(inLock: target) else { return true }
         return kill(pid, 0) == 0 || errno == EPERM
+    }
+
+    /// The browser that has the profile open, by its lock: the process to bring forward when the person opens its window.
+    /// Nil when no browser has it, or the lock does not name a running one. Asks no browser anything.
+    static func holder(profile: URL) -> pid_t? {
+        guard let target = try? FileManager.default.destinationOfSymbolicLink(atPath: profile.appending(path: "SingletonLock").path),
+              let pid = pid(inLock: target), kill(pid, 0) == 0 || errno == EPERM else { return nil }
+        return pid
+    }
+
+    /// `<host>-<pid>`, as Chromium writes it (measured: "MacBook-Pro.local-3550" names the browser's own process).
+    private static func pid(inLock target: String) -> pid_t? {
+        target.split(separator: "-").last.flatMap { pid_t($0) }.flatMap { $0 > 0 ? $0 : nil }
     }
 
     /// Cleans when a week has passed since the last time and there is enough to remove; the day is noted either way. Never while

@@ -219,6 +219,8 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
 
     var config: AgentBrowserConfig { state.withLock { $0 } }
 
+    var isHeaded: Bool { config.headed }
+
     /// The longest a page load, or the first launch of the browser, is waited for.
     static let openTimeout = Duration.seconds(75)
     static let commandTimeout = Duration.seconds(45)
@@ -270,7 +272,10 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
         return data
     }
 
+    /// The browser is gone, by a `close` or on its own (⌘Q in its window, the idle timeout): the next launch is in the Orb's own
+    /// mode again, so a window the person had does not come back by itself (`setHeaded` sets it after this, for its own launch).
     private func markClosed() {
+        state.withLock { $0.headed = $0.visibleByDefault }
         if !closed.withLock({ $0 }) { browserGone() }
         closed.withLock { $0 = true }
         aliveUntil.withLock { $0 = nil }
@@ -626,7 +631,6 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
     }
 
     func close() async throws {
-        state.withLock { $0.headed = $0.visibleByDefault }
         markClosed()
         config.forgetFingerprint()
         do {

@@ -125,6 +125,9 @@ final class TabBook: @unchecked Sendable {
     /// The tab a conversation works in.
     func tab(for scope: String) -> String? { state.withLock { $0.tabs[scope]?.first } }
 
+    /// The conversation that called last: its tab is the browser's current one.
+    var currentScope: String? { state.withLock { $0.current } }
+
     /// Every tab a conversation has, the one it works in first.
     func tabs(of scope: String) -> [String] { state.withLock { $0.tabs[scope] ?? [] } }
 
@@ -417,13 +420,17 @@ final class BrowserSession: @unchecked Sendable {
 
     /// The pages of the other conversations, read before the browser starts over (`restoreTabs`). Inside `exclusive`.
     func pagesOfOtherConversations() async -> [(scope: String, url: String)] {
-        await tabs.pages(excluding: scope, driver: driver)
+        await tabs.pages(excluding: owner, driver: driver)
     }
+
+    /// The conversation whose page the browser reopens first when it starts over: this one, or, for the browser as a whole (the
+    /// person opening its window), the one that called last, whose tab is the current one.
+    private var owner: String? { scope ?? tabs.currentScope }
 
     /// The browser started over with this conversation's page in its first tab: the other conversations get theirs back. Inside
     /// `exclusive`.
     func restoreTabs(_ pages: [(scope: String, url: String)]) async {
-        await tabs.restore(pages, owner: scope, driver: driver)
+        await tabs.restore(pages, owner: owner, driver: driver)
     }
 
     /// Runs `relaunch` (`setHeaded`, which closes the browser and opens this conversation's page again) and gives the other
@@ -694,6 +701,63 @@ final class BrowserHub: Sendable {
 
     /// Whether the last page this Orb looked at looked sensitive; false when it has not looked at any. Asks the browser nothing.
     func pageLooksSensitive(botID: UUID) -> Bool { sensitivePages.withLock { $0.contains(botID) } }
+
+    // MARK: The person's own use
+
+    /// The person opens the Orb's browser for themself ("Abrir o navegador"), with no turn asking: the Orb's tools wait from now on
+    /// (`control`), and the browser shows its window. Not running: launched with the Orb's profile and a window. Running in the
+    /// background: launched again with a window, the pages of every conversation kept (they load again). Already in a window: as
+    /// it is. Returns the browser's process, to bring its window forward; nothing is held when it throws.
+    @discardableResult
+    func openForPerson(botID: UUID, mode: BrowserMode) async throws -> pid_t? {
+        control.take(botID)
+        do {
+            let session = try await session(botID: botID, mode: mode)
+            try await session.exclusive {
+                // `currentURL` is nil when no browser runs (it asks without starting one).
+                let running = (try? await session.driver.currentURL()) != nil
+                guard !(running && session.driver.isHeaded) else { return }
+                session.forgetPage()
+                _ = try await session.relaunchKeepingTabs { try await session.driver.setHeaded(true) }
+            }
+            session.setShowingWindow(true)
+            clearLabels(botID: botID)
+        } catch {
+            control.giveBack(botID)
+            throw error
+        }
+        return profileFolder(botID: botID).flatMap(BrowserProfileCache.holder)
+    }
+
+    /// Whether the window the person opened is still there: the browser holds its profile (read from the lock, which starts no
+    /// process) and has a tab. A browser that was quit is not asked anything: agent-browser would launch it again for the
+    /// question (measured on 0.39.1). The question to the browser also counts as use, so its idle timeout (half an hour) does not
+    /// close the window under the person (measured: a command every 9 s kept a 20 s timeout from closing it).
+    func personWindowIsOpen(botID: UUID) async -> Bool {
+        guard let session = existingSession(botID: botID), let profile = profileFolder(botID: botID),
+              BrowserProfileCache.holder(profile: profile) != nil else { return false }
+        let tabs = try? await session.exclusive { try await session.driver.tabs() }
+        return tabs?.isEmpty == false
+    }
+
+    /// The person is done with the browser they opened (the button, or its window closed): a window still open goes back to the
+    /// background, unless the Orb is set to Visível; a browser that was quit is closed for good, so the Orb's next page starts a
+    /// new one in its own mode. Then the Orb's tools go on.
+    func giveBackFromPerson(botID: UUID) async {
+        defer { control.giveBack(botID) }
+        guard let session = existingSession(botID: botID) else { return }
+        guard let profile = profileFolder(botID: botID), BrowserProfileCache.holder(profile: profile) != nil else {
+            await close(botID: botID)
+            return
+        }
+        guard session.mode != .visible, session.driver.isHeaded else { return }
+        _ = try? await session.exclusive {
+            session.forgetPage()
+            _ = try await session.relaunchKeepingTabs { try await session.driver.setHeaded(false) }
+        }
+        session.setShowingWindow(false)
+        clearLabels(botID: botID)
+    }
 
     // MARK: Labels
 

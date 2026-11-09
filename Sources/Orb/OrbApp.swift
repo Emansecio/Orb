@@ -345,6 +345,12 @@ enum Snapshot {
         let height = ProcessInfo.processInfo.environment["ORB_SNAPSHOT_HEIGHT"].flatMap(Double.init)
         let content: AnyView = switch screen {
         case "app": AnyView(RootView())
+        case "browser-with-person":
+            // The person opened the Orb's browser for themself: the composer's chip that says so.
+            AnyView(model.bots.first.map { bot in
+                model.browserWithPerson.insert(bot.id)
+                return RootView()
+            })
         case "showcase": ReadmeSnapshots.app(model)
         case "permission": ReadmeSnapshots.permission(model)
         case "skills": AnyView(SkillsView())

@@ -109,6 +109,8 @@ protocol BrowserDriver: Sendable {
     /// Where an element of the last snapshot is on the page now (`get box`), in the viewport's CSS pixels (what scrolling has
     /// moved is already in it); nil when the browser cannot say. Only the live screen asks (the pointer of the Orb).
     func box(of ref: String) async throws -> CGRect?
+    /// Whether the next launch, or the browser running now, has a window (`setHeaded`, the Orb's "Visível").
+    var isHeaded: Bool { get }
 }
 
 extension BrowserDriver {
@@ -121,4 +123,5 @@ extension BrowserDriver {
     var generation: Int { 0 }
     func streamPort() async throws -> Int? { nil }
     func box(of ref: String) async throws -> CGRect? { nil }
+    var isHeaded: Bool { false }
 }

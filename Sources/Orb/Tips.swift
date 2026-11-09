@@ -147,6 +147,10 @@ enum Tip {
     static let enlargeScreen = "Abre o navegador do Orb numa janela grande, onde você pode assumir o controle"
     static let takeOverBrowser = "Seus cliques e o teclado vão para a página; o Orb espera você devolver"
     static let giveBackBrowser = "Devolve o navegador ao Orb, que olha a página de novo antes de continuar"
+    static let openPersonBrowser = "Abre o navegador deste Orb numa janela, com os logins dele; o Orb espera você devolver"
+    static let showPersonBrowser = "Traz para a frente a janela do navegador deste Orb"
+    static let personBrowserChip = "Você está usando o navegador deste Orb; ele espera você devolver para usá-lo"
+    static let browserModeWhilePerson = "Devolva o navegador ao Orb para trocar o modo"
     static let stopBrowsing = "Para o Orb: interrompe o que ele está fazendo"
     static let hideScreen = "Borra a tela do navegador até você mostrar de novo"
     static let revealScreen = "Mostra de novo a tela do navegador do Orb"
@@ -364,7 +368,7 @@ enum Tip {
          copyReply, copyMarkdown, redoReply, editMessage, cancelEdit, toggleOutput(isExpanded: true), toggleOutput(isExpanded: false), toggleCommand(isExpanded: true), toggleCommand(isExpanded: false), toggleRequest(isOpen: true), toggleRequest(isOpen: false), toggleActions(isOpen: true), toggleActions(isOpen: false), toggleWork(isOpen: true), toggleWork(isOpen: false),
          routineUseAuto, routineUseReadOnly, randomLook, denyWithNote, showAllActions, deny, allowOptions,
          handoffDone, handoffCancel, browserMode, removeBrowserProxy, installBrowser, addSearchKey,
-         enlargeScreen, takeOverBrowser, giveBackBrowser, stopBrowsing, hideScreen, revealScreen, lastScreen, backToLiveScreen, showBrowserScreen,
+         enlargeScreen, takeOverBrowser, giveBackBrowser, openPersonBrowser, showPersonBrowser, personBrowserChip, browserModeWhilePerson, stopBrowsing, hideScreen, revealScreen, lastScreen, backToLiveScreen, showBrowserScreen,
          menuBarItem, connectModel, openMainWindow, closeReply, openChatInApp, reviewRiskyInApp, allowOnce, allowBatchOnce,
          routineRequest, chooseOrb(named: "Orb"),
          importFromAssistant, importPickBot, importMarketplaceCategory, startFromKeptMemory, importBack, importCopyPrompt, importChooseFile, importReadLocal, importKind, importItem, importReview, importRemove,

@@ -34,6 +34,7 @@ final class FakeBrowserDriver: BrowserDriver, @unchecked Sendable {
     }
 
     var generation: Int { state.withLock { $0.generation } }
+    var isHeaded: Bool { state.withLock { $0.headed } }
 
     let state = OSAllocatedUnfairLock(initialState: State())
 
@@ -105,8 +106,12 @@ final class FakeBrowserDriver: BrowserDriver, @unchecked Sendable {
         return state.hasPage ? state.url : nil
     }
 
+    /// Holds `setHeaded` until opened (a window that takes a while to come up); nil: it answers at once.
+    let headedGate = OSAllocatedUnfairLock<TestGate?>(initialState: nil)
+
     func setHeaded(_ headed: Bool) async throws -> BrowserPage {
         let state = try note("setHeaded \(headed)")
+        if let gate = headedGate.withLock({ $0 }) { await gate.wait() }
         self.state.withLock { $0.headed = headed }
         return BrowserPage(url: state.url, title: state.title)
     }

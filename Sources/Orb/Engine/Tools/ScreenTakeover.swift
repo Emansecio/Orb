@@ -113,7 +113,8 @@ protocol TakeoverPlatform: Sendable {
     func associateCursor()
     func makePoster() -> any TakeoverEventPoster
     /// The second way to give the person's app back when `AXFrontmost` did not: `NSRunningApplication.activate()` (only
-    /// here, in the takeover, does the Orb activate another app).
+    /// here, in the takeover, does the Orb activate another app; the one other caller is the person's own "Abrir o navegador",
+    /// `AppModel.openBrowserForPerson`, which brings the Orb's browser window forward because they asked).
     func activate(_ pid: Int32)
 }
 

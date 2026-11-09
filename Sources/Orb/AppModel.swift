@@ -285,6 +285,13 @@ final class AppModel {
     @ObservationIgnored let outputsDirectory: URL
     /// The Orbs' browsers (`navegador/<id>/` in the data folder holds what each keeps, logins included).
     @ObservationIgnored var browserHub: BrowserHub
+    /// The Orbs whose browser the person opened for themself ("Abrir o navegador") and has not handed back.
+    var browserWithPerson: Set<UUID> = []
+    /// What looks, while the person has an Orb's browser, for its window to be closed (`watchPersonBrowser`).
+    @ObservationIgnored var personBrowserWatchers: [UUID: Task<Void, Never>] = [:]
+    /// How often that window is looked at: often enough that closing it hands the browser back at once, and well inside the
+    /// browser's idle timeout (half an hour), which each look resets. Short in tests.
+    @ObservationIgnored var personBrowserCheck = Duration.seconds(15)
     /// The live screens of the Orbs' browsers (docs/TELA-AO-VIVO.md).
     @ObservationIgnored lazy var liveScreens = LiveFeedHub(browsers: browserHub)
     /// Ajustes → Navegador: installs, updates and removes what the Orbs' browser needs (`navegador/bin`, `chrome`).

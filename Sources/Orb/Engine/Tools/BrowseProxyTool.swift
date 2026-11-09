@@ -51,7 +51,8 @@ struct BrowseProxyTool: BrowseTool {
     /// Reopens the browser with the new proxy and reads the address from the web; with a proxy that does not work, goes back to the
     /// one it had and says so. Every page is opened and read under the browser's lock, in this conversation's tab.
     private func apply(_ proxy: String?, replacing old: String?, hub: BrowserHub, botID: UUID, context: ToolContext) async throws -> String {
-        // The person has the browser (the live screen's window): it is not relaunched under them.
+        // The person has the browser: it is not relaunched under them (and a run nobody watches does not wait for them).
+        if hub.control.refusesRun(botID, unattended: context.unattended) { throw ToolError(BrowserControl.inUseByPerson) }
         _ = await hub.control.waitWhileHeld(botID)
         // Stop ends the wait too: the browser is not relaunched (or the proxy changed) after it.
         try Task.checkCancellation()

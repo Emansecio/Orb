@@ -213,6 +213,20 @@ struct AgentBrowserDriverTests {
         #expect(!driver.config.headed)
     }
 
+    /// The window was the person's (`browse_show`, "Abrir o navegador") and the browser went away without a `close` (⌘Q in Chrome,
+    /// the idle timeout): the next page the Orb opens is in the background again, not in a window over what the person does.
+    @Test func aBrowserThatWentAwayOpensAgainWithoutItsWindow() async throws {
+        let (driver, calls) = make(headed: true, listsSession: false) { arguments in
+            arguments.contains("session") ? abOK(#"{"sessions":[]}"#) : abOK(#"{"url":"https://b.test/","title":"B"}"#)
+        }
+        await #expect(throws: BrowserDriverError.noPage) { try await driver.tabs() }
+        #expect(!driver.config.headed)
+        _ = try await driver.open("https://b.test/")
+        let launch = try #require(calls.withLock { $0.last })
+        #expect(launch.suffix(2) == ["open", "https://b.test/"])
+        #expect(!launch.contains("--headed"))
+    }
+
     @Test func errorsAreThrownAsWhatTheyAre() async throws {
         let (driver, _) = make { _ in #"{"success":false,"data":null,"error":"Browser not launched"}"# }
         await #expect(throws: BrowserDriverError.noPage) { _ = try await driver.snapshot(interactive: true, selector: nil) }
