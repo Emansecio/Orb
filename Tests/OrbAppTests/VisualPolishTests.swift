@@ -31,14 +31,18 @@ extension OrbDriverTests {
         if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             await waitUntil("the group picker's initial animation") { avatars(in: host).contains(where: \.isRunning) }
         }
-        await waitUntil("idle choices to settle", timeout: .seconds(12)) {
+        let settled = await waitUntil("idle choices to settle", timeout: .seconds(12)) {
             let shown = avatars(in: host)
-            // Settling moves only in frames, at most 0.1 s of it per frame: on the CI's virtual display the link fires too
-            // seldom for them to rest in time. Stepped here on the real clock as well, as a link would; a live avatar
-            // still never rests.
-            let now = CACurrentMediaTime()
-            for orb in shown where orb.isRunning { orb.stepIfDue(at: now) }
             return !shown.isEmpty && shown.allSatisfy { !$0.isRunning }
+        }
+        if !settled {
+            // It fails only on the CI, and settles in ~6 s here: say what each avatar was doing, to find out why.
+            let states = avatars(in: host).map { "live \($0.live) running \($0.isRunning) steps \($0.steps) fps \($0.frameRate)" }
+            Issue.record("""
+                \(states.count) avatars: \(states.joined(separator: "; ")); reduce motion \
+                \(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion); screen \(NSScreen.main?.frame ?? .zero) \
+                @\(NSScreen.main?.backingScaleFactor ?? 0)x; window visible \(window.occlusionState.contains(.visible))
+                """)
         }
     }
 }

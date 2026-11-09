@@ -94,7 +94,7 @@ final class OrbAnimationView: NSView {
     private var showsBubble = true
     private var followsPointer = true
     private var interactive = false
-    private var live = true
+    private(set) var live = true
     /// The eyes' size and the face's shift for the body shape, read from the config when it changes (not per frame).
     private var eyeScale: CGFloat = 1
     private var faceOffset = CGSize.zero
