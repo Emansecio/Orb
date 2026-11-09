@@ -668,12 +668,10 @@ private struct HangsAfterText: LLMClient {
     @Test func aDeadlineGivesUpOnWorkThatNeverAnswers() async throws {
         #expect(try await withDeadline(5, "a conta") { 42 } == 42)
         let started = ContinuousClock.now
-        do {
+        let error = try #require(await #expect(throws: DeadlineExceeded.self) {
             _ = try await withDeadline(0.2, "a captura da janela") { await Self.deaf(5) }
-            Issue.record("no deadline")
-        } catch let error as DeadlineExceeded {
-            #expect(error.localizedDescription == "A captura da janela passou de 0 s e foi abandonada.")
-        } catch { Issue.record("\(error)") }
+        })
+        #expect(error.localizedDescription == "A captura da janela passou de 0 s e foi abandonada.")
         #expect(started.duration(to: .now) < .seconds(2))
         #expect(CaptureFallbackPolicy.shouldFallBack(after: DeadlineExceeded(seconds: 10, what: "x"))) // a stuck SCK falls back
     }

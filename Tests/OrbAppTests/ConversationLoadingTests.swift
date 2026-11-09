@@ -96,7 +96,7 @@ import Testing
         model.usageLog.record(UsageTotals(requests: 1, input: 3), orb: bots[0].id, name: "Atlas", model: "openai/gpt-5", source: .chat)
         model.usageLog.flush()
         model.store.flush()
-        for _ in 0..<500 where model.dataNotices.isEmpty { try await Task.sleep(for: .milliseconds(10)) } // the notice hops to the main actor
+        await waitUntil("the notice about the unreadable usage file") { !model.dataNotices.isEmpty } // it hops to the main actor
         #expect(model.dataNotices.count == 1)
 
         await model.loadRemainingConversations()
@@ -299,7 +299,7 @@ import Testing
         #expect(model.conversations[bots[1].id] == nil)
         model.sendWhenLoaded("oi", to: bots[1].id)
         #expect(model.transcript(bots[1].id).isEmpty, "nothing happened on the main thread")
-        for _ in 0..<200 where model.transcript(bots[1].id).count < 3 { try await Task.sleep(for: .milliseconds(10)) }
+        await waitUntil("the saved exchange and the notice") { model.transcript(bots[1].id).count >= 3 }
         #expect(model.transcript(bots[1].id).count == 3) // the saved exchange and the "connect a model" notice
     }
 
@@ -315,10 +315,10 @@ import Testing
         model.runRoutine(routine.id)
         await model.routineStarted()
         #expect(!model.isWorking(bots[1].id))
-        for _ in 0..<300 where model.conversations[bots[1].id] == nil || !model.isRoutineRunning(routine.id) && model.routines[0].runs.isEmpty {
-            try await Task.sleep(for: .milliseconds(10))
+        await waitUntil("the conversation read and the routine started") {
+            model.conversations[bots[1].id] != nil && (model.isRoutineRunning(routine.id) || !model.routines[0].runs.isEmpty)
         }
-        for _ in 0..<300 where model.isWorking(bots[1].id) || model.turns[bots[1].id] != nil { try await Task.sleep(for: .milliseconds(10)) }
+        await waitUntil("the routine's turn to end") { !model.isWorking(bots[1].id) && model.turns[bots[1].id] == nil }
         #expect(model.routines[0].runs.count == 1, "the run happened, and the chat's history was there for it")
         #expect(model.transcript(bots[1].id).count >= 3)
     }

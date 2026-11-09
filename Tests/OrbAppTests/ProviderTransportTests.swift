@@ -274,41 +274,35 @@ struct ProviderTransportTests {
         }
     }
 
-    @Test func aChatErrorAfterTheOKIsRetryableLikeTheOtherFormats() async {
+    @Test func aChatErrorAfterTheOKIsRetryableLikeTheOtherFormats() async throws {
         let body = #"data: {"error":{"code":"server_error","message":"Provider disconnected unexpectedly"},"choices":[{"delta":{"content":""},"finish_reason":"error"}]}"# + "\n\n"
-        do {
+        let error = try #require(await #expect(throws: LLMError.self) {
             _ = try await run(.chat, host: "chat-midstream.test", .init(body: body))
-            Issue.record("the error chunk should have been thrown")
-        } catch let error as LLMError {
-            #expect(error == .stream(type: "server_error", message: "Provider disconnected unexpectedly"))
-            #expect(error.isRetryable)
-        } catch { Issue.record("unexpected \(error)") }
+        })
+        #expect(error == .stream(type: "server_error", message: "Provider disconnected unexpectedly"))
+        #expect(error.isRetryable)
     }
 
-    @Test func aNumericChatErrorCodeIsTheHTTPStatus() async {
+    @Test func aNumericChatErrorCodeIsTheHTTPStatus() async throws {
         for (host, code) in [("chat-429.test", "429"), ("chat-429s.test", #""429""#)] {
             let body = #"data: {"error":{"code":\#(code),"message":"Rate limit exceeded"}}"# + "\n\n"
-            do {
+            let error = try #require(await #expect(throws: LLMError.self) {
                 _ = try await run(.chat, host: host, .init(body: body))
-                Issue.record("the error chunk should have been thrown")
-            } catch let error as LLMError {
-                #expect(error == .http(status: 429, message: "Rate limit exceeded"))
-                #expect(error.isRetryable)
-            } catch { Issue.record("unexpected \(error)") }
+            })
+            #expect(error == .http(status: 429, message: "Rate limit exceeded"))
+            #expect(error.isRetryable)
         }
     }
 
-    @Test func aCodeOutsideTheHTTPRangeIsNotAStatus() async {
+    @Test func aCodeOutsideTheHTTPRangeIsNotAStatus() async throws {
         // A gateway speaking JSON-RPC style codes must not turn into "O provedor respondeu -32000" or be retried as a 503.
         for (host, code) in [("chat-rpc.test", "-32000"), ("chat-zero.test", "0"), ("chat-503-ish.test", "1503")] {
             let body = #"data: {"error":{"code":\#(code),"message":"Upstream failed"}}"# + "\n\n"
-            do {
+            let error = try #require(await #expect(throws: LLMError.self) {
                 _ = try await run(.chat, host: host, .init(body: body))
-                Issue.record("the error chunk should have been thrown")
-            } catch let error as LLMError {
-                #expect(error == .stream(type: code, message: "Upstream failed"))
-                #expect(!error.isRetryable)
-            } catch { Issue.record("unexpected \(error)") }
+            })
+            #expect(error == .stream(type: code, message: "Upstream failed"))
+            #expect(!error.isRetryable)
         }
     }
 
