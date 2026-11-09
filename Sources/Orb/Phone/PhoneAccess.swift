@@ -11,7 +11,8 @@ import CryptoKit
 final class PhoneAccess {
     static let enabledKey = "phoneAccess"
     static let keepAwakeKey = "phoneKeepsMacAwake"
-    static let tokenAccount = "phone-access-token"
+    nonisolated static let tokenAccount = "phone-access-token"
+    nonisolated static let tokenCreatedKey = "phoneTokenCreated"
     static let botsThrottle: Duration = .milliseconds(300)
     static let chatThrottle: Duration = .milliseconds(150)
 
@@ -30,7 +31,16 @@ final class PhoneAccess {
     /// This Mac's Tailscale address, looked up when the access starts and when Ajustes → Celular appears.
     private(set) var address: String?
 
+    /// True when the pairing code could not be read or stored: the screen then offers a new one.
+    private(set) var canRenewAfterFailure = false
+
     @ObservationIgnored private weak var model: AppModel?
+    @ObservationIgnored private let vault: PhoneTokenVault
+    @ObservationIgnored private let retryDelays: [Duration]
+    @ObservationIgnored private var wantsServer = false
+    @ObservationIgnored private var requestedPort: UInt16 = PhoneWire.port
+    @ObservationIgnored private var retryAttempt = 0
+    @ObservationIgnored private var retry: Task<Void, Never>?
     @ObservationIgnored private var server: PhoneServer?
     @ObservationIgnored private(set) var token: String?
     @ObservationIgnored private var botsArmed = false
@@ -39,8 +49,11 @@ final class PhoneAccess {
     @ObservationIgnored private var avatarImages: [String: String] = [:]
     @ObservationIgnored private var awake: (any NSObjectProtocol)?
 
-    init(model: AppModel?) {
+    init(model: AppModel?, vault: PhoneTokenVault = .keychain,
+         retryDelays: [Duration] = [.seconds(2), .seconds(5), .seconds(15), .seconds(30), .seconds(60)]) {
         self.model = model
+        self.vault = vault
+        self.retryDelays = retryDelays
     }
 
     var isEnabled: Bool { UserDefaults.standard.bool(forKey: Self.enabledKey) }
@@ -70,7 +83,23 @@ final class PhoneAccess {
 
     func start(port: UInt16 = PhoneWire.port) {
         guard server == nil else { return }
-        token = Self.storedToken()
+        wantsServer = true
+        requestedPort = port
+        retry?.cancel()
+        retry = nil
+        switch PhonePairing.loadToken(from: vault) {
+        case .ready(let saved):
+            token = saved
+            canRenewAfterFailure = false
+        case .unreadable:
+            status = .failed("Não consegui ler o código de pareamento no Keychain.")
+            canRenewAfterFailure = true
+            return
+        case .unsaved:
+            status = .failed("Não consegui guardar o código de pareamento no Keychain.")
+            canRenewAfterFailure = true
+            return
+        }
         let server = PhoneServer(token: { [weak self] in self?.token }, macName: Self.macName)
         server.onState = { [weak self] state in self?.serverChanged(state) }
         server.onAuthorized = { [weak self] connection in self?.authorized(connection) }
@@ -84,6 +113,10 @@ final class PhoneAccess {
     }
 
     func stop() {
+        wantsServer = false
+        retry?.cancel()
+        retry = nil
+        retryAttempt = 0
         server?.stop()
         server = nil
         status = .off
@@ -94,10 +127,27 @@ final class PhoneAccess {
     /// "Gerar novo código": phones paired with the old one are dropped and must read the new QR code.
     func renewToken() {
         let fresh = PhonePairing.newToken()
-        Keychain.set(fresh, account: Self.tokenAccount)
+        guard vault.write(fresh) else {
+            status = .failed("Não consegui guardar o código de pareamento no Keychain.")
+            return
+        }
+        vault.markCreated()
         token = fresh
+        canRenewAfterFailure = false
         server?.dropAll()
+        if server == nil, wantsServer { start(port: requestedPort) }
     }
+
+    /// The Mac woke up: a server that failed meanwhile (the network changed) is not worth waiting for.
+    func systemDidWake() {
+        guard wantsServer, server == nil else { return }
+        retry?.cancel()
+        retry = nil
+        retryAttempt = 0
+        start(port: requestedPort)
+    }
+
+    var isRetryPending: Bool { retry.map { !$0.isCancelled } ?? false }
 
     /// Only while the access is on: off, there is no code to show.
     func refreshAddress() {
@@ -118,22 +168,32 @@ final class PhoneAccess {
         }
     }
 
-    private static func storedToken() -> String {
-        if let saved = Keychain.get(tokenAccount), PhonePairing.isValidToken(saved) { return saved }
-        let fresh = PhonePairing.newToken()
-        Keychain.set(fresh, account: tokenAccount)
-        return fresh
-    }
-
-    private func serverChanged(_ state: PhoneServer.State) {
+    func serverChanged(_ state: PhoneServer.State) {
         switch state {
         case .starting: status = .starting
-        case .listening: status = .listening
+        case .listening:
+            status = .listening
+            retryAttempt = 0
         case .failed(let message):
             status = .failed(message)
             server?.stop()
             server = nil
             syncAwake()
+            scheduleRetry()
+        }
+    }
+
+    /// Waits longer after each failure (the network may be coming back), then starts the server again.
+    private func scheduleRetry() {
+        guard wantsServer, !retryDelays.isEmpty else { return }
+        let delay = retryDelays[min(retryAttempt, retryDelays.count - 1)]
+        retryAttempt += 1
+        retry?.cancel()
+        retry = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard let self, !Task.isCancelled, wantsServer, server == nil else { return }
+            retry = nil
+            start(port: requestedPort)
         }
     }
 
@@ -412,7 +472,12 @@ final class PhoneAccess {
 #if DEBUG || ORB_DEV_TOOLS
 extension PhoneAccess {
     /// For `--snapshot settings-phone`: the access as it looks listening, with made-up values and no socket.
-    func showPreview(address: String?, devices: [Device]) {
+    func showPreview(address: String?, devices: [Device], unreadable: Bool = false) {
+        if unreadable {
+            status = .failed("Não consegui ler o código de pareamento no Keychain.")
+            canRenewAfterFailure = true
+            return
+        }
         status = .listening
         self.address = address
         token = "previewpreviewpreviewpreviewpreviewpreview1"
@@ -420,17 +485,18 @@ extension PhoneAccess {
     }
 }
 
-/// `Orb --snapshot settings-phone | settings-phone-no-tailscale out.png`: Ajustes → Celular with the access on, a QR code and
+/// `Orb --snapshot settings-phone | settings-phone-no-tailscale | settings-phone-unreadable out.png`: Ajustes → Celular with the access on, a QR code and
 /// one phone connected, or with Tailscale missing. Turned on only in this process (the argument domain is never saved).
 @MainActor
 enum PhoneSnapshots {
     static func view(_ screen: String, model: AppModel) -> AnyView? {
-        guard screen == "settings-phone" || screen == "settings-phone-no-tailscale" else { return nil }
+        guard ["settings-phone", "settings-phone-no-tailscale", "settings-phone-unreadable"].contains(screen) else { return nil }
         var arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
         arguments[PhoneAccess.enabledKey] = true
         UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
         let devices = [PhoneAccess.Device(id: UUID(), name: "Pixel 9", since: .now.addingTimeInterval(-600))]
-        model.phone.showPreview(address: screen == "settings-phone" ? "100.101.102.103" : nil, devices: screen == "settings-phone" ? devices : [])
+        model.phone.showPreview(address: screen == "settings-phone" ? "100.101.102.103" : nil,
+                                devices: screen == "settings-phone" ? devices : [], unreadable: screen == "settings-phone-unreadable")
         return AnyView(PhoneSettings()
             .frame(width: 640, height: SettingsTab.phone.height)
             .background(Palette.chrome)
@@ -438,3 +504,11 @@ enum PhoneSnapshots {
     }
 }
 #endif
+
+extension PhoneTokenVault {
+    static let keychain = PhoneTokenVault(
+        read: { Keychain.get(PhoneAccess.tokenAccount) },
+        write: { Keychain.store($0, account: PhoneAccess.tokenAccount) },
+        wasCreated: { UserDefaults.standard.bool(forKey: PhoneAccess.tokenCreatedKey) },
+        markCreated: { UserDefaults.standard.set(true, forKey: PhoneAccess.tokenCreatedKey) })
+}

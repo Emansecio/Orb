@@ -61,7 +61,37 @@ enum PhonePeer {
     }
 }
 
+/// Where the pairing token lives. `wasCreated` is remembered outside the Keychain, so a Keychain that cannot be read
+/// right now is never taken for "no token yet" and written over (the phones would unpair themselves).
+struct PhoneTokenVault: Sendable {
+    var read: @Sendable () -> String?
+    var write: @Sendable (String) -> Bool
+    var wasCreated: @Sendable () -> Bool
+    var markCreated: @Sendable () -> Void
+}
+
+enum PhoneTokenLoad: Equatable {
+    case ready(String)
+    /// A token was made before and cannot be read now.
+    case unreadable
+    /// A new token could not be stored: it would change at every launch.
+    case unsaved
+}
+
 enum PhonePairing {
+    /// Reads the saved token; makes one only when none was ever made. Never writes over a token that existed.
+    static func loadToken(from vault: PhoneTokenVault, make: () -> String = newToken) -> PhoneTokenLoad {
+        if let saved = vault.read(), isValidToken(saved) {
+            vault.markCreated()
+            return .ready(saved)
+        }
+        if vault.wasCreated() { return .unreadable }
+        let fresh = make()
+        guard vault.write(fresh) else { return .unsaved }
+        vault.markCreated()
+        return .ready(fresh)
+    }
+
     /// 32 random bytes in base64url without padding: 43 characters.
     static func newToken() -> String {
         var bytes = [UInt8](repeating: 0, count: 32)

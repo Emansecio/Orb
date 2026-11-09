@@ -101,3 +101,6 @@ um campo opcional ausente vale `null`.
   fecham as conexões seguintes dele por um minuto.
 - Quadros de entrada acima de 64 KB são recusados (`too_large`); mensagens acima de 20.000 caracteres também.
 - O token nunca vai para log nem para a tela depois do pareamento. O QR só aparece enquanto Ajustes → Celular está aberto.
+- Se o Keychain não deixa ler o código, o Orb mostra o erro e não gera outro sozinho; gerar um novo é uma ação da pessoa
+  (Ajustes → Celular → Gerar novo código).
+- Se o servidor para, ele tenta de novo com espera de 2 s a 60 s e também ao acordar o Mac.

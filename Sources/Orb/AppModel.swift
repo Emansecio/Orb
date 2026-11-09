@@ -2687,6 +2687,7 @@ final class AppModel {
     func systemDidWake(at date: Date = .now) {
         asleepSince = nil
         wokeAt = date
+        phone.systemDidWake()
     }
 
     /// Trims `saidas/` to its age and size limits once a day: without it they only applied at launch, and fifty Orbs

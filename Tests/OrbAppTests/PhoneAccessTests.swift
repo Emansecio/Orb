@@ -38,7 +38,60 @@ import Testing
     }
 }
 
+/// An in-memory token vault that counts what was written.
+final class MemoryTokenVault: @unchecked Sendable {
+    struct State { var token: String?; var created: Bool; var writes = 0; var marks = 0; var writeSucceeds = true }
+    let box: LockedBox<State>
+    init(token: String? = nil, created: Bool = false, writeSucceeds: Bool = true) {
+        box = LockedBox(State(token: token, created: created, writeSucceeds: writeSucceeds))
+    }
+    var vault: PhoneTokenVault {
+        let box = box
+        return PhoneTokenVault(
+            read: { box.value.token },
+            write: { value in box.withLock { state in
+                state.writes += 1
+                if state.writeSucceeds { state.token = value }
+                return state.writeSucceeds
+            } },
+            wasCreated: { box.value.created },
+            markCreated: { box.withLock { $0.created = true; $0.marks += 1 } })
+    }
+}
+
 @Suite struct PhonePairingTests {
+    @Test func aSavedValidTokenIsUsed() {
+        let saved = PhonePairing.newToken()
+        let memory = MemoryTokenVault(token: saved)
+        #expect(PhonePairing.loadToken(from: memory.vault) == .ready(saved))
+        #expect(memory.box.value.writes == 0 && memory.box.value.created)
+    }
+
+    @Test func nothingSavedAndNeverCreatedMakesOne() {
+        let memory = MemoryTokenVault()
+        let fresh = PhonePairing.newToken()
+        #expect(PhonePairing.loadToken(from: memory.vault, make: { fresh }) == .ready(fresh))
+        #expect(memory.box.value.token == fresh && memory.box.value.created)
+    }
+
+    @Test func nothingReadButCreatedBeforeIsUnreadableAndWritesNothing() {
+        let memory = MemoryTokenVault(created: true)
+        #expect(PhonePairing.loadToken(from: memory.vault) == .unreadable)
+        #expect(memory.box.value.writes == 0)
+    }
+
+    @Test func aFailedWriteIsUnsavedAndNotRemembered() {
+        let memory = MemoryTokenVault(writeSucceeds: false)
+        #expect(PhonePairing.loadToken(from: memory.vault) == .unsaved)
+        #expect(memory.box.value.marks == 0 && !memory.box.value.created)
+    }
+
+    @Test func aSavedInvalidTokenAfterCreationIsUnreadable() {
+        let memory = MemoryTokenVault(token: "curto", created: true)
+        #expect(PhonePairing.loadToken(from: memory.vault) == .unreadable)
+        #expect(memory.box.value.writes == 0)
+    }
+
     @Test func tokens() {
         let a = PhonePairing.newToken(), b = PhonePairing.newToken()
         #expect(a.count == 43 && PhonePairing.isValidToken(a))
@@ -256,14 +309,48 @@ final class PhoneClient: Sendable {
 
     deinit { QuietNotifications.release() }
 
-    @MainActor private func setUp(_ replies: [[LLMEvent]]) -> (AppModel, Bot, PhoneAccess) {
+    @MainActor private func setUp(_ replies: [[LLMEvent]], vault: PhoneTokenVault? = nil,
+                                  retryDelays: [Duration] = [.seconds(2)]) -> (AppModel, Bot, PhoneAccess) {
         Store(directory: root.url).save(AppState.initial)
         let model = AppModel(store: Store(directory: root.url), runsBackgroundWork: false)
         model.providers = [ProviderAccount(kind: .custom)]
         model.defaultModel = "custom/modelo"
         let script = CallScript(replies, whenExhausted: .reply(ModelReply([.text("fim"), .finished(.done, nil)])))
         model.clientOverride = { CallScriptModel(script: script) }
-        return (model, model.bots[0], PhoneAccess(model: model))
+        return (model, model.bots[0], PhoneAccess(model: model, vault: vault ?? MemoryTokenVault().vault, retryDelays: retryDelays))
+    }
+
+    @Test @MainActor func anUnreadableTokenFailsInsteadOfBeingReplaced() async {
+        let memory = MemoryTokenVault(created: true)
+        let (_, _, phone) = setUp([], vault: memory.vault)
+        defer { phone.stop() }
+        phone.start(port: 0)
+        #expect(phone.status == .failed("Não consegui ler o código de pareamento no Keychain."))
+        #expect(phone.token == nil && phone.canRenewAfterFailure)
+        #expect(memory.box.value.writes == 0)
+        phone.renewToken()
+        _ = await waitUntil("the phone access listening") { phone.status == .listening }
+        #expect(phone.token != nil && !phone.canRenewAfterFailure && memory.box.value.writes == 1)
+    }
+
+    @Test @MainActor func aFailedServerComesBackByItself() async {
+        let (_, _, phone) = setUp([], retryDelays: [.milliseconds(20)])
+        defer { phone.stop() }
+        phone.start(port: 0)
+        _ = await waitUntil("the phone access listening") { phone.status == .listening }
+        phone.serverChanged(.failed("x"))
+        #expect(phone.status == .failed("x"))
+        _ = await waitUntil("the phone access listening again") { phone.status == .listening }
+        #expect(phone.port != nil)
+    }
+
+    @Test @MainActor func stoppingCancelsTheRetry() {
+        let (_, _, phone) = setUp([], retryDelays: [.milliseconds(20)])
+        phone.start(port: 0)
+        phone.serverChanged(.failed("x"))
+        #expect(phone.isRetryPending)
+        phone.stop()
+        #expect(phone.status == .off && !phone.isRetryPending)
     }
 
     @MainActor private func connect(_ phone: PhoneAccess) async throws -> PhoneClient {

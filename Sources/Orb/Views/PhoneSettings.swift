@@ -60,6 +60,16 @@ struct PhoneSettings: View {
                 Label(message, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(Palette.warn)
                 Button("Tentar de novo") { phone.setEnabled(true) }
+                if phone.canRenewAfterFailure {
+                    Button("Gerar novo código…") { isConfirmingRenew = true }
+                        .help("Troca o código: os celulares pareados com o atual precisam ler o novo")
+                        .confirmationDialog("Gerar um novo código?", isPresented: $isConfirmingRenew, titleVisibility: .visible) {
+                            Button("Gerar e desconectar os celulares") { phone.renewToken() }
+                            Button("Cancelar", role: .cancel) {}
+                        } message: {
+                            Text("Os celulares pareados agora saem e precisam ler o novo código.")
+                        }
+                }
             case .listening:
                 if let link = phone.pairingLink, let image = QRCode.image(link) {
                     HStack(alignment: .top, spacing: Spacing.l) {
