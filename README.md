@@ -277,7 +277,7 @@ scripts/test.sh --filter 'WaitingTests|ChildProcessTests'
 | Documento | Assunto |
 |---|---|
 | [docs/ARQUITETURA.md](docs/ARQUITETURA.md) | mapa dos módulos, caminho de um turno, concorrência, desempenho e como estender |
-| [docs/FERRAMENTAS.md](docs/FERRAMENTAS.md) | as ferramentas do motor: terminal, arquivos, web, navegador, apps do Mac e agenda |
+| [docs/FERRAMENTAS.md](docs/FERRAMENTAS.md) | as ferramentas do motor: terminal, arquivos, web, navegador, apps do Mac, agenda e conectores |
 | [docs/COLABORACAO.md](docs/COLABORACAO.md) | Orbs juntos: delegação entre Orbs e grupos |
 | [docs/PERSISTENCIA.md](docs/PERSISTENCIA.md) | arquivos de dados, retomada, redefinir o Orb, decodificação tolerante e filas de gravação |
 | [docs/TESTES.md](docs/TESTES.md) | como rodar a suíte, flags dos testes e o modelo falso |

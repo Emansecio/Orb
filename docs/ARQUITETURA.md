@@ -95,7 +95,7 @@ Tudo em `Sources/Orb/`.
 
 ### Ferramentas (`Engine/Tools/`)
 
-As famílias de ferramentas (terminal e arquivos, web e navegador, apps do Mac, agenda), os limites de cada uma e o que
+As famílias de ferramentas (terminal e arquivos, web e navegador, apps do Mac, agenda, conectores), os limites de cada uma e o que
 acontece com processos, codificação de texto e erros: [FERRAMENTAS.md](FERRAMENTAS.md).
 
 ### Trabalho de programação
@@ -307,8 +307,8 @@ linhas de ferramenta, brilho, Orbs): sem translação, escala nem pulso; o Orb f
 
 ## Testes
 
-Como rodar a suíte e as suítes afetadas, as flags dos testes de Acessibilidade, internet e navegador real, e o modelo falso para uso manual:
-[TESTES.md](TESTES.md).
+Como rodar a suíte e as suítes afetadas, as flags dos testes de Acessibilidade, internet e
+navegador real, e o modelo falso para uso manual: [TESTES.md](TESTES.md).
 
 ## Ferramentas de desenvolvimento
 
