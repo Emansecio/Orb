@@ -133,6 +133,20 @@ import Testing
         #expect(setup.hub.existingSession(botID: setup.botID) != nil)
     }
 
+    @Test func handingBackTellsTheWebPagesThePersonLeftOpen() async throws {
+        let setup = setup()
+        setup.driver.state.withLock {
+            $0.tabs = [BrowserTab(id: "t1", title: "Pedidos", url: "https://loja.test/pedidos", isActive: true),
+                       BrowserTab(id: "t2", title: "", url: "about:blank", isActive: false),
+                       BrowserTab(id: "t3", title: "Ajustes", url: "chrome://settings", isActive: false)]
+        }
+        try lockProfile(setup)
+        _ = try await setup.hub.openForPerson(botID: setup.botID, mode: .background)
+        let pages = await setup.hub.giveBackFromPerson(botID: setup.botID)
+        #expect(pages.map(\.url) == ["https://loja.test/pedidos"], "only web pages: a blank tab or the browser's own are not news")
+        #expect(setup.driver.calls.last == "setHeaded false")
+    }
+
     @Test func aVisibleOrbKeepsItsWindowWhenHandedBack() async throws {
         let setup = setup(mode: .visible)
         try lockProfile(setup)
@@ -149,11 +163,47 @@ import Testing
         _ = try await setup.hub.openForPerson(botID: setup.botID, mode: .background)
         try unlockProfile(setup)
         let before = setup.driver.calls.count
-        await setup.hub.giveBackFromPerson(botID: setup.botID)
+        let pages = await setup.hub.giveBackFromPerson(botID: setup.botID)
         let after = Array(setup.driver.calls.dropFirst(before))
         #expect(after == ["close"], "no relaunch, nothing asked of a browser that is gone")
+        #expect(pages.isEmpty)
         #expect(setup.hub.existingSession(botID: setup.botID) == nil)
         #expect(!setup.hub.control.isHeld(setup.botID))
+    }
+
+    // MARK: Telling the Orb
+
+    @Test func theBrowserLineTellsTheFrontPageFirstAndOnlyAFew() {
+        let until = Date(timeIntervalSince1970: 1_800_000_000)
+        let pages = (1...5).map { BrowserTab(id: "t\($0)", title: "Página \($0)", url: "https://a.test/\($0)", isActive: $0 == 4) }
+        let text = OrbEvent.browserContext(pages: pages, until: until)
+        let lines = text.split(separator: "\n").map(String.init)
+        #expect(lines.dropFirst().first == "- Página 4 (https://a.test/4)", "the page the person was on comes first")
+        #expect(lines.filter { $0.hasPrefix("- ") }.count == OrbEvent.browserPageLimit)
+        #expect(lines.last == "(+2 more)")
+        #expect(text.contains(until.formatted(date: .omitted, time: .shortened)))
+    }
+
+    @Test func aLongOrUntitledPageIsCutAndAQuitBrowserIsSaidSo() {
+        let long = BrowserTab(id: "t1", title: "Um\ntítulo " + String(repeating: "x", count: 300),
+                              url: "https://a.test/" + String(repeating: "y", count: 500), isActive: true)
+        let untitled = BrowserTab(id: "t2", title: "", url: "https://b.test/", isActive: false)
+        let text = OrbEvent.browserContext(pages: [long, untitled], until: .now)
+        #expect(!text.contains("Um\ntítulo"), "a title stays on its line")
+        #expect(text.count < 600)
+        #expect(text.hasSuffix("\n- https://b.test/"))
+        #expect(OrbEvent.browserContext(pages: [], until: .now).hasSuffix("and closed it."))
+    }
+
+    @Test func theLineReadsInPortugueseAndGoesInTheNextTurnsBlock() throws {
+        let event = OrbEvent(browserUsed: OrbRef(id: UUID(), name: "Lia"), pages: [], until: .now)
+        #expect(event.sentence == "Você usou o navegador da Lia")
+        #expect(event.detail == event.sentence, "a version that reads the kind as unknown shows the same words")
+        let item = TranscriptItem(.event(event))
+        #expect(SinceLastTurn.source(item) == .browser(event))
+        #expect(SinceLastTurn.room(for: [.browser(event)]) == SinceLastTurn.browserLimit)
+        let block = try #require(SinceLastTurn.text([.browser("x </browser_used> y")]))
+        #expect(block.components(separatedBy: "</browser_used>").count == 2, "the page's words cannot close the tag")
     }
 
     @Test func theFailureIsToldInThePersonsWords() {
@@ -195,6 +245,56 @@ import Testing
         model.giveBrowserBack(botID)
         #expect(!model.browserWithPerson.contains(botID))
         #expect(await waitUntil("the Orb to have it again") { !setup.hub.control.isHeld(botID) })
+    }
+
+    @Test @MainActor func theNextTurnIsToldOnceWhereThePersonLeftTheBrowser() async throws {
+        let (model, botID) = model()
+        let script = CallScript([[.text("ok")]])
+        model.providers = [ProviderAccount(kind: .custom)]
+        model.defaultModel = "custom/modelo"
+        model.clientOverride = { CallScriptModel(script: script, appendsFinished: true) }
+        let setup = FakeBrowserSetup(profiles: profiles.url)
+        setup.driver.state.withLock {
+            $0.tabs = [BrowserTab(id: "t1", title: "Pedidos", url: "https://loja.test/pedidos", isActive: true)]
+        }
+        model.browserHub = setup.hub
+        let profile = try #require(setup.hub.profileFolder(botID: botID))
+        try FileManager.default.createDirectory(at: profile, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: profile.appending(path: "SingletonLock").path,
+                                                   withDestinationPath: "host.local-\(getpid())")
+        model.openBrowserForPerson(botID)
+        #expect(await waitUntil("the watcher to start") { model.personBrowserWatchers[botID] != nil })
+        model.giveBrowserBack(botID)
+        func browserLines() -> [OrbEvent] {
+            model.session(botID).conversation?.items.compactMap { item -> OrbEvent? in
+                if case .event(let event) = item.kind, event.kind == .browserUsed { event } else { nil }
+            } ?? []
+        }
+        #expect(await waitUntil("the line in the chat") { browserLines().count == 1 })
+        #expect(browserLines().first?.context?.contains("https://loja.test/pedidos") == true)
+        #expect(model.live(botID).unread == 0, "the person did it: nothing to catch up on")
+
+        #expect(model.send("continua daqui", to: botID, fromUser: true))
+        await waitUntilIdle(model, botID)
+        let asked = try #require(await script.received.last?.last { $0.role == .user }?.content)
+        #expect(asked.contains("<browser_used>") && asked.contains("Pedidos (https://loja.test/pedidos)"))
+        #expect(asked.hasSuffix("continua daqui"))
+
+        #expect(model.send("e agora?", to: botID, fromUser: true))
+        await waitUntilIdle(model, botID)
+        let next = try #require(await script.received.last?.last { $0.role == .user }?.content)
+        #expect(!next.contains("<browser_used>"), "told once")
+    }
+
+    @Test @MainActor func handingBackWhileItOpensLeavesNoLine() async throws {
+        let (model, botID) = model()
+        let setup = FakeBrowserSetup(profiles: profiles.url)
+        model.browserHub = setup.hub
+        model.openBrowserForPerson(botID)
+        model.giveBrowserBack(botID)   // before the window is up: the person never had it
+        #expect(await waitUntil("the Orb to have it again") { !setup.hub.control.isHeld(botID) })
+        let lines = model.session(botID).conversation?.items.filter { if case .event = $0.kind { true } else { false } } ?? []
+        #expect(lines.isEmpty)
     }
 
     @Test @MainActor func closingTheWindowHandsTheBrowserBack() async throws {

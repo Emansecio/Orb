@@ -164,6 +164,7 @@ struct EventLineView: View {
         case .pulseRan, .pulseResumed: "waveform.path.ecg"
         case .pulseStopped: "stop.circle"
         case .deletionAsked, .deletionAnswered: "trash"
+        case .browserUsed: Capability.browser.symbol
         case .unknown: "info.circle"
         }
     }
@@ -176,26 +177,6 @@ struct EventsSummary: View {
     let unfolded: Bool
 
     var body: some View {
-        if kind == .routineRun, case .event(let last) = items[items.count - 1].kind {
-            // The routine's runs: the count and the last one's line (its note while folded), on the left like each run.
-            RoutineRunLine(event: last, title: TranscriptFolding.eventsTitle(kind, items), mark: Self.marked(items) ?? last.outcome,
-                           showsNote: !unfolded, chevron: unfolded ? "chevron.down" : "chevron.right")
-        } else {
-            folded
-        }
-    }
-
-    /// The outcome of the last run that failed or needs you, which the folded line keeps showing. A plain loop: the chain of
-    /// closures it replaces took the CI's compiler too long to type-check.
-    private static func marked(_ items: [TranscriptItem]) -> OrbEvent.Outcome? {
-        for item in items.reversed() {
-            guard case .event(let event) = item.kind, let outcome = event.outcome else { continue }
-            if outcome == .failed || outcome == .attention { return outcome }
-        }
-        return nil
-    }
-
-    private var folded: some View {
         HStack(spacing: 6) {
             Image(systemName: EventLineView.symbol(for: kind))
                 .font(Typography.small)
@@ -215,39 +196,29 @@ struct EventsSummary: View {
 }
 
 /// A routine's run in the chat, on the left: a mark (gray for an ordinary run, orange or red when it needs you, green for a
-/// goal reached), what happened, the report's first line in two lines at most, and "Abrir relatório". Folded, `title`
-/// counts the runs and there is no button: the line itself unfolds.
+/// goal reached), what happened, the report's first line in two lines at most, and "Abrir relatório".
 struct RoutineRunLine: View {
     @Environment(AppModel.self) private var model
     let event: OrbEvent
-    var title: String?
-    var mark: OrbEvent.Outcome?
-    var showsNote = true
-    var chevron: String?
     /// The report was asked for and is gone (deleted, or in a folder that no longer exists).
     @State private var reportIsMissing = false
 
     var body: some View {
-        let outcome = mark ?? event.outcome
+        let outcome = event.outcome
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Image(systemName: outcome.symbol)
                 .font(Typography.small)
                 .foregroundStyle(outcome.tint)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(title ?? event.headline).foregroundStyle(Palette.muted)
-                    if let chevron {
-                        EventChevron(name: chevron)
-                    }
-                }
-                if showsNote, let note = event.note, !note.isEmpty {
+                Text(event.headline).foregroundStyle(Palette.muted)
+                if let note = event.note, !note.isEmpty {
                     Text(note)
                         .foregroundStyle(Palette.faint)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if chevron == nil, event.file != nil {
+                if event.file != nil {
                     if reportIsMissing {
                         Text("O arquivo do relatório não está mais lá.").foregroundStyle(Palette.warn)
                     } else {
@@ -319,6 +290,82 @@ struct RoutineRunMessage: View {
             MarkdownChunk(source: run?.report ?? run?.summary ?? event.note ?? event.sentence).equatable()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// A stretch of one routine's runs in a day, in its Orb's chat: the latest as a message with its whole report (what the
+/// person comes to read), and the earlier ones folded above it into "8 rodadas anteriores", one line each when unfolded. A
+/// routine every 15 minutes would otherwise fill the chat with its reports, a time between each.
+struct RoutineRunsGroup: View {
+    let items: [TranscriptItem]
+    /// The item the find bar is on: an earlier run opens the list, so the chat can scroll to its line.
+    var reveals: UUID?
+    /// The review snapshots cannot press the line: `transcript-routine-runs-open` opens every block.
+    static var opensInSnapshots = false
+    @State private var showsEarlier: Bool?
+
+    var body: some View {
+        let earlier = Array(items.dropLast())
+        let unfolded = showsEarlier ?? (Self.opensInSnapshots || earlier.contains { $0.id == reveals })
+        VStack(alignment: .leading, spacing: Spacing.s) {
+            Button {
+                showsEarlier = !unfolded
+            } label: {
+                HStack(spacing: 6) {
+                    let mark = TranscriptFolding.earlierRunsMark(earlier)
+                    Image(systemName: mark.symbol)
+                        .foregroundStyle(mark.tint)
+                        .accessibilityHidden(true)
+                    Text(TranscriptFolding.earlierRunsTitle(earlier))
+                    EventChevron(name: unfolded ? "chevron.down" : "chevron.right")
+                }
+                .font(Typography.small)
+                .foregroundStyle(Palette.muted)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(unfolded ? "Recolhe" : "Mostra uma linha por rodada")
+            if unfolded {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(earlier) { item in
+                        if case .event(let event) = item.kind {
+                            // Ids for scrolling to a run; the first one's is the row's own.
+                            RoutineRunBrief(event: event, date: item.date).id(item.id == items.first?.id ? nil : item.id)
+                        }
+                    }
+                }
+            }
+            if let last = items.last, case .event(let event) = last.kind {
+                RoutineRunMessage(event: event, date: last.date).id(last.id)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// An earlier run of `RoutineRunsGroup`, in one line: its mark, its time and the report's first line (whole on hover).
+private struct RoutineRunBrief: View {
+    let event: OrbEvent
+    let date: Date
+
+    var body: some View {
+        let text = event.note.flatMap { $0.isEmpty ? nil : $0 } ?? event.headline
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: event.outcome.symbol)
+                .foregroundStyle(event.outcome.tint)
+                .frame(width: 14)
+                .accessibilityHidden(true)
+            Text(RoutineText.time(date))
+                .monospacedDigit()
+                .foregroundStyle(Palette.faint)
+            Text(text)
+                .foregroundStyle(event.outcome == .failed ? Palette.danger : Palette.muted)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .font(Typography.small)
+        .help(text)
+        .accessibilityElement(children: .combine)
     }
 }
 

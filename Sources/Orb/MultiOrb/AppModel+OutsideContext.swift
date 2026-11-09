@@ -71,6 +71,8 @@ extension AppModel {
                 if bot(message.from.id) != nil { entries.append(.notice(from: message.from.name, text: message.text)) }
             case .decision(let event):
                 if let text = SinceLastTurn.decision(event) { entries.append(.decision(text)) }
+            case .browser(let event):
+                if let text = event.context, !text.isEmpty { entries.append(.browser(text)) }
             }
         }
         return entries

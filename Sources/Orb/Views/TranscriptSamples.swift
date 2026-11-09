@@ -368,6 +368,26 @@ enum TranscriptSample {
             model.update(bot.id) { $0.permissionMode = .bypass }
             items = [TranscriptItem(.user(text: "Como estão os atendimentos de hoje?", attachments: [])),
                      TranscriptItem(.bot(text: routineReport, isStreaming: false))]
+        case "transcript-routine-runs", "transcript-routine-runs-open":
+            // A routine every 15 minutes: one block for the day's stretch, the latest run whole, the earlier ones folded.
+            RoutineRunsGroup.opensInSnapshots = screen.hasSuffix("open")
+            let atlas = OrbRef(bot), start = Date.now.addingTimeInterval(-75 * 60)
+            let notes: [(String, OrbEvent.Outcome)] = [
+                ("Rodada das 17:45 fechada: 1 resposta enviada (Sarinha) e nenhuma venda paga hoje (ontem foram 5).", .finished),
+                ("Rodada das 18:00 fechada: 2 respostas enviadas (Renata e Jessyca). Nada novo depende de você.", .finished),
+                ("Rodada das 18:15: a Liege pediu desconto acima do combinado; precisa da sua resposta.", .attention),
+                ("Rodada das 18:30 fechada: nenhuma mensagem enviada, nenhuma venda paga hoje.", .finished),
+                ("Rodada das 18:45 fechada: 1 resposta enviada (Liege, com o link do Individual), nenhuma venda paga hoje e nada novo depende de você.", .finished)]
+            items = [TranscriptItem(.user(text: "Cuida do WhatsApp a cada 15 minutos, por favor.", attachments: [])),
+                     TranscriptItem(.bot(text: "Combinado: deixei a rotina rodando das 8h às 23h.", isStreaming: false))]
+            for (index, note) in notes.enumerated() {
+                var item = TranscriptItem(.event(OrbEvent(kind: .routineRun, actor: atlas, detail: "WhatsApp 30min 8h-23h",
+                                                          note: note.0, outcome: note.1)))
+                item.date = start.addingTimeInterval(Double(index) * 15 * 60)
+                items.append(item)
+            }
+            items[0].date = start.addingTimeInterval(-120)
+            items[1].date = start.addingTimeInterval(-110)
         case "transcript-retry":
             items = [user, TranscriptItem(.notice("Não deu certo: Sem conexão com o provedor: A conexão com a Internet parece estar desligada."))]
         default:

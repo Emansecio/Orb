@@ -109,10 +109,12 @@ struct ReadOnlyTranscriptRows: View {
 @MainActor
 extension TranscriptRowModel {
     /// A run that folds into one line (events, messages between Orbs, proposals), shared by the chat and the read-only
-    /// transcripts. Other rows draw nothing here.
+    /// transcripts. Other rows draw nothing here. `found`: the item the find bar is on, which an earlier run opens for.
     @ViewBuilder
-    func foldedThread<Child: View>(botID: UUID, @ViewBuilder child: @escaping (TranscriptItem) -> Child) -> some View {
+    func foldedThread<Child: View>(botID: UUID, found: UUID? = nil, @ViewBuilder child: @escaping (TranscriptItem) -> Child) -> some View {
         switch self {
+        case .events(.routineRun, let items):
+            RoutineRunsGroup(items: items, reveals: found).alignedWithReplyText()
         case .events(let kind, let items):
             FoldedThread(items: items, summary: { EventsSummary(kind: kind, items: items, unfolded: $0).alignedWithReplyText() }, child: child)
         case .exchange(let items):

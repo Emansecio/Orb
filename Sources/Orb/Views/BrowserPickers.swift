@@ -285,19 +285,28 @@ struct BrowserPickerRows: View {
     }
 
     /// "Abrir o navegador": the Orb's browser in its window, for the person; while they have it, bringing it forward and handing
-    /// it back. The same quiet links as the proxy row's "Remover".
+    /// it back. Pills with the browser's symbol, not quiet links: it is the one thing here the person comes to do.
     private func personBrowserRow(withPerson: Bool) -> some View {
-        HStack(spacing: 12) {
-            Button(withPerson ? "Mostrar o navegador" : "Abrir o navegador") { model.openBrowserForPerson(botID) }
-                .help(withPerson ? Tip.showPersonBrowser : Tip.openPersonBrowser)
-            if withPerson {
-                Button("Devolver ao Orb") { model.giveBrowserBack(botID) }
-                    .help(Tip.giveBackBrowser)
-            }
+        // Side by side when they fit; the panel at its narrowest stacks them.
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) { personBrowserButtons(withPerson: withPerson) }
+            VStack(alignment: .leading, spacing: 6) { personBrowserButtons(withPerson: withPerson) }
         }
-        .buttonStyle(QuietTextStyle())
-        .font(Typography.small)
+        .buttonStyle(SecondaryPillStyle())
+        .controlSize(.small)
         .padding(.leading, Self.indent)
+        .padding(.vertical, 4)
+    }
+
+    @ViewBuilder private func personBrowserButtons(withPerson: Bool) -> some View {
+        Button(withPerson ? "Mostrar o navegador" : "Abrir o navegador", systemImage: Capability.browser.symbol) {
+            model.openBrowserForPerson(botID)
+        }
+        .help(withPerson ? Tip.showPersonBrowser : Tip.openPersonBrowser)
+        if withPerson {
+            Button("Devolver ao Orb", systemImage: "arrow.uturn.backward") { model.giveBrowserBack(botID) }
+                .help(Tip.giveBackBrowser)
+        }
     }
 
     private var modeBinding: Binding<BrowserMode> {

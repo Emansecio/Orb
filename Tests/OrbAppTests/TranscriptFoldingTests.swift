@@ -88,16 +88,28 @@ struct TranscriptFoldingTests {
         #expect(try decoded("Guardado na memória: x") == .notice("Guardado na memória: x"))
     }
 
-    @Test("Cada rodada de rotina fica como sua própria mensagem")
+    @Test("As rodadas seguidas de uma rotina, no mesmo dia, viram um bloco; a última fica inteira")
     func routineRunsFoldByRoutine() {
-        func run(_ name: String, _ outcome: OrbEvent.Outcome = .finished) -> TranscriptItem {
-            TranscriptItem(.event(OrbEvent(kind: .routineRun, actor: atlas, detail: name, note: "nada novo", outcome: outcome)))
+        func run(_ name: String, _ outcome: OrbEvent.Outcome = .finished, at date: Date = .now) -> TranscriptItem {
+            var item = TranscriptItem(.event(OrbEvent(kind: .routineRun, actor: atlas, detail: name, note: "nada novo", outcome: outcome)))
+            item.date = date
+            return item
         }
-        let same = [run("WhatsApp"), run("WhatsApp", .failed), run("WhatsApp")]
-        #expect(TranscriptFolding.rows(for: same) == same.map { .single($0) })
-        let title = TranscriptFolding.eventsTitle(.routineRun, same)
-        #expect(title.hasPrefix("Rotina “WhatsApp” · 3 rodadas · última ") && title.hasSuffix(" · 1 não terminou"))
+        let same = [run("WhatsApp"), run("WhatsApp", .failed), run("WhatsApp", .attention), run("WhatsApp")]
+        #expect(TranscriptFolding.rows(for: same) == [.events(.routineRun, same)])
+        #expect(TranscriptFolding.earlierRunsTitle(Array(same.dropLast())) == "WhatsApp · 3 rodadas anteriores · 1 não terminou · 1 pede atenção")
+        #expect(TranscriptFolding.earlierRunsTitle([same[0]]) == "WhatsApp · 1 rodada anterior")
+        #expect(TranscriptFolding.earlierRunsMark(Array(same.dropLast())) == .failed, "a run that did not finish wins")
+        #expect(TranscriptFolding.earlierRunsMark([same[2], same[0]]) == .attention)
+        #expect(TranscriptFolding.earlierRunsMark([same[0]]) == nil)
+        // Another routine, or a message in between, starts another block.
         #expect(TranscriptFolding.rows(for: [run("WhatsApp"), run("Anúncios")]).count == 2)
+        let said = say("oi")
+        #expect(TranscriptFolding.rows(for: [same[0], said, same[3]]) == [.single(same[0]), .single(said), .single(same[3])])
+        // Nor across days: the chat's day line stays between them.
+        let today = Calendar.current.startOfDay(for: .now)
+        let lateYesterday = run("WhatsApp", at: today.addingTimeInterval(-60)), early = run("WhatsApp", at: today.addingTimeInterval(60))
+        #expect(TranscriptFolding.rows(for: [lateYesterday, early]) == [.single(lateYesterday), .single(early)])
         #expect(ConversationSearch.searchable(same[1])?.source == .notice)
     }
 

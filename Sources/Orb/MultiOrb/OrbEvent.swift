@@ -13,6 +13,9 @@ struct OrbEvent: Codable, Equatable, Sendable {
         case deletionAsked
         /// The person answered a `deletionAsked`: the Orb that asked is told in its next turn.
         case deletionAnswered
+        /// The person opened the Orb's browser for themself and handed it back ("Abrir o navegador"): the chat's next turn is
+        /// told (`SinceLastTurn`), with the pages left open (`context`).
+        case browserUsed
         case unknown
 
         /// A kind from a newer version reads as `unknown`.
@@ -126,6 +129,8 @@ struct OrbEvent: Codable, Equatable, Sendable {
             case .attention: return "O pedido de \(actorName) para \(deletionWhat) não vale mais"
             default: return "Você não deixou \(actorName) \(deletionWhat)"
             }
+        case .browserUsed:
+            return "Você usou o navegador d\(PortugueseArticle.article(for: subjectName)) \(subjectName)"
         case .unknown:
             return detail
         }
@@ -187,6 +192,32 @@ extension OrbEvent {
         finished.next = nil
         self.init(kind: .planDone, plan: finished)
         detail = sentence
+    }
+
+    /// The person handed back `orb`'s browser at `until`, with `pages` open: `context` is what the Orb's next turn is told
+    /// (English and short, as model text is), and `detail` the line's words for a version that reads the kind as `unknown`.
+    init(browserUsed orb: OrbRef, pages: [BrowserTab], until: Date) {
+        self.init(kind: .browserUsed, subject: orb)
+        context = Self.browserContext(pages: pages, until: until)
+        detail = sentence
+    }
+
+    /// Pages told at most, and how much of each title and address.
+    static let browserPageLimit = 3, browserTitleLimit = 80, browserURLLimit = 200
+
+    static func browserContext(pages: [BrowserTab], until: Date) -> String {
+        let time = until.formatted(date: .omitted, time: .shortened)
+        guard !pages.isEmpty else { return "The user used your browser window until \(time) and closed it." }
+        // The front tab first: it is the page the user was on.
+        let ordered = pages.filter(\.isActive) + pages.filter { !$0.isActive }
+        let lines = ordered.prefix(browserPageLimit).map { page in
+            let title = Conversation.clipped(page.title.split(whereSeparator: \.isNewline).joined(separator: " "), to: browserTitleLimit)
+            let url = Conversation.clipped(page.url, to: browserURLLimit)
+            return title.isEmpty ? "- " + url : "- \(title) (\(url))"
+        }
+        let more = pages.count > browserPageLimit ? "\n(+\(pages.count - browserPageLimit) more)" : ""
+        return "The user used your browser window until \(time) and handed it back. Pages open then:\n"
+            + lines.joined(separator: "\n") + more
     }
 
     /// A run told as text by versions before the event: "Rotina “X” terminou: … (relatório em …)". nil for any other notice.

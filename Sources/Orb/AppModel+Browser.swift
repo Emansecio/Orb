@@ -85,7 +85,7 @@ extension AppModel {
             do {
                 let pid = try await hub.openForPerson(botID: botID, mode: mode)
                 // Handed back while it opened: the window goes again.
-                guard browserWithPerson.contains(botID) else { return await hub.giveBackFromPerson(botID: botID) }
+                guard browserWithPerson.contains(botID) else { await hub.giveBackFromPerson(botID: botID); return }
                 if let pid { Self.bringForward(pid) }
                 watchPersonBrowser(botID)
             } catch {
@@ -104,7 +104,17 @@ extension AppModel {
         guard let watcher = personBrowserWatchers.removeValue(forKey: botID) else { return }
         watcher.cancel()
         let hub = browserHub
-        Task { await hub.giveBackFromPerson(botID: botID) }
+        Task { [weak self] in
+            let pages = await hub.giveBackFromPerson(botID: botID)
+            self?.noteBrowserUsed(botID, pages: pages)
+        }
+    }
+
+    /// A line in the Orb's chat that the person used its browser: the next turn is told it once, with the pages left open
+    /// (`SinceLastTurn`), so "continua daqui" knows where they stopped. It marks nothing unread: the person did it.
+    func noteBrowserUsed(_ botID: UUID, pages: [BrowserTab], at date: Date = .now) {
+        guard let bot = bot(botID) else { return }
+        _ = appendToChat(.event(OrbEvent(browserUsed: OrbRef(bot), pages: pages, until: date)), of: botID, marksUnread: false)
     }
 
     /// While the person has the browser, looks now and then whether its window is still there: closing it, or quitting the

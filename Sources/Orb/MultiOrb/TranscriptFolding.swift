@@ -381,7 +381,7 @@ enum TranscriptFolding {
     static func foldableEventKind(of item: TranscriptItem) -> OrbEvent.Kind? {
         guard case .event(let event) = item.kind else { return nil }
         switch event.kind {
-        case .orbCreated, .joinedGroup, .leftGroup, .routineCreated, .groupWorked: return event.kind
+        case .orbCreated, .joinedGroup, .leftGroup, .routineCreated, .groupWorked, .routineRun: return event.kind
         default: return nil
         }
     }
@@ -391,11 +391,41 @@ enum TranscriptFolding {
     private static func sameFoldKey(_ lhs: TranscriptItem, _ rhs: TranscriptItem) -> Bool {
         guard case .event(let a) = lhs.kind, case .event(let b) = rhs.kind else { return false }
         guard a.actor?.id == b.actor?.id else { return false }
-        if [.joinedGroup, .leftGroup, .routineRun, .groupWorked].contains(a.kind) { return a.detail == b.detail }
+        // A routine's runs fold within a day: the chat's day line stays between two days of them.
+        if a.kind == .routineRun { return a.detail == b.detail && Calendar.current.isDate(lhs.date, inSameDayAs: rhs.date) }
+        if [.joinedGroup, .leftGroup, .groupWorked].contains(a.kind) { return a.detail == b.detail }
         return true
     }
 
     // MARK: Words of a folded row
+
+    /// The fold above a routine's latest run: "WhatsApp · 8 rodadas anteriores · 1 não terminou" (what needs the person
+    /// stays in view; `earlierRunsMark` marks it).
+    static func earlierRunsTitle(_ items: [TranscriptItem]) -> String {
+        var failed = 0, attention = 0, name: String?
+        for item in items {
+            guard case .event(let event) = item.kind else { continue }
+            name = name ?? event.detail
+            if event.outcome == .failed { failed += 1 } else if event.outcome == .attention { attention += 1 }
+        }
+        let count = items.count
+        return [name.flatMap { $0.isEmpty ? nil : $0 },
+                count == 1 ? "1 rodada anterior" : "\(count) rodadas anteriores",
+                failed > 0 ? "\(failed) não \(failed == 1 ? "terminou" : "terminaram")" : nil,
+                attention > 0 ? "\(attention) \(attention == 1 ? "pede" : "pedem") atenção" : nil]
+            .compactMap { $0 }.joined(separator: " · ")
+    }
+
+    /// The mark of that fold: a run that did not finish wins over one that needs attention; nil when all went as usual.
+    static func earlierRunsMark(_ items: [TranscriptItem]) -> OrbEvent.Outcome? {
+        var mark: OrbEvent.Outcome?
+        for item in items {
+            guard case .event(let event) = item.kind else { continue }
+            if event.outcome == .failed { return .failed }
+            if event.outcome == .attention { mark = .attention }
+        }
+        return mark
+    }
 
     /// The events of a folded row, in one line: "Atlas criou 3 Orbs: A, B e C", "A, B e C entraram no grupo Lançamento",
     /// "Atlas criou 2 rotinas". Only the kinds `foldableEventKind(of:)` accepts reach it.
@@ -422,10 +452,6 @@ enum TranscriptFolding {
         case .routineCreated:
             if let who { return "\(who) criou \(count) rotinas" }
             return "\(count) rotinas criadas"
-        case .routineRun:
-            let failed = events.filter { $0.outcome == .failed }.count
-            return ["Rotina “\(group)”", "\(count) rodadas", "última \(RoutineText.dayAndTime(items[items.count - 1].date))",
-                    failed > 0 ? "\(failed) não \(failed == 1 ? "terminou" : "terminaram")" : nil].compactMap { $0 }.joined(separator: " · ")
         default:
             return "\(count) eventos"
         }

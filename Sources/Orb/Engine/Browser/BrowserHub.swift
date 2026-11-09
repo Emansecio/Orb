@@ -742,21 +742,26 @@ final class BrowserHub: Sendable {
 
     /// The person is done with the browser they opened (the button, or its window closed): a window still open goes back to the
     /// background, unless the Orb is set to Visível; a browser that was quit is closed for good, so the Orb's next page starts a
-    /// new one in its own mode. Then the Orb's tools go on.
-    func giveBackFromPerson(botID: UUID) async {
+    /// new one in its own mode. Then the Orb's tools go on. Returns the web pages the person left open (none when they quit
+    /// it), for the Orb's next turn to be told (`OrbEvent.browserUsed`).
+    @discardableResult
+    func giveBackFromPerson(botID: UUID) async -> [BrowserTab] {
         defer { control.giveBack(botID) }
-        guard let session = existingSession(botID: botID) else { return }
+        guard let session = existingSession(botID: botID) else { return [] }
         guard let profile = profileFolder(botID: botID), BrowserProfileCache.holder(profile: profile) != nil else {
             await close(botID: botID)
-            return
+            return []
         }
-        guard session.mode != .visible, session.driver.isHeaded else { return }
+        // Read before the relaunch below, which keeps only one page per conversation.
+        let pages = ((try? await session.exclusive { try await session.driver.tabs() }) ?? []).filter { $0.url.hasPrefix("http") }
+        guard session.mode != .visible, session.driver.isHeaded else { return pages }
         _ = try? await session.exclusive {
             session.forgetPage()
             _ = try await session.relaunchKeepingTabs { try await session.driver.setHeaded(false) }
         }
         session.setShowingWindow(false)
         clearLabels(botID: botID)
+        return pages
     }
 
     // MARK: Labels
