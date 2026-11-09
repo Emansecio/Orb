@@ -56,11 +56,6 @@ jobs:
       - name: Compilar
         run: swift build
 
-      # O release não tem as telas de revisão (--snapshot etc. ficam atrás de #if DEBUG || ORB_DEV_TOOLS) e precisa compilar
-      # sozinho: sem este passo, um símbolo de produção escondido por engano nesse #if só quebraria no bundle.sh.
-      - name: Compilar (release)
-        run: swift build -c release
-
       # Em série: a máquina do CI tem poucos núcleos, e com ~5000 testes em paralelo os que esperam por algo (processos,
       # servidores falsos, prazos de rede) estouram o tempo. Localmente, scripts/test.sh roda com metade dos núcleos.
       # A saída vai também para um arquivo (tee, com pipefail para a falha do swift test não se perder) que o passo
@@ -126,3 +121,65 @@ jobs:
           plutil -lint "$app/Contents/Info.plist"
           codesign --verify --deep --strict --verbose=2 "$app"
           echo "Versão do bundle: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist") (build $(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist"), commit $(/usr/libexec/PlistBuddy -c 'Print :OrbGitCommit' "$app/Contents/Info.plist"))"
+
+  # Em paralelo com os testes: o release não tem as telas de revisão (--snapshot etc. ficam atrás de
+  # #if DEBUG || ORB_DEV_TOOLS) e precisa compilar sozinho; sem ele, um símbolo de produção escondido por engano nesse
+  # #if só quebraria no bundle.sh. Num job próprio, os 8 a 9 minutos dele não atrasam o resultado dos testes.
+  release:
+    name: swift build -c release
+    runs-on: macos-26
+    timeout-minutes: 30
+
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@v5
+
+      # Mesmo Xcode do job swift (ver o comentário lá).
+      - name: Selecionar o Xcode mais novo
+        run: |
+          set -euo pipefail
+          latest="$(ls -d /Applications/Xcode_*.app 2>/dev/null | grep -E '/Xcode_[0-9]+(\.[0-9]+)*\.app$' | sort -V | tail -n 1 || true)"
+          if [ -z "$latest" ] && [ -d /Applications/Xcode.app ]; then
+            echo "Nenhum Xcode versionado; usando /Applications/Xcode.app"
+            latest="/Applications/Xcode.app"
+          fi
+          if [ -z "$latest" ]; then
+            echo "Nenhum Xcode encontrado em /Applications" >&2
+            ls -d /Applications/Xcode* >&2 || true
+            exit 1
+          fi
+          echo "Usando $latest"
+          sudo xcode-select -s "$latest/Contents/Developer"
+          xcodebuild -version
+          swift --version
+
+      - name: Compilar (release)
+        run: swift build -c release
+
+  # Os testes JVM do app Android (pareamento, quadros, notificações, capturas com o Paparazzi). Em Linux: não precisam
+  # de macOS nem de emulador.
+  android:
+    name: testes do app Android
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: android
+
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@v5
+
+      - name: Instalar o JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # O gradle.properties fixa o JDK numa pasta do Homebrew, que só existe no Mac de quem desenvolve; aqui vale o
+      # JDK que o passo anterior instalou (JAVA_HOME).
+      - name: Usar o JDK do runner
+        run: sed -i '/^org\.gradle\.java\.home=/d' gradle.properties
+
+      - name: Rodar os testes
+        run: ./gradlew testDebugUnitTest --no-daemon
