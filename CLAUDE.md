@@ -4,7 +4,7 @@ App nativo de macOS (SwiftUI, Swift 6, sem dependências externas) que roda vár
 
 ## Documentação
 
-- `docs/ARQUITETURA.md` é o mapa do código: módulos, o caminho de um turno, persistência, concorrência, testes e flags. Antes de criar ferramenta, provedor, campo persistido, tela ou atalho, siga a receita da seção "Como estender".
+- `docs/ARQUITETURA.md` é o mapa do código: módulos, o caminho de um turno, concorrência, desempenho e a receita "Como estender". Antes de criar ferramenta, provedor, campo persistido, tela ou atalho, siga essa receita. O detalhe fica em documentos irmãos: persistência em `docs/PERSISTENCIA.md`, testes em `docs/TESTES.md`, argumentos, variáveis, `--snapshot` e scripts em `docs/DESENVOLVIMENTO.md`, ferramentas em `docs/FERRAMENTAS.md` e colaboração entre Orbs em `docs/COLABORACAO.md`.
 - Por tema: `docs/CONTEXTO.md`, `PERMISSOES.md`, `MEMORIA.md`, `ORBS.md`, `MOVIMENTO.md`. Manual do usuário: `docs/MANUAL.md`.
 - `docs/REVISAO-*.md`, `AUTONOMIA-*.md`, `OTIMIZACAO.md` e `docs/historico/` são relatórios datados: confira no código antes de tratá-los como estado atual.
 

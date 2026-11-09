@@ -31,7 +31,7 @@ Os caminhos de código abreviados são relativos a `Sources/Orb/`. Caminhos inic
 | Redefinição de dados | `Reset/`, `AppModel+Reset.swift` | Plano de redefinição, execução e relançamento. |
 | Testes | `Tests/OrbAppTests/`, `Tests/OrbAppTests/TestSupport/`, `Tests/OrbAXFixture/` | Suítes por tema, fakes e sincronização compartilhados; app separado para smoke de Acessibilidade. |
 | Scripts e CI | `scripts/`, `.github/workflows/` | Bundle e assinatura, modelo falso, capturas do README e verificações de CI. |
-| Documentação e referências | `docs/`, `README.md`, `CLAUDE.md` | Arquitetura e manual; `docs/CONTEXTO.md`, `docs/PERMISSOES.md`, `docs/MEMORIA.md`, `docs/ORBS.md`, `docs/MOVIMENTO.md`, `docs/TELA-AO-VIVO.md` e `docs/USO-DO-COMPUTADOR.md` detalham cada área. Relatórios `docs/REVISAO-*`, `docs/AUTONOMIA-*` e `docs/historico/` são históricos: valide no código. `docs/mocks/` e `docs/readme/` contêm referências visuais. |
+| Documentação e referências | `docs/`, `README.md`, `CLAUDE.md` | Arquitetura e manual; `docs/CONTEXTO.md`, `docs/PERMISSOES.md`, `docs/MEMORIA.md`, `docs/ORBS.md`, `docs/MOVIMENTO.md`, `docs/FERRAMENTAS.md`, `docs/COLABORACAO.md`, `docs/PERSISTENCIA.md`, `docs/TESTES.md`, `docs/DESENVOLVIMENTO.md`, `docs/TELA-AO-VIVO.md` e `docs/USO-DO-COMPUTADOR.md` detalham cada área. Relatórios `docs/REVISAO-*`, `docs/AUTONOMIA-*` e `docs/historico/` são históricos: valide no código. `docs/mocks/` e `docs/readme/` contêm referências visuais. |
 
 `build/` e `.build/` são saídas de compilação. As pastas `~/` e `.slim/` na raiz são resíduos de ferramenta; não são código do produto.
 

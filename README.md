@@ -276,7 +276,12 @@ scripts/test.sh --filter 'WaitingTests|ChildProcessTests'
 
 | Documento | Assunto |
 |---|---|
-| [docs/ARQUITETURA.md](docs/ARQUITETURA.md) | mapa dos módulos, caminho de um turno, persistência, concorrência, desempenho, testes e ferramentas de desenvolvimento |
+| [docs/ARQUITETURA.md](docs/ARQUITETURA.md) | mapa dos módulos, caminho de um turno, concorrência, desempenho e como estender |
+| [docs/FERRAMENTAS.md](docs/FERRAMENTAS.md) | as ferramentas do motor: terminal, arquivos, web, navegador, apps do Mac e agenda |
+| [docs/COLABORACAO.md](docs/COLABORACAO.md) | Orbs juntos: delegação entre Orbs e grupos |
+| [docs/PERSISTENCIA.md](docs/PERSISTENCIA.md) | arquivos de dados, retomada, redefinir o Orb, decodificação tolerante e filas de gravação |
+| [docs/TESTES.md](docs/TESTES.md) | como rodar a suíte, flags dos testes e o modelo falso |
+| [docs/DESENVOLVIMENTO.md](docs/DESENVOLVIMENTO.md) | argumentos, variáveis de ambiente, modos de `--snapshot` e scripts |
 | [docs/CONTEXTO.md](docs/CONTEXTO.md) | orçamento, compactação, resumo estruturado, medidor, economia de tokens e o registro de uso |
 | [docs/PERMISSOES.md](docs/PERMISSOES.md) | modos, liberações com escopo, comandos perigosos, aprovações, o Claude Code como cano e permissões do macOS |
 | [docs/MEMORIA.md](docs/MEMORIA.md) | a memória por Orb |
@@ -286,7 +291,7 @@ scripts/test.sh --filter 'WaitingTests|ChildProcessTests'
 
 Variáveis úteis: `ORB_DATA_DIR` (pasta de dados alternativa, para testar sem tocar nos seus Orbs), `ORB_SEND` (envia um prompt ao
 abrir), `ORB_STATIC`, `ORB_ANIMATE_INACTIVE`, `ORB_MEMORY_IDLE`, `ORB_CLAUDE_PATH`, `ORB_DEBUG_USAGE`. O modelo falso
-`scripts/fake-llm.py` e os modos de `--snapshot` estão em [docs/ARQUITETURA.md](docs/ARQUITETURA.md).
+`scripts/fake-llm.py` está em [docs/TESTES.md](docs/TESTES.md) e os modos de `--snapshot` em [docs/DESENVOLVIMENTO.md](docs/DESENVOLVIMENTO.md).
 
 ## Licença
 
