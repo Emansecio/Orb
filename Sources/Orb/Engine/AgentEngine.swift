@@ -866,10 +866,7 @@ actor AgentEngine {
         guard let batch = ApprovalBatch.plan(calls: calls, tools: request.tools, context: request.context, state: live, grants: allowed)
         else { return ([], [:]) }
         let approval = batch.request(botName: request.bot.name, reason: reason)
-        await gate.open(approval.id, botID: request.bot.id)
-        out.yield(.approval(approval))
-        out.yield(.status("Esperando sua resposta"))
-        let answer = await gate.wait(for: approval.id)
+        let answer = await answer(to: approval, request: request, out: out)
         let indices = Set(batch.members.map(\.index))
         let rules = answer.rule.map { [$0] } ?? approval.suggestions
         switch answer.decision {
@@ -1003,10 +1000,7 @@ actor AgentEngine {
                 suggestions: PermissionPolicy.suggestions(for: permission, existing: live.rules + allowed,
                                                           workspace: live.ownWorkspace(request.context.workingDirectory)),
                 isDangerous: why.isDangerous)
-            await gate.open(approval.id, botID: request.bot.id, alwaysAsks: why != .needsPermission)
-            out.yield(.approval(approval))
-            out.yield(.status("Esperando sua resposta"))
-            let answer = await gate.wait(for: approval.id)
+            let answer = await answer(to: approval, request: request, alwaysAsks: why != .needsPermission, out: out)
             let rule = answer.rule ?? approval.suggestions.first
             switch answer.decision {
             case .deny, .review:
@@ -1084,8 +1078,7 @@ actor AgentEngine {
                 let toolName = tool.spec.name
                 context.confirm = { [self] title, detail in
                     let answered = await gate.confirm(toolName: toolName, title: title, detail: detail, botID: request.bot.id) { card in
-                        out.yield(.approval(card))
-                        out.yield(.status("Esperando sua resposta"))
+                        Self.show(card, on: out)
                     }
                     out.yield(.status(summary.title))
                     return answered
@@ -1111,8 +1104,7 @@ actor AgentEngine {
     /// "Pronto". Parar answers it with a refusal (the turn is cancelled anyway).
     private func handoff(page: String, resuming title: String, request: TurnRequest, out: AsyncStream<TurnEvent>.Continuation) async -> Bool {
         let done = await gate.handoff(page: page, botName: request.bot.name, botID: request.bot.id) { card in
-            out.yield(.approval(card))
-            out.yield(.status("Esperando sua resposta"))
+            Self.show(card, on: out)
         }
         out.yield(.status(title))
         return done
@@ -1122,8 +1114,7 @@ actor AgentEngine {
     private func ask(_ question: OrbQuestion, resuming title: String, request: TurnRequest,
                      out: AsyncStream<TurnEvent>.Continuation) async -> String? {
         let answer = await gate.ask(question, botName: request.bot.name, botID: request.bot.id) { card in
-            out.yield(.approval(card))
-            out.yield(.status("Esperando sua resposta"))
+            Self.show(card, on: out)
         }
         out.yield(.status(title))
         return answer
@@ -1134,8 +1125,7 @@ actor AgentEngine {
     private func requestAccess(_ asked: AccessRequest, support: AccessSupport, resuming title: String, request: TurnRequest,
                                out: AsyncStream<TurnEvent>.Continuation) async -> AccessOutcome {
         let outcome = await gate.requestAccess(asked, support: support, botName: request.bot.name, botID: request.bot.id) { card in
-            out.yield(.approval(card))
-            out.yield(.status("Esperando sua resposta"))
+            Self.show(card, on: out)
         }
         out.yield(.status(title))
         return outcome
@@ -1147,13 +1137,26 @@ actor AgentEngine {
     private func propose(_ proposal: OrbProposal, creation: OrbCreationSupport, resuming title: String, request: TurnRequest,
                          out: AsyncStream<TurnEvent>.Continuation) async -> ProposalOutcome {
         let outcome = await gate.proposeAndCreate(proposal, creation: creation, botName: request.bot.name, botID: request.bot.id) { card in
-            out.yield(.approval(card))
-            out.yield(.status("Esperando sua resposta"))
+            Self.show(card, on: out)
         }
         out.yield(.status(title))
         return outcome
     }
     // MARK: end MultiOrb (WP3)
+
+    /// A card on screen: the card itself, then the status that says the turn waits for the person.
+    private static func show(_ card: ApprovalRequest, on out: AsyncStream<TurnEvent>.Continuation) {
+        out.yield(.approval(card))
+        out.yield(.status(ApprovalGate.waitingStatus))
+    }
+
+    /// Opens the card, shows it and waits for the person's answer.
+    private func answer(to approval: ApprovalRequest, request: TurnRequest, alwaysAsks: Bool = false,
+                        out: AsyncStream<TurnEvent>.Continuation) async -> ApprovalAnswer {
+        await gate.open(approval.id, botID: request.bot.id, alwaysAsks: alwaysAsks)
+        Self.show(approval, on: out)
+        return await gate.wait(for: approval.id)
+    }
 
     /// Where `write_file` or `edit_file` is about to write and whether a file was there already, to tell "novo" from "alterado".
     static func writeTarget(_ name: String, _ arguments: JSONValue, _ context: ToolContext) -> (url: URL, existed: Bool)? {

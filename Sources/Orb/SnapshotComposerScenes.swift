@@ -155,7 +155,7 @@ extension Snapshot {
             let card = ApprovalRequest(toolName: "run_command", title: "Rodando no Terminal", command: "git push origin main",
                                        reason: "", suggestions: [.shell("git", "push"), .shell("git")])
             items.append(TranscriptItem(.approval(card)))
-            model.apply(.status("Esperando sua resposta"), to: id)
+            model.apply(.status(ApprovalGate.waitingStatus), to: id)
             model.setAwaitingApproval(true, of: id)
         case "chat-working-retry":
             // Long enough that the countdown still has a number when the picture is taken.

@@ -201,7 +201,7 @@ enum WorkPhrase {
     /// The phrase for a status line the engines emit between and around tools ("Pensando", "Escrevendo", "Esperando
     /// sua resposta", the wait before a new try), or a tool's own title (a status that is not a call).
     static func line(status: String, now: Date = .now) -> WorkLine {
-        if status == "Esperando sua resposta" { return WorkLine(verb: status, tone: .waiting) }
+        if status == ApprovalGate.waitingStatus { return WorkLine(verb: status, tone: .waiting) }
         if let wait = Retry.parseWaitStatus(status) {
             return WorkLine(verb: "\(wait.cause) · tentando de novo", tone: .retrying(until: now.addingTimeInterval(Double(wait.seconds))))
         }

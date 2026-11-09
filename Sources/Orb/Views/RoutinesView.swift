@@ -863,7 +863,7 @@ struct RoutineConversationSheet: View {
         .background(Palette.canvas)
         .orbSheet(routine?.name ?? "Rotina",
                   subtitle: live == nil ? "Conversa da rotina, só para ler"
-                      : routine.map { model.needsYou($0.botID) } == true ? "Esperando sua resposta" : "Rodando agora",
+                      : routine.map { model.needsYou($0.botID) } == true ? ApprovalGate.waitingStatus : "Rodando agora",
                   size: .large) {
             SheetFooterBar {
                 Spacer()

@@ -128,6 +128,10 @@ extension ApprovalGate {
 /// (or a change of permission mode) answers it. Waiting is safe against cancellation, and an answer that
 /// arrives before the engine starts waiting is kept.
 actor ApprovalGate {
+    /// The status a turn shows while a card waits for the person. `WorkLine` reads it to pick the waiting tone, so
+    /// every place that emits or compares it uses this one value.
+    static let waitingStatus = "Esperando sua resposta"
+
     private struct Entry {
         var botID: UUID
         /// Still needs the user's eyes whatever the mode (destructive, or changes the Orb's instructions).

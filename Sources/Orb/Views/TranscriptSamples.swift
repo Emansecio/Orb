@@ -456,7 +456,7 @@ enum TranscriptSample {
                 ]))
                 if screen.hasSuffix("-need") {
                     model.setAwaitingApproval(true, of: bot.id)
-                    live.setWork(WorkLine(verb: "Esperando sua resposta", tone: .waiting, actions: 4))
+                    live.setWork(WorkLine(verb: ApprovalGate.waitingStatus, tone: .waiting, actions: 4))
                 }
                 // Re-seed after the offscreen layer subscribed: this scene has a drawn page, never a running browser.
                 try? await Task.sleep(for: .milliseconds(500))
