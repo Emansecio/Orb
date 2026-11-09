@@ -204,8 +204,10 @@ final class PhoneAccess {
         case .avatar(let bot):
             guard let config = model.bot(bot)?.orb else { return unknown(bot, to: connection) }
             let hash = avatarHash(config)
-            guard let png = avatarPNG(config, hash: hash) else { return }
-            server.send(PhoneWire.Avatar(bot: bot.uuidString, hash: hash, png: png), to: connection)
+            Task { [weak self] in
+                guard let png = await self?.avatarPNG(config, hash: hash) else { return }
+                self?.server?.send(PhoneWire.Avatar(bot: bot.uuidString, hash: hash, png: png), to: connection)
+            }
         }
     }
 
@@ -353,28 +355,57 @@ final class PhoneAccess {
 
     // MARK: Avatars
 
+    private static let avatarVersion = 2
+
     private func avatarHash(_ config: OrbConfig) -> String {
         if let known = avatarHashes[config] { return known }
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
-        let digest = SHA256.hash(data: (try? encoder.encode(config)) ?? Data())
+        // The phone keeps an avatar by hash for good. Bump `avatarVersion` when the drawing changes, so phones
+        // download again (version 1 sent empty images: the layers were not decoded yet).
+        let digest = SHA256.hash(data: Data("\(Self.avatarVersion)".utf8) + ((try? encoder.encode(config)) ?? Data()))
         let hash = digest.prefix(8).map { String(format: "%02x", $0) }.joined()
         avatarHashes[config] = hash
         return hash
     }
 
     /// The Orb at rest, 256 × 256 px, as base64 PNG. Made once per look.
-    private func avatarPNG(_ config: OrbConfig, hash: String) -> String? {
+    private func avatarPNG(_ config: OrbConfig, hash: String) async -> String? {
         if let known = avatarImages[hash] { return known }
-        let renderer = ImageRenderer(content: OrbView(config: config, size: 128, animated: false)
-            .frame(width: 128, height: 128)
-            .environment(\.colorScheme, .dark))
-        renderer.scale = 2
-        guard let image = renderer.cgImage,
+        // The static orb decodes its layers in the background and draws nothing until they arrive, and
+        // ImageRenderer draws once: decode them first, at the exact pixel size the canvas will ask for.
+        let size: CGFloat = 128, scale: CGFloat = 2
+        let pixels = OrbGeometry.imageSide(for: size, scale: scale) * scale
+        let decoded = await OrbImages.load(config.layers(for: .idle), pixels: pixels)
+        guard !decoded.contains(where: { $0 == nil }) else { return nil }
+        if let known = avatarImages[hash] { return known } // another request made it meanwhile
+        let renderer = ImageRenderer(content: OrbView(config: config, size: size, animated: false)
+            .frame(width: size, height: size)
+            .environment(\.colorScheme, .dark)
+            .environment(\.displayScale, scale))
+        renderer.scale = scale
+        // An orb-less image (layers dropped from the cache in between) is not kept: the phone caches by hash for good.
+        guard let image = renderer.cgImage, Self.showsTheOrb(image),
               let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else { return nil }
         let encoded = png.base64EncodedString()
         avatarImages[hash] = encoded
         return encoded
+    }
+
+    /// Whether `image` shows the orb's body: its center is opaque. Without its layers the canvas still draws the
+    /// ground shadow, so "some pixels" is not enough.
+    nonisolated static func showsTheOrb(_ image: CGImage) -> Bool {
+        let width = image.width, height = image.height
+        guard width > 0, height > 0 else { return false }
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                                          bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        return drawn && pixels[((height / 2) * width + width / 2) * 4 + 3] > 200
     }
 }
 

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Network
 import Testing
@@ -302,6 +303,10 @@ final class PhoneClient: Sendable {
         let avatar = await client.next("avatar")
         let png = try #require(Data(base64Encoded: avatar?["png"] as? String ?? ""))
         #expect(png.starts(with: [0x89, 0x50, 0x4E, 0x47]))
+        // The orb itself, not an empty canvas drawn before its layers were decoded.
+        let image = try #require(NSBitmapImageRep(data: png)?.cgImage)
+        #expect(image.width == 256)
+        #expect(PhoneAccess.showsTheOrb(image))
         try await client.send(#"{"type":"send","bot":"\#(UUID())","text":"oi","ref":"r2"}"#)
         #expect(await client.next("error")?["code"] as? String == "unknown_bot")
     }
