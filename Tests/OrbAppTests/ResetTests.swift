@@ -476,6 +476,9 @@ import Testing
         }
         store.flush()
         let model = AppModel(store: store, runsBackgroundWork: false, secretVault: vault)
+        // No browser for the test, whatever this Mac has: with `agent-browser` installed (Homebrew), the app's own hub runs it
+        // for real when the Orbs' browsers are closed, and that leaves `navegador/` behind in the data folder.
+        model.browserHub = BrowserHub(profilesDirectory: data.appending(path: "navegador"), locate: { BrowserStatus() })
         let finished = RaisedFlag()
         model.resetEnvironment.arguments = arguments
         model.resetEnvironment.preferences = preferences
