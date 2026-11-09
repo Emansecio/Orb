@@ -390,6 +390,50 @@ import Testing
         #expect(measure.floors(of: table(rows: 2, columns: 2)) == TableBlockView.columnFloors(of: table(rows: 2, columns: 2)))
     }
 
+    /// A campaign report wider than the chat, as the one that came out broken: it must scroll, not squeeze.
+    private var wideReport: MarkdownTable {
+        MarkdownTable(header: ["Palavra-chave", "Correspondência", "Impressões", "Cliques", "CTR", "Custo", "CPC médio"],
+                      rows: [["\"gympass planos\"", "Expressão", "563", "68", "12,08%", "101,12 R$", "1,49 R$"],
+                             ["[planos gympass valores]", "Exata", "37", "13", "35,14%", "19,21 R$", "1,48 R$"],
+                             ["[gympass pessoa física]", "Exata", "37", "11", "29,73%", "16,33 R$", "1,48 R$"]],
+                      alignments: Array(repeating: .leading, count: 7))
+    }
+
+    @Test func aTableThatScrollsKeepsEachCellOnOneLineUpToACap() {
+        var table = wideReport
+        table.rows.append(["uma frase bem longa que o modelo escreveu numa célula e que precisa quebrar em algum ponto da coluna",
+                           "Exata", "1", "1", "1%", "1 R$", "1 R$"])
+        let floors = TableBlockView.columnFloors(of: table)
+        let lines = TableBlockView.columnLines(of: table, floors: floors)
+        let regular = NSFont.systemFont(ofSize: 13)
+        func width(_ text: String) -> CGFloat { (text as NSString).size(withAttributes: [.font: regular]).width }
+        #expect(lines.count == 7 && zip(lines, floors).allSatisfy { $0 >= $1 }, "never under the longest word")
+        #expect(lines[5] >= width("101,12 R$"), "a price is not broken in two")
+        #expect(lines[0] == TableBlockView.maxLine, "a long sentence still wraps")
+    }
+
+    @MainActor @Test func theKeptMeasureGivesTheLinesAFreshOneGives() {
+        let measure = TableBlockView.FloorMeasure()
+        var current = table(rows: 25)
+        for row in ["um texto que cresce", "um texto que cresce ainda mais que o anterior, com muitas palavras a mais"] {
+            current.rows.append([row, "x", "y"])
+            let floors = measure.floors(of: current)
+            #expect(measure.lines == TableBlockView.columnLines(of: current, floors: floors))
+        }
+    }
+
+    /// A table that scrolls sideways is as tall as its rows: the scroll view took the height it was offered (a band of
+    /// empty space over and under the rows) and cut each row to one line.
+    @MainActor @Test func aTableThatScrollsIsAsTallAsItsRows() {
+        func size(_ width: CGFloat) -> CGSize {
+            NSHostingView(rootView: TableBlockView(table: wideReport).frame(width: width)).fittingSize
+        }
+        let fits = size(2_000)
+        let scrolls = size(400)
+        // A scroller under the rows is all a scrolled table may add.
+        #expect(scrolls.height >= fits.height - 0.5 && scrolls.height <= fits.height + 20, "\(scrolls) vs \(fits)")
+    }
+
     @MainActor @Test func theColumnsStayAlignedWhilePiecesStream() {
         func size(_ view: some View) -> CGSize { NSHostingView(rootView: view.frame(width: 700)).fittingSize }
         let long = table(rows: TableBlockView.pieceRows * 2 + 7)

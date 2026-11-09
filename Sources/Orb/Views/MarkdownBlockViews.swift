@@ -476,6 +476,8 @@ struct TableBlockView: View, Equatable {
         private var header: [String] = []
         private var rows: [[String]] = []
         private(set) var floors: [CGFloat] = []
+        /// What `columnLines` returns for the same table, folded in the same way.
+        private(set) var lines: [CGFloat] = []
 
         /// The floors `columnFloors` computes, measuring only what grew since the last call.
         func floors(of table: MarkdownTable) -> [CGFloat] {
@@ -484,14 +486,21 @@ struct TableBlockView: View, Equatable {
                 header = table.header
                 rows = table.rows
                 floors = TableBlockView.columnFloors(of: table)
+                lines = TableBlockView.columnLines(of: table, floors: floors)
                 return floors
             }
             let regular = NSFont.systemFont(ofSize: 13)
             for row in table.rows.dropFirst(rows.count) {
-                for (column, cell) in row.enumerated() where column < floors.count && floors[column] < TableBlockView.maxFloor {
-                    // A word narrower than the floor cannot lift it, so the measure starts from it.
-                    let word = TableBlockView.widestWord([cell], font: regular, seed: floors[column] - 2)
-                    floors[column] = min(ceil(word) + 2, TableBlockView.maxFloor)
+                for (column, cell) in row.enumerated() where column < floors.count {
+                    if floors[column] < TableBlockView.maxFloor {
+                        // A word narrower than the floor cannot lift it, so the measure starts from it.
+                        let word = TableBlockView.widestWord([cell], font: regular, seed: floors[column] - 2)
+                        floors[column] = min(ceil(word) + 2, TableBlockView.maxFloor)
+                    }
+                    if lines[column] < TableBlockView.maxLine {
+                        let line = TableBlockView.widestLine([cell], font: regular, seed: lines[column] - 2)
+                        lines[column] = max(min(ceil(line) + 2, TableBlockView.maxLine), floors[column])
+                    }
                 }
             }
             rows = table.rows
@@ -501,9 +510,11 @@ struct TableBlockView: View, Equatable {
 
     var body: some View {
         // Each column is at least as wide as its longest word, so a narrow chat (inspector open, small window) never
-        // breaks words letter by letter; when even that does not fit, the table scrolls sideways.
+        // breaks words letter by letter; when even that does not fit, the table scrolls sideways, and then each column
+        // takes its longest cell on one line (up to `maxLine`): squeezed to its words, "101,12 R$" broke in two.
         let floors = floorMeasure.floors(of: table)
-        let needed = floors.reduce(0, +) + Self.columnSpacing * CGFloat(max(floors.count - 1, 0)) + Self.inset * 2
+        let lines = floorMeasure.lines
+        let needed = Self.width(of: floors)
         VStack(alignment: .leading, spacing: 0) {
             // Outside what scrolls sideways, so a wide table keeps its buttons in view.
             HStack(spacing: Spacing.m) {
@@ -522,8 +533,10 @@ struct TableBlockView: View, Equatable {
             .padding(.bottom, 2)
             ViewThatFits(in: .horizontal) {
                 grid(floors).frame(minWidth: needed, idealWidth: needed, maxWidth: .infinity, alignment: .leading)
+                // The grid's own height: without it the scroll view took the height it was offered (a band of empty
+                // space over and under the rows) and the rows got one line each, cut short.
                 ScrollView(.horizontal) {
-                    grid(floors).frame(width: needed)
+                    grid(lines).frame(width: Self.width(of: lines)).fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -546,6 +559,41 @@ struct TableBlockView: View, Equatable {
         .font(Typography.text)
         .padding(Self.inset)
     }
+
+    /// The width of a grid whose columns are `columns` wide.
+    private static func width(of columns: [CGFloat]) -> CGFloat {
+        columns.reduce(0, +) + columnSpacing * CGFloat(max(columns.count - 1, 0)) + inset * 2
+    }
+
+    /// The width each column takes when the table scrolls: its widest cell on one line (header in semibold), up to
+    /// `maxLine` so a long sentence still wraps, and never under its floor.
+    nonisolated static func columnLines(of table: MarkdownTable, floors: [CGFloat]) -> [CGFloat] {
+        let regular = NSFont.systemFont(ofSize: 13)
+        let semibold = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        return floors.indices.map { column in
+            let header = widestLine(table.header.indices.contains(column) ? [table.header[column]] : [], font: semibold)
+            let body = widestLine(table.rows.compactMap { $0.indices.contains(column) ? $0[column] : nil }, font: regular,
+                                  seed: header)
+            return max(min(ceil(body) + 2, maxLine), floors[column])
+        }
+    }
+
+    /// The width of the widest of some cells on one line, without the `**` and backticks in them, never under `seed`.
+    /// A cell is measured only if it could be wider than the widest so far, as in `widestWord`.
+    private nonisolated static func widestLine(_ cells: [String], font: NSFont, seed: CGFloat = 0) -> CGFloat {
+        let widestCharacter = font.pointSize * 1.2
+        var widest = seed
+        for cell in cells {
+            guard CGFloat(cell.utf16.count) * widestCharacter > widest else { continue }
+            let plain = cell.filter { $0 != "*" && $0 != "`" }
+            widest = max(widest, (plain as NSString).size(withAttributes: [.font: font]).width)
+            if widest >= maxLine { return widest }
+        }
+        return widest
+    }
+
+    /// Past this a cell wraps even when the table scrolls.
+    nonisolated static let maxLine: CGFloat = 280
 
     /// The narrowest each column may get: its widest word (header in semibold), up to `maxFloor` so a long link or
     /// path still wraps.

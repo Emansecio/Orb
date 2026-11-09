@@ -44,6 +44,22 @@ enum TranscriptSample {
         Quer que eu faça isso agora?
         """
 
+    /// A table wider than the chat, as a campaign report gives: it scrolls sideways.
+    private static let wideTable = #"""
+        Nos dias **7 e 8 de novembro**, a campanha teve **123 cliques** e **912 impressões**:
+
+        | Palavra-chave | Correspondência | Impressões | Cliques | CTR | Custo | CPC médio |
+        |---|---|---|---|---|---|---|
+        | "gympass planos" | Expressão | 563 | 68 | 12,08% | 101,12 R$ | 1,49 R$ |
+        | [gympass] | Exata | 211 | 26 | 12,32% | 38,48 R$ | 1,48 R$ |
+        | [planos gympass valores] | Exata | 37 | 13 | 35,14% | 19,21 R$ | 1,48 R$ |
+        | [gympass pessoa física] | Exata | 37 | 11 | 29,73% | 16,33 R$ | 1,48 R$ |
+        | [wellhub gympass] | Exata | 33 | 3 | 9,09% | 4,49 R$ | 1,50 R$ |
+        | "gympass seguro" | Expressão | 18 | 2 | 11,11% | 2,08 R$ | 1,04 R$ |
+
+        "gympass planos" leva 55% dos cliques.
+        """#
+
     /// A reply with code in a few languages and a table with cells that exports must get right.
     private static let richMarkdown = #"""
         A taxa mudou em dois lugares. O cálculo ficou assim:
@@ -343,6 +359,8 @@ enum TranscriptSample {
                                 detail: "/Users/voce/Projetos/app/Sources/Preco.swift\n" + EditFileTool.diff(old: "let taxa = 0.1", new: "let taxa = 0.12\nlet moeda = \"BRL\""),
                                 state: .done, output: "Arquivo editado.", startedAt: start, finishedAt: start.addingTimeInterval(0.2))
             items = [user, TranscriptItem(.tool(edit)), TranscriptItem(.bot(text: richMarkdown, isStreaming: false))]
+        case "transcript-wide-table":
+            items = [user, TranscriptItem(.bot(text: wideTable, isStreaming: false))]
         case "transcript-rich-work":
             // The rail, the plan's card, what a turn read and changed, and the fuller questions.
             let start = Date.now.addingTimeInterval(-60)
