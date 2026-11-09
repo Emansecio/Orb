@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Indigo orb inside the adaptive-icon safe zone (66 dp circle) with two white eyes. -->
+    <path
+        android:fillColor="#5B5BF0"
+        android:pathData="M54,54m-27,0a27,27 0,1 1,54 0a27,27 0,1 1,-54 0" />
+    <path
+        android:fillColor="#7C7CFF"
+        android:fillAlpha="0.55"
+        android:pathData="M45,40m-10,0a10,8 0,1 1,20 0a10,8 0,1 1,-20 0" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M46.5,52m-3.6,0a3.6,4.6 0,1 1,7.2 0a3.6,4.6 0,1 1,-7.2 0" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M61.5,52m-3.6,0a3.6,4.6 0,1 1,7.2 0a3.6,4.6 0,1 1,-7.2 0" />
+</vector>

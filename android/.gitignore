@@ -1,0 +1,9 @@
+build/
+.gradle/
+local.properties
+*.jks
+keystore.properties
+.idea/
+*.iml
+.kotlin/
+app/src/test/snapshots/

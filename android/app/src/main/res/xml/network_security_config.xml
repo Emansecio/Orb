@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Mac is reached by Tailscale address or MagicDNS name over ws://; WireGuard already encrypts the tunnel,
+     and the Mac only accepts Tailscale/loopback peers. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
