@@ -33,10 +33,11 @@ final class BrowserControl: Sendable {
         state.withLock { _ = $0.held.insert(botID) }
     }
 
-    /// The person handed it back (or closed the window): every tool waiting for it goes on.
-    func giveBack(_ botID: UUID) {
+    /// The person handed it back (or closed the window): every tool waiting for it goes on. `used: false` is for a
+    /// take that came to nothing (the browser failed to open): nobody touched the page, so nothing is marked as handed back.
+    func giveBack(_ botID: UUID, used: Bool = true) {
         let waiting = state.withLock { state -> [CheckedContinuation<Void, Never>] in
-            if state.held.remove(botID) != nil { state.handedBack.insert(botID) }
+            if state.held.remove(botID) != nil, used { state.handedBack.insert(botID) }
             return state.waiters.removeValue(forKey: botID).map { Array($0.values) } ?? []
         }
         for continuation in waiting { continuation.resume() }

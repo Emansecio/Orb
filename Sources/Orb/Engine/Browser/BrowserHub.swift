@@ -723,7 +723,7 @@ final class BrowserHub: Sendable {
             session.setShowingWindow(true)
             clearLabels(botID: botID)
         } catch {
-            control.giveBack(botID)
+            control.giveBack(botID, used: false)
             throw error
         }
         return profileFolder(botID: botID).flatMap(BrowserProfileCache.holder)

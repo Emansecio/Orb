@@ -58,6 +58,13 @@ import Testing
         #expect(setup.driver.calls.isEmpty)
     }
 
+    @Test func aBrowserThatCannotOpenLeavesNoHandBackBehind() async throws {
+        let setup = setup(ready: false)
+        await #expect(throws: BrowserDriverError.self) { try await setup.hub.openForPerson(botID: setup.botID, mode: .background) }
+        // Nobody used the browser: the Orb's next tool must not be told the page may have changed.
+        #expect(!setup.hub.control.consumeHandBack(setup.botID))
+    }
+
     @Test func showingTheWindowFromTheWholeBrowserReopensOnlyTheOtherConversationsPages() async throws {
         let setup = setup()
         func scroll(_ scope: String) async throws {
