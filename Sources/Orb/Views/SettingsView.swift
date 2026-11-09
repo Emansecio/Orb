@@ -2,11 +2,11 @@ import SwiftUI
 import AppKit
 import ServiceManagement
 
-// Ajustes: six tabs (Geral, Orbs, Modelos, Navegador, Uso, Acesso ao Mac) that anything in the app can open directly.
+// Ajustes: seven tabs (Geral, Orbs, Modelos, Navegador, Celular, Uso, Acesso ao Mac) that anything in the app can open directly.
 
 enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
     // `permissions` keeps its raw value: it is what the app stored as the last tab, and it must still open that tab.
-    case general, orbs, models, browser, usage, permissions
+    case general, orbs, models, browser, phone, usage, permissions
 
     var id: String { rawValue }
 
@@ -16,6 +16,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
         case .orbs: "Orbs"
         case .models: "Modelos"
         case .browser: "Navegador"
+        case .phone: "Celular"
         case .usage: "Uso"
         case .permissions: "Acesso ao Mac"
         }
@@ -27,6 +28,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
         case .orbs: "person.2"
         case .models: "cpu"
         case .browser: "globe"
+        case .phone: "iphone"
         case .usage: "chart.bar"
         case .permissions: "lock.shield"
         }
@@ -88,6 +90,7 @@ struct SettingsView: View {
             settingsTab(.orbs) { OrbsSettings() }
             settingsTab(.models) { ProviderSettings() }
             settingsTab(.browser) { BrowserSettings() }
+            settingsTab(.phone) { PhoneSettings() }
             settingsTab(.usage) { UsageSettings() }
             settingsTab(.permissions) { MacPermissionsView() }
         }

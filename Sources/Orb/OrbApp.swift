@@ -410,6 +410,7 @@ enum Snapshot {
                 ?? SidebarCategorySnapshots.view(screen, model: model)
                 ?? ContextSnapshots.view(screen, model: model)
                 ?? UsageSnapshots.view(screen, model: model)
+                ?? PhoneSnapshots.view(screen, model: model)
                 ?? Snapshot.composerScene(screen, model: model)
                 ?? SettingsSnapshots.view(screen, firstBotID: model.bots.first?.id)
                 ?? CatalogSnapshots.view(screen, model: model)

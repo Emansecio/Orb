@@ -387,6 +387,8 @@ final class AppModel {
     @ObservationIgnored var waitingActivity: (any NSObjectProtocol)?
     /// Whether the app stays out of App Nap while a routine is switched on (the running app; not tests or developer runs).
     @ObservationIgnored var keepsAwakeForRoutines = false
+    /// "Acessar pelo celular" (Ajustes → Celular): the phone server and what it keeps the phones up to date with.
+    @ObservationIgnored private(set) lazy var phone = PhoneAccess(model: self)
     /// The model-list refresh the scheduler started, while it runs, and the providers whose last automatic attempt failed.
     @ObservationIgnored private var modelRefresh: Task<Void, Never>?
     @ObservationIgnored private var modelRefreshFailures: [ProviderKind: ModelRefreshBackoff.Failure] = [:]
@@ -586,6 +588,7 @@ final class AppModel {
             keepsAwakeForRoutines = true
             syncActivities()
             startWakeWatch() // outside processes can ring a routine awake through `wake/`
+            phone.restore() // the phone server, when the user left it on
             startStateWatch() // and an outside change to `state.json` is read again (its own writes never are)
             scheduler = Task { [weak self] in
                 await self?.refreshConnections()

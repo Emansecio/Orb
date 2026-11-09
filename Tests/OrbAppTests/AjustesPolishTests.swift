@@ -227,8 +227,8 @@ struct SettingsRouterTests {
         #expect(defaults.string(forKey: SettingsRouter.requestKey) == "permissions")
     }
 
-    @Test func tabsAreInTheOrderGeralOrbsModelosNavegadorUsoAcessoAoMac() {
-        #expect(SettingsTab.allCases.map(\.title) == ["Geral", "Orbs", "Modelos", "Navegador", "Uso", "Acesso ao Mac"])
+    @Test func tabsAreInTheOrderGeralOrbsModelosNavegadorCelularUsoAcessoAoMac() {
+        #expect(SettingsTab.allCases.map(\.title) == ["Geral", "Orbs", "Modelos", "Navegador", "Celular", "Uso", "Acesso ao Mac"])
     }
 
     @Test func renamedTabsKeepTheValueAlreadyStoredAndTheModelTextNamesTheShownTitle() {

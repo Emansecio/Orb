@@ -889,6 +889,22 @@ app em segundo plano; também avisam quando uma rotina não termina, com o motiv
 de 3 h num pedido, com **Parar**), o **Local dos dados**, as **Memórias guardadas**, a **Pasta dos Orbs** com "Mostrar no Finder" e
 **Redefinir o Orb…**.
 
+## Orb no celular
+
+O app **Orb para Android** mostra os seus Orbs, abre a conversa de cada um, manda mensagens, acompanha a resposta enquanto ela é
+escrita, para um Orb e responde aos pedidos de permissão e às perguntas, de qualquer lugar. O Mac faz o trabalho: ele precisa estar
+ligado, acordado e com o Orb aberto.
+
+1. Instale o **Tailscale** (gratuito) no Mac e no celular e entre com a mesma conta nos dois.
+2. No Mac, ligue **Ajustes → Celular → Acessar os Orbs pelo celular**. Aparece um QR code.
+3. No celular, abra o Orb e toque em **Ler QR code**.
+
+A conexão passa só pelo Tailscale, criptografada; nenhuma porta fica aberta para a internet. **Não deixar o Mac dormir** (ligado por
+padrão) impede que o Mac durma sozinho enquanto o acesso está ligado; a tela ainda apaga. Pelo celular dá para permitir comandos (os
+arriscados pedem a digital ou a senha do aparelho) e responder perguntas; criar um Orb, liberar mais acesso e o que pede o navegador
+aberto continuam no Mac, e o celular só pode recusar. **Gerar novo código…** desconecta os celulares pareados, que precisam ler o novo
+QR code.
+
 ## Redefinir o Orb
 
 Ajustes → Geral → Seus dados → **Redefinir o Orb…** volta o app ao primeiro uso. A folha é irmã de "Apagar Atlas?": diz o que some ("3 Orbs, 42 conversas,

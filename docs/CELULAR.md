@@ -36,10 +36,10 @@ um campo opcional ausente vale `null`.
 | `type` | Campos | O que faz |
 | --- | --- | --- |
 | `hello` | `token`, `device` (nome do aparelho), `protocol` | Primeiro quadro, em até 10 s. Token errado: `error` `unauthorized` e a conexão fecha. |
-| `open` | `bot` | Passa a acompanhar a conversa desse Orb (uma por vez; outro `open` troca). Resposta: `chat` e, enquanto houver resposta em andamento, `stream`. |
-| `close` | | Deixa de acompanhar a conversa (voltou para a lista). |
+| `open` | `bot` | Passa a acompanhar a conversa desse Orb (uma por vez; outro `open` troca). Resposta: `chat` e, enquanto houver resposta em andamento, `stream`. Enquanto aberta, o que chega nela não conta como não lido no Mac. |
+| `close` | | Deixa de acompanhar a conversa (voltou para a lista ou o app foi para o segundo plano). |
 | `send` | `bot`, `text`, `ref` (UUID do celular) | Manda uma mensagem. Com o Orb livre, começa um turno; trabalhando, entra na tarefa como no painel rápido do Mac. Resposta: `sent`. |
-| `decide` | `bot`, `approval`, `decision` (`once`, `task`, `always`, `deny`), `reply?`, `note?` | Responde a um cartão. `reply` é a resposta a uma pergunta (com `once`); `note`, o que fazer em vez disso (com `deny`). |
+| `decide` | `bot`, `approval` (o `id` do `Item` do cartão), `decision` (`once`, `task`, `always`, `deny`), `reply?`, `note?` | Responde a um cartão. `reply` é a resposta a uma pergunta (com `once`); `note`, o que fazer em vez disso (com `deny`). |
 | `stop` | `bot` | Para o turno do Orb (o "Parar" do Mac). |
 | `avatar` | `bot` | Pede a imagem do Orb. Resposta: `avatar`. |
 | `ping` | | Resposta: `pong`. |
@@ -50,8 +50,8 @@ um campo opcional ausente vale `null`.
 | --- | --- | --- |
 | `welcome` | `mac` (nome), `protocol` | Depois de um `hello` válido, seguido de `bots`. |
 | `bots` | `bots`: lista de `Bot`, na ordem da lateral | Sempre que algo de algum Orb muda (no máximo a cada 300 ms). |
-| `chat` | `bot`, `items`: os últimos 80 `Item`, `working`, `status?` | No `open` e a cada mudança da conversa aberta (no máximo a cada 250 ms). |
-| `stream` | `bot`, `item`, `text` (o texto inteiro até agora) | Enquanto a resposta é escrita (no máximo a cada 120 ms). Quando ela termina, o `chat` seguinte traz o texto final. |
+| `chat` | `bot`, `items`: os últimos 80 `Item` (mais os cartões abertos fora deles), `working`, `status?` | No `open` e a cada mudança da conversa aberta (no máximo a cada 150 ms). |
+| `stream` | `bot`, `item`, `text` (o texto inteiro até agora) | Enquanto a resposta é escrita (no máximo a cada 150 ms). Quando ela termina, o `chat` seguinte traz o texto final. |
 | `sent` | `ref`, `ok`, `queued`, `note?` | Resposta ao `send`. `ok: false` traz em `note` o motivo, para mostrar ao usuário. |
 | `avatar` | `bot`, `hash`, `png` (base64, 256×256) | Resposta ao pedido. |
 | `pong` | | |
@@ -68,7 +68,8 @@ um campo opcional ausente vale `null`.
   "needsYou": false,          // há um cartão esperando resposta
   "status": "Lendo package.json", // o que ele está fazendo agora (null quando parado)
   "unread": 2,                // respostas que chegaram sem você ver
-  "last": { "text": "Pronto: separei 214 arquivos…", "date": 1762700000000 } // ou null
+  "last": { "text": "Pronto: separei 214 arquivos…", "date": 1762700000000 }, // ou null
+  "card": { …Item de kind "approval"… } // o cartão aberto mais novo, só com needsYou; senão null
 }
 ```
 
