@@ -1,6 +1,7 @@
 package app.orb.android
 
 import java.net.URLDecoder
+import okhttp3.HttpUrl
 
 data class Pairing(val host: String, val port: Int, val token: String, val mac: String) {
     // Never print the token: toString ends up in logs and crash reports.
@@ -33,6 +34,12 @@ object PairingLink {
         val host = params["host"]?.trim()?.removePrefix("[")?.removeSuffix("]").orEmpty()
         if (host.isEmpty() || host.any { it.isWhitespace() || it == '/' || it == '?' || it == '#' || it == '@' }) {
             throw PairingException("O link não traz o endereço do Mac.")
+        }
+        // The same builder `connectOnce` uses: a host it refuses would crash the connection loop at every launch.
+        try {
+            HttpUrl.Builder().scheme("http").host(host).port(1).build()
+        } catch (e: IllegalArgumentException) {
+            throw PairingException("O link não traz um endereço válido do Mac.")
         }
         val port = params["port"]?.let { p ->
             p.trim().toIntOrNull()?.takeIf { it in 1..65535 } ?: throw PairingException("A porta do link é inválida.")

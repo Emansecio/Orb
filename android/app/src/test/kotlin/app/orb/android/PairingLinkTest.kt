@@ -65,6 +65,12 @@ class PairingLinkTest {
         assertThrows(PairingException::class.java) { PairingLink.parse("orb://parear?token=$token") }
     }
 
+    @Test fun rejectsHostOkHttpRefuses() {
+        for (h in listOf("a%5Cb", "1:2:zz", "a%25b")) {
+            assertThrows("host=$h", PairingException::class.java) { PairingLink.parse("orb://parear?host=$h&token=$token") }
+        }
+    }
+
     @Test fun rejectsWrongSchemeOrHost() {
         for (l in listOf("http://parear?host=h&token=$token", "orb://outro?host=h&token=$token", "", "host=h&token=$token", "orb://parear.evil.com?host=h&token=$token")) {
             assertThrows(l, PairingException::class.java) { PairingLink.parse(l) }

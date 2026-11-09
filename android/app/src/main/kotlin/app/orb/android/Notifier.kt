@@ -12,7 +12,10 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
+import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -125,8 +128,18 @@ class ActionReceiver : BroadcastReceiver() {
         val bot = intent.getStringExtra(EXTRA_BOT) ?: return
         val approval = intent.getStringExtra(EXTRA_APPROVAL) ?: return
         val decision = intent.getStringExtra(EXTRA_DECISION)?.takeIf { it == "once" || it == "deny" } ?: return
-        OrbRepository.get(context).decide(bot, approval, decision)
-        Notifier(context).cancelFor(bot)
+        // Keep the receiver alive until the send result is known; cancel the notification only if it went out.
+        val pending = goAsync()
+        OrbRepository.get(context).decide(bot, approval, decision) { sent ->
+            if (sent) {
+                Notifier(context).cancelFor(bot)
+            } else {
+                Handler(Looper.getMainLooper()).post {
+                    Toast.makeText(context, "Sem conexão com o Mac. Tente de novo.", Toast.LENGTH_LONG).show()
+                }
+            }
+            pending.finish()
+        }
     }
 }
 

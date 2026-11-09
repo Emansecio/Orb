@@ -213,12 +213,17 @@ class OrbRepository private constructor(private val appContext: Context) {
     fun stop(botId: String) = launchSerial { socket?.send(Protocol.stop(botId)) }
 
     /** Answers a card. Used by the chat and by the notification buttons. */
-    fun decide(botId: String, approvalId: String, decision: String, reply: String? = null, note: String? = null) =
+    fun decide(botId: String, approvalId: String, decision: String, reply: String? = null, note: String? = null,
+        onResult: ((Boolean) -> Unit)? = null,
+    ) =
         launchSerial {
             _chat.update { it?.copy(submitted = it.submitted + approvalId) }
             if (socket?.send(Protocol.decide(botId, approvalId, decision, reply, note)) != true) {
                 _chat.update { it?.copy(submitted = it.submitted - approvalId) }
                 _events.tryEmit(UiEvent.Message("Sem conexão com o Mac. Tente de novo."))
+                onResult?.invoke(false)
+            } else {
+                onResult?.invoke(true)
             }
         }
 
@@ -249,7 +254,13 @@ class OrbRepository private constructor(private val appContext: Context) {
             val p = _state.value.pairing ?: break
             _state.update { it.copy(conn = Conn.Connecting) }
             sessionWelcomed = false; sessionUnauthorized = false
-            connectOnce(p)
+            try {
+                connectOnce(p)
+            } catch (e: IllegalArgumentException) {
+                // A saved host the HTTP client refuses would otherwise crash the app at every launch.
+                unpair("O endereço salvo do Mac é inválido. Pareie de novo.")
+                return
+            }
             if (sessionUnauthorized) {
                 unpair("O código deste celular foi trocado no Mac. Pareie de novo.")
                 return
@@ -303,7 +314,9 @@ class OrbRepository private constructor(private val appContext: Context) {
         when (val f = Protocol.parse(text) ?: return) {
             is Frame.Welcome -> {
                 sessionWelcomed = true
-                previousBots = null; requestedAvatars.clear()
+                // Keep the previous list: the first frame after a reconnect then notifies what changed during the
+                // outage. It is only reset in disconnect() (user left the app or unpaired).
+                requestedAvatars.clear()
                 _state.update { s ->
                     val p = s.pairing
                     if (p != null && f.mac.isNotBlank() && f.mac != p.mac) {
