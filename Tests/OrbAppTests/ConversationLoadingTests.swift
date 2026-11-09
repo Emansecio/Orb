@@ -200,6 +200,9 @@ import Testing
         await model.loadedConversation(id)
         model.newChat(for: id)
         let chat = try #require(model.live(id).chats?.active)
+        // Leaving the first conversation saves it on the store's queue: removing the folder while that write puts its
+        // temporary file in it failed with "no permission" (513).
+        model.store.flush()
 
         let folder = root.appending(path: "conversations")
         try FileManager.default.removeItem(at: folder)

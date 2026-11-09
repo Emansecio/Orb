@@ -156,15 +156,20 @@ private let gitReady = WorkFolders.Git.make() != nil
 
     @Test(.enabled(if: gitReady)) @MainActor func renamingAMemberMidRequestKeepsItsWorktree() async throws {
         try await makeRepo()
-        let script = CallScript([[.text("Li tudo."), .finished(.done, nil)]], holdsCall: 1)
-        let (model, group, _, revisor) = try setUp(script)
-        model.postUserMessage("@Revisor confira o projeto", to: group.id)
         let work = root.appending("trabalho")
-        func worktrees() -> [String] {
+        let worktrees: @Sendable () -> [String] = {
             (try? FileManager.default.contentsOfDirectory(atPath: work.path)).map { projects in
                 projects.flatMap { (try? FileManager.default.contentsOfDirectory(atPath: work.path + "/" + $0)) ?? [] }
             } ?? []
         }
+        // Looked at as the second turn calls the model, while the request still runs: once it ends, a worktree with
+        // nothing to merge goes, and a look after the second call raced with that cleanup (on the CI it found none).
+        let atSecondCall = LockedBox<[String]?>(nil)
+        let script = CallScript([[.text("Li tudo."), .finished(.done, nil)]], holdsCall: 1) { index in
+            if index == 1 { atSecondCall.value = worktrees() }
+        }
+        let (model, group, _, revisor) = try setUp(script)
+        model.postUserMessage("@Revisor confira o projeto", to: group.id)
         _ = await waitUntil("the first worktree") { worktrees().count == 1 && model.groupHub.run(group.id) != nil }
         let first = worktrees()
         #expect(model.rename(revisor.id, to: "Outro nome"))
@@ -172,6 +177,6 @@ private let gitReady = WorkFolders.Git.make() != nil
         model.postUserMessage("@Outro nome mais uma coisa", to: group.id)
         await script.release()
         _ = await waitUntil("the second turn") { await script.calls.count >= 2 }
-        #expect(worktrees() == first, "a new worktree was made for the new name")
+        #expect(atSecondCall.value == first, "a new worktree was made for the new name")
     }
 }

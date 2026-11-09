@@ -122,6 +122,13 @@ enum Thumbnails {
         ]
         guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
               let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
-        return NSImage(cgImage: cg, size: NSSize(width: cg.width / 2, height: cg.height / 2))
+        // An explicit bitmap rep, whose `pixelsWide` is the CGImage's width: the snapshot rep `NSImage(cgImage:size:)`
+        // makes said 40 for this 80 px copy on macOS 26 (it says 80 on 27), and the cache's memory budget is counted
+        // from it.
+        let rep = NSBitmapImageRep(cgImage: cg)
+        rep.size = NSSize(width: cg.width / 2, height: cg.height / 2)
+        let image = NSImage(size: rep.size)
+        image.addRepresentation(rep)
+        return image
     }
 }

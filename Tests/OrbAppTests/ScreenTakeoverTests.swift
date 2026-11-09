@@ -357,8 +357,15 @@ struct ScreenTakeoverTests {
         let rig = TakeoverRig(stepLimit: .seconds(2))
         rig.world.poster.delay = .milliseconds(2)
         let path = (0..<100).map { CGPoint(x: CGFloat($0), y: 0) }
+        let start = ContinuousClock.now
         _ = try await rig.takeOver { hand in try await hand.drag(along: path, modifiers: []) }
-        #expect(rig.world.frontmostCalls < 40, "\(rig.world.frontmostCalls) asks for 100 points")
+        let elapsed = ContinuousClock.now - start
+        // The front app is looked at once per interval of the clock, so the bound grows with the time the drag took: a
+        // loaded runner spends ~20 ms a point and asks ~40 times, still well short of once per point. The slack covers
+        // bringing the app up and the checks before the button goes down.
+        let bound = Int(elapsed / LiveTakeoverHand.dragFrontInterval) + 10
+        #expect(rig.world.frontmostCalls <= bound, "\(rig.world.frontmostCalls) asks for 100 points in \(elapsed)")
+        #expect(rig.world.frontmostCalls < path.count, "\(rig.world.frontmostCalls) asks for 100 points in \(elapsed)")
     }
 
     @Test func aDragStillNoticesWhenAnotherAppTakesTheFront() async throws {

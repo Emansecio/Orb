@@ -33,6 +33,11 @@ extension OrbDriverTests {
         }
         await waitUntil("idle choices to settle", timeout: .seconds(12)) {
             let shown = avatars(in: host)
+            // Settling moves only in frames, at most 0.1 s of it per frame: on the CI's virtual display the link fires too
+            // seldom for them to rest in time. Stepped here on the real clock as well, as a link would; a live avatar
+            // still never rests.
+            let now = CACurrentMediaTime()
+            for orb in shown where orb.isRunning { orb.stepIfDue(at: now) }
             return !shown.isEmpty && shown.allSatisfy { !$0.isRunning }
         }
     }
