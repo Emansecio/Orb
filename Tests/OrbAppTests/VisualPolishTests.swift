@@ -28,15 +28,17 @@ extension OrbDriverTests {
         func avatars(in view: NSView) -> [OrbAnimationView] {
             (view as? OrbAnimationView).map { [$0] } ?? view.subviews.flatMap(avatars)
         }
-        if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+        // Under Reduce Motion (the CI's runner has it on) the choices are still pictures: no animated avatar to wait for.
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        if !reduceMotion {
             await waitUntil("the group picker's initial animation") { avatars(in: host).contains(where: \.isRunning) }
         }
         let settled = await waitUntil("idle choices to settle", timeout: .seconds(12)) {
             let shown = avatars(in: host)
-            return !shown.isEmpty && shown.allSatisfy { !$0.isRunning }
+            return (reduceMotion || !shown.isEmpty) && shown.allSatisfy { !$0.isRunning }
         }
         if !settled {
-            // It fails only on the CI, and settles in ~6 s here: say what each avatar was doing, to find out why.
+            // What each avatar was doing: this is how the CI's Reduce Motion was found.
             let states = avatars(in: host).map { "live \($0.live) running \($0.isRunning) steps \($0.steps) fps \($0.frameRate)" }
             Issue.record("""
                 \(states.count) avatars: \(states.joined(separator: "; ")); reduce motion \
