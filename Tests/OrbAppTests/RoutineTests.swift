@@ -461,12 +461,24 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
     @Test func aPrecheckThatIgnoresTermIsKilledInsteadOfBlockingForever() async throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", "trap '' TERM; while :; do :; done"]
+        // Ignores TERM and stays alive without spinning a core; `echo` says the trap is in place.
+        process.arguments = ["-c", "trap '' TERM; echo ready; while :; do sleep 1; done"]
+        let output = Pipe()
+        process.standardOutput = output
+        let ready = LockedBox(false)
+        output.fileHandleForReading.readabilityHandler = { handle in
+            if !handle.availableData.isEmpty { ready.value = true }
+        }
         try process.run()
-        try await Task.sleep(for: .milliseconds(200)) // let the shell install its trap
+        // Whatever happens below, the shell does not outlive the test.
+        defer {
+            output.fileHandleForReading.readabilityHandler = nil
+            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+        }
+        #expect(await waitUntil("the shell to install its trap", timeout: .seconds(10)) { ready.value })
         let started = Date.now
-        await Task.detached { RoutinePrecheck.stop(process, grace: 0.3); process.waitUntilExit() }.value
-        #expect(!process.isRunning)
+        await Task.detached { RoutinePrecheck.stop(process, grace: 0.3) }.value // bounded by itself: grace, then SIGKILL
+        #expect(await waitUntil("the process to die", timeout: .seconds(10)) { !process.isRunning })
         #expect(Date.now.timeIntervalSince(started) < 10)
     }
 
