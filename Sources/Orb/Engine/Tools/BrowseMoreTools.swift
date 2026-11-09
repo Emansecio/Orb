@@ -9,8 +9,8 @@ struct BrowseWaitTool: BrowseTool {
     let spec = ToolSpec(
         name: "browse_wait",
         description: """
-        Wait for one of: `text` to appear, `url` (a glob like **/done), `ref` to show, a `load` state, or `ms`. Fails after \
-        `timeout` ms (default 10000, up to 40000).
+        Wait for one of: `text` to appear, `url` (a glob like **/done), `ref` to show, a `load` state, or `ms` (a blind \
+        pause: prefer the others, which end as soon as the page is ready). Fails after `timeout` ms (default 10000, up to 40000).
         """,
         parameters: .schema([
             "text": .property("string"), "url": .property("string"), "ref": .property("string"),
@@ -124,12 +124,14 @@ struct BrowseFindTool: BrowseTool {
         let session = try await BrowseSupport.session(context)
         let (data, dialog) = try await BrowseSupport.acting {
             try await session.exclusive {
+                // A loading veil over the element goes by itself (see `pastCover`); reading its text is never covered.
                 if action == "fill" {
-                    _ = try await session.driver.command(focusWords)
+                    _ = try await BrowseSupport.pastCover { try await session.driver.command(focusWords) }
                     let focus = try await session.driver.evaluate(BrowsePressTool.focusScript)
                     if let reason = BrowsePressTool.secretReason(focus: focus) { throw ToolError(SecretField.refusal(reason)) }
                 }
-                let data = try await session.driver.command(words)
+                let data = action == "text" ? try await session.driver.command(words)
+                    : try await BrowseSupport.pastCover { try await session.driver.command(words) }
                 let after = action == "text" ? (url: nil as String?, dialog: nil as String?) : await BrowseSupport.addressOrDialog(session)
                 return (data, after.dialog)
             }

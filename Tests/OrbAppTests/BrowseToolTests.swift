@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import os
 @testable import Orb
 
 /// The `browse_*` tools against a fake browser: what they return, what they refuse and what they ask for.
@@ -260,6 +261,66 @@ struct BrowseToolTests {
         setup.driver.state.withLock { $0.failure = .failed("Element @e9 not found") }
         let text = await message(BrowseClickTool(), ["ref": .string("e9")])
         #expect(text.contains("not found") && text.contains("fresh browse_snapshot"))
+    }
+
+    // MARK: A covered target
+
+    /// A sticky header over the element: one scroll brings it clear, and the model never hears of the cover.
+    @Test func aClickUnderAStickyHeaderScrollsTheElementClearAndClicks() async throws {
+        setup.driver.state.withLock { $0.coverings["click e1"] = 1 }
+        let text = try await run(BrowseClickTool(), ["ref": .string("e1")])
+        #expect(text.contains("Clicked e1"))
+        let clicks = setup.driver.calls.filter { $0.hasPrefix("click") || $0.contains("scrollintoview") }
+        #expect(clicks == ["click e1", "command scrollintoview @e1", "click e1"])
+    }
+
+    /// A loading veil that outlasts the scroll: the click waits for it to go.
+    @Test func aClickWaitsOutALoadingVeil() async throws {
+        setup.driver.state.withLock { $0.coverings["click e1"] = 3 }
+        let text = try await run(BrowseClickTool(), ["ref": .string("e1")])
+        #expect(text.contains("Clicked e1"))
+        #expect(setup.driver.calls.filter { $0 == "click e1" }.count == 4)
+        #expect(setup.driver.calls.filter { $0.contains("scrollintoview") }.count == 1)
+    }
+
+    @Test func otherActionsOnAPointAreTriedAgainButADragIsNot() async throws {
+        setup.driver.state.withLock { $0.coverings = ["check @e1": 1, "drag @e1 @e2": 1] }
+        #expect(try await run(BrowseClickTool(), ["ref": .string("e1"), "action": .string("check")]).contains("done"))
+        let drag = await message(BrowseClickTool(), ["ref": .string("e1"), "action": .string("drag"), "to": .string("e2")])
+        #expect(drag.contains("is covered by"))
+        #expect(setup.driver.calls.filter { $0 == "command drag @e1 @e2" }.count == 1)
+    }
+
+    /// A cover that stays: tried until the patience runs out, then the model is told to close it, not to snapshot again.
+    @Test func aCoverThatStaysEndsWithTheAdviceToCloseIt() async {
+        let attempts = OSAllocatedUnfairLock(initialState: 0)
+        let text: String
+        do {
+            try await BrowseSupport.acting {
+                try await BrowseSupport.pastCover(patience: .milliseconds(60), poll: .milliseconds(10), clear: {}) {
+                    attempts.withLock { $0 += 1 }
+                    throw BrowserDriverError.failed(FakeBrowserDriver.coveredMessage)
+                }
+            }
+            text = "no error"
+        } catch {
+            text = error.localizedDescription
+        }
+        #expect(text.contains("stays covered") && text.contains("Close what covers it") && !text.contains("fresh browse_snapshot"))
+        #expect(attempts.withLock { $0 } > 2)
+    }
+
+    @Test func onlyACoverIsTriedAgain() async {
+        let attempts = OSAllocatedUnfairLock(initialState: 0)
+        await #expect(throws: BrowserDriverError.self) {
+            try await BrowseSupport.pastCover(clear: {}) {
+                attempts.withLock { $0 += 1 }
+                throw BrowserDriverError.failed("Unknown ref: e9")
+            }
+        }
+        #expect(attempts.withLock { $0 } == 1)
+        #expect(BrowseSupport.isCovered(FakeBrowserDriver.coveredMessage))
+        #expect(!BrowseSupport.isCovered("Element @e9 not found"))
     }
 
     @Test func aPasswordFieldIsNeverFilledWhateverTheLanguage() async throws {

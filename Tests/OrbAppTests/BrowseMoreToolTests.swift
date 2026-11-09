@@ -107,6 +107,14 @@ struct BrowseMoreToolTests {
         #expect(calls.contains("command find placeholder Nome fill Ana"))
     }
 
+    /// A loading veil over what find located: the click waits for it to go instead of failing to the model.
+    @Test func findWaitsOutACoverBeforeClicking() async throws {
+        setup.driver.state.withLock { $0.coverings["find text Salvar click"] = 2 }
+        let text = try await run(BrowseFindTool(), ["by": .string("text"), "value": .string("Salvar"), "do": .string("click")])
+        #expect(text.contains("did click"))
+        #expect(setup.driver.calls.filter { $0 == "command find text Salvar click" }.count == 3)
+    }
+
     @Test func findNeverFillsAPasswordOrAnOptionLookingValue() async {
         let password = await message(BrowseFindTool(), ["by": .string("label"), "value": .string("Senha"), "do": .string("fill"), "text": .string("x")])
         #expect(!password.isEmpty && !setup.driver.calls.contains { $0.hasPrefix("command find") })

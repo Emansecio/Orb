@@ -91,12 +91,50 @@ enum BrowseSupport {
         return FileStamp(size: size, modified: (attributes[.modificationDate] as? Date) ?? .distantPast)
     }
 
-    /// Adds what to do when the browser's own error is about a ref that no longer exists.
+    /// Adds what to do when the browser's own error is about a ref that no longer exists, or about a target that stayed
+    /// covered after `pastCover` (the ref is fine there: telling the model to snapshot again only cost it a turn).
     static func acting<T>(_ work: () async throws -> T) async throws -> T {
         do {
             return try await work()
+        } catch BrowserDriverError.failed(let message) where isCovered(message) {
+            throw BrowserDriverError.failed(message + " (Waited and scrolled it into view; it stays covered. Close what covers it first: a dialog, banner or menu.)")
         } catch BrowserDriverError.failed(let message) {
             throw BrowserDriverError.failed(message + " (Refs change when the page does: take a fresh browse_snapshot and use its refs.)")
+        }
+    }
+
+    /// The browser refused the input because another element is at the target's click point (a sticky header, a loading
+    /// veil). It checks before sending anything, so nothing was clicked and trying again cannot repeat an action.
+    static func isCovered(_ message: String) -> Bool {
+        message.contains(" is covered by <") && message.contains("would land on")
+    }
+
+    /// How long a covered target is tried again. In the Orbs' history most covers were Google Ads' progress veil, which goes
+    /// in a second or two; a cover that stays (a cookie banner) costs this once before the model hears of it.
+    static let coverPatience: Duration = .milliseconds(2_500)
+    static let coverPoll: Duration = .milliseconds(250)
+
+    /// Runs `act`, and again while its target is covered: first right after `clear` (scrolling the element out from under a
+    /// sticky header, which the browser's own scrolling leaves it under), then every `poll` until `patience` is spent. Any
+    /// other failure, and the last covered one, are thrown as they are. Runs inside the caller's `exclusive`.
+    static func pastCover<T>(patience: Duration = coverPatience, poll: Duration = coverPoll,
+                             clear: (() async throws -> Void)? = nil, _ act: () async throws -> T) async throws -> T {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: patience)
+        var cleared = clear == nil
+        while true {
+            do {
+                return try await act()
+            } catch BrowserDriverError.failed(let message) where isCovered(message) {
+                if !cleared, let clear {
+                    cleared = true
+                    // A failed scroll is not the click's failure: the click is tried again either way.
+                    try? await clear()
+                    continue
+                }
+                guard clock.now.advanced(by: poll) < deadline else { throw BrowserDriverError.failed(message) }
+                try await Task.sleep(for: poll)
+            }
         }
     }
 
@@ -480,11 +518,20 @@ struct BrowseClickTool: BrowseTool {
         let session = try await BrowseSupport.session(context)
         let (url, dialog) = try await BrowseSupport.acting {
             try await session.exclusive {
-                if let kind = Self.pointerKind(action) { await context.browser.hub?.point(at: ref, kind: kind, session: session) }
-                if action == "click" {
-                    try await session.driver.click(ref)
+                let pointer = Self.pointerKind(action)
+                if let pointer { await context.browser.hub?.point(at: ref, kind: pointer, session: session) }
+                let act = {
+                    if action == "click" {
+                        try await session.driver.click(ref)
+                    } else {
+                        _ = try await session.driver.command([action, "@" + ref] + (target.map { ["@" + $0] } ?? []))
+                    }
+                }
+                // Only what lands on one point can be covered; a drag is left to the model, which sees where it went.
+                if pointer == nil {
+                    try await act()
                 } else {
-                    _ = try await session.driver.command([action, "@" + ref] + (target.map { ["@" + $0] } ?? []))
+                    try await BrowseSupport.pastCover(clear: { _ = try await session.driver.command(["scrollintoview", "@" + ref]) }, act)
                 }
                 return await BrowseSupport.addressOrDialog(session)
             }

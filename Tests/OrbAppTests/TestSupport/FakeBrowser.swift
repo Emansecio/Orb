@@ -31,6 +31,8 @@ final class FakeBrowserDriver: BrowserDriver, @unchecked Sendable {
         var streamPort: Int?
         /// What `box` answers, by ref; a ref without one has no box.
         var boxes: [String: CGRect] = [:]
+        /// How many more times an action fails as covered (by its words: "click e1", "find text Salvar click").
+        var coverings: [String: Int] = [:]
     }
 
     var generation: Int { state.withLock { $0.generation } }
@@ -62,7 +64,21 @@ final class FakeBrowserDriver: BrowserDriver, @unchecked Sendable {
         return state.snapshot
     }
 
-    func click(_ ref: String) async throws { try note("click \(ref)") }
+    /// Fails as the real browser does when another element sits on the click point, while `call` has coverings left.
+    private func uncover(_ call: String) throws {
+        try state.withLock { state in
+            guard let left = state.coverings[call], left > 0 else { return }
+            state.coverings[call] = left - 1
+            throw BrowserDriverError.failed(FakeBrowserDriver.coveredMessage)
+        }
+    }
+
+    static let coveredMessage = "Element '@e1' is covered by <ipl-progress-indicator> at its click point, so the input would land on that element instead."
+
+    func click(_ ref: String) async throws {
+        try note("click \(ref)")
+        try uncover("click \(ref)")
+    }
     func fill(_ ref: String, text: String) async throws { try note("fill \(ref) \(text)") }
     func select(_ ref: String, value: String) async throws { try note("select \(ref) \(value)") }
     func press(_ key: String) async throws { try note("press \(key)") }
@@ -121,6 +137,7 @@ final class FakeBrowserDriver: BrowserDriver, @unchecked Sendable {
     func command(_ arguments: [String], text: Bool) async throws -> JSONValue {
         let state = try note("command " + arguments.joined(separator: " ") + (text ? " (text)" : ""))
         if let failure = state.failingCommands[arguments.joined(separator: " ")] { throw failure }
+        try uncover(arguments.joined(separator: " "))
         return state.commandReply
     }
 
