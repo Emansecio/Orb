@@ -31,7 +31,7 @@ private fun it(id: String, kind: String, min: Int, text: String = "", tool: Tool
 private val bots = listOf(
     Bot("a", "Atlas", "Assistente do seu Mac", "h1", "#5B5BF0", working = true, status = "Lendo package.json", unread = 0,
         last = LastMessage("Pronto: separei 214 arquivos em pastas por tipo.", T0)),
-    Bot("b", "Lia", "Pesquisa e resume", "h2", "#E8508F", needsYou = true, status = "Rodando no Terminal", unread = 1,
+    Bot("b", "Lia", "Pesquisa e resume", "h2", "#E8508F", needsYou = true, card = Item("p1", T0, "approval", "Rodando no Terminal", approval = ApprovalInfo("permission", "Rodando no Terminal", "brew upgrade", canAlways = true)), status = "Rodando no Terminal", unread = 1,
         last = LastMessage("Preciso rodar um comando.", T0 - 3_600_000)),
     Bot("c", "Bento", "Cuida das finanças da casa", "h3", "#2FB36D", unread = 0,
         last = LastMessage("Feito: 43 arquivos foram para a Lixeira e você ganhou 7,2 GB.", T0 - 86_400_000 * 1)),

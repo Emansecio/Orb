@@ -31,6 +31,8 @@ data class Bot(
     val status: String? = null,
     val unread: Int = 0,
     val last: LastMessage? = null,
+    /** Newest open approval card; the Mac sends it only while [needsYou]. */
+    val card: Item? = null,
 )
 
 @Serializable

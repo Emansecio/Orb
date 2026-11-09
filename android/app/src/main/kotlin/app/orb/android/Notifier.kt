@@ -75,7 +75,7 @@ class Notifier(private val context: Context) : NotifySink {
             ))
             .build()
 
-    override fun notify(event: NotifyEvent, card: Item?) {
+    override fun notify(event: NotifyEvent) {
         if (!canPost()) return
         val bot = event.bot
         val b = NotificationCompat.Builder(context, CH_ALERTS)
@@ -86,6 +86,7 @@ class Notifier(private val context: Context) : NotifySink {
         when (event) {
             is NotifyEvent.NeedsYou -> {
                 b.setContentTitle("${bot.name} precisa de você").setColor(0xFFFF9800.toInt())
+                val card = bot.card
                 val approval = card?.approval
                 val text = approval?.title?.takeIf { it.isNotBlank() } ?: card?.text?.takeIf { it.isNotBlank() }
                 if (text != null) b.setContentText(text)

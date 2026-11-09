@@ -77,7 +77,7 @@ sealed interface UiEvent {
 
 /** Receives what should become a system notification; implemented by [Notifier]. */
 interface NotifySink {
-    fun notify(event: NotifyEvent, card: Item?)
+    fun notify(event: NotifyEvent)
     fun cancelAll()
 }
 
@@ -118,7 +118,6 @@ class OrbRepository private constructor(private val appContext: Context) {
     private var previousBots: List<Bot>? = null
     private val requestedAvatars = HashSet<String>()
     private val wake = Channel<Unit>(Channel.CONFLATED)
-    private var peek: NotifyEvent.NeedsYou? = null
     private var items: List<Item> = emptyList()
 
     private fun init() {
@@ -135,8 +134,18 @@ class OrbRepository private constructor(private val appContext: Context) {
 
     // region lifecycle hooks
 
-    fun onAppStarted() = launchSerial { visibleCount++; reconcile(); kickNow() }
-    fun onAppStopped() = launchSerial { visibleCount = (visibleCount - 1).coerceAtLeast(0); reconcile() }
+    fun onAppStarted() = launchSerial {
+        visibleCount++
+        reconcile(); kickNow()
+        // The Mac clears unread only for the open conversation, so it is opened again only while visible.
+        if (visibleCount == 1) _state.value.openBot?.let { socket?.send(Protocol.open(it)) }
+    }
+
+    fun onAppStopped() = launchSerial {
+        visibleCount = (visibleCount - 1).coerceAtLeast(0)
+        if (visibleCount == 0 && _state.value.openBot != null) socket?.send(Protocol.close())
+        reconcile()
+    }
     fun onServiceActive(active: Boolean) = launchSerial { serviceActive = active; reconcile() }
 
     fun setKeepAlive(v: Boolean) {
@@ -230,7 +239,7 @@ class OrbRepository private constructor(private val appContext: Context) {
     private fun disconnect() {
         loopJob?.cancel(); loopJob = null
         socket?.cancel(); socket = null
-        previousBots = null; peek = null
+        previousBots = null
         requestedAvatars.clear()
     }
 
@@ -302,7 +311,7 @@ class OrbRepository private constructor(private val appContext: Context) {
                         s.copy(conn = Conn.Connected, pairing = np, mac = f.mac)
                     } else s.copy(conn = Conn.Connected)
                 }
-                _state.value.openBot?.let { ws.send(Protocol.open(it)) }
+                if (visibleCount > 0) _state.value.openBot?.let { ws.send(Protocol.open(it)) }
             }
             is Frame.Bots -> onBots(ws, f.bots)
             is Frame.Chat -> onChat(f)
@@ -334,38 +343,11 @@ class OrbRepository private constructor(private val appContext: Context) {
             if (cached != null) _state.update { it.copy(avatars = it.avatars + (hash to cached)) }
             else ws.send(Protocol.avatar(b.id))
         }
-        for (e in events) when (e) {
-            is NotifyEvent.NeedsYou -> startPeek(ws, e)
-            is NotifyEvent.Responded -> notifier?.notify(e, null)
-        }
-    }
-
-    /**
-     * The `bots` frame does not carry the card, so to put its title and buttons in the notification the phone briefly
-     * opens that conversation (only when the user is not looking at another one) and then restores the previous one.
-     */
-    private fun startPeek(ws: WebSocket, e: NotifyEvent.NeedsYou) {
-        val s = _state.value
-        if (peek != null || (visibleCount > 0 && s.openBot != null)) { notifier?.notify(e, null); return }
-        peek = e
-        ws.send(Protocol.open(e.bot.id))
-        scope.launch(serial) { delay(4_000); if (peek === e) finishPeek(null) }
-    }
-
-    private fun finishPeek(card: Item?) {
-        val e = peek ?: return
-        peek = null
-        notifier?.notify(e, card)
-        val cur = _state.value.openBot
-        socket?.send(if (cur != null) Protocol.open(cur) else Protocol.close())
+        for (e in events) notifier?.notify(e)
     }
 
     private fun onChat(f: Frame.Chat) {
         val s = _state.value
-        if (f.bot == peek?.bot?.id && f.bot != s.openBot) {
-            finishPeek(f.items.lastOrNull { it.kind == "approval" && it.approval?.decision == null })
-            return
-        }
         if (f.bot != s.openBot) return
         items = f.items
         val live = _stream.value

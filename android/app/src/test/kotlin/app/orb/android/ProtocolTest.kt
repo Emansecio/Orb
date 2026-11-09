@@ -22,6 +22,15 @@ class ProtocolTest {
         assertNull(b.status); assertNull(b.last); assertNull(b.avatar); assertFalse(b.needsYou); assertEquals(0, b.unread)
     }
 
+    @Test fun botCardDecodesAsApprovalItemOrNull() {
+        val f = Protocol.parse(
+            """{"type":"bots","bots":[{"id":"a","name":"A","needsYou":true,"card":{"id":"c","kind":"approval","text":"x",
+              "approval":{"kind":"permission","title":"T","command":"ls"}}},{"id":"b","name":"B","card":null}]}""",
+        ) as Frame.Bots
+        assertEquals("T", f.bots[0].card?.approval?.title)
+        assertNull(f.bots[1].card)
+    }
+
     @Test fun nullOptionalsAreAccepted() {
         val f = Protocol.parse("""{"type":"bots","bots":[{"id":"a","name":"A","status":null,"last":null,"avatar":null}]}""") as Frame.Bots
         assertNull(f.bots[0].last)

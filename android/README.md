@@ -28,7 +28,7 @@ O celular chega ao Mac pelo Tailscale, gratuito para uso pessoal, sem abrir port
    cole o link `orb://parear?...`.
 3. A lista mostra os seus Orbs. No topo ficam os que estão trabalhando ou precisando de você. Toque num Orb para abrir a
    conversa.
-4. Na conversa: escreva em "Pergunte ao <nome>", toque no quadrado para parar um turno, e responda aos cartões de
+4. Na conversa: escreva em "Mensagem para <nome>", toque no quadrado para parar um turno, e responda aos cartões de
    permissão ("Permitir", "Só nesta tarefa", "Sempre permitir", "Não permitir"). Ações arriscadas pedem a digital ou a senha
    do celular.
 5. Com "Manter conectado em segundo plano" ligado (Ajustes, na engrenagem), o app avisa quando um Orb precisa de você ou

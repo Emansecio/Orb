@@ -83,6 +83,7 @@ import app.orb.android.StreamState
 import app.orb.android.Times
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.model.markdownDimens
+import com.mikepenz.markdown.compose.components.markdownComponents
 import com.mikepenz.markdown.m3.markdownColor
 import com.mikepenz.markdown.m3.markdownTypography
 import kotlinx.coroutines.flow.Flow
@@ -284,6 +285,8 @@ private fun Cursor() {
     Box(Modifier.padding(top = 4.dp).size(width = 8.dp, height = 16.dp).alpha(a).background(OrbColors.InkSecondary, RoundedCornerShape(2.dp)))
 }
 
+private val tableComponents = markdownComponents(table = { OrbTable(it.content, it.node) })
+
 @Composable
 fun MarkdownText(text: String, modifier: Modifier = Modifier) {
     val colors = markdownColor(
@@ -301,20 +304,21 @@ fun MarkdownText(text: String, modifier: Modifier = Modifier) {
     val typography = markdownTypography(
         text = body,
         paragraph = body,
-        h1 = body.copy(fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold),
-        h2 = body.copy(fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold),
-        h3 = body.copy(fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold),
-        h4 = body.copy(fontWeight = FontWeight.SemiBold),
-        h5 = body.copy(fontWeight = FontWeight.SemiBold),
-        h6 = body.copy(fontWeight = FontWeight.SemiBold),
+        // Headings stay close to the body size on a phone, like the Mac app.
+        h1 = body.copy(fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.Bold),
+        h2 = body.copy(fontSize = 17.sp, lineHeight = 23.sp, fontWeight = FontWeight.Bold),
+        h3 = body.copy(fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.Bold),
+        h4 = body.copy(fontWeight = FontWeight.Bold),
+        h5 = body.copy(fontWeight = FontWeight.Bold),
+        h6 = body.copy(fontWeight = FontWeight.Bold),
         code = body.copy(fontSize = 13.sp, lineHeight = 19.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
         inlineCode = body.copy(fontSize = 14.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
     )
     // The library memoizes the parse by content, so a recomposition with the same text costs nothing.
     Markdown(
         content = text, colors = colors, typography = typography, modifier = modifier,
-        // Narrow cells so a typical 3-column table fits a phone; wider ones scroll sideways.
-        dimens = markdownDimens(tableCellWidth = 96.dp, tableCellPadding = 10.dp),
+        dimens = markdownDimens(),
+        components = tableComponents,
     )
 }
 
@@ -345,7 +349,7 @@ private fun Composer(name: String, value: String, onChange: (String) -> Unit, on
             verticalAlignment = Alignment.Bottom,
         ) {
             Box(Modifier.weight(1f).defaultMinSize(minHeight = 40.dp), contentAlignment = Alignment.CenterStart) {
-                if (value.isEmpty()) Text("Pergunte ao $name", color = OrbColors.Hint, fontSize = 16.sp, maxLines = 1)
+                if (value.isEmpty()) Text("Mensagem para $name", color = OrbColors.Hint, fontSize = 16.sp, maxLines = 1)
                 BasicTextField(
                     value = value, onValueChange = onChange,
                     textStyle = TextStyle(color = OrbColors.Ink, fontSize = 16.sp, lineHeight = 22.sp),

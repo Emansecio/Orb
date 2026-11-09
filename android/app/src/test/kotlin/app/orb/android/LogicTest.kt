@@ -115,6 +115,15 @@ class NotifyLogicTest {
         assertTrue(NotifyLogic.diff(listOf(bot(needs = true)), listOf(bot()), null).isEmpty())
     }
 
+    @Test fun needsYouEventCarriesTheCardFromTheFrame() {
+        val card = Item("c1", 1, "approval", "t", approval = ApprovalInfo(kind = "permission", title = "Rodando no Terminal", command = "brew upgrade"))
+        val e = NotifyLogic.diff(listOf(bot()), listOf(bot(needs = true).copy(card = card)), null).single() as NotifyEvent.NeedsYou
+        assertEquals("c1", e.bot.card?.id)
+        assertTrue(NotifyLogic.canActFromNotification(e.bot.card?.approval))
+        val danger = card.copy(approval = card.approval!!.copy(dangerous = true))
+        assertFalse(NotifyLogic.canActFromNotification(danger.approval))
+    }
+
     @Test fun unreadIncreaseAfterTurnNotifies() {
         val e = NotifyLogic.diff(listOf(bot(working = true)), listOf(bot(unread = 1)), null)
         assertTrue(e.single() is NotifyEvent.Responded)
