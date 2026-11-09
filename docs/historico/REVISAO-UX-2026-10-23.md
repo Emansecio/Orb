@@ -2,7 +2,7 @@
 
 Levantamento de leitura sobre `72c9bcf`, com parecer item a item em 24/10 e implementação no mesmo dia. Este arquivo
 guarda só o resultado. A versão completa, com cada achado, o parecer e o "como", está em
-`git show 6a33911:docs/REVISAO-UX-2026-10-23.md`.
+`git show 6a33911:docs/historico/REVISAO-UX-2026-10-23.md`.
 
 ## O que foi feito
 

@@ -7,7 +7,7 @@ import Testing
 // or anywhere the locator looks). Asked for, not skipped on request: they start Chrome and reach the internet (example.com,
 // DuckDuckGo, Google), which a plain `swift test` on a Mac in use must not do. They run headless, except the one that opens the
 // window of `browse_show` and takes the focus of the Mac, which also needs ORB_REAL_BROWSER_WINDOW=1. The measurements that
-// chose this browser are in docs/REVISAO-NAVEGADOR-2026-10-16.md.
+// chose this browser are in docs/historico/REVISAO-NAVEGADOR-2026-10-16.md.
 
 enum RealBrowsers {
     static let environment = ProcessInfo.processInfo.environment

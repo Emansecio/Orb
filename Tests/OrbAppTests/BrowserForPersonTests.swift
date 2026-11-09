@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import Orb
 
-/// The person opens an Orb's browser for themself ("Abrir o navegador", docs/NAVEGADOR-DA-PESSOA-PLANO.md): its window, the
+/// The person opens an Orb's browser for themself ("Abrir o navegador", docs/historico/NAVEGADOR-DA-PESSOA-PLANO.md): its window, the
 /// Orb's tools waiting, a run nobody watches not waiting, and the hand-back.
 @Suite final class BrowserForPersonTests {
     let profiles = TempFolder("OrbPersonBrowser", creating: true)

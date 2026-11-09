@@ -153,7 +153,7 @@ enum ScheduleCommand: Equatable {
 struct ScheduleTool: AgentTool {
     /// What `schedule` is in a run nobody watches (a routine's, a request from another Orb, a group's turn): the app refuses
     /// create, update, resume, run and delete there (`AppModel.sideRunRefusal`), so only list and pause are described, in a
-    /// fifth of the characters (docs/REVISAO-TOKENS-PROMPT-2026-10-17.md). The same tool answers either way.
+    /// fifth of the characters (docs/historico/REVISAO-TOKENS-PROMPT-2026-10-17.md). The same tool answers either way.
     static let sideRunSpec = ToolSpec(
         name: "schedule",
         description: """

@@ -1,6 +1,6 @@
 import SwiftUI
 
-// The person's own use of an Orb's browser (docs/NAVEGADOR-DA-PESSOA-PLANO.md): "Abrir o navegador" opens its window, with
+// The person's own use of an Orb's browser (docs/historico/NAVEGADOR-DA-PESSOA-PLANO.md): "Abrir o navegador" opens its window, with
 // the Orb's logins, and the Orb's browser tools wait until it is handed back. The panel's row is in `BrowserPickerRows`.
 
 /// "Abrir o navegador" in the Orb's menu in the sidebar. While the person has the browser: bringing it forward and handing it

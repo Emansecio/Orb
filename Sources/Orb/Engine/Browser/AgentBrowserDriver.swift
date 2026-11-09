@@ -115,7 +115,7 @@ struct AgentBrowserConfig: Sendable, Equatable {
     /// The script `--executable-path` points at: it starts the real browser and adds `--user-agent=<a real Chrome's>`. The flag
     /// goes through a script because `agent-browser --args` splits on commas, and a user agent has one ("KHTML, like Gecko"); its
     /// own `--user-agent` option goes by the DevTools protocol and leaves the service workers saying HeadlessChrome (measured in
-    /// docs/REVISAO-NAVEGADOR-2026-10-16.md). Nil without the app's folder or without a version to put in the user agent.
+    /// docs/historico/REVISAO-NAVEGADOR-2026-10-16.md). Nil without the app's folder or without a version to put in the user agent.
     var launcherURL: URL? {
         guard let stateDirectory, let browser, let major = browser.major else { return nil }
         return stateDirectory.appending(path: "lancadores/\(browser.kind.rawValue)-\(major).sh")

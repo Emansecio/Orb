@@ -32,7 +32,7 @@ O Orb já tem ditado local, Quick Look, anexos com extração de texto, busca na
 
 **Aceitação.** Um resultado continua localizável após reiniciar; arquivo ausente aparece como ausente; abrir a origem leva ao turno correto; cadastrar uma entrega não aumenta o prompt de toda conversa.
 
-Base: [ProducedFile](../Sources/Orb/AttachmentInfo.swift), [registro no motor](../Sources/Orb/Engine/AgentEngine.swift), [arquivos da pasta](../Sources/Orb/OrbFolder.swift), [relatórios de rotina](../Sources/Orb/AppModel.swift).
+Base: [ProducedFile](../../Sources/Orb/AttachmentInfo.swift), [registro no motor](../../Sources/Orb/Engine/AgentEngine.swift), [arquivos da pasta](../../Sources/Orb/OrbFolder.swift), [relatórios de rotina](../../Sources/Orb/AppModel.swift).
 
 ## 2. Rotinas que avisam pelo resultado
 
@@ -46,7 +46,7 @@ Base: [ProducedFile](../Sources/Orb/AttachmentInfo.swift), [registro no motor](.
 
 **Aceitação.** Falha gera um único aviso; checagem sem novidade obedece à política escolhida; sucesso técnico e meta concluída permanecem estados distintos; o histórico continua disponível mesmo sem banner.
 
-Base: [fim do turno](../Sources/Orb/BotSession+Turn.swift), [execução e término das rotinas](../Sources/Orb/AppModel.swift), [dados da rotina](../Sources/Orb/Models.swift).
+Base: [fim do turno](../../Sources/Orb/BotSession+Turn.swift), [execução e término das rotinas](../../Sources/Orb/AppModel.swift), [dados da rotina](../../Sources/Orb/Models.swift).
 
 ## 3. Busca global, local e com origem
 
@@ -60,7 +60,7 @@ Essa busca é para o usuário: não deve dar automaticamente a um Orb acesso às
 
 **Aceitação.** Encontrar um trecho sem saber quem o disse; abrir a mensagem exata; excluir do índice conteúdo apagado; manter a interface responsiva com histórico grande.
 
-Base: [motor de busca](../Sources/Orb/ConversationSearch.swift), [controle da busca](../Sources/Orb/ConversationFind.swift), [paleta](../Sources/Orb/Views/CommandPalette.swift).
+Base: [motor de busca](../../Sources/Orb/ConversationSearch.swift), [controle da busca](../../Sources/Orb/ConversationFind.swift), [paleta](../../Sources/Orb/Views/CommandPalette.swift).
 
 ## 4. “Enviar ao Orb” a partir do Mac
 
@@ -74,7 +74,7 @@ Base: [motor de busca](../Sources/Orb/ConversationSearch.swift), [controle da bu
 
 **Aceitação.** Funciona com app fechado e aberto; não perde o rascunho anterior; um Orb ocupado usa a fila existente; recebe somente o conteúdo escolhido e conserva as permissões do Orb.
 
-Base: [anexos](../Sources/Orb/AppModel+Attachments.swift), [pergunta rápida](../Sources/Orb/Views/QuickAskView.swift), [ferramentas de Atalhos](../Sources/Orb/Engine/Tools/MacAppTools.swift), [alvos do pacote](../Package.swift), [empacotamento](../scripts/bundle.sh).
+Base: [anexos](../../Sources/Orb/AppModel+Attachments.swift), [pergunta rápida](../../Sources/Orb/Views/QuickAskView.swift), [ferramentas de Atalhos](../../Sources/Orb/Engine/Tools/MacAppTools.swift), [alvos do pacote](../../Package.swift), [empacotamento](../../scripts/bundle.sh).
 
 ## 5. Exportar e restaurar um Orb completo
 
@@ -86,7 +86,7 @@ Base: [anexos](../Sources/Orb/AppModel+Attachments.swift), [pergunta rápida](..
 
 **Aceitação.** Exportar e restaurar reproduz o conteúdo selecionado; nenhum segredo entra no pacote; caminho que não existe no novo Mac pede remapeamento; formato incompatível não altera os dados existentes.
 
-Base: [persistência e recuperação](../Sources/Orb/Store.swift), [importação](../Sources/Orb/Import/OrbImportReader.swift), [preservação no reset](../Sources/Orb/Reset/ResetPlan.swift).
+Base: [persistência e recuperação](../../Sources/Orb/Store.swift), [importação](../../Sources/Orb/Import/OrbImportReader.swift), [preservação no reset](../../Sources/Orb/Reset/ResetPlan.swift).
 
 ## 6. Limite de consumo antes da próxima chamada
 
@@ -98,7 +98,7 @@ Base: [persistência e recuperação](../Sources/Orb/Store.swift), [importação
 
 **Aceitação.** Não inicia novas chamadas após o bloqueio; registra o motivo; contabiliza auxiliares; diferencia API paga, plano e execução local; modelo sem preço aparece como consumo desconhecido, nunca como custo zero.
 
-Base: [ponto central do registro](../Sources/Orb/Usage/AppModel+Usage.swift), [relatório de uso](../Sources/Orb/Views/UsageSettings.swift), [classificação de preços](../Sources/Orb/Usage/ModelPricing.swift).
+Base: [ponto central do registro](../../Sources/Orb/Usage/AppModel+Usage.swift), [relatório de uso](../../Sources/Orb/Views/UsageSettings.swift), [classificação de preços](../../Sources/Orb/Usage/ModelPricing.swift).
 
 ## 7. Rotinas quando um arquivo chega
 
@@ -112,12 +112,12 @@ Base: [ponto central do registro](../Sources/Orb/Usage/AppModel+Usage.swift), [r
 
 É a proposta de maior complexidade desta lista. Deve vir depois dos estados de rotina e da identificação das entregas.
 
-Base: [tipos de agendamento](../Sources/Orb/Models.swift), [fila e execução das rotinas](../Sources/Orb/AppModel.swift).
+Base: [tipos de agendamento](../../Sources/Orb/Models.swift), [fila e execução das rotinas](../../Sources/Orb/AppModel.swift).
 
 ## Duas melhorias menores que acompanham essas entregas
 
-- **Preservar anexos importantes.** Hoje arquivos comuns ficam referenciados pelo caminho original, enquanto imagens têm armazenamento próprio. Oferecer “Guardar cópia com a conversa” evita que mover ou apagar o original quebre a consulta futura. Distinguir cópia enviada de arquivo de trabalho vivo, com controle de espaço. Base: [anexos](../Sources/Orb/AppModel+Attachments.swift) e [texto anexado](../Sources/Orb/AttachmentText.swift).
-- **Retomar após fechar o app.** Já existe continuação de tarefa pausada por limite de passos. Ao reabrir, uma tarefa interrompida é encerrada no histórico. Uma melhoria diferente é mostrar “Revisar e retomar” com o último passo confirmado; reconferir os efeitos antes de continuar, especialmente envio e publicação. Base: [encerramento de interrupções](../Sources/Orb/Models.swift) e [carregamento da conversa](../Sources/Orb/BotSession+Conversation.swift).
+- **Preservar anexos importantes.** Hoje arquivos comuns ficam referenciados pelo caminho original, enquanto imagens têm armazenamento próprio. Oferecer “Guardar cópia com a conversa” evita que mover ou apagar o original quebre a consulta futura. Distinguir cópia enviada de arquivo de trabalho vivo, com controle de espaço. Base: [anexos](../../Sources/Orb/AppModel+Attachments.swift) e [texto anexado](../../Sources/Orb/AttachmentText.swift).
+- **Retomar após fechar o app.** Já existe continuação de tarefa pausada por limite de passos. Ao reabrir, uma tarefa interrompida é encerrada no histórico. Uma melhoria diferente é mostrar “Revisar e retomar” com o último passo confirmado; reconferir os efeitos antes de continuar, especialmente envio e publicação. Base: [encerramento de interrupções](../../Sources/Orb/Models.swift) e [carregamento da conversa](../../Sources/Orb/BotSession+Conversation.swift).
 
 ## Primeiro ciclo sugerido
 

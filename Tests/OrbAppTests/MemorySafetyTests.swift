@@ -4,7 +4,7 @@ import Testing
 
 /// The memory loses nothing it should keep and keeps nothing it should not: updates that are corrections (never a
 /// different fact), versions kept, "Esquecer" that checks, secrets out, the group board fenced, the system prompt's
-/// memory steady (docs/REVISAO-MEMORIA-2026-10-16.md).
+/// memory steady (docs/historico/REVISAO-MEMORIA-2026-10-16.md).
 @Suite final class MemorySafetyTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbMemorySafety-\(UUID().uuidString)")
     let day: TimeInterval = 86_400

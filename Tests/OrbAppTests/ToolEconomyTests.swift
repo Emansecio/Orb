@@ -17,10 +17,10 @@ struct ToolSpecEconomyTests {
     /// (`web_search`, always offered with "Navegar na web", came after and fits the same ceiling, raised from 15,000.)
     /// Raised to 17,500 for background computer use (docs/USO-DO-COMPUTADOR.md): `ui_read`, `ui_act` and `screenshot` grow, within
     /// their own ceiling below, and the rest stays as it was.
-    /// Raised to 18,250 for `task_plan` (~720), the plan of a long task kept outside the conversation (docs/AUTONOMIA-2026-10-13.md).
-    /// Raised to 18,400 for `open` in the background and its `front` (~130, docs/REVISAO-USO-DO-COMPUTADOR-2026-10-16.md).
+    /// Raised to 18,250 for `task_plan` (~720), the plan of a long task kept outside the conversation (docs/historico/AUTONOMIA-2026-10-13.md).
+    /// Raised to 18,400 for `open` in the background and its `front` (~130, docs/historico/REVISAO-USO-DO-COMPUTADOR-2026-10-16.md).
     /// Raised to 18,900 for `app_dictionary` (~500, with the line in `applescript`): the AppleScript dictionary of an app, read on demand
-    /// so the model stops writing scripts from memory (docs/REVISAO-USO-DO-COMPUTADOR-2026-10-16.md, fase 3). It is the detail that stays out of the prompt.
+    /// so the model stops writing scripts from memory (docs/historico/REVISAO-USO-DO-COMPUTADOR-2026-10-16.md, fase 3). It is the detail that stays out of the prompt.
     /// `apps_list` saying how to control each app (~100; item 2 of the same phase) fits after both descriptions were shortened: 18,861.
     /// Raised to 19,200 for the `description` of `run_command` and `applescript` (~315): what the action is for, in words, which the
     /// working line and the folded lines of the chat say instead of the raw command. Measured at 19,180.
@@ -36,14 +36,14 @@ struct ToolSpecEconomyTests {
     /// `ui_read`, `ui_act` and `screenshot` together: waiting, steps, takeover, marks and OCR all have to fit here.
     private static let appControlSpecCharsCeiling = 4_800
     /// The tools of the Orb's own browser are offered only when an engine is installed, so they have a ceiling of their own.
-    /// 4,200 for the first 13 tools. The second step (docs/REVISAO-NAVEGADOR-2026-10-16.md) brought every command of the browser:
+    /// 4,200 for the first 13 tools. The second step (docs/historico/REVISAO-NAVEGADOR-2026-10-16.md) brought every command of the browser:
     /// the 13 grew to 4,519 (click, press and scroll took actions) and six tools came, grouped by action (wait 447, find 634,
     /// dialog 295, files 373, page 659, run 592), measured at 7,519 in all; `browse_proxy` (414, the third step) makes it 7,933.
     /// The review of the browser trimmed the descriptions (what a schema's enum or a parameter's name already says, repeated
     /// examples) to 7,010 for the same 20 tools, and the ceiling came down with it, keeping a sentence or two of room.
     /// `browse_snapshot` gained `query` and the widening of a missing selector (~300, measured at 7,312): the parameter the model
     /// already sent dozens of times to no effect now returns the matching lines, each with its offset
-    /// (docs/INVESTIGACAO-NAVEGADOR-ROTINAS-2026-10-27.md).
+    /// (docs/historico/INVESTIGACAO-NAVEGADOR-ROTINAS-2026-10-27.md).
     private static let browseSpecCharsCeiling = 7_400
 
     @Test func theToolSpecsStayWellUnderTheirOldSize() {
@@ -165,7 +165,7 @@ struct ToolSpecEconomyTests {
     }
 
     /// The multi-Orb tools (`orbs`, `orb_propose`, `group_*`, `ask_user`) were measured at 3,705 characters in all
-    /// (docs/REVISAO-TOKENS-PROMPT-2026-10-17.md); they had no ceiling of their own. `multiple` and `fields` of `ask_user`
+    /// (docs/historico/REVISAO-TOKENS-PROMPT-2026-10-17.md); they had no ceiling of their own. `multiple` and `fields` of `ask_user`
     /// (the fuller questions, 2026-11-02) took it to 3,964. `folder` on `orbs` and `group_create` (a shared project, a git
     /// worktree per member) and the builder/reviewer hint of `group_create` took it to 4,173. `group_edit` (2026-11-07) took it to 4,723. `orb_delete` and the neutral `orb_propose` (2026-11-08) took it to 4,979; "only when no teammate fits" in `orb_propose` (the same day) fit under the ceiling by shortening its first line.
     @Test func theMultiOrbToolSpecsStayWithinTheirOwnCeiling() {

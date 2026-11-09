@@ -19,11 +19,11 @@ informação que você sente vem principalmente das **48 ferramentas (~7,4 mil t
 
 **O que detectei**
 - `AppModel.jobs` é `@ObservationIgnored` e `BackgroundJobs` é um actor sem nenhum estado observável
-  ([AppModel.swift:231](../Sources/Orb/AppModel.swift:231)). Nenhuma view lê jobs (`grep -i job` em `Views/` não acha nada).
+  ([AppModel.swift:231](../../Sources/Orb/AppModel.swift:231)). Nenhuma view lê jobs (`grep -i job` em `Views/` não acha nada).
 - `run_command(background: true)` espera 1 s e devolve. O cartão vira **"concluído em 1,0 s"**
-  ([BackgroundJobs.swift:138](../Sources/Orb/Engine/Tools/BackgroundJobs.swift:138)). Para você, parece um comando que já acabou.
+  ([BackgroundJobs.swift:138](../../Sources/Orb/Engine/Tools/BackgroundJobs.swift:138)). Para você, parece um comando que já acabou.
 - Quando o job termina, `ended()` só atualiza um dicionário interno
-  ([BackgroundJobs.swift:228](../Sources/Orb/Engine/Tools/BackgroundJobs.swift:228)). Ninguém é avisado, nem você nem o Orb.
+  ([BackgroundJobs.swift:228](../../Sources/Orb/Engine/Tools/BackgroundJobs.swift:228)). Ninguém é avisado, nem você nem o Orb.
   O resultado fica parado no log até alguém perguntar.
 
 **Proposta (~45 linhas, sem tipo novo)**
@@ -37,7 +37,7 @@ informação que você sente vem principalmente das **48 ferramentas (~7,4 mil t
 4. `NoticeAction.actions(for:)`: o prefixo "Processo " recebe `[.continueTurn]`, então o aviso já ganha o botão
    **Continuar**, que existe hoje. Se o Orb estiver no meio de um turno, em vez do aviso:
    `queueMessage(…, delivery: .steer)`, e o modelo vê no próximo passo.
-5. Uma faixa `JobsStrip` no `card` do composer ([ComposerView.swift:129](../Sources/Orb/Views/ComposerView.swift:129)),
+5. Uma faixa `JobsStrip` no `card` do composer ([ComposerView.swift:129](../../Sources/Orb/Views/ComposerView.swift:129)),
    ao lado do `attachmentStrip`: ícone de terminal, comando truncado, tempo com `TimelineView(.periodic(1))` e botão
    ⏹ que chama `jobs.stop`. Com mais de um job, mostra "3 comandos rodando" e abre um popover.
 
@@ -53,10 +53,10 @@ terminar, uma linha no chat com o botão Continuar.
 
 **O que detectei**
 - O turno termina sempre que a resposta não tem chamada de ferramenta
-  ([AgentEngine.swift:332](../Sources/Orb/Engine/AgentEngine.swift:332)). O corte por `max_tokens` **já** continua sozinho
+  ([AgentEngine.swift:332](../../Sources/Orb/Engine/AgentEngine.swift:332)). O corte por `max_tokens` **já** continua sozinho
   uma vez (:292), então isso não é bug do motor.
 - O prompt cria o problema. Ele manda *"Before a tool that changes something, say … what you are about to do"*
-  ([SystemPrompt.swift:18](../Sources/Orb/Engine/SystemPrompt.swift:18)), mas nunca diz "e chame a ferramenta na mesma
+  ([SystemPrompt.swift:18](../../Sources/Orb/Engine/SystemPrompt.swift:18)), mas nunca diz "e chame a ferramenta na mesma
   resposta". O `workHabits` ainda pede *"finish with … what is left"* (:127), o que convida a fechar o turno com uma
   lista de pendências. Modelos pequenos (Haiku, DeepSeek Flash e Luna fazem a maior parte das suas chamadas)
   obedecem ao pé da letra: anunciam e encerram.
@@ -71,7 +71,7 @@ terminar, uma linha no chat com o botão Continuar.
      turn on a promise (\"vou fazer X\"): do X now. If something blocks you, say what and ask."*
    - `workHabits`: trocar *"finish with what changed and what is left"* por *"finish with what changed; mention what is
      left only if you could not do it, and why."*
-2. **Trava no motor (~10 linhas, reforço).** Antes do `return` de [AgentEngine.swift:338](../Sources/Orb/Engine/AgentEngine.swift:338):
+2. **Trava no motor (~10 linhas, reforço).** Antes do `return` de [AgentEngine.swift:338](../../Sources/Orb/Engine/AgentEngine.swift:338):
    se o turno **já usou ferramentas** e o último parágrafo casa
    `\b(vou|irei|vamos|em seguida|a seguir|I'll|let me)\b` **sem** `não vou` e sem terminar em `?`, reaproveitar o
    mecanismo de `nudge` que já existe (como o `continueNudge`) uma única vez por turno.
@@ -96,7 +96,7 @@ texto, modelos pequenos esquecem o marcador e cada esquecimento custaria uma cha
   pasta irrelevante.
 
 **Proposta**
-1. **Uma frase no `roaming`** ([SystemPrompt.swift:21](../Sources/Orb/Engine/SystemPrompt.swift:21)): *"Save scripts and
+1. **Uma frase no `roaming`** ([SystemPrompt.swift:21](../../Sources/Orb/Engine/SystemPrompt.swift:21)): *"Save scripts and
    files you make for the work in your folder (scripts/ for code you may run again), never in /tmp: they must last and
    be found again."* O ganho vem de graça: o `WorkspaceSnapshot` já lista os arquivos recentes, então na próxima
    conversa o Orb **vê** o próprio kit de scripts.
@@ -113,7 +113,7 @@ texto, modelos pequenos esquecem o marcador e cada esquecimento custaria uma cha
   `/subir-site-docker` e `/subir-lp-docker`. No chat apareceram 4 avisos de "Skill proposta: /subir-lp-docker".
   Cada uma entra no prompt e compete na escolha do modelo.
 - A trava contra duplicata (`repeats`) é boa, mas compara **só com as skills já salvas**
-  ([MemoryBank+Skills.swift:18](../Sources/Orb/Memory/MemoryBank+Skills.swift:18)). Enquanto uma proposta espera sua
+  ([MemoryBank+Skills.swift:18](../../Sources/Orb/Memory/MemoryBank+Skills.swift:18)). Enquanto uma proposta espera sua
   decisão, outra parecida passa, e você acaba aprovando as duas.
 
 **Proposta (3 linhas):** em `proposeSkill`, validar contra
@@ -132,7 +132,7 @@ Depois, juntar as 4 skills de Docker em uma só (eu faço isso se você quiser).
   `shortcuts_*`, `browse_back/scroll/select/close`, `connector_*` e `web_search`. Por outro lado, os seus Orbs **usam**
   `applescript` e `ui_act`, então cortar a capacidade inteira não vale.
 - Duas ferramentas são redundantes de fato: `processes`, porque `ps` já roda sem pedir permissão
-  ([ReadOnlyCommand.swift:36](../Sources/Orb/Engine/ReadOnlyCommand.swift:36)), e `job_list`, que pode ser `job_output`
+  ([ReadOnlyCommand.swift:36](../../Sources/Orb/Engine/ReadOnlyCommand.swift:36)), e `job_list`, que pode ser `job_output`
   sem `id`.
 - O limite de 30 passos parou o Atendente 2 vezes ("Pausei depois de 30 passos").
 
@@ -142,7 +142,7 @@ Depois, juntar as 4 skills de Docker em uma só (eu faço isso se você quiser).
 2. `WizardPrompt`: uma frase pedindo para ligar só as capacidades que o papel exige ("each one adds tools the model
    must read"). Isso vale para os Orbs que ainda vão ser criados.
 3. Cortar repetição entre prompt e ferramentas: a linha "Work in this order: browse_open, browse_snapshot…" de
-   `BrowserPrompt` ([SystemPrompt.swift:209](../Sources/Orb/Engine/SystemPrompt.swift:209)) repete o que as descrições
+   `BrowserPrompt` ([SystemPrompt.swift:209](../../Sources/Orb/Engine/SystemPrompt.swift:209)) repete o que as descrições
    `browse_*` já dizem. Isso é texto a menos. O Codex Luna confirmou a medição de forma independente: ~7,1 mil tokens
    em ferramentas.
 4. `defaultMaxSteps` de 30 para 50 (1 linha). O aviso de "restam 3 chamadas" e o botão Continuar continuam valendo.
@@ -154,7 +154,7 @@ Depois, juntar as 4 skills de Docker em uma só (eu faço isso se você quiser).
 - **Timeout que vira job em vez de matar o comando.** A ideia é boa (é o modelo do "unified exec" do Codex:
   `jobs.start(wait:)` resolve com cerca de 20 linhas), mas houve só **2 timeouts em 293 comandos**.
 - **Endurecer o fim do stream.** O Sol notou que `Reply.stop` começa como `.done`
-  ([AgentEngine.swift:386](../Sources/Orb/Engine/AgentEngine.swift:386)), então um stream que fecha sem o evento final
+  ([AgentEngine.swift:386](../../Sources/Orb/Engine/AgentEngine.swift:386)), então um stream que fecha sem o evento final
   parece uma resposta completa. Antes de trocar para `.incomplete`, é preciso confirmar que todo provedor
   compatível com OpenAI manda `finish_reason`. Do contrário, o app passaria a mostrar falha em resposta boa.
 - **Detalhe do prompt:** quando o papel termina em ponto, a identidade sai com ponto duplo ("…segunda instância..").

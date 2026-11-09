@@ -99,7 +99,7 @@ struct SystemPromptTests {
         // app_dictionary before scripting one the model does not know well). The prompt is
         // cached across turns.
         // 150 more went to joining simple sequential shell commands into one run_command (14 calls in a row each resend the context).
-        // Tightened from 5,600 on 2026-10-17 (docs/REVISAO-TOKENS-PROMPT-2026-10-17.md), after the "Mac apps" line that repeated the hints went.
+        // Tightened from 5,600 on 2026-10-17 (docs/historico/REVISAO-TOKENS-PROMPT-2026-10-17.md), after the "Mac apps" line that repeated the hints went.
         // ~230 more went to the rich blocks a reply may hold (```chart, ```mermaid, $$, ```page; 2026-11-02).
         #expect(system.count < 5_950, "the native system prompt is \(system.count) characters")
         for rule in ["Reply in the user's language", "Be brief", "Use tools to find out", "read before you change things",

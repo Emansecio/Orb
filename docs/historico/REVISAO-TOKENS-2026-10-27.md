@@ -4,7 +4,7 @@ Há espaço para otimizar preservando o modelo principal, a memória e as verifi
 
 Esta foi uma revisão: o motor, os modelos escolhidos, o contexto e os agendamentos não foram alterados.
 
-A [investigação posterior do navegador e das rotinas](/Users/thiagomacbookpro/Orb/docs/INVESTIGACAO-NAVEGADOR-ROTINAS-2026-10-27.md) reproduziu as duas classes de erro de seletor, identificou parâmetros `query` ignorados e conferiu as pré-checagens com dados sintéticos. Também confirmou que o prompt de atendimento pede meia hora explicitamente; o nome “horária” está desatualizado.
+A [investigação posterior do navegador e das rotinas](/Users/thiagomacbookpro/Orb/docs/historico/INVESTIGACAO-NAVEGADOR-ROTINAS-2026-10-27.md) reproduziu as duas classes de erro de seletor, identificou parâmetros `query` ignorados e conferiu as pré-checagens com dados sintéticos. Também confirmou que o prompt de atendimento pede meia hora explicitamente; o nome “horária” está desatualizado.
 
 ## Escopo e evidências
 

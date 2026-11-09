@@ -1,6 +1,6 @@
 import Foundation
 
-/// One line per Responses-API request for diagnosing prompt-cache misses (docs/REVISAO-TOKENS-2026-10-27.md):
+/// One line per Responses-API request for diagnosing prompt-cache misses (docs/historico/REVISAO-TOKENS-2026-10-27.md):
 /// a fingerprint of the request's segments next to the cached-token count the provider reported. Diffing
 /// consecutive lines of one conversation shows the first input item that changed — where the provider's
 /// cache stopped matching (`scripts/cache-probe-diff.py` does that diff). The file lives with the usage

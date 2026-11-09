@@ -4,7 +4,7 @@ import Testing
 import UserNotifications
 @testable import Orb
 
-// The turn without a step limit (docs/REVISAO-TURNO-2026-10-16.md): what the person sees of a turn that runs long or goes
+// The turn without a step limit (docs/historico/REVISAO-TURNO-2026-10-16.md): what the person sees of a turn that runs long or goes
 // wrong by itself, and what each failure leaves behind.
 
 private func said(_ text: String) -> [LLMEvent] { [.text(text), .finished(.done, nil)] }

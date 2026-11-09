@@ -64,7 +64,7 @@ extension AppModel {
     // MARK: The person's own use
 
     /// Opens the Orb's browser in its own window for the person ("Abrir o navegador"), with its profile and logins, and brings
-    /// it to the front: the person asked, so this one gesture may put another app's window ahead (AGENTS.md, rule 24). The Orb's
+    /// it to the front: the person asked, so this one gesture may put another app's window ahead (AGENTS.md, PROD-1). The Orb's
     /// browser tools wait until it is handed back. Already open: brought forward again.
     func openBrowserForPerson(_ botID: UUID) {
         guard let bot = bot(botID), bot.capabilities.contains(.browser) else { return }

@@ -113,7 +113,7 @@ Chromium (o Chrome ou o Brave de Applications; sem eles, o Chrome for Testing qu
 `--executable-path <lançador>`, `--args --disable-blink-features=AutomationControlled`, `--profile <pasta do Orb>` e, no modo visível, `--headed`.
 O lançador (`navegador/lancadores/<navegador>-<versão>.sh`, `AgentBrowserConfig.launcherScript`) é um `exec '<navegador>' "$@" '--user-agent=<Chrome N>'`:
 o `--args` do agent-browser divide na vírgula e um user agent tem uma ("KHTML, like Gecko"), e o `--user-agent` do próprio agent-browser vai pelo
-protocolo DevTools e deixa os service workers dizendo "HeadlessChrome" (medido em docs/REVISAO-NAVEGADOR-2026-10-16.md); o blink flag é o que
+protocolo DevTools e deixa os service workers dizendo "HeadlessChrome" (medido em docs/historico/REVISAO-NAVEGADOR-2026-10-16.md); o blink flag é o que
 faz `navigator.webdriver` ser falso, sem o que o DuckDuckGo e o Google respondem com captcha. O texto de um campo que é exatamente uma opção da
 linha de comando (`--json`) seria comido por ela, e `--` não impede: esse texto vai por `batch`, com aspas simples. Só `open` lança um navegador, com as
 opções do Orb: o agent-browser inicia um navegador à escolha dele (o Brave ou o Chrome de Applications, sem perfil nem opções) para qualquer comando que não encontra processo em segundo plano (`get url`, `snapshot`,

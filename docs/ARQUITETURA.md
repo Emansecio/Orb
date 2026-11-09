@@ -39,7 +39,36 @@ Três ideias organizam o resto:
 
 ## Mapa dos módulos
 
-Tudo em `Sources/Orb/`.
+### Índice por responsabilidade
+
+Por onde começar em cada área. Os caminhos de código abreviados são relativos a `Sources/Orb/`. Caminhos iniciados por `Sources/`, `Tests/`, `docs/`, `scripts/`, `art/` ou `.github/` partem da raiz do repositório; `Package.swift`, `README.md` e `AGENTS.md` também ficam na raiz.
+
+| Categoria | Onde procurar | Responsabilidade |
+| --- | --- | --- |
+| Inicialização e configuração do pacote | `Package.swift`, `Sources/OrbMain/main.swift`, `Sources/Orb/OrbApp.swift`, `DevRun.swift` | Alvos, janela, menus, entrada do app e modos de desenvolvimento. O app é a biblioteca `Orb`; o executável `OrbMain` só chama `Launcher.main()`. |
+| Estado e execução de cada Orb | `AppModel.swift`, `AppModel+*.swift`, `BotSession.swift`, `BotSession+*.swift`, `BotLive.swift` | Orquestração, eventos de turno, estado observado pelas telas e operações por tema. Prefira a extensão da área afetada. |
+| Conversa e apresentação de atividades | `LiveText.swift`, `ToolTally.swift`, `ToolIntent.swift`, `WorkLine.swift`, `MultiOrb/TranscriptFolding.swift`, `Views/ChatView.swift`, `Views/TranscriptViews.swift` | Streaming, agrupamento por pedido e etapa, resumos de ações, status e expansão. `TranscriptFolding` decide os grupos; as views os apresentam. |
+| Interface e identidade visual | `Views/`, `Theme.swift`, `Motion.swift`, `Shortcuts.swift` | Chat, compositor, painel, ajustes, estilos, movimento e atalhos. `Views/Multi/` contém colaboração; `Views/Groups/`, conversas em grupo. |
+| Catálogos e buscas na interface | `Views/CatalogParts.swift`, `Views/ConnectorGalleryView.swift`, `Views/ConnectorsView.swift`, `Views/SkillsView.swift`, `Views/MarketplaceGallery.swift`, `Catalog/BrandGlyph.swift` | Busca compartilhada, estados de carga, cards, ferramentas e marcas. O catálogo de dados fica em `Catalog/`; filtros e layout pertencem às views. |
+| Folhas, campos e seleção de modelos | `Views/SheetKit.swift`, `Views/SharedControls.swift`, `Views/ModelPicker.swift`, `Views/ModelPopover.swift`, `Views/ProviderSettings.swift` | Molduras e rodapés, edição de nomes, foco, listas de modelos e configuração dos provedores. Reuse os controles existentes. |
+| Motor e provedores | `Engine/` | Loop do agente, clientes de modelos, eventos, plano, prompt, contexto, compactação e política de permissões. `Engine/ClaudePipe/` integra o CLI Claude Code. |
+| Ferramentas e controle do computador | `Engine/Tools/`, `MacPermissions.swift` | Terminal, arquivos, web, Acessibilidade, automação de apps, captura e passagem do controle. |
+| Navegador e conectores | `Engine/Browser/`, `Engine/MCP*.swift`, `Engine/ConnectorGateway.swift`, `AppModel+Browser.swift`, `AppModel+*Connector*.swift` | Sessões e abas, instalação do navegador, ferramentas MCP, autenticação e conectores locais. |
+| Tela ao vivo | `LiveScreen/`, `BotSession+LiveScreen.swift` | Frames, fonte do navegador, transmissão, prévia, histórico visual e intervenção da pessoa. Não confundir a apresentação da tela com a execução das ferramentas em `Engine/`. |
+| Persistência e segredos | `Models.swift`, `Store.swift`, `StoreCoordination.swift`, `ConversationCoding.swift`, `ConversationHistory.swift`, `InicioHistory.swift`, `LegacyMigration.swift`, `Sources/OrbKeychainHelper/` | Tipos persistidos, JSON, histórico, migrações e acesso estável ao Keychain. Campos novos precisam de defaults e decodificação tolerante. |
+| Memória | `Memory/`, `AppModel+Memory*.swift`, `AppModel+SessionNotes.swift`, `AppModel+ChunkSummaries.swift`, `Views/MemoryViews.swift`, `Views/InspectorSupport.swift`, `Views/Groups/GroupBoardView.swift` | Recuperação e consolidação no modelo; agrupamento, filtros e cache de busca em `MemoryGroups`/`FoldedTextCache`; apresentação nas views de memória e quadro do grupo. |
+| Colaboração | `MultiOrb/`, `Groups/`, `MultiOrb/AppModel+Delegation.swift` | Mensagens e delegação entre Orbs, pedidos paralelos, grupos e seus estados. O agrupamento visual do transcript também fica em `MultiOrb/TranscriptFolding.swift`. |
+| Rotinas e agendamento | `AppModel+Schedule.swift`, `AppModel+RoutinesUI.swift`, `RoutineGoal.swift`, `CronExpression.swift`, `RoutinePrecheck.swift`, `RoutineFollowUps.swift`, `RoutineWake.swift`, `Engine/Tools/ScheduleTool.swift`, `Views/RoutinesView.swift` | Criação, execução, repetição, pré-checagem, acompanhamentos, despertar por sinal externo, relatórios e apresentação das rotinas. Confira os nomes existentes com `rg` antes de criar arquivos. |
+| Catálogos, importação e criação | `Catalog/`, `Import/`, `Wizard/` | Skills e conectores disponíveis, importação de outros assistentes e assistente de criação de Orb. |
+| Avatares e arte | `Orbs/`, `Resources/Orbs/`, `AppIcon.swift`, `art/` | Modelos, animação, renderização dos avatares e ícone. `art/orbgen/` e `art/orbkit/` são ferramentas de geração; veja `art/README.md` antes de regenerar recursos. |
+| Uso e custos | `Usage/` | Registros, preços de modelos, agregação e relatórios de consumo. |
+| Ditado e anexos | `Dictation/`, `AppModel+Dictation.swift`, `ImageAttachments.swift`, `AttachmentInfo.swift`, `Views/Attachment*.swift` | Microfone, transcrição, imagens, arquivos anexados e arquivos produzidos. |
+| Redefinição de dados | `Reset/`, `AppModel+Reset.swift` | Plano de redefinição, execução e relançamento. |
+| Testes | `Tests/OrbAppTests/`, `Tests/OrbAppTests/TestSupport/`, `Tests/OrbAXFixture/` | Suítes por tema, fakes e sincronização compartilhados; app separado para smoke de Acessibilidade. |
+| Scripts e CI | `scripts/`, `.github/workflows/` | Bundle e assinatura, modelo falso, capturas do README e verificações de CI. |
+| Documentação e referências | `docs/`, `README.md`, `AGENTS.md` | Arquitetura, manual e documentos por tema (a lista está na seção "Documentação" de `AGENTS.md`). `docs/historico/` guarda os relatórios datados: valide no código. `docs/mocks/` e `docs/readme/` contêm referências visuais. |
+
+As subseções seguintes detalham arquivo por arquivo. Tudo em `Sources/Orb/`.
 
 ### Aplicativo e estado
 
