@@ -586,7 +586,16 @@ private struct TranscriptList: View {
             .onChange(of: live.scrollNudge) { showSentMessage(proxy) }
             .onChange(of: live.followNudge) { followResumedTurn(proxy) }
             .onAppear {
-                guard !BottomFollower.anchorsItself else { return }
+                if BottomFollower.anchorsItself {
+                    // A list made with its rows already in memory (the window opened again, an Orb or a conversation on show
+                    // again) is put at its end by `KeepsBottom`'s initial offset alone. That offset comes from estimated row
+                    // heights, and the lazy stack does not lay out the rows at it until something scrolls: the chat showed
+                    // only the canvas, at the end of an overestimated content, until the user scrolled. A scroll to the end
+                    // anchor in the same update makes the stack lay out and measure the rows there before the first frame.
+                    // Not when a result of the find bar (or a jump from Início) holds the chat: it scrolls to its own place.
+                    if !find.pausesFollowing { scrollToBottom(proxy) }
+                    return
+                }
                 scrollToBottom(proxy)
                 // The first scroll goes by estimated row heights; once the rows near the end are laid out it can fall short.
                 Task {
