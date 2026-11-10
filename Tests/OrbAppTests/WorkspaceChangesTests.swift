@@ -310,11 +310,11 @@ struct WorkspaceMarksStorageTests {
         #expect(loaded.workspaceSeen == nil)
     }
 
-    @Test func aRoutineRunStartsWithoutThem() {
+    @Test func aRoutineRunKeepsThemAndARunFromScratchDoesNot() {
         var conversation = Conversation()
         conversation.workspaceSeen = snap()
-        let fresh = conversation.startingRoutineRun(at: .now)
-        #expect(fresh.workspaceSeen == nil)
+        #expect(conversation.startingRoutineRun(at: .now).workspaceSeen == snap())
+        #expect(conversation.forgettingContext().workspaceSeen == nil)
     }
 }
 

@@ -236,10 +236,11 @@ struct GatewayErrorTests {
 }
 
 struct GatewaySessionTests {
-    @Test func aRoutineRunAndAFreshChatGetTheirOwnGatewaySession() {
+    @Test func aRoutineKeepsItsGatewaySessionAcrossRunsAndAFreshChatGetsItsOwn() {
         var chat = Conversation()
         chat.gatewaySessionID = "s1"
-        #expect(chat.startingRoutineRun(at: .now).gatewaySessionID == nil)
+        #expect(chat.startingRoutineRun(at: .now).gatewaySessionID == "s1") // the cache of the earlier runs is its own
+        #expect(chat.forgettingContext().gatewaySessionID == nil)
         #expect(Conversation().gatewaySessionID == nil)
     }
 

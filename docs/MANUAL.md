@@ -566,8 +566,8 @@ aviso dizendo por quê.
   fim. Rodadas seguidas da mesma rotina, no mesmo dia, ficam num bloco só: a última aparece inteira e as anteriores ficam
   dobradas em "WhatsApp · 8 rodadas anteriores", com a bandeira de uma que não terminou ou pede atenção; abertas, mostram uma
   linha por rodada (a hora e a primeira linha do relatório). Em **Ver conversa** você lê a execução. Fica o histórico das últimas 10 execuções, com
-  relatório. A próxima recebe o último relatório disponível, até três outros registros recentes e um trecho das ações e respostas
-  da execução imediatamente anterior, inclusive se ela foi interrompida. O Orb é orientado a conferir acompanhamentos pendentes
+  relatório. Cada execução continua de onde as anteriores pararam: o que o Orb leu e fez nelas segue no contexto dele, então
+  ele não relê tudo a cada rodada, e o contexto é resumido sozinho quando enche, como numa conversa. O Orb é orientado a conferir acompanhamentos pendentes
   nas fontes e a levá-los ao relatório seguinte até serem resolvidos; isso depende do registro e da verificação pelo modelo.
   A rotina também pode manter acompanhamentos abertos em uma lista própria, que sobrevive ao limite do histórico de execuções.
   Há um item aberto por contato: quando o canal tem um telefone ou e-mail ("WhatsApp 5511…"), salvar de novo atualiza o

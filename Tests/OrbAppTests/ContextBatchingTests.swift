@@ -648,11 +648,12 @@ struct CondensingTests {
         #expect(again.condensedCount == 14)
     }
 
-    @Test func aNewRoutineRunStartsWithoutACondensedCount() {
+    @Test func aNewRoutineRunKeepsTheCondensedCountAndAPulseStartsWithoutIt() {
         var conversation = Conversation()
         conversation.messages = turn("a")
         conversation.condensedCount = 3
-        #expect(conversation.startingRoutineRun(at: .now).condensedCount == nil)
+        #expect(conversation.startingRoutineRun(at: .now).condensedCount == 3)
+        #expect(conversation.forgettingContext().condensedCount == nil)
     }
 }
 

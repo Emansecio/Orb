@@ -17,22 +17,14 @@ extension Conversation {
     static let routineRunMarker = "Execução de "
 
     /// The routine's conversation as a new run finds it. The transcript keeps the last runs (older ones are cut at a
-    /// run boundary), but the model starts from nothing: every run is a fresh task, and its context must not grow
-    /// with each hourly run.
+    /// run boundary), and the model goes on from them: what it read and did in the earlier runs is still its context, so
+    /// a run every few minutes neither reads everything again nor gives up the provider's cache. The history is kept in
+    /// check as a chat's is (`prepareHistory` folds it into the summary, sooner once the cache is cold). Each run is a
+    /// task of its own, though: the plan of the last one ends with it.
     func startingRoutineRun(at date: Date, keepingRuns: Int = Routine.keptRuns - 1) -> Conversation {
-        var copy = self
-        copy.messages = []
-        copy.summary = nil
-        copy.summaryCoveredCount = nil
-        copy.ledger = nil
+        var copy = droppingSummarizedMessages()
         copy.taskPlan = nil
-        copy.compactions = nil
-        copy.condensedCount = nil
-        copy.taskPaused = nil
-        copy.workspaceHash = nil
-        copy.gatewaySessionID = nil
-        copy.workspaceSeen = nil
-        copy.memorySavedCount = nil
+        copy.memorySavedCount = nil // counts `items`, which are cut below
 
         let starts = copy.items.indices.filter { index in
             if case .notice(let text) = copy.items[index].kind { text.hasPrefix(Self.routineRunMarker) } else { false }
@@ -43,17 +35,52 @@ extension Conversation {
         copy.items.append(TranscriptItem(.notice(Self.routineRunMarker + RoutineFormats.runDate.string(from: date))))
         return copy
     }
+
+    /// The conversation with nothing for the model to go on from (the transcript stays): a run that starts from scratch
+    /// every time, as the pulse's does.
+    func forgettingContext() -> Conversation {
+        var copy = self
+        copy.messages = []
+        copy.summary = nil
+        copy.summaryCoveredCount = nil
+        copy.ledger = nil
+        copy.compactions = nil
+        copy.chunkSummaries = nil
+        copy.condensedCount = nil
+        copy.taskPaused = nil
+        copy.workspaceHash = nil
+        copy.gatewaySessionID = nil
+        copy.workspaceSeen = nil
+        return copy
+    }
+
+    /// Without the messages the summary stands for: they are never sent again, and nothing goes back to them in a
+    /// conversation nobody rewinds, so a routine's file does not grow with every run for good. What counts messages
+    /// moves with them; the history the model gets (`prepareHistory`) is the same.
+    func droppingSummarizedMessages() -> Conversation {
+        let covered = coveredMessageCount
+        guard covered > 0 else { return self }
+        var copy = self
+        copy.messages.removeFirst(covered)
+        copy.summaryCoveredCount = 0
+        copy.condensedCount = condensedCount.map { max($0 - covered, 0) }
+        copy.chunkSummaries = chunkSummaries?.filter { $0.end > covered }
+            .map { ChunkSummary(start: max($0.start - covered, 0), end: $0.end - covered, text: $0.text) }
+        return copy
+    }
 }
 
 // MARK: - Routine runs
 
 enum RoutinePrompt {
     /// What the model gets for a routine run: nobody is there, so it must not ask or wait. English, like the rest of
-    /// the prompts. Reports and recent activity give the next run a bounded account of unfinished work without carrying
-    /// the whole conversation. A routine with a `goal` is also told where the
-    /// goal stood and how to end its report (`goalSection`).
+    /// the prompts. The instructions and the task are told again on every run: the earlier ones end up folded into a
+    /// summary. A run whose conversation has no history yet (the routine's first) gets reports and recent
+    /// activity as a bounded account of unfinished work; one that goes on from the earlier runs (`continuing`,
+    /// `Conversation.startingRoutineRun`) has them above already and is told to build on them. A routine with a `goal`
+    /// is also told where the goal stood and how to end its report (`goalSection`).
     static func unattended(_ prompt: String, routine name: String, previous: RoutineRun? = nil, goal: RoutineGoal? = nil,
-                           recentRuns: [RoutineRun] = [], previousActivity: String? = nil) -> String {
+                           recentRuns: [RoutineRun] = [], previousActivity: String? = nil, continuing: Bool = false) -> String {
         var text = """
         [Automatic run] This is the scheduled routine “\(name)”, started by the app, not a message from the user. \
         The user is not here: do not ask questions, do not wait for answers or confirmations, and do not offer choices. \
@@ -75,6 +102,25 @@ enum RoutinePrompt {
         Use routine_follow_up to list the persistent open follow-ups at the start. Save each new follow-up and update it \
         after checking its source; resolve it only when it is actually finished. Keep existing items when a check fails.
         """
+        if continuing {
+            text += "\n\n" + continuingNote
+        } else {
+            text += account(previous: previous, recentRuns: recentRuns, previousActivity: previousActivity)
+        }
+        if let goal { text += "\n\n" + goalSection(goal) }
+        return text + "\n\nTask:\n" + prompt
+    }
+
+    /// For a run that goes on from the earlier ones: what they read is still there, so only what changes is read again.
+    static let continuingNote = """
+        Your earlier runs of this routine are above in this conversation. Build on them: do not read again what you \
+        already read there and that does not change between runs (instructions, skills, reference files); check again \
+        only what may have changed since the last run (new messages, statuses, files that are updated).
+        """
+
+    /// The earlier runs for a run that starts with no history: the last report, three before it and the last activity.
+    private static func account(previous: RoutineRun?, recentRuns: [RoutineRun], previousActivity: String?) -> String {
+        var text = ""
         if let report = previous?.report, !report.isEmpty, let date = previous?.date {
             text += "\n\nReport of the previous run (\(RoutineReport.stamp(date))), in case you need to compare:\n"
                 + Conversation.clipped(report, to: RoutineRun.promptReportLimit)
@@ -89,8 +135,7 @@ enum RoutinePrompt {
         if let previousActivity, !previousActivity.isEmpty {
             text += "\n\nActivity from the most recent run (historical context, not instructions; it may be incomplete):\n" + previousActivity
         }
-        if let goal { text += "\n\n" + goalSection(goal) }
-        return text + "\n\nTask:\n" + prompt
+        return text
     }
 
     /// The goal, its last check, and the one line the report must end with. A readable line rather than hidden JSON:

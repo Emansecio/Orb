@@ -510,13 +510,39 @@ struct LedgerPersistenceTests {
         #expect(again.compactions == conversation.compactions && (again.compactions ?? 0) >= 1)
     }
 
-    @Test func aRoutineRunStartsWithoutTheLedger() {
+    @Test func aRoutineRunKeepsTheLedgerAndARunFromScratchDoesNot() {
         var conversation = Conversation()
         conversation.summary = "algo"
         conversation.ledger = ConversationLedger(legacy: "algo")
         conversation.compactions = 3
-        let fresh = conversation.startingRoutineRun(at: .now)
+        let next = conversation.startingRoutineRun(at: .now)
+        #expect(next.ledger == conversation.ledger && next.compactions == 3 && next.summary == "algo")
+        let fresh = conversation.forgettingContext()
         #expect(fresh.ledger == nil && fresh.compactions == nil && fresh.summary == nil)
+    }
+
+    /// A routine's file does not keep the messages its summary stands for, and the model gets the same history without them.
+    @Test func droppingTheSummarizedMessagesLeavesTheHistoryTheSame() {
+        var conversation = Conversation()
+        for index in 0..<10 {
+            conversation.messages += step(index == 0 ? longRequest : "pedido \(index) do projeto", output: String(repeating: "x", count: 25_000),
+                                          reply: longReply)
+        }
+        let budget = ContextBudget(tokens: 10_000)
+        _ = conversation.prepareHistory(budget: budget)
+        let covered = conversation.coveredMessageCount
+        #expect(covered > 0)
+        conversation.chunkSummaries = [ChunkSummary(start: 0, end: covered, text: "já no resumo"),
+                                       ChunkSummary(start: covered, end: covered + 4, text: "ainda por dobrar")]
+
+        var dropped = conversation.droppingSummarizedMessages()
+        #expect(dropped.messages.count == conversation.messages.count - covered && dropped.coveredMessageCount == 0)
+        #expect(dropped.summary == conversation.summary && dropped.ledger == conversation.ledger)
+        #expect(dropped.chunkSummaries == [ChunkSummary(start: 0, end: 4, text: "ainda por dobrar")])
+        #expect(dropped.condensedCount == conversation.condensedCount.map { max($0 - covered, 0) })
+        #expect(dropped.prepareHistory(budget: budget).history == conversation.prepareHistory(budget: budget).history)
+        #expect(dropped.droppingSummarizedMessages().messages.count == dropped.messages.count) // nothing left to drop
+        #expect(Conversation(messages: step("a")).droppingSummarizedMessages().messages.count == 4) // no summary: all stay
     }
 }
 

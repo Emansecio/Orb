@@ -2662,9 +2662,13 @@ final class AppModel {
     private func unattendedPrompt(_ prompt: String, for botID: UUID, origin: SendOrigin) -> String {
         guard origin.isUser, let routineID = sessions[botID]?.routineID,
               let routine = routines.first(where: { $0.id == routineID }) else { return prompt }
+        let own = sessions[botID]?.conversation
+        // The earlier runs are the model's history (`startingRoutineRun`): their reports are not told a second time.
+        let continuing = own?.messages.isEmpty == false
         return RoutinePrompt.unattended(prompt, routine: routine.name, previous: routine.runs.first { $0.report != nil },
                                         goal: routine.goal, recentRuns: routine.runs,
-                                        previousActivity: sessions[botID]?.conversation.flatMap { RoutineActivity.previous(in: $0) })
+                                        previousActivity: continuing ? nil : own.flatMap { RoutineActivity.previous(in: $0) },
+                                        continuing: continuing)
     }
 
     /// The status line says which routine the Orb is busy with.

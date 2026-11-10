@@ -494,7 +494,8 @@ extension AppModel {
         ensureLoaded(botID)
         addNotice(Self.labeled(read.notice, for: bot(botID)))
         let started = Date.now
-        let own = (read.value?.closingInterruptedTurn(notice: BotSession.quitSideNotice) ?? Conversation()).startingRoutineRun(at: started)
+        let own = (read.value?.closingInterruptedTurn(notice: BotSession.quitSideNotice) ?? Conversation())
+            .forgettingContext().startingRoutineRun(at: started) // a pulse starts from scratch every time
         let runID = UUID()
         session.startRoutineRun(runID, conversation: own, at: started, kind: .pulse)
         pulseRuns[botID] = PulseRun(id: runID, startedAt: started, reason: demands.first?.line ?? "", keys: demands.map(\.key))

@@ -308,7 +308,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(line.hasPrefix("Rotina “Resumo da manhã” alcançou a meta e foi pausada: Tudo em pastas."))
     }
 
-    @Test @MainActor func theHistoryKeepsTheLastRunsAndEachRunStartsFromScratch() async throws {
+    @Test @MainActor func theHistoryKeepsTheLastRunsAndEachRunGoesOnFromTheEarlierOnes() async throws {
         let stub = StubModel()
         let (model, bot, routine) = setUp(stub)
         for _ in 0..<(Routine.keptRuns + 2) {
@@ -318,13 +318,15 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         }
         #expect(model.routines[0].runs.count == Routine.keptRuns)
 
-        // Every call carries just that run's task: earlier runs are not in the model's context.
+        // Every call carries the earlier runs too: what the model read in them is not read again, and the cache holds.
         let received = await stub.calls.received
         #expect(received.count == Routine.keptRuns + 2)
-        for messages in received { #expect(messages.filter { $0.role == .user }.count == 1) }
-        // The previous run's report is handed over so the routine can compare.
-        #expect(received.last?.contains { text($0).contains("Report of the previous run") } == true)
-        #expect(received.first?.contains { text($0).contains("Report of the previous run") } == false)
+        for (run, messages) in received.enumerated() { #expect(messages.filter { $0.role == .user }.count == run + 1) }
+        // Their reports are in that history already: the task is told again, the reports are not.
+        let prompts = received.compactMap { $0.last { $0.role == .user }?.content }
+        #expect(prompts.allSatisfy { $0.hasSuffix("Task:\nresuma os arquivos novos") && !$0.contains("Report of the previous run") })
+        #expect(!prompts[0].contains(RoutinePrompt.continuingNote))
+        #expect(prompts.dropFirst().allSatisfy { $0.contains(RoutinePrompt.continuingNote) })
 
         // The transcript keeps the last runs only, cut at a run boundary.
         let saved = try #require(store.readRoutineConversation(routine: routine.id, for: bot.id).value)
@@ -380,6 +382,11 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(text.hasSuffix("Task:\nfaça X"))
         #expect(text.contains("Tinha 3 arquivos."))
         #expect(!RoutinePrompt.unattended("faça X", routine: "Diária").contains("previous run"))
+        // A run that goes on from the earlier ones has their reports above: only the task and the note.
+        let going = RoutinePrompt.unattended("faça X", routine: "Diária", previous: previous, recentRuns: [previous],
+                                             previousActivity: "Action: leu", continuing: true)
+        #expect(going.hasSuffix("Task:\nfaça X") && going.contains(RoutinePrompt.continuingNote))
+        #expect(!going.contains("Tinha 3 arquivos.") && !going.contains("Action: leu"))
     }
 
     @Test func theReportPutsWhatNeedsTheUserFirstAndKeepsInternalCodesOut() {
@@ -395,7 +402,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(text.contains("how many items need the user"))
     }
 
-    @Test @MainActor func nextRunReceivesOpenFollowUpsAndPreviousActivity() async throws {
+    @Test @MainActor func nextRunReceivesOpenFollowUpsAndThePreviousRunInItsHistory() async throws {
         let stub = StubModel(reply: "Atendi a cliente.\nPendências: verificar resposta de Ana na caixa de entrada.")
         let (model, bot, routine) = setUp(stub)
         for _ in 0..<2 {
@@ -403,9 +410,10 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
             await model.routineStarted()
             await waitUntilIdle(model, bot.id)
         }
-        let prompt = try #require(await stub.calls.received.last?.last { $0.role == .user }).content
-        #expect(prompt.contains("verificar resposta de Ana na caixa de entrada"))
-        #expect(prompt.contains("Activity from the most recent run"))
+        let call = try #require(await stub.calls.received.last)
+        #expect(call.contains { $0.role == .assistant && $0.content.contains("verificar resposta de Ana na caixa de entrada") })
+        let prompt = try #require(call.last { $0.role == .user }).content
+        #expect(!prompt.contains("Activity from the most recent run") && !prompt.contains("verificar resposta de Ana"))
         #expect(prompt.contains("check outstanding follow-ups"))
         #expect(prompt.contains("carry unresolved items forward"))
     }
@@ -1473,19 +1481,25 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(long.count <= 180 && long.hasSuffix("…") && !long.contains("\n"))
     }
 
-    @Test func aNewRunKeepsTheTranscriptButStartsTheModelFromScratch() {
+    @Test func aNewRunKeepsTheTranscriptAndWhatTheModelHadButNotTheMessagesTheSummaryStandsFor() {
         var old = Conversation()
-        old.messages = [.user("antiga")]
+        old.messages = [.user("antiga"), .user("recente")]
         old.summary = "resumo"
         old.summaryCoveredCount = 1
         old.workspaceHash = "h"
+        old.gatewaySessionID = "s"
         old.memorySavedCount = 3
         old.items = [TranscriptItem(.notice(Conversation.routineRunMarker + "ontem")), TranscriptItem(.user(text: "p", attachments: []))]
 
         let next = old.startingRoutineRun(at: .now)
-        #expect(next.messages.isEmpty && next.summary == nil && next.summaryCoveredCount == nil)
-        #expect(next.workspaceHash == nil && next.memorySavedCount == nil)
+        #expect(next.messages.map(\.content) == ["recente"] && next.summary == "resumo" && next.summaryCoveredCount == 0)
+        #expect(next.workspaceHash == "h" && next.gatewaySessionID == "s")
+        #expect(next.memorySavedCount == nil) // it counts the items, which a run may cut
         #expect(next.items.count == 3) // what was there, and the marker of this run
+
+        let fresh = old.forgettingContext() // a pulse's run
+        #expect(fresh.messages.isEmpty && fresh.summary == nil && fresh.summaryCoveredCount == nil)
+        #expect(fresh.workspaceHash == nil && fresh.gatewaySessionID == nil && fresh.items.count == 2)
     }
 
     @Test func olderRunsAreCutAtARunBoundary() {

@@ -297,8 +297,12 @@ renomear ou remover chave exige migração.
   A primeira mensagem da execução leva no topo `<orb_recent_chat>` (`RoutineBackground`, via `outsideContext`): o trecho do
   chat estacionado depois de `memorySavedCount` (pedidos, respostas e ações, mais recentes primeiro até 3.000 caracteres,
   segredos removidos). O que já virou página de sessão chega pelo "onde paramos" e pelas notas relacionadas.
-  `RoutinePrompt` acrescenta o último relatório disponível, até três outros registros recentes e `RoutineActivity` acrescenta
-  até 12.000 caracteres de ações, respostas e avisos da execução imediatamente anterior, inclusive interrompida. O relatório é
+  Cada execução continua o histórico do modelo das anteriores (`Conversation.startingRoutineRun` guarda mensagens, resumo e
+  sessão; `prepareHistory` dobra o histórico como no chat, e as mensagens já cobertas pelo resumo saem do arquivo da rotina):
+  o `RoutinePrompt` repete as instruções e a tarefa e diz para aproveitar o que já foi lido. Só uma execução sem histórico
+  (a primeira, ou um arquivo perdido) recebe o último relatório, até três outros registros recentes e, de `RoutineActivity`,
+  até 12.000 caracteres de ações, respostas e avisos da execução anterior. O pulso começa do zero a cada vez
+  (`forgettingContext`). O relatório é
   orientado a carregar os acompanhamentos abertos para a próxima execução; cada relatório armazenado tem até 8.000 caracteres.
   `routine_follow_up` mantém um item aberto por contato (`RoutineFollowUp.contact`, o telefone ou e-mail do canal, nunca do
   assunto, onde um lote cita um lead entre outros) e `collapse` resolve os gêmeos mais antigos a cada chamada.
