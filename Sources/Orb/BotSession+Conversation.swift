@@ -202,6 +202,7 @@ extension BotSession {
             model?.notePlan(chat, chat: chatID, of: id)
             model?.store.save(chat, for: id, chat: chatID)
         }
+        narratedChat = chatID
         parkedChat = chat
         conversation = own
         sideKind = kind

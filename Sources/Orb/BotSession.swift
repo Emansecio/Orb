@@ -34,7 +34,10 @@ final class BotSession {
     /// same Orb cannot run together yet (the routine waits in the queue).
     var parkedChat: Conversation? { didSet { showTranscript() } }
     /// Which of the Orb's conversations the chat shows (`OrbChats`): the Orb's own id for its first one.
-    var chatID: UUID
+    var chatID: UUID { didSet { if chatID != oldValue { showTranscript() } } } // a run is narrated in `narratedChat` only
+    /// The conversation on show when the side run began (`startRoutineRun`): the only one its steps are narrated in. One
+    /// opened meanwhile, a new one above all, shows its own items alone. Stale once the run ends, when nothing reads it.
+    @ObservationIgnored var narratedChat: UUID?
     /// The conversation a turn still works on after you opened another one (`openChat`): `conversation` is that one,
     /// and the one you opened waits in `parkedChat` until the turn ends (`endWorkElsewhere`). nil the rest of the time.
     var workingChatID: UUID?
@@ -102,8 +105,8 @@ final class BotSession {
     /// The parked chat's lines, in their file order, come first; the run's follow. When the run ends the chat returns
     /// unchanged, with only the routine's event line added (`closeRoutineRun`).
     var shownItems: [TranscriptItem] {
-        guard let parked = parkedChat, routineID != nil, [.routine, .pulse].contains(sideKind ?? .routine),
-              let running = conversation else { return (parkedChat ?? conversation)?.items ?? [] }
+        guard let parked = parkedChat, routineID != nil, chatID == narratedChat,
+              [.routine, .pulse].contains(sideKind ?? .routine), let running = conversation else { return (parkedChat ?? conversation)?.items ?? [] }
         return parked.items + running.items.suffix(from: lastRoutineRunStart(in: running))
     }
 

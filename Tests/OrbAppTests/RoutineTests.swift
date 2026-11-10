@@ -187,6 +187,24 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(onDisk.messages.count == 2 && onDisk.messages.first?.content == "oi")
     }
 
+    /// The run is narrated in the conversation that was on show when it began: a new one opened meanwhile starts empty
+    /// (it showed the run's steps, so "Nova conversa" seemed to do nothing).
+    @Test @MainActor func aNewConversationOpenedWhileARoutineRunsIsEmpty() async throws {
+        let (model, bot, routine) = setUp()
+        let before = model.transcript(bot.id)
+        model.runRoutine(routine.id)
+        await model.routineStarted()
+        #expect(model.transcript(bot.id).count > before.count)
+
+        model.newChat(for: bot.id)
+        #expect(model.live(bot.id).chats?.list.count == 2)
+        #expect(model.transcript(bot.id).isEmpty)
+        model.newChat(for: bot.id) // already new and empty: no third one
+        #expect(model.live(bot.id).chats?.list.count == 2)
+        await waitUntilIdle(model, bot.id)
+        #expect(model.transcript(bot.id).count <= 1) // at most the routine's one line
+    }
+
     /// The `schedule` tool's run and run_now start the same run as the Rotinas page's button.
     /// The run happened in a conversation of its own: the chat's next turn is told its report (once), so "o que a rotina
     /// achou?" has an answer.
