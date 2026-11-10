@@ -82,7 +82,12 @@ O cartão de `drag` nomeia o fim (e o `to_app`) e é perigoso se o fim for a Lix
 `[x,y]` ou `[x,y,pressão]`, ou caminho SVG por `SVGPath.parse`; o tempo padrão cresce com o comprimento, até 5 s). `app` ausente
 = app do snapshot mais novo **deste Orb**, nunca o da frente; sem snapshot, `pick_menu`/`key` exigem `app`. Saída diz o
 método (`[segundo plano · AX]`, `[segundo plano · evento ao app]`, `[assumi a tela 2,1 s · devolvi ao Safari]`) + diff
-(≤ 600 caracteres) + resultado do `wait`. Escalada: `ToolError` com o marcador estável `[precisa_assumir_tela]` e o motivo
+(≤ 600 caracteres) + resultado do `wait` + a janela nova: se, do estado antes do primeiro passo ao de depois do último (e do `wait`), as janelas
+mudaram (abriu, fechou), o foco foi a outra janela ou uma folha apareceu ou sumiu (`UIState.structureDiffers`; mudança só de valor não conta, o diff basta), a
+saída traz a leitura da janela em foco, como o `ui_read` a faria, com teto próprio de 150 linhas e 5.000 caracteres (`UIActTool.windowAfterLimits`; passou
+disso, avisa para usar `ui_read`) e dizendo que os ids são dessa leitura. Ela é gravada como a do `ui_read` (`UIReadTool.remember`: `store.save`, `live.remember`,
+`generation`), então os ids valem na próxima ação. É uma por chamada, nunca no takeover, e nunca derruba a ação: leitura que falha, estoura o prazo da ação (2 s) ou é cancelada
+só some da saída. Escalada: `ToolError` com o marcador estável `[precisa_assumir_tela]` e o motivo
 ("repetir pode duplicar"). Takeover: `danger()` sempre (cartão em Perguntar antes e Automático, recusa em Só leitura,
 roda em Sem pedir com o HUD); o cartão lista os `steps`.
 

@@ -310,13 +310,19 @@ struct UIReadTool: AgentTool {
             }
         }
 
+        Self.remember(reading, app: app, bot: context.botID, store: store, live: live,
+                      partial: query != nil || rootID != nil || limits.regionsOnly)
+        return reading.text + (waitNote.map { "\n" + $0 } ?? "")
+    }
+
+    /// Saves a reading so its ids are the ones the next action resolves (`ui_act` calls this too, for the window it reads after acting).
+    static func remember(_ reading: UIReading, app: AccessibilityApp, bot: UUID?, store: UISnapshotStore, live: UILiveElements, partial: Bool) {
         var snapshot = reading.snapshot
         snapshot.generation = live.nextGeneration()
-        snapshot = snapshot.carryingOver(from: store.snapshot(bot: context.botID, app: app), partial: query != nil || rootID != nil || limits.regionsOnly)
-        store.save(snapshot, bot: context.botID)
-        live.remember(bot: context.botID, pid: app.pid, generation: snapshot.generation, takenAt: snapshot.takenAt,
+        snapshot = snapshot.carryingOver(from: store.snapshot(bot: bot, app: app), partial: partial)
+        store.save(snapshot, bot: bot)
+        live.remember(bot: bot, pid: app.pid, generation: snapshot.generation, takenAt: snapshot.takenAt,
                       window: reading.window, elements: reading.elements)
-        return reading.text + (waitNote.map { "\n" + $0 } ?? "")
     }
 
     static func seconds(_ duration: Duration) -> Double {
@@ -1014,6 +1020,12 @@ struct UIState: Equatable, Sendable {
         return state
     }
 
+    /// Whether windows or a sheet came or went, or the focus moved to another window: what a new reading of the focused window
+    /// is for. A value or a selection that changed is not that; `describe` already says it.
+    func structureDiffers(from other: UIState) -> Bool {
+        windows.sorted() != other.windows.sorted() || focusedWindow != other.focusedWindow || sheet != other.sheet
+    }
+
     /// One sentence about what differs; a note that nothing visible did when it is the same.
     static func describe(from before: UIState, to after: UIState) -> String {
         func name(_ title: String) -> String { title.isEmpty ? "(sem título)" : UIText.quoted(UIText.clean(title, limit: 60)) }
@@ -1682,12 +1694,14 @@ struct UIActTool: AgentTool {
 
         var done: [String] = []
         var last: Performed?
+        var firstBefore: UIState?
         for (index, step) in steps.enumerated() {
             do {
                 let performed = try await perform(step, app: app, context: context, approved: approved, waitsAfter: index == steps.count - 1 && arguments.nonEmptyString("wait") != nil)
                 done.append(steps.count == 1 ? performed.text : "\(index + 1). \(performed.text)")
                 last?.watcher.cancel()
                 last = performed
+                firstBefore = firstBefore ?? performed.before
             } catch {
                 last?.watcher.cancel()
                 guard steps.count > 1 else { throw error }
@@ -1698,12 +1712,43 @@ struct UIActTool: AgentTool {
         var text = done.joined(separator: "\n")
         if let last {
             defer { last.watcher.cancel() }
+            var finalState = last.after
             if let wanted = arguments.nonEmptyString("wait") {
                 let timeout = Duration.seconds(arguments.integer("timeout", default: 5, in: 1...30))
                 text += "\n" + (try await waitAfter(wanted, app: app, context: context, timeout: timeout, last: last))
+                // What the wait waited for may be a window that came after the last step looked.
+                finalState = await currentState(app: app) ?? finalState
+            }
+            if let firstBefore, finalState.structureDiffers(from: firstBefore), let window = await readFocusedWindow(app: app, context: context) {
+                text += "\n" + window
             }
         }
         return text
+    }
+
+    /// The most a reading after an action lists: the model asked to act, not to read, and a bigger window is `ui_read`'s to give.
+    static let windowAfterLimits = UIOutlineLimits(maxLines: 150, maxCharacters: 5_000)
+
+    private func currentState(app: AccessibilityApp) async -> UIState? {
+        let system = system
+        return try? await sessions.run(app, within: sessions.deadlines.action) { UIState.capture(root: system.root(of: app), target: nil) }
+    }
+
+    /// When the windows or a sheet changed, the focused window read the way `ui_read` would, saved the same way so its ids
+    /// work in the next action (one reading per call, not per step). Never fails the call: the action has already happened, so a
+    /// reading that errors, runs out of time or is cancelled just leaves the output as it was.
+    private func readFocusedWindow(app: AccessibilityApp, context: ToolContext) async -> String? {
+        var limits = Self.windowAfterLimits
+        limits.seconds = max(0.1, UIReadTool.seconds(sessions.deadlines.action) - 0.25)
+        let readLimits = limits
+        let system = system
+        guard let reading = try? await sessions.run(app, within: sessions.deadlines.action, {
+            try UIReadTool.reading(root: system.root(of: app), app: app, window: nil, query: nil, includeMenus: false, limits: readLimits)
+        }), reading.snapshot.windowIndex != nil else { return nil }
+        UIReadTool.remember(reading, app: app, bot: context.botID, store: store, live: live, partial: false)
+        let cut = reading.text.contains("[Saída cortada")
+        return "A janela em foco mudou; leitura dela agora (os ids são desta leitura nova e valem na próxima ação):\n" + reading.text
+            + (cut ? "\nA janela passa do que cabe aqui; chame ui_read (com query, window ou root) para ver o resto." : "")
     }
 
     /// One step done: what to tell the model, and the subscription made before acting (for a `wait` that follows).
@@ -1711,6 +1756,7 @@ struct UIActTool: AgentTool {
         var text: String
         var watcher: AXEventWatcher
         var before: UIState
+        var after: UIState
         var target: (any AccessibilityElement)?
     }
 
@@ -1822,7 +1868,7 @@ struct UIActTool: AgentTool {
             var text = acted.summary + " " + method.tag + " " + UIState.describe(from: acted.before, to: after).clipped(to: 600)
             if let listing = acted.listing, !listing.isEmpty { text += "\nItens do menu:\n" + listing }
             if !acted.notes.isEmpty { text += "\n" + acted.notes.joined(separator: "\n") }
-            return Performed(text: text, watcher: events, before: acted.before, target: target)
+            return Performed(text: text, watcher: events, before: acted.before, after: after, target: target)
         } catch {
             // Failing (or being cancelled) after acting does not leave the person with another app in front.
             watcher?.cancel()

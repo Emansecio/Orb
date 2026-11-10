@@ -171,7 +171,7 @@ enum PromptParts {
         if bot.capabilities.contains(.computerUse) {
             uses.append("applescript and shortcuts_run to work with apps (app_dictionary before scripting one you do not know well)"
                 + (hasFiles ? "; read_file, not the app, to read an image" : ""))
-            uses.append("ui_read then ui_act for apps with no AppleScript or Shortcuts support (read the screen before acting, read again after it changes)")
+            uses.append("ui_read then ui_act for apps with no AppleScript or Shortcuts support (read the screen before acting; ui_act itself returns the new window when one opens, closes or takes focus)")
         }
         if bot.capabilities.contains(.browser) {
             uses.append("web_fetch for public pages, APIs and PDFs (offset or find for long ones; no JavaScript)"

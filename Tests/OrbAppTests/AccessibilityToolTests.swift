@@ -486,6 +486,94 @@ struct UIActToolTests {
         #expect(open.performed == ["AXPress"])
     }
 
+    // MARK: The new window after acting
+
+    private static let newReading = "leitura dela agora"
+
+    /// A rig whose "Abrir" button opens a window on top, focused, holding `children`.
+    private func openingRig(_ children: [FakeElement], prepare: (FakeElement) -> Void = { _ in }) -> (Rig, FakeElement) {
+        let open = fakeButton("Abrir")
+        let window = fake("AXWindow", title: "Principal", [open])
+        let rig = rig(windows: [window])
+        let dialog = fake("AXWindow", title: "Salvar como", focused: true, children)
+        prepare(dialog)
+        open.onPerform = { _ in
+            rig.root.attrs["AXWindows"] = .elements([dialog, window])
+            rig.root.attrs["AXFocusedWindow"] = .element(dialog)
+        }
+        return (rig, open)
+    }
+
+    @Test func aWindowThatOpensIsReadAndItsIdsWorkInTheNextAction() async throws {
+        let cancel = fakeButton("Cancelar")
+        let (rig, _) = openingRig([fakeButton("Salvar"), cancel])
+        try await readFirst(rig)
+        let text = try await act(rig, ["action": .string("press"), "id": .string("w1.1")])
+        #expect(text.contains("Mudou: abriu a janela “Salvar como”"))
+        #expect(text.contains(Self.newReading) && text.contains("ids são desta leitura nova"))
+        #expect(text.contains("w1.2") && text.contains("Cancelar"), "the dialog is window 1 now, and its buttons are listed")
+        _ = try await act(rig, ["action": .string("press"), "id": .string("w1.2")])
+        #expect(cancel.performed == ["AXPress"], "an id of the reading the action returned is valid for the next action")
+    }
+
+    @Test func aSheetThatAppearsIsReadToo() async throws {
+        let ok = fakeButton("Salvar")
+        let sheet = fake("AXSheet", title: "Confirmar", [ok])
+        let button = fakeButton("Abrir")
+        let window = fake("AXWindow", title: "Principal", [button])
+        let rig = rig(windows: [window])
+        button.onPerform = { _ in window.children.append(sheet) }
+        try await readFirst(rig)
+        let text = try await act(rig, ["action": .string("press"), "id": .string("w1.1")])
+        #expect(text.contains("apareceu um painel (folha)") && text.contains(Self.newReading) && text.contains("Salvar"))
+    }
+
+    @Test func aChangeOfValueAloneDoesNotAddAReading() async throws {
+        let box = fake("AXCheckBox", title: "Fixar", value: .number(0), actions: ["AXPress"])
+        box.onPerform = { _ in box.attrs["AXValue"] = .number(1) }
+        let rig = rig(windows: [fake("AXWindow", title: "Principal", [box])])
+        try await readFirst(rig)
+        let text = try await act(rig, ["action": .string("press"), "id": .string("w1.1")])
+        #expect(text.contains("Mudou:") && !text.contains(Self.newReading))
+        let nothing = try await act(rig, ["action": .string("press"), "id": .string("w1.1")])
+        #expect(!nothing.contains(Self.newReading))
+    }
+
+    @Test func aFailingReadingNeverFailsTheActionThatAlreadyHappened() async throws {
+        let (rig, open) = openingRig([fakeButton("Salvar")]) { $0.failures["AXChildren"] = .cannotComplete }
+        try await readFirst(rig)
+        let text = try await act(rig, ["action": .string("press"), "id": .string("w1.1")])
+        #expect(open.performed == ["AXPress"])
+        #expect(text.contains("Mudou: abriu a janela “Salvar como”") && !text.contains(Self.newReading))
+    }
+
+    @Test func theReadingAfterActingHasItsOwnSmallerCeiling() async throws {
+        let (rig, _) = openingRig((1...300).map { fakeButton("Botão \($0)") })
+        try await readFirst(rig)
+        let text = try await act(rig, ["action": .string("press"), "id": .string("w1.1")])
+        let listed = text.split(separator: "\n").filter { $0.contains("Botão") }.count
+        #expect(listed > 0 && listed <= UIActTool.windowAfterLimits.maxLines, "\(listed) lines")
+        #expect(text.contains("[Saída cortada") && text.contains("chame ui_read"))
+        #expect(text.count < 7_500)
+    }
+
+    @Test func severalStepsReadTheWindowOnceAtTheEnd() async throws {
+        let open = fakeButton("Abrir")
+        let window = fake("AXWindow", title: "Principal", [fakeButton("Antes"), open])
+        let rig = rig(windows: [window])
+        let dialog = fake("AXWindow", title: "Salvar como", focused: true, [fakeButton("Salvar")])
+        open.onPerform = { _ in
+            rig.root.attrs["AXWindows"] = .elements([dialog, window])
+            rig.root.attrs["AXFocusedWindow"] = .element(dialog)
+        }
+        try await readFirst(rig)
+        let steps: JSONValue = .array([.object(["action": .string("press"), "id": .string("w1.1")]),
+                                       .object(["action": .string("press"), "id": .string("w1.2")])])
+        let text = try await act(rig, ["action": .string("press"), "steps": steps])
+        #expect(text.components(separatedBy: Self.newReading).count - 1 == 1)
+        #expect(text.contains("Salvar"))
+    }
+
     @Test func aValueThatChangedIsReportedWithTheOldOne() async throws {
         let box = fake("AXCheckBox", title: "Fixar", value: .number(0), actions: ["AXPress"])
         box.onPerform = { _ in box.attrs["AXValue"] = .number(1) }
@@ -923,6 +1011,24 @@ struct UIStateTests {
         after = before
         after.targetGone = true
         #expect(UIState.describe(from: before, to: after) == "Mudou: o elemento não está mais na tela.")
+    }
+
+    @Test func onlyWindowsFocusAndSheetsCountAsAStructureChange() {
+        let base = UIState(windows: ["A", "B"], focusedWindow: "A", focusedElement: "campo", sheet: false, target: "valor 1")
+        var valueOnly = base
+        valueOnly.target = "valor 2"
+        valueOnly.focusedElement = "outro"
+        #expect(!valueOnly.structureDiffers(from: base))
+        var reordered = base
+        reordered.windows = ["B", "A"]
+        #expect(!reordered.structureDiffers(from: base), "the same windows in another order")
+        var opened = base
+        opened.windows.append("C")
+        var moved = base
+        moved.focusedWindow = "B"
+        var sheet = base
+        sheet.sheet = true
+        #expect(opened.structureDiffers(from: base) && moved.structureDiffers(from: base) && sheet.structureDiffers(from: base))
     }
 
     @Test func untitledWindowsAreNamed() {
