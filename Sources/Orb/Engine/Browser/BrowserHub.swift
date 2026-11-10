@@ -471,9 +471,10 @@ final class BrowserSession: @unchecked Sendable {
 
     /// Remembers which tabs the model now knows of and returns the ones it did not know before (none the first time).
     func noteTabs(_ ids: Set<String>) -> Set<String> {
-        memory.withLock {
-            defer { $0.knownTabs = ids }
-            return $0.knownTabs.map { ids.subtracting($0) } ?? []
+        memory.withLock { memory in
+            let opened = memory.knownTabs.map { ids.subtracting($0) } ?? []
+            memory.knownTabs = ids
+            return opened
         }
     }
 
