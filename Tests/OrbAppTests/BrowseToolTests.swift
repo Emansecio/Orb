@@ -19,8 +19,9 @@ struct BrowseToolTests {
 
     @Test func openGivesTheFinalAddressAndTitleAndWhatToDoNext() async throws {
         let text = try await run(BrowseOpenTool(), ["url": .string("example.com/docs")])
-        #expect(text.contains("Opened https://example.com/docs") && text.contains("“Example”") && text.contains("browse_snapshot"))
-        #expect(setup.driver.calls == ["open https://example.com/docs"])
+        #expect(text.contains("Opened https://example.com/docs") && text.contains("“Example”") && text.contains("[ref=e1]"), "the page comes with the answer")
+        #expect(text.contains(BrowseSupport.untrusted))
+        #expect(setup.driver.calls.first == "open https://example.com/docs")
     }
 
     @Test func onlyWebAddressesAreOpened() async {
@@ -53,7 +54,7 @@ struct BrowseToolTests {
         let context = setup.context()
         let text = try await BrowseSnapshotTool().run(.object([:]), context: context)
         #expect(text.contains("URL: https://shop.test/") && text.contains("[ref=e7]") && text.contains("untrusted"))
-        #expect(setup.driver.calls == ["snapshot interactive=true selector=-"])
+        #expect(setup.driver.calls == ["tabs", "snapshot interactive=true selector=-"])
         #expect(setup.hub.label(ofRef: "e7", botID: setup.botID) == "Comprar")
 
         // The card names what is clicked, by what the snapshot said it was.
@@ -84,9 +85,13 @@ struct BrowseToolTests {
         let click = BrowseClickTool()
         #expect(click.summary(.object(["ref": .string("e7")]), context: chat).title == "Clicando em “Comprar”")
         #expect(click.summary(.object(["ref": .string("e7")]), context: routine).title == "Clicando em “Cancelar”")
-        // Going back leaves the old page: its names go, as they do on browse_open.
+        // Going back leaves the old page: its names go, as they do on browse_open, and the page it comes back to names its own.
+        setup.driver.state.withLock {
+            $0.snapshot = BrowserSnapshot(url: "https://shop.test/antes", tree: "- link \"Voltar\" [ref=e2]", refs: ["e2": BrowserRef(role: "link", name: "Voltar")])
+        }
         _ = try await BrowseBackTool().run(.object([:]), context: chat)
         #expect(click.summary(.object(["ref": .string("e7")]), context: chat).title == "Clicando na página")
+        #expect(click.summary(.object(["ref": .string("e2")]), context: chat).title == "Clicando em “Voltar”")
         #expect(click.summary(.object(["ref": .string("e7")]), context: routine).title == "Clicando em “Cancelar”")
     }
 
@@ -125,11 +130,11 @@ struct BrowseToolTests {
         let context = setup.context()
         let text = try await BrowseSnapshotTool().run(.object(["selector": .string("#main")]), context: context)
         #expect(text.contains("Selector '#main' did not match") && text.contains("[ref=e7]"))
-        #expect(setup.driver.calls == ["snapshot interactive=true selector=#main", "snapshot interactive=true selector=-"])
+        #expect(setup.driver.calls == ["tabs", "snapshot interactive=true selector=#main", "snapshot interactive=true selector=-"])
         // The wide read is what stays remembered: its refs name the elements, and the next page keeps paging it.
         #expect(setup.hub.label(ofRef: "e7", botID: setup.botID) == "Comprar")
         let more = try await BrowseSnapshotTool().run(.object(["offset": .number(5)]), context: context)
-        #expect(more.contains("caracteres 6–") && setup.driver.calls.count == 2, "offset keeps paging the wide read: \(setup.driver.calls)")
+        #expect(more.contains("caracteres 6–") && setup.driver.calls.count == 3, "offset keeps paging the wide read: \(setup.driver.calls)")
     }
 
     @Test func aSelectorWithoutAnAccessibilityNodeWidensToo() async throws {
@@ -138,14 +143,14 @@ struct BrowseToolTests {
         }
         let text = try await BrowseSnapshotTool().run(.object(["selector": .string("[role=dialog]")]), context: setup.context())
         #expect(text.contains("No accessibility node") && text.contains("whole page"))
-        #expect(setup.driver.calls == ["snapshot interactive=true selector=[role=dialog]", "snapshot interactive=true selector=-"])
+        #expect(setup.driver.calls == ["tabs", "snapshot interactive=true selector=[role=dialog]", "snapshot interactive=true selector=-"])
     }
 
     @Test func aSnapshotFailureThatIsNotAMissIsNotRetried() async {
         setup.driver.state.withLock { $0.failingSelectors["#main"] = .failed("Error: the tab crashed") }
         let text = await message(BrowseSnapshotTool(), ["selector": .string("#main")])
         #expect(text.contains("the tab crashed"))
-        #expect(setup.driver.calls == ["snapshot interactive=true selector=#main"])
+        #expect(setup.driver.calls == ["tabs", "snapshot interactive=true selector=#main"])
     }
 
     @Test func aWidenedReadThatAlsoFailsReportsBothFailures() async {
@@ -155,7 +160,7 @@ struct BrowseToolTests {
         }
         let text = await message(BrowseSnapshotTool(), ["selector": .string("#main")])
         #expect(text.contains("did not match") && text.contains("the page is gone"))
-        #expect(setup.driver.calls == ["snapshot interactive=true selector=#main", "snapshot interactive=true selector=-"])
+        #expect(setup.driver.calls == ["tabs", "snapshot interactive=true selector=#main", "snapshot interactive=true selector=-"])
     }
 
     // MARK: Searching the snapshot
@@ -186,7 +191,7 @@ struct BrowseToolTests {
         // Each hit shows the elements around it; lines far from every hit stay out.
         #expect(text.contains("Ajuda") && text.contains("banner"))
         #expect(!text.contains("Endereço") && !text.contains("Horário"))
-        #expect(setup.driver.calls == ["snapshot interactive=true selector=-"])
+        #expect(setup.driver.calls == ["tabs", "snapshot interactive=true selector=-"])
     }
 
     @Test func queryIsLiteralNotAPattern() async throws {
@@ -206,7 +211,7 @@ struct BrowseToolTests {
         setup.driver.state.withLock { $0.failingSelectors["main"] = .failed("Error: Selector 'main' did not match any element") }
         let text = try await BrowseSnapshotTool().run(.object(["selector": .string("main"), "query": .string("comprar")]), context: setup.context())
         #expect(text.contains("whole page") && text.contains("2 lines match") && text.contains("[ref=e7]"))
-        #expect(setup.driver.calls == ["snapshot interactive=true selector=main", "snapshot interactive=true selector=-"])
+        #expect(setup.driver.calls == ["tabs", "snapshot interactive=true selector=main", "snapshot interactive=true selector=-"])
     }
 
     @Test func aLoginFormInTheSnapshotIsAHandoff() async throws {
@@ -367,7 +372,7 @@ struct BrowseToolTests {
     }
 
     @Test func scrollBackAndTabsWork() async throws {
-        #expect(try await run(BrowseScrollTool(), ["direction": .string("up"), "amount": .number(250)]) == "Scrolled up 250 px.")
+        #expect(try await run(BrowseScrollTool(), ["direction": .string("up"), "amount": .number(250)]) .hasPrefix("Scrolled up 250 px."))
         #expect(try await run(BrowseScrollTool()).contains("down 600"))
         #expect(await message(BrowseScrollTool(), ["direction": .string("sideways")]).contains("up, down, left or right"))
         #expect(try await run(BrowseBackTool()).contains("Back at https://example.com/"))

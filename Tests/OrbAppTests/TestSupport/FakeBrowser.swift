@@ -17,6 +17,10 @@ final class FakeBrowserDriver: BrowserDriver, @unchecked Sendable {
         /// Selectors `snapshot` cannot match (the command line's own words), and a failure every `snapshot` gets.
         var failingSelectors: [String: BrowserDriverError] = [:]
         var snapshotFailure: BrowserDriverError?
+        /// What the next `snapshot` calls answer, in order (the last one repeats); empty: `snapshot` as usual. For a page that changes under it.
+        var snapshotScript: [BrowserSnapshot] = []
+        /// What only `currentURL` fails with (a JavaScript dialog answers nothing else but the question about the address).
+        var urlFailure: BrowserDriverError?
         var hasPage = true
         var headed = false
         var screenshotBytes: Data?
@@ -61,7 +65,11 @@ final class FakeBrowserDriver: BrowserDriver, @unchecked Sendable {
         let state = try note("snapshot interactive=\(interactive) selector=\(selector ?? "-")")
         if let selector, let failure = state.failingSelectors[selector] { throw failure }
         if let failure = state.snapshotFailure { throw failure }
-        return state.snapshot
+        let scripted: BrowserSnapshot? = self.state.withLock { state in
+            guard !state.snapshotScript.isEmpty else { return nil }
+            return state.snapshotScript.count > 1 ? state.snapshotScript.removeFirst() : state.snapshotScript[0]
+        }
+        return scripted ?? state.snapshot
     }
 
     /// Fails as the real browser does when another element sits on the click point, while `call` has coverings left.
@@ -123,6 +131,7 @@ final class FakeBrowserDriver: BrowserDriver, @unchecked Sendable {
 
     func currentURL() async throws -> String? {
         let state = try note("currentURL")
+        if let failure = state.urlFailure { throw failure }
         return state.hasPage ? state.url : nil
     }
 

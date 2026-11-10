@@ -126,6 +126,20 @@ os proxies ficam. Um seletor de `browse_snapshot` ou um id de aba que começaria
 `BrowserLocator` procura o `agent-browser` primeiro em `navegador/bin` (o que o app instalou), depois no PATH do shell, Homebrew, npm e cargo, e o navegador em Applications (Chrome, Brave, Chromium, Canary,
 nessa ordem; `BrowserProgram`) e só depois no Chrome for Testing; devolve um `BrowserStatus`: pronto, ou o que falta (o Orb manda instalar em Ajustes → Navegador).
 
+**O estado da página depois da ação.** Cada ida ao modelo custa ~3 s e, no histórico (9.624 ações), 53 % dos cliques eram seguidos de um
+`browse_snapshot`. Por isso `browse_open`, `browse_click` (menos hover, focus e scrollintoview), `browse_fill` com `submit`, `browse_press` (tecla, não
+texto digitado), `browse_scroll` e `browse_back` terminam com `BrowseSupport.pageState`: tiram o snapshot interativo (o mesmo do `browse_snapshot`
+padrão) quando a página assenta (dois iguais em seguida, até `settlePolls` = 8 tentativas de 120 ms, ~1 s; estourou, o aviso diz que ainda
+mudava) e comparam com o último que a sessão mostrou inteiro (`BrowserSession.seen`; busca, `selector` e `full` não contam). Igual: uma frase
+("Page unchanged…", refs ainda valem). Diferente: `[Page now]`, `URL:`, abas, `BrowseSupport.untrusted`, o mesmo corte de `WebFetchTool.page`
+e a nota de passagem, e a sessão grava refs, rótulos e `notePage` como o `browse_snapshot` (`BrowseSupport.record`), então os refs valem na próxima
+ação e `offset` continua o mesmo snapshot. Diálogo JavaScript aberto: relatado como antes, sem snapshot; snapshot que falha: a resposta da ação e o
+conselho antigo. Com mais de uma aba (`visibleTabs`, só as da conversa), o resultado ganha a linha `Tabs (* is current): id* “título” endereço · …`, também no
+`browse_snapshot`; uma aba que a ação abriu é dita com o id (`BrowserSession.noteTabs`, só depois de a conversa ter visto a lista uma vez). `browse_open` aceita
+`wait_text`: depois de abrir, o mesmo `wait --text … --timeout 10000` do `browse_wait`; texto que não veio é dito e a página é entregue. No histórico, o
+resultado de uma ação cuja página foi trocada por um snapshot mais novo perde só a página (`ContextText.supersededState`, que corta no `[Page now]`),
+como o `browse_snapshot` antigo vira uma linha (`ContextWindow`). `BrowserControl`, recusa de senha e cartão, `pastCover`, risco e `readsLivePage` ficam como estavam.
+
 **Instalação (`BrowserInstaller`).** Instala dentro de `navegador/` na pasta de dados (`BrowserInstallLayout`): `bin/agent-browser`, `chrome/chrome-<versão>/` (só sem Chrome nem Brave no Mac) e
 `instalados.json`. O agent-browser é **fixo** (`BrowserPlatform.agentBrowserVersion`, 0.39.1): o app baixa `releases/download/v0.39.1/agent-browser-darwin-<arm64|x64>` e confere o SHA-256 gravado no código
 (`BrowserPlatform.pinnedHashes`); nada de "latest". O Chrome for Testing é o `agent-browser install` rodado com um `HOME` da pasta de trabalho (ele não tem variável para a pasta de

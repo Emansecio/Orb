@@ -219,6 +219,91 @@ enum BrowseSupport {
     }
 }
 
+extension BrowseSupport {
+    /// Starts the page state an action appends to its result (the history shortens an old one: `ContextText.supersededState`).
+    static let stateMarker = "\n\n[Page now]\n"
+    /// The tools whose result carries the new state of the page, so the model need not ask for a snapshot after them.
+    static let attachesState: Set<String> = ["browse_open", "browse_click", "browse_fill", "browse_press", "browse_scroll", "browse_back"]
+    /// A page is settled when two snapshots in a row are the same; up to this many tries, `settlePoll` apart (about a second).
+    static let settlePolls = 8
+    static let settlePoll = Duration.milliseconds(120)
+
+    /// Waits as the hub does (tests do not wait); without a hub, for real.
+    static func pause(_ context: ToolContext, _ duration: Duration) async throws {
+        if let hub = context.browser.hub { try await hub.pause(duration) } else { try await Task.sleep(for: duration) }
+    }
+
+    /// One line with the tabs (id, `*` for the current one, title, address cut), only when there is more than one.
+    static func tabsLine(_ tabs: [BrowserTab]) -> String {
+        guard tabs.count > 1 else { return "" }
+        let items = tabs.map { tab in
+            "\(tab.id)\(tab.isActive ? "*" : "")\(tab.title.isEmpty ? "" : " “\(tab.title.clipped(to: 40))”") \(tab.url.clipped(to: 60))"
+        }
+        return "Tabs (* is current): " + items.joined(separator: " · ") + "\n"
+    }
+
+    /// What a snapshot teaches the session: its refs and text, the names the approval cards show, and whether the page is sensitive.
+    static func record(_ snapshot: BrowserSnapshot, title: String = "", session: BrowserSession, context: ToolContext) {
+        session.remember(snapshot, text: snapshot.tree)
+        if let botID = context.botID {
+            context.browser.hub?.setLabels(snapshot.refs, botID: botID, scope: context.browser.scope)
+            context.browser.hub?.notePage(botID: botID, url: snapshot.url, title: title, text: snapshot.tree, refs: snapshot.refs)
+        }
+    }
+
+    /// The interactive snapshot once the page stops changing (a click that navigates is not photographed half loaded). `settled`
+    /// is false when it was still changing after the last try. Inside the caller's `exclusive`.
+    static func settledSnapshot(_ session: BrowserSession, context: ToolContext) async throws -> (snapshot: BrowserSnapshot, settled: Bool) {
+        var previous = try await session.driver.snapshot(interactive: true, selector: nil)
+        for _ in 0..<settlePolls {
+            try await pause(context, settlePoll)
+            let next = try await session.driver.snapshot(interactive: true, selector: nil)
+            if next.tree == previous.tree, next.url == previous.url { return (next, true) }
+            previous = next
+        }
+        return (previous, false)
+    }
+
+    /// The text an acting tool appends after it acted: the page as `browse_snapshot` would show it (same warning, limit, refs,
+    /// names and handoff note, and the tabs when there are several), or one sentence when it is what the model last saw. nil when
+    /// the browser cannot say (a dialog, a failure): the tool then tells the model to look. Only Parar is thrown.
+    static func pageState(_ session: BrowserSession, context: ToolContext, title: String = "") async throws -> String? {
+        let taken: (snapshot: BrowserSnapshot, settled: Bool, tabs: [BrowserTab]?)
+        do {
+            taken = try await session.exclusive {
+                let (snapshot, settled) = try await settledSnapshot(session, context: context)
+                return (snapshot, settled, try? await session.visibleTabs().mine)
+            }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            return nil
+        }
+        let snapshot = taken.snapshot
+        record(snapshot, title: title, session: session, context: context)
+        let tabs = taken.tabs ?? []
+        let opened = taken.tabs.map { session.noteTabs(Set($0.map(\.id))) } ?? []
+        var extras = ""
+        let newTabs = tabs.filter { opened.contains($0.id) }.map(\.id)
+        if !newTabs.isEmpty {
+            extras += "NOTE: this action opened a new tab (\(newTabs.joined(separator: ", "))); the browser is on the tab marked *, and browse_tabs select switches.\n"
+        }
+        extras += tabsLine(tabs)
+        let loading = taken.settled ? "" : "\nNOTE: the page was still changing after about a second; browse_wait, or a new browse_snapshot later, shows where it ends up."
+        let seen = session.seen
+        if !seen.tree.isEmpty, snapshot.tree == seen.tree, snapshot.url == seen.url {
+            return "\nPage unchanged since your last snapshot; its refs still work.\n" + extras.trimmingCharacters(in: .newlines) + loading
+        }
+        guard !snapshot.tree.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return "\nPage now: nothing to list (it may still be loading, or have no controls).\n" + extras.trimmingCharacters(in: .newlines) + loading
+        }
+        session.markSeen(tree: snapshot.tree, url: snapshot.url)
+        let body = WebFetchTool.page(of: snapshot.tree, arguments: .object([:]), truncatedDownload: nil)
+        return stateMarker + "URL: \(snapshot.url)\n" + extras + "\(untrusted)\n\n" + body
+            + handoffNote(url: snapshot.url, title: "", text: snapshot.tree) + loading
+    }
+}
+
 /// Fields the Orb never types into.
 enum SecretField {
     private static let words = [
@@ -295,17 +380,18 @@ struct BrowseOpenTool: BrowseTool {
     let spec = ToolSpec(
         name: "browse_open",
         description: """
-        Open a page in your own browser (a real Chrome: JavaScript, the user's logins kept). Returns the final address and title; \
-        then browse_snapshot to act on it or browse_read for its text. A login, a 2FA code or a captcha is not yours to try: call \
-        browse_show.
+        Open a page in your own browser (a real Chrome: JavaScript, the user's logins kept). Returns the final address, title and \
+        the page's elements with refs. `wait_text`: waits (10 s) for that text first. A login, a 2FA code or a captcha is not yours to try: call browse_show.
         """,
-        parameters: .schema(["url": .property("string")], required: ["url"]))
+        parameters: .schema(["url": .property("string"), "wait_text": .property("string")], required: ["url"]))
 
     func risk(_ arguments: JSONValue) -> ToolRisk { .sensitive }
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) { ("Abrindo página", arguments["url"]?.string ?? "") }
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
         let address = try BrowseSupport.address(try arguments.requiredString("url"))
+        let waitText = arguments.nonEmptyString("wait_text")
+        if let waitText, waitText.hasPrefix("-") { throw ToolError("`wait_text` cannot start with “-”.") }
         let session = try await BrowseSupport.session(context)
         let page = try await session.exclusive {
             session.forgetPage()
@@ -314,8 +400,25 @@ struct BrowseOpenTool: BrowseTool {
         BrowseSupport.forgetLabels(context)
         if let botID = context.botID { context.browser.hub?.notePage(botID: botID, url: page.url, title: page.title) }
         var text = "Opened \(page.url)" + (page.title.isEmpty ? "" : " — “\(page.title)”")
-        text += BrowseSupport.handoffNote(url: page.url, title: page.title)
-        return text + "\nNext: browse_snapshot (what to click or fill) or browse_read (the text)."
+        let handoff = BrowseSupport.handoffNote(url: page.url, title: page.title)
+        if let waitText {
+            // The same wait as browse_wait with its default limit; a text that never came is told, not an error: the page is still here.
+            do {
+                _ = try await BrowseSupport.acting {
+                    try await session.exclusive { try await session.driver.command(["wait", "--text", waitText, "--timeout", "10000"]) }
+                }
+                text += "\nThe text “\(waitText.clipped(to: 80))” appeared."
+            } catch BrowserDriverError.failed(let message) {
+                text += "\nThe text “\(waitText.clipped(to: 80))” did not appear within 10 s (\(message.clipped(to: 120)))."
+            } catch BrowserDriverError.timedOut {
+                text += "\nThe text “\(waitText.clipped(to: 80))” did not appear within 10 s."
+            }
+        }
+        guard let state = try await BrowseSupport.pageState(session, context: context, title: page.title) else {
+            return text + handoff + "\nNext: browse_snapshot (what to click or fill) or browse_read (the text)."
+        }
+        // The state says it too when the snapshot shows a login; the page's title can say it when the snapshot does not.
+        return text + (state.contains("NOTE: this looks like") ? "" : handoff) + state
     }
 }
 
@@ -325,7 +428,7 @@ struct BrowseSnapshotTool: BrowseTool {
         description: """
         What the page offers to click or fill, one line per element with a ref (e12) for the other browse_* tools. Refs change \
         with the page: snapshot again after it changes. 12,000 characters (`max_chars` up to 24,000; the closing note gives the \
-        next `offset`). `full` adds text and headings; `selector` (CSS) scopes it to one element, or the whole page when it \
+        next `offset`). Lists tabs if several. `full` adds text and headings; `selector` (CSS) scopes it to one element, or the whole page when it \
         misses; `query` gives only the lines with that text, each with neighbors and its offset.
         """,
         parameters: .schema([
@@ -346,17 +449,19 @@ struct BrowseSnapshotTool: BrowseTool {
         let query = arguments.nonEmptyString("query") ?? arguments.nonEmptyString("find")
         var (tree, url) = session.snapshotMemory
         var widened: String?
+        var tabsLine = ""
         if offset == 0 || tree.isEmpty {
             let interactive = !arguments.flag("full")
             let selector = arguments.nonEmptyString("selector")
             // A scoped read that misses is read again on the whole page, inside the same lock and tab: the model's own
             // recovery was this very second snapshot, a full model turn later.
-            let (snapshot, failed): (BrowserSnapshot, String?) = try await session.exclusive {
+            let (snapshot, failed, tabs): (BrowserSnapshot, String?, [BrowserTab]) = try await session.exclusive {
+                let tabs = (try? await session.visibleTabs().mine) ?? []
                 do {
-                    return (try await session.driver.snapshot(interactive: interactive, selector: selector), nil)
+                    return (try await session.driver.snapshot(interactive: interactive, selector: selector), nil, tabs)
                 } catch BrowserDriverError.failed(let message) where selector != nil && BrowseSupport.isSelectorMiss(message) {
                     do {
-                        return (try await session.driver.snapshot(interactive: interactive, selector: nil), message)
+                        return (try await session.driver.snapshot(interactive: interactive, selector: nil), message, tabs)
                     } catch BrowserDriverError.failed(let again) {
                         throw BrowserDriverError.failed(message + " Reading the whole page instead also failed: " + again)
                     }
@@ -365,11 +470,12 @@ struct BrowseSnapshotTool: BrowseTool {
             tree = snapshot.tree
             url = snapshot.url
             widened = failed
-            session.remember(snapshot, text: tree)
-            if let botID = context.botID {
-                context.browser.hub?.setLabels(snapshot.refs, botID: botID, scope: context.browser.scope)
-                context.browser.hub?.notePage(botID: botID, url: url, title: "", text: tree, refs: snapshot.refs)
-            }
+            tabsLine = BrowseSupport.tabsLine(tabs)
+            _ = session.noteTabs(Set(tabs.map(\.id)))
+            BrowseSupport.record(snapshot, session: session, context: context)
+            // What a later action may call "unchanged": only the whole page as the default view lists it, nothing less.
+            let whole = interactive && selector == nil && query == nil && failed == nil
+            session.markSeen(tree: whole ? tree : "", url: whole ? url : "")
         }
         let note = BrowseSupport.handoffNote(url: url, title: "", text: tree)
         guard !tree.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -380,7 +486,7 @@ struct BrowseSnapshotTool: BrowseTool {
         let body = query.map {
             BrowseSupport.matches(of: $0, in: tree, budget: arguments.integer("max_chars", default: WebFetchTool.defaultCharacters, in: 1...WebFetchTool.maxCharacters))
         } ?? WebFetchTool.page(of: tree, arguments: arguments, truncatedDownload: nil)
-        return "URL: \(url)\n" + widenedNote + "\(BrowseSupport.untrusted)\n\n" + body + note
+        return "URL: \(url)\n" + tabsLine + widenedNote + "\(BrowseSupport.untrusted)\n\n" + body + note
     }
 }
 
@@ -484,8 +590,7 @@ struct BrowseClickTool: BrowseTool {
         name: "browse_click",
         description: """
         Act on an element by its ref from the latest browse_snapshot: `action` (default click; drag goes onto the ref in `to`). \
-        Returns the address after; snapshot again if the page changed. A JavaScript dialog that opens is reported: answer it \
-        with browse_dialog.
+        Returns the address and the page's new state (no browse_snapshot needed). A JavaScript dialog that opens is reported: answer it with browse_dialog.
         """,
         parameters: .schema(["ref": .property("string"), "action": BrowseSupport.choice(actions), "to": .property("string")], required: ["ref"]))
 
@@ -539,7 +644,9 @@ struct BrowseClickTool: BrowseTool {
         session.pageChanged()
         let done = action == "click" ? "Clicked \(ref)" : "\(action) \(ref)" + (target.map { " → \($0)" } ?? "") + " done"
         if let dialog { return done + ". " + dialog }
-        return done + ". Page: \(url ?? "unknown"). If the page changed, take a new browse_snapshot."
+        // Looking or pointing changes nothing: no state for those.
+        let state = Self.gentle.contains(action) ? nil : try await BrowseSupport.pageState(session, context: context)
+        return done + ". Page: \(url ?? "unknown")." + (state ?? " If the page changed, take a new browse_snapshot.")
     }
 }
 
@@ -547,8 +654,8 @@ struct BrowseFillTool: BrowseTool {
     let spec = ToolSpec(
         name: "browse_fill",
         description: """
-        Type text into a field by its ref (replaces what is there); `submit` presses Enter after. Refused for passwords and card \
-        numbers: the user types those (browse_show).
+        Type text into a field by its ref (replaces what is there); `submit` presses Enter after and returns the new page \
+        state. Refused for passwords and card numbers: the user types those (browse_show).
         """,
         parameters: .schema([
             "ref": .property("string"),
@@ -580,7 +687,9 @@ struct BrowseFillTool: BrowseTool {
         }
         if outcome.hasPrefix("Refused") { throw ToolError(outcome) }
         session.pageChanged()
-        return submit ? "Filled \(ref) and pressed Enter. Page: \(outcome). Take a new browse_snapshot." : "Filled \(ref)."
+        guard submit else { return "Filled \(ref)." }
+        let state = try await BrowseSupport.pageState(session, context: context)
+        return "Filled \(ref) and pressed Enter. Page: \(outcome)." + (state ?? " Take a new browse_snapshot.")
     }
 }
 
@@ -617,7 +726,7 @@ struct BrowsePressTool: BrowseTool {
         description: """
         Press a named key: Enter, Tab, Shift+Tab, Escape, ArrowUp/Down/Left/Right, PageUp, PageDown, Home, End, Backspace, \
         Delete or Space. Or type `text` with real keystrokes where the focus is (`insert`: no key events, for editors that \
-        ignore browse_fill). Refused while a password or card field has the focus.
+        ignore browse_fill). A key press returns the new page state. Refused while a password or card field has the focus.
         """,
         parameters: .schema(["key": .property("string"), "text": .property("string"), "insert": .property("boolean")]))
 
@@ -691,14 +800,14 @@ struct BrowsePressTool: BrowseTool {
             return try await session.driver.currentURL()
         }
         session.pageChanged()
-        return "Pressed \(key). Page: \(url ?? "unknown")."
+        return "Pressed \(key). Page: \(url ?? "unknown")." + (try await BrowseSupport.pageState(session, context: context) ?? "")
     }
 }
 
 struct BrowseScrollTool: BrowseTool {
     let spec = ToolSpec(
         name: "browse_scroll",
-        description: "Scroll the page (default down 600 px; long pages and lists load more as you scroll), or bring `ref` into view. Then browse_snapshot or browse_read.",
+        description: "Scroll the page (default down 600 px; long pages and lists load more as you scroll), or bring `ref` into view. Returns the new page state.",
         parameters: .schema([
             "ref": .property("string"),
             "direction": BrowseSupport.choice(BrowserScrollDirection.allCases.map(\.rawValue)),
@@ -719,7 +828,7 @@ struct BrowseScrollTool: BrowseTool {
             let ref = try BrowseSupport.ref(arguments)
             try await BrowseSupport.acting { try await session.exclusive { _ = try await session.driver.command(["scrollintoview", "@" + ref]) } }
             session.pageChanged()
-            return "Scrolled \(ref) into view."
+            return "Scrolled \(ref) into view." + (try await BrowseSupport.pageState(session, context: context) ?? "")
         }
         // Someone watching the page sees it move in steps along a smooth curve (one process, the same pixels in all); nobody, or the
         // setting off: one jump as ever.
@@ -732,12 +841,12 @@ struct BrowseScrollTool: BrowseTool {
             }
         }
         session.pageChanged()
-        return "Scrolled \(direction.rawValue) \(pixels) px."
+        return "Scrolled \(direction.rawValue) \(pixels) px." + (try await BrowseSupport.pageState(session, context: context) ?? "")
     }
 }
 
 struct BrowseBackTool: BrowseTool {
-    let spec = ToolSpec(name: "browse_back", description: "Go back one page in the browser's history.", parameters: .schema([:]))
+    let spec = ToolSpec(name: "browse_back", description: "Go back one page in the browser's history; returns the page's elements.", parameters: .schema([:]))
 
     func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
     func readsLivePage(_ arguments: JSONValue) -> Bool { true }
@@ -751,6 +860,7 @@ struct BrowseBackTool: BrowseTool {
         }
         BrowseSupport.forgetLabels(context)
         return "Back at \(page.url)" + (page.title.isEmpty ? "" : " — “\(page.title)”") + "."
+            + (try await BrowseSupport.pageState(session, context: context, title: page.title) ?? "")
     }
 }
 

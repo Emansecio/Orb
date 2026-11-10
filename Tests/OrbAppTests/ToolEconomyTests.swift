@@ -44,7 +44,9 @@ struct ToolSpecEconomyTests {
     /// `browse_snapshot` gained `query` and the widening of a missing selector (~300, measured at 7,312): the parameter the model
     /// already sent dozens of times to no effect now returns the matching lines, each with its offset
     /// (docs/historico/INVESTIGACAO-NAVEGADOR-ROTINAS-2026-10-27.md).
-    private static let browseSpecCharsCeiling = 7_400
+    /// The acting tools now return the page's new state and `browse_open` takes `wait_text` (+~160, measured at 7,557): a sentence
+    /// each saves the model the snapshot that came after 53 % of the clicks.
+    private static let browseSpecCharsCeiling = 7_600
 
     @Test func theToolSpecsStayWellUnderTheirOldSize() {
         let now = specChars(ToolBox.all.filter { !ToolBox.browseToolNames.contains($0.spec.name) })

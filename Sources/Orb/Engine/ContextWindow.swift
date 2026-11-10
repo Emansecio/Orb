@@ -188,6 +188,12 @@ struct ContextWindow: Sendable, Equatable {
         let newestSnapshot = ContextCondensing.snapshotIndex(in: raw)
 
         let snapshotCalls = Set(raw.flatMap(\.toolCalls).filter { $0.name == "browse_snapshot" }.map(\.id))
+        // The acting browse_* tools append the new page to their result: that part is a snapshot too (same refs, same fate).
+        let stateCalls = Set(raw.flatMap(\.toolCalls).filter { BrowseSupport.attachesState.contains($0.name) }.map(\.id))
+        func carriesSnapshot(_ message: ChatMessage) -> Bool {
+            guard let id = message.toolCallID else { return false }
+            return snapshotCalls.contains(id) || (stateCalls.contains(id) && message.content.contains(BrowseSupport.stateMarker))
+        }
 
         /// `raw` shortened at level `rung`.
         func prepared(_ rung: Int) -> [ChatMessage] {
@@ -198,7 +204,7 @@ struct ContextWindow: Sendable, Equatable {
             // A browse_snapshot that a newer one (also no longer whole) has replaced: its refs are dead. The fresh
             // boundary only moves in batches, so this changes exactly where a batch already rewrites the history.
             let snapshots = raw.indices.filter {
-                raw[$0].role == .tool && !raw[$0].isError && !fresh.contains($0) && raw[$0].toolCallID.map(snapshotCalls.contains) == true
+                raw[$0].role == .tool && !raw[$0].isError && !fresh.contains($0) && carriesSnapshot(raw[$0])
             }
             let superseded = Set(snapshots.dropLast())
             for index in messages.indices {
@@ -217,7 +223,9 @@ struct ContextWindow: Sendable, Equatable {
                     allowed = max(allowed, messages[index].isError ? ContextCondensing.errorLimit : 0)
                     // Only where the preview cuts it anyway, so a short snapshot is not rewritten for nothing.
                     if superseded.contains(index), messages[index].content.count > allowed + 80 {
-                        messages[index].content = ContextText.supersededSnapshot(messages[index].content)
+                        messages[index].content = messages[index].toolCallID.map(snapshotCalls.contains) == true
+                            ? ContextText.supersededSnapshot(messages[index].content)
+                            : ContextText.supersededState(messages[index].content)
                     } else {
                         messages[index].content = ContextText.preview(messages[index].content, limit: allowed)
                     }
@@ -418,6 +426,12 @@ enum ContextText {
         let first = text.prefix { $0 != "\n" }
         let page = first.hasPrefix("URL: ") && first.count <= 140 ? " de " + first.dropFirst(5) : ""
         return "[Instantâneo antigo\(page): substituído por um mais novo; as refs dele já não valem. Peça browse_snapshot de novo se precisar.]"
+    }
+
+    /// An acting browse_* result whose appended page a newer snapshot replaced: what the action said stays, the page goes.
+    static func supersededState(_ text: String) -> String {
+        guard let marker = text.range(of: BrowseSupport.stateMarker) else { return text }
+        return text[..<marker.lowerBound] + "\n[Instantâneo antigo da página: substituído por um mais novo; as refs dele já não valem. Peça browse_snapshot de novo se precisar.]"
     }
 
     /// The start and end of `text` with a marker for what is left out, `limit` characters in all (plus the marker).

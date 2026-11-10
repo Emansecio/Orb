@@ -40,7 +40,7 @@ struct LiveMotionToolTests {
         setup.driver.state.withLock { $0.boxes["e1"] = CGRect(x: 1, y: 2, width: 3, height: 4) }
         _ = try await run(setup, BrowseClickTool(), ["ref": .string("e1")])
         _ = try await run(setup, BrowseScrollTool(), ["amount": .number(600)])
-        #expect(setup.pauses.withLock { $0.isEmpty })
+        #expect(!setup.pauses.withLock { $0.contains(LiveMotion.travel) }, "no cursor to wait for")
         #expect(setup.driver.calls.filter { $0 == "box e1" || $0.contains("steps") }.isEmpty)
         #expect(setup.driver.calls.contains("scroll down 600"))
     }
@@ -51,7 +51,8 @@ struct LiveMotionToolTests {
         let heard = listen(setup)
         _ = try await run(setup, BrowseClickTool(), ["ref": .string("e1")])
         #expect(heard.withLock { $0.count } == 1)
-        #expect(setup.pauses.withLock { $0 } == [LiveMotion.travel])
+        #expect(setup.pauses.withLock { $0.filter { $0 == LiveMotion.travel }.count } == 1)
+        #expect(setup.pauses.withLock { $0.first } == LiveMotion.travel, "and it comes before anything the action does")
     }
 
     @Test func stoppingDuringTheWaitMeansTheActionNeverHappens() async throws {
@@ -70,7 +71,7 @@ struct LiveMotionToolTests {
         _ = try await run(setup, BrowseClickTool(), ["ref": .string("e1")])
         _ = try await run(setup, BrowseScrollTool(), ["amount": .number(600)])
         #expect(heard.withLock { $0.count } == 1)
-        #expect(setup.pauses.withLock { $0.isEmpty })
+        #expect(!setup.pauses.withLock { $0.contains(LiveMotion.travel) })
         #expect(setup.driver.calls.contains("scroll down 600") && !setup.driver.calls.contains { $0.contains("steps") })
     }
 

@@ -332,6 +332,11 @@ final class BrowserSession: @unchecked Sendable {
         var snapshotURL = ""
         var readText = ""
         var readURL = ""
+        /// The snapshot (and its address) the model last saw whole, to tell it "unchanged" after an action; empty: none to compare.
+        var seenTree = ""
+        var seenURL = ""
+        /// The ids of the tabs the model was last told about; nil until it was told, so a first look is never "a new tab".
+        var knownTabs: Set<String>?
         /// The window is open for the person (see `browse_show`).
         var showingWindow = false
     }
@@ -458,6 +463,17 @@ final class BrowserSession: @unchecked Sendable {
         memory.withLock {
             $0.readText = text
             $0.readURL = url
+        }
+    }
+
+    var seen: (tree: String, url: String) { memory.withLock { ($0.seenTree, $0.seenURL) } }
+    func markSeen(tree: String, url: String) { memory.withLock { ($0.seenTree, $0.seenURL) = (tree, url) } }
+
+    /// Remembers which tabs the model now knows of and returns the ones it did not know before (none the first time).
+    func noteTabs(_ ids: Set<String>) -> Set<String> {
+        memory.withLock {
+            defer { $0.knownTabs = ids }
+            return $0.knownTabs.map { ids.subtracting($0) } ?? []
         }
     }
 

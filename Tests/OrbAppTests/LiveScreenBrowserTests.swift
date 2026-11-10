@@ -134,11 +134,11 @@ struct LiveScreenSensitivePageTests {
     }
 
     @Test func aLoginOrChallengePageOnOpenIsSensitiveAndAnOrdinaryOneClearsIt() async throws {
-        setup.driver.state.withLock { $0.title = "Entrar" }
+        setup.driver.state.withLock { $0.title = "Entrar"; $0.snapshot.url = "https://site.test/login" }
         try await look(BrowseOpenTool(), ["url": .string("https://site.test/login")])
         #expect(setup.hub.pageLooksSensitive(botID: setup.botID))
 
-        setup.driver.state.withLock { $0.title = "Home" }
+        setup.driver.state.withLock { $0.title = "Home"; $0.snapshot.url = "https://site.test/" }
         try await look(BrowseOpenTool(), ["url": .string("https://site.test/")])
         #expect(!setup.hub.pageLooksSensitive(botID: setup.botID))
 
@@ -177,7 +177,7 @@ struct LiveScreenSensitivePageTests {
     }
 
     @Test func eachOrbHasItsOwnVerdictAndClosingTheBrowserForgetsIt() async throws {
-        setup.driver.state.withLock { $0.title = "Entrar" }
+        setup.driver.state.withLock { $0.title = "Entrar"; $0.snapshot.url = "https://site.test/login" }
         try await look(BrowseOpenTool(), ["url": .string("https://site.test/login")])
         #expect(setup.hub.pageLooksSensitive(botID: setup.botID))
         #expect(!setup.hub.pageLooksSensitive(botID: UUID()))
