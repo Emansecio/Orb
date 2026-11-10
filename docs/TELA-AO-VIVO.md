@@ -77,11 +77,14 @@ reunião com tela compartilhada.
 - Conecta só com o cartão (ou a aba Tela) visível na janela do Orb na tela, e o Orb com o navegador em uso; desconecta
   3 s depois de sair da tela, ao fim do uso ou com a janela minimizada. Ao conectar, o quadro em cache chega antigo:
   esmaecido até o primeiro novo.
-- `?maxFps=10`; largura máx. 480 px, qualidade 60 (ampliada: reconecta com 960). Decodificação fora da main
+- `?maxFps=0` (sem limite): 60,3 quadros/s medidos no agent-browser 0.39.1, o teto do Chrome (com `maxFps=60` vieram 55, com
+  intervalos irregulares). O Chrome gasta o mesmo em 10, 30 ou 60, porque pinta todos os quadros e o limite só os descarta no
+  processo de fundo; no Orb cada quadro custa ~1 ms fora da thread principal (~6 % de um núcleo a 60/s, e nada com a página
+  parada). O `LiveInbox` descarta o quadro atrasado antes de decodificar. Largura máx. 960 px, qualidade 60. Decodificação fora da main
   (`CGImageSource` numa fila própria), quadro atrasado é descartado.
 - No máximo 1 stream por vez (o do Orb em vista); os outros mostram o último quadro com "pausado".
-- **Critérios de pronto:** zero quadros processados sem cartão visível (contador em teste); CPU do app abaixo de 3 % de
-  um núcleo com o cartão visível a 10 qps; rolagem da conversa de 2.173 itens em 114–118 fps (PanelsBench / medição
+- **Critérios de pronto:** zero quadros processados sem cartão visível (contador em teste); CPU do app em torno de 6 % de
+  um núcleo com o cartão visível e a página se mexendo (60 qps); rolagem da conversa de 2.173 itens em 114–118 fps (PanelsBench / medição
   equivalente); toggle desligado = comportamento idêntico ao de hoje.
 
 ## 6. Segurança da porta

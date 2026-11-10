@@ -237,7 +237,7 @@ struct LiveFeedHubTests {
         #expect(await rig.opened(1))
         let socket = try #require(rig.transport.sockets.first)
         #expect(socket.port == 4321)
-        #expect(socket.maxFps == 10)
+        #expect(socket.maxFps == 0)   // no cap: the stream's own 60 frames per second
         socket.send(LiveTestJPEG.frameMessage(LiveTestJPEG.make(width: 40)))
         #expect(await liveUntil { log.frames.count == 1 })
         let frame = try #require(log.frames.first)
@@ -707,9 +707,9 @@ struct LiveFeedHubTests {
     }
 
     @Test func theRealTransportAsksForTheLocalStreamWithTheFrameRateCap() throws {
-        let socket = URLSessionLiveTransport().open(port: 51955, maxFps: 10)
+        let socket = URLSessionLiveTransport().open(port: 51955, maxFps: LiveStreamRunner.maxFps)
         defer { socket.close() }
         let real = try #require(socket as? URLSessionLiveSocket)
-        #expect(real.url.absoluteString == "ws://127.0.0.1:51955/?maxFps=10")
+        #expect(real.url.absoluteString == "ws://127.0.0.1:51955/?maxFps=0")
     }
 }

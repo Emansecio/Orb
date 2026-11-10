@@ -286,7 +286,10 @@ struct LiveStreamRunner: Sendable {
     /// Where the open socket is left for the person's input.
     var outbox = LiveOutbox()
 
-    static let maxFps = 10
+    /// 0 is "no limit" for the stream (agent-browser 0.39.1, measured): 60.3 frames/s, the Chrome's own ceiling, where 60 gave 55 with
+    /// uneven gaps. Chrome costs the same at any cap (it paints every frame; the cap only drops them in the background process), and
+    /// the inbox below throws late frames away before decoding, so a slow main thread never queues anything.
+    static let maxFps = 0
     /// The pauses before each retry of a connection that failed or dropped; after them, `failed`.
     static let retryDelays: [Duration] = [.milliseconds(500), .seconds(1), .seconds(2)]
     /// A connection that lasted this long was healthy: its drop starts the count of retries over.

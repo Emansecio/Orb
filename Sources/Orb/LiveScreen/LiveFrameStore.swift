@@ -4,7 +4,7 @@ import Observation
 
 // The live screen of an Orb's browser (docs/TELA-AO-VIVO.md): what the views read. Two speeds on purpose. What changes
 // rarely (connected or not, the page's host, protected, private) is observed by SwiftUI; the frames and the pointer,
-// which change up to ten times a second, never are: they go straight to the views that registered for them (an NSView
+// which change up to sixty times a second, never are: they go straight to the views that registered for them (an NSView
 // that swaps its layer's contents), so a frame redraws the thumbnail and nothing else — not the list, not the row, not
 // the sidebar.
 
