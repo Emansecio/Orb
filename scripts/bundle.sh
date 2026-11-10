@@ -47,13 +47,16 @@ if [[ -n "$SIGN_IDENTITY" && "$SIGN_IDENTITY" != "-" ]]; then
   cp "$HELPER_CACHE/OrbKeychainHelper" "$APP/Contents/Helpers/OrbKeychainHelper"
 fi
 
-# App icon: rendered by the app itself (AppIcon), straight at each size.
+# App icon: rendered by the app itself (AppIcon), straight at each size. The ten renders run at once: each launch of the
+# app takes ~0.8 s, and one after the other they were most of the time this script spends after the build.
 ICONSET="$(mktemp -d)/AppIcon.iconset"
 mkdir -p "$ICONSET"
+RENDERS=()
 for size in 16 32 128 256 512; do
-  "$BIN" --render-icon "$ICONSET/icon_${size}x${size}.png" $size
-  "$BIN" --render-icon "$ICONSET/icon_${size}x${size}@2x.png" $((size * 2))
+  "$BIN" --render-icon "$ICONSET/icon_${size}x${size}.png" $size & RENDERS+=($!)
+  "$BIN" --render-icon "$ICONSET/icon_${size}x${size}@2x.png" $((size * 2)) & RENDERS+=($!)
 done
+for pid in $RENDERS; do wait $pid; done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 
 # Version from git, so "Sobre" and diagnostics can tell builds apart: the build number is the commit count, the short

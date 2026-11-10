@@ -34,7 +34,11 @@ let package = Package(
         .testTarget(
             name: "OrbAppTests",
             dependencies: ["Orb", "OrbAXFixture"],
-            path: "Tests/OrbAppTests"
+            path: "Tests/OrbAppTests",
+            // Any change to a declaration of the app recompiles every test file (~290), and a third of that time was debug
+            // info nobody reads: Swift Testing reports failures by source location, not through it (measured: a batch of 24
+            // test files in 36 s instead of 59 s). The app keeps its debug info.
+            swiftSettings: [.unsafeFlags(["-Xfrontend", "-gnone"], .when(configuration: .debug))]
         )
     ]
 )

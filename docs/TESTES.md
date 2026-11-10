@@ -4,7 +4,7 @@ Parte do mapa do código: veja [ARQUITETURA.md](ARQUITETURA.md) para a visão ge
 
 
 ```bash
-scripts/test.sh                                         # a suíte inteira, com metade dos núcleos (~1 min num Mac de 8)
+scripts/test.sh                                         # a suíte inteira, em 4 processos com todos os núcleos (~1 min num Mac de 8)
 scripts/test.sh --filter 'ContextWindowTests|WaitingTests'   # as suítes afetadas (expressão regular)
 ORB_LIVE_TESTS=1 scripts/test.sh --filter LiveCatalogTests   # catálogos reais (internet)
 ORB_REAL_BROWSER_TESTS=1 scripts/test.sh --filter RealBrowser # Chrome real, sem janela (internet)
@@ -14,10 +14,28 @@ ORB_RICH_RENDER_TESTS=1 scripts/test.sh --filter PageSandboxLiveTests # WebKit r
 São cerca de 5.000 testes em `Tests/OrbAppTests`, em Swift Testing (`@Test`, `@Suite`, `#expect`, `#require`).
 
 - **Paralelismo.** Sem limite, o `swift test` roda tantos testes de uma vez quanto há núcleos, e num Mac de 8 núcleos uns 25
-  testes que esperam um relógio ou a main actor falham. `scripts/test.sh` limita a metade dos núcleos
-  (`SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH`, que o Swift Testing lê; o `--num-workers` do SwiftPM só vale para XCTest), e
-  `ORB_TEST_WIDTH=<n>` escolhe outro número (1 é o mesmo que `--no-parallel`). Medido em 2026-11-02: a suíte inteira em ~65 s
-  com 4 de uma vez, sem falha a mais em três rodadas, contra ~4 min em série. O CI, com 3 núcleos, continua com `--no-parallel`.
+  testes que esperam um relógio ou a main actor falham: num processo só há uma main actor, e os testes `@MainActor` fazem fila
+  nela. Por isso `scripts/test.sh` faz assim (`SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH`, que o Swift Testing lê; o
+  `--num-workers` do SwiftPM só vale para XCTest):
+  - **Com `--filter`**: um processo, com metade dos núcleos.
+  - **Sem filtro (a suíte inteira)**: compila uma vez e divide as suítes em `ORB_TEST_SHARDS` processos (4 por padrão), que
+    dividem entre si um teste por núcleo; cada processo tem a sua main actor. Uma suíte nunca é partida, então `.serialized`
+    e o que ela compartilha continuam valendo. A divisão equilibra o tempo de cada suíte medido em série, guardado em
+    `scripts/test-times.txt` (suíte nova conta 0,04 s por teste); para refazer a tabela, `swift test --no-parallel 2>&1 |
+    scripts/test.sh --record-times`. O resumo no fim mostra o que falhou e uma linha por parte; os logs completos ficam na
+    pasta temporária que ele indica.
+  - `ORB_TEST_WIDTH=<n>` muda o total de testes de uma vez (1 é o mesmo que `--no-parallel`), `ORB_TEST_SHARDS=1` volta a um
+    processo só, e `ORB_TEST_SHARD=<i>/<n>` roda só a parte i de n neste processo (o CI usa assim).
+
+  Medido em 2026-11-10 (8 núcleos): um processo com 4 de uma vez, ~82 s; 4 processos com 2 cada, ~60 s, sem falha a mais em
+  quatro rodadas; em série, ~4 min. Mais que um teste por núcleo não ganhou nada: a suíte é limitada pela CPU.
+- **CI.** Cada push roda a suíte em 4 jobs ao mesmo tempo (`ORB_TEST_SHARD=i/4`), em série dentro de cada um, porque o runner
+  tem 3 núcleos e os testes que esperam algo estouram o tempo em paralelo. Antes, num job só, eram ~8 min de testes.
+- **Build dos testes.** O alvo `OrbAppTests` compila sem informação de depuração (`-gnone`, no `Package.swift`): qualquer mudança
+  numa declaração do app recompila os ~290 arquivos de teste, e um terço desse tempo era informação de depuração que ninguém
+  lê (falhas do Swift Testing vêm com arquivo e linha pelo macro, não por ela). Medido: de ~113 s para ~90 s depois de mudar
+  uma declaração do app. Mudar só o corpo de uma função leva ~17 s, quase todo na emissão do módulo `Orb` (que confere as
+  declarações dos ~450 arquivos); só dividir o módulo baixaria esse piso.
 - **Tela.** A suíte padrão não traz nada para a frente de quem usa o Mac: o processo de teste não pode se ativar (sem ícone no
   Dock), as janelas que alguns testes desenham são transparentes e não recebem clique, e o que mexe no Mac de verdade
   (navegador real e internet, Acessibilidade, captura, tomada de tela) só roda com a variável própria. Nas rodadas de

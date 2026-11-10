@@ -15,10 +15,17 @@ permissions:
   contents: read
 
 jobs:
+  # A suíte, em série, passava de 8 minutos num runner só. Dividida em quatro partes que rodam ao mesmo tempo (cada uma
+  # compila e roda as suítes dela; scripts/test.sh com ORB_TEST_SHARD=i/n faz a mesma divisão em todas), o resultado chega
+  # em cerca de metade do tempo. fail-fast desligado: uma parte que falha não esconde o resultado das outras.
   swift:
-    name: swift build + swift test
+    name: swift test (parte ${{ matrix.shard }}/4)
     runs-on: macos-26
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
 
     steps:
       - name: Baixar o código
@@ -53,18 +60,22 @@ jobs:
       # todos os fontes são mais recentes que o cache, então ele recompilaria tudo igual. Não há dependências externas
       # (nem Package.resolved) para baixar. Se o tempo de build incomodar, reavaliar.
 
+      # Um build só para o app e os testes: o swift build sozinho deixava o alvo de testes para o swift test compilar depois.
       - name: Compilar
-        run: swift build
+        run: swift build --build-tests
 
-      # Em série: a máquina do CI tem poucos núcleos, e com ~5000 testes em paralelo os que esperam por algo (processos,
-      # servidores falsos, prazos de rede) estouram o tempo. Localmente, scripts/test.sh roda com metade dos núcleos.
-      # A saída vai também para um arquivo (tee, com pipefail para a falha do swift test não se perder) que o passo
-      # seguinte lê para contar o que rodou, falhou e foi pulado. A integração com navegadores reais só roda quando
-      # pedida (ORB_REAL_BROWSER_TESTS=1), então não entra aqui.
+      # Em série dentro de cada parte (ORB_TEST_WIDTH=1): a máquina do CI tem poucos núcleos, e com milhares de testes em
+      # paralelo os que esperam por algo (processos, servidores falsos, prazos de rede) estouram o tempo. A saída vai
+      # também para um arquivo (tee, com pipefail para a falha do swift test não se perder) que o passo seguinte lê para
+      # contar o que rodou, falhou e foi pulado. A integração com navegadores reais só roda quando pedida
+      # (ORB_REAL_BROWSER_TESTS=1), então não entra aqui.
       - name: Rodar os testes
+        env:
+          ORB_TEST_SHARD: ${{ matrix.shard }}/4
+          ORB_TEST_WIDTH: '1'
         run: |
           set -o pipefail
-          swift test --no-parallel 2>&1 | tee "$RUNNER_TEMP/swift-test.log"
+          scripts/test.sh --skip-build 2>&1 | tee "$RUNNER_TEMP/swift-test.log"
 
       # Roda mesmo se os testes falharem. Os testes que dependem de Python, Acessibilidade, Gravação de Tela ou de um
       # navegador real (.enabled(if:)) são pulados sem erro; aqui eles aparecem, para que um "tudo verde" que na verdade
@@ -112,6 +123,7 @@ jobs:
       # não há a identidade "Orb Local", então ele cai na assinatura ad-hoc; não abre nem encerra o app. Em debug, que reaproveita
       # o build do swift test; vem depois dele para uma falha aqui não esconder o resultado dos testes.
       - name: Montar e assinar o Orb.app
+        if: matrix.shard == 1
         run: |
           set -euo pipefail
           scripts/bundle.sh debug

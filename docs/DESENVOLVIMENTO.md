@@ -39,7 +39,8 @@ verificação do Claude Code (`AppModel(devRun:)`); `ORB_SEND` continua funciona
 | `ORB_SNAPSHOT_PANE_WIDTH` | largura da lateral (280) e do painel do Orb (360) em `sidebar`, `sidebar-profile`, `sidebar-categories*`, `groups-sidebar` e `inspector*`; use 240 e 244 para ver o mínimo |
 | `ORB_LIVE_TESTS=1` | liga as suítes que usam a rede (catálogos reais) |
 | `ORB_REAL_BROWSER_TESTS=1` / `ORB_REAL_BROWSER_WINDOW=1` | ligam os testes com o navegador real (internet) e, dentre eles, o que abre uma janela e toma o foco |
-| `ORB_TEST_WIDTH=<n>` | (em `scripts/test.sh`) quantos testes rodam de uma vez; o padrão é metade dos núcleos |
+| `ORB_TEST_WIDTH=<n>` | (em `scripts/test.sh`) quantos testes rodam de uma vez; o padrão é metade dos núcleos com `--filter` e todos na suíte inteira |
+| `ORB_TEST_SHARDS=<n>` / `ORB_TEST_SHARD=<i>/<n>` | (em `scripts/test.sh`) em quantos processos a suíte inteira se divide (4) / roda só a parte i de n (o CI usa) |
 | `ORB_SIGN_IDENTITY="Nome"` | (em `scripts/bundle.sh`) assina com outra identidade |
 
 ## `--snapshot`
@@ -74,7 +75,7 @@ abrir janela, use o modelo falso com `--long`, `ORB_SEND` e `ORB_SNAPSHOT_WAIT=4
 | `scripts/bundle.sh [debug\|release]` | compila (padrão `release`), monta `build/Orb.app` (executável, `Resources/Orbs`, `Info.plist` com `app.orb.mac`, `NSAllowsArbitraryLoads` (sem isso o macOS bloqueia `http://` no app empacotado) e os textos de permissão de Agenda (`NSCalendarsFullAccessUsageDescription`), Lembretes (`NSRemindersFullAccessUsageDescription`) e Apple Events, ícone gerado pelo próprio app) e assina |
 | `scripts/make-signing-identity.sh` | cria uma vez o certificado local "Orb Local" no chaveiro de login e o marca como confiável para assinar |
 | `scripts/fake-llm.py` | o modelo falso acima |
-| `scripts/test.sh [opções do swift test]` | roda os testes com metade dos núcleos (veja "Testes") |
+| `scripts/test.sh [opções do swift test]` | roda os testes: filtrados num processo, a suíte inteira em 4 (veja `docs/TESTES.md`) |
 
 A arte (camadas dos Orbs) tem o seu próprio gerador, descrito em [art/README.md](../art/README.md).
 
