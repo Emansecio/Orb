@@ -93,10 +93,10 @@ roda em Sem pedir com o HUD); o cartão lista os `steps`.
 
 **Nomes de app e o navegador do Orb** (`RunningAppMatcher`, `UIAccess`). O casamento exato aceita o nome mostrado, o bundle id e o nome do `.app` em disco
 (`bundleURL` sem a extensão; `liveProcesses` o preenche), porque `open` e AppleScript conhecem "Preview" e o app mostra "Pré-Visualização". Na busca parcial,
-um processo auxiliar (bundle id filho do de outro candidato, como `com.google.Chrome.helper…` diante de `com.google.Chrome`) não é outro app e sai da
-ambiguidade; `exactOnly` (antes de ações destrutivas) segue sem busca parcial. Um id no formato `eN` (ref do `browse_snapshot`) em `id`, `ids`, `to`, `root`
+um processo auxiliar (fora do Dock e com bundle id filho do de outro candidato, como `com.google.Chrome.helper…` diante de `com.google.Chrome`) não é outro app e sai da
+ambiguidade (o Chrome Canary, `com.google.Chrome.canary`, está no Dock e continua sendo uma escolha); `exactOnly` (antes de ações destrutivas) segue sem busca parcial. Um id no formato `eN` (ref do `browse_snapshot`) em `id`, `ids`, `to`, `root`
 ou `steps` falha antes de procurar o app, mandando usar `browse_click`. O app que for o navegador do próprio Orb sem janela (o pid que segura o perfil
-dele, `BrowserProfileCache.holder`, e `windowList` vazia) é recusado por `ui_read`, `ui_act` e `screenshot` com a mesma indicação; sem identificar, o
+dele, `BrowserProfileCache.holder`, e nenhuma janela na tela em `windowList`: medido, o Chrome sem janela tem quatro na lista do servidor de janelas, nenhuma na tela e nenhuma pela Acessibilidade) é recusado por `ui_read`, `ui_act` e `screenshot` com a mesma indicação; sem identificar, o
 comportamento é o antigo. `app: "browser"` ou `"navegador"` não encontrado ganha a dica.
 
 **`screenshot`** (`.safe`): `window` (seletor de `ui_read`), `marks` (padrão true com janela + Acessibilidade),
@@ -115,10 +115,10 @@ só quando a pessoa pediu para ver. A saída diz "em segundo plano" ou "na frent
 Em segundo plano, `open` vigia a frente por 800 ms e a devolve por `AXFrontmost` se o app aberto se ativar sozinho e a pessoa não tiver mexido no Mac nos últimos 2 s. `ui_act key` pede `[precisa_assumir_tela]` para atalhos que puxam o foco (`UIFocusKeys`: `⌘L`, `⌘1…9`, troca de aba nos navegadores, `⌘⇧G` no Finder) e para atalho cujo item de menu está desativado, porque a tecla morreria nele.
 
 **`applescript`** (`MacTools.swift`): um `tell application` pode trazer o app para a frente, então a ferramenta guarda o pid da frente antes do script (só com
-Acessibilidade concedida) e olha uma vez quando ele termina, com sucesso, erro ou cancelamento: se outro app veio e a pessoa não apertou tecla ou botão nos últimos
-2 s (`UIActTool.personWentThere`), devolve a frente por `AXFrontmost` no app anterior (nunca `activate`) e acrescenta um aviso à saída. Sem espera fixa nem laço. Um
+Acessibilidade concedida) e olha uma vez quando ele termina, com sucesso, erro ou cancelamento: se outro app veio e a pessoa não apertou tecla ou botão desde que o script começou, nem nos últimos
+2 s (`AppleScriptTool.personStayedAway`: num script longo, a troca de app pode ter sido dela), devolve a frente por `AXFrontmost` no app anterior (nunca `activate`) e acrescenta um aviso à saída. Sem espera fixa nem laço. Um
 script que contém `activate` como palavra (AppleScript ou `.activate()` do JXA, sem caixa) pediu a frente de propósito e não é desfeito
-(`AppleScriptTool.asksForFront`). Se o app da frente antes era o próprio Orb, nada é devolvido (o Orb não é alvo de `AXFrontmost` aqui, como em `ui_*`). O prompt
+(`AppleScriptTool.asksForFront`). O app devolvido costuma ser o próprio Orb, onde a pessoa conversava; o Orb vir para a frente sozinho (um cartão, uma notificação) não é desfeito. O prompt
 (`PromptParts.appControl`) manda não usar `activate` sem pedido e ler imagem com `read_file`.
 
 **`app_dictionary`** (`AppDictionary.swift`, `.safe`, `computerUse`): `app` (nome, bundle id ou caminho do `.app`), `search`, `suite`, `offset`. Roda `/usr/bin/sdef`

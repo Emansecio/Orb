@@ -327,15 +327,16 @@ struct AppleScriptTool: AgentTool {
         // A `tell application` can bring the app forward whatever the script meant: note who was in front, and put them
         // back when the script ends, unless it asked for the front itself.
         let front = Self.asksForFront(script) || !system.isTrusted() ? nil : await system.frontmostPID()
+        let started = ContinuousClock.now
         let output: String
         do {
             output = try await execute(script, language, style == "structured", .seconds(seconds))
         } catch {
             // Failing or being cancelled does not leave the person with another app in front either.
-            guard let note = await giveFrontBack(to: front), let failure = error as? ToolError else { throw error }
+            guard let note = await giveFrontBack(to: front, since: started), let failure = error as? ToolError else { throw error }
             throw ToolError(failure.message + "\n" + note)
         }
-        let note = await giveFrontBack(to: front)
+        let note = await giveFrontBack(to: front, since: started)
         return (output.isEmpty ? "(sem resultado)" : output) + (note.map { "\n" + $0 } ?? "")
     }
 
@@ -345,16 +346,23 @@ struct AppleScriptTool: AgentTool {
         script.range(of: #"\bactivate\b"#, options: [.regularExpression, .caseInsensitive]) != nil
     }
 
-    /// One look when the script is over: if another app came to the front and the person did not touch the Mac in the last
-    /// 2 s (a person who just went there stays there), `before` is put back through `AXFrontmost`, never `activate`. Not the
-    /// Orb itself, which `ui_*` never operates either. The note says what happened, nil when nothing did. Runs in its own
-    /// task: giving the front back is not cancelled with the call.
-    private func giveFrontBack(to before: Int32?) async -> String? {
-        guard let before, before != ownPID else { return nil }
-        let system = system, sessions = sessions
+    /// No key or click of the person's since the script began, nor in the last 2 s: the app in front did not get there by them.
+    static func personStayedAway(idle: TimeInterval, ran: TimeInterval) -> Bool {
+        idle >= max(UIActTool.personWentThere, ran)
+    }
+
+    /// One look when the script is over: if another app came to the front and the person did not touch the Mac since the
+    /// script began (and not in the last 2 s), `before` is put back through `AXFrontmost`, never `activate`. A key or a
+    /// click during the script may be the person changing apps, and a long script would otherwise pull them back from
+    /// where they went. `before` is often the Orb, where the person was talking to it; the Orb coming forward by itself
+    /// (a card, a notification) is left alone. The note says what happened, nil when nothing did. Runs in its own task:
+    /// giving the front back is not cancelled with the call.
+    private func giveFrontBack(to before: Int32?, since started: ContinuousClock.Instant) async -> String? {
+        guard let before else { return nil }
+        let system = system, sessions = sessions, ownPID = ownPID
         return await Task.detached(priority: .userInitiated) { () -> String? in
             guard let now = await system.frontmostPID(), now != before, now != ownPID,
-                  system.secondsSinceUserInput() >= UIActTool.personWentThere else { return nil }
+                  Self.personStayedAway(idle: system.secondsSinceUserInput(), ran: UIReadTool.seconds(started.duration(to: .now))) else { return nil }
             let previous = AccessibilityApp(name: "", bundleID: nil, pid: before)
             do {
                 try await sessions.run(previous, within: sessions.deadlines.action) {

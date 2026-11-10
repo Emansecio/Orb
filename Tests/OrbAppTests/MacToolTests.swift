@@ -128,7 +128,7 @@ struct MacToolTests {
         let safari = fakeApp(windows: [])
         let tool: AppleScriptTool
 
-        init(trusted: Bool = true, ran: @escaping @Sendable (FakeAccessibility) throws -> String) {
+        init(trusted: Bool = true, ownPID: Int32 = 1, ran: @escaping @Sendable (FakeAccessibility) throws -> String) {
             system.trusted = trusted
             system.frontmost = 200
             system.roots[200] = safari
@@ -136,7 +136,7 @@ struct MacToolTests {
             var tool = AppleScriptTool()
             tool.system = system
             tool.sessions = AXSessions(deadlines: .patient)
-            tool.ownPID = 1
+            tool.ownPID = ownPID
             let system = system
             tool.execute = { _, _, _, _ in try ran(system) }
             self.tool = tool
@@ -169,6 +169,18 @@ struct MacToolTests {
         let untrusted = FrontBench(trusted: false) { $0.frontmost = 300; return "ok" }
         #expect(try await untrusted.call() == "ok" && !untrusted.restored)
         #expect(untrusted.system.frontmostCalls == 0, "without Accessibility the front is not even looked at")
+
+        // A key or a click during the script may be the person changing apps: a long script does not pull them back.
+        #expect(AppleScriptTool.personStayedAway(idle: 30, ran: 12))
+        #expect(!AppleScriptTool.personStayedAway(idle: 5, ran: 12))
+        #expect(!AppleScriptTool.personStayedAway(idle: 1, ran: 0.3))
+    }
+
+    /// The usual case: the person was talking to the Orb when the script brought another app forward.
+    @Test func theFrontGoesBackToTheOrbWhenThePersonWasInIt() async throws {
+        let bench = FrontBench(ownPID: 200) { $0.frontmost = 300; return "ok" }
+        #expect(try await bench.call().hasPrefix("ok\nAviso: o script trouxe outro app para a frente; devolvi"))
+        #expect(bench.restored)
     }
 
     @Test func aScriptThatActivatesOnPurposeIsNotUndone() async throws {
@@ -459,6 +471,13 @@ struct MacToolTests {
         #expect(RunningAppMatcher.match("google", in: [main, helper, drive]) == .ambiguous([main, drive]))
         // Exact matching never widens: a partial name still finds nothing.
         #expect(RunningAppMatcher.match("Chrome", in: [main, helper], exactOnly: true) == .none)
+        // The Orb's own Chrome runs without a Dock icon, and so do its helpers: the browser is still the one found.
+        var headless = main
+        headless.isRegular = false
+        #expect(RunningAppMatcher.match("Chrome", in: [helper, headless]) == .found([headless]))
+        // An app of its own whose id sits under another's (Chrome Canary) is in the Dock: it stays a choice to make.
+        let canary = RunningAppInfo(name: "Google Chrome Canary", bundleID: "com.google.Chrome.canary", pid: 30, isActive: false, isHidden: false, isRegular: true)
+        #expect(RunningAppMatcher.match("Chrome", in: [main, canary, helper]) == .ambiguous([main, canary]))
     }
 
     @Test func theNameOfTheAppOnDiskMatchesExactly() {

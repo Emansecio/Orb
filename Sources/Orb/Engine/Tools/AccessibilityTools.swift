@@ -126,9 +126,12 @@ enum UIAccess {
 
     /// The app is the browser this Orb runs without a window: its pages belong to the browse_* tools, and reading it here
     /// only finds "no windows". Judged by the process that holds the Orb's browser profile; without that, nothing is refused.
+    /// "Without a window" is none on screen: a headless Chrome still has windows in the window server's list (measured:
+    /// four, 1280×720 among them, none on screen, and none through Accessibility).
     static func refuseOrbBrowser(_ app: AccessibilityApp, context: ToolContext, system: any AccessibilitySystem) throws {
         guard let botID = context.botID, let profile = context.browser.hub?.profileFolder(botID: botID),
-              BrowserProfileCache.holder(profile: profile) == app.pid, system.windowList(pid: app.pid).isEmpty else { return }
+              BrowserProfileCache.holder(profile: profile) == app.pid,
+              !system.windowList(pid: app.pid).contains(where: \.isOnScreen) else { return }
         throw ToolError("\(app.name) é o navegador do próprio Orb e roda sem janela: use browse_snapshot e browse_click (ou outra browse_*) para as páginas. "
                         + "ui_read, ui_act e screenshot operam apps do Mac com janela.")
     }

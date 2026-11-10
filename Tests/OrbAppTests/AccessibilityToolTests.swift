@@ -326,6 +326,8 @@ struct UIReadToolTests {
         let (tool, system, _) = setup(windows: [])
         system.apps.append(FakeAccessibility.app("Google Chrome", "com.google.Chrome", pid: pid))
         system.roots[pid] = fakeApp(windows: [])
+        // A headless Chrome has windows in the window server's list, none of them on screen (measured on the real one).
+        system.listedWindows[pid] = [CapturableWindow(windowID: 3, pid: pid, frame: CGRect(x: 0, y: 0, width: 1280, height: 720), isOnScreen: false)]
         let refused = await failureMessage { try await tool.run(.object(["app": .string("Google Chrome")]), context: browserContext) }
         #expect(refused.contains("navegador do próprio Orb") && refused.contains("browse_snapshot"), "\(refused)")
 

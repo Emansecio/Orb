@@ -316,9 +316,10 @@ enum RunningAppMatcher {
         if exactOnly { return .none }
         let matching = apps.filter { $0.name.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
         // A helper process (bundle id under another candidate's) is part of that app, not a second app to choose from.
+        // Only one that is not in the Dock: "com.google.Chrome.canary" is under Chrome's id too, and is an app of its own.
         let parents = matching.compactMap { $0.bundleID?.lowercased() }
         let partial = matching.filter { app in
-            guard let id = app.bundleID?.lowercased() else { return true }
+            guard !app.isRegular, let id = app.bundleID?.lowercased() else { return true }
             return !parents.contains { id.hasPrefix($0 + ".") }
         }
         if partial.isEmpty { return .none }
