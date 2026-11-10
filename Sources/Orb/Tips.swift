@@ -157,6 +157,7 @@ enum Tip {
     static let lastScreen = "Mostra a última tela deste uso do navegador, enquanto o app estiver aberto"
     static let backToLiveScreen = "Volta para a tela ao vivo do navegador do Orb"
     static let showBrowserScreen = "Mostra no chat a página que o Orb abre no navegador, ao vivo; nada é gravado"
+    static let animateBrowserCursor = "Com a tela à vista, o cursor chega antes do clique e a rolagem é suave"
 
     // MARK: Menu bar panel
 
@@ -368,7 +369,7 @@ enum Tip {
          copyReply, copyMarkdown, redoReply, editMessage, cancelEdit, toggleOutput(isExpanded: true), toggleOutput(isExpanded: false), toggleCommand(isExpanded: true), toggleCommand(isExpanded: false), toggleRequest(isOpen: true), toggleRequest(isOpen: false), toggleActions(isOpen: true), toggleActions(isOpen: false), toggleWork(isOpen: true), toggleWork(isOpen: false),
          routineUseAuto, routineUseReadOnly, randomLook, denyWithNote, showAllActions, deny, allowOptions,
          handoffDone, handoffCancel, browserMode, removeBrowserProxy, installBrowser, addSearchKey,
-         enlargeScreen, takeOverBrowser, giveBackBrowser, openPersonBrowser, showPersonBrowser, personBrowserChip, browserModeWhilePerson, stopBrowsing, hideScreen, revealScreen, lastScreen, backToLiveScreen, showBrowserScreen,
+         enlargeScreen, takeOverBrowser, giveBackBrowser, openPersonBrowser, showPersonBrowser, personBrowserChip, browserModeWhilePerson, stopBrowsing, hideScreen, revealScreen, lastScreen, backToLiveScreen, showBrowserScreen, animateBrowserCursor,
          menuBarItem, connectModel, openMainWindow, closeReply, openChatInApp, reviewRiskyInApp, allowOnce, allowBatchOnce,
          routineRequest, chooseOrb(named: "Orb"),
          importFromAssistant, importPickBot, importMarketplaceCategory, startFromKeptMemory, importBack, importCopyPrompt, importChooseFile, importReadLocal, importKind, importItem, importReview, importRemove,

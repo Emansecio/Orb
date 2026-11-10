@@ -519,7 +519,7 @@ struct BrowseClickTool: BrowseTool {
         let (url, dialog) = try await BrowseSupport.acting {
             try await session.exclusive {
                 let pointer = Self.pointerKind(action)
-                if let pointer { await context.browser.hub?.point(at: ref, kind: pointer, session: session) }
+                if let pointer { try await context.browser.hub?.point(at: ref, kind: pointer, session: session) }
                 let act = {
                     if action == "click" {
                         try await session.driver.click(ref)
@@ -571,7 +571,7 @@ struct BrowseFillTool: BrowseTool {
         let outcome: String = try await BrowseSupport.acting {
             try await session.exclusive {
                 if let reason = await BrowseSupport.secretReason(ref: ref, session: session) { return SecretField.refusal(reason) }
-                await context.browser.hub?.point(at: ref, kind: .type, session: session)
+                try await context.browser.hub?.point(at: ref, kind: .type, session: session)
                 try await session.driver.fill(ref, text: text)
                 guard submit else { return "" }
                 try await session.driver.press("Enter")
@@ -602,7 +602,7 @@ struct BrowseSelectTool: BrowseTool {
         let session = try await BrowseSupport.session(context)
         try await BrowseSupport.acting {
             try await session.exclusive {
-                await context.browser.hub?.point(at: ref, kind: .click, session: session)
+                try await context.browser.hub?.point(at: ref, kind: .click, session: session)
                 try await session.driver.select(ref, value: value)
             }
         }
@@ -721,7 +721,16 @@ struct BrowseScrollTool: BrowseTool {
             session.pageChanged()
             return "Scrolled \(ref) into view."
         }
-        try await session.exclusive { try await session.driver.scroll(direction, pixels: pixels) }
+        // Someone watching the page sees it move in steps along a smooth curve (one process, the same pixels in all); nobody, or the
+        // setting off: one jump as ever.
+        let steps = await context.browser.hub?.showsMotion(botID: session.botID) == true ? LiveMotion.scrollSteps(pixels) : [pixels]
+        try await session.exclusive {
+            if steps.count > 1 {
+                try await session.driver.scroll(direction, steps: steps, pause: LiveMotion.scrollPause)
+            } else {
+                try await session.driver.scroll(direction, pixels: pixels)
+            }
+        }
         session.pageChanged()
         return "Scrolled \(direction.rawValue) \(pixels) px."
     }

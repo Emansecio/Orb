@@ -587,6 +587,31 @@ final class LiveScreenLayerTests {
         withExtendedLifetime(window) {}
     }
 
+    @Test func aRestingCursorPulsesUntilTheNextActionOrTheyLeave() async {
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }   // the pulse is off then, by design
+        let model = model()
+        let (view, window, id) = layerView(model)
+        view.pulseDelay = 0.01
+        let store = model.liveScreens.store(id)
+        store.deliver(frame())
+        view.refresh()
+        let button = LivePointer(rect: CGRect(x: 600, y: 300, width: 40, height: 20), kind: .click)
+        store.point(button)
+        #expect(!view.isPulsing, "not before it has rested")
+        #expect(await liveUntil { view.isPulsing })
+        store.point(LivePointer(rect: CGRect(x: 100, y: 100, width: 40, height: 20), kind: .click))
+        #expect(!view.isPulsing, "an action stops it at once")
+        #expect(await liveUntil { view.isPulsing }, "and it starts again when the cursor rests")
+        view.showsPointer = false
+        #expect(!view.isPulsing)
+        view.showsPointer = true
+        store.point(button)
+        #expect(await liveUntil { view.isPulsing })
+        view.detach()
+        #expect(!view.isPulsing, "off screen nothing animates")
+        withExtendedLifetime(window) {}
+    }
+
     @Test func aWindowThatIsNotOnScreenDoesNotWantTheFeed() {
         #expect(LiveScreenLayerView.wantsFeed(hasWindow: true, windowVisible: true, viewHidden: false, inView: true))
         #expect(!LiveScreenLayerView.wantsFeed(hasWindow: false, windowVisible: true, viewHidden: false, inView: true))

@@ -522,12 +522,21 @@ final class BrowserHub: Sendable {
     /// Whether the person has taken an Orb's browser over in the live screen's window: its tools wait meanwhile.
     let control = BrowserControl()
 
+    /// How the tools wait for the cursor, the scroll steps and a page to settle (tests bring one that does not wait), and whether
+    /// motion is wanted at all (the setting, Reduce Motion).
+    let pause: @Sendable (Duration) async throws -> Void
+    private let wantsMotion: @Sendable () async -> Bool
+
     init(profilesDirectory: URL?,
          locate: (@Sendable () async -> BrowserStatus)? = nil,
-         makeDriver: @escaping @Sendable (AgentBrowserConfig) -> any BrowserDriver = { AgentBrowserDriver(config: $0) }) {
+         makeDriver: @escaping @Sendable (AgentBrowserConfig) -> any BrowserDriver = { AgentBrowserDriver(config: $0) },
+         pause: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+         wantsMotion: @escaping @Sendable () async -> Bool = { await LiveMotion.animates() }) {
         self.profilesDirectory = profilesDirectory
         self.locate = locate ?? BrowserHub.liveStatus(root: profilesDirectory)
         self.makeDriver = makeDriver
+        self.pause = pause
+        self.wantsMotion = wantsMotion
     }
 
     /// The hub of the app, with its folder in the data folder (`Store.directory`).
@@ -683,10 +692,24 @@ final class BrowserHub: Sendable {
     /// Tells the handler where the element is, asked of the browser (`get box`) just before the action. Inside the `exclusive` of the
     /// action, so it is the same page and no other conversation moves it. Nothing happens, and nothing is asked of the browser,
     /// when no one listens; a box that cannot be had is no cursor, never an error.
-    func point(at ref: String, kind: LivePointer.Kind, session: BrowserSession) async {
-        guard let listener = pointerHandler.withLock({ $0 }), listener.botID == nil || listener.botID == session.botID else { return }
+    /// With motion wanted, it then waits for the cursor to arrive (`LiveMotion.travel`) so the click lands where it is seen; Parar ends
+    /// the wait (it throws).
+    func point(at ref: String, kind: LivePointer.Kind, session: BrowserSession) async throws {
+        guard let listener = listener(for: session.botID) else { return }
         guard let rect = try? await session.driver.box(of: ref) else { return }
         listener.handler(session.botID, LivePointer(rect: rect, kind: kind))
+        if await wantsMotion() { try await pause(LiveMotion.travel) }
+    }
+
+    private func listener(for botID: UUID) -> PointerListener? {
+        guard let listener = pointerHandler.withLock({ $0 }), listener.botID == nil || listener.botID == botID else { return nil }
+        return listener
+    }
+
+    /// Someone watches this Orb's screen and wants motion: the only time a tool slows down (scrolling in steps) to be seen.
+    func showsMotion(botID: UUID) async -> Bool {
+        guard listener(for: botID) != nil else { return false }
+        return await wantsMotion()
     }
 
     /// The page an Orb just looked at, as far as the live screen goes: a login, a code, a captcha, or a password or card field in

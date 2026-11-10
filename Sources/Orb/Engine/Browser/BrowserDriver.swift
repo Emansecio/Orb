@@ -69,6 +69,9 @@ protocol BrowserDriver: Sendable {
     func select(_ ref: String, value: String) async throws
     func press(_ key: String) async throws
     func scroll(_ direction: BrowserScrollDirection, pixels: Int) async throws
+    /// The same scroll in several steps with `pause` between them, in one go (for someone watching the page move). The steps add up
+    /// to the pixels asked for; a driver that cannot do it in one go scrolls them one after the other.
+    func scroll(_ direction: BrowserScrollDirection, steps: [Int], pause: Duration) async throws
     func read() async throws -> BrowserReadout
     /// Saves a PNG of the viewport at `file`.
     func screenshot(to file: URL) async throws
@@ -114,6 +117,12 @@ protocol BrowserDriver: Sendable {
 }
 
 extension BrowserDriver {
+    func scroll(_ direction: BrowserScrollDirection, steps: [Int], pause: Duration) async throws {
+        for (index, pixels) in steps.enumerated() {
+            if index > 0 { try await Task.sleep(for: pause) }
+            try await scroll(direction, pixels: pixels)
+        }
+    }
     func command(_ arguments: [String], text: Bool) async throws -> JSONValue { throw BrowserDriverError.failed("This browser has no such command.") }
     func command(_ arguments: [String]) async throws -> JSONValue { try await command(arguments, text: false) }
     func manual(_ topic: String?) async throws -> String { throw BrowserDriverError.failed("This browser has no manual.") }

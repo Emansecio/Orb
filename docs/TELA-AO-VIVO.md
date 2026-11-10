@@ -38,8 +38,13 @@ abre a aba "Tela" no Inspetor (só ver). Toggle em Ajustes → "Mostrar a tela d
   Miniatura 160 × 100 pt (proporção da página), raio 8, `Palette.line`. Fundo `Palette.surface`, raio 12, padding 10.
 - **À direita da miniatura:** linha 1 = chip de estado + host (11 pt); linha 2 = legenda (`WorkLine.headline`, 12 pt,
   `Palette.secondary`, shimmer só trabalhando); linha 3 = botões pílula pequenos.
-- **Cursor do Orb** desenhado em camada sobre a imagem (seta + bolinha na cor do Orb), desliza 0,25 s (`Motion.content`)
-  até o ponto da ação; anel de 0,3 s no clique. Reduzir movimento: salta com fade, sem anel. O ponto vem da caixa do
+- **Cursor do Orb** desenhado em camada sobre a imagem (seta + bolinha na cor do Orb). Com a animação ligada (Ajustes →
+  Navegador, "Animar o cursor e a rolagem na tela do navegador", padrão), viaja 0,2 s com curva de entrada e saída até o
+  ponto da ação, e **a ação espera esse tempo** (`BrowserHub.point(at:)`, cancelável por Parar): ao chegar, o cursor "aperta"
+  (escala 0,8 e volta, 0,16 s) e o anel de 0,3 s abre junto do clique. Entre duas ações, com o cursor parado há mais de 0,6 s e
+  o cartão ao vivo, ele pulsa (opacidade, animação repetida da camada; para com a próxima ação, ao sair da tela ou ao
+  esconder o ponteiro). Desligada a animação: desliza 0,25 s como antes, sem espera, sem aperto e sem pulso. Reduzir
+  movimento do sistema: salta com fade, sem anel, sem espera, sem pulso. O ponto vem da caixa do
   elemento que o driver já resolve (`ref` → caixa) + `metadata` de rolagem do quadro.
 - **Quadros fora da lista:** a linha da transcrição é `Equatable` pelo id e pelo estado; a imagem vem de um objeto
   observável próprio (`LiveFrameStore`), então um quadro novo redesenha só a miniatura.
@@ -82,6 +87,11 @@ reunião com tela compartilhada.
   processo de fundo; no Orb cada quadro custa ~1 ms fora da thread principal (~6 % de um núcleo a 60/s, e nada com a página
   parada). O `LiveInbox` descarta o quadro atrasado antes de decodificar. Largura máx. 960 px, qualidade 60. Decodificação fora da main
   (`CGImageSource` numa fila própria), quadro atrasado é descartado.
+- **Custo do movimento (só com a tela à vista):** o Orb só pede a caixa do elemento quando há ouvinte; sem ouvinte, nada
+  muda e nada custa (zero comandos a mais, zero espera; coberto em teste). Com ouvinte e a animação ligada, cada
+  clique, preenchimento ou escolha espera 0,2 s, e `browse_scroll` (100 px ou mais) vira um único `batch` de até 7 `scroll`
+  com `wait 35` entre eles (curva suave, soma exata dos pixels, ~200 ms; medido no agent-browser 0.39.1: 5 passos em 192 ms
+  num só processo). A espera é injetável (`BrowserHub.pause`), então os testes não esperam tempo real.
 - No máximo 1 stream por vez (o do Orb em vista); os outros mostram o último quadro com "pausado".
 - **Critérios de pronto:** zero quadros processados sem cartão visível (contador em teste); CPU do app em torno de 6 % de
   um núcleo com o cartão visível e a página se mexendo (60 qps); rolagem da conversa de 2.173 itens em 114–118 fps (PanelsBench / medição

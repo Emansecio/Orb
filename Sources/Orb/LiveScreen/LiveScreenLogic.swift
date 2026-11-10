@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 
@@ -11,6 +12,47 @@ enum LiveScreenSetting {
     static func isOn(_ defaults: UserDefaults = .standard) -> Bool {
         defaults.object(forKey: key) as? Bool ?? true
     }
+}
+
+/// The motion that only exists for someone watching (Ajustes → Navegador): the cursor takes `travel` to arrive before the action
+/// goes, scrolling moves in steps, and a still cursor pulses. On by default. Off, or with Reduce Motion on, the tools do what they
+/// did before: no wait, one scroll, the cursor jumps.
+enum LiveMotion {
+    static let key = "animateBrowserCursor"
+    /// How long the cursor takes to get to its target, and how long the action waits for it (the layer animates the same time).
+    static let travelSeconds = 0.2
+    static let travel = Duration.seconds(travelSeconds)
+    /// A cursor that stays still this long between two actions starts to pulse: the Orb is thinking.
+    static let idleBeforePulse: TimeInterval = 0.6
+
+    static func isOn(_ defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: key) as? Bool ?? true
+    }
+
+    /// The setting is on and Reduce Motion is off. Asked from any thread: the system's flag is read on the main actor.
+    static func animates(_ defaults: UserDefaults = .standard) async -> Bool {
+        guard isOn(defaults) else { return false }
+        return await MainActor.run { !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+    }
+
+    /// A scroll of `pixels` as the steps of an ease-in-out curve whose sum is exactly `pixels`; one step (no animation) when it is
+    /// too short for several to show.
+    static func scrollSteps(_ pixels: Int) -> [Int] {
+        let count = min(7, pixels / 50)
+        guard count >= 2 else { return [pixels] }
+        var steps: [Int] = []
+        var done = 0
+        for index in 1...count {
+            let t = Double(index) / Double(count)
+            let position = index == count ? pixels : Int((Double(pixels) * t * t * (3 - 2 * t)).rounded())
+            if position > done { steps.append(position - done) }
+            done = max(done, position)
+        }
+        return steps
+    }
+
+    /// The pause between two steps: about a quarter of a second for the whole scroll.
+    static let scrollPause = Duration.milliseconds(35)
 }
 
 /// What the card shows. One state at a time, chosen by `of(...)` from what the stream and the turn say.

@@ -123,6 +123,21 @@ struct AgentBrowserDriverTests {
         #expect(all[1] == ["--session", "orb-test-chrome", "--json", "click", "@e1"])
     }
 
+    @Test func aScrollInStepsIsOneBatchOfScrollsAndWaits() async throws {
+        let (driver, calls) = make { _ in abOK(#"[{"command":["scroll"],"error":null,"result":{"scrolled":true},"success":true}]"#) }
+        try await driver.scroll(.up, steps: [30, 120, 30], pause: .milliseconds(35))
+        let command = try #require(calls.withLock { $0.last }).dropFirst(3)
+        #expect(Array(command) == ["batch", "--bail", "scroll up 30", "wait 35", "scroll up 120", "wait 35", "scroll up 30"])
+    }
+
+    @Test func aBatchWhoseLaterStepFailedIsAFailure() throws {
+        let entries = #"[{"command":["scroll"],"error":null,"result":{},"success":true},{"command":["wait"],"error":"Page gone","result":null,"success":false}]"#
+        let reply = try #require(AgentBrowserReply.parse(entries))
+        #expect(!reply.success && reply.error == "Page gone")
+        let fine = try #require(AgentBrowserReply.parse(#"[{"command":["scroll"],"error":null,"result":{"scrolled":true},"success":true}]"#))
+        #expect(fine.success && fine.data?["scrolled"]?.bool == true)
+    }
+
     @Test func theBrowserIsLaunchedFromItsOwnExecutableWhenOneIsGiven() async throws {
         let (run, calls) = recorder { _ in abOK(#"{"url":"https://a.test/","title":"A"}"#) }
         let brave = BrowserProgram(kind: .brave, executable: "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser", major: 140)

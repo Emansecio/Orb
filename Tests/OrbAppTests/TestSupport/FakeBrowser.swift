@@ -84,6 +84,10 @@ final class FakeBrowserDriver: BrowserDriver, @unchecked Sendable {
     func press(_ key: String) async throws { try note("press \(key)") }
     func scroll(_ direction: BrowserScrollDirection, pixels: Int) async throws { try note("scroll \(direction.rawValue) \(pixels)") }
 
+    func scroll(_ direction: BrowserScrollDirection, steps: [Int], pause: Duration) async throws {
+        try note("scroll \(direction.rawValue) steps \(steps.map(String.init).joined(separator: ","))")
+    }
+
     func read() async throws -> BrowserReadout {
         let state = try note("read")
         return BrowserReadout(url: state.url, content: state.readContent)
@@ -154,11 +158,18 @@ struct FakeBrowserSetup {
     let mode: BrowserMode
     /// The configurations the hub asked drivers for.
     let configs = OSAllocatedUnfairLock<[AgentBrowserConfig]>(initialState: [])
+    /// What the tools waited for (cursor travel, scroll steps, a page settling): nothing really waits.
+    let pauses = OSAllocatedUnfairLock<[Duration]>(initialState: [])
+    /// Parar during a wait: the next one throws `CancellationError`.
+    let cancelsPauses = OSAllocatedUnfairLock(initialState: false)
 
-    init(mode: BrowserMode = .background, ready: Bool = true, profiles: URL? = nil) {
+    /// `motion`: someone's motion setting is on (it still takes a pointer listener, someone watching, to count).
+    init(mode: BrowserMode = .background, ready: Bool = true, profiles: URL? = nil, motion: Bool = false) {
         self.mode = mode
         let driver = driver
         let configs = configs
+        let pauses = pauses
+        let cancelsPauses = cancelsPauses
         hub = BrowserHub(
             profilesDirectory: profiles,
             locate: {
@@ -170,7 +181,12 @@ struct FakeBrowserSetup {
             makeDriver: { config in
                 configs.withLock { $0.append(config) }
                 return driver
-            })
+            },
+            pause: { duration in
+                if cancelsPauses.withLock({ $0 }) { throw CancellationError() }
+                pauses.withLock { $0.append(duration) }
+            },
+            wantsMotion: { motion })
     }
 
     func context(directory: URL = FileManager.default.temporaryDirectory, provider: SearchProvider = .duckduckgo,

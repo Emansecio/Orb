@@ -186,7 +186,11 @@ struct AgentBrowserReply: Sendable, Equatable {
             let text = line.trimmingCharacters(in: .whitespaces)
             if text.hasPrefix("["), let json = JSONValue.parse(text), let first = json.array?.first, let success = first["success"]?.bool {
                 // `batch --json` answers with a list, one entry per command (`{command, result, error, success}`).
-                return AgentBrowserReply(success: success, data: first["result"], error: first["error"]?.string)
+                // A step that failed is the reply (a `batch` of several stops at it with --bail).
+                let entries = json.array ?? []
+                let failed = entries.first { $0["success"]?.bool == false }
+                let entry = failed ?? first
+                return AgentBrowserReply(success: failed == nil && success, data: entry["result"], error: entry["error"]?.string)
             }
             guard text.hasPrefix("{"), let json = JSONValue.parse(text), case .object = json, let success = json["success"]?.bool else { continue }
             return AgentBrowserReply(success: success, data: json["data"], error: json["error"]?.string)
@@ -452,6 +456,17 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
 
     func scroll(_ direction: BrowserScrollDirection, pixels: Int) async throws {
         try await send(["scroll", direction.rawValue, String(pixels)])
+    }
+
+    /// One `batch` of `scroll` and `wait` (one process; each step is a command of the browser, 5 steps took 190 ms measured).
+    func scroll(_ direction: BrowserScrollDirection, steps: [Int], pause: Duration) async throws {
+        let milliseconds = Int(pause.components.seconds * 1000 + pause.components.attoseconds / 1_000_000_000_000_000)
+        var batch = ["batch", "--bail"]
+        for (index, pixels) in steps.enumerated() {
+            if index > 0 { batch.append("wait \(milliseconds)") }
+            batch.append("scroll \(direction.rawValue) \(pixels)")
+        }
+        try await send(batch)
     }
 
     func read() async throws -> BrowserReadout {

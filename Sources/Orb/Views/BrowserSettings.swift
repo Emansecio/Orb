@@ -6,6 +6,7 @@ import AppKit
 struct BrowserSettings: View {
     @Environment(AppModel.self) private var model
     @AppStorage(LiveScreenSetting.key) private var showsScreen = true
+    @AppStorage(LiveMotion.key) private var animatesCursor = true
 
     var body: some View {
         let setup = model.browserSetup
@@ -20,8 +21,11 @@ struct BrowserSettings: View {
             Section {
                 Toggle("Mostrar a tela do navegador no chat", isOn: $showsScreen)
                     .help(Tip.showBrowserScreen)
+                Toggle("Animar o cursor e a rolagem na tela do navegador", isOn: $animatesCursor)
+                    .disabled(!showsScreen)
+                    .help(Tip.animateBrowserCursor)
             } footer: { FormFootnote {
-                Text("Enquanto o Orb usa o navegador, o chat mostra a página ao vivo. Só você vê: nada é gravado nem vai para o modelo. Desligado, o chat fica como antes.")
+                Text("Enquanto o Orb usa o navegador, o chat mostra a página ao vivo. Só você vê: nada é gravado nem vai para o modelo. Desligado, o chat fica como antes. Com a tela à vista, cada clique espera o cursor chegar (cerca de 0,2 s) e a rolagem é suave; sem ela, nada muda. Sem a animação, ou com “Reduzir movimento” ligado no sistema, o cursor salta como antes.")
             } }
             SearchKeySection()
             Section("Privacidade") {

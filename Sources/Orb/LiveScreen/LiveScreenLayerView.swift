@@ -146,6 +146,7 @@ final class LiveScreenLayerView: NSView {
 
     private func updatePointerVisibility() {
         let visible = showsPointer && showsPage && !isBlurred && isPointerPlaced
+        if !visible { stopPulse() }
         guard cursorLayer.isHidden == visible else { return }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -211,6 +212,7 @@ final class LiveScreenLayerView: NSView {
         let from = cursorLayer.presentation()?.position ?? cursorLayer.position
         let wasPlaced = isPointerPlaced && !cursorLayer.isHidden
         isPointerPlaced = true
+        stopPulse()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         cursorLayer.isHidden = false
@@ -224,19 +226,27 @@ final class LiveScreenLayerView: NSView {
             fade.toValue = 1
             fade.duration = Motion.fadeDuration
             cursorLayer.add(fade, forKey: "fade")
+            schedulePulse()
             return
         }
+        // With the motion setting on, the tool waits `LiveMotion.travel` for the cursor to arrive, so the slide lasts the same and
+        // the press (below) happens when the click does. Off, it is the quick slide of before and no wait.
+        let animated = LiveMotion.isOn()
         let slide = CABasicAnimation(keyPath: "position")
         slide.fromValue = NSValue(point: from)
         slide.toValue = NSValue(point: target)
-        slide.duration = 0.25
-        slide.timingFunction = CAMediaTimingFunction(controlPoints: 0.3, 0.7, 0.2, 1)
+        slide.duration = animated ? LiveMotion.travelSeconds : 0.25
+        slide.timingFunction = animated ? CAMediaTimingFunction(name: .easeInEaseOut) : CAMediaTimingFunction(controlPoints: 0.3, 0.7, 0.2, 1)
         cursorLayer.add(slide, forKey: "slide")
-        if pointer.kind == .click { ripple() }
+        if pointer.kind == .click { ripple(after: animated ? slide.duration : 0) }
+        if animated {
+            if pointer.kind == .click { press(after: slide.duration) }
+            schedulePulse()
+        }
     }
 
-    /// The ring of a click: grows from a third of its size to a third more and fades, in 0.3 s.
-    private func ripple() {
+    /// The ring of a click: grows from a third of its size to a third more and fades, in 0.3 s, starting `delay` from now.
+    private func ripple(after delay: CFTimeInterval) {
         let grow = CABasicAnimation(keyPath: "transform.scale")
         grow.fromValue = 0.3
         grow.toValue = 1.3
@@ -247,7 +257,57 @@ final class LiveScreenLayerView: NSView {
         group.animations = [grow, fade]
         group.duration = 0.3
         group.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        if delay > 0 { group.beginTime = CACurrentMediaTime() + delay }
         ringLayer.add(group, forKey: "ripple")
+    }
+
+    /// The cursor presses down when it arrives: a quick dip of its size about the tip of the arrow, and back.
+    private func press(after delay: CFTimeInterval) {
+        let dip = CABasicAnimation(keyPath: "transform.scale")
+        dip.fromValue = 1
+        dip.toValue = 0.8
+        dip.duration = 0.08
+        dip.autoreverses = true
+        dip.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        dip.beginTime = CACurrentMediaTime() + delay
+        cursorLayer.add(dip, forKey: "press")
+    }
+
+    // MARK: The pulse of a thinking Orb
+
+    /// Between two actions of an Orb that is working, a cursor that rests starts to pulse softly (a repeating opacity animation
+    /// that Core Animation runs on its own: no timer ticks, no redraws). Any action, leaving the screen, hiding the pointer and Reduce
+    /// Motion stop it.
+    private var pulseTask: Task<Void, Never>?
+    /// How long the cursor rests before it pulses (a test shortens it).
+    var pulseDelay = LiveMotion.idleBeforePulse
+    /// For tests (an animation of a layer nobody sees is dropped by Core Animation, so its presence says nothing there).
+    private(set) var isPulsing = false
+
+    private func schedulePulse() {
+        pulseTask?.cancel()
+        guard LiveMotion.isOn(), !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        let delay = pulseDelay
+        pulseTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled, let self, self.isAcquired, !self.cursorLayer.isHidden else { return }
+            let pulse = CABasicAnimation(keyPath: "opacity")
+            pulse.fromValue = 1
+            pulse.toValue = 0.45
+            pulse.duration = 0.9
+            pulse.autoreverses = true
+            pulse.repeatCount = .infinity
+            pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            self.cursorLayer.add(pulse, forKey: "pulse")
+            self.isPulsing = true
+        }
+    }
+
+    private func stopPulse() {
+        pulseTask?.cancel()
+        pulseTask = nil
+        cursorLayer.removeAnimation(forKey: "pulse")
+        isPulsing = false
     }
 
     // MARK: On screen or not
@@ -306,6 +366,7 @@ final class LiveScreenLayerView: NSView {
     var composedKeys: Set<UInt16> = []
 
     private func unregister() {
+        stopPulse()
         if let frameToken { store.removeObserver(frameToken) }
         if let pointerToken { store.removeObserver(pointerToken) }
         frameToken = nil
