@@ -36,6 +36,7 @@ Correções que o usuário já fez mais de uma vez e decisões dele que já est�
 - **TESTE-3.** Suíte que passa de ~2 min está presa: rode `sample` no `swiftpm-testing-helper` para achar o teste, encerre, rode de novo com `--skip` nele, rode-o sozinho e diga no relatório que foi pulado. Rode a suíte com `caffeinate -i`.
 - **TESTE-4.** Depois de cada feature implementada ou alterada, rode as suítes afetadas (`scripts/test.sh --filter`) antes de passar à próxima.
 - **TESTE-5.** Toda correção de bug ganha um teste de regressão, e você confere que ele falha sem a correção (dois testes já passavam mesmo sem ela). Lógica nova com ramificação, laço ou parsing ganha testes do caminho principal e dos casos de borda.
+- **TESTE-6.** Rode só os testes que cobrem o que você alterou ou implementou (`scripts/test.sh --filter` com as suítes dessa área). A suíte completa fica para quando for de fato necessária: mudança em código compartilhado por muitas áreas (ex.: `AppModel`, `BotSession`, `Engine`, `TestSupport`) ou falha que só aparece no conjunto. Quando rodá-la, diga no relatório por quê.
 
 ### Subagentes
 
@@ -52,7 +53,7 @@ Correções que o usuário já fez mais de uma vez e decisões dele que já est�
 ### Git e CI
 
 - **GIT-1.** Trabalho direto na `main`, com push liberado. Use worktree quando outra sessão estiver mexendo na `main`.
-- **GIT-2.** Push só depois da suíte completa e do bundle passarem; nunca encadeie o push aos testes com `&&` frouxo (já subiu push com teste falhando).
+- **GIT-2.** Push só depois de passarem os testes da área alterada (TESTE-6) e o bundle; a suíte completa só entra nos casos da TESTE-6. Nunca encadeie o push aos testes com `&&` frouxo (já subiu push com teste falhando).
 - **GIT-3.** O CI usa Swift 6.3.3, mais estrito que o Swift local: erros que passam aqui quebram lá. Depois do push, confira com `gh run list --branch main`.
 - **GIT-4.** Teste que já falhava na `main` antes da sua mudança não libera o push. Confirme numa worktree sem a sua mudança que a falha é anterior; depois corrija-a num commit próprio ou pare e pergunte. Nunca pule nem desligue o teste para o push passar.
 - **GIT-5.** O repositório é público: nenhum segredo, token, dado pessoal ou descrição de falha de segurança ainda aberta vai para commit, mensagem de commit ou issue. Auditorias e planos com esse conteúdo ficam fora do git.
