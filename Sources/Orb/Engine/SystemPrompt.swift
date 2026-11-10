@@ -147,7 +147,7 @@ enum PromptParts {
     /// How to work with other apps without taking over the person's Mac. Only for an Orb that may control apps: in the
     /// `computerUse` line of `nativeToolHints`.
     static let appControl = "Work with apps in the background: prefer ids and marks to coordinates; [precisa_assumir_tela] means ask the user "
-        + "for a takeover of the screen; web content goes to the browser tools."
+        + "for a takeover of the screen; web content goes to the browser tools. No activate in a script unless the user asked to see the app."
 
     /// How a reply shows a picture on this Mac (`MarkdownBlock.image`): a capture names its copy with `ImageAttachment.note`.
     /// What a reply can draw. Fixed text: it goes in every request and must not break the prompt cache.
@@ -169,7 +169,8 @@ enum PromptParts {
             uses.append("edit_file for small changes (write_file for new files or full rewrites)")
         }
         if bot.capabilities.contains(.computerUse) {
-            uses.append("applescript and shortcuts_run to work with apps (app_dictionary before scripting one you do not know well)")
+            uses.append("applescript and shortcuts_run to work with apps (app_dictionary before scripting one you do not know well)"
+                + (hasFiles ? "; read_file, not the app, to read an image" : ""))
             uses.append("ui_read then ui_act for apps with no AppleScript or Shortcuts support (read the screen before acting, read again after it changes)")
         }
         if bot.capabilities.contains(.browser) {

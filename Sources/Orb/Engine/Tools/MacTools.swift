@@ -294,6 +294,14 @@ struct AppleScriptTool: AgentTool {
             "description": .property("string", ToolIntent.shortSchemaText),
         ], required: ["script"]))
 
+    /// The tests put a system that reports the front and a script runner that does not start `osascript`.
+    var system: any AccessibilitySystem = LiveAccessibilitySystem()
+    var sessions: AXSessions = .shared
+    var ownPID: Int32 = ProcessInfo.processInfo.processIdentifier
+    var execute: @Sendable (String, AppleScript.Language, Bool, Duration) async throws -> String = { script, language, structured, timeout in
+        try await AppleScript.run(script, language: language, structured: structured, timeout: timeout)
+    }
+
     var kind: ToolCall.Kind { .computer }
     var capability: Capability? { .computerUse }
     func risk(_ arguments: JSONValue) -> ToolRisk { .sensitive }
@@ -316,9 +324,47 @@ struct AppleScriptTool: AgentTool {
             throw ToolError("Formato de saída desconhecido \"\(style)\": use \"text\" ou \"structured\".")
         }
         let seconds = arguments.integer("timeout_seconds", default: 60, in: 1...300)
-        let output = try await AppleScript.run(script, language: language, structured: style == "structured",
-                                               timeout: .seconds(seconds))
-        return output.isEmpty ? "(sem resultado)" : output
+        // A `tell application` can bring the app forward whatever the script meant: note who was in front, and put them
+        // back when the script ends, unless it asked for the front itself.
+        let front = Self.asksForFront(script) || !system.isTrusted() ? nil : await system.frontmostPID()
+        let output: String
+        do {
+            output = try await execute(script, language, style == "structured", .seconds(seconds))
+        } catch {
+            // Failing or being cancelled does not leave the person with another app in front either.
+            guard let note = await giveFrontBack(to: front), let failure = error as? ToolError else { throw error }
+            throw ToolError(failure.message + "\n" + note)
+        }
+        let note = await giveFrontBack(to: front)
+        return (output.isEmpty ? "(sem resultado)" : output) + (note.map { "\n" + $0 } ?? "")
+    }
+
+    /// Whether the script brings an app to the front on purpose: `activate` as a word, in AppleScript (`activate`) and in
+    /// JavaScript for Automation (`app.activate()`), whatever the case. The model asked for it; it is not undone.
+    static func asksForFront(_ script: String) -> Bool {
+        script.range(of: #"\bactivate\b"#, options: [.regularExpression, .caseInsensitive]) != nil
+    }
+
+    /// One look when the script is over: if another app came to the front and the person did not touch the Mac in the last
+    /// 2 s (a person who just went there stays there), `before` is put back through `AXFrontmost`, never `activate`. Not the
+    /// Orb itself, which `ui_*` never operates either. The note says what happened, nil when nothing did. Runs in its own
+    /// task: giving the front back is not cancelled with the call.
+    private func giveFrontBack(to before: Int32?) async -> String? {
+        guard let before, before != ownPID else { return nil }
+        let system = system, sessions = sessions
+        return await Task.detached(priority: .userInitiated) { () -> String? in
+            guard let now = await system.frontmostPID(), now != before, now != ownPID,
+                  system.secondsSinceUserInput() >= UIActTool.personWentThere else { return nil }
+            let previous = AccessibilityApp(name: "", bundleID: nil, pid: before)
+            do {
+                try await sessions.run(previous, within: sessions.deadlines.action) {
+                    try system.root(of: previous).setValue(.bool(true), for: "AXFrontmost")
+                }
+            } catch {
+                return "Aviso: o script trouxe outro app para a frente e não consegui devolver o app anterior; o usuário pode precisar selecioná-lo."
+            }
+            return "Aviso: o script trouxe outro app para a frente; devolvi o app que estava na frente. Não use activate a menos que o usuário peça para ver o app."
+        }.value
     }
 }
 

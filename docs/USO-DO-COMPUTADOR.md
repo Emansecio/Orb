@@ -109,6 +109,13 @@ só quando a pessoa pediu para ver. A saída diz "em segundo plano" ou "na frent
 
 Em segundo plano, `open` vigia a frente por 800 ms e a devolve por `AXFrontmost` se o app aberto se ativar sozinho e a pessoa não tiver mexido no Mac nos últimos 2 s. `ui_act key` pede `[precisa_assumir_tela]` para atalhos que puxam o foco (`UIFocusKeys`: `⌘L`, `⌘1…9`, troca de aba nos navegadores, `⌘⇧G` no Finder) e para atalho cujo item de menu está desativado, porque a tecla morreria nele.
 
+**`applescript`** (`MacTools.swift`): um `tell application` pode trazer o app para a frente, então a ferramenta guarda o pid da frente antes do script (só com
+Acessibilidade concedida) e olha uma vez quando ele termina, com sucesso, erro ou cancelamento: se outro app veio e a pessoa não apertou tecla ou botão nos últimos
+2 s (`UIActTool.personWentThere`), devolve a frente por `AXFrontmost` no app anterior (nunca `activate`) e acrescenta um aviso à saída. Sem espera fixa nem laço. Um
+script que contém `activate` como palavra (AppleScript ou `.activate()` do JXA, sem caixa) pediu a frente de propósito e não é desfeito
+(`AppleScriptTool.asksForFront`). Se o app da frente antes era o próprio Orb, nada é devolvido (o Orb não é alvo de `AXFrontmost` aqui, como em `ui_*`). O prompt
+(`PromptParts.appControl`) manda não usar `activate` sem pedido e ler imagem com `read_file`.
+
 **`app_dictionary`** (`AppDictionary.swift`, `.safe`, `computerUse`): `app` (nome, bundle id ou caminho do `.app`), `search`, `suite`, `offset`. Roda `/usr/bin/sdef`
 (20 s, cancelável), lê o XML com `XMLParser` (itens `hidden` saem) e devolve uma linha por comando (`cmd show <tipo> param?:tipo -> resultado`),
 classe (`class note (item): name:text, id:text ro; elements: …`; `+` é extensão) e enumeração, com a descrição cortada em 70 caracteres.

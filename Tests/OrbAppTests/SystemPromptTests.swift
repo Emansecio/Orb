@@ -101,7 +101,8 @@ struct SystemPromptTests {
         // 150 more went to joining simple sequential shell commands into one run_command (14 calls in a row each resend the context).
         // Tightened from 5,600 on 2026-10-17 (docs/historico/REVISAO-TOKENS-PROMPT-2026-10-17.md), after the "Mac apps" line that repeated the hints went.
         // ~230 more went to the rich blocks a reply may hold (```chart, ```mermaid, $$, ```page; 2026-11-02).
-        #expect(system.count < 5_950, "the native system prompt is \(system.count) characters")
+        // ~150 more went to no `activate` in scripts and reading an image with read_file instead of opening the app (2026-11-10).
+        #expect(system.count < 6_100,"the native system prompt is \(system.count) characters")
         for rule in ["Reply in the user's language", "Be brief", "Use tools to find out", "read before you change things",
                      "say in one short sentence what you are about to do", "never retry what the user denied",
                      "Do not emulate a switched-off capability", "sudo cannot work", "prefer the trash tool over rm",

@@ -120,6 +120,79 @@ struct MacToolTests {
         #expect(!syntax.isEmpty)
     }
 
+    // MARK: applescript keeps the front
+
+    /// The person is in Safari (pid 200) and the script, which only runs a closure, may bring Mail (pid 300) forward.
+    private struct FrontBench {
+        let system = FakeAccessibility()
+        let safari = fakeApp(windows: [])
+        let tool: AppleScriptTool
+
+        init(trusted: Bool = true, ran: @escaping @Sendable (FakeAccessibility) throws -> String) {
+            system.trusted = trusted
+            system.frontmost = 200
+            system.roots[200] = safari
+            safari.settable = ["AXFrontmost"]
+            var tool = AppleScriptTool()
+            tool.system = system
+            tool.sessions = AXSessions(deadlines: .patient)
+            tool.ownPID = 1
+            let system = system
+            tool.execute = { _, _, _, _ in try ran(system) }
+            self.tool = tool
+        }
+
+        func call(_ script: String = #"tell application "Mail" to count messages"#) async throws -> String {
+            try await tool.run(.object(["script": .string(script)]), context: ToolContext(workingDirectory: FileManager.default.temporaryDirectory))
+        }
+        var restored: Bool { safari.assignedValue("AXFrontmost")?.bool == true }
+    }
+
+    @Test func aScriptThatBringsAnAppForwardGivesTheFrontBack() async throws {
+        let bench = FrontBench { $0.frontmost = 300; return "3" }
+        let text = try await bench.call()
+        #expect(text.hasPrefix("3\nAviso: o script trouxe outro app para a frente; devolvi"))
+        #expect(bench.restored, "put back with AXFrontmost on the app that was in front, never activate")
+        #expect(bench.system.activated.isEmpty)
+    }
+
+    @Test func theFrontStaysWhereThePersonWentOrWhereItAlreadyWas() async throws {
+        let person = FrontBench { $0.frontmost = 300; $0.userIdle = 0.5; return "ok" }
+        #expect(try await person.call() == "ok" && !person.restored, "a person who just pressed a key went there")
+
+        let still = FrontBench { _ in "ok" }
+        #expect(try await still.call() == "ok" && !still.restored)
+
+        let orb = FrontBench { $0.frontmost = 1; return "ok" }
+        #expect(try await orb.call() == "ok" && !orb.restored, "the Orb itself is never the app taken over")
+
+        let untrusted = FrontBench(trusted: false) { $0.frontmost = 300; return "ok" }
+        #expect(try await untrusted.call() == "ok" && !untrusted.restored)
+        #expect(untrusted.system.frontmostCalls == 0, "without Accessibility the front is not even looked at")
+    }
+
+    @Test func aScriptThatActivatesOnPurposeIsNotUndone() async throws {
+        for script in ["tell application \"Notes\" to ACTIVATE", "tell app \"Notes\"\nactivate\nend tell", "Application('Notes').activate()"] {
+            let bench = FrontBench { $0.frontmost = 300; return "ok" }
+            #expect(try await bench.call(script) == "ok" && !bench.restored, "\(script)")
+            #expect(bench.system.frontmostCalls == 0)
+        }
+        #expect(AppleScriptTool.asksForFront("tell application \"Notes\" to activate"))
+        #expect(!AppleScriptTool.asksForFront("tell application \"Notes\" to get name of every note whose name contains \"inactive\""))
+        #expect(!AppleScriptTool.asksForFront("set deactivated to true"))
+    }
+
+    @Test func aFailingOrCancelledScriptAlsoGivesTheFrontBack() async throws {
+        let failing = FrontBench { $0.frontmost = 300; throw ToolError("Mail deu erro") }
+        let message = await failureMessage { try await failing.call() }
+        #expect(message.hasPrefix("Mail deu erro\nAviso: o script trouxe outro app para a frente"))
+        #expect(failing.restored)
+
+        let cancelled = FrontBench { $0.frontmost = 300; throw CancellationError() }
+        await #expect(throws: CancellationError.self) { try await cancelled.call() }
+        #expect(cancelled.restored)
+    }
+
     // MARK: open
 
     @Test func hostAndPortIsNotParsedAsAScheme() {
