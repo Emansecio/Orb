@@ -1,10 +1,14 @@
 name: Testes
 
+# Um commit só de documentação (docs/ e os .md da raiz) não muda o que se compila nem o que se testa: não roda o CI,
+# que leva mais de 10 minutos. Nenhum teste lê esses arquivos.
 on:
   push:
     branches: [main]
+    paths-ignore: ['docs/**', '*.md']
   pull_request:
     branches: [main]
+    paths-ignore: ['docs/**', '*.md']
 
 # Uma execução nova na mesma ref cancela a anterior que ficou para trás.
 concurrency:

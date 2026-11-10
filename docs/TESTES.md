@@ -30,7 +30,9 @@ São cerca de 5.000 testes em `Tests/OrbAppTests`, em Swift Testing (`@Test`, `@
   Medido em 2026-11-10 (8 núcleos): um processo com 4 de uma vez, ~82 s; 4 processos com 2 cada, ~60 s, sem falha a mais em
   quatro rodadas; em série, ~4 min. Mais que um teste por núcleo não ganhou nada: a suíte é limitada pela CPU.
 - **CI.** Cada push roda a suíte em 4 jobs ao mesmo tempo (`ORB_TEST_SHARD=i/4`), em série dentro de cada um, porque o runner
-  tem 3 núcleos e os testes que esperam algo estouram o tempo em paralelo. Antes, num job só, eram ~8 min de testes.
+  tem 3 núcleos e os testes que esperam algo estouram o tempo em paralelo: ~2 min de testes por job, contra ~5,5 min num job
+  só. O que domina agora é compilar app e testes no runner (8 a 12 min, e o release, em paralelo, leva o mesmo). Commit só de
+  documentação (`docs/` e os `.md` da raiz) não dispara o CI; nesse caso o `gh run list` não mostra execução nova.
 - **Build dos testes.** O alvo `OrbAppTests` compila sem informação de depuração (`-gnone`, no `Package.swift`): qualquer mudança
   numa declaração do app recompila os ~290 arquivos de teste, e um terço desse tempo era informação de depuração que ninguém
   lê (falhas do Swift Testing vêm com arquivo e linha pelo macro, não por ela). Medido: de ~113 s para ~90 s depois de mudar
