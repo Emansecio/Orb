@@ -25,6 +25,7 @@ enum UIAppResolver {
             switch self {
             case .notRunning(let name):
                 "O app \"\(name)\" não está aberto. Abra-o com open (abre em segundo plano, sem tirar a pessoa do que ela usa) e tente de novo; apps_list mostra o que está aberto."
+                    + (["browser", "navegador"].contains(UIText.fold(name)) ? " Se quer a página do navegador do Orb, use browse_snapshot e browse_click: ui_read e ui_act operam apps do Mac." : "")
             case .ambiguous(let names):
                 "Mais de um app combina: \(names.joined(separator: ", ")). Diga o nome exato ou o bundle identifier."
             case .isOrb:
@@ -121,6 +122,15 @@ enum UIAccess {
     static func sameLaunch(_ one: Date?, _ other: Date?) -> Bool {
         guard let one, let other else { return true }
         return abs(one.timeIntervalSince(other)) < 1
+    }
+
+    /// The app is the browser this Orb runs without a window: its pages belong to the browse_* tools, and reading it here
+    /// only finds "no windows". Judged by the process that holds the Orb's browser profile; without that, nothing is refused.
+    static func refuseOrbBrowser(_ app: AccessibilityApp, context: ToolContext, system: any AccessibilitySystem) throws {
+        guard let botID = context.botID, let profile = context.browser.hub?.profileFolder(botID: botID),
+              BrowserProfileCache.holder(profile: profile) == app.pid, system.windowList(pid: app.pid).isEmpty else { return }
+        throw ToolError("\(app.name) é o navegador do próprio Orb e roda sem janela: use browse_snapshot e browse_click (ou outra browse_*) para as páginas. "
+                        + "ui_read, ui_act e screenshot operam apps do Mac com janela.")
     }
 
     /// What the model is told when a call fails.
@@ -256,7 +266,9 @@ struct UIReadTool: AgentTool {
     }
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
+        for key in ["root", "id"] { if let id = arguments.nonEmptyString(key) { try UIResolver.rejectBrowserRef(id, tool: "ui_read") } }
         let app = try await UIAccess.forReading(arguments["app"]?.string, bot: context.botID, store: store, system: system)
+        try UIAccess.refuseOrbBrowser(app, context: context, system: system)
         var limits = limits
         limits.maxDepth = arguments.integer("max_depth", default: limits.maxDepth, in: 1...limits.maxDepth)
         limits.regionsOnly = arguments.flag("regions")
@@ -692,6 +704,14 @@ enum UIResolver {
         guard id.range(of: #"^[wmx][0-9]+(\.[0-9]+)*$"#, options: .regularExpression) != nil, let kind = id.first else { return nil }
         let numbers = id.dropFirst().split(separator: ".").compactMap { Int($0) }
         return numbers.isEmpty ? nil : (kind, numbers)
+    }
+
+    /// A ref of `browse_snapshot` (`e7586`) given where an id of ui_read belongs: the model took the Orb's browser for an app.
+    /// Checked before the app is looked up, which would answer with something else entirely.
+    static func rejectBrowserRef(_ id: String, tool: String) throws {
+        let id = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard id.range(of: #"^e[0-9]+$"#, options: .regularExpression) != nil else { return }
+        throw ToolError("\"\(id)\" é um ref do browse_snapshot, do navegador do Orb: use browse_click (ou outra browse_*) nele; \(tool) só opera apps do Mac.")
     }
 
     /// The id an argument names: itself, or for `#12` the id under mark 12 of the last screenshot of that window.
@@ -1281,6 +1301,7 @@ struct UIActTool: AgentTool {
                 step.destinationPoint = CGPoint(x: pair[0].rounded(), y: pair[1].rounded())
             } else if let text {
                 step.destination = text.trimmingCharacters(in: .whitespaces)
+                try UIResolver.rejectBrowserRef(text, tool: "ui_act")
             } else {
                 throw ToolError("Faltou o argumento \"to\": o id (ou x,y em pixels do screenshot) onde soltar.")
             }
@@ -1329,6 +1350,7 @@ struct UIActTool: AgentTool {
             step.reference = arguments.nonEmptyString("id")?.trimmingCharacters(in: .whitespaces)
             step.ids = (arguments["ids"]?.array ?? []).compactMap(\.string).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
             if step.reference == nil, step.ids.count == 1 { step.reference = step.ids.removeFirst() }
+            for id in [step.reference].compactMap({ $0 }) + step.ids { try UIResolver.rejectBrowserRef(id, tool: "ui_act") }
             let hasTarget = step.reference != nil || !step.ids.isEmpty
             /// What a click, hover, drag or scroll starts from: an element, or a pixel of the screenshot.
             func needSource() throws {
@@ -1652,6 +1674,7 @@ struct UIActTool: AgentTool {
         let steps = try Self.steps(in: arguments)
         let needsName = steps.contains { $0.action == .pickMenu || $0.action == .key }
         let app = try await UIAccess.forAction(arguments["app"]?.string, bot: context.botID, store: store, system: system, needsName: needsName)
+        try UIAccess.refuseOrbBrowser(app, context: context, system: system)
         // What the approval card judged: an action whose live target turns out dangerous runs only if the card said so. The
         // engine hands the card's own verdict over (`judgedDanger`); only a call no card was computed for judges itself here.
         let approved = context.judgedDanger ?? (danger(arguments, context: context) != nil)

@@ -288,6 +288,61 @@ struct UIReadToolTests {
         #expect(UIAppResolver.resolve(nil, in: [], ownPID: 1, ownBundleID: nil) == .failure(.noFrontmost))
     }
 
+    @Test func aBrowserRefIsRedirectedBeforeAnyAppIsLookedUp() async {
+        let (tool, system, _) = setup(windows: [fake("AXWindow", title: "A")])
+        for key in ["root", "id"] {
+            let message = await failureMessage { try await read(tool, [key: .string("e7586")]) }
+            #expect(message.contains("\"e7586\" é um ref do browse_snapshot") && message.contains("browse_click"), "\(key): \(message)")
+        }
+        #expect(system.listings.isEmpty && system.rootCalls == 0, "no app was looked up for it")
+        // An id of the Mac's interface keeps its own message.
+        let own = await failureMessage { try await read(tool, ["root": .string("x9")]) }
+        #expect(own.contains("inválido") && !own.contains("browse_snapshot"))
+    }
+
+    @Test func theBrowserNamedAsAnAppPointsToTheBrowseTools() async {
+        let (tool, _, _) = setup(windows: [])
+        for name in ["browser", "Navegador"] {
+            let message = await failureMessage { try await read(tool, ["app": .string(name)]) }
+            #expect(message.contains("não está aberto") && message.contains("browse_snapshot"), "\(name): \(message)")
+        }
+        let other = await failureMessage { try await read(tool, ["app": .string("Pages")]) }
+        #expect(!other.contains("browse_snapshot"))
+    }
+
+    @Test func theOrbsOwnBrowserWithoutAWindowIsNotReadAsAnApp() async throws {
+        let profiles = TempFolder("OrbReadBrowser", creating: true)
+        let hub = BrowserHub(profilesDirectory: profiles.url)
+        let botID = UUID()
+        let profile = try #require(hub.profileFolder(botID: botID))
+        try FileManager.default.createDirectory(at: profile, withIntermediateDirectories: true)
+        // The browser holds the profile: its lock names a running process (the test runner's parent stands in for it; the
+        // runner itself is the Orb's own pid and would be refused for that).
+        let pid = getppid()
+        try FileManager.default.createSymbolicLink(atPath: profile.appending(path: "SingletonLock").path, withDestinationPath: "host.local-\(pid)")
+        var browserContext = ToolContext(workingDirectory: FileManager.default.temporaryDirectory, botID: botID)
+        browserContext.browser = BrowserAccess(hub: hub, available: true)
+
+        let (tool, system, _) = setup(windows: [])
+        system.apps.append(FakeAccessibility.app("Google Chrome", "com.google.Chrome", pid: pid))
+        system.roots[pid] = fakeApp(windows: [])
+        let refused = await failureMessage { try await tool.run(.object(["app": .string("Google Chrome")]), context: browserContext) }
+        #expect(refused.contains("navegador do próprio Orb") && refused.contains("browse_snapshot"), "\(refused)")
+
+        // A window of it (the person opened one) is an app window like any other.
+        system.listedWindows[pid] = [CapturableWindow(windowID: 7, pid: pid, frame: CGRect(x: 0, y: 0, width: 800, height: 600))]
+        system.roots[pid] = fakeApp(windows: [fake("AXWindow", title: "Página")])
+        let text = try await tool.run(.object(["app": .string("Google Chrome")]), context: browserContext)
+        #expect(text.contains("Página"))
+
+        // A Chrome the Orb did not start is an ordinary app: nothing identifies it, so the behavior is the old one.
+        system.listedWindows[pid] = nil
+        system.roots[pid] = fakeApp(windows: [])
+        let plain = ToolContext(workingDirectory: FileManager.default.temporaryDirectory, botID: botID)
+        let old = try await tool.run(.object(["app": .string("Google Chrome")]), context: plain)
+        #expect(old.contains("não tem janelas"))
+    }
+
     @Test func ambiguousNamesAskForTheExactOne() {
         let apps = [FakeAccessibility.app("Pages", "com.apple.iWork.Pages", pid: 1), FakeAccessibility.app("Page Maker", "x.pm", pid: 2)]
         guard case .failure(.ambiguous(let names)) = UIAppResolver.resolve("page", in: apps, ownPID: 9, ownBundleID: nil) else {
@@ -370,6 +425,22 @@ struct UIActToolTests {
     }
 
     // MARK: Pressing and checking
+
+    @Test func aBrowserRefIsRedirectedToTheBrowseToolsEvenWithoutAReading() async {
+        let rig = rig(windows: [fake("AXWindow", title: "Principal", [fakeButton("Abrir")])])
+        let calls: [[String: JSONValue]] = [
+            ["action": .string("press"), "id": .string("e7586")],
+            ["action": .string("press"), "ids": .array([.string("e12")])],
+            ["action": .string("drag"), "id": .string("w1.1"), "to": .string("e3")],
+            ["action": .string("press"), "steps": .array([.object(["action": .string("press"), "id": .string("w1.1")]),
+                                                           .object(["action": .string("press"), "id": .string("e9")])])],
+        ]
+        for call in calls {
+            let message = await failureMessage { try await act(rig, call) }
+            #expect(message.contains("ref do browse_snapshot") && message.contains("browse_click") && message.contains("ui_act"), "\(message)")
+        }
+        #expect(rig.system.rootCalls == 0 && rig.system.listings.isEmpty, "the redirect comes before the app is looked up")
+    }
 
     @Test func anItemThatOnlyOpensIsOpenedWithoutAnEvent() async throws {
         let row = fake("AXButton", title: "Arquivo", actions: ["AXOpen"])

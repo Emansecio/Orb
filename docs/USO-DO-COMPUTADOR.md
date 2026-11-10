@@ -86,6 +86,14 @@ método (`[segundo plano · AX]`, `[segundo plano · evento ao app]`, `[assumi a
 ("repetir pode duplicar"). Takeover: `danger()` sempre (cartão em Perguntar antes e Automático, recusa em Só leitura,
 roda em Sem pedir com o HUD); o cartão lista os `steps`.
 
+**Nomes de app e o navegador do Orb** (`RunningAppMatcher`, `UIAccess`). O casamento exato aceita o nome mostrado, o bundle id e o nome do `.app` em disco
+(`bundleURL` sem a extensão; `liveProcesses` o preenche), porque `open` e AppleScript conhecem "Preview" e o app mostra "Pré-Visualização". Na busca parcial,
+um processo auxiliar (bundle id filho do de outro candidato, como `com.google.Chrome.helper…` diante de `com.google.Chrome`) não é outro app e sai da
+ambiguidade; `exactOnly` (antes de ações destrutivas) segue sem busca parcial. Um id no formato `eN` (ref do `browse_snapshot`) em `id`, `ids`, `to`, `root`
+ou `steps` falha antes de procurar o app, mandando usar `browse_click`. O app que for o navegador do próprio Orb sem janela (o pid que segura o perfil
+dele, `BrowserProfileCache.holder`, e `windowList` vazia) é recusado por `ui_read`, `ui_act` e `screenshot` com a mesma indicação; sem identificar, o
+comportamento é o antigo. `app: "browser"` ou `"navegador"` não encontrado ganha a dica.
+
 **`screenshot`** (`.safe`): `window` (seletor de `ui_read`), `marks` (padrão true com janela + Acessibilidade),
 `max_side` 640–1568 (padrão 1280), `ocr` `auto|on|off` (`auto` só com < 8 elementos rotulados; Vision `.fast`). Janela
 resolvida por janelas AX → `SCShareableContent` (cache 1,5 s) casando pid, frame (±2 pt) e título. Saída: cabeçalho com

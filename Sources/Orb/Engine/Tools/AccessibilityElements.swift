@@ -544,7 +544,7 @@ struct LiveDesktop: Sendable {
         return pids.prefix(Int(count)).compactMap { pid -> RunningAppInfo? in
             guard pid > 0, let app = NSRunningApplication(processIdentifier: pid), !app.isTerminated, let name = app.localizedName else { return nil }
             return RunningAppInfo(name: name, bundleID: app.bundleIdentifier, pid: pid, isActive: false, isHidden: app.isHidden,
-                                  isRegular: app.activationPolicy == .regular, launchDate: app.launchDate)
+                                  isRegular: app.activationPolicy == .regular, launchDate: app.launchDate, bundleURL: app.bundleURL)
         }
     }
 }

@@ -299,18 +299,28 @@ enum RunningAppMatcher {
         case ambiguous([RunningAppInfo])
     }
 
-    /// An exact name or bundle id (ignoring case and accents) wins; otherwise a name that contains the text,
-    /// as long as only one app does. Several instances of the same app all match.
+    /// An exact name, bundle id or name of the `.app` on disk (ignoring case and accents) wins; the disk name is how
+    /// `open` and AppleScript know an app whose shown name is translated ("Preview" for "Pré-Visualização").
+    /// Otherwise a name that contains the text, as long as only one app does. Several instances of the same app all match.
     /// With `exactOnly`, a partial match is never accepted (used before destructive actions); the caller can still ask
     /// for the partial ones to offer as suggestions.
     static func match(_ query: String, in apps: [RunningAppInfo], exactOnly: Bool = false) -> Result {
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return .none }
         func same(_ a: String, _ b: String) -> Bool { a.compare(b, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }
-        let exact = apps.filter { same($0.name, query) || ($0.bundleID.map { same($0, query) } ?? false) }
+        let exact = apps.filter {
+            same($0.name, query) || ($0.bundleID.map { same($0, query) } ?? false)
+                || ($0.bundleURL.map { same($0.deletingPathExtension().lastPathComponent, query) } ?? false)
+        }
         if !exact.isEmpty { return .found(exact) }
         if exactOnly { return .none }
-        let partial = apps.filter { $0.name.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
+        let matching = apps.filter { $0.name.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
+        // A helper process (bundle id under another candidate's) is part of that app, not a second app to choose from.
+        let parents = matching.compactMap { $0.bundleID?.lowercased() }
+        let partial = matching.filter { app in
+            guard let id = app.bundleID?.lowercased() else { return true }
+            return !parents.contains { id.hasPrefix($0 + ".") }
+        }
         if partial.isEmpty { return .none }
         let distinct = Set(partial.map { $0.bundleID ?? $0.name })
         return distinct.count == 1 ? .found(partial) : .ambiguous(partial)

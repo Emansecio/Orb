@@ -279,6 +279,7 @@ struct ScreenshotTool: AgentTool {
         if !hasScreen, !accessibilityGranted { throw ToolError(MacPermissionProblem.screenRecording.modelMessage) }
 
         let app = try await resolveApp(arguments.nonEmptyString("app"))
+        try UIAccess.refuseOrbBrowser(app, context: context, system: system)
         // The Orb's own window can be photographed, but its interface is not read (as ui_read refuses it).
         let isOrb = app.pid == ownPID || (Bundle.main.bundleIdentifier.map { app.bundleID == $0 } ?? false)
         if !hasScreen, isOrb { throw ToolError(MacPermissionProblem.screenRecording.modelMessage) }

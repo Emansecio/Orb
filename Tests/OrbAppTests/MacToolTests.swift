@@ -375,6 +375,32 @@ struct MacToolTests {
         #expect(RunningAppMatcher.match("  ", in: apps) == .none)
     }
 
+    @Test func aHelperProcessIsNotAnotherApp() {
+        let main = RunningAppInfo(name: "Google Chrome", bundleID: "com.google.Chrome", pid: 20, isActive: false, isHidden: false, isRegular: true)
+        let helper = RunningAppInfo(name: "Google Chrome Helper (Renderer)", bundleID: "com.google.Chrome.helper.Renderer", pid: 22,
+                                    isActive: false, isHidden: false, isRegular: false)
+        let drive = RunningAppInfo(name: "Google Drive", bundleID: "com.google.drivefs", pid: 40, isActive: false, isHidden: false, isRegular: false)
+        #expect(RunningAppMatcher.match("Chrome", in: [main, helper]) == .found([main]))
+        // The same holds with the helper listed first, and a different app that shares only the vendor stays ambiguous.
+        #expect(RunningAppMatcher.match("Chrome", in: [helper, main]) == .found([main]))
+        #expect(RunningAppMatcher.match("google", in: [main, helper, drive]) == .ambiguous([main, drive]))
+        // Exact matching never widens: a partial name still finds nothing.
+        #expect(RunningAppMatcher.match("Chrome", in: [main, helper], exactOnly: true) == .none)
+    }
+
+    @Test func theNameOfTheAppOnDiskMatchesExactly() {
+        let preview = RunningAppInfo(name: "Pré-Visualização", bundleID: "com.apple.Preview", pid: 50, isActive: false, isHidden: false, isRegular: true,
+                                     bundleURL: URL(fileURLWithPath: "/System/Applications/Preview.app"))
+        let extensionProcess = RunningAppInfo(name: "QLPreviewGenerationExtension", bundleID: "com.apple.quicklook.QLPreviewGenerationExtension", pid: 51,
+                                              isActive: false, isHidden: false, isRegular: false)
+        #expect(RunningAppMatcher.match("Preview", in: [extensionProcess, preview]) == .found([preview]))
+        #expect(RunningAppMatcher.match("preview", in: [extensionProcess, preview], exactOnly: true) == .found([preview]))
+        #expect(RunningAppMatcher.match("Pré-Visualização", in: [preview]) == .found([preview]))
+        // Without the disk name only the partial search is left, and it finds the extension.
+        let bare = RunningAppInfo(name: "Pré-Visualização", bundleID: "com.apple.Preview", pid: 50, isActive: false, isHidden: false, isRegular: true)
+        #expect(RunningAppMatcher.match("Preview", in: [extensionProcess, bare]) == .found([extensionProcess]))
+    }
+
     @Test func formatsTheRunningAppsList() {
         let text = AppListFormatter.format([apps[1], apps[0], apps[4]])
         #expect(text.hasPrefix("3 apps abertos:"))
