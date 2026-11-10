@@ -27,10 +27,14 @@ enum ReasoningEffort {
         return kept.isEmpty ? nil : kept
     }
 
-    /// The level a turn sends: the Orb's choice when its model takes it; nil (the provider's default) otherwise.
+    /// The level a request sends: the Orb's choice when its model takes it; otherwise the default the model's catalog
+    /// names, which Codex also sends by name instead of leaving it to the server (so "Padrão (Baixo)" in the picker is
+    /// what goes out). Nil, the provider's own default, when the catalog names none (Claude Code's) or lists no levels.
     static func sent(_ chosen: String, for model: ProviderModel?) -> String? {
-        guard !chosen.isEmpty, model?.efforts?.contains(chosen) == true else { return nil }
-        return chosen
+        guard let levels = model?.efforts else { return nil }
+        if levels.contains(chosen) { return chosen }
+        guard let standard = model?.defaultEffort, levels.contains(standard) else { return nil }
+        return standard
     }
 
     /// The picker's first option: the model's own default, named when the catalog says which it is.
@@ -42,8 +46,8 @@ enum ReasoningEffort {
     /// The line under the picker: a level the model does not take, or a cost worth knowing about.
     static func note(_ chosen: String, for model: ProviderModel?) -> String? {
         guard !chosen.isEmpty else { return nil }
-        guard model?.efforts != nil else { return "Este modelo não tem ajuste de esforço; ele usa o padrão dele." }
-        guard sent(chosen, for: model) != nil else {
+        guard let levels = model?.efforts else { return "Este modelo não tem ajuste de esforço; ele usa o padrão dele." }
+        guard levels.contains(chosen) else {
             return "Este modelo não tem o esforço \(label(chosen)); ele usa o padrão dele."
         }
         return ["xhigh", "max"].contains(chosen)

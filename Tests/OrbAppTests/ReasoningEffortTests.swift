@@ -36,6 +36,38 @@ struct ReasoningEffortTests {
         #expect(ReasoningEffort.sent("high", for: nil) == nil)
     }
 
+    /// A ChatGPT model, whose catalog names its default level.
+    private let sol = ProviderModel(id: "gpt-6.1-sol", name: "GPT-6.1-Sol", format: .responses,
+                                    efforts: ["low", "medium", "high"], defaultEffort: "low")
+
+    @Test func withoutAChoiceATurnSendsTheDefaultTheCatalogNames() {
+        #expect(ReasoningEffort.sent("", for: sol) == "low")
+        #expect(ReasoningEffort.sent("high", for: sol) == "high")
+        // A level kept from another model: the default goes out, as the line under the picker says.
+        #expect(ReasoningEffort.sent("xhigh", for: sol) == "low")
+        #expect(ReasoningEffort.note("xhigh", for: sol) == "Este modelo não tem o esforço Muito alto; ele usa o padrão dele.")
+        // A default the Orb does not send (or that the model does not list) is left to the provider.
+        var odd = sol
+        odd.defaultEffort = "ultra"
+        #expect(ReasoningEffort.sent("", for: odd) == nil)
+        #expect(ReasoningEffort.sent("xhigh", for: odd) == nil)
+    }
+
+    @Test func theAccountSendsTheDefaultWhenNobodyChoseAndNeverALevelTheModelDoesNotTake() throws {
+        var chatgpt = ProviderAccount(kind: .chatgpt)
+        chatgpt.baseURL = "https://chatgpt.com/backend-api/codex"
+        func level(_ model: ProviderModel?, _ effort: String?) throws -> String? {
+            try #require(chatgpt.client(for: model, credentials: { _ in "t" }, conversationID: "c", effort: effort) as? ResponsesClient)
+                .reasoningEffort
+        }
+        // The background work (notes, summaries, the wizard) asks for a client without a level.
+        #expect(try level(sol, nil) == "low")
+        #expect(try level(sol, "medium") == "medium")
+        #expect(try level(sol, "max") == "low")
+        // A model that left the list: nothing is known of it, so nothing is sent.
+        #expect(try level(nil, "high") == nil)
+    }
+
     @Test func theLineUnderThePickerSaysWhatTheChoiceMeans() {
         #expect(ReasoningEffort.note("", for: sonnet) == nil)
         #expect(ReasoningEffort.note("high", for: sonnet) == nil)

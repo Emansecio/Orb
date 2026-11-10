@@ -467,13 +467,16 @@ enum ModelCatalog {
 extension ProviderAccount {
     /// The client for one model: the format decides the wire protocol; OpenCode also wants a stable session id,
     /// and the OpenAI-style formats key their prompt cache to the conversation.
-    /// `effort` is the thinking level to send (`ReasoningEffort.sent`): only Claude Code and the Responses API take one.
+    /// `effort` is the thinking level asked for, nil for none (the background work asks for none): what goes out is
+    /// `ReasoningEffort.sent`, decided here so that no caller sends a level the model does not take or skips the model's
+    /// named default. Only Claude Code and the Responses API take one.
     /// `cacheTTL`: the prompt-cache lifetime Claude Code should ask for (`Schedule.cacheTTL`); nil is the CLI's own.
     /// `replyTokens`: the room the history left for the reply (`ContextBudget.replyTokens`), the cap the Messages format
     /// sends, so a full history and the longest reply still fit the window together.
     func client(for model: ProviderModel?, credentials: @escaping CredentialsProvider, conversationID: String,
                 effort: String? = nil, replyTokens: Int? = nil, cacheTTL: String? = nil,
                 keepsIdleProcess: Bool = false) -> (any LLMClient)? {
+        let effort = ReasoningEffort.sent(effort ?? "", for: model)
         // Claude Code has no address and no key: the installed CLI is only the transport to the model, through the user's login
         // (so `credentials` goes unused). Everything else about the turn (prompt, tools, memory) is the Orb's own.
         // `keepsIdleProcess`: the chat's own turns leave the CLI process open for the next message (`ClaudePipeIdlePool`); side calls do not.
