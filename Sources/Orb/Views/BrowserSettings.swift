@@ -25,7 +25,7 @@ struct BrowserSettings: View {
                     .disabled(!showsScreen)
                     .help(Tip.animateBrowserCursor)
             } footer: { FormFootnote {
-                Text("Enquanto o Orb usa o navegador, o chat mostra a página ao vivo. Só você vê: nada é gravado nem vai para o modelo. Desligado, o chat fica como antes. Com a tela à vista, cada clique espera o cursor chegar (cerca de 0,2 s) e a rolagem é suave; sem ela, nada muda. Sem a animação, ou com “Reduzir movimento” ligado no sistema, o cursor salta como antes.")
+                Text("Enquanto o Orb usa o navegador, o chat mostra a página ao vivo. Só você vê: nada é gravado nem vai para o modelo. Desligado, o chat fica como antes. Com a animação, cada clique espera o cursor chegar (cerca de 0,2 s), só enquanto a tela está à vista.")
             } }
             SearchKeySection()
             Section("Privacidade") {
