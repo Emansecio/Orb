@@ -12,6 +12,15 @@ struct TaskPlan: Codable, Sendable, Equatable {
         case blocked
 
         init(from decoder: Decoder) throws { self = try decoder.rawValue(Self.self, fallback: .pending) }
+
+        /// The state a call names. Models also send the words other plan tools taught them ("completed") and the ones of
+        /// the criteria ("met"): refusing those left steps that were done marked as pending for good.
+        static func named(_ text: String) -> State? {
+            let name = text.lowercased().replacingOccurrences(of: "-", with: "_").replacingOccurrences(of: " ", with: "_")
+            return State(rawValue: name) ?? aliases[name]
+        }
+
+        private static let aliases: [String: State] = ["completed": .done, "complete": .done, "met": .done, "todo": .pending, "open": .pending]
     }
 
     struct Step: Codable, Sendable, Equatable {
@@ -55,9 +64,21 @@ struct TaskPlan: Codable, Sendable, Equatable {
     var updatedAt: Date = .now
     /// The `done_when` list; empty for a plan that sets none (and for every plan saved before it existed).
     var criteria: [Criterion] = []
+    /// Requests in a row that ended with the plan open and no `task_plan` call (`BotSession.finishTurn`). At
+    /// `passedOverLimit` the conversation has moved on without it, and the plan is set aside.
+    var passedOver = 0
 
-    /// Some step is not done yet: the plan still steers the work (it goes in the prompt and shows in the chat).
-    var isActive: Bool { steps.contains { $0.state != .done } }
+    /// A plan nobody closed used to follow the conversation for good: in every message, in the chat and in the pulse.
+    static let passedOverLimit = 3
+
+    /// Some step is not done yet.
+    var isUnfinished: Bool { steps.contains { $0.state != .done } }
+    /// The plan still steers the work (it goes in the prompt, shows in the chat and may wake the pulse): unfinished, and
+    /// not set aside. A plan set aside is kept as it was, and an `update` takes it up again.
+    var isActive: Bool { isUnfinished && passedOver < Self.passedOverLimit }
+
+    /// The work went on without the plan, or the Orb found nothing left to do in it: it stops following the conversation.
+    mutating func setAside() { passedOver = Self.passedOverLimit }
     var doneCount: Int { steps.count(where: { $0.state == .done }) }
     /// The step being worked on, else the first one still open.
     var current: Step? { steps.first { $0.state == .inProgress } ?? steps.first { $0.state != .done } }
@@ -65,8 +86,8 @@ struct TaskPlan: Codable, Sendable, Equatable {
     /// The plan a turn finished: all its steps done at the end, and not the very plan it began with already done (a turn
     /// that only touches a finished plan, or a reopened chat, says nothing again). `before` is the plan when the turn began.
     static func finishedInTurn(from before: TaskPlan?, to after: TaskPlan?) -> TaskPlan? {
-        guard let after, !after.steps.isEmpty, !after.isActive else { return nil }
-        if let before, !before.isActive, before.goal == after.goal, before.steps.map(\.text) == after.steps.map(\.text) { return nil }
+        guard let after, !after.steps.isEmpty, !after.isUnfinished else { return nil }
+        if let before, !before.isUnfinished, before.goal == after.goal, before.steps.map(\.text) == after.steps.map(\.text) { return nil }
         return after
     }
 
@@ -122,16 +143,29 @@ struct TaskPlan: Codable, Sendable, Equatable {
     // MARK: Changes
 
     enum Action: String, CaseIterable {
-        case set, update, clear
+        case set, update, done, clear, show
 
         static var allNames: [String] { allCases.map(\.rawValue) }
+
+        /// The action a call means. Models call it as other plan tools taught them: with no `action` (the fields given
+        /// say which), or with their own word for reading the plan or closing it. Each of these was an error before, and
+        /// a model that could not read or close its plan left it open.
+        static func of(_ arguments: JSONValue) -> Action? {
+            let name = (arguments["action"]?.string ?? "").trimmingCharacters(in: .whitespaces).lowercased()
+            if let action = Action(rawValue: name) ?? aliases[name] { return action }
+            guard name.isEmpty else { return nil }
+            if arguments["goal"] != nil || arguments["steps"] != nil { return .set }
+            if arguments["updates"] != nil || arguments["checks"] != nil || arguments["next"] != nil { return .update }
+            return nil
+        }
+
+        private static let aliases: [String: Action] = ["list": .show, "get": .show, "complete": .done, "finish": .done]
     }
 
     /// The plan after a `task_plan` call with these arguments (nil: cleared). Throws, changing nothing, for anything
     /// the call cannot do; the tool and the replay of a conversation's calls both go through here, so they agree.
     static func applying(_ arguments: JSONValue, to plan: TaskPlan?, now: Date = .now) throws -> TaskPlan? {
-        let action = arguments["action"]?.string ?? ""
-        switch Action(rawValue: action) {
+        switch Action.of(arguments) {
         case .set:
             let goal = clip(arguments["goal"]?.string ?? "", goalLimit)
             guard !goal.isEmpty else { throw ToolError("Give the `goal`.") }
@@ -158,7 +192,7 @@ struct TaskPlan: Codable, Sendable, Equatable {
                     let given = update["step"]?.int.map(String.init) ?? "?"
                     throw ToolError("There is no step \(given): the plan has steps 1 to \(plan.steps.count).")
                 }
-                guard let state = update["state"]?.string.flatMap(State.init(rawValue:)) else {
+                guard let state = update["state"]?.string.flatMap(State.named) else {
                     throw ToolError("`state` of step \(number) is one of " + State.allCases.map(\.rawValue).joined(separator: ", ") + ".")
                 }
                 let reason = clip(update["reason"]?.string ?? "", reasonLimit)
@@ -187,12 +221,25 @@ struct TaskPlan: Codable, Sendable, Equatable {
                 let clipped = clip(next, nextLimit)
                 plan.next = clipped.isEmpty ? nil : clipped
             }
+            plan.passedOver = 0
+            plan.updatedAt = now
+            return plan
+        case .done:
+            guard var plan else { throw ToolError("There is no plan: create one with action \"set\".") }
+            for index in plan.steps.indices {
+                plan.steps[index].state = .done
+                plan.steps[index].reason = nil
+            }
+            plan.next = nil
+            plan.passedOver = 0
             plan.updatedAt = now
             return plan
         case .clear:
             return nil
+        case .show:
+            return plan
         case nil:
-            throw ToolError("`action` is one of set, update, clear.")
+            throw ToolError("`action` is one of " + Action.allNames.joined(separator: ", ") + ".")
         }
     }
 
@@ -262,6 +309,7 @@ extension TaskPlan {
         next = try c.decodeIfPresent(String.self, forKey: .next)
         updatedAt = try c.value(.updatedAt, default: .distantPast)
         criteria = try c.lossyArray(.criteria)
+        passedOver = try c.value(.passedOver, default: 0)
     }
 }
 

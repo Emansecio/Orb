@@ -148,8 +148,8 @@ carregada), cancelam com o ⌘. e uma falha do pedido volta ao texto simples. Ja
 mesmo repetindo as células: a tabela tem teto de 4.000 caracteres, e tirar do texto o que caiu nela arriscaria perder o que o Vision
 não pôs em célula nenhuma (títulos, legendas) e, na captura de janela, a posição para clicar. Formulários só saem se Vision os ler como tabela; a API não tem campo.
 
-**Specs:** teto total 20.850 caracteres, 20.822 medidos (subiu com `task_plan`, com o `front` do `open`, com o `app_dictionary`, com o `apps_list` e com o mouse do `ui_act`:
-modificadores, `hold`, `move`, `drag` entre apps e `draw`, ~440), sub-teto testado de 4.800 para
+**Specs:** teto total 20.950 caracteres, 20.911 medidos (subiu com `task_plan`, com o `front` do `open`, com o `app_dictionary`, com o `apps_list`, com o mouse do `ui_act`:
+modificadores, `hold`, `move`, `drag` entre apps e `draw`, ~440, e com as ações `done` e `show` do `task_plan`, ~90), sub-teto testado de 4.800 para
 `ui_read`+`ui_act`+`screenshot` (4.433 medidos).
 
 ## 3. Desempenho e confiabilidade

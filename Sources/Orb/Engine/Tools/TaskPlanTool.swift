@@ -31,7 +31,7 @@ struct TaskPlanTool: AgentTool {
         description: """
         Plan of a task with several steps (not a question or a quick request), shown to you again as you work. set: goal \
         and 1 to \(TaskPlan.maxSteps) steps (replaces the plan). update: steps by number (blocked needs a reason), checks, next. \
-        clear: drop it. Making files or code: set done_when from the request and check each met, with evidence, before saying done.
+        done: task finished, every step done. clear: drop it. show: read it. Making files or code: set done_when from the request and check each met, with evidence, before saying done.
         """,
         // No descriptions where the description above or the name says it: every character goes with every request.
         parameters: .schema([
@@ -59,15 +59,19 @@ struct TaskPlanTool: AgentTool {
     func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
 
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) {
-        switch TaskPlan.Action(rawValue: arguments["action"]?.string ?? "") {
+        switch TaskPlan.Action.of(arguments) {
         case .set: ("Planejando", arguments["goal"]?.string ?? "")
+        case .done: ("Concluindo o plano", "")
         case .clear: ("Encerrando o plano", "")
+        case .show: ("Consultando o plano", "")
         case .update, nil: ("Atualizando o plano", arguments["next"]?.string ?? "")
         }
     }
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
-        guard let plan = try context.taskPlan.apply(arguments) else { return "The plan was cleared." }
+        guard let plan = try context.taskPlan.apply(arguments) else {
+            return TaskPlan.Action.of(arguments) == .show ? "There is no plan: create one with action \"set\"." : "The plan was cleared."
+        }
         return plan.render()
     }
 }

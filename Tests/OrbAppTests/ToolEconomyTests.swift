@@ -32,7 +32,10 @@ struct ToolSpecEconomyTests {
     /// and `done_when`/`checks` on `task_plan` (acceptance criteria checked before "done"). Measured at 20,377.
     /// Raised to 20,850 for the mouse of `ui_act`: modifiers, hold, `move`, `drag` to another app (`to`, `to_app`, `duration`) and `draw`
     /// (`path`), about 440 characters (docs/USO-DO-COMPUTADOR.md). The sub-ceiling below did not need to grow. Measured at 20,822.
-    private static let specCharsCeiling = 20_850
+    /// Raised to 20,950 for `done` and `show` on `task_plan` (~90): closing a finished plan in one call and reading it. In real
+    /// conversations the model asked for both under names the tool refused (`list` eleven times in one run), and a plan it could
+    /// not close stayed open for good. Measured at 20,911.
+    private static let specCharsCeiling = 20_950
     /// `ui_read`, `ui_act` and `screenshot` together: waiting, steps, takeover, marks and OCR all have to fit here.
     private static let appControlSpecCharsCeiling = 4_800
     /// The tools of the Orb's own browser are offered only when an engine is installed, so they have a ceiling of their own.

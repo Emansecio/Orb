@@ -2,7 +2,7 @@ import Foundation
 
 /// A routine's working list is separate from its bounded run history.
 struct RoutineFollowUpTool: AgentTool {
-    let spec = ToolSpec(name: "routine_follow_up", description: "Maintain this routine's persistent follow-ups. List first; save new items with subject, channel and next_step; update or resolve existing items by id. One open item per contact (phone or e-mail in channel): saving another updates it. Never infer that a missing item is resolved.",
+    let spec = ToolSpec(name: "routine_follow_up", description: "Maintain this routine's persistent follow-ups. List first; save new items with subject, channel and next_step; update or resolve existing items by id, or by the same channel or subject. One open item per contact (phone or e-mail in channel): saving another updates it. Resolve what is finished, and what waits on someone who went quiet (the list says for how long): it comes back if they write. Never infer that a missing item is resolved.",
                         parameters: .schema([
                             "action": .property("string", "list, save, update or resolve"),
                             "id": .property("string"), "subject": .property("string"),
@@ -37,16 +37,7 @@ extension AppModel {
         // Two open items about one client are two states of it, and a run would act on either: the older ones go first.
         RoutineFollowUp.collapse(&routines[index].followUps)
         RoutineFollowUp.pruneResolved(&routines[index].followUps)
-        if action == "list" {
-            let open = routines[index].followUps.filter { !$0.resolved }.sorted { $0.updatedAt > $1.updatedAt }
-            return open.isEmpty ? "Nenhum acompanhamento aberto." : open.prefix(RoutineFollowUp.listLimit).map {
-                "\($0.id.uuidString) | \($0.subject) | \($0.channel) | \($0.nextStep)"
-                    + ($0.lastAction.map { " | Última ação: " + $0 } ?? "")
-                    + ($0.source.map { " | Fonte: " + $0 } ?? "")
-                    + ($0.lastChecked.map { " | Verificado: " + $0.formatted(.iso8601) } ?? "")
-            }.joined(separator: "\n")
-                + (open.count > RoutineFollowUp.listLimit ? "\n+\(open.count - RoutineFollowUp.listLimit) abertos; resolva para ver" : "")
-        }
+        if action == "list" { return RoutineFollowUp.list(routines[index].followUps) }
         func field(_ name: String) -> String? {
             let value = arguments[name]?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             return value.isEmpty ? nil : String(value.prefix(500))
@@ -76,12 +67,19 @@ extension AppModel {
             }
             return reply
         }
-        guard action == "update" || action == "resolve", let id = field("id").flatMap(UUID.init(uuidString:)),
-              let item = routines[index].followUps.firstIndex(where: { $0.id == id }) else {
-            throw ToolError("Informe action e o id de um acompanhamento existente.")
+        // By id, else by what makes two items one (`sameness`): the id is only in the list, which shows part of a long
+        // one, so an item could be saved again and again but not closed.
+        let followUps = routines[index].followUps
+        let subject = field("subject"), channel = field("channel")
+        let probe = subject == nil && channel == nil ? nil
+            : RoutineFollowUp(subject: subject ?? "", channel: channel ?? "", nextStep: "").sameness
+        guard action == "update" || action == "resolve",
+              let item = field("id").flatMap(UUID.init(uuidString:)).flatMap({ id in followUps.firstIndex { $0.id == id } })
+                ?? followUps.firstIndex(where: { !$0.resolved && $0.sameness == probe }) else {
+            throw ToolError("Informe action e o id, ou o mesmo channel ou subject, de um acompanhamento aberto.")
         }
-        if let subject = field("subject") { routines[index].followUps[item].subject = subject }
-        if let channel = field("channel") { routines[index].followUps[item].channel = channel }
+        if let subject { routines[index].followUps[item].subject = subject }
+        if let channel { routines[index].followUps[item].channel = channel }
         if let next = field("next_step") { routines[index].followUps[item].nextStep = next }
         if let action = field("last_action") { routines[index].followUps[item].lastAction = action }
         if let source = field("source") { routines[index].followUps[item].source = source }
@@ -97,6 +95,33 @@ extension RoutineFollowUp {
     /// What `list` hands the model, and how many resolved items a routine keeps: both grow with the routine's life otherwise.
     static let listLimit = 50
     static let resolvedKept = 200
+    /// An open item nobody updated or checked for this long is quiet: the list says so, and asks for it to be closed or
+    /// updated. Of a list longer than `listLimit`, this many of the quietest take the place of the last newest ones.
+    static let quietAfter: TimeInterval = 7 * 86_400
+    static let quietShown = 10
+
+    /// When the item last moved: saved, updated or checked.
+    var lastMoved: Date { max(updatedAt, lastChecked ?? .distantPast) }
+
+    /// What `list` answers: the open items, newest first. A list longer than `listLimit` used to show only the newest, so
+    /// the old ones were never seen again and never closed: now the quietest come along, and each one closed or updated
+    /// makes room for the next.
+    static func list(_ items: [RoutineFollowUp], now: Date = .now) -> String {
+        let open = items.filter { !$0.resolved }.sorted { $0.updatedAt > $1.updatedAt }
+        guard !open.isEmpty else { return "Nenhum acompanhamento aberto." }
+        let quietest = open.dropFirst(listLimit).sorted { $0.lastMoved < $1.lastMoved }.prefix(quietShown)
+        let shown = open.prefix(listLimit - quietest.count) + quietest
+        let lines = shown.map { item in
+            let quiet = now.timeIntervalSince(item.lastMoved)
+            return "\(item.id.uuidString) | \(item.subject) | \(item.channel) | \(item.nextStep)"
+                + (item.lastAction.map { " | Última ação: " + $0 } ?? "")
+                + (item.source.map { " | Fonte: " + $0 } ?? "")
+                + (item.lastChecked.map { " | Verificado: " + $0.formatted(.iso8601) } ?? "")
+                + (quiet >= quietAfter ? " | Parado há \(Int(quiet / 86_400)) dias: conclua (resolve) ou atualize" : "")
+        }
+        let more = open.count - shown.count
+        return lines.joined(separator: "\n") + (more > 0 ? "\n+\(more) abertos: aparecem conforme os parados acima forem concluídos ou atualizados" : "")
+    }
 
     /// Drops the oldest resolved items beyond `resolvedKept`; open ones are never touched.
     static func pruneResolved(_ items: inout [RoutineFollowUp]) {

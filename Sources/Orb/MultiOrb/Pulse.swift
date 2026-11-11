@@ -141,6 +141,7 @@ enum Pulse {
         marker + "Nobody asked for this run" + (inChat ? ", and nobody reads it while it works" : "") + ". Open work you could move forward:\n"
             + demands.map { "- " + $0.line }.joined(separator: "\n")
             + (inChat ? "\nThis is the conversation of the plan: resume its next step from where it stopped (check what is already done)."
+                + " If its work is done or no longer wanted, close the plan (task_plan done, or clear)."
                 + " Do not ask the user anything; if a step needs them, leave it blocked and say why." : "")
             + "\nAct only on these: resume, ask a teammate, create an Orb or group, or adjust members (a new Orb only when no "
             + "teammate can do it). If none needs anything now, reply only NOTHING."
@@ -587,6 +588,13 @@ extension AppModel {
                 savePulseState()
                 return true
             }
+        }
+
+        // Asked to resume the plan, the Orb found nothing to do and left it as it was: the plan is set aside, or it would go
+        // on in front of every message of that chat with work nobody is going to do.
+        if chat != nil, succeeded, !userStopped, Pulse.isNothing(reply), let started = run?.startedAt,
+           let plan = session.conversation?.activePlan, plan.updatedAt < started {
+            session.changeConversation { $0.taskPlan?.setAside() }
         }
 
         // This run's items: after the marker (or, in the chat, the line) that opens it.

@@ -243,7 +243,10 @@ Se o navegador não estiver instalado, o Orb fica só com `web_fetch` e `web_sea
   "Lendo README.md", "Procurando “TODO”", "Abrindo github.com") com o tempo do turno; com o mouse sobre ela, vêm também
   quantas ações ele já fez e o que o turno gastou ("16 s · 3 ações · 180 mil tokens"). Se o Orb montou um plano, um anel
   pequeno ao lado da frase enche conforme as etapas ficam prontas ("2/5"); um clique mostra as etapas. Enquanto o modelo
-  não marca nenhuma etapa, o anel fica apagado e diz só "Plano", em vez de um "0 de 5" que nunca anda. Entre um passo e
+  não marca nenhuma etapa, o anel fica apagado e diz só "Plano", em vez de um "0 de 5" que nunca anda. Um plano que o
+  Orb deixou aberto não acompanha a conversa para sempre: depois de três pedidos seguidos atendidos sem ele tocar no
+  plano, o plano sai de cena (some o anel, ele deixa de ir junto com cada mensagem e não acorda o pulso). Ele fica
+  guardado como estava, e volta se o Orb retomar as etapas. Entre um passo e
   outro a linha diz "Pensando…". Quando espera por você, ela fica
   parada em laranja ("Esperando sua resposta"); quando espera para tentar de novo, mostra a contagem ("Conexão caiu ·
   tentando de novo", "em 8 s"). A barra lateral e o painel da barra de menus dizem a mesma coisa; o subtítulo da janela fica só com o nome da
@@ -574,6 +577,10 @@ aviso dizendo por quê.
   Há um item aberto por contato: quando o canal tem um telefone ou e-mail ("WhatsApp 5511…"), salvar de novo atualiza o
   item daquele cliente em vez de criar outro, e dois itens abertos do mesmo contato viram o mais recente. O número vale com ou
   sem 55 e com ou sem o nono dígito. Se o cliente já teve um item concluído, o Orb é avisado ao abrir um novo.
+  O Orb conclui ou atualiza um item pelo contato ou pelo assunto, sem precisar do código dele. Numa lista longa, ele recebe
+  os 40 itens mais recentes e os 10 parados há mais tempo, cada um com os dias sem movimento, e é orientado a concluir o
+  que espera resposta de alguém que sumiu há uma semana (se a pessoa voltar a escrever, o item reabre com o histórico); o que
+  espera uma decisão sua continua aberto.
   O cartão da rotina mostra essa lista e permite concluir um item. Depois de duas execuções que registram a lista, o cartão
   compara quantos acompanhamentos foram abertos ou concluídos desde a anterior.
   Ela também sabe o que vocês acabaram de fazer no chat aberto:
@@ -692,7 +699,8 @@ ou grupos, ajusta membros. Se o trabalho não pede nada agora, não diz nada.
   pulso" mostra o motivo. Um Orb ocupado, ou com um pulso esperando resposta, espera a próxima volta.
 - **Plano retomado no chat.** Um plano largado é retomado na própria conversa dele, com o histórico: o chat mostra "Atlas
   retomou sozinho o plano “…”" e o trabalho em seguida, sem bolha sua. Nesse turno o Orb não faz perguntas nem pede acesso
-  (ninguém está olhando); se encontra nada a fazer, a conversa fica como estava. O que você escrever enquanto ele trabalha
+  (ninguém está olhando); se encontra nada a fazer, a conversa fica como estava e o plano sai de cena, porque o trabalho
+  dele já estava feito ou não é mais para fazer. O que você escrever enquanto ele trabalha
   espera o fim e vai como uma mensagem sua. Fechar o app no meio descarta esse turno, como qualquer pulso, e a demanda volta
   no pulso seguinte.
 - **Respostas voltam ao pulso.** Quando o pulso pede algo a um colega, a resposta retoma o próprio pulso, não o seu chat, e a

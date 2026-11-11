@@ -27,6 +27,8 @@ leva a chamada ao `DelegationHub`. `orbs` (`ask`, `tell`, `list`), `group_create
   que ele orquestra; aviso (`tell`) não lido há `noticeIdle` (`PulseState.notices`, de `notePulseNotice`). Trabalho com
   `envelope.pulseRun` nunca é demanda. As chaves vão no `PulseRun` e só são entregues no fim (`settleDemands`): falha conta em
   `PulseState.failures` e entrega após `failureLimit`; `delivered` guarda só chaves cujo trabalho ainda existe (teto 200).
+  Um plano deixado de lado (`TaskPlan.isActive` falso: três turnos seguidos passaram por cima dele, ou um pulso respondeu NOTHING
+  sem tocá-lo) não é demanda até um `update` retomá-lo.
   Com um plano entre as demandas, `beginPulseInChat` roda na conversa dele (`prepareTurn`, `BotSession.pulseInChat`,
   `SendOrigin.pulse`, linha `pulseResumed`, turno `unattended`; no `WorkJournal` só a entrada `.pulse`, descartada na abertura,
   nunca a tarefa do chat; o Orb com uma tarefa cortada esperando a retomada (`WorkJournal.awaitsChatResume`) fica fora do

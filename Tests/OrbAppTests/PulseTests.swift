@@ -215,6 +215,7 @@ private final class PulseWorld {
         // The plan moves on (one step fewer): another key.
         var conversation = try #require(model.sessions[world.bot("Atlas").id]?.conversation)
         conversation.taskPlan?.steps[1].state = .done
+        conversation.taskPlan?.passedOver = 0 // as the `update` that marks the step does: the NOTHING had set the plan aside
         model.session(world.bot("Atlas").id).conversation = conversation
         await model.pulseTick(now: world.at(minutes: 244))
         await world.settle()
@@ -1179,6 +1180,23 @@ private final class PulseWorld {
         #expect(world.events("Atlas").isEmpty, "the NOTHING took its line along")
         #expect(model.pulseState.delivered[atlas.uuidString]?.count == 1)
         #expect(model.live(atlas).unread == 0, "nothing to read: no unread")
+    }
+
+    @Test func aPlanThePulseFoundNothingToDoInIsSetAside() async throws {
+        let world = PulseWorld(names: ["Atlas", "Revisor"], demand: false, rule: Self.nothing)
+        defer { world.cleanUp() }
+        let model = world.model, atlas = world.bot("Atlas").id
+        world.plant("Atlas", tag: 0)
+        await world.startInterval()
+        await model.pulseTick(now: world.at(minutes: 61))
+        await world.settle()
+        #expect(await world.log.count(by: "Atlas") == 1)
+        let conversation = try #require(model.session(atlas).conversation)
+        // Kept as it was, but it no longer goes with every message, shows in the chat or wakes a pulse.
+        #expect(conversation.taskPlan?.steps.map(\.state) == [.done, .pending, .pending])
+        #expect(conversation.activePlan == nil && model.session(atlas).shownPlan == nil)
+        model.session(atlas).write()
+        #expect(model.pulseState.plans[atlas.uuidString] == nil)
     }
 
     @Test func aQuitDuringAPulseLeavesItsDemandsForTheNextOne() async throws {

@@ -6,9 +6,12 @@ enum PlanReminder {
     /// The closing reminder: the reply ends the turn while steps of the plan are still open.
     static func text(open steps: [Int]) -> String {
         let list = steps.map(String.init).joined(separator: ", ")
-        return "Before you finish: step\(steps.count == 1 ? "" : "s") \(list) of your task plan \(steps.count == 1 ? "is" : "are") "
-            + "still open. Go on with \(steps.count == 1 ? "it" : "them") now; or mark what you cannot do as blocked, with the "
-            + "reason (task_plan update); or tell the user plainly why you stop here."
+        let one = steps.count == 1
+        // "Mark what is done" comes first: a model that did the work and never marked it took this for a call to redo it,
+        // said it was done again, and left the plan open.
+        return "Before you finish: step\(one ? "" : "s") \(list) of your task plan \(one ? "is" : "are") still open. Mark what is "
+            + "done (task_plan update, or action done when all of it is); go on now with what is not; or mark what you cannot "
+            + "do as blocked, with the reason; or tell the user plainly why you stop here."
     }
 
     /// The reminder for a reply that says the work is done while criteria of the plan's `done_when` are not met; nil when

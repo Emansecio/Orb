@@ -466,8 +466,58 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         for number in 0..<total { _ = try save("Lead \(number)", channel: "Caixa \(number)", in: model, routine, bot) }
         let list = try model.changeFollowUp(.object(["action": .string("list")]), routineID: routine.id, botID: bot.id)
         #expect(list.split(separator: "\n").count == RoutineFollowUp.listLimit + 1)
-        #expect(list.hasSuffix("+7 abertos; resolva para ver"))
+        #expect(list.hasSuffix("+7 abertos: aparecem conforme os parados acima forem concluídos ou atualizados"))
         #expect(model.routines[0].followUps.count == total, "open items are never dropped")
+    }
+
+    /// The list of a routine with 253 open items showed the 50 newest for good: the other 203 were never seen again, so
+    /// never closed.
+    @Test func aLongListBringsTheQuietestAlongAndSaysForHowLong() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        func item(_ number: Int, daysAgo: Double, checkedDaysAgo: Double? = nil) -> RoutineFollowUp {
+            var item = RoutineFollowUp(subject: "Lead \(number)", channel: "Caixa \(number)", nextStep: "Aguardar")
+            item.updatedAt = now.addingTimeInterval(-daysAgo * 86_400 - Double(number))
+            item.lastChecked = checkedDaysAgo.map { now.addingTimeInterval(-$0 * 86_400) }
+            return item
+        }
+        // 55 of today, 12 left for ten days, and one of those checked yesterday (so not quiet).
+        let items = (0..<55).map { item($0, daysAgo: 0) } + (100..<112).map { item($0, daysAgo: 10, checkedDaysAgo: $0 == 100 ? 1 : nil) }
+        let lines = RoutineFollowUp.list(items, now: now).split(separator: "\n")
+        #expect(lines.count == RoutineFollowUp.listLimit + 1)
+        let quiet = lines.filter { $0.hasSuffix(" | Parado há 10 dias: conclua (resolve) ou atualize") }
+        #expect(quiet.count == RoutineFollowUp.quietShown)
+        #expect(!quiet.contains { $0.contains("| Lead 100 |") }, "checked yesterday: the others come first")
+        #expect(lines.prefix(40).allSatisfy { !$0.contains("Parado") } && lines[0].contains("| Lead 0 |"))
+        #expect(lines.last == "+17 abertos: aparecem conforme os parados acima forem concluídos ou atualizados")
+        // A short list is whole, and says which of its items went quiet.
+        let short = RoutineFollowUp.list([item(1, daysAgo: 0), item(2, daysAgo: 6.9), item(3, daysAgo: 7)], now: now).split(separator: "\n")
+        #expect(short.count == 3 && short.filter { $0.contains("Parado há 7 dias") }.count == 1)
+        #expect(RoutineFollowUp.list([], now: now) == "Nenhum acompanhamento aberto.")
+    }
+
+    /// The id is only in the list: an item could be saved again and again by its contact, but not closed by it.
+    @Test @MainActor func anItemIsClosedOrUpdatedByItsContactOrSubjectWithoutTheId() throws {
+        let (model, bot, routine) = setUp()
+        model.session(bot.id).routineID = routine.id
+        _ = try save("Ana quer o plano família", channel: "WhatsApp 5511999990000", in: model, routine, bot)
+        _ = try save("Túnel defasado", channel: "servidor", in: model, routine, bot)
+        func change(_ fields: [String: String]) throws -> String {
+            try model.changeFollowUp(.object(fields.mapValues(JSONValue.string)), routineID: routine.id, botID: bot.id)
+        }
+        #expect(try change(["action": "update", "subject": "túnel defasado", "next_step": "Atualizar na sexta"]) == "Acompanhamento atualizado.")
+        #expect(model.routines[0].followUps[1].nextStep == "Atualizar na sexta" && !model.routines[0].followUps[1].resolved)
+        #expect(try change(["action": "resolve", "channel": "(11) 99999-0000", "last_action": "Comprou"]) == "Acompanhamento concluído.")
+        #expect(model.routines[0].followUps[0].resolved && model.routines[0].followUps[0].lastAction == "Comprou")
+        // Nothing to tell it by, nobody by that contact, or one already closed: said plainly, and nothing changes.
+        let before = model.routines[0].followUps
+        for fields in [["action": "resolve"], ["action": "resolve", "channel": "5521888880000"], ["action": "resolve", "channel": "5511999990000"],
+                       ["action": "resolve", "id": "sem id"]] {
+            #expect(throws: ToolError.self) { try change(fields) }
+        }
+        #expect(model.routines[0].followUps == before)
+        // The id still finds a closed one (reopening it), as before.
+        #expect(try change(["action": "update", "id": before[0].id.uuidString]) == "Acompanhamento atualizado.")
+        #expect(!model.routines[0].followUps[0].resolved)
     }
 
     @Test func oldResolvedItemsBeyondTheLimitAreDroppedAndOpenOnesStay() {

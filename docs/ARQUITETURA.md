@@ -140,6 +140,12 @@ O que deixa um Orb (ou um grupo) programar, testar e entregar sem cliques além 
   `evidence`). No fim do turno, depois do `CompletionWatch`, `PlanReminder.unmetCriteria` lembra os critérios que faltam quando a
   resposta diz que acabou. O `CompletionWatch` também lembra de rodar o check de novo quando houve `write_file`/`edit_file`
   depois do último check que passou.
+- **Fim do plano (`TaskPlan.isActive`).** O plano só acompanha a conversa (prefácio, recital, anel, pulso) enquanto tem etapa
+  aberta e não foi deixado de lado. `finishTurn` conta em `passedOver` os turnos do chat que terminaram com o plano aberto e
+  intocado; em `passedOverLimit` (3) ele sai de cena, guardado como estava, e um `update` o traz de volta. O pulso que retoma um
+  plano e responde NOTHING sem tocá-lo também o deixa de lado (`finishPulse`). A ferramenta aceita o que os modelos mandam de
+  fato: sem `action` (deduzida dos campos), `list`/`get` (lê o plano, `show`), `done`/`complete` (fecha todas as etapas) e os
+  estados `completed` e `met` (`TaskPlan.Action.of`, `State.named`).
 - **Revisão no grupo (`Groups/GroupReview.swift`).** O prompt do orquestrador manda definir `done_when`, construir com um membro,
   revisar com outro (até 3 rodadas) e dar o veredito na resposta final. O revisor começa com `APPROVED` ou `CHANGES:`;
   `ReviewVerdict.read` conta a rodada (`GroupRun.round`, `verdict`), põe "Revisão: …" no fio e na página da sessão do quadro.
@@ -306,6 +312,9 @@ renomear ou remover chave exige migração.
   orientado a carregar os acompanhamentos abertos para a próxima execução; cada relatório armazenado tem até 8.000 caracteres.
   `routine_follow_up` mantém um item aberto por contato (`RoutineFollowUp.contact`, o telefone ou e-mail do canal, nunca do
   assunto, onde um lote cita um lead entre outros) e `collapse` resolve os gêmeos mais antigos a cada chamada.
+  `update` e `resolve` acham o item pelo id ou pela mesma identidade (`sameness`: contato ou assunto). `RoutineFollowUp.list`
+  entrega os 50 mais recentes; numa lista maior, os 10 parados há mais tempo (`lastMoved`) ocupam as últimas vagas, e todo item
+  sem movimento há `quietAfter` (7 dias) vai marcado com os dias, para o modelo concluir ou atualizar.
   `runDueRoutines` pula, como a pré-checagem, um horário que `Routine.missedSlot` acha vencido pelo próprio ritmo da agenda.
 - Um turno de outra conversa do mesmo Orb (a que você deixou com ele trabalhando, ou a que pediu algo a outro Orb e recebeu a
   resposta) usa o mesmo estacionamento: `workingChatID` é a conversa do turno, em `conversation`, e a que está na tela fica em

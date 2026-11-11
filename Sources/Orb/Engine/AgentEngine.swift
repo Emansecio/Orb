@@ -429,7 +429,8 @@ actor AgentEngine {
                         // A "done" with criteria of the plan still unmet (`done_when`), before the open steps.
                         let unmet = earlier != nil || stopAsked || !(planTouched || picksUpTask) || Self.endsWaitingForUser(said)
                             ? nil : PlanReminder.unmetCriteria(in: request.context.taskPlan.plan, said: said)
-                        let open = skipsPlan || unmet != nil ? [] : request.context.taskPlan.plan?.openSteps ?? []
+                        // A plan set aside (`TaskPlan.isActive`) asks for nothing: only its `update` brings it back.
+                        let open = skipsPlan || unmet != nil ? [] : request.context.taskPlan.plan.flatMap { $0.isActive ? $0.openSteps : nil } ?? []
                         if let reminder = earlier ?? unmet ?? (open.isEmpty ? nil : PlanReminder.text(open: open)) {
                             if earlier == nil, unmet == nil { remindedOfPlan = true }
                             reminders += 1

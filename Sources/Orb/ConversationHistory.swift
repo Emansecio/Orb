@@ -100,7 +100,8 @@ enum RoutinePrompt {
         field names, exit codes, phone numbers or ids (routine_follow_up keeps those); bold only the names in what needs \
         the user. Follow the task and existing permissions.
         Use routine_follow_up to list the persistent open follow-ups at the start. Save each new follow-up and update it \
-        after checking its source; resolve it only when it is actually finished. Keep existing items when a check fails.
+        after checking its source; resolve it when it is finished, and when it waits on someone who has not answered for a week \
+        (it comes back if they write; one that waits on the user stays). Keep existing items when a check fails.
         """
         if continuing {
             text += "\n\n" + continuingNote

@@ -446,6 +446,13 @@ extension BotSession {
         if routineID == nil, let finished = TaskPlan.finishedInTurn(from: planAtTurnStart, to: conversation?.taskPlan) {
             appendPlanSummary(finished)
         }
+        // A turn of the chat that ended with the plan open and as it found it: the work went on without the plan. After
+        // `TaskPlan.passedOverLimit` of them in a row it is set aside, or a plan the model never closed would go with every
+        // message and wake the pulse for good. Not a turn that failed or that you stopped, nor the pulse's (`finishPulse`).
+        if routineID == nil, pulseInChat == nil, completed, !userStopped, let plan = conversation?.taskPlan, plan.isActive,
+           plan == planAtTurnStart {
+            conversation?.taskPlan?.passedOver += 1
+        }
         planAtTurnStart = nil
         model.setStatus(nil, of: id)
         resetWork()

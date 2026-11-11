@@ -91,6 +91,33 @@ struct PlanDoneEventTests {
     /// What the model says at the end: the words in the chat and in its history.
     private func reply(_ text: String) -> [TurnEvent] { [.text(text), .message(ChatMessage(role: .assistant, content: text))] }
 
+    @Test @MainActor func aPlanTheWorkPassedOverThreeTurnsInARowIsSetAside() {
+        let model = model()
+        let id = model.bots[0].id
+        let session = model.session(id)
+        // The turn that makes the plan touched it: it does not count.
+        runTurn(model, id, asking: "publica", call("c1", set) + reply("Posso subir?"))
+        #expect(session.conversation?.taskPlan?.passedOver == 0)
+        runTurn(model, id, asking: "quanto custa?", reply("Nada."))
+        runTurn(model, id, asking: "e o prazo?", reply("Hoje."))
+        #expect(session.conversation?.taskPlan?.passedOver == 2 && session.conversation?.activePlan != nil)
+        // A turn that failed says nothing about the plan, and one that works on it starts the count again.
+        runTurn(model, id, asking: "segue", [.failed("sem rede")], succeeded: false)
+        #expect(session.conversation?.taskPlan?.passedOver == 2)
+        runTurn(model, id, asking: "segue", call("c2", first) + reply("Build gerado."))
+        #expect(session.conversation?.taskPlan?.passedOver == 0)
+        for question in ["e o domínio?", "e o e-mail?", "e o logo?"] { runTurn(model, id, asking: question, reply("Depois.")) }
+        // Set aside: kept as it was, out of the chat and of the prompt, and with no line saying it was finished.
+        #expect(session.conversation?.activePlan == nil && session.shownPlan == nil)
+        #expect(session.conversation?.taskPlan?.steps.map(\.state) == [.done, .pending])
+        #expect(lines(model, id).isEmpty)
+        // Further turns change nothing, and taking the plan up again brings it back.
+        runTurn(model, id, asking: "oi", reply("Oi."))
+        #expect(session.conversation?.taskPlan?.passedOver == TaskPlan.passedOverLimit)
+        runTurn(model, id, asking: "termina", call("c3", second) + reply("Pronto."))
+        #expect(lines(model, id).map(\.sentence) == ["Plano concluído · 2 etapas"])
+    }
+
     @Test @MainActor func theLineComesOnceWhenThePlanEndsAndNeverWhileAStepIsOpen() {
         let model = model()
         let id = model.bots[0].id

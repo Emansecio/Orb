@@ -91,7 +91,74 @@ struct TaskPlanToolTests {
         #expect(message(#"{"action": "update"}"#, existing) == "Give `updates`, `checks`, `next`, or any of them.")
         #expect(message(#"{"action": "set", "steps": ["a"]}"#) == "Give the `goal`.")
         #expect(message(#"{"action": "set", "goal": "x", "steps": []}"#) == "Give the `steps`, 1 to \(TaskPlan.maxSteps).")
-        #expect(message(#"{"action": "rename"}"#) == "`action` is one of set, update, clear.")
+        #expect(message(#"{"action": "rename"}"#) == "`action` is one of set, update, done, clear, show.")
+        #expect(message("{}") == "`action` is one of set, update, done, clear, show.")
+        #expect(message(#"{"action": "done"}"#) == "There is no plan: create one with action \"set\".")
+    }
+
+    // What the models really sent, each of which was an error that left the plan as it was (and so open for good).
+
+    @Test func aCallWithoutAnActionIsReadFromItsFields() throws {
+        let made = try #require(try TaskPlan.applying(arguments(#"{"goal": "Ler os e-mails", "steps": ["Abrir", "Ler"]}"#), to: nil))
+        #expect(made.goal == "Ler os e-mails" && made.steps.count == 2)
+        let updated = try #require(try TaskPlan.applying(arguments(#"{"updates": [{"step": 1, "state": "done"}]}"#), to: made))
+        #expect(updated.steps.map(\.state) == [.done, .pending])
+        #expect(try TaskPlan.applying(arguments(#"{"next": "ler o segundo"}"#), to: made)?.next == "ler o segundo")
+    }
+
+    @Test func readingThePlanAnswersWithItAndChangesNothing() async throws {
+        let existing = try plan()
+        let board = TaskPlanBoard(existing)
+        for action in ["show", "list", "get", "LIST"] {
+            #expect(try await run(arguments(#"{"action": "\#(action)"}"#), on: board) == existing.render())
+        }
+        #expect(board.plan == existing)
+        #expect(try await run(arguments(#"{"action": "list"}"#), on: TaskPlanBoard()) == "There is no plan: create one with action \"set\".")
+    }
+
+    @Test func doneClosesEveryStepInOneCall() throws {
+        var existing = try plan()
+        existing.steps[1].state = .blocked
+        existing.steps[1].reason = "sem acesso"
+        for action in ["done", "complete", "finish"] {
+            let closed = try #require(try TaskPlan.applying(arguments(#"{"action": "\#(action)"}"#), to: existing))
+            #expect(closed.steps.allSatisfy { $0.state == .done && $0.reason == nil })
+            #expect(closed.next == nil && !closed.isActive && !closed.isUnfinished)
+            #expect(TaskPlan.finishedInTurn(from: existing, to: closed) == closed, "the chat says the plan was finished")
+        }
+    }
+
+    @Test func theWordsOfOtherPlanToolsMarkAStep() throws {
+        let existing = try plan()
+        let json = #"""
+        {"action": "update", "updates": [{"step": 1, "state": "completed"}, {"step": 2, "state": "met", "criterion": 1},
+        {"step": 3, "state": "In-Progress"}]}
+        """#
+        #expect(try TaskPlan.applying(arguments(json), to: existing)?.steps.map(\.state) == [.done, .done, .inProgress])
+        #expect(TaskPlan.State.named("todo") == .pending && TaskPlan.State.named("open") == .pending)
+        #expect(TaskPlan.State.named("blocked") == .blocked && TaskPlan.State.named("whatever") == nil)
+    }
+
+    @Test func aPlanSetAsideStopsSteeringUntilAnUpdateTakesItUp() throws {
+        var existing = try plan()
+        #expect(existing.isActive)
+        existing.setAside()
+        #expect(!existing.isActive && existing.isUnfinished)
+        var conversation = Conversation()
+        conversation.taskPlan = existing
+        #expect(conversation.activePlan == nil)
+        #expect(PulsePlan(conversation.activePlan, chat: UUID(), paused: false) == nil, "it wakes no pulse")
+        #expect(TaskPlan.finishedInTurn(from: nil, to: existing) == nil, "set aside is not finished")
+        // It survives a save as it is, and a plan saved before the count existed was never passed over.
+        let saved = try JSONEncoder().encode(existing)
+        #expect(try JSONDecoder().decode(TaskPlan.self, from: saved) == existing)
+        var object = try #require(JSONSerialization.jsonObject(with: saved) as? [String: Any])
+        object.removeValue(forKey: "passedOver")
+        #expect(try JSONDecoder().decode(TaskPlan.self, from: JSONSerialization.data(withJSONObject: object)).isActive)
+        // Reading it does not bring it back; working on it does.
+        #expect(try TaskPlan.applying(arguments(#"{"action": "show"}"#), to: existing)?.isActive == false)
+        let resumed = try TaskPlan.applying(arguments(#"{"action": "update", "updates": [{"step": 1, "state": "in_progress"}]}"#), to: existing)
+        #expect(resumed?.isActive == true && resumed?.passedOver == 0)
     }
 
     @Test func clearingDropsThePlan() async throws {
