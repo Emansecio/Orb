@@ -191,21 +191,45 @@ actor ClaudeCode {
         guard let installation = await installation() else { throw ToolError("O Claude Code não está instalado neste Mac.") }
         let process = try LineProcess(
             executable: installation.executable,
+            // Without the user's own Claude Code settings, as a turn runs (`ClaudePipeSession`): they may shrink the window the
+            // CLI plans by (`autoCompactWindow`), which is not the window the Orb's turns get.
             arguments: ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
-                        "--no-session-persistence", "--strict-mcp-config"],
+                        "--no-session-persistence", "--strict-mcp-config", "--setting-sources", ""],
             directory: FileManager.default.temporaryDirectory, environment: await environment(for: installation))
-        let requestID = ClaudeCodeWire.newRequestID()
-        process.send(ClaudeCodeWire.controlRequest(id: requestID, subtype: "initialize"))
-        process.terminate(after: 30)
+        // Fourteen models take about fifteen seconds; the limit is for a CLI that stops answering.
+        process.terminate(after: 60)
         defer {
             process.closeInput()
             process.terminate(after: 3)
         }
-        for await line in process.lines {
-            if let models = ClaudeCodeWire.models(fromInitializeResponse: line, requestID: requestID), !models.isEmpty {
-                return models
+        return await Self.models(asking: process)
+    }
+
+    /// The CLI's model list (`initialize`) and each model's window (`set_model`, then `get_context_usage`: neither calls a
+    /// model). One model at a time: the CLI answers control requests as they finish, so two asked together can state each
+    /// other's window. A CLI that refuses these, or ends first, leaves the windows it did not state unknown.
+    static func models(asking process: LineProcess) async -> [ProviderModel] {
+        var lines = process.lines.makeAsyncIterator()
+        func answer(to subtype: String, model: String? = nil) async -> JSONValue? {
+            let id = ClaudeCodeWire.newRequestID()
+            process.send(ClaudeCodeWire.controlRequest(id: id, subtype: subtype, model: model))
+            while let line = await lines.next() {
+                if let response = ClaudeCodeWire.controlResponse(line, requestID: id) { return response }
             }
+            return nil
         }
-        return ClaudeCodeModels.fallback
+        let requestID = ClaudeCodeWire.newRequestID()
+        process.send(ClaudeCodeWire.controlRequest(id: requestID, subtype: "initialize"))
+        var listed: [ProviderModel] = []
+        while listed.isEmpty, let line = await lines.next() {
+            listed = ClaudeCodeWire.models(fromInitializeResponse: line, requestID: requestID) ?? []
+        }
+        guard !listed.isEmpty else { return ClaudeCodeModels.fallback }
+        for index in listed.indices where listed[index].contextLength == nil {
+            guard let chosen = await answer(to: "set_model", model: listed[index].id) else { break } // the process ended
+            guard chosen["subtype"]?.string == "success", let usage = await answer(to: "get_context_usage") else { continue }
+            listed[index].contextLength = ClaudeCodeWire.window(fromContextUsage: usage)
+        }
+        return listed
     }
 }

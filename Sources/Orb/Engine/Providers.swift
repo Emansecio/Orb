@@ -225,8 +225,8 @@ enum ModelCatalog {
     /// Goes up when the app starts keeping more of what a provider's list says about each model, so a list read before
     /// is read again on the next launch instead of hours later. 2: thinking levels (`ProviderModel.efforts`).
     /// 3: each model's window, from wherever it is stated (`statedWindow`, `publicWindows`, `ollamaCloudWindows`); the
-    /// Claude Code list no longer carries a made-up 200K.
-    static let version = 3
+    /// Claude Code list no longer carries a made-up 200K. 4: Claude Code's windows, asked from the CLI with the list.
+    static let version = 4
 
     /// Words of a model id that mark a model that does not chat: embeddings, rerankers, speech and moderation. Local servers
     /// list everything they hold, so a user of RAG has `bge-m3` next to `qwen3`.

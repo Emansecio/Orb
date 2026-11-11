@@ -52,9 +52,13 @@ palpite da tabela (o medidor então diz "de uns 200 mil"). As fontes, na ordem:
    gateways), `context_window` (ChatGPT, Groq), `max_context_length`, `max_input_tokens` ou `max_model_len`. O OpenCode lê a
    seção dele no models.dev.
 2. **Claude Code**: a lista não informa janela, e ela depende do modelo e do plano (o mesmo modelo aceita 200 mil num e 1 milhão
-   noutro). O CLI informa no fim de cada turno (`modelUsage.<modelo>.contextWindow` da linha `result`, lido por
-   `ClaudeCodeWire.window(fromResult:)`); o cliente avisa (`onWindow`) e `AppModel.noteStatedWindow` grava no modelo da lista.
-   Até o primeiro turno terminar vale o palpite de 200 000. Só o id terminado em `[1m]` já nasce com 1 milhão.
+   noutro). Ao ler a lista, o app pergunta ao CLI a janela de cada modelo (`ClaudeCode.models(asking:)`: `set_model` e depois
+   `get_context_usage`, um modelo por vez, porque o CLI responde fora de ordem; nenhum dos dois chama o modelo, então não gasta
+   tokens; 14 modelos levam uns 15 s). A lista é lida com `--setting-sources ""`, como um turno: um ajuste do usuário no Claude
+   Code (`autoCompactWindow`) encolheria a janela informada. O CLI repete a janela no fim de cada turno
+   (`modelUsage.<modelo>.contextWindow` da linha `result`, `ClaudeCodeWire.window(fromResult:)` → `onWindow` →
+   `AppModel.noteStatedWindow`), o que corrige um apelido que passou a apontar para outro modelo. CLI que recusa esses pedidos
+   deixa a janela vazia, e vale o palpite de 200 000. O id terminado em `[1m]` já nasce com 1 milhão.
 3. **Ollama**: a lista nativa (`/api/tags`, ao lado de `/v1`) diz quais modelos rodam na nuvem do Ollama (`remote_host`) e a
    janela deles (`details.context_length`, `ModelCatalog.ollamaCloudWindows`). Modelo local continua em 16 000: o servidor o
    carrega com a janela que foi configurada, quase sempre bem menor que a do modelo, e corta o excesso sem avisar.
@@ -66,7 +70,7 @@ palpite da tabela (o medidor então diz "de uns 200 mil"). As fontes, na ordem:
 
 Uma lista relida mantém a janela que a anterior tinha para o modelo quando a nova não informa nenhuma
 (`ModelCatalog.keepingWindows`), desde que a anterior tenha sido lida pela mesma `ModelCatalog.version`: a versão 3 descarta os
-200 000 que as anteriores gravavam em todo modelo do Claude Code.
+200 000 que as anteriores gravavam em todo modelo do Claude Code, e a 4 relê a lista dele para perguntar as janelas.
 
 ### Janela aprendida
 

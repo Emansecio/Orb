@@ -30,10 +30,11 @@ enum ClaudeCodeParser {
 // MARK: - Lines Orb writes
 
 enum ClaudeCodeWire {
-    /// `initialize` (sent first, before any user message) or `interrupt`.
-    static func controlRequest(id: String, subtype: String) -> String {
+    /// `initialize` (sent first, before any user message), `interrupt`, `get_context_usage` or, with `model`, `set_model`.
+    static func controlRequest(id: String, subtype: String, model: String? = nil) -> String {
         var request: [String: JSONValue] = ["subtype": .string(subtype)]
         if subtype == "initialize" { request["hooks"] = .null }
+        if let model { request["model"] = .string(model) }
         return JSONValue.object(["type": .string("control_request"), "request_id": .string(id),
                                  "request": .object(request)]).jsonString
     }
@@ -74,6 +75,20 @@ enum ClaudeCodeWire {
         }
     }
 
+    /// The CLI's answer to control request `requestID` (its `subtype` is "success" or "error"); nil if `line` is anything else.
+    static func controlResponse(_ line: String, requestID: String) -> JSONValue? {
+        guard let json = JSONValue.parse(line), json["type"]?.string == "control_response",
+              let response = json["response"], response["request_id"]?.string == requestID else { return nil }
+        return response
+    }
+
+    /// The window in the answer to `get_context_usage`: the model's own (`rawMaxTokens`), or the one the CLI plans by when
+    /// that is all it says; nil for an answer that is an error or states none.
+    static func window(fromContextUsage response: JSONValue) -> Int? {
+        guard response["subtype"]?.string == "success" else { return nil }
+        return [response["response"]?["rawMaxTokens"]?.int, response["response"]?["maxTokens"]?.int].lazy.compactMap { $0 }.first { $0 > 0 }
+    }
+
     /// The window the CLI says the model of this run has: `modelUsage.<model>.contextWindow` of a `result` line. It depends
     /// on the model and on the plan (the same model takes 200K on one and a million on another), and nothing else says it.
     /// A run that also called a smaller model on the side lists both: the one that read the most is the conversation's.
@@ -98,8 +113,9 @@ enum ClaudeCodeModels {
     /// Not passed to `--model`, so the user's own Claude Code setting (or their plan's default) applies.
     static let defaultID = "default"
 
-    /// An id ending in `[1m]` is the million-token variant. The list says no other window: the CLI states it when a turn
-    /// ends (`ClaudeCodeWire.window(fromResult:)`), and until then the budget assumes the smallest (`ContextBudget`).
+    /// An id ending in `[1m]` is the million-token variant. The list says no other window: the CLI is asked for each
+    /// model's when the list is read (`ClaudeCode.models(asking:)`) and states it again when a turn ends
+    /// (`ClaudeCodeWire.window(fromResult:)`); a model neither answered for gets the smallest (`ContextBudget`).
     static func window(of id: String) -> Int? { id.hasSuffix("[1m]") ? 1_000_000 : nil }
 
     /// Documented aliases (https://code.claude.com/docs/en/model-config#model-aliases), used when the CLI
