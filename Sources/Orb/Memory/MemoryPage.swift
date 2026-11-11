@@ -391,8 +391,11 @@ enum MemoryText {
                 guard let found = Range(match.range, in: text) else { continue }
                 var token = String(text[found])
                 if index == 0 { token = token.trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?")) }
-                // A path inside a URL already found is the same reference.
-                if index == 1, tokens.contains(where: { $0.contains(token) }) { continue }
+                // A quoted path is the path alone; a device (`/dev/null`) is no file worth a line.
+                if index == 1 { token = String(token.dropFirst().dropLast()) }
+                if index > 0, token.hasPrefix("/dev/") { continue }
+                // A path inside a URL or a quoted path already found is the same reference (or a piece of it).
+                if index == 2, tokens.contains(where: { $0.contains(token) }) { continue }
                 if !tokens.contains(token) { tokens.append(token) }
                 if tokens.count == limit { return tokens }
             }
@@ -400,7 +403,9 @@ enum MemoryText {
         return tokens
     }
 
-    private static let tokenPatterns = [#"https?://[^\s)>\]"'`]+"#, #"(?<![\w/.:])(?:~|/)[\w.\-]+(?:/[\w.\-]+)+"#, #"`[^`\n]{2,80}`"#]
+    /// URLs, paths in quotes (the only way a path with a space is whole: "…/Application Support/…"), bare paths, code spans.
+    private static let tokenPatterns = [#"https?://[^\s)>\]"'`]+"#, #""(?:~|/)[^"\n{}|;<>$*]{1,300}/[^"\n{}|;<>$*]{1,300}"|'(?:~|/)[^'\n{}|;<>$*]{1,300}/[^'\n{}|;<>$*]{1,300}'"#,
+                                        #"(?<![\w/.:])(?:~|/)[\w.\-]+(?:/[\w.\-]+)+"#, #"`[^`\n]{2,80}`"#]
         .map { try! NSRegularExpression(pattern: $0) }
 
     private static let stopwords: Set<String> = [

@@ -254,7 +254,7 @@ struct ContextWindow: Sendable, Equatable {
         let hasNotes = !cut.chunks.isEmpty || cut.ledger?.digests.isEmpty == false
         func reserve() -> Int {
             guard previous != nil || carriedNote != nil || dropped > 0 else { return 0 }
-            return ContextSummary.reserve + (hasNotes || carriedNote != nil && dropped > 0 ? ConversationLedger.digestRoom : 0)
+            return ContextSummary.reserve + (hasNotes || carriedNote != nil && dropped > 0 ? budget.digestRoom : 0)
         }
         let charactersBefore = total + (previous != nil || carriedNote != nil ? ContextSummary.pair(
             [previous, carriedNote].compactMap { $0 }.joined(separator: "\n")).contextCharacters : 0)
@@ -350,7 +350,7 @@ struct ContextWindow: Sendable, Equatable {
             cut.attachedNotes += carried
             cut.chunks.removeAll { $0.end <= foldedUpTo }
             ledger = extended
-            summary = extended.render()
+            summary = extended.render(digestRoom: budget.digestRoom)
         }
         let note = ContextSummary.mergedNotes(dropped == 0 ? carriedNote : nil,
                                               ContextSummary.stepsNote(skippedSteps, maxLines: digestLines),

@@ -104,6 +104,16 @@ struct ContextBudget: Sendable, Equatable {
         lowWaterShare ?? (tokens < Self.smallBudgetTokens ? Self.smallBudgetLowWater : Self.defaultLowWater)
     }
 
+    /// A window from this size up gives the model's notes in the summary their wide room.
+    static let wideNotesWindow = 64_000
+
+    /// Characters the summary may spend on the model's notes of folded stretches (`ConversationLedger.render`): one note
+    /// in a small window (a local model), three where the window can spare ~2 thousand tokens. It goes by the window, which
+    /// a budget made smaller for one fit (a manual compaction, room for the message) keeps.
+    var digestRoom: Int {
+        (window ?? tokens) >= Self.wideNotesWindow ? ConversationLedger.wideDigestRoom : ConversationLedger.digestRoom
+    }
+
     var characters: Int { Int(min(Double(tokens) * Self.charactersPerToken, Double(Int.max / 4))) }
 
     /// Used when nothing is known about the model.

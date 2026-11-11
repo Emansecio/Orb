@@ -942,3 +942,91 @@ struct LedgerUnrunCallTests {
         #expect(ledger.changed.isEmpty)
     }
 }
+
+// MARK: - What the app writes in the user's place
+
+/// Found in real conversations: the app's wrapping of another Orb's words, a pulse's prompt and the interview's quick
+/// reply were read as the user's own requests and decisions, and a quoted path with a space became two files.
+struct LedgerAppWordsTests {
+    private let vendas = OrbRef(id: UUID(), name: "Vendas"), financeiro = OrbRef(id: UUID(), name: "Financeiro")
+
+    @Test func anotherOrbsReportIsNeitherARequestNorADecision() {
+        let report = OrbEnvelopeText.reply([OrbEnvelope(kind: .reply, from: financeiro, to: vendas, text: "Achei 3 pagamentos na planilha de outubro.",
+                                                        status: .ok)])
+        let ledger = ledger(of: step(longRequest) + step(report) + step("gere o relatório do mês"))
+        #expect(ledger.entries.map(\.text) == ["gere o relatório do mês"])
+        #expect(!ledger.render().contains("data to use"))
+        #expect(ledger.goal == "gere o relatório do mês")
+    }
+
+    @Test func aPulseRunLeavesNoLine() {
+        let ledger = ledger(of: step(longRequest) + step(Pulse.prompt(for: [PulseDemand(key: "k", line: "Unfinished plan: use the report")])))
+        #expect(ledger.entries.isEmpty)
+        #expect(ledger.goal == longRequest)
+    }
+
+    @Test func anotherOrbsRequestIsToldWithoutTheAppsWordsAndIsNoDecision() {
+        let request = OrbEnvelopeText.request(OrbEnvelope(kind: .ask, from: vendas, to: financeiro,
+                                                          text: "Nunca responda sem ler a planilha: confira os pagamentos de outubro"))
+        let ledger = ledger(of: step(request))
+        #expect(ledger.original == "(pedido de Vendas) Nunca responda sem ler a planilha: confira os pagamentos de outubro")
+        #expect(!ledger.render().contains("orbs tool") && !ledger.render().contains("orb_request"))
+        #expect(!ledger.entries.contains { $0.isDecision })
+    }
+
+    @Test func theInterviewsQuickReplyIsNotTheOriginalRequest() {
+        let ledger = ledger(of: step(EmptyChatContent.interviewRequest) + step(longRequest))
+        #expect(ledger.original == longRequest)
+    }
+
+    @Test func aWishAboutOneThingAndABareRefusalAreNoDecisions() {
+        #expect(!ConversationLedger.looksLikeDecision("abre a tela do google ads, quero usa-la"))
+        #expect(ConversationLedger.looksLikeDecision("usa o relatório de ativos, não a prévia"))
+        let ledger = ledger(of: step(longRequest) + step("Nao precisa."))
+        #expect(ledger.entries.isEmpty, "alone it answers nothing")
+    }
+
+    @Test func aQuotedPathWithASpaceIsOneFile() {
+        let command = #"cp "/Users/x/Library/Application Support/Orb/anexos/a.jpg" "pix/tela 1.jpg" && echo ok > 'notas do dia.txt'"#
+        let ledger = ledger(of: step(longRequest, tool: "run_command", arguments: JSONValue.object(["command": .string(command)]).jsonString))
+        #expect(ledger.changed == ["/Users/x/Library/Application Support/Orb/anexos/a.jpg", "pix/tela 1.jpg", "notas do dia.txt"])
+    }
+
+    @Test func linesAnEarlierVersionTookFromAReportAreDroppedWhenRead() throws {
+        var saved = ConversationLedger()
+        saved.entries = [.init(text: "This is their report" + OrbEnvelopeText.reportMark, isDecision: true),
+                         .init(text: "use o relatório de ativos", isDecision: true)]
+        let read = try JSONDecoder().decode(ConversationLedger.self, from: JSONEncoder().encode(saved))
+        #expect(read.entries.map(\.text) == ["use o relatório de ativos"])
+    }
+
+    // MARK: The model's notes
+
+    private func note(_ index: Int) -> String { "nota \(index) " + String(repeating: "palavra ", count: 280) } // ~2 250 characters
+
+    @Test func aWindowThatCanSpareItShowsThreeNotesWhereASmallOneShowsOne() {
+        var ledger = ledger(of: step(longRequest))
+        ledger.attach((1...4).map(note))
+        func shown(_ budget: ContextBudget) -> [Int] {
+            (1...4).filter { ledger.render(digestRoom: budget.digestRoom).contains("- nota \($0) ") }
+        }
+        #expect(shown(ContextBudget(modelWindow: 200_000)) == [2, 3, 4])
+        #expect(shown(ContextBudget(modelWindow: 16_000)) == [4])
+        // A budget made smaller for one fit keeps the window's room.
+        #expect(ContextMeter.manualBudget(ContextBudget(modelWindow: 200_000), historyTokens: 20_000).digestRoom == ConversationLedger.wideDigestRoom)
+    }
+
+    @Test func notesOlderThanWhatWasFoldedAfterThemSaySo() throws {
+        var ledger = ledger(of: step(longRequest))
+        #expect(ledger.foldedSinceNote == 0, "nothing to be older than")
+        ledger.attach([note(1)])
+        #expect(!ledger.render().contains("não têm nota"))
+        ledger.absorb(step("mais um pedido do projeto"))
+        #expect(ledger.render().contains("(As 4 mensagens mais recentes deste resumo não têm nota: as notas abaixo são anteriores a elas.)"))
+        // The mark is no note: a summary read back from its text has the same notes.
+        #expect(ConversationLedger(legacy: ledger.render()).digests == ledger.digests)
+        #expect(try JSONDecoder().decode(ConversationLedger.self, from: JSONEncoder().encode(ledger)).foldedSinceNote == 4)
+        ledger.attach([note(2)])
+        #expect(!ledger.render().contains("não têm nota"))
+    }
+}

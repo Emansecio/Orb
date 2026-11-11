@@ -10,7 +10,7 @@ enum MemoryConsolidation {
     /// Notes and preferences together past which a pass is made.
     static let threshold = 30
     /// What a pass aims for in characters, for lists that are long rather than many.
-    static let characterTarget = 1_200
+    static let characterTarget = MemoryBank.preferencesShare * 8 / 10
     /// What a pass aims for: well under the threshold, so the next one is far off.
     static let target = threshold * 6 / 10
     /// The most a pass may leave: one that hardly shortens would be paid for again a few facts later.

@@ -430,9 +430,9 @@ import Testing
         #expect(plan.pages.map(\.title) == (1...3).map { "Instruções completas de Cartão do Orb (\($0)/3)" })
         #expect(plan.pages.map(\.text).joined(separator: "\n") == found.identity?.text) // nothing lost, nothing repeated
         #expect(found.identity?.omitted == 0)
-        // A text that fits in one page keeps the title without a count.
+        // A text within the identity's share stays there whole: no page repeats it.
         let short = try OrbImportReader.read(text: "## Como funciona\n\(instructions(characters: 1_800))").plan()
-        #expect(short.pages.map(\.title) == ["Instruções completas de Cartão do Orb"])
+        #expect(short.pages.isEmpty && !short.identity.hasSuffix("…"))
     }
 
     @Test func aSingleHugeLineIsSplitToo() {

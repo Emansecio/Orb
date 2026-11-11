@@ -470,7 +470,7 @@ struct OrbsSettings: View {
                 .help(Tip.proposeSkills)
                 Toggle(isOn: $summarizeSessions) {
                     toggleLabel("Resumir com o modelo as conversas longas que vão para a memória",
-                                "Um resumo curto, escrito pelo modelo, de cada conversa longa guardada. Conversas com conectores, modelos locais ou o Claude Code ficam de fora.")
+                                "Um resumo curto, escrito pelo modelo, de cada conversa longa guardada. Conversas com conectores ou modelos locais ficam de fora.")
                 }
                 .help(Tip.summarizeSessions)
             }

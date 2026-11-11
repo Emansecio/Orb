@@ -5,12 +5,12 @@ import Foundation
 // steps, and when it fails the summary is simply the rules' alone.
 
 extension AppModel {
-    /// After a turn ends: starts the note, when one is due. A routine's run, a developer mode and
-    /// Claude Code (its side requests would each start a CLI process) never get one.
+    /// After a turn ends: starts the note, when one is due. A routine's run and a developer mode never get one. On Claude
+    /// Code the note is a side run of the CLI with Haiku (`ChunkSummarizer.model`), apart from the conversation's idle process.
     func writeStretchNote(of botID: UUID) {
         let session = session(botID)
         guard writesStretchNotes, !isDevRun, !isResetting, session.routineID == nil, session.chunkTask == nil,
-              let conversation = session.conversation, let bot = bot(botID), let ref = modelRef(for: bot), ref.provider != .claudeCode,
+              let conversation = session.conversation, let bot = bot(botID), let ref = modelRef(for: bot),
               let account = account(ref.provider), account.isEnabled, isUsable(account),
               let budget = contextBudget(for: bot) else { return }
         // A stretch is asked about at most `maxAttempts` times: checked before the plan, which is the costly part.

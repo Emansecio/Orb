@@ -37,6 +37,9 @@ struct ConversationLedger: Codable, Sendable, Equatable {
     /// Room, besides the 3,000 characters of the rest, for the model's notes on folded stretches (see `ChunkSummary`).
     /// It holds the header and one note of the longest size (`ChunkSummary.maxLength`) whole.
     static let digestRoom = 2_700
+    /// The same room where the model's window can spare it (`ContextBudget.digestRoom`): three notes whole, so a second
+    /// fold does not hide the first one's note.
+    static let wideDigestRoom = 7_500
     /// The notes kept at most (the newest); the oldest are dropped.
     static let maxDigests = 12
     /// What the rendered summary shows of an old summary (the first request is pinned apart, see `init(legacy:)`).
@@ -70,6 +73,8 @@ struct ConversationLedger: Codable, Sendable, Equatable {
     /// What the model wrote about each stretch folded so far, oldest first (see `ChunkSummary`): each was written once
     /// and is carried as it is, never summarized again.
     var digests: [String] = []
+    /// Messages absorbed since the newest note: stretches folded with no note of their own, which the notes say nothing about.
+    var foldedSinceNote = 0
     /// How many messages have been absorbed.
     var foldedMessages = 0
 
@@ -182,7 +187,7 @@ struct ConversationLedger: Codable, Sendable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case original, goal, focus, entries, earlierEntries, changed, read, failures, openQuestion, unanswered
-        case lastReply, legacy, foldedMessages, digests
+        case lastReply, legacy, foldedMessages, digests, foldedSinceNote
     }
 
     init(from decoder: Decoder) throws {
@@ -190,7 +195,8 @@ struct ConversationLedger: Codable, Sendable, Equatable {
         original = try c.decodeIfPresent(String.self, forKey: .original)
         goal = try c.decodeIfPresent(String.self, forKey: .goal)
         focus = try c.decodeIfPresent(String.self, forKey: .focus)
-        entries = try c.lossyArray(.entries)
+        // Lines an earlier version took from what the app wraps around another Orb's report: never the user's decision.
+        entries = try c.lossyArray(.entries).filter { !$0.text.contains(OrbEnvelopeText.reportMark) }
         earlierEntries = try c.value(.earlierEntries, default: 0)
         changed = try c.value(.changed, default: [])
         read = try c.value(.read, default: [])
@@ -201,13 +207,17 @@ struct ConversationLedger: Codable, Sendable, Equatable {
         legacy = try c.decodeIfPresent(String.self, forKey: .legacy)
         foldedMessages = try c.value(.foldedMessages, default: 0)
         digests = (try? c.decodeIfPresent([String].self, forKey: .digests)) ?? []
+        foldedSinceNote = try c.value(.foldedSinceNote, default: 0)
     }
 
     // MARK: Absorbing messages
 
     /// Adds the model's notes on stretches that were just folded (each one is carried as it is).
     mutating func attach(_ notes: [String]) {
-        digests += notes.map { Self.clip($0, ChunkSummary.maxLength) }.filter { !$0.isEmpty }
+        let added = notes.map { Self.clip($0, ChunkSummary.maxLength) }.filter { !$0.isEmpty }
+        guard !added.isEmpty else { return }
+        digests += added
+        foldedSinceNote = 0
         if digests.count > Self.maxDigests { digests.removeFirst(digests.count - Self.maxDigests) }
     }
 
@@ -235,13 +245,22 @@ struct ConversationLedger: Codable, Sendable, Equatable {
                 absorbToolResult(message, call: message.toolCallID.flatMap { calls[$0] })
             }
             foldedMessages += 1
+            if !digests.isEmpty { foldedSinceNote += 1 }
         }
         // The question stays only when the conversation goes on with a user message outside what was absorbed.
         if !followedByUser { openQuestion = nil }
     }
 
     private mutating func absorbUser(_ message: ChatMessage) {
-        var text = MemoryText.flatten(TurnPreface.userWords(message.content))
+        let words = TurnPreface.userWords(message.content)
+        // What the app wrote in the user's place is not the user's word: another Orb's report and a pulse's run leave no line
+        // (the turn they continue keeps its own), and another Orb's request is told as such, never as a decision.
+        if words.hasPrefix(OrbEnvelopeText.replyOpen) || words.hasPrefix(Pulse.marker) {
+            openQuestion = nil
+            return
+        }
+        let outside = OrbEnvelopeText.requestWords(words)
+        var text = MemoryText.flatten(outside.map { "(pedido de \($0.from)) " + $0.text } ?? words)
         // A picture alone is worth a line in the timeline, but it is not a new task: the goal stays.
         let isPlaceholder = text.isEmpty && !message.images.isEmpty
         if isPlaceholder { text = "(imagem anexada)" }
@@ -256,12 +275,13 @@ struct ConversationLedger: Codable, Sendable, Equatable {
             return
         }
         // The first real request is fixed whatever it says (it often holds a "never…" of its own).
-        if original == nil, legacy == nil, text.count >= Self.minimumOriginal {
+        // (The interview's quick reply is the app's opening, not a task.)
+        if original == nil, legacy == nil, text.count >= Self.minimumOriginal, text != EmptyChatContent.interviewRequest {
             original = Self.clipEnds(text, Self.originalLimit)
             goal = Self.clip(text, Self.goalLimit)
             return
         }
-        if Self.looksLikeDecision(text) {
+        if outside == nil, Self.looksLikeDecision(text) {
             add(Entry(text: Self.decisionText(text), isDecision: true))
             return
         }
@@ -375,7 +395,10 @@ struct ConversationLedger: Codable, Sendable, Equatable {
     /// The notes that fit in `room` characters whole, the newest first (the newest alone is cut to fit); nil without any.
     private func renderedDigests(room: Int) -> String? {
         guard room > Heading.digests.count + 20 else { return nil }
-        var shown: [String] = [], used = Heading.digests.count
+        // Said before the notes when stretches were folded after the newest one: it is not about the latest part.
+        let stale = foldedSinceNote > 0
+            ? ["(As \(foldedSinceNote) mensagens mais recentes deste resumo não têm nota: as notas abaixo são anteriores a elas.)"] : []
+        var shown: [String] = [], used = Heading.digests.count + (stale.first.map { $0.count + 1 } ?? 0)
         for digest in digests.reversed() {
             var line = "- " + Self.clip(digest, ChunkSummary.maxLength)
             if used + line.count + 1 > room {
@@ -385,7 +408,7 @@ struct ConversationLedger: Codable, Sendable, Equatable {
             shown.append(line)
             used += line.count + 1
         }
-        return shown.isEmpty ? nil : ([Heading.digests] + shown).joined(separator: "\n")
+        return shown.isEmpty ? nil : ([Heading.digests] + stale + shown).joined(separator: "\n")
     }
 
     private func changedLine() -> String { "Arquivos alterados: " + Self.list(changed, budget: 420) }
@@ -507,6 +530,7 @@ struct ConversationLedger: Codable, Sendable, Equatable {
         "sim", "nao", "ok", "okay", "pode", "pode sim", "pode ser", "isso", "isso mesmo", "claro", "beleza", "blz", "manda",
         "manda ver", "vai", "faz", "faca", "pode fazer", "pode continuar", "continua", "continue", "segue", "segue em frente",
         "fechado", "combinado", "certo", "ta", "ta bom", "tudo bem", "valeu", "obrigado", "obrigada", "show", "perfeito",
+        "nao precisa", "nao quero", "precisa nao",
     ]
 
     /// "sim", "pode", "continua": an answer that means something only next to the question it answers.
@@ -517,7 +541,8 @@ struct ConversationLedger: Codable, Sendable, Equatable {
 
     private static let decisionPatterns: [String] = [
         #"\bdecidi\b"#, #"\bdecidimos\b"#, #"\bficou decidido\b"#, #"\bvamos (usar|com|de|manter|adotar|seguir)\b"#,
-        #"\b(use|usa|utilize|adote|mantenha|mantenham)\b"#, #"\b(nao|jamais|nunca) (use|usa|utilize|mude|mexa|apague|delete|remova|faca|faça)\b"#,
+        // ("quero usá-la" is a wish about one thing, not a standing rule: no pronoun stuck to the verb.)
+        #"\b(use|usa|utilize|adote|mantenha|mantenham)\b(?!-)"#, #"\b(nao|jamais|nunca) (use|usa|utilize|mude|mexa|apague|delete|remova|faca|faça)\b"#,
         #"\bsempre\b"#, #"\bnunca\b"#, #"\bprefiro\b"#, #"\blembre(-se)?\b"#, #"\ba partir de agora\b"#, #"\bcombinado\b"#,
         #"\bnao (quero|precisa|vamos)\b"#, #"\bem vez de\b"#, #"\bao inves de\b"#, #"\bevite\b"#,
         // The same in English.
@@ -637,9 +662,9 @@ private struct ToolReference {
                   !found.contains(path) else { return }
             found.append(path)
         }
-        let segments = text.replacingOccurrences(of: "&&", with: ";").split(whereSeparator: { ";|\n".contains($0) })
-        for segment in segments {
-            var tokens = segment.split(whereSeparator: \.isWhitespace).map(String.init)
+        // The shell's own words: a quoted path with a space ("…/Application Support/…") is one file, not two.
+        for segment in ShellCommandLine.parse(text).segments {
+            var tokens = segment.words
             while let first = tokens.first, first == "sudo" || first == "env" || (first.contains("=") && !first.hasPrefix("-")) {
                 tokens.removeFirst()
             }

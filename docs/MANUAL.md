@@ -274,7 +274,8 @@ Se o navegador não estiver instalado, o Orb fica só com `web_fetch` e `web_sea
   **Outro modelo** refaz o pedido com o modelo padrão do app ou um dos usados há pouco, e ele passa a ser o da conversa. A frase do
   aviso é do Orb; a mensagem do provedor fica recolhida em **Detalhes**. Uma resposta vazia ganha uma nova tentativa sozinha
   antes de virar falha.
-- **Quando o Orb anda em círculos** (a mesma chamada com o mesmo resultado três vezes, ou três falhas seguidas), o próprio
+- **Quando o Orb anda em círculos** (a mesma chamada com o mesmo resultado três vezes, ou três falhas seguidas; dez vezes quando a chamada olha o
+  navegador, um app ou uma tarefa em andamento, onde o mesmo texto pode voltar algumas vezes de verdade), o próprio
   resultado avisa o modelo para mudar de caminho ou dizer o que o bloqueia, e a linha de trabalho mostra "Mudando de abordagem".
   É uma contagem, sem chamar outro modelo; horários, IDs e caminhos de saídas salvas não contam como diferença. Se isso se repete
   (9 voltas no mesmo turno), a conversa ganha um aviso, uma vez, e, se você não está olhando esse Orb, chega um banner com **Parar**.
@@ -492,10 +493,10 @@ Cada Orb tem a **sua** memória, que nasce com ele e cresce a cada conversa: nad
     reconhecidos e recusados com orientação; arquivos acima de 1 MB também.
   - *O que entra.* Só nome, papel, identidade, preferências, fatos, procedimentos e skills; **nunca** permissões, modo,
     capacidades, pasta, modelo, conectores nem rotinas, mesmo que o arquivo traga esses campos. Chaves e senhas são removidas.
-    A identidade vai até 1.500 caracteres no prompt; quando o texto é maior, ele inteiro também vira fatos de até 2.000
+    A identidade vai até 3.000 caracteres no prompt; quando o texto é maior, ele inteiro também vira fatos de até 2.000
     caracteres ("Instruções completas de ChatGPT (1/3)"…), que o Orb consulta quando precisa. Lê-se até 6.000 caracteres de
     instruções; o que passa disso fica de fora e a prévia diz quanto. Preferências até 40, 240
-    caracteres cada e 1.500 no total (o resto também vira fato); até 60 fatos, 12 procedimentos e 5 skills, que valem só para o
+    caracteres cada e 3.000 no total (o resto também vira fato); até 60 fatos, 12 procedimentos e 5 skills, que valem só para o
     Orb novo e só rodam quando você digita `/comando`. A entrevista da primeira conversa deixa de ser pedida quando entra
     identidade ou preferências, e o Orb novo continua se apresentando como sempre; a conversa ganha antes uma linha "Importei
     de ChatGPT: 1 instrução, 9 lembranças e 2 skills. Veja na aba Memória." O que a importação traz de "Sobre você" fica na

@@ -693,6 +693,8 @@ struct SkillSectionTests {
         await bank.remember("Curta", kind: .preferencia)
         #expect(await bank.preferencesOverflow() == 0)
         await bank.remember(String(repeating: "palavra ", count: 400), kind: .preferencia)
+        #expect(await bank.preferencesOverflow() == 0, "one long preference fits the share")
+        await bank.remember(String(repeating: "termo ", count: 400), kind: .preferencia)
         #expect(await bank.preferencesOverflow() > 0)
     }
 

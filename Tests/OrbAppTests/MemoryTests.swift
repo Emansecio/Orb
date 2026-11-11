@@ -698,6 +698,25 @@ struct MemoryIntentTests {
         #expect(MemoryText.keepTokens("veja https://example.com/doc/a e /Users/x/notas.md") == ["https://example.com/doc/a", "/Users/x/notas.md"])
     }
 
+    @Test func aQuotedPathWithASpaceIsKeptWholeAndADeviceIsNot() {
+        let command = #"cp "/Users/x/Library/Application Support/Orb/a.jpg" pix/tela.jpg && ls /Applications/Safari.app 2>/dev/null > '/tmp/saida 1.txt'"#
+        #expect(MemoryText.keepTokens(command) == ["/Users/x/Library/Application Support/Orb/a.jpg", "/tmp/saida 1.txt", "/Applications/Safari.app"])
+    }
+
+    @Test func aFewLongPreferencesAllReachThePromptWhole() async {
+        // What a real Orb had: five preferences, 2 965 characters in all. At a share of 1 500 each was cut to 300 and the oldest left out.
+        let bank = bank("regras")
+        let lengths = [368, 757, 785, 552, 503]
+        for (index, length) in lengths.enumerated() {
+            let words = (0..<length / 10).map { "p\(index)x\($0)".padding(toLength: 9, withPad: "z", startingAt: 0) }.joined(separator: " ")
+            await bank.remember(words, kind: .preferencia, now: Date(timeIntervalSince1970: Double(1_000 + index)))
+        }
+        let pinned = await bank.brief(for: "oi", conversationIsNew: false).pinned
+        #expect(!pinned.contains("…") && !pinned.contains("not shown here"))
+        #expect((0..<5).allSatisfy { pinned.contains("p\($0)x0") })
+        #expect(await bank.preferencesOverflow() == 0)
+    }
+
     // MARK: Pinned memory within its share
 
     @Test func aLongPreferenceGoesInWholeUpToTheShare() async {
@@ -732,14 +751,14 @@ struct MemoryIntentTests {
     }
 
     @Test func aLongIdentityKeepsWhatYouWroteAndDropsTheOldestNotes() {
-        let text = String(repeating: "Escrevi isto eu mesma. ", count: 58) // ~1 330 characters
+        let text = String(repeating: "Escrevi isto eu mesma. ", count: (MemoryBank.identityShare - 170) / 23) // just under the share
         let notes = (1...6).map { "- nota número \($0) sobre como trabalhar" }
         let body = text + "\n\n" + MemoryBank.identityNotesHeader + "\n" + notes.joined(separator: "\n")
         let shown = MemoryBank.identityBlock(body, MemoryBank.identityShare)
         #expect(shown.count <= MemoryBank.identityShare && shown.hasPrefix(text) && !shown.contains("[…]"))
         #expect(shown.contains("older notes left out of this prompt") && shown.contains("nota número 6") && !shown.contains("nota número 1 "))
         #expect(MemoryBank.identityBlock("curta", MemoryBank.identityShare) == "curta")
-        let huge = String(repeating: "x", count: 2_000) + "\n" + MemoryBank.identityNotesHeader + "\n- uma nota"
+        let huge = String(repeating: "x", count: MemoryBank.identityShare + 500) + "\n" + MemoryBank.identityNotesHeader + "\n- uma nota"
         #expect(MemoryBank.identityBlock(huge, MemoryBank.identityShare).contains("[…]")) // the text alone does not fit
     }
 }

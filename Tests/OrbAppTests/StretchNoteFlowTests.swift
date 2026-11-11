@@ -176,7 +176,22 @@ final class StretchNoteFlowTests {
         #expect(model.conversations[botID]?.chunkSummaries == nil)
     }
 
-    @Test func nothingIsAskedForARoutineADeveloperRunADisabledSwitchOrClaudeCode() async throws {
+    @Test func onClaudeCodeTheNoteIsWrittenByHaiku() async throws {
+        // Before, an Orb on Claude Code never got a note: its long conversations were summarized by the rules alone.
+        let (model, botID, asked) = try setUp(provider: .claudeCode)
+        model.publishConnections([.claudeCode])
+        model.providers[0].models = ClaudeCodeModels.fallback // what the CLI lists
+        model.bots[0].model = "claudeCode/sonnet"
+        model.learnContextWindow(32_000, of: "claudeCode/sonnet")
+        await warmUp(model, botID)
+        try grow(to: 0.75, model, botID)
+        model.writesStretchNotes = true
+        model.writeStretchNote(of: botID)
+        await waitUntil("the note") { model.conversations[botID]?.chunkSummaries?.count == 1 }
+        #expect(await asked.notes.map(\.model) == ["haiku"])
+    }
+
+    @Test func nothingIsAskedForARoutineADeveloperRunOrADisabledSwitch() async throws {
         // The control: with everything in order a note starts.
         let (model, botID, asked) = try setUp()
         await warmUp(model, botID)
@@ -199,7 +214,6 @@ final class StretchNoteFlowTests {
         }
         try await quiet({ _, session in session.routineID = UUID() }, "a routine's run")
         try await quiet({ model, _ in model.writesStretchNotes = false }, "the switch off (tests, previews)")
-        try await quiet({ model, _ in model.bots[0].model = "claudeCode/sonnet" }, "Claude Code")
 
         // A developer mode, even with the switch forced on.
         let (dev, devBot, devAsked) = try setUp(devRun: true)

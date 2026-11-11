@@ -133,10 +133,12 @@ struct PulseDemand: Sendable, Equatable {
 }
 
 enum Pulse {
+    /// How the prompt of a run opens: the app's words, not the user's.
+    static let marker = "[Pulse] "
     /// What the model is sent: the demands (short, in English: it goes in every pulse).
     /// `inChat`: the run is in the conversation of the plan (the first demand), whose history it has.
     static func prompt(for demands: [PulseDemand], inChat: Bool = false) -> String {
-        "[Pulse] Nobody asked for this run" + (inChat ? ", and nobody reads it while it works" : "") + ". Open work you could move forward:\n"
+        marker + "Nobody asked for this run" + (inChat ? ", and nobody reads it while it works" : "") + ". Open work you could move forward:\n"
             + demands.map { "- " + $0.line }.joined(separator: "\n")
             + (inChat ? "\nThis is the conversation of the plan: resume its next step from where it stopped (check what is already done)."
                 + " Do not ask the user anything; if a step needs them, leave it blocked and say why." : "")

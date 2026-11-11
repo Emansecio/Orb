@@ -102,13 +102,14 @@ enum ChunkSummarizer {
         // preface are counted, with the room the summary will take added to the history.
         let room = budget.leavingRoom(forCharacters: AppModel.prefaceAllowance)
         let hasNotes = !conversation.pendingChunks(after: covered).isEmpty || conversation.currentLedger?.digests.isEmpty == false
-        let reserve = conversation.summary != nil ? ContextSummary.reserve + (hasNotes ? ConversationLedger.digestRoom : 0) : 0
+        let reserve = conversation.summary != nil ? ContextSummary.reserve + (hasNotes ? room.digestRoom : 0) : 0
         let kept = Int(Double(room.characters) * room.lowWater)
         guard Double(body + reserve) > Double(room.characters) * startsAt, body > kept else { return nil }
 
         // A budget the history is just over, with the low-water mark where the real one would leave it: the fit folds
         // what a real fold takes down to `kept`.
         var forced = ContextBudget(tokens: max(Int(Double(body) / ContextBudget.charactersPerToken) - 2, 500))
+        forced.window = budget.window // the notes' room goes by the window (`digestRoom`)
         forced.lowWaterShare = min(max(Double(kept) / Double(forced.characters), 0.05), 1)
         var cut = ContextCut(summary: conversation.summary, ledger: conversation.currentLedger)
         let folded = ContextWindow.fit(slice, budget: forced, cut: &cut, condensing: condensing, paused: paused)
@@ -209,9 +210,11 @@ enum ChunkSummarizer {
     /// routers list -1), never one the catalog prices at the Orb's model's price or above, and nothing when the Orb's model
     /// is a small one already. Local servers never switch: loading another model would cost more than it saves. Pure.
     static func model(in account: ProviderAccount, orb orbID: String) -> ProviderModel? {
-        guard account.kind != .ollama, account.kind != .lmstudio, account.kind != .claudeCode, let maker = maker(of: orbID) else { return nil }
         let words = ModelCatalog.words(of:)
         guard words(orbID).isDisjoint(with: cheapWords) else { return nil }
+        // Claude Code's list names its models by family alone ("opus", "sonnet", "haiku"): the small one is Haiku.
+        if account.kind == .claudeCode { return account.models.first { words($0.id).contains("haiku") } }
+        guard account.kind != .ollama, account.kind != .lmstudio, let maker = maker(of: orbID) else { return nil }
         let orbPrice = account.models.first { $0.id == orbID }?.inputPrice.flatMap { $0 > 0 ? $0 : nil }
         let candidates = account.models.compactMap { model -> (model: ProviderModel, rank: Int)? in
             let named = words(model.id)

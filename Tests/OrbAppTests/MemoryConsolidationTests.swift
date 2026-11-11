@@ -38,7 +38,7 @@ import Testing
     @Test func aPassIsDueWhenWhatItCanShortenDoesNotFit() {
         let few = MemoryConsolidation.Pinned(notes: ["a", "b"], preferences: ["c"])
         #expect(!MemoryConsolidation.isDue(few, identityLength: 100))
-        let big = MemoryConsolidation.Pinned(preferences: (1...12).map { "Preferência \($0) " + String(repeating: "x", count: 200) })
+        let big = MemoryConsolidation.Pinned(preferences: (1...20).map { "Preferência \($0) " + String(repeating: "x", count: 200) })
         #expect(big.count < MemoryConsolidation.threshold)
         #expect(MemoryConsolidation.isDue(big, identityLength: 0)) // the preferences overflow their share
         let notes = MemoryConsolidation.Pinned(notes: (1...4).map { _ in String(repeating: "n", count: 200) })

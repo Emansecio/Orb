@@ -697,6 +697,13 @@ extension AgentEngineTests {
         // A job being waited on is not a loop, even when a quiet log reads the same for a minute; a page fetched again is.
         #expect(LoopWatch.isLive("job_output", kind: .shell) && LoopWatch.isLive("browse_scroll", kind: .browser))
         #expect(!LoopWatch.isLive("web_fetch", kind: .browser) && !LoopWatch.isLive("run_command", kind: .shell))
+        // Something that moves may honestly read the same a few times, but not ten: a turn once listed the tabs 1 105 times.
+        let tabs = ToolCallRequest(id: "t", name: "browse_tabs", arguments: #"{"action":"list"}"#)
+        var moving = LoopWatch()
+        for _ in 1..<LoopWatch.liveRepeats { moving.record(tabs, result: "t1 “Gmail”", failed: false, live: true) }
+        #expect(moving.note() == nil)
+        moving.record(tabs, result: "t1 “Gmail”", failed: false, live: true)
+        #expect(moving.note() == LoopWatch.liveRepeatingNote)
         let poll = ToolCallRequest(id: "j", name: "job_output", arguments: #"{"id":"1"}"#)
         for _ in 1...3 { watch.record(poll, result: "Processo 1 (rodando há 2 min): make\n…", failed: false, live: true) }
         #expect(watch.note() == nil)

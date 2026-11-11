@@ -6,12 +6,12 @@ extension AppModel {
     var summarizesSessions: Bool { preferences.object(forKey: SessionNote.settingKey) as? Bool ?? false }
 
     /// What asks the model for the note on a stretch saved to the memory (see `SessionNote`), or nil when none is asked: the
-    /// setting off, a developer run or a test that does not look at it, a routine's run, Claude Code (each request a CLI
-    /// process) or a local server (one slot, which the chat needs), an account that cannot be used. The smaller model of
-    /// the same maker when there is one (`ChunkSummarizer.model`), else the Orb's.
+    /// setting off, a developer run or a test that does not look at it, a routine's run, a local server (one slot, which
+    /// the chat needs), an account that cannot be used. The smaller model of the same maker when there is one
+    /// (`ChunkSummarizer.model`: Haiku on Claude Code, in a side run of the CLI), else the Orb's.
     func sessionNoteWriter(for botID: UUID) -> (@Sendable (String) async -> String?)? {
         guard summarizesSessions, writesStretchNotes, !isDevRun, !isResetting, sessions[botID]?.routineID == nil,
-              let bot = bot(botID), let ref = modelRef(for: bot), ref.provider != .claudeCode, !Self.hasSingleSlot(ref.provider),
+              let bot = bot(botID), let ref = modelRef(for: bot), !Self.hasSingleSlot(ref.provider),
               let account = account(ref.provider), account.isEnabled, isUsable(account) else { return nil }
         let writer = ChunkSummarizer.model(in: account, orb: ref.model)?.id ?? ref.model
         guard let client = clientOverride?() ?? account.client(for: account.models.first { $0.id == writer },

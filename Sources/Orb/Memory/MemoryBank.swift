@@ -108,10 +108,11 @@ actor MemoryBank {
 
     static let identityPath = "nucleo/identidade.md"
     static let identityNotesHeader = "## Como funcionar"
-    /// Characters of memory in the system prompt (~1 500 tokens), whatever the memory's size.
-    static let briefBudget = 6_000
-    /// Share of the brief each part can take at most.
-    static let identityShare = 1_500, preferencesShare = 1_500, leftOffShare = 900
+    /// Characters of memory in the system prompt (~2 900 tokens at most), whatever the memory's size.
+    static let briefBudget = 10_000
+    /// Share of the brief each part can take at most. The pinned parts are the Orb's standing rules: at 1 500 each, an Orb
+    /// with a few long preferences had every one cut and the oldest left out of the prompt.
+    static let identityShare = 3_000, preferencesShare = 3_000, leftOffShare = 900
     /// What the memories related to one message may take: up to `relatedLimit` of them, each cut to `relatedSnippet`
     /// characters (the rest is one `recall` away).
     static let relatedShare = 900, relatedLimit = 3, relatedSnippet = 220
@@ -1030,16 +1031,17 @@ actor MemoryBank {
     /// Preferences read from the index at most (the prompt shows far fewer).
     static let pinnedPreferenceLimit = 200
 
-    /// The preferences (flattened bodies, newest first) as the prompt lists them: each cut to
-    /// `max(240, share / count)` characters, the list within `share`, and a last line counting the older ones
-    /// that did not fit. `whole`: how many are shown uncut. `overflow`: those cut or left out. `displayed`: how many
+    /// The preferences (flattened bodies, newest first) as the prompt lists them: all whole when together they fit in
+    /// `share` (a long one beside short ones is not cut for an average); else each cut to `max(240, share / count)`
+    /// characters, the list within `share`, and a last line counting the older ones that did not fit. `whole`: how many are shown uncut. `overflow`: those cut or left out. `displayed`: how many
     /// leading ones have a line (whole or cut), each cut to `each`.
     /// The one rule for the brief and the panel.
     static func preferenceBlock(_ bodies: [String], share: Int = preferencesShare)
         -> (text: String, whole: Int, overflow: Int, displayed: Int, each: Int) {
         guard !bodies.isEmpty else { return ("", 0, 0, 0, 0) }
-        let each = min(max(240, share / bodies.count), share - 4) // + "- ", the ellipsis and the line break
-        let reserve = 80 // the "+N" line
+        let fits = bodies.reduce(0) { $0 + $1.count + 3 } <= share // "- " and the line break
+        let each = fits ? share : min(max(240, share / bodies.count), share - 4) // + "- ", the ellipsis and the line break
+        let reserve = fits ? 0 : 80 // the "+N" line
         var lines: [String] = [], used = 0, whole = 0, cut = 0, stopped = false
         for (index, body) in bodies.enumerated() {
             let clipped = MemoryText.clip(body, each)

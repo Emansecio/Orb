@@ -5,7 +5,12 @@ import Foundation
 /// changes course or asks, instead of spending the turn's steps on what does not work.
 struct LoopWatch: Sendable {
     static let repeats = 3
+    /// The same for a call that looks at something that moves (`isLive`): the same words may honestly come back a few times
+    /// while a page loads, but not this many (a turn once listed the browser's tabs 1 105 times).
+    static let liveRepeats = 10
     static let repeatingNote = "[Orb: você fez esta mesma chamada \(repeats) vezes e recebeu o mesmo resultado; repetir não muda nada. "
+        + "Tente outro caminho ou, se está esperando algo ou travado, pare e diga ao usuário o que falta]"
+    static let liveRepeatingNote = "[Orb: você fez esta mesma chamada \(liveRepeats) vezes e recebeu o mesmo resultado; nada está mudando. "
         + "Tente outro caminho ou, se está esperando algo ou travado, pare e diga ao usuário o que falta]"
     static let failingNote = "[Orb: as últimas \(repeats) chamadas de ferramenta falharam. Não repita o que falhou: entenda por quê e "
         + "tente outro caminho; pare só se for algo que só o usuário resolve, e diga o quê]"
@@ -22,14 +27,14 @@ struct LoopWatch: Sendable {
     private var pending: String?
 
     /// Counts one call and what it gave back (the tool's own text, before any note or cap). `live`: the call looks at
-    /// something that changes by itself (`isLive`), where the same words come back while it moves: only its failures count.
+    /// something that changes by itself (`isLive`), where the same words come back while it moves: it is told only after
+    /// `liveRepeats` of the same.
     mutating func record(_ call: ToolCallRequest, result: String, failed: Bool, live: Bool = false) {
         failures = failed ? failures + 1 : 0
         if failed, failures % Self.repeats == 0 {
             pending = Self.failingNote
             return
         }
-        guard failed || !live else { return }
         var hasher = Hasher()
         hasher.combine(call.name)
         hasher.combine(call.arguments)
@@ -37,7 +42,8 @@ struct LoopWatch: Sendable {
         let key = hasher.finalize()
         let times = seen[key, default: 0] + 1
         seen[key] = times
-        if times % Self.repeats == 0 { pending = Self.repeatingNote }
+        let every = live && !failed ? Self.liveRepeats : Self.repeats
+        if times % every == 0 { pending = live && !failed ? Self.liveRepeatingNote : Self.repeatingNote }
     }
 
     /// Whether a tool drives the browser page or a Mac app ("Scrolled down 600 px." again while the page moves), or reads
