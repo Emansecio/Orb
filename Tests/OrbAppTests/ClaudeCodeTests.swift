@@ -47,6 +47,8 @@ struct ClaudeCodeWireTests {
         #expect(models?.map(\.id) == ["default", "claude-fable-5-1[1m]", "sonnet"])
         #expect(models?.map(\.name) == ["Padrão do Claude Code", "Fable", "Sonnet"])
         #expect(models?.allSatisfy { $0.format == .claudeCode } == true)
+        // The list states no window: only the id of a million-token variant does.
+        #expect(models?.map(\.contextLength) == [nil, 1_000_000, nil])
         #expect(ClaudeCodeWire.models(fromInitializeResponse: line, requestID: "other") == nil)
         #expect(ModelRef("claudeCode/claude-fable-5-1[1m]")?.model == "claude-fable-5-1[1m]")
     }

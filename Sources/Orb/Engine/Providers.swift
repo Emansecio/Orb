@@ -136,6 +136,9 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
     /// Keeps a key in the Keychain: the ones that need it, and the gateway, where it is optional.
     var storesKey: Bool { needsKey || self == .custom }
     var hasEditableURL: Bool { [.ollama, .lmstudio, .custom].contains(self) }
+    /// Whether the public catalog may fill in a window the provider's own list does not state. Not where the window is the
+    /// plan's (a ChatGPT or Claude subscription gives some models less than their API does) or the local server's.
+    var takesPublicWindows: Bool { ![.chatgpt, .claudeCode, .ollama, .lmstudio].contains(self) }
 }
 
 /// A provider the user set up. Keys and sign-in tokens live in the Keychain, not here.
@@ -221,7 +224,9 @@ enum ModelRefreshBackoff {
 enum ModelCatalog {
     /// Goes up when the app starts keeping more of what a provider's list says about each model, so a list read before
     /// is read again on the next launch instead of hours later. 2: thinking levels (`ProviderModel.efforts`).
-    static let version = 2
+    /// 3: each model's window, from wherever it is stated (`statedWindow`, `publicWindows`, `ollamaCloudWindows`); the
+    /// Claude Code list no longer carries a made-up 200K.
+    static let version = 3
 
     /// Words of a model id that mark a model that does not chat: embeddings, rerankers, speech and moderation. Local servers
     /// list everything they hold, so a user of RAG has `bge-m3` next to `qwen3`.
@@ -248,9 +253,88 @@ enum ModelCatalog {
         return fetched + previous.filter { $0.isManual == true && !listed.contains($0.id) }
     }
 
-    /// Fetches the provider's current models with their wire format.
+    /// A refreshed list keeps the window the last one had for a model it states none for: what Claude Code said at the end
+    /// of a turn (`AppModel.noteStatedWindow`), or what the public catalog said before it failed to load this time.
+    static func keepingWindows(fetched: [ProviderModel], previous: [ProviderModel]) -> [ProviderModel] {
+        let known = Dictionary(previous.compactMap { model in model.contextLength.map { (model.id, $0) } }, uniquingKeysWith: { first, _ in first })
+        guard !known.isEmpty else { return fetched }
+        return fetched.map { model in
+            var model = model
+            if model.contextLength == nil { model.contextLength = known[model.id] }
+            return model
+        }
+    }
+
+    /// Fetches the provider's current models with their wire format, and each one's window when anything states it: the
+    /// provider's own list first, then the public catalog (models.dev) for a list that says none.
     /// `token` is the API key or, for ChatGPT, the access token.
     static func fetch(_ account: ProviderAccount, token: String?, session: URLSession = .shared) async throws -> [ProviderModel] {
+        let models = try await listed(account, token: token, session: session)
+        guard account.kind.takesPublicWindows, models.contains(where: { $0.contextLength == nil }) else { return models }
+        let windows = publicWindows(try? await ProviderTransport.fetch(ProviderTransport.authorizedRequest(modelsDevURL, apiKey: nil),
+                                                                       session: session))
+        return models.map { model in
+            var model = model
+            if model.contextLength == nil { model.contextLength = windows[windowKey(model.id)] }
+            return model
+        }
+    }
+
+    /// The window a list entry states for its model, under the names servers give it (`context_length` on OpenRouter and
+    /// most gateways, `context_window` on ChatGPT and Groq, `max_context_length` on Mistral, `max_input_tokens` on
+    /// Anthropic, `max_model_len` on vLLM); nil when the entry says none.
+    static func statedWindow(in entry: JSONValue?) -> Int? {
+        guard let entry else { return nil }
+        return ["context_length", "context_window", "max_context_length", "max_input_tokens", "max_model_len"].lazy
+            .compactMap { entry[$0]?.int }.first { $0 > 0 }
+    }
+
+    /// An OpenAI-style list: each id once, in alphabetical order, with the window its entry states.
+    static func listedModels(_ entries: [JSONValue], format: APIFormat) -> [ProviderModel] {
+        var seen: Set<String> = []
+        return entries.compactMap { entry -> ProviderModel? in
+            guard let id = entry["id"]?.string, seen.insert(id).inserted else { return nil }
+            return ProviderModel(id: id, name: id, format: format, contextLength: statedWindow(in: entry))
+        }
+        .sorted { $0.id < $1.id }
+    }
+
+    /// models.dev lists a model under every provider that serves it, not always with the same window: the one most of
+    /// them state for an id, and the smaller on a tie. A window too big only costs a refused request, which teaches the
+    /// real one (`AppModel.learnContextWindow`).
+    /// Read with `JSONSerialization`: the catalog is megabytes, which `JSONValue` takes over a second to decode.
+    static func publicWindows(_ catalog: Data?) -> [String: Int] {
+        guard let catalog, let providers = try? JSONSerialization.jsonObject(with: catalog) as? [String: Any] else { return [:] }
+        var counts: [String: [Int: Int]] = [:]
+        for case let provider as [String: Any] in providers.values {
+            for (id, info) in provider["models"] as? [String: Any] ?? [:] {
+                guard let window = ((info as? [String: Any])?["limit"] as? [String: Any])?["context"] as? Int, window > 0 else { continue }
+                counts[windowKey(id), default: [:]][window, default: 0] += 1
+            }
+        }
+        return counts.compactMapValues { windows in windows.max { ($0.value, -$0.key) < ($1.value, -$1.key) }?.key }
+    }
+
+    /// How an id is looked up in `publicWindows`: without the vendor before a "/", in lower case, and with the "." some
+    /// lists write where others write "-" ("claude-haiku-5.5", "anthropic/claude-haiku-5-5").
+    static func windowKey(_ id: String) -> String {
+        (id.split(separator: "/").last.map(String.init) ?? id).lowercased().replacingOccurrences(of: ".", with: "-")
+    }
+
+    /// Ollama's own list (`/api/tags`): a model with a `remote_host` runs in Ollama's cloud, at the window its entry
+    /// states (`details.context_length`). A model on this Mac is loaded with the window the server was set to, often
+    /// far below the model's, and a longer prompt is cut without a word: those keep the cautious guess (`ContextBudget`).
+    static func ollamaCloudWindows(_ tags: JSONValue?) -> [String: Int] {
+        var windows: [String: Int] = [:]
+        for entry in tags?["models"]?.array ?? [] {
+            guard entry["remote_host"]?.string?.isEmpty == false, let name = entry["name"]?.string ?? entry["model"]?.string,
+                  let window = entry["details"]?["context_length"]?.int, window > 0 else { continue }
+            windows[name] = window
+        }
+        return windows
+    }
+
+    private static func listed(_ account: ProviderAccount, token: String?, session: URLSession) async throws -> [ProviderModel] {
         if account.kind == .claudeCode { return try await ClaudeCode.shared.models() }
         guard let base = URL(string: account.baseURL), base.host != nil else { throw LLMError.notConfigured }
         switch account.kind {
@@ -272,15 +356,22 @@ enum ModelCatalog {
             return openCodeModels(live: try await live, metadata: (try? await metadata)?[key]?["models"], provider: account.kind)
         case .custom:
             // The gateway speaks one chosen format; list via the matching endpoint, with the user's headers.
-            let ids = account.format == .messages
-                ? try await AnthropicClient(baseURL: base, apiKey: token, extraHeaders: account.headers, session: session).models()
-                : try await OpenAIClient(baseURL: base, apiKey: token, extraHeaders: account.headers, session: session).models()
-            return ids.map { ProviderModel(id: $0, name: $0, format: account.format) }
+            guard account.format == .messages else {
+                return listedModels(try await OpenAIClient(baseURL: base, apiKey: token, extraHeaders: account.headers, session: session)
+                    .modelEntries(), format: account.format)
+            }
+            return try await AnthropicClient(baseURL: base, apiKey: token, extraHeaders: account.headers, session: session).models()
+                .map { ProviderModel(id: $0, name: $0, format: .messages) }
         case .openrouter:
             return openRouterModels(try await OpenAIClient(baseURL: base, apiKey: token, session: session).modelEntries())
-        case .claudeCode, .openDesign, .xai, .ollama, .lmstudio:
-            return try await OpenAIClient(baseURL: base, apiKey: token, session: session).models()
-                .map { ProviderModel(id: $0, name: $0, format: .chat) }
+        case .ollama:
+            // The OpenAI-style list names the models; the server's own, beside `/v1`, says which of them run in the cloud.
+            let root = base.lastPathComponent == "v1" ? base.deletingLastPathComponent() : base
+            let ids = try await OpenAIClient(baseURL: base, apiKey: token, session: session).models()
+            let windows = ollamaCloudWindows(try? await getJSON(root.appending(path: "api/tags"), token: token, session: session))
+            return ids.map { ProviderModel(id: $0, name: $0, format: .chat, contextLength: windows[$0]) }
+        case .claudeCode, .openDesign, .xai, .lmstudio:
+            return listedModels(try await OpenAIClient(baseURL: base, apiKey: token, session: session).modelEntries(), format: .chat)
         }
     }
 
@@ -293,7 +384,7 @@ enum ModelCatalog {
             // Each level comes as {"effort": "low", ...} (a bare "low" is read too).
             let levels = (entry["supported_reasoning_levels"]?.array ?? []).compactMap { $0["effort"]?.string ?? $0.string }
             return ProviderModel(id: slug, name: entry["display_name"]?.string ?? slug, format: .responses,
-                                 supportsImages: supportsImages(in: entry) ?? openAIFamilySupportsImages(slug),
+                                 contextLength: statedWindow(in: entry), supportsImages: supportsImages(in: entry) ?? openAIFamilySupportsImages(slug),
                                  efforts: ReasoningEffort.levels(levels), defaultEffort: entry["default_reasoning_level"]?.string)
         }
     }
@@ -322,8 +413,8 @@ enum ModelCatalog {
         var seen: Set<String> = []
         return entries.compactMap { entry -> ProviderModel? in
             guard let id = entry["id"]?.string, seen.insert(id).inserted else { return nil }
-            return ProviderModel(id: id, name: id, format: .chat, supportsImages: supportsImages(in: entry),
-                                 price: openRouterPrice(entry["pricing"]))
+            return ProviderModel(id: id, name: id, format: .chat, contextLength: statedWindow(in: entry),
+                                 supportsImages: supportsImages(in: entry), price: openRouterPrice(entry["pricing"]))
         }
         .sorted { $0.id < $1.id }
     }
@@ -473,15 +564,17 @@ extension ProviderAccount {
     /// `cacheTTL`: the prompt-cache lifetime Claude Code should ask for (`Schedule.cacheTTL`); nil is the CLI's own.
     /// `replyTokens`: the room the history left for the reply (`ContextBudget.replyTokens`), the cap the Messages format
     /// sends, so a full history and the longest reply still fit the window together.
+    /// `onWindow`: told the model's window when the provider states it with an answer (only Claude Code does).
     func client(for model: ProviderModel?, credentials: @escaping CredentialsProvider, conversationID: String,
                 effort: String? = nil, replyTokens: Int? = nil, cacheTTL: String? = nil,
-                keepsIdleProcess: Bool = false) -> (any LLMClient)? {
+                keepsIdleProcess: Bool = false, onWindow: (@Sendable (Int) -> Void)? = nil) -> (any LLMClient)? {
         let effort = ReasoningEffort.sent(effort ?? "", for: model)
         // Claude Code has no address and no key: the installed CLI is only the transport to the model, through the user's login
         // (so `credentials` goes unused). Everything else about the turn (prompt, tools, memory) is the Orb's own.
         // `keepsIdleProcess`: the chat's own turns leave the CLI process open for the next message (`ClaudePipeIdlePool`); side calls do not.
         if kind == .claudeCode {
-            return ClaudeCodeClient(effort: effort, cacheTTL: cacheTTL, conversationID: conversationID, keepsIdleProcess: keepsIdleProcess)
+            return ClaudeCodeClient(effort: effort, cacheTTL: cacheTTL, conversationID: conversationID, keepsIdleProcess: keepsIdleProcess,
+                                    onWindow: onWindow)
         }
         guard let base = URL(string: baseURL), base.host != nil else { return nil }
         var headers = kind == .custom ? self.headers : [:]
@@ -505,7 +598,8 @@ extension ProviderAccount {
             client.reasoningEffort = effort
             return client
         case .claudeCode:
-            return ClaudeCodeClient(effort: effort, cacheTTL: cacheTTL, conversationID: conversationID, keepsIdleProcess: keepsIdleProcess)
+            return ClaudeCodeClient(effort: effort, cacheTTL: cacheTTL, conversationID: conversationID, keepsIdleProcess: keepsIdleProcess,
+                                    onWindow: onWindow)
         }
     }
 }

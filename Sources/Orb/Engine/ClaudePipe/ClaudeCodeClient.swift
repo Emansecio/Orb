@@ -67,6 +67,8 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
     private let idlePool: ClaudePipeIdlePool
     private let idleTimeout: Duration
     private let metrics: ClaudePipeMetricsLog
+    /// Told the model's window whenever the CLI states it (the end of a turn, see `ClaudeCodeWire.window(fromResult:)`).
+    private let onWindow: (@Sendable (Int) -> Void)?
 
     /// What a step left behind: the live process waiting at the model's tool calls, and the messages of the call that got there.
     private struct Parked {
@@ -90,8 +92,9 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
          folders: ClaudePipeFolders = .standard, initializeTimeout: Duration = .seconds(60), parkTimeout: Duration = .seconds(30 * 60),
          effort: String? = nil, cacheTTL: String? = nil, conversationID: String? = nil,
          idlePool: ClaudePipeIdlePool = .shared, idleTimeout: Duration = ClaudePipeIdlePool.defaultTimeout,
-         keepsIdleProcess: Bool = true, stepIdleTimeout: Duration = .seconds(300)) {
+         keepsIdleProcess: Bool = true, stepIdleTimeout: Duration = .seconds(300), onWindow: (@Sendable (Int) -> Void)? = nil) {
         self.stepIdleTimeout = stepIdleTimeout
+        self.onWindow = onWindow
         self.conversationID = keepsIdleProcess ? conversationID : nil
         self.idlePool = idlePool
         self.idleTimeout = idleTimeout
@@ -126,7 +129,7 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
         ClaudeCodeClient(launch: launch, orbBinary: orbBinary, folders: folders, initializeTimeout: initializeTimeout,
                          parkTimeout: parkTimeout, effort: effort, cacheTTL: cacheTTL, conversationID: nil,
                          idlePool: idlePool, idleTimeout: idleTimeout, keepsIdleProcess: false,
-                         stepIdleTimeout: stepIdleTimeout)
+                         stepIdleTimeout: stepIdleTimeout, onWindow: onWindow)
     }
 
     // MARK: Streaming
@@ -275,6 +278,7 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
                 (run, step) = try await startFresh(reason)
             }
             try Task.checkCancellation()
+            if let window = step.window { onWindow?(window) }
             metrics.record(ClaudePipeMetric(timestamp: Date(), conversation: conversationTag, model: model, fresh: freshReason,
                                             messageCount: messages.count, characterCount: messages.reduce(0) { $0 + $1.content.count },
                                             usage: step.usage, idle: reusedIdle))
@@ -451,6 +455,8 @@ struct ClaudePipeStep: Sendable, Equatable {
     var calls: [ToolCallRequest]
     var stop: StopReason
     var usage: TokenUsage?
+    /// The model's window, when the step ended at the CLI's `result` line and it said so.
+    var window: Int?
 }
 
 /// One CLI process and its stdout. An actor because the line iterator is read by one step after another, from different tasks.
@@ -577,7 +583,9 @@ actor ClaudePipeRun {
                 if json["is_error"]?.bool == true || json["api_error_status"]?.int != nil {
                     throw ClaudePipeErrors.error(forResult: json, assistantError: state.assistantError)
                 }
-                return state.step
+                var step = state.step
+                step.window = ClaudeCodeWire.window(fromResult: json)
+                return step
             default:
                 continue
             }

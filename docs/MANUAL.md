@@ -958,7 +958,7 @@ Rodando pelo SwiftPM (sem um `.app`), ele só fecha: abra de novo. Nos modos de 
   (nomes de arquivos do primeiro nível, arquivos mexidos há pouco, branch, mudanças e títulos dos últimos commits do git).
   **Com Ollama ou LM Studio o modelo roda no seu Mac e a conversa não sai dele** (as ferramentas que você liberar, como
   `web_fetch` e os conectores, continuam falando com a rede). **Com o Claude Code, o conteúdo vai à Anthropic por ele.**
-- **Outras conexões**: as listas de modelos de cada provedor (e a `models.dev`, para os modelos do OpenCode), o
+- **Outras conexões**: as listas de modelos de cada provedor (e a `models.dev`, um catálogo público: para os modelos do OpenCode e para o tamanho do contexto dos modelos cuja lista não o informa; o app baixa o catálogo inteiro e não envia nada sobre os seus modelos), o
   [Skills.sh](https://skills.sh) e o GitHub quando você explora ou instala uma skill, o registro do MCP, as páginas que o Orb
   abrir com `web_fetch` ou no navegador dele, as pesquisas (o DuckDuckGo ou o Google recebem o que o Orb pesquisa), os serviços dos conectores que você instalar e o login do ChatGPT.
 - **Navegador e pesquisa.** O navegador do Orb guarda cookies e logins numa pasta de perfil por Orb (`navegador/`, na pasta de dados), no seu Mac, e ela some com o Orb. **Com o TinyFish como provedor de pesquisa, o que o Orb pesquisa vai para os servidores do TinyFish** (com a sua chave, guardada no Keychain); com DuckDuckGo ou Google, vai para eles.

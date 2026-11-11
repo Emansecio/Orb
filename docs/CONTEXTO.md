@@ -36,7 +36,7 @@ histórico (tokens) = máx( 2 000,  mín( 90% da janela − sobrecarga − reser
 
 | Parte | Valor |
 |---|---|
-| Janela | a do catálogo do modelo (`ProviderModel.contextLength`); senão 16 000 (Ollama e LM Studio), 128 000 (chat e Responses) ou 200 000 (Messages e Claude Code); o menor entre ela e a **janela aprendida** |
+| Janela | a do catálogo do modelo (`ProviderModel.contextLength`, veja "De onde vem a janela" abaixo); senão 16 000 (Ollama e LM Studio), 128 000 (chat e Responses) ou 200 000 (Messages e Claude Code); o menor entre ela e a **janela aprendida** |
 | Sobrecarga | prompt do sistema + especificações das ferramentas. O motor mede a real (`ContextBudget.overheadTokens`) e avisa o app (`onOverheadMeasured`); antes disso vale 8 000 |
 | Reserva da resposta | 16 000 (Messages, Claude Code) ou 4 000 (demais), nunca mais que 1/8 da janela; no formato Messages vai como `max_tokens` do pedido (`ProviderAccount.client(…, replyTokens:)`), então a resposta nunca pede mais do que o orçamento deixou |
 | Teto do nível | "Contexto das conversas" em Ajustes → Orbs: **Econômico** 40 000 · **Equilibrado** 80 000 (padrão) · **Amplo** 60% da janela, nunca menos que o Equilibrado (em janelas abaixo de ~133 mil, 60% seria menos que 80 000). `ContextMemoryLevel`, salvo em `AppState.contextMemory` |
@@ -44,6 +44,29 @@ histórico (tokens) = máx( 2 000,  mín( 90% da janela − sobrecarga − reser
 
 Um modelo fora do catálogo usa o formato do provedor (ou o `format` da conta, no gateway próprio). O Claude Code tem orçamento como
 qualquer outro provedor (`ContextBudget.init(model:provider:…)` o trata como o formato `claudeCode`).
+
+**De onde vem a janela.** `ProviderModel.contextLength` só guarda o que alguém informou; sem informação fica vazio e vale o
+palpite da tabela (o medidor então diz "de uns 200 mil"). As fontes, na ordem:
+
+1. **A lista do próprio provedor** (`ModelCatalog.statedWindow`): `context_length` (OpenRouter, Command Code e a maioria dos
+   gateways), `context_window` (ChatGPT, Groq), `max_context_length`, `max_input_tokens` ou `max_model_len`. O OpenCode lê a
+   seção dele no models.dev.
+2. **Claude Code**: a lista não informa janela, e ela depende do modelo e do plano (o mesmo modelo aceita 200 mil num e 1 milhão
+   noutro). O CLI informa no fim de cada turno (`modelUsage.<modelo>.contextWindow` da linha `result`, lido por
+   `ClaudeCodeWire.window(fromResult:)`); o cliente avisa (`onWindow`) e `AppModel.noteStatedWindow` grava no modelo da lista.
+   Até o primeiro turno terminar vale o palpite de 200 000. Só o id terminado em `[1m]` já nasce com 1 milhão.
+3. **Ollama**: a lista nativa (`/api/tags`, ao lado de `/v1`) diz quais modelos rodam na nuvem do Ollama (`remote_host`) e a
+   janela deles (`details.context_length`, `ModelCatalog.ollamaCloudWindows`). Modelo local continua em 16 000: o servidor o
+   carrega com a janela que foi configurada, quase sempre bem menor que a do modelo, e corta o excesso sem avisar.
+4. **Catálogo público** (models.dev, `ModelCatalog.publicWindows`): para a lista que não informa (Open Design, xAI, OpenAI,
+   Anthropic, gateway próprio). O mesmo modelo aparece em vários provedores, nem sempre com a mesma janela: vale a que a maioria
+   informa e, no empate, a menor; o id é comparado sem o prefixo do fornecedor, sem caixa e com "." igual a "-". Não vale para
+   ChatGPT e Claude Code (a janela é a do plano) nem para Ollama e LM Studio (`ProviderKind.takesPublicWindows`). Uma janela
+   maior que a real custa um pedido recusado, que ensina a certa (janela aprendida).
+
+Uma lista relida mantém a janela que a anterior tinha para o modelo quando a nova não informa nenhuma
+(`ModelCatalog.keepingWindows`), desde que a anterior tenha sido lida pela mesma `ModelCatalog.version`: a versão 3 descarta os
+200 000 que as anteriores gravavam em todo modelo do Claude Code.
 
 ### Janela aprendida
 

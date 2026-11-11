@@ -66,4 +66,37 @@ import Testing
         await model.refreshAllModels()
         #expect(await asked.count == 1)
     }
+
+    /// Claude Code's list states no window; the end of a turn does (`ClaudeCodeWire.window(fromResult:)`).
+    @Test @MainActor func theWindowAnAnswerStatedStaysOnTheModelThroughTheNextList() async throws {
+        let model = model(failing: false, asked: Asked())
+        await model.refreshAllModels()
+        let ref = ModelRef(provider: .ollama, model: "m")
+        model.noteStatedWindow(1_000_000, of: ref)
+        #expect(model.providers.first?.models.map(\.contextLength) == [1_000_000])
+        // The list is read again and still states none.
+        try await model.refreshModels(.ollama)
+        #expect(model.providers.first?.models.map(\.contextLength) == [1_000_000])
+        // Not a window, or not a model of the list: nothing changes.
+        model.noteStatedWindow(0, of: ref)
+        model.noteStatedWindow(64_000, of: ModelRef(provider: .ollama, model: "other"))
+        #expect(model.providers.first?.models.map(\.contextLength) == [1_000_000])
+        // The model moved to another window (an alias that now names another model): the newest answer wins.
+        model.noteStatedWindow(200_000, of: ref)
+        #expect(model.providers.first?.models.map(\.contextLength) == [200_000])
+    }
+
+    /// The build before this one wrote 200K on every Claude Code model, whatever the model took.
+    @Test @MainActor func aWindowFromAListAnOlderBuildReadIsNotKept() async {
+        let asked = Asked()
+        let model = model(failing: false, asked: asked)
+        model.updateProvider(.ollama) {
+            $0.models = [ProviderModel(id: "m", name: "m", format: .chat, contextLength: 200_000)]
+            $0.modelsUpdatedAt = .now
+            $0.catalogVersion = ModelCatalog.version - 1
+        }
+        await model.refreshAllModels()
+        #expect(await asked.count == 1)
+        #expect(model.providers.first?.models.map(\.contextLength) == [nil])
+    }
 }

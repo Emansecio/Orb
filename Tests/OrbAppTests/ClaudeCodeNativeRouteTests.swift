@@ -79,14 +79,16 @@ private struct RecordingModel: LLMClient {
         await waitUntil("the turn to end") { !model.isWorking(botID) && model.session(botID).turnTask == nil }
         #expect(model.live(botID).lastUsage == TokenUsage(input: 100, output: 20))
         #expect(UsageBilling.of(.claudeCode, account: model.account(.claudeCode)) == .plan)
-        // The window the history is planned by: Claude Code's models take 200K tokens.
+        // The window the history is planned by until Claude Code states the model's: the smallest its models take.
         #expect(model.contextBudget(for: model.bots[0])?.window == 200_000)
     }
 
-    @Test func theFallbackModelsStateTheirWindowAndPictures() {
+    /// The list does not say a window (it is the plan's, and only an answer states it): none is made up.
+    @Test func theFallbackModelsTakePicturesAndStateNoWindow() {
         for model in ClaudeCodeModels.fallback {
-            #expect(model.contextLength == 200_000 && model.supportsImages == true, "\(model.id)")
+            #expect(model.contextLength == nil && model.supportsImages == true, "\(model.id)")
         }
         #expect(ClaudeCodeModels.window(of: "claude-fable-5-1[1m]") == 1_000_000)
+        #expect(ClaudeCodeModels.window(of: "claude-fable-5-1") == nil)
     }
 }

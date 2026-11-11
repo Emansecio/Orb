@@ -73,6 +73,18 @@ enum ClaudeCodeWire {
                                  efforts: ReasoningEffort.levels(levels))
         }
     }
+
+    /// The window the CLI says the model of this run has: `modelUsage.<model>.contextWindow` of a `result` line. It depends
+    /// on the model and on the plan (the same model takes 200K on one and a million on another), and nothing else says it.
+    /// A run that also called a smaller model on the side lists both: the one that read the most is the conversation's.
+    static func window(fromResult json: JSONValue) -> Int? {
+        guard case .object(let models)? = json["modelUsage"] else { return nil }
+        func read(_ entry: JSONValue) -> Int {
+            ["inputTokens", "cacheReadInputTokens", "cacheCreationInputTokens"].reduce(0) { $0 + max(0, entry[$1]?.int ?? 0) }
+        }
+        let main = models.values.filter { ($0["contextWindow"]?.int ?? 0) > 0 }.max { read($0) < read($1) }
+        return main?["contextWindow"]?.int
+    }
 }
 
 enum ClaudeCodePermissionAnswer: Equatable, Sendable {
@@ -86,18 +98,16 @@ enum ClaudeCodeModels {
     /// Not passed to `--model`, so the user's own Claude Code setting (or their plan's default) applies.
     static let defaultID = "default"
 
-    /// The window the Orb plans a Claude Code model's history by (the CLI does not say; Claude models take 200K tokens).
-    static let windowTokens = 200_000
-
-    /// An id ending in `[1m]` is the million-token variant.
-    static func window(of id: String) -> Int { id.hasSuffix("[1m]") ? 1_000_000 : windowTokens }
+    /// An id ending in `[1m]` is the million-token variant. The list says no other window: the CLI states it when a turn
+    /// ends (`ClaudeCodeWire.window(fromResult:)`), and until then the budget assumes the smallest (`ContextBudget`).
+    static func window(of id: String) -> Int? { id.hasSuffix("[1m]") ? 1_000_000 : nil }
 
     /// Documented aliases (https://code.claude.com/docs/en/model-config#model-aliases), used when the CLI
     /// cannot be asked for its list.
     static let fallback: [ProviderModel] = [
-        ProviderModel(id: defaultID, name: "Padrão do Claude Code", format: .claudeCode, contextLength: windowTokens, supportsImages: true),
-        ProviderModel(id: "opus", name: "Opus", format: .claudeCode, contextLength: windowTokens, supportsImages: true),
-        ProviderModel(id: "sonnet", name: "Sonnet", format: .claudeCode, contextLength: windowTokens, supportsImages: true),
-        ProviderModel(id: "haiku", name: "Haiku", format: .claudeCode, contextLength: windowTokens, supportsImages: true),
+        ProviderModel(id: defaultID, name: "Padrão do Claude Code", format: .claudeCode, supportsImages: true),
+        ProviderModel(id: "opus", name: "Opus", format: .claudeCode, supportsImages: true),
+        ProviderModel(id: "sonnet", name: "Sonnet", format: .claudeCode, supportsImages: true),
+        ProviderModel(id: "haiku", name: "Haiku", format: .claudeCode, supportsImages: true),
     ]
 }

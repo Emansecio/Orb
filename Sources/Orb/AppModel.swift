@@ -1176,7 +1176,12 @@ final class AppModel {
         updateProvider(kind) {
             // Read inside the update, so a model added by hand while the list was loading is kept.
             // An empty answer from the server is not a list: it would erase the models the Orbs were set to use.
-            if !fetched.isEmpty { $0.models = kind == .custom ? ModelCatalog.mergingManual(fetched: fetched, previous: $0.models) : fetched }
+            if !fetched.isEmpty {
+                // A list read by an older catalog version may carry windows that version made up: not kept.
+                let known = ($0.catalogVersion ?? 1) == ModelCatalog.version ? $0.models : []
+                let listed = ModelCatalog.keepingWindows(fetched: fetched, previous: known)
+                $0.models = kind == .custom ? ModelCatalog.mergingManual(fetched: listed, previous: $0.models) : listed
+            }
             $0.modelsUpdatedAt = .now
             $0.catalogVersion = ModelCatalog.version
         }
@@ -1931,7 +1936,10 @@ final class AppModel {
                                                                       cacheTTL: routineCacheTTL(of: session),
                                                                       // Only the Orb's own chat: a routine's run, a request from another Orb
                                                                       // or a group starts from nothing next time and would only take a slot.
-                                                                      keepsIdleProcess: session.routineID == nil && session.sideKind == nil) else { throw LLMError.notConfigured }
+                                                                      keepsIdleProcess: session.routineID == nil && session.sideKind == nil,
+                                                                      onWindow: { [weak self] tokens in
+                                                                          Task { @MainActor in self?.noteStatedWindow(tokens, of: ref) }
+                                                                      }) else { throw LLMError.notConfigured }
                 client = made
             } catch {
                 session.failSetup(error, turn: turn)
@@ -2083,6 +2091,16 @@ final class AppModel {
         guard tokens > 0 else { return }
         learnedContexts[model] = LearnedContext(tokens: tokens, date: .now, inferred: stated ? nil : true)
         scheduleStateSave()
+    }
+
+    /// Keeps the window a provider stated with an answer (Claude Code, whose list says none) on the model in its list,
+    /// where the budget and the meter read it. Written only when it differs: it arrives at the end of every turn.
+    func noteStatedWindow(_ tokens: Int, of ref: ModelRef) {
+        guard tokens > 0, account(ref.provider)?.models.contains(where: { $0.id == ref.model && $0.contextLength != tokens }) == true
+        else { return }
+        updateProvider(ref.provider) { account in
+            for index in account.models.indices where account.models[index].id == ref.model { account.models[index].contextLength = tokens }
+        }
     }
 
     /// Forgets what was learned about a model's window (after raising the server's limit, for instance).

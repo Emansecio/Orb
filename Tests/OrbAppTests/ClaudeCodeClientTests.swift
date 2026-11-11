@@ -103,7 +103,9 @@ def api_message(blocks, stop):
 
 def result(text, **extra):
     body = {"type": "result", "subtype": "success", "is_error": False, "result": text, "session_id": "s",
-            "usage": {"input_tokens": 10, "output_tokens": 42}, "total_cost_usd": 0.01}
+            "usage": {"input_tokens": 10, "output_tokens": 42}, "total_cost_usd": 0.01,
+            "modelUsage": {"claude-side": {"inputTokens": 900, "contextWindow": 200000},
+                           "claude-main": {"inputTokens": 2, "cacheReadInputTokens": 4000, "contextWindow": 1000000}}}
     body.update(extra)
     emit(body)
 
@@ -212,11 +214,11 @@ private struct Rig {
     }
 
     func client(initializeTimeout: Duration = .seconds(20), parkTimeout: Duration = .seconds(60), effort: String? = nil,
-                stepIdleTimeout: Duration = .seconds(300)) -> ClaudeCodeClient {
+                stepIdleTimeout: Duration = .seconds(300), onWindow: (@Sendable (Int) -> Void)? = nil) -> ClaudeCodeClient {
         let launch = ClaudePipeLaunch(executable: script, environment: environment)
         return ClaudeCodeClient(launch: { launch }, orbBinary: URL(fileURLWithPath: "/fake/Orb"), folders: folders,
                                 initializeTimeout: initializeTimeout, parkTimeout: parkTimeout, effort: effort,
-                                stepIdleTimeout: stepIdleTimeout)
+                                stepIdleTimeout: stepIdleTimeout, onWindow: onWindow)
     }
 
     /// A client per turn, as the app makes them, sharing `pool` (the process a turn leaves idle) for the conversation.
@@ -408,6 +410,37 @@ struct ClaudeCodeClientTests {
         #expect(permission["response"]?["response"]?["behavior"] == .string("allow"))
         #expect(permission["response"]?["response"]?["updatedInput"]?["path"] == .string("a.txt"))
         #expect(await waitUntil { rig.scratchEntries.isEmpty })
+    }
+
+    @Test func theWindowTheCLIStatesAtTheEndOfATurnReachesTheCaller() async throws {
+        let rig = try Rig(scenario: "tool")
+        defer { rig.cleanUp() }
+        let windows = LockedBox<[Int]>([])
+        let client = rig.client(onWindow: { windows.append($0) })
+        let first: [ChatMessage] = [.system("s"), .user("Leia a.txt")]
+        let call = ToolCallRequest(id: "toolu_0_0", name: "read_file", arguments: #"{"path":"a.txt"}"#)
+
+        _ = try await collect(client.stream(model: "m", messages: first, tools: [readFile], toolChoice: .auto))
+        // A step that stops at tool calls has no `result` line yet: nothing is said about the window.
+        #expect(windows.value.isEmpty)
+        let second = first + [ChatMessage(role: .assistant, content: "Vou ler. ", toolCalls: [call]), .tool("toolu_0_0", "conteúdo do a.txt")]
+        _ = try await collect(client.stream(model: "m", messages: second, tools: [readFile], toolChoice: .auto))
+        // The model that read the conversation, not the smaller one the CLI called on the side.
+        #expect(windows.value == [1_000_000])
+    }
+
+    @Test func theWindowIsReadFromTheModelThatReadTheMost() throws {
+        func window(_ usage: String) throws -> Int? {
+            ClaudeCodeWire.window(fromResult: try #require(JSONValue.parse(#"{"type":"result","modelUsage":\#(usage)}"#)))
+        }
+        #expect(try window(#"{"claude-opus-5-5":{"inputTokens":2,"cacheCreationInputTokens":3283,"contextWindow":1000000}}"#) == 1_000_000)
+        #expect(try window(#"{"claude-opus-4-6":{"inputTokens":2600,"contextWindow":200000}}"#) == 200_000)
+        #expect(try window(#"{"a":{"inputTokens":50,"contextWindow":200000},"b":{"cacheReadInputTokens":9000,"contextWindow":1000000}}"#) == 1_000_000)
+        // An entry without a window says nothing, however much it read.
+        #expect(try window(#"{"a":{"inputTokens":9000},"b":{"inputTokens":5,"contextWindow":0},"c":{"inputTokens":1,"contextWindow":400000}}"#) == 400_000)
+        #expect(try window("{}") == nil)
+        let silent = try #require(JSONValue.parse(#"{"type":"result","result":"ok"}"#))
+        #expect(ClaudeCodeWire.window(fromResult: silent) == nil)
     }
 
     @Test func aParkedProcessThatDiedStartsANewOneInsteadOfFailingTheTurn() async throws {
