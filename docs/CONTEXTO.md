@@ -332,6 +332,22 @@ ambiente dele). O que muda é como o histórico chega a ele (`ClaudePipeSession.
   aparece com `plan: "idle"`. Qualquer outra chamada (um turno novo que não continua, uma nova tentativa, um corte do histórico)
   começa um processo novo com a conversa reconstruída, e o cache do prompt é o do provedor (`arrangesPromptCache`).
 
+## Tamanho real do token, por modelo (`LearnedDensity`)
+
+O orçamento corta o histórico em caracteres e contava 3,5 caracteres por token para todo modelo. Num modelo de tokens mais
+curtos, "80 mil tokens" virava bem mais que isso (o chat no Sonnet rodava com 115 mil de entrada por chamada no nível
+Equilibrado). Agora o motor diz, a cada chamada que o provedor contou, quantos caracteres a requisição tinha (prompt do
+sistema, especificações das ferramentas e mensagens) e quantos tokens de entrada isso deu (`TurnRequest.onDensityMeasured`).
+`AppModel.noteDensity` guarda por modelo uma média móvel (peso 0,1 por chamada; só chamadas de 8 mil tokens ou mais) em
+`learnedDensities`, no `state.json`. Depois de 5 chamadas o orçamento passa a usar o valor (`ContextBudget.density`), em
+passos de 0,05 e sempre entre 2,2 e 3,5: nunca acima da estimativa antiga (o histórico não cresce além do que já ia) e com
+piso para requisições atípicas. Na primeira vez que o valor vale, o histórico de uma conversa longa dobra uma vez. As
+estimativas do medidor e os outros usos de `ContextBudget.charactersPerToken` continuam em 3,5.
+
+Medido no uso real antes de decidir o que mais cortar (25 dias, 36 conversas guardadas): as saídas de ferramentas são 87%
+dos caracteres guardados, os argumentos das chamadas 6,5% e o raciocínio 0,9%. Por isso o raciocínio antigo continua sendo
+reenviado: tirá-lo não paga.
+
 ## Nível próprio das rotinas
 
 As rodadas de rotina guardam o histórico de uma rodada para a seguinte e o reenviam a cada passo: em 25 dias de uso real

@@ -26,6 +26,8 @@ struct AppState: Codable, Sendable {
     var routineContextMemory = ContextMemoryLevel.economical
     /// Context windows models turned out to have (a request was refused for its size), by "provider/model".
     var learnedContexts: [String: LearnedContext] = [:]
+    /// Characters a token of each model takes, as its answers measured it, by "provider/model" (`LearnedDensity`).
+    var learnedDensities: [String: LearnedDensity] = [:]
     /// Who the user is, for every Orb (Ajustes → Geral → Você).
     var profile = UserProfile()
     /// Prices the user corrected on the Uso page, by "provider/model" (US$ per million tokens).
@@ -1218,6 +1220,7 @@ extension AppState {
         contextMemory = try c.value(.contextMemory, default: .balanced)
         routineContextMemory = try c.value(.routineContextMemory, default: .economical)
         learnedContexts = c.recordingLoss([String: LearnedContext].self, forKey: .learnedContexts) ?? [:]
+        learnedDensities = (try? c.decodeIfPresent([String: LearnedDensity].self, forKey: .learnedDensities)) ?? [:] // relearned if lost
         do { profile = try c.value(.profile, default: UserProfile()) } catch { DecodeLoss.record() }
         // One damaged correction is dropped alone; the others stay.
         struct Price: Decodable {

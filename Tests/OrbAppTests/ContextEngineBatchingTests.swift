@@ -534,6 +534,51 @@ struct ContextSettingsTests {
         return (model, root)
     }
 
+    @Test func aModelsRealTokenSizeIsLearnedFromItsAnswersAndBoundsTheBudget() throws {
+        // Too small to say anything, or numbers that make no sense: nothing is learned.
+        #expect(LearnedDensity.learning(nil, characters: 20_000, promptTokens: 7_999) == nil)
+        #expect(LearnedDensity.learning(nil, characters: 0, promptTokens: 50_000) == nil)
+        #expect(LearnedDensity.learning(nil, characters: 30_000, promptTokens: 50_000) == nil, "0.6 characters a token is a broken count")
+        var known = try #require(LearnedDensity.learning(nil, characters: 250_000, promptTokens: 100_000))
+        #expect(known == LearnedDensity(charactersPerToken: 2.5, samples: 1) && known.trusted == nil, "one request is not believed")
+        for _ in 1..<LearnedDensity.trustedSamples { known = try #require(LearnedDensity.learning(known, characters: 250_000, promptTokens: 100_000)) }
+        #expect(known.samples == 5 && abs((known.trusted ?? 0) - 2.5) < 0.001)
+        // One odd request moves it a tenth of the way.
+        let moved = try #require(LearnedDensity.learning(known, characters: 350_000, promptTokens: 100_000))
+        #expect(abs(moved.charactersPerToken - 2.6) < 0.001)
+        #expect(LearnedDensity(charactersPerToken: 2.512, samples: 9).trusted == 2.5, "in steps of 0.05, so the cut holds still")
+        // Never above the estimate the budget always used, never under the floor.
+        #expect(LearnedDensity(charactersPerToken: 4.8, samples: 9).trusted == 3.5)
+        #expect(LearnedDensity(charactersPerToken: 1.2, samples: 9).trusted == 2.2)
+
+        var budget = ContextBudget(tokens: 80_000)
+        #expect(budget.characters == 280_000)
+        budget.density = 2.5
+        #expect(budget.characters == 200_000)
+        #expect(ContextBudget.overheadTokens(system: String(repeating: "a", count: 7_000), specs: [], density: 2.5) == 2_800)
+        #expect(ContextBudget.overheadTokens(system: String(repeating: "a", count: 7_000), specs: []) == 2_000)
+    }
+
+    @Test func theBudgetOfAnOrbFollowsWhatItsModelTaught() throws {
+        let (model, root) = try model()
+        defer { removeTestFolder(root) }
+        let bot = model.bots[0]
+        #expect(model.contextBudget(for: bot)?.characters == 280_000)
+        for _ in 0..<4 { model.noteDensity(characters: 250_000, promptTokens: 100_000, of: "custom/modelo") }
+        #expect(model.contextBudget(for: bot)?.characters == 280_000, "four requests are not enough")
+        model.noteDensity(characters: 250_000, promptTokens: 100_000, of: "custom/modelo")
+        #expect(model.contextBudget(for: bot)?.characters == 200_000 && model.contextBudget(for: bot)?.tokens == 80_000)
+        // Another model's lesson is not this one's.
+        model.noteDensity(characters: 250_000, promptTokens: 100_000, of: "custom/outro")
+        #expect(model.learnedDensities["custom/outro"]?.samples == 1)
+        // It survives the file.
+        var state = AppState.initial
+        state.learnedDensities = model.learnedDensities
+        let kept = try JSONDecoder().decode(AppState.self, from: JSONEncoder().encode(state))
+        #expect(kept.learnedDensities["custom/modelo"]?.samples == 5)
+        #expect(try JSONDecoder().decode(AppState.self, from: Data(#"{"bots":[]}"#.utf8)).learnedDensities.isEmpty)
+    }
+
     @Test func aRoutinesRunIsKeptAtTheRoutinesLevelNotTheChats() throws {
         let (model, root) = try model()
         defer { removeTestFolder(root) }

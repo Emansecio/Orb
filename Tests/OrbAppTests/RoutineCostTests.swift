@@ -60,6 +60,29 @@ import Testing
     init() { QuietNotifications.hold() }
     deinit { QuietNotifications.release(); removeTestFolder(root) }
 
+    @Test @MainActor func everyCountedAnswerTeachesTheModelsTokenSize() async throws {
+        let store = Store(directory: root.appending(path: "densidade"))
+        store.save(AppState.initial)
+        store.flush()
+        let model = AppModel(store: store, runsBackgroundWork: false)
+        model.homeFolder = root
+        model.providers = [ProviderAccount(kind: .custom)]
+        model.defaultModel = "custom/modelo"
+        // The provider says the request (system prompt, tool specs and the message) was 10 thousand tokens.
+        let script = CallScript([[.text("oi"), .finished(.done, TokenUsage(input: 10_000, output: 5))]])
+        model.clientOverride = { CallScriptModel(script: script) }
+        let bot = model.bots[0]
+        #expect(model.send("oi", to: bot.id))
+        await waitUntilIdle(model, bot.id)
+        await waitUntil("the lesson") { model.learnedDensities["custom/modelo"] != nil }
+        let learned = try #require(model.learnedDensities["custom/modelo"])
+        let sent = try #require(await script.calls.first)
+        // What was measured is the request as it went: the system prompt and the messages, and the tool specs besides.
+        let text = Double(sent.sent.reduce(0) { $0 + $1.content.count })
+        #expect(learned.samples == 1 && learned.charactersPerToken * 10_000 >= text)
+        #expect(learned.trusted == nil && model.contextBudget(for: bot)?.density == ContextBudget.charactersPerToken)
+    }
+
     @Test @MainActor func aRunUsesTheRoutinesModelAndTheChatKeepsTheOrbs() async throws {
         let store = Store(directory: root)
         store.save(AppState.initial)

@@ -285,6 +285,8 @@ final class AppModel {
     @ObservationIgnored private var fileStamps: [UUID: FileStamps] = [:]
     /// Context windows learned from refusals ("provider/model"); they shrink the history budget of that model.
     @ObservationIgnored private(set) var learnedContexts: [String: LearnedContext]
+    /// Characters a token of each model takes ("provider/model"), measured from its answers; the budget cuts by them.
+    @ObservationIgnored private(set) var learnedDensities: [String: LearnedDensity]
     /// Where outputs too big for a conversation are saved for the model to read back (`saidas/<id>/` in the data folder).
     @ObservationIgnored let outputsDirectory: URL
     /// The Orbs' browsers (`navegador/<id>/` in the data folder holds what each keeps, logins included).
@@ -464,6 +466,7 @@ final class AppModel {
         routineContextMemory = state.routineContextMemory
         profile = state.profile
         learnedContexts = state.learnedContexts
+        learnedDensities = state.learnedDensities
         priceCorrections = state.priceCorrections
         groups = state.groups
         let readCategories = SidebarOrder.normalized(state.categories, botIDs: state.bots.map(\.id))
@@ -2034,6 +2037,9 @@ final class AppModel {
                                       onOverheadMeasured: { [weak self] tokens in
                                           Task { @MainActor in self?.noteMeasuredOverhead(tokens, of: botID) }
                                       },
+                                      onDensityMeasured: { [weak self] characters, promptTokens in
+                                          Task { @MainActor in self?.noteDensity(characters: characters, promptTokens: promptTokens, of: ref.text) }
+                                      },
                                       picksUpTask: paused,
                                       steering: steering)
             session.keepForReview(request)
@@ -2084,9 +2090,10 @@ final class AppModel {
     /// prepared here is the one the engine will fit: planned with a guess, the engine would cut it again every turn.
     private func contextBudget(ref: ModelRef, account: ProviderAccount, botID: UUID) -> ContextBudget {
         let learned = learnedContexts[ref.text].flatMap { $0.isFresh() ? $0.tokens : nil }
-        let budget = ContextBudget(model: account.models.first { $0.id == ref.model }, provider: ref.provider,
+        var budget = ContextBudget(model: account.models.first { $0.id == ref.model }, provider: ref.provider,
                                    format: ref.provider == .custom ? account.format : nil, level: contextLevel(of: botID),
                                    learnedWindow: learned)
+        if let density = learnedDensities[ref.text]?.trusted { budget.density = density }
         return sessions[botID]?.measuredOverhead.map { budget.refined(overheadTokens: $0) } ?? budget
     }
 
@@ -2101,6 +2108,16 @@ final class AppModel {
     func contextFill(for botID: UUID) -> ContextFill? {
         guard let bot = bot(botID), let budget = contextBudget(for: bot) else { return nil }
         return (sessions[botID]?.conversation ?? Conversation()).contextFill(budget: budget)
+    }
+
+    /// One more request of `model` measured: how many characters it had and how many prompt tokens the provider counted.
+    /// The state is saved only when what the budget would use moves by 0.05 or first becomes trusted, not at every step.
+    func noteDensity(characters: Int, promptTokens: Int, of model: String) {
+        let known = learnedDensities[model]
+        guard let learned = LearnedDensity.learning(known, characters: characters, promptTokens: promptTokens) else { return }
+        learnedDensities[model] = learned
+        func step(_ density: LearnedDensity?) -> Int? { density?.trusted.map { Int(($0 * 20).rounded()) } }
+        if step(known) != step(learned) { scheduleStateSave() }
     }
 
     /// Remembers what the system prompt and tool specs of the Orb's last turn took, to plan the next history by.
@@ -2986,6 +3003,7 @@ final class AppModel {
         routineContextMemory = state.routineContextMemory
         profile = state.profile
         learnedContexts = state.learnedContexts
+        learnedDensities = state.learnedDensities
         priceCorrections = state.priceCorrections
         groups = state.groups
         categories = SidebarOrder.normalized(state.categories, botIDs: state.bots.map(\.id))
@@ -3051,7 +3069,7 @@ final class AppModel {
         return AppState(bots: bots, routines: routines, skills: skills, connectors: connectorSecrets.redact(connectors),
                         providers: providers, defaultModel: defaultModel, unread: unread, replies: replies, contextMemory: contextMemory,
                         routineContextMemory: routineContextMemory,
-                        learnedContexts: learnedContexts, profile: profile, priceCorrections: priceCorrections, groups: groups,
+                        learnedContexts: learnedContexts, learnedDensities: learnedDensities, profile: profile, priceCorrections: priceCorrections, groups: groups,
                         categories: categories, chats: chats, inicio: inicio)
     }
 

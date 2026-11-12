@@ -114,7 +114,12 @@ struct ContextBudget: Sendable, Equatable {
         (window ?? tokens) >= Self.wideNotesWindow ? ConversationLedger.wideDigestRoom : ConversationLedger.digestRoom
     }
 
-    var characters: Int { Int(min(Double(tokens) * Self.charactersPerToken, Double(Int.max / 4))) }
+    /// Characters a token of this model takes, as its own answers measured it (`LearnedDensity`); `charactersPerToken`
+    /// until enough of them were seen. The history is cut by characters, so this is what makes "80 thousand tokens" be
+    /// 80 thousand of the model's tokens and not of an average one's.
+    var density = ContextBudget.charactersPerToken
+
+    var characters: Int { Int(min(Double(tokens) * density, Double(Int.max / 4))) }
 
     /// Used when nothing is known about the model.
     static let fallback = ContextBudget(modelWindow: 128_000)
@@ -227,10 +232,53 @@ struct ContextBudget: Sendable, Equatable {
     /// Estimated tokens of `characters`.
     static func tokens(forCharacters characters: Int) -> Int { Int((Double(characters) / charactersPerToken).rounded(.up)) }
 
-    /// Estimated tokens of a request's system prompt and tool specs.
-    static func overheadTokens(system: String, specs: [ToolSpec]) -> Int {
-        let specCharacters = specs.reduce(0) { $0 + $1.name.count + $1.description.count + $1.parameters.jsonString.count }
-        return tokens(forCharacters: system.count + specCharacters)
+    /// Characters of a request's system prompt and tool specs.
+    static func overheadCharacters(system: String, specs: [ToolSpec]) -> Int {
+        system.count + specs.reduce(0) { $0 + $1.name.count + $1.description.count + $1.parameters.jsonString.count }
+    }
+
+    /// Estimated tokens of a request's system prompt and tool specs, at `density` characters a token.
+    static func overheadTokens(system: String, specs: [ToolSpec], density: Double = charactersPerToken) -> Int {
+        Int((Double(overheadCharacters(system: system, specs: specs)) / density).rounded(.up))
+    }
+}
+
+// MARK: - What the answers taught
+
+/// How many characters a token of a model really takes, learned from what its provider said each request used against
+/// the characters the request had. The budget counts 3.5 for every model, and a model whose tokens are shorter (Claude's,
+/// on text with accents, JSON and code) was kept at a history a good deal larger than the level chosen.
+struct LearnedDensity: Codable, Sendable, Equatable {
+    var charactersPerToken: Double
+    var samples: Int
+
+    /// Requests under this are mostly system prompt and tool specs, whose JSON is denser than a conversation.
+    static let minimumPromptTokens = 8_000
+    /// Seen this many times before the budget believes it.
+    static let trustedSamples = 5
+    /// Each request moves the value this much of the way to what it measured.
+    static let weight = 0.1
+    /// What the budget takes: never above the estimate it always used (so no history grows past what was sent before), and
+    /// not under 2.2 (a request that is mostly pictures or base64 says little about text).
+    static let range = 2.2...ContextBudget.charactersPerToken
+
+    /// The value after one more request of `characters` that the provider counted as `promptTokens`; nil when the
+    /// request is too small to say anything or the numbers make no sense.
+    static func learning(_ known: LearnedDensity?, characters: Int, promptTokens: Int) -> LearnedDensity? {
+        guard promptTokens >= minimumPromptTokens, characters > 0 else { return nil }
+        let measured = Double(characters) / Double(promptTokens)
+        guard (1.0...8.0).contains(measured) else { return nil }
+        guard let known else { return LearnedDensity(charactersPerToken: measured, samples: 1) }
+        return LearnedDensity(charactersPerToken: known.charactersPerToken + (measured - known.charactersPerToken) * weight,
+                              samples: min(known.samples + 1, 1_000_000))
+    }
+
+    /// What the budget uses, or nil while too few requests were seen. In steps of 0.05: the value drifts a little with
+    /// every request, and a budget that moved each time would move where the history is cut (and the provider's cache).
+    var trusted: Double? {
+        guard samples >= Self.trustedSamples else { return nil }
+        let stepped = (charactersPerToken * 20).rounded() / 20
+        return min(max(stepped, Self.range.lowerBound), Self.range.upperBound)
     }
 }
 

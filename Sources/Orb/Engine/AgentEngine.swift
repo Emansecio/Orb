@@ -78,6 +78,9 @@ struct TurnRequest: Sendable {
     /// Called with the tokens the system prompt and tool specs really take, so the next turn plans its history with
     /// them (planned with a guess, the history would be cut again inside every turn).
     var onOverheadMeasured: (@Sendable (Int) -> Void)?
+    /// Told, after each model call the provider counted, how many characters the request had and how many prompt tokens
+    /// that was (`LearnedDensity`).
+    var onDensityMeasured: (@Sendable (_ characters: Int, _ promptTokens: Int) -> Void)?
     /// The last task stopped at the step limit and this message picks it up (nil: judge by the history itself).
     var picksUpTask: Bool?
     /// Messages the user sends while this turn runs. The engine hands them to the model at the next step boundary;
@@ -150,7 +153,8 @@ actor AgentEngine {
         let specs = request.tools.map(\.spec)
         var allowed = request.turnGrants
         // The request carries the system prompt and the tool specs besides the history: the budget accounts for them.
-        let overhead = ContextBudget.overheadTokens(system: request.system, specs: specs)
+        let overheadCharacters = ContextBudget.overheadCharacters(system: request.system, specs: specs)
+        let overhead = ContextBudget.overheadTokens(system: request.system, specs: specs, density: request.budget.density)
         var budget = request.budget.refined(overheadTokens: overhead)
         request.onOverheadMeasured?(overhead)
         // Where the fits of this turn cut the history, so the start of the request holds still between compactions.
@@ -234,6 +238,7 @@ actor AgentEngine {
                 circling = false
                 out.yield(.status(thinking))
                 var reply = Reply()
+                var sentCharacters = 0 // of the request the reply answers, for `onDensityMeasured`
                 var contextRetried = false
                 var refused: [ChatMessage]? // the request refused for size, so the same one is not sent again
                 while true {
@@ -247,6 +252,7 @@ actor AgentEngine {
                             return
                         }
                         sent = window
+                        sentCharacters = window.dropFirst().contextCharacters + overheadCharacters
                         windowHasImages = window.contains { !$0.images.isEmpty }
                         if let fit {
                             for report in announced.reports(after: fit, cut: cut, input: messages.dropFirst()) { out.yield(.compacted(report)) }
@@ -314,6 +320,7 @@ actor AgentEngine {
                     if CacheHealth.logsUsage { FileHandle.standardError.write(Data((CacheHealth.logLine(step: step, usage: reported) + "\n").utf8)) }
                     out.yield(.requestUsage(reported))
                     out.yield(.usage(total))
+                    if let prompt = reported.promptTokens, sentCharacters > 0 { request.onDensityMeasured?(sentCharacters, prompt) }
                     if !warnedAboutCache, request.client.arrangesPromptCache, CacheHealth.isFailing(total, requests: requestsWithUsage) {
                         warnedAboutCache = true
                         out.yield(.notice(CacheHealth.notice))
