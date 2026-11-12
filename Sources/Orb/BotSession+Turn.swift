@@ -28,6 +28,7 @@ extension BotSession {
         base.context.release = nil
         reviewBase = base
         reviewFrom = conversation?.messages.count ?? 0
+        reviewChat = conversationChat
     }
 
     /// Registers a new turn of the Orb and returns its id.

@@ -111,6 +111,9 @@ enum Tip {
     static let copyReply = "Copia a resposta como texto"
     static let copyMarkdown = "Copia a resposta como Markdown"
     static let redoReply = "Descarta esta resposta e faz o pedido de novo"
+    static let reactGood = "Gostei: o Orb fica sabendo na sua próxima mensagem"
+    static let reactBad = "Não gostei: diga o porquê e o Orb fica sabendo"
+    static let reactUndo = "Desfaz a sua marcação"
     static let editMessage = "Põe esta mensagem no campo para editar; o que veio depois sai da conversa"
     static let cancelEdit = "Desiste da edição; o campo volta como estava"
     static func toggleOutput(isExpanded: Bool) -> String { isExpanded ? "Oculta o resultado desta ação" : "Mostra o resultado desta ação" }
@@ -366,7 +369,7 @@ enum Tip {
          capability(.terminal), capability(.browser), capability(.computerUse), capability(.connectors),
          createFirstOrb, showWelcome, skillsPage, keptMemoryInFinder, dismissNotice, deleteWithMemory,
          deleteKeepingMemory, profile(callName: "Ana"), profile(callName: nil),
-         copyReply, copyMarkdown, redoReply, editMessage, cancelEdit, toggleOutput(isExpanded: true), toggleOutput(isExpanded: false), toggleCommand(isExpanded: true), toggleCommand(isExpanded: false), toggleRequest(isOpen: true), toggleRequest(isOpen: false), toggleActions(isOpen: true), toggleActions(isOpen: false), toggleWork(isOpen: true), toggleWork(isOpen: false),
+         copyReply, copyMarkdown, redoReply, reactGood, reactBad, reactUndo, editMessage, cancelEdit, toggleOutput(isExpanded: true), toggleOutput(isExpanded: false), toggleCommand(isExpanded: true), toggleCommand(isExpanded: false), toggleRequest(isOpen: true), toggleRequest(isOpen: false), toggleActions(isOpen: true), toggleActions(isOpen: false), toggleWork(isOpen: true), toggleWork(isOpen: false),
          routineUseAuto, routineUseReadOnly, randomLook, denyWithNote, showAllActions, deny, allowOptions,
          handoffDone, handoffCancel, browserMode, removeBrowserProxy, installBrowser, addSearchKey,
          enlargeScreen, takeOverBrowser, giveBackBrowser, openPersonBrowser, showPersonBrowser, personBrowserChip, browserModeWhilePerson, stopBrowsing, hideScreen, revealScreen, lastScreen, backToLiveScreen, showBrowserScreen, animateBrowserCursor,

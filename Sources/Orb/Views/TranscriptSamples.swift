@@ -260,6 +260,16 @@ enum TranscriptSample {
                  TranscriptItem(.notice("Compactei a conversa: os 2 primeiros pedidos viraram um resumo (≈ 58 mil → 19 mil tokens)."))]
         case "transcript-failed":
             items = [user, TranscriptItem(.notice("Não deu certo: A chave ou o login foi recusado (401). Detalhe do provedor: invalid x-api-key"))]
+        case "transcript-reactions":
+            // What you marked stays beside the reply and at the end of the action's line (the buttons come with the pointer).
+            var liked = TranscriptItem(.bot(text: "Publicado: a versão 2.4 já está no ar e o rodapé confere.", isStreaming: false))
+            liked.reaction = Reaction(isGood: true)
+            var action = tool
+            action.reaction = Reaction(isGood: false, reason: "Faltou conferir o resultado")
+            var disliked = TranscriptItem(.bot(text: "Também avisei a equipe no canal de lançamentos, com o resumo das mudanças e o link.", isStreaming: false))
+            disliked.reaction = Reaction(isGood: false, reason: "Não era isso que pedi")
+            items = [TranscriptItem(.user(text: "Publica o site de novo, agora com a versão 2.4", attachments: [])), action, liked,
+                     TranscriptItem(.user(text: "E avisa só o Rafa, por favor", attachments: [])), disliked]
         case "transcript-skill-proposal":
             items = [TranscriptItem(.user(text: "Publica o site de novo, agora com a versão 2.4", attachments: [])), tool,
                      TranscriptItem(.bot(text: "Publicado: a versão 2.4 já está no ar e o rodapé confere.", isStreaming: false)),

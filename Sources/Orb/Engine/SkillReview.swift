@@ -23,6 +23,7 @@ enum SkillReview {
     /// What makes a short stretch worth asking the gate about: the user wrote again after the Orb worked (where a
     /// correction is), or a skill was used (run with /name, or read by the Orb), which may have turned out wrong.
     static func hasSign(_ stretch: ArraySlice<ChatMessage>) -> Bool {
+        guard feedback(in: stretch).isEmpty else { return true }
         var worked = false
         for message in stretch {
             if message.role == .assistant, !message.toolCalls.isEmpty {
@@ -33,6 +34,19 @@ enum SkillReview {
             }
         }
         return false
+    }
+
+    /// The user's reactions to replies and actions that the stretch was told of (`SinceLastTurn`'s `user_feedback`): the
+    /// gate reads the stretch without the blocks the app adds, so it is given them apart.
+    static func feedback(in stretch: ArraySlice<ChatMessage>) -> [String] {
+        stretch.filter { $0.role == .user }.flatMap { message -> [String] in
+            guard let open = message.content.range(of: SinceLastTurn.openTag),
+                  let close = message.content.range(of: SinceLastTurn.closeTag, range: open.upperBound..<message.content.endIndex) else { return [] }
+            return message.content[open.upperBound..<close.lowerBound].components(separatedBy: SinceLastTurn.feedbackOpen).dropFirst()
+                .compactMap { piece in
+                    piece.range(of: SinceLastTurn.feedbackClose).map { piece[..<$0.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines) }
+                }
+        }
     }
 
     // MARK: The gate
@@ -65,11 +79,15 @@ enum SkillReview {
 
     /// The request of the gate: the instructions, the skills the Orb already has, what the user turned down and the
     /// stretch, condensed.
-    static func gatePrompt(transcript: String, skillNames: [String], declined: [SkillDigest] = [], early: Bool = false) -> [ChatMessage] {
+    static func gatePrompt(transcript: String, skillNames: [String], declined: [SkillDigest] = [], feedback: [String] = [],
+                           early: Bool = false) -> [ChatMessage] {
         let known = skillNames.isEmpty ? "none" : skillNames.joined(separator: ", ")
         let refused = declined.isEmpty ? "" : "\nSkills the user already declined (the same lesson again is a NO): " + declinedList(declined)
+        // A rating is the user's correction (or its confirmation) given with a click instead of a sentence.
+        let rated = feedback.isEmpty ? "" : "\nThe user rated the assistant's work in this stretch (a BAD one counts as a "
+            + "correction, a GOOD one says the method worked):\n" + feedback.map { "- " + MemoryText.flatten($0) }.joined(separator: "\n")
         return [.system(early ? earlyGateInstructions : gateInstructions),
-                .user("Skills the assistant already has: \(known)\(refused)\n\nConversation:\n\n" + transcript)]
+                .user("Skills the assistant already has: \(known)\(refused)\(rated)\n\nConversation:\n\n" + transcript)]
     }
 
     private static func declinedList(_ declined: [SkillDigest]) -> String {
@@ -159,9 +177,18 @@ enum SkillReview {
         """
 
     /// `prompt`, and what the user already turned down: proposing it again costs their attention twice.
-    static func prompt(declined: [SkillDigest]) -> String {
-        guard !declined.isEmpty else { return prompt }
-        return prompt + "\n\nThe user already declined these proposals. Do not propose them again, with these or other words: "
-            + declinedList(declined) + "."
+    /// `rated`: the reaction that started this review (`AppModel.react`), which the history does not hold yet.
+    static func prompt(declined: [SkillDigest], rated: String? = nil) -> String {
+        var text = prompt
+        if !declined.isEmpty {
+            text += "\n\nThe user already declined these proposals. Do not propose them again, with these or other words: "
+                + declinedList(declined) + "."
+        }
+        if let rated {
+            text += "\n\nThe user has just rated your work with a click, which is why this review runs now. Treat a BAD rating "
+                + "as a correction of how you work (of the skill, if one was used) and a GOOD one as a sign the method is worth "
+                + "keeping:\n" + rated
+        }
+        return text
     }
 }

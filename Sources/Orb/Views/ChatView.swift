@@ -658,7 +658,7 @@ private struct TranscriptList: View {
             entering(row, row.foldedThread(botID: look.id, found: found?.itemID) { plainRow($0) })
         case .tools(let items):
             ToolGroupRow(items: items, botID: look.id, orb: look.orb, isOpen: openRuns.contains(row.id) || ToolGroupRow.opensInSnapshots,
-                         find: items.contains { $0.id == found?.itemID } ? found : nil) {
+                         find: items.contains { $0.id == found?.itemID } ? found : nil, editable: true) {
                 toggleRun(row.id)
             }
             .equatable()
@@ -714,7 +714,7 @@ private struct TranscriptList: View {
             if case .tools(let actions) = step {
                 ToolGroupRow(items: actions, botID: look.id, orb: look.orb,
                              isOpen: openSteps.contains(step.id) || ToolGroupRow.opensInSnapshots,
-                             find: actions.contains { $0.id == found?.itemID } ? found : nil, isStep: true) {
+                             find: actions.contains { $0.id == found?.itemID } ? found : nil, isStep: true, editable: true) {
                     if openSteps.remove(step.id) == nil {
                         openSteps.insert(step.id)
                         // Keep the outer disclosure open when this request ends while its details are being read.

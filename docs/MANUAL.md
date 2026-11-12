@@ -848,6 +848,15 @@ tem a **Galeria**, os **Instalados** e **Explorar**.
   e lê o `SKILL.md` no GitHub de quem publicou, com **prévia completa antes de instalar** (instale só de fontes em que você
   confia: a skill vira instrução para o Orb). Use com `/comando` no começo da mensagem, ou pelo botão "Usar". "Nova skill" cria a sua.
   O Orb também lê sozinho a skill que serve para a tarefa.
+- **Gostei e não gostei.** Passe o ponteiro sobre uma resposta do Orb, ou sobre a linha de uma ação dele, e marque
+  👍 ou 👎. No 👎 dá para dizer o porquê com um clique ("Não era isso que pedi", "Está errado", "Longo demais", "Faltou
+  conferir o resultado") ou com suas palavras; fechar sem escolher também vale. A marca fica ao lado da resposta e clicar
+  nela de novo desfaz. O Orb fica sabendo **na sua próxima mensagem naquela conversa**: qual resposta ou ação, como você
+  avaliou, o motivo e as skills usadas naquele turno. Depois de um 👎 ele muda o jeito de fazer; se for uma preferência
+  duradoura, ele pede para guardar na memória. Quando a avaliação é do turno que acabou de terminar e houve ações, o Orb
+  também revisa na hora, em segundo plano, se a skill usada precisa de correção (ou se o método vale uma skill), e a
+  proposta aparece no chat como as outras. Isso usa uma chamada curta ao modelo barato do provedor, e só se "Propor skills
+  com o que os Orbs aprendem" estiver ligado.
 - **Skills aprendidas.** Depois de uma tarefa longa, ou de uma mais curta em que você o corrigiu ou em que uma skill foi
   usada, o Orb revisa o que fez e, se aprendeu algo que vale repetir (uma técnica, uma correção sua, uma skill que estava
   errada), **propõe** uma skill, ou uma melhoria de uma que você já tem. O que você descarta ele não sugere de novo sozinho;

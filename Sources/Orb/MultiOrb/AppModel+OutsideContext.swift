@@ -73,6 +73,9 @@ extension AppModel {
                 if let text = SinceLastTurn.decision(event) { entries.append(.decision(text)) }
             case .browser(let event):
                 if let text = event.context, !text.isEmpty { entries.append(.browser(text)) }
+            case .feedback(let report, let commands):
+                let slugs = Set(skills(for: botID).map(\.slug))
+                entries.append(.feedback(report + Reaction.skillsLine(commands.filter(slugs.contains))))
             }
         }
         return entries

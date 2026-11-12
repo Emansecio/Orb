@@ -218,6 +218,8 @@ struct TranscriptItem: Identifiable, Codable, Sendable, Equatable {
     /// A message of the user's that reached the model in the middle of its task (steered, not sent as a request of its
     /// own): the chat marks it. nil for every other item and for conversations from before the mark existed.
     var duringTask: Bool?
+    /// What the person thought of this reply or action (`Reaction`); nil when they said nothing.
+    var reaction: Reaction?
 
     init(_ kind: Kind, duringTask: Bool = false) {
         self.kind = kind
@@ -231,6 +233,7 @@ struct TranscriptItem: Identifiable, Codable, Sendable, Equatable {
         if case .notice(let text) = kind, let run = OrbEvent(routineNotice: text) { kind = .event(run) }
         date = try c.value(.date, default: Date.now)
         duringTask = try? c.decodeIfPresent(Bool.self, forKey: .duringTask) // a mark that cannot be read is no loss
+        reaction = try? c.decodeIfPresent(Reaction.self, forKey: .reaction)
     }
 }
 

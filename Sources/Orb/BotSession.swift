@@ -255,6 +255,8 @@ final class BotSession {
     @ObservationIgnored var reviewBase: TurnRequest?
     /// Where in the conversation's messages the turn began: what the turn added is what follows `reviewBase.history`.
     @ObservationIgnored var reviewFrom = 0
+    /// The chat that turn worked on: a reaction in another chat of the Orb is not about `reviewBase`.
+    @ObservationIgnored var reviewChat: UUID?
     /// The review that runs now, in the background. It stops when you write.
     @ObservationIgnored var skillReview: Task<Void, Never>?
     /// The pass that shortens the pinned memory (`MemoryConsolidation`), while it runs, and when the last one began.

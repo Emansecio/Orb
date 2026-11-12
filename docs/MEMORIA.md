@@ -331,6 +331,13 @@ skill vai dentro de `remember` e `recall`.
   fim do próximo turno tenta de novo, sobre o trecho inteiro (antes a contagem já tinha zerado e a lição se perdia). Se a
   revisão já tinha proposto algo quando parou, não há nova tentativa; interrompida de novo, o trecho é solto
   (`BotSession.reviewStopped`), para quem responde na hora não pagar uma revisão a cada turno.
+- **Avaliação com um clique (desde 2026-11-12).** 👍 e 👎 numa resposta ou ação (`Reaction`, guardada em
+  `TranscriptItem.reaction`; `AppModel.react`) chegam ao Orb pelo `SinceLastTurn` como `<user_feedback>`, uma vez, com a
+  próxima mensagem daquela conversa (no máximo as 8 mais recentes). `SkillReview.feedback(in:)` relê esses blocos no
+  trecho: uma avaliação é sinal para a revisão e vai ao porteiro, que lê o trecho sem os blocos do app. Avaliar o turno
+  que acabou de terminar, com ações, pergunta ao porteiro na hora (`reviewSkillsIfDue(rated:)`): só um sim claro roda a
+  revisão, e um não deixa a contagem como estava. Sem modelo barato, ou sem ação no turno, nada roda além da entrega na
+  próxima mensagem.
 - **O que você descartou não volta.** "Descartar proposta" guarda a proposta em `_propostas/_recusadas.json` (as 12 mais
   recentes). O porteiro e o prompt da revisão recebem a lista, e `remember` recusa à revisão a mesma proposta: comando igual
   ou a mesma tarefa com outras palavras; numa melhoria de skill existente, só o texto quase igual (similaridade ≥ 0,75),

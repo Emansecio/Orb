@@ -46,6 +46,12 @@ struct TranscriptRow: View, Equatable {
             .animation(Motion.exit, value: isDropping) // opacity only, so it holds under Reduce Motion too
     }
 
+    /// The line takes "Gostei" and "Não gostei": a finished reply or action in the Orb's own chat (`editable`), where the
+    /// reaction is kept and told. Not in a routine's run, a request from another Orb or a group's thread.
+    private func rated(_ item: TranscriptItem, if allowed: Bool = true) -> Rated? {
+        editable && allowed && Reaction.takes(item) ? Rated(itemID: item.id, reaction: item.reaction) : nil
+    }
+
     @ViewBuilder private var content: some View {
         switch item.kind {
         case .user(let text, let attachments):
@@ -54,9 +60,9 @@ struct TranscriptRow: View, Equatable {
         case .bot(let text, let isStreaming):
             BotMessage(orb: orb, botID: botID, text: text, live: isStreaming ? model.liveText(for: item.id, of: botID) : nil,
                        isLastReply: isLastReply, showsAvatar: showsAvatar, isNarration: isNarration, offersRedo: offersRedo,
-                       highlight: find?.query)
+                       highlight: find?.query, rated: rated(item, if: !isNarration))
         case .tool(let call):
-            ToolCallLine(call: call, retries: retries)
+            ToolCallLine(call: call, retries: retries, botID: botID, rated: rated(item))
         case .approval(let request):
             if let proposal = request.proposal { // MultiOrb (WP3): an Orb proposes a new Orb
                 OrbProposalCard(request: request, proposal: proposal, botID: botID, pulses: entering)
@@ -383,6 +389,18 @@ private struct EditMessageButton: View {
     }
 }
 
+/// Where, in a line of work, its reaction buttons go (`ToolCallLine`).
+private struct ReactionSlot: PreferenceKey {
+    static var defaultValue: Anchor<CGRect>? { nil }
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) { value = nextValue() ?? value }
+}
+
+/// A line that takes a reaction, and the one it has (`ReactionButtons`).
+struct Rated: Equatable {
+    let itemID: UUID
+    let reaction: Reaction?
+}
+
 /// A reply of the Orb. While it streams, `live` has its text and the views below read it; the row itself is not
 /// redrawn per flush. Once it is done it is its blocks again (paragraphs, lists, code…) drawn from the whole text,
 /// which is cached, and hovering it shows "Copiar" and "Copiar como Markdown" (the buttons, not only a context menu:
@@ -403,8 +421,12 @@ private struct BotMessage: View {
     /// The last reply of an idle chat: "Refazer" is beside its copy buttons.
     var offersRedo = false
     var highlight: String?
+    /// The reply takes "Gostei" and "Não gostei" (an answer, not the words along the work nor a greeting).
+    var rated: Rated?
 
     @State private var hovering = false
+    /// The reasons of "Não gostei" are open: the buttons stay up without the pointer.
+    @State private var isAskingWhy = false
     /// What is selected in the reply's text, for "Citar".
     @State private var selection: String?
     /// "Refazer" asking first. Here and not in the hover button: the button leaves with the pointer, and a dialog opened
@@ -455,11 +477,25 @@ private struct BotMessage: View {
                 // travels to it.
                 // Shown while something is selected too: "Citar" is for the selection.
                 // Not mounted at all otherwise: a long chat does not carry a hidden set of buttons on every reply.
-                if live == nil, hovering || selection != nil {
-                    MessageActions(text: text, botID: botID, offersRedo: offersRedo, selection: selection, redo: redo)
+                let showsActions = hovering || selection != nil || isAskingWhy
+                if live == nil, showsActions || rated?.reaction != nil {
+                    // Hung from the text's bottom right corner, to its right: an alignment guide that moved them there
+                    // was not honored, and they sat over the last words of a short reply.
+                    Color.clear.frame(width: 0, height: 0).overlay(alignment: .bottomLeading) {
+                        Group {
+                            if showsActions {
+                                MessageActions(text: text, botID: botID, offersRedo: offersRedo, selection: selection, rated: rated,
+                                               isAskingWhy: $isAskingWhy, redo: redo)
+                            } else if let rated {
+                                // What you marked stays in sight after the pointer leaves.
+                                ReactionButtons(itemID: rated.itemID, botID: botID, reaction: rated.reaction, isAsking: $isAskingWhy,
+                                                showsOnlyChosen: true)
+                            }
+                        }
                         .fixedSize()
-                        .alignmentGuide(.trailing) { $0[.leading] - 6 }
-                        .transition(.opacity)
+                        .padding(.leading, 6)
+                    }
+                    .transition(.opacity)
                 }
             }
             .environment(\.proseSelection, live == nil ? ProseSelectionAction(
@@ -586,6 +622,8 @@ private struct MessageActions: View {
     let offersRedo: Bool
     /// The words selected in the reply: "Citar" puts them in your next message.
     var selection: String?
+    var rated: Rated?
+    @Binding var isAskingWhy: Bool
     /// "Refazer", decided by the reply (it also owns the confirmation).
     let redo: () -> Void
 
@@ -608,6 +646,9 @@ private struct MessageActions: View {
                 Clipboard.copy(text)
             }
             if offersRedo { RedoReplyButton(botID: botID, action: redo) }
+            if let rated {
+                ReactionButtons(itemID: rated.itemID, botID: botID, reaction: rated.reaction, isAsking: $isAskingWhy)
+            }
         }
     }
 }
@@ -895,13 +936,25 @@ struct ToolCallLine: View {
     let call: ToolCall
     /// Failed tries of this same action that the group folded away: the line says it worked after them.
     var retries = 0
+    var botID: UUID?
+    /// The action takes "Gostei" and "Não gostei" (it ended, in a chat of an Orb).
+    var rated: Rated?
     @State private var isExpanded = Self.opensInSnapshots
+    @State private var isHovering = false
+    @State private var isAskingWhy = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Found once per output, not on every render.
     @State private var permissionProblem: MacPermissionProblem?
 
     /// Review snapshots cannot press the line: they draw every action open.
     static var opensInSnapshots = false
+
+    /// Width set aside at the line's end for "Gostei" and "Não gostei": both under the pointer, the chosen one otherwise.
+    private var reactionRoom: CGFloat {
+        guard let rated, botID != nil else { return 0 }
+        if isHovering || isAskingWhy { return 48 }
+        return rated.reaction == nil ? 0 : 24
+    }
 
     /// The output's length, not the output: it is set once when the call ends, and comparing a 20,000-character string on
     /// every render would cost more than the search it guards.
@@ -968,6 +1021,12 @@ struct ToolCallLine: View {
                     if canOpen {
                         FoldChevron(isOpen: isExpanded, size: 9)
                     }
+                    // Room for "Gostei" and "Não gostei" right after the line's words; the buttons are laid over it from outside
+                    // this button's label (a button inside a button gets no click).
+                    if reactionRoom > 0 {
+                        Color.clear.frame(width: reactionRoom, height: 18)
+                            .anchorPreference(key: ReactionSlot.self, value: .bounds) { $0 }
+                    }
                     Spacer(minLength: 0)
                 }
                 // A failure stands out from the lines around it: in a long turn it is the one that matters (item 24).
@@ -987,6 +1046,20 @@ struct ToolCallLine: View {
                 .compactMap { $0 }.joined(separator: " "), state: call.state))
             .accessibilityValue(!canOpen ? "" : (isExpanded ? "expandido" : "recolhido"))
             .accessibilityHint(!canOpen ? "" : hidden == nil ? "Mostra a saída" : "Mostra o comando e a saída")
+            // Not mounted on the lines the pointer is not on.
+            .overlayPreferenceValue(ReactionSlot.self) { slot in
+                if let slot, let rated, let botID {
+                    GeometryReader { proxy in
+                        ReactionButtons(itemID: rated.itemID, botID: botID, reaction: rated.reaction, isAsking: $isAskingWhy,
+                                        isInline: true, showsOnlyChosen: !isHovering && !isAskingWhy)
+                            .frame(width: proxy[slot].width, height: proxy[slot].height, alignment: .leading)
+                            .offset(x: proxy[slot].minX, y: proxy[slot].minY)
+                    }
+                    .transition(.opacity)
+                }
+            }
+            .onHover { isHovering = $0 }
+            .animation(Motion.hover(isHovering), value: isHovering)
 
             if let problem = permissionProblem {
                 OpenPrivacySettingsButton(problem: problem).padding(.leading, 22)
@@ -1238,6 +1311,8 @@ struct ToolGroupRow: View, Equatable {
     var find: FindFocus?
     /// A task step names its purpose; its original progress message remains inside the disclosure.
     var isStep = false
+    /// The run is in the Orb's own chat: its actions take a reaction (`TranscriptRow.editable`).
+    var editable = false
     let toggle: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var permissionProblem: MacPermissionProblem?
@@ -1249,7 +1324,7 @@ struct ToolGroupRow: View, Equatable {
 
     nonisolated static func == (lhs: ToolGroupRow, rhs: ToolGroupRow) -> Bool {
         lhs.items == rhs.items && lhs.botID == rhs.botID && lhs.orb == rhs.orb && lhs.isOpen == rhs.isOpen && lhs.find == rhs.find
-            && lhs.isStep == rhs.isStep
+            && lhs.isStep == rhs.isStep && lhs.editable == rhs.editable
     }
 
     private var calls: [ToolCall] {
@@ -1277,7 +1352,7 @@ struct ToolGroupRow: View, Equatable {
                 let listed = items.filter { $0.id != repeated && !folded.hidden.contains($0.id) }
                 ForEach(Array(listed.enumerated()), id: \.element.id) { index, item in
                     TranscriptRow(item: item, botID: botID, orb: orb, showsAvatar: false, isNarration: true,
-                                  find: item.id == find?.itemID ? find : nil, retries: folded.retries[item.id] ?? 0)
+                                  find: item.id == find?.itemID ? find : nil, editable: editable, retries: folded.retries[item.id] ?? 0)
                         .equatable()
                         .padding(.leading, 22) // under the line's words, past its symbol
                         // A rail under the line's symbol ties the actions to it, one piece per action that reaches down

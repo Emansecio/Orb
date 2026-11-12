@@ -461,6 +461,8 @@ struct RememberTool: AgentTool {
 }
 
 struct RecallTool: AgentTool {
+    /// The title of a call that loads a skill (`recall "/name"`).
+    static let skillTitle = "Lendo a skill"
     let spec = ToolSpec(
         name: "recall",
         description: """
@@ -478,7 +480,7 @@ struct RecallTool: AgentTool {
 
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) {
         let query = arguments["query"]?.string ?? ""
-        return (query.hasPrefix("/") ? "Lendo a skill" : "Buscando na memória", query)
+        return (query.hasPrefix("/") ? Self.skillTitle : "Buscando na memória", query)
     }
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {

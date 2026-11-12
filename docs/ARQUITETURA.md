@@ -179,7 +179,7 @@ os pedidos e os grupos: [COLABORACAO.md](COLABORACAO.md).
 `MemoryBank` (um actor por Orb) + `MemoryIndex` (SQLite/FTS5) + `MemoryPage`/`MemoryText`/`MemorySanitizer` +
 `SessionSummary` + `MemoryIntent` + `KeptMemories` (memórias guardadas e o perfil de cada uma).
 Detalhes em [MEMORIA.md](MEMORIA.md). As skills que o Orb propõe vivem aí também (`SkillProposal`, `MemoryBank+Skills`,
-`_propostas/`, `_skills.json`); a revisão que as propõe é `Engine/SkillReview.swift` + `AppModel+SkillReview.swift`, e o contador
+`_propostas/`, `_skills.json`); a revisão que as propõe é `Engine/SkillReview.swift` + `AppModel+SkillReview.swift` (as avaliações 👍/👎 que a alimentam: `Reaction.swift`, `AppModel+Reactions.swift`, `Views/ReactionViews.swift`), e o contador
 (`stepsSinceSkill`, de passos do modelo, e `reviewSince`, onde ele começou), o pedido guardado (`reviewBase`, com `reviewFrom`) e a tarefa (`skillReview`) ficam no `BotSession`.
 
 ### Importar de outro assistente (`Import/`)
@@ -224,7 +224,7 @@ O avatar e seu sistema de animação: `OrbModel` (config, catálogo, imagens), `
 | Ajustes | `SettingsView` (Geral, Orbs, Modelos, Navegador, Uso, Acesso ao Mac; `OrbsSettings` reúne o que os Orbs fazem entre si e sozinhos), `ProfileSettings` (a seção "Você" e `ProfileAvatar`, que a barra lateral também usa), `ResetOrbSheet` ("Redefinir o Orb?" e o alerta), `ProviderSettings`, `ProviderPresentation`, `CustomProviderFields`, `ClaudeCodeSettings`, `MacPermissionsView`, `ContextSettings` |
 | Páginas | `RoutinesView`, `SkillsView`, `ConnectorsView`, `CatalogParts` |
 | Sistema | `CommandPalette` (⌘K e a folha de atalhos; as teclas vêm de `ShortcutCatalog`, em `Shortcuts.swift`, a mesma lista que Ajustes → Geral mostra), `QuickAskView` (painel da barra de menus), `SheetKit` (folhas: `orbSheet`, `SheetFooter`/`SheetFooterBar`, `ActionRow` das linhas de botões dos cartões), `ImportPanel` (a importação de outro assistente, dentro da folha Novo Orb) |
-| Para revisão (só `--snapshot`, só em debug ou `ORB_DEV_TOOLS`) | `WelcomeSnapshots`, `CatalogSnapshots` (com as cenas `skill-proposal`, `skill-proposal-update`), `ContextSnapshots`, `SystemSnapshots`, `TranscriptSamples` (`transcript-skill-proposal`), `AttachmentSnapshots`, e `SnapshotComposerScenes.swift` (na raiz de `Sources/Orb/`) |
+| Para revisão (só `--snapshot`, só em debug ou `ORB_DEV_TOOLS`) | `WelcomeSnapshots`, `CatalogSnapshots` (com as cenas `skill-proposal`, `skill-proposal-update`), `ContextSnapshots`, `SystemSnapshots`, `TranscriptSamples` (`transcript-skill-proposal`, `transcript-reactions`), `AttachmentSnapshots`, e `SnapshotComposerScenes.swift` (na raiz de `Sources/Orb/`) |
 
 ## O caminho de um turno
 
