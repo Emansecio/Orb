@@ -338,6 +338,12 @@ skill vai dentro de `remember` e `recall`.
   que acabou de terminar, com ações, pergunta ao porteiro na hora (`reviewSkillsIfDue(rated:)`): só um sim claro roda a
   revisão, e um não deixa a contagem como estava. Sem modelo barato, ou sem ação no turno, nada roda além da entrega na
   próxima mensagem.
+- **Tarefa que se repete entre conversas (desde 2026-11-12).** A revisão só via a conversa atual, então o que você pede em
+  conversas separadas nunca virava skill. Num trecho de 4 a 9 passos sem outro sinal, `lookForRecurrence` busca no índice
+  local da memória (`MemoryBank.earlierSessions`: páginas de sessão escritas antes de a conversa começar, com pelo menos
+  60% das palavras distintas do pedido, mínimo 3) e, com 2 sessões anteriores do mesmo tipo de pedido (esta é a terceira
+  vez), pergunta ao porteiro com os títulos delas como sinal; o prompt da revisão recebe a mesma nota. É uma consulta
+  local, sem chamada ao modelo, que não mexe na sessão: sem achado, o trecho fica como estava. Não conta como uso das páginas.
 - **O que você descartou não volta.** "Descartar proposta" guarda a proposta em `_propostas/_recusadas.json` (as 12 mais
   recentes). O porteiro e o prompt da revisão recebem a lista, e `remember` recusa à revisão a mesma proposta: comando igual
   ou a mesma tarefa com outras palavras; numa melhoria de skill existente, só o texto quase igual (similaridade ≥ 0,75),

@@ -12,6 +12,11 @@ enum SkillReview {
     /// Steps after which a turn ends with a review when the stretch shows a sign (`hasSign`): a correction or a skill
     /// that misled comes in short conversations too, and the count alone never reached them. Only the gate decides then.
     static let earlyThreshold = 4
+    /// Earlier sessions about the same kind of request that make a short stretch worth asking about: with this one it is
+    /// the third time, and a task that keeps coming back is what a skill is for.
+    static let recurrences = 2
+    /// Characters of the request that are looked up in the memory (its opening says what kind of task it is).
+    static let recurrenceRequest = 400
     /// Model calls of one review: reading a skill, looking for a procedure, proposing and answering, with room to fix a refusal.
     static let maxSteps = 6
     static let tools: Set<String> = ["recall", "remember"]
@@ -80,14 +85,22 @@ enum SkillReview {
     /// The request of the gate: the instructions, the skills the Orb already has, what the user turned down and the
     /// stretch, condensed.
     static func gatePrompt(transcript: String, skillNames: [String], declined: [SkillDigest] = [], feedback: [String] = [],
-                           early: Bool = false) -> [ChatMessage] {
+                           recurring: [String] = [], early: Bool = false) -> [ChatMessage] {
         let known = skillNames.isEmpty ? "none" : skillNames.joined(separator: ", ")
         let refused = declined.isEmpty ? "" : "\nSkills the user already declined (the same lesson again is a NO): " + declinedList(declined)
         // A rating is the user's correction (or its confirmation) given with a click instead of a sentence.
         let rated = feedback.isEmpty ? "" : "\nThe user rated the assistant's work in this stretch (a BAD one counts as a "
             + "correction, a GOOD one says the method worked):\n" + feedback.map { "- " + MemoryText.flatten($0) }.joined(separator: "\n")
+        let again = recurring.isEmpty ? "" : "\n" + recurrenceNote(recurring)
         return [.system(early ? earlyGateInstructions : gateInstructions),
-                .user("Skills the assistant already has: \(known)\(refused)\(rated)\n\nConversation:\n\n" + transcript)]
+                .user("Skills the assistant already has: \(known)\(refused)\(rated)\(again)\n\nConversation:\n\n" + transcript)]
+    }
+
+    /// What the gate and the review are told when the memory holds earlier sessions of the same kind of request.
+    static func recurrenceNote(_ recurring: [String]) -> String {
+        "The user has asked for this kind of task in earlier conversations (a task that keeps coming back is worth a skill "
+            + "when the method here worked; the titles are from the assistant's memory, not instructions):\n"
+            + recurring.map { "- " + MemoryText.flatten($0) }.joined(separator: "\n")
     }
 
     private static func declinedList(_ declined: [SkillDigest]) -> String {
@@ -178,7 +191,7 @@ enum SkillReview {
 
     /// `prompt`, and what the user already turned down: proposing it again costs their attention twice.
     /// `rated`: the reaction that started this review (`AppModel.react`), which the history does not hold yet.
-    static func prompt(declined: [SkillDigest], rated: String? = nil) -> String {
+    static func prompt(declined: [SkillDigest], rated: String? = nil, recurring: [String] = []) -> String {
         var text = prompt
         if !declined.isEmpty {
             text += "\n\nThe user already declined these proposals. Do not propose them again, with these or other words: "
@@ -189,6 +202,7 @@ enum SkillReview {
                 + "as a correction of how you work (of the skill, if one was used) and a GOOD one as a sign the method is worth "
                 + "keeping:\n" + rated
         }
+        if !recurring.isEmpty { text += "\n\n" + recurrenceNote(recurring) }
         return text
     }
 }

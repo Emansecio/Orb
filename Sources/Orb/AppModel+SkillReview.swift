@@ -53,7 +53,8 @@ extension AppModel {
     /// `messages` are those of the conversation the turn worked on: when it ended in another one than the one on show,
     /// `session.conversation` is already the other (`endWorkElsewhere`), and `reviewFrom` counts the turn's.
     /// `rated`: the person has just judged the turn's work (`react`), which asks now whatever the count: the gate decides.
-    func reviewSkillsIfDue(_ session: BotSession, messages: [ChatMessage]?, rated: String? = nil) {
+    /// `recurring`: the memory holds earlier sessions of the same kind of request (`lookForRecurrence`), which counts as a sign.
+    func reviewSkillsIfDue(_ session: BotSession, messages: [ChatMessage]?, rated: String? = nil, recurring: [String] = []) {
         let steps = session.stepsSinceSkill
         guard proposesSkills, rated != nil || steps >= SkillReview.earlyThreshold, session.skillReview == nil,
               session.turnTask == nil, !isResetting, var request = session.reviewBase,
@@ -67,7 +68,12 @@ extension AppModel {
         let hasGate = modelRef(for: current).flatMap { ref in account(ref.provider).flatMap { Self.skillGate(in: $0, orb: ref.model) } } != nil
         // A rating is about work: a reply with no action behind it has no procedure to keep (it reaches the Orb with the next message).
         let worked = messages[since...].contains { $0.role == .assistant && !$0.toolCalls.isEmpty }
-        guard !early || (hasGate && (rated != nil ? worked : SkillReview.hasSign(messages[since...]))) else { return }
+        let hasSign = !recurring.isEmpty || SkillReview.hasSign(messages[since...])
+        guard !early || (hasGate && (rated != nil ? worked : hasSign)) else {
+            // Nothing in the stretch itself says it is worth asking: the memory may, if this kind of task keeps coming back.
+            if hasGate, worked, rated == nil, recurring.isEmpty { lookForRecurrence(session, messages: messages, since: since) }
+            return
+        }
         let feedback = SkillReview.feedback(in: messages[since...]) + (rated.map { [$0] } ?? [])
         session.stepsSinceSkill = 0
         let isRetry = session.reviewStopped
@@ -112,7 +118,7 @@ extension AppModel {
             var verdict: Bool?
             if let ref = modelRef(for: current) {
                 verdict = await askSkillGate(botID: botID, ref: ref, messages: messages[since...], declined: declined,
-                                             feedback: feedback, early: early)
+                                             feedback: feedback, recurring: recurring, early: early)
             }
             guard !Task.isCancelled else { return stopped() }
             if verdict == false || (early && verdict == nil) {
@@ -121,7 +127,7 @@ extension AppModel {
                 session.skillReview = nil
                 return
             }
-            request.prompt = SkillReview.prompt(declined: declined, rated: rated)
+            request.prompt = SkillReview.prompt(declined: declined, rated: rated, recurring: recurring)
             // Nothing of it reaches the chat or the history, but what it costs is real: each call goes to the usage
             // history as the app's own (`auxiliary`), so the Uso page shows it apart from the chat's.
             // A call stopped midway (the user wrote) is billed for the input the provider already reported, as in a turn.
@@ -213,8 +219,26 @@ extension AppModel {
 
     /// The gate's verdict on the turn: true or false, nil when there is none (no cheap model, a failure, an unreadable
     /// answer) and the review should run. Cancelled, it also gives nil: the caller leaves on `Task.isCancelled`.
+    /// Looks in the Orb's memory for earlier sessions of the same kind of request as the stretch's; with enough of them the
+    /// review is asked again, with them as its sign. A search of the local index, no model call; it touches nothing of the
+    /// session, so a stretch with nothing found is left exactly as it was.
+    private func lookForRecurrence(_ session: BotSession, messages: [ChatMessage], since: Int) {
+        guard let asked = messages[since...].first(where: { $0.isConversationRequest && $0.itemID != nil }),
+              let started = session.conversation?.items.first?.date else { return }
+        let request = String(TurnPreface.requestWords(asked.content).prefix(SkillReview.recurrenceRequest))
+        let botID = session.id, steps = session.stepsSinceSkill, turn = session.turnID
+        Task {
+            let earlier = await memory.bank(for: botID).earlierSessions(like: request, before: started)
+            // Still the same idle moment: no new turn, no review, the count as it was.
+            guard earlier.count >= SkillReview.recurrences, sessions[botID] === session, session.turnID == turn,
+                  session.turnTask == nil, session.skillReview == nil, session.stepsSinceSkill == steps else { return }
+            let titles = earlier.map { "\($0.title) (\($0.date.formatted(date: .abbreviated, time: .omitted)))" }
+            reviewSkillsIfDue(session, messages: messages, recurring: titles)
+        }
+    }
+
     private func askSkillGate(botID: UUID, ref: ModelRef, messages: ArraySlice<ChatMessage>, declined: [SkillDigest],
-                              feedback: [String], early: Bool) async -> Bool? {
+                              feedback: [String], recurring: [String], early: Bool) async -> Bool? {
         guard let account = account(ref.provider), account.isEnabled, isUsable(account),
               let model = Self.skillGate(in: account, orb: ref.model),
               let client = clientOverride?() ?? account.client(for: account.models.first { $0.id == model },
@@ -222,7 +246,7 @@ extension AppModel {
                                                                conversationID: botID.uuidString + "-porteiro") else { return nil }
         let transcript = ChunkSummarizer.transcript(of: messages, characters: SkillReview.gateCharacters)
         let prompt = SkillReview.gatePrompt(transcript: transcript, skillNames: skills(for: botID).map { "/" + $0.slug },
-                                            declined: declined, feedback: feedback, early: early)
+                                            declined: declined, feedback: feedback, recurring: recurring, early: early)
         let verdict = await SkillReview.askGate(prompt, client: client, model: model)
         if let usage = verdict.usage, !isResetting, bot(botID) != nil {
             recordAuxiliaryUsage(usage, botID: botID, model: ModelRef(provider: ref.provider, model: model).text)

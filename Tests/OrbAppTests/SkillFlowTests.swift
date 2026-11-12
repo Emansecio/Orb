@@ -770,6 +770,57 @@ private func reviews(_ script: CallScript) async -> Int {
         #expect(await bank.proposals().isEmpty && model.notices(botID).isEmpty)
     }
 
+    private func session(_ title: String, _ body: String, at date: Date, _ tag: String) -> MemoryPage {
+        MemoryPage(path: "sessoes/2026-01-01-0000-\(tag).md", kind: .sessao, title: title, body: body, created: date, updated: date, origin: .orb)
+    }
+
+    @Test func theMemoryFindsEarlierSessionsOfTheSameKindOfRequest() async {
+        let bank = MemoryBank(directory: root.appending(path: "recorrencia"))
+        let old = Date.now.addingTimeInterval(-10 * 86_400)
+        #expect(await bank.saveSession(session("Publicação do site", "Pediu para publicar o site em produção com a versão 2.3; rodei o deploy.", at: old, "aaaaaa"), now: old))
+        #expect(await bank.saveSession(session("Site no ar", "Publicar o site em produção de novo, versão 2.4, com conferência do rodapé.", at: old.addingTimeInterval(86_400), "bbbbbb"), now: old.addingTimeInterval(86_400)))
+        #expect(await bank.saveSession(session("Planilha de leads", "Montei a planilha de leads de outubro e o site do cliente foi citado.", at: old, "cccccc"), now: old))
+        let request = "Publica o site em produção com a versão 2.5"
+        let found = await bank.earlierSessions(like: request, before: .now)
+        #expect(Set(found.map(\.title)) == ["Publicação do site", "Site no ar"], "a page that only shares a word is another task")
+        // The conversation's own pages (written after it began) do not count, and neither does a request that says too little.
+        #expect(await bank.earlierSessions(like: request, before: old.addingTimeInterval(3_600)).map(\.title) == ["Publicação do site"])
+        #expect(await bank.earlierSessions(like: "o site", before: .now).isEmpty)
+    }
+
+    @Test @MainActor func aTaskThatKeepsComingBackAsksTheGateWithoutAnyOtherSign() async throws {
+        let script = CallScript(steps(4) + [said("Publicado."), said("SIM"), said("Nothing to save.")])
+        let (model, botID) = setUpGated(script)
+        let bank = model.memory.bank(for: botID)
+        let old = Date.now.addingTimeInterval(-10 * 86_400)
+        #expect(await bank.saveSession(session("Publicação do site", "Pediu para publicar o site em produção com a versão 2.3; rodei o deploy.", at: old, "aaaaaa"), now: old))
+        #expect(await bank.saveSession(session("Site no ar", "Publicar o site em produção de novo, versão 2.4, com conferência do rodapé.", at: old.addingTimeInterval(86_400), "bbbbbb"), now: old.addingTimeInterval(86_400)))
+        #expect(model.send("Publica o site em produção com a versão 2.5", to: botID))
+        await waitUntilIdle(model, botID)
+        await waitUntil("the gate, and the review it lets run") { await script.calls.count == 7 && model.session(botID).skillReview == nil }
+        let calls = await script.calls
+        let gate = try #require(calls[5].messages.last?.content)
+        #expect(calls[5].system == SkillReview.earlyGateInstructions)
+        #expect(gate.contains("asked for this kind of task in earlier conversations") && gate.contains("- Publicação do site (") && gate.contains("- Site no ar ("))
+        let review = try #require(calls[6].messages.last?.content)
+        #expect(review.hasPrefix(SkillReview.prompt) && review.contains("- Site no ar ("))
+        #expect(model.session(botID).stepsSinceSkill == 0)
+    }
+
+    @Test @MainActor func oneEarlierSessionIsNotARecurrenceAndLeavesTheStretchAsItWas() async throws {
+        let script = CallScript(steps(4) + [said("Publicado.")])
+        let (model, botID) = setUpGated(script)
+        let old = Date.now.addingTimeInterval(-10 * 86_400)
+        let bank = model.memory.bank(for: botID)
+        #expect(await bank.saveSession(session("Publicação do site", "Pediu para publicar o site em produção com a versão 2.3; rodei o deploy.", at: old, "aaaaaa"), now: old))
+        #expect(model.send("Publica o site em produção com a versão 2.5", to: botID))
+        await waitUntilIdle(model, botID)
+        // The search is one hop to the memory's actor and back: by the time a second one answers, the first has decided.
+        _ = await bank.earlierSessions(like: "Publica o site em produção", before: .now)
+        _ = await bank.earlierSessions(like: "Publica o site em produção", before: .now)
+        #expect(await script.calls.count == 5 && model.session(botID).stepsSinceSkill == 4 && model.session(botID).skillReview == nil)
+    }
+
     @Test @MainActor func aYesFromTheGateRunsTheReviewAsAlways() async throws {
         let script = CallScript(steps(10) + [said("pronto"), said("SIM"), said("Nothing to save.")])
         let (model, botID) = setUpGated(script)

@@ -316,6 +316,27 @@ actor MemoryBank {
         return Array(hits)
     }
 
+    /// Earlier sessions about the same kind of request as `request`, newest matches first: what tells a task that keeps
+    /// coming back in other conversations (`SkillReview`). Only session pages last written before `before` (the start of
+    /// the conversation asking, whose own pages would match themselves), and only those that hold most of the request's
+    /// words: a page that shares a name or two with it is another task. Reads only: it does not count as a use of the pages.
+    func earlierSessions(like request: String, before: Date, limit: Int = 3, now: Date = .now) -> [MemoryHit] {
+        prepare(now: now)
+        let words = Set(MemoryText.words(request).map(MemoryText.stem))
+        guard words.count >= Self.recurrenceWords, let match = MemoryText.ftsQuery(request) else { return [] }
+        let needed = max(Self.recurrenceWords, Int((Double(words.count) * Self.recurrenceShare).rounded(.up)))
+        return search(match: match, words: words, rows: 24, excluding: [])
+            .filter { candidate in
+                guard candidate.hit.kind == .sessao, candidate.hit.date < before else { return false }
+                return words.intersection(MemoryText.words(candidate.text).map(MemoryText.stem)).count >= needed
+            }
+            .prefix(limit).map(\.hit)
+    }
+    /// A request of fewer distinct words than this says too little to be matched; and this many must be in the page.
+    static let recurrenceWords = 3
+    /// The share of the request's distinct words an earlier session must hold to be about the same kind of task.
+    static let recurrenceShare = 0.6
+
     private struct Candidate {
         var hit: MemoryHit
         /// Title and body, for telling how many of the message's words a page really has.
