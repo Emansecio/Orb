@@ -899,6 +899,8 @@ struct RoutineEditor: View {
     /// Empty: the Mac's own time zone.
     @State private var cronTimeZone = ""
     @State private var showsAdvanced = false
+    /// Worked out when the schedule or the model changes, not at every keystroke (a cron line is walked through a day).
+    @State private var costAdvice: RoutineCost.Advice?
     /// Why the Orb could not be changed on save (the routine is running).
     @State private var moveProblem: String?
     /// The routine was deleted (by the Orb) while this sheet was open: saving asks before bringing it back.
@@ -1006,6 +1008,9 @@ struct RoutineEditor: View {
                 // Right under the Orb it depends on, so it is seen before the rest of the form.
                 Section { waitingWarning(bot).transition(.quiet) }
             }
+            if let costAdvice {
+                Section { costWarning(costAdvice).transition(.quiet) }
+            }
             // What the routine does comes before when it runs: it is the heart of it. A routine made for a goal (a goal idea or
             // template) shows the goal first: below "O que fazer" it would open off screen.
             if leadsWithGoal { goalSection }
@@ -1083,6 +1088,11 @@ struct RoutineEditor: View {
                         ForEach(ContextMemoryLevel.allCases, id: \.self) { Text($0.label).tag(ContextMemoryLevel?.some($0)) }
                     }
                     .help(Tip.routineContext)
+                    Picker("Modelo da rotina", selection: $routine.model) {
+                        Text("Igual ao Orb\(orbModelName.isEmpty ? "" : " (\(orbModelName))")").tag(String?.none)
+                        ForEach(providerModels, id: \.text) { Text($0.name).tag(String?.some($0.text)) }
+                    }
+                    .help(Tip.routineModel)
                     Text(advancedExplanation)
                         .font(Typography.small)
                         .foregroundStyle(Palette.muted)
@@ -1123,6 +1133,10 @@ struct RoutineEditor: View {
         }
         .onAppear(perform: load)
         .task(id: draftSchedule) { await refreshScheduleCheck() }
+        .task(id: CostKey(schedule: draftSchedule, model: routine.model ?? orbModel)) {
+            let advice = RoutineCost.advice(schedule: draftSchedule, model: routine.model ?? orbModel, prices: model.priceBook)
+            withAnimation(Motion.content) { costAdvice = advice }
+        }
     }
 
     /// What the footer says: what is missing. The "will wait for approval" case lives only in the warning above.
@@ -1147,6 +1161,43 @@ struct RoutineEditor: View {
     private var advancedExplanation: String {
         let mode = routine.permissionMode ?? bot?.permissionMode ?? .ask
         return "\(mode.label): \(mode.summary) Ninguém está presente para responder durante a rotina."
+    }
+
+    /// The Orb's own model ("provider/model"), which the routine runs on unless it has one.
+    private var orbModel: String { bot.flatMap { ModelRef($0.model.isEmpty ? model.defaultModel : $0.model) }?.text ?? "" }
+    private var orbModelName: String { bot.map { model.modelName(forModel: $0.model) } ?? "" }
+    /// The models the routine may have: those of the Orb's provider (another provider would be another login and price list).
+    private var providerModels: [(text: String, name: String)] {
+        guard let ref = ModelRef(orbModel), let account = model.account(ref.provider) else { return [] }
+        return account.models.map { (ModelRef(provider: ref.provider, model: $0.id).text, $0.name) }
+    }
+
+    private struct CostKey: Equatable { var schedule: Schedule; var model: String }
+
+    /// The routine runs often on a model much dearer than one its provider has: said once, with the way out beside it.
+    private func costWarning(_ advice: RoutineCost.Advice) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label {
+                Text("Esta rotina roda cerca de \(advice.runsPerDay) vezes por dia em \(model.modelName(forModel: advice.current)), e cada rodada reenvia o histórico dela.")
+                    .fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: "exclamationmark.triangle")
+            }
+            .font(Typography.label)
+            .foregroundStyle(Palette.warn)
+            Button("Usar \(advice.cheaperName) nesta rotina") {
+                routine.model = advice.cheaper
+                showsAdvanced = true
+            }
+            .buttonStyle(SecondaryPillStyle())
+            .controlSize(.small)
+            .help(Tip.routineCheaperModel)
+            Text("\(advice.cheaperName) custa cerca de \(advice.times) vezes menos por token. Vale só para esta rotina; o Orb continua com o modelo dele nas conversas.")
+                .font(Typography.small)
+                .foregroundStyle(Palette.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 2)
     }
 
     private func waitingWarning(_ bot: Bot) -> some View {
@@ -1204,7 +1255,7 @@ struct RoutineEditor: View {
         opensNew = !isStored
         if original == nil { original = routine }
         let calendar = Calendar.current
-        showsAdvanced = routine.permissionMode != nil || routine.contextMemory != nil
+        showsAdvanced = routine.permissionMode != nil || routine.contextMemory != nil || routine.model != nil
         tracksGoal = routine.goal != nil
         leadsWithGoal = tracksGoal
         goalTarget = routine.goal?.target ?? ""
@@ -1332,6 +1383,19 @@ enum RoutinesSnapshots {
         switch screen {
         case "routine-editor":
             guard let routine = model.routines.first else { return nil }
+            return AnyView(RoutineEditor(routine: routine))
+        case "routine-editor-cost":
+            // A routine every 30 minutes on the dearest of three priced models: the advice and its way out.
+            guard var routine = model.routines.first else { return nil }
+            var account = ProviderAccount(kind: .custom)
+            account.models = [("Opus", 15.0), ("Sonnet", 3.0), ("Haiku", 1.0)].map { name, input in
+                var priced = ProviderModel(id: name.lowercased(), name: name, format: .chat)
+                priced.price = ModelPrice(input: input, output: input * 5)
+                return priced
+            }
+            model.providers = [account]
+            model.defaultModel = "custom/opus"
+            routine.permissionMode = .auto
             return AnyView(RoutineEditor(routine: routine))
         case "routine-editor-new":
             guard let routine = model.draftRoutine(from: RoutineTemplate.all[1]) else { return nil }

@@ -13,6 +13,8 @@ extension Routine {
         if edited.botID != original.botID { result.botID = edited.botID }
         if edited.prompt != original.prompt { result.prompt = edited.prompt }
         if edited.permissionMode != original.permissionMode { result.permissionMode = edited.permissionMode }
+        if edited.contextMemory != original.contextMemory { result.contextMemory = edited.contextMemory }
+        if edited.model != original.model { result.model = edited.model }
         if edited.schedule != original.schedule {
             // Count the next run from now, not from when the routine was created.
             result.schedule = edited.schedule

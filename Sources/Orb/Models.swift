@@ -678,6 +678,9 @@ struct Routine: Identifiable, Codable, Sendable {
     var followUps: [RoutineFollowUp] = []
     /// How much of its history this routine's runs keep word for word; nil means the level of all routines.
     var contextMemory: ContextMemoryLevel?
+    /// The model of this routine's runs ("provider/model"); nil means the Orb's. A routine that runs often pays for its
+    /// history at every run, so it may be worth a cheaper model than the one the Orb talks with (`RoutineCost`).
+    var model: String?
 
     static let keptRuns = 10
 
@@ -750,6 +753,7 @@ extension Routine {
         goal = (try? c.decodeIfPresent(RoutineGoal.self, forKey: .goal)) ?? nil
         precheck = (try? c.decodeIfPresent(RoutinePrecheck.self, forKey: .precheck)) ?? nil
         contextMemory = (try? c.decodeIfPresent(ContextMemoryLevel.self, forKey: .contextMemory)) ?? nil
+        model = (try? c.decodeIfPresent(String.self, forKey: .model)) ?? nil
         followUps = try c.lossyArray(.followUps)
     }
 }

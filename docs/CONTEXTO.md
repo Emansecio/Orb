@@ -341,6 +341,15 @@ antes do ajuste) e, por rotina, `Routine.contextMemory` (editor → Avançado �
 rotinas). `AppModel.contextLevel(of:)` escolhe: enquanto `BotSession.routineID` não é nulo vale o da rotina, senão o
 do chat; o orçamento (`contextBudget`) e o medidor leem dali. A conversa do chat não é afetada.
 
+### Modelo próprio e aviso de custo
+
+Uma rotina também pode ter modelo próprio (`Routine.model`, editor → Avançado → "Modelo da rotina", só modelos do provedor
+do Orb): `AppModel.modelRef(for:)` devolve o da rotina enquanto a rodada tem o Orb, se o provedor ainda o oferece; o chat
+segue com o do Orb. `RoutineCost.advice` avisa no editor quando a rotina roda 6 vezes por dia ou mais num modelo pelo menos
+3 vezes mais caro (preço de entrada) que outro do mesmo provedor, e oferece o mais caro dentre os baratos o bastante (o
+degrau de baixo, não o menor modelo). É só aviso. O salvar do editor aplica só o que mudou (`Routine.merged`): campo novo
+do editor tem de entrar lá.
+
 ## Economia de tokens
 
 Medidas que não são "compactar" mas decidem quanto cada mensagem custa:

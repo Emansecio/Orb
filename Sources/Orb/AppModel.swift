@@ -821,7 +821,16 @@ final class AppModel {
     var enabledSkills: [Skill] { skills.filter(\.isEnabled) }
 
     /// The model a bot actually uses: its own or the default ("provider/model").
-    func modelRef(for bot: Bot) -> ModelRef? { ModelRef(bot.model.isEmpty ? defaultModel : bot.model) }
+    func modelRef(for bot: Bot) -> ModelRef? {
+        // While a routine's run has the Orb, the routine's own model, if it has one that can still be used. The routines
+        // are read only then: a view that shows the Orb's model does not come to depend on every routine's last run.
+        if let running = sessions[bot.id]?.routineID, let own = routines.first(where: { $0.id == running })?.model,
+           let ref = ModelRef(own), let account = account(ref.provider), account.isEnabled, isUsable(account),
+           account.models.contains(where: { $0.id == ref.model }) {
+            return ref
+        }
+        return ModelRef(bot.model.isEmpty ? defaultModel : bot.model)
+    }
 
     /// Short model name for the UI ("" when none is set), from a bot's `model` string.
     func modelName(forModel model: String) -> String {
