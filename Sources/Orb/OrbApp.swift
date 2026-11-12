@@ -273,7 +273,7 @@ struct AppCommands: Commands {
             Button(CommandName.exportConversation) {
                 if let id = model.commandBotID { model.exportConversation(id) }
             }
-            .disabled(sheetOpen || model.commandBotID.map(model.canExportConversation) != true)
+            .disabled(sheetOpen || model.commandBotID == nil)
         }
     }
 }

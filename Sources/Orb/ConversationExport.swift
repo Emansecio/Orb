@@ -53,15 +53,15 @@ enum ConversationExport {
 }
 
 extension AppModel {
-    /// Whether the Orb's conversation on show has anything to export.
-    func canExportConversation(_ botID: UUID) -> Bool {
-        transcript(botID).contains { if case .bot(let text, false) = $0.kind { !text.isEmpty } else { false } }
-    }
-
-    /// Asks where to keep the conversation on show and writes it there as Markdown.
+    /// Asks where to keep the conversation on show and writes it there as Markdown. Whether there is anything to export is
+    /// found here, on the click, and not by the menu: a menu item that read the conversation to enable itself would have
+    /// the whole menu bar worked out again at every line the chat gains.
     func exportConversation(_ botID: UUID) {
-        guard let bot = bot(botID),
-              let text = ConversationExport.markdown(transcript(botID), orb: bot.name, person: profile.callName ?? "Você") else { return }
+        guard let bot = bot(botID) else { return }
+        guard let text = ConversationExport.markdown(transcript(botID), orb: bot.name, person: profile.callName ?? "Você") else {
+            append(.notice("Ainda não há o que exportar nesta conversa."), to: botID)
+            return
+        }
         let panel = NSSavePanel()
         panel.nameFieldStringValue = ConversationExport.fileName(orb: bot.name)
         panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]

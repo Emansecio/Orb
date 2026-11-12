@@ -30,6 +30,14 @@ import Testing
         #expect(ConversationExport.markdown([TranscriptItem(.notice("oi"))], orb: "Atlas", person: "Ana") == nil)
     }
 
+    @Test @MainActor func exportingAnEmptyConversationSaysSoInsteadOfOpeningAPanel() throws {
+        let folder = try TempFolder()
+        let model = AppModel(store: Store(directory: folder.url), runsBackgroundWork: false)
+        let botID = model.bots[0].id
+        model.exportConversation(botID)
+        #expect(model.notices(botID).last == "Ainda não há o que exportar nesta conversa.")
+    }
+
     @Test func theFileNameIsSafeInAnyFolder() {
         let day = Date(timeIntervalSince1970: 1_800_000_000)
         let name = ConversationExport.fileName(orb: "A/B: C", now: day)
