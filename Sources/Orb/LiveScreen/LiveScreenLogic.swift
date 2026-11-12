@@ -189,12 +189,13 @@ enum LiveScreenText {
 
     /// The closing line: "Usou o navegador · checkout.acessosfit · 2 min · 14 ações · terminou em /pagamentos". What is not
     /// known is left out (a use cut by a crash has no end time).
-    static func closingLine(_ view: BrowserViewItem) -> String {
+    /// `short`: without where it ended, for a card too narrow for the whole line.
+    static func closingLine(_ view: BrowserViewItem, short: Bool = false) -> String {
         var parts = ["Usou o navegador"]
         if !view.host.isEmpty { parts.append(view.host) }
         if let end = view.endedAt, end > view.startedAt { parts.append(duration(end.timeIntervalSince(view.startedAt))) }
         if view.actions > 0 { parts.append(actions(view.actions)) }
-        if let path = view.lastPath, !path.isEmpty {
+        if !short, let path = view.lastPath, !path.isEmpty {
             let verb = switch view.outcome {
             case .failed: "falhou em"
             case .stopped: "parou em"

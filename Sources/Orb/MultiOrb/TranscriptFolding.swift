@@ -78,6 +78,17 @@ enum WorkOutcome: Equatable, Sendable {
 
 /// Folds a chat's Orb lines (exchanges between Orbs, events) into rows (`TranscriptFolding.rows`). Pure: the same items
 /// always fold the same way, so the rules are tested without a view.
+/// What a work row says of the answer that followed it: when it came and what the request used.
+struct WorkAnswer: Equatable, Sendable {
+    var date: Date
+    var spend: ReplySpend?
+
+    /// "13:42 · US$ 0,12"
+    var text: String {
+        ([date.formatted(date: .omitted, time: .shortened)] + [spend?.text].compactMap { $0 }).joined(separator: " · ")
+    }
+}
+
 enum TranscriptFolding {
     /// The rows of a chat, nil when every row would be one item as it is (the list then draws the items themselves).
     /// Only a chat with an action or a line between Orbs can fold, so the others are not walked twice.
@@ -282,6 +293,27 @@ enum TranscriptFolding {
         case .browserView: true // the Orb's browser (card or closing line) stays in view, after the work's line
         default: false
         }
+    }
+
+    /// When the answer after a work row came and what its request used, for the row's line: by the row's id. The answer is
+    /// the reply right after the row.
+    static func workAnswers(in rows: [TranscriptRowModel]) -> [UUID: WorkAnswer] {
+        var answers: [UUID: WorkAnswer] = [:]
+        for (index, row) in rows.enumerated() {
+            guard case .work = row else { continue }
+            // Past what the request left between its work and its answer (a notice, the line of its browser), to the answer.
+            search: for next in rows[(index + 1)...] {
+                guard case .single(let item) = next else { break }
+                switch item.kind {
+                case .bot:
+                    answers[row.id] = WorkAnswer(date: item.date, spend: item.spend)
+                    break search
+                case .notice, .browserView, .event: continue
+                default: break search
+                }
+            }
+        }
+        return answers
     }
 
     /// The work of one request, from the item after your message to the one before its answer (or before the notice it

@@ -150,6 +150,8 @@ final class OrbTranscript: WritesOnlyChanges {
     /// runs when a scroll begins or ends, a search moves, a run of actions opens).
     private(set) var avatars = ReplyAvatars([])
     private(set) var redoCandidate: UUID?
+    /// When each work row's answer came and what it used (`TranscriptFolding.workAnswers`), by row id.
+    private(set) var workAnswers: [UUID: WorkAnswer] = [:]
     /// The task plan while some step of it is open (`Conversation.activePlan`), for the line at the end of the chat.
     private(set) var plan: TaskPlan?
 
@@ -245,6 +247,7 @@ final class OrbTranscript: WritesOnlyChanges {
         assign(\.timeBreaks, to: breaks)
         let avatars = ReplyAvatars(items)
         assign(\.avatars, to: avatars)
+        assign(\.workAnswers, to: rows.map(TranscriptFolding.workAnswers) ?? [:])
         let redo = RewindRows.redoTarget(in: items, isWorking: false)
         assign(\.redoCandidate, to: redo)
         markNew()

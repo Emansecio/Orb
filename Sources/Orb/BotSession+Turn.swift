@@ -434,6 +434,7 @@ extension BotSession {
         foldedNotes = []
         stopSpeaking()
         closeStreaming()
+        keepSpend(model.live(id).turnSpend)
         closeBrowserView(succeeded ? .done : .failed)
         if routineID == nil, pulseInChat == nil, let boundary = inicioTurnStart, let chat = conversationChat, let conversation {
             inicioTurnStart = nil
@@ -727,6 +728,19 @@ extension BotSession {
             }
         }
         return files
+    }
+
+    /// Keeps what the turn used on the answer it ended with (the last reply after your message), where the chat shows it.
+    private func keepSpend(_ spend: TurnSpend?) {
+        guard let spend, spend.tokens > 0, let items = conversation?.items else { return }
+        let asked = items.lastIndex { if case .user = $0.kind { true } else { false } } ?? -1
+        guard let answer = items.indices.last(where: { index in
+            if index > asked, case .bot(let text, _) = items[index].kind { !text.isEmpty } else { false }
+        }) else { return }
+        let id = items[answer].id
+        mutateItems { items in
+            if let index = items.lastIndex(where: { $0.id == id }) { items[index].spend = ReplySpend(tokens: spend.tokens, dollars: spend.dollars) }
+        }
     }
 
     func mutateItems(_ change: (inout [TranscriptItem]) -> Void) {

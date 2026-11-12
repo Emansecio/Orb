@@ -325,11 +325,13 @@ private struct LiveScreenClosedLine: View {
                 .foregroundStyle(Palette.muted)
                 .frame(width: 14)
                 .accessibilityHidden(true)
-            Text(LiveScreenText.closingLine(view))
-                .font(Typography.label)
-                .foregroundStyle(Palette.faint)
-                .lineLimit(1)
-                .truncationMode(.middle)
+            // Whole when it fits; else without where it ended; cut at the end only as a last resort (the help has it whole).
+            ViewThatFits(in: .horizontal) {
+                closing(LiveScreenText.closingLine(view)).fixedSize()
+                closing(LiveScreenText.closingLine(view, short: true)).fixedSize()
+                closing(LiveScreenText.closingLine(view, short: true))
+            }
+            .help(LiveScreenText.closingLine(view))
             if hasLastScreen {
                 Button("Ver última tela") { showLastScreen() }
                     .buttonStyle(.plain)
@@ -340,8 +342,16 @@ private struct LiveScreenClosedLine: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.leading, gutter)
+        // The card of the request's work (`WorkGroupRow`), so what the Orb did in its browser reads as the same kind of thing.
+        .padding(.horizontal, Spacing.m)
+        .frame(minHeight: 36)
+        .card()
+        .chatCard()
         .onAppear { hasLastScreen = model.liveScreens.hasLastScreen(of: itemID) }
+    }
+
+    private func closing(_ text: String) -> some View {
+        Text(text).font(Typography.label).foregroundStyle(Palette.secondary).lineLimit(1).truncationMode(.tail)
     }
 
     private func showLastScreen() {

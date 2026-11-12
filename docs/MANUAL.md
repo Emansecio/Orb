@@ -851,6 +851,13 @@ tem a **Galeria**, os **Instalados** e **Explorar**.
   e lê o `SKILL.md` no GitHub de quem publicou, com **prévia completa antes de instalar** (instale só de fontes em que você
   confia: a skill vira instrução para o Orb). Use com `/comando` no começo da mensagem, ou pelo botão "Usar". "Nova skill" cria a sua.
   O Orb também lê sozinho a skill que serve para a tarefa.
+- **O trabalho de um pedido num cartão.** Quando o Orb responde depois de agir, o trabalho fica num cartão acima da
+  resposta: quanto tempo levou, quantas ações, os símbolos dos tipos de ação e, no fim, a hora em que a resposta chegou e
+  o que o pedido gastou (em dólares quando o preço do modelo é conhecido, senão em tokens). Clicar abre as etapas. O uso
+  do navegador tem o mesmo cartão. Numa conversa estreita os símbolos somem primeiro, depois a hora e o custo. Em resposta
+  sem trabalho, a hora e o gasto aparecem ao lado dos botões dela, ao passar o ponteiro.
+- **Ação que não pode ser desfeita pede para segurar.** No cartão de permissão vermelho, o botão é "Segure para
+  permitir": mantenha pressionado até ele encher (0,8 s). Um clique solto não permite. ⌘↩ continua valendo na hora.
 - **Gostei e não gostei.** Passe o ponteiro sobre uma resposta do Orb, ou sobre a linha de uma ação dele, e marque
   👍 ou 👎. No 👎 dá para dizer o porquê com um clique ("Não era isso que pedi", "Está errado", "Longo demais", "Faltou
   conferir o resultado") ou com suas palavras; fechar sem escolher também vale. A marca fica ao lado da resposta e clicar

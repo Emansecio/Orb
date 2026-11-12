@@ -191,6 +191,19 @@ struct BrowserViewItem: Codable, Sendable, Equatable {
     var outcome = Outcome.running
 }
 
+/// What one request cost, from the message to its answer: the tokens charged in full (what was read from the cache is
+/// left out, as in `TurnSpend`) and, when the model is billed by use and its price is known, the dollars.
+struct ReplySpend: Codable, Sendable, Equatable {
+    var tokens: Int
+    var dollars: Double?
+
+    /// "US$ 0,12" when the price is known, "38 mil tokens" otherwise; nil when nothing was used.
+    var text: String? {
+        if let dollars, dollars > 0 { return UsageFormat.dollars(dollars) }
+        return tokens > 0 ? UsageFormat.tokens(tokens) : nil
+    }
+}
+
 struct TranscriptItem: Identifiable, Codable, Sendable, Equatable {
     enum Kind: Codable, Sendable, Equatable {
         case user(text: String, attachments: [String])
@@ -220,6 +233,9 @@ struct TranscriptItem: Identifiable, Codable, Sendable, Equatable {
     var duringTask: Bool?
     /// What the person thought of this reply or action (`Reaction`); nil when they said nothing.
     var reaction: Reaction?
+    /// What the turn this answer ended used (`ReplySpend`), kept when the turn ends; nil for every other line, for an
+    /// answer whose provider reported nothing and for conversations from before it was kept.
+    var spend: ReplySpend?
 
     init(_ kind: Kind, duringTask: Bool = false) {
         self.kind = kind
@@ -234,6 +250,7 @@ struct TranscriptItem: Identifiable, Codable, Sendable, Equatable {
         date = try c.value(.date, default: Date.now)
         duringTask = try? c.decodeIfPresent(Bool.self, forKey: .duringTask) // a mark that cannot be read is no loss
         reaction = try? c.decodeIfPresent(Reaction.self, forKey: .reaction)
+        spend = try? c.decodeIfPresent(ReplySpend.self, forKey: .spend)
     }
 }
 

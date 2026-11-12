@@ -699,7 +699,8 @@ private struct TranscriptList: View {
         let isOpen = openRuns.contains(owner) || ToolGroupRow.opensInSnapshots
         return WorkGroupRow(items: items, seconds: seconds, outcome: outcome, isOpen: isOpen,
                             inputs: isOpen ? .init(openRuns: openRuns, openSteps: openSteps, avatars: avatars, redoID: redoID,
-                                                   dropping: dropping, find: found, orb: look.orb) : nil) {
+                                                   dropping: dropping, find: found, orb: look.orb) : nil,
+                            answer: model.orbTranscript(look.id).workAnswers[owner]) {
             toggleRun(owner)
         } content: {
             activitySteps(steps, in: owner, avatars: avatars, redoID: redoID, dropping: dropping, found: found)

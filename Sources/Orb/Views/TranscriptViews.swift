@@ -60,7 +60,8 @@ struct TranscriptRow: View, Equatable {
         case .bot(let text, let isStreaming):
             BotMessage(orb: orb, botID: botID, text: text, live: isStreaming ? model.liveText(for: item.id, of: botID) : nil,
                        isLastReply: isLastReply, showsAvatar: showsAvatar, isNarration: isNarration, offersRedo: offersRedo,
-                       highlight: find?.query, rated: rated(item, if: !isNarration))
+                       highlight: find?.query, rated: rated(item, if: !isNarration),
+                       stamp: isNarration || isStreaming ? nil : WorkAnswer(date: item.date, spend: item.spend))
         case .tool(let call):
             ToolCallLine(call: call, retries: retries, botID: botID, rated: rated(item))
         case .approval(let request):
@@ -423,6 +424,8 @@ private struct BotMessage: View {
     var highlight: String?
     /// The reply takes "Gostei" and "Não gostei" (an answer, not the words along the work nor a greeting).
     var rated: Rated?
+    /// When the reply came and what its request used, said beside its buttons under the pointer.
+    var stamp: WorkAnswer?
 
     @State private var hovering = false
     /// The reasons of "Não gostei" are open: the buttons stay up without the pointer.
@@ -485,7 +488,7 @@ private struct BotMessage: View {
                         Group {
                             if showsActions {
                                 MessageActions(text: text, botID: botID, offersRedo: offersRedo, selection: selection, rated: rated,
-                                               isAskingWhy: $isAskingWhy, redo: redo)
+                                               stamp: stamp, isAskingWhy: $isAskingWhy, redo: redo)
                             } else if let rated {
                                 // What you marked stays in sight after the pointer leaves.
                                 ReactionButtons(itemID: rated.itemID, botID: botID, reaction: rated.reaction, isAsking: $isAskingWhy,
@@ -623,6 +626,7 @@ private struct MessageActions: View {
     /// The words selected in the reply: "Citar" puts them in your next message.
     var selection: String?
     var rated: Rated?
+    var stamp: WorkAnswer?
     @Binding var isAskingWhy: Bool
     /// "Refazer", decided by the reply (it also owns the confirmation).
     let redo: () -> Void
@@ -648,6 +652,14 @@ private struct MessageActions: View {
             if offersRedo { RedoReplyButton(botID: botID, action: redo) }
             if let rated {
                 ReactionButtons(itemID: rated.itemID, botID: botID, reaction: rated.reaction, isAsking: $isAskingWhy)
+            }
+            if let stamp {
+                Text(stamp.text)
+                    .font(Typography.small)
+                    .monospacedDigit()
+                    .foregroundStyle(Palette.faint)
+                    .padding(.leading, 4)
+                    .accessibilityLabel("Respondido às \(stamp.text)")
             }
         }
     }
@@ -1535,6 +1547,8 @@ struct WorkGroupRow<Content: View>: View, Equatable {
     let outcome: WorkOutcome
     let isOpen: Bool
     var inputs: ContentInputs?
+    /// When the answer came and what the request used, said at the card's end; nil while there is no answer (or outside a chat).
+    var answer: WorkAnswer?
     let toggle: () -> Void
     @ViewBuilder let content: () -> Content
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -1542,7 +1556,14 @@ struct WorkGroupRow<Content: View>: View, Equatable {
     /// The closures (`toggle`, `content`) stay out: they are made again on every pass and say nothing the rest does not.
     nonisolated static func == (lhs: WorkGroupRow, rhs: WorkGroupRow) -> Bool {
         lhs.items == rhs.items && lhs.seconds == rhs.seconds && lhs.outcome == rhs.outcome && lhs.isOpen == rhs.isOpen
-            && lhs.inputs == rhs.inputs
+            && lhs.inputs == rhs.inputs && lhs.answer == rhs.answer
+    }
+
+    /// The kinds of action the work used, in the order they first came, a few at most: what a glance tells the work was.
+    private static func kinds(of calls: [ToolCall]) -> [ToolCall.Kind] {
+        var seen: [ToolCall.Kind] = []
+        for call in calls where !seen.contains(call.kind) { seen.append(call.kind) }
+        return Array(seen.prefix(4))
     }
 
     var body: some View {
@@ -1551,29 +1572,26 @@ struct WorkGroupRow<Content: View>: View, Equatable {
         // Stopped or cut by the app closing, the action that ran then counts as failed: the line already says why.
         let failures = [.stopped, .appClosed].contains(outcome) ? nil : ToolTally.failures(calls)
         VStack(alignment: .leading, spacing: 12) {
+            let kinds = Self.kinds(of: calls)
+            let meta = answer?.text
             Button(action: toggle) {
-                HStack(spacing: 8) {
-                    Image(systemName: outcome.symbol)
-                        .font(Typography.small)
-                        .foregroundStyle(outcome.tint)
-                        .frame(width: 14)
-                    Text(line)
-                        .font(Typography.label)
-                        .foregroundStyle(Palette.secondary)
-                        .lineLimit(1)
-                        .layoutPriority(-1)
-                    if let failures {
-                        ErrorMark(failures: failures)
-                    }
-                    FoldChevron(isOpen: isOpen, size: 9)
-                    Spacer(minLength: 0)
+                // One object for the request's work, as wide as the chat's other cards: what it was (the symbols of the
+                // kinds of action), how long and how much, and at its end when the answer came and what it used. In a
+                // narrow chat the symbols give way first, then the time and the cost; the line's words are cut last.
+                ViewThatFits(in: .horizontal) {
+                    header(line, failures: failures, kinds: kinds, meta: meta, cuts: false)
+                    header(line, failures: failures, kinds: [], meta: meta, cuts: false)
+                    header(line, failures: failures, kinds: [], meta: nil, cuts: true)
                 }
+                .padding(.horizontal, Spacing.m)
+                .frame(minHeight: 36)
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .padding(.leading, gutter)
+            .card()
+            .chatCard()
             .help(Tip.toggleWork(isOpen: isOpen))
-            .accessibilityLabel(failures.map { "\(line), \($0.text)" } ?? line)
+            .accessibilityLabel(([failures.map { "\(line), \($0.text)" } ?? line] + [meta].compactMap { $0 }).joined(separator: ", "))
             .accessibilityValue(isOpen ? "expandido" : "recolhido")
             .accessibilityHint(isOpen ? "Recolhe o trabalho" : "Mostra o que o Orb disse e fez")
             if isOpen {
@@ -1583,6 +1601,45 @@ struct WorkGroupRow<Content: View>: View, Equatable {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .animation(FoldMotion.animation(reduceMotion: reduceMotion), value: isOpen)
+    }
+}
+
+extension WorkGroupRow {
+    private func header(_ line: String, failures: ToolTally.Failures?, kinds: [ToolCall.Kind], meta: String?, cuts: Bool) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: outcome.symbol)
+                .font(Typography.small)
+                .foregroundStyle(outcome.tint)
+                .frame(width: 14)
+            Text(line)
+                .font(Typography.label)
+                .foregroundStyle(Palette.secondary)
+                .lineLimit(1)
+                .fixedSize(horizontal: !cuts, vertical: false)
+                .layoutPriority(-1)
+            if let failures {
+                ErrorMark(failures: failures)
+            }
+            Spacer(minLength: Spacing.s)
+            if !kinds.isEmpty { kindMarks(kinds) }
+            metaText(meta)
+            FoldChevron(isOpen: isOpen, size: 9)
+        }
+    }
+
+    private func kindMarks(_ kinds: [ToolCall.Kind]) -> some View {
+        HStack(spacing: 6) {
+            ForEach(kinds, id: \.self) { kind in
+                Image(systemName: kind.symbol).font(Typography.small).foregroundStyle(Palette.faint)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
+    @ViewBuilder private func metaText(_ meta: String?) -> some View {
+        if let meta {
+            Text(meta).font(Typography.small).monospacedDigit().foregroundStyle(Palette.faint).lineLimit(1).fixedSize()
+        }
     }
 }
 
@@ -1987,6 +2044,12 @@ enum ApprovalHints {
 /// opens a line to tell the Orb what to do instead. Destructive commands and changes to the Orb's instructions offer
 /// only allow and deny. ⌘↩ allows and Esc denies on the Orb's newest open card. Answered: one quiet line, which opens
 /// the card as it was asked.
+/// The risky answer of a permission card is given by holding the pointer down, not by a click.
+enum HoldToAllow {
+    static let seconds = 0.8
+    static let title = "Segure para permitir"
+}
+
 struct ApprovalCard: View {
     @Environment(AppModel.self) private var model
     let request: ApprovalRequest
@@ -2033,6 +2096,8 @@ struct ApprovalCard: View {
     private var allowText: Color { request.isDangerous ? .white : Palette.onInk }
     private var hasMoreOptions: Bool { !request.suggestions.isEmpty || request.isBatch }
     private static let visibleItems = 8
+    /// The pointer is down on "Segure para permitir" and the pill is filling.
+    @State private var isHolding = false
 
     var body: some View {
         // One container for the card and its record, so while one fades out and the other in they overlap instead of
@@ -2233,34 +2298,60 @@ struct ApprovalCard: View {
         .accessibilityHint(ApprovalHints.accessibilityHint("Esc", showsKeys: showsKeys))
     }
 
+    private func allowLabel(_ title: String, showsKeys: Bool) -> some View {
+        HStack(spacing: 7) {
+            Text(title)
+                .contentTransition(reduceMotion ? .opacity : .numericText())
+            if showsKeys {
+                Text(AppShortcut.commandReturn.label)
+                    .font(Typography.small)
+                    .opacity(0.55)
+            }
+        }
+        .font(.system(size: 13, weight: .medium))
+        .foregroundStyle(allowText)
+        .padding(.leading, 14)
+        .padding(.trailing, hasMoreOptions ? 10 : 14)
+        .frame(minHeight: ControlHeight.regular)
+        .contentShape(.rect)
+    }
+
     /// "Permitir ⌘↩" with, when there is more to choose, a chevron in the same capsule that opens the rest.
     @ViewBuilder private var allowControl: some View {
         let showsKeys = self.showsKeys // once per render, see `denyButton`
         HStack(spacing: 0) {
-            Button {
-                model.decide(.once, approvalID: request.id, botID: botID)
-            } label: {
-                HStack(spacing: 7) {
-                    Text(allowTitle)
-                        .contentTransition(reduceMotion ? .opacity : .numericText())
-                    if showsKeys {
-                        Text(AppShortcut.commandReturn.label)
-                            .font(Typography.small)
-                            .opacity(0.55)
+            if request.isDangerous {
+                // What cannot be undone is not allowed by a stray click: the pointer has to stay down while the pill fills.
+                // ⌘↩ still answers at once (two keys are no accident), and so does VoiceOver's own activation.
+                allowLabel(HoldToAllow.title, showsKeys: showsKeys)
+                    .background(alignment: .leading) {
+                        Rectangle().fill(.white.opacity(0.28))
+                            .scaleEffect(x: isHolding ? 1 : 0, anchor: .leading)
+                            .animation(isHolding ? .linear(duration: HoldToAllow.seconds) : Motion.press, value: isHolding)
                     }
+                    .onLongPressGesture(minimumDuration: HoldToAllow.seconds, maximumDistance: 40) {
+                        isHolding = false
+                        model.decide(.once, approvalID: request.id, botID: botID)
+                    } onPressingChanged: { isHolding = $0 }
+                    .clickablePointer()
+                    .help(ApprovalHints.help(Tip.holdToAllow, key: AppShortcut.commandReturn.label, showsKeys: showsKeys))
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(allowTitle)
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityHint(ApprovalHints.accessibilityHint(AppShortcut.commandReturn.label, showsKeys: showsKeys))
+                    .accessibilityAction { model.decide(.once, approvalID: request.id, botID: botID) }
+            } else {
+                Button {
+                    model.decide(.once, approvalID: request.id, botID: botID)
+                } label: {
+                    allowLabel(allowTitle, showsKeys: showsKeys)
                 }
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(allowText)
-                .padding(.leading, 14)
-                .padding(.trailing, hasMoreOptions ? 10 : 14)
-                .frame(minHeight: ControlHeight.regular)
-                .contentShape(.rect)
+                .buttonStyle(SplitPillSegmentStyle(tint: allowText))
+                .help(ApprovalHints.help(request.isHandoff ? Tip.handoffDone : allowTitle, key: AppShortcut.commandReturn.label,
+                                         showsKeys: showsKeys))
+                .accessibilityLabel(allowTitle)
+                .accessibilityHint(ApprovalHints.accessibilityHint(AppShortcut.commandReturn.label, showsKeys: showsKeys))
             }
-            .buttonStyle(SplitPillSegmentStyle(tint: allowText))
-            .help(ApprovalHints.help(request.isHandoff ? Tip.handoffDone : allowTitle, key: AppShortcut.commandReturn.label,
-                                     showsKeys: showsKeys))
-            .accessibilityLabel(allowTitle)
-            .accessibilityHint(ApprovalHints.accessibilityHint(AppShortcut.commandReturn.label, showsKeys: showsKeys))
             if hasMoreOptions {
                 Rectangle().fill(allowText.opacity(0.25)).frame(width: 1, height: 16)
                     .accessibilityHidden(true)

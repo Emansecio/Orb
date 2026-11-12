@@ -130,6 +130,7 @@ enum Tip {
     static let randomLook = "Sorteia cor, formato, olhos e boca; o jeito fica"
     static let showAllActions = "Mostra todas as ações deste pedido"
     static let deny = "Recusa o pedido"
+    static let holdToAllow = "Mantenha o botão pressionado para permitir: esta ação não pode ser desfeita"
     static let allowOptions = "Permite só nesta tarefa ou sempre; remova depois em Liberações"
     static let handoffDone = "Você terminou no navegador: o Orb continua de onde parou"
     static let handoffCancel = "Você não vai fazer isso: o Orb segue sem esse passo"
@@ -373,7 +374,7 @@ enum Tip {
          createFirstOrb, showWelcome, skillsPage, keptMemoryInFinder, dismissNotice, deleteWithMemory,
          deleteKeepingMemory, profile(callName: "Ana"), profile(callName: nil),
          copyReply, copyMarkdown, redoReply, reactGood, reactBad, reactUndo, editMessage, cancelEdit, toggleOutput(isExpanded: true), toggleOutput(isExpanded: false), toggleCommand(isExpanded: true), toggleCommand(isExpanded: false), toggleRequest(isOpen: true), toggleRequest(isOpen: false), toggleActions(isOpen: true), toggleActions(isOpen: false), toggleWork(isOpen: true), toggleWork(isOpen: false),
-         routineUseAuto, routineUseReadOnly, randomLook, denyWithNote, showAllActions, deny, allowOptions,
+         routineUseAuto, routineUseReadOnly, randomLook, holdToAllow, denyWithNote, showAllActions, deny, allowOptions,
          handoffDone, handoffCancel, browserMode, removeBrowserProxy, installBrowser, addSearchKey,
          enlargeScreen, takeOverBrowser, giveBackBrowser, openPersonBrowser, showPersonBrowser, personBrowserChip, browserModeWhilePerson, stopBrowsing, hideScreen, revealScreen, lastScreen, backToLiveScreen, showBrowserScreen, animateBrowserCursor,
          menuBarItem, connectModel, openMainWindow, closeReply, openChatInApp, reviewRiskyInApp, allowOnce, allowBatchOnce,

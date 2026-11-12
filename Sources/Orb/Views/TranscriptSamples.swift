@@ -304,6 +304,7 @@ enum TranscriptSample {
             if screen.hasPrefix("transcript-work") {
                 items[0].date = .now.addingTimeInterval(-65)
                 items.append(TranscriptItem(.bot(text: "Pronto: dos 61 contatos, 12 eram leads sem resposta. Respondi os 12 conforme o Brain e deixei o relatório em /tmp/af_report.txt.", isStreaming: false)))
+                items[items.count - 1].spend = ReplySpend(tokens: 38_400, dollars: 0.12) // said at the end of the work's card
             }
             if screen == "transcript-interrupted" {
                 items[0].date = .now.addingTimeInterval(-65)
