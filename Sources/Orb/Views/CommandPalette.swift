@@ -7,7 +7,7 @@ struct PaletteEntry: Identifiable, Equatable {
     enum Action: Equatable {
         case bot(UUID)
         case page(SidebarItem)
-        case newBot, importOrb, newChat, focusComposer, findInConversation, askAside, openFolder, toggleInspector, shortcuts
+        case newBot, importOrb, newChat, focusComposer, findInConversation, exportConversation, askAside, openFolder, toggleInspector, shortcuts
         /// A group's chat (its id), and "Novo grupo…".
         case group(UUID), newGroup
         /// Names a new category of the sidebar.
@@ -119,6 +119,8 @@ enum PaletteBuilder {
                                      section: .actions, shortcut: ShortcutCatalog.keys(for: .writeMessage), action: .focusComposer, keywords: "compositor campo focar digitar"))
             list.append(PaletteEntry(id: "find", title: CommandName.findInConversation, subtitle: nil, symbol: "magnifyingglass",
                                      section: .actions, shortcut: ShortcutCatalog.keys(for: .find), action: .findInConversation, keywords: "procurar pesquisar texto mensagem"))
+            list.append(PaletteEntry(id: "export", title: CommandName.exportConversation, subtitle: "Em Markdown", symbol: "square.and.arrow.up",
+                                     section: .actions, shortcut: nil, action: .exportConversation, keywords: "salvar baixar arquivo markdown guardar"))
             list.append(PaletteEntry(id: "aside", title: CommandName.askAside, subtitle: nil, symbol: "bubble.left.and.text.bubble.right",
                                      section: .actions, shortcut: ShortcutCatalog.keys(for: .askAside), action: .askAside, keywords: "perguntar lateral resumo dúvida"))
             list.append(PaletteEntry(id: "folder", title: CommandName.openFolder, subtitle: nil, symbol: "folder",
@@ -336,6 +338,7 @@ struct CommandPalette: View {
         case .newChat: if let id = model.commandBotID { model.newChat(for: id) }
         case .focusComposer: model.focusComposer()
         case .findInConversation: model.findInConversation()
+        case .exportConversation: if let id = model.commandBotID { model.exportConversation(id) }
         case .askAside: model.askAside()
         case .openFolder: if let id = model.commandBotID { model.openFolder(of: id) }
         case .toggleInspector: model.toggleInspector()

@@ -19,6 +19,7 @@ enum CommandName {
     static let goTo = "Ir para…"
     static let writeMessage = "Escrever uma mensagem"
     static let findInConversation = "Buscar na conversa"
+    static let exportConversation = "Exportar conversa…"
     static let askAside = "Pergunta lateral…"
     static let stop = "Parar a resposta"
     static let sendToBackground = "Mandar o comando para segundo plano"

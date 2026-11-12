@@ -270,6 +270,10 @@ struct AppCommands: Commands {
             Button(CommandName.askAside) { showMain(); model.askAside() }
                 .keyboardShortcut(AppShortcut.askAside)
                 .disabled(sheetOpen || model.commandBotID == nil)
+            Button(CommandName.exportConversation) {
+                if let id = model.commandBotID { model.exportConversation(id) }
+            }
+            .disabled(sheetOpen || model.commandBotID.map(model.canExportConversation) != true)
         }
     }
 }

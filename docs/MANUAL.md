@@ -210,6 +210,9 @@ Se o navegador não estiver instalado, o Orb fica só com `web_fetch` e `web_sea
   mensagem ao campo, em vez de deixá-la numa tarefa que não vai respondê-la. Se o Orb espera sua
   resposta a um pedido, o que ia entrar no próximo passo só entra depois dela.
   Dá para tirar uma mensagem da espera ("Editar"). Se o turno falhar ou for parado, o que estava esperando (nos dois modos) volta para o campo. O que está no campo (texto, arquivos e imagens anexados) e o que voltou da fila ficam guardados em `rascunhos.json` ao fechar o app e voltam na próxima abertura (arquivos que sumiram ficam de fora).
+- **Exportar conversa.** No menu do Orb na barra de menus, ou em ⌘K, "Exportar conversa…" salva a conversa aberta num
+  arquivo Markdown, onde você escolher: o que você pediu, o que o Orb respondeu (com tabelas e blocos de código) e uma
+  linha por ação. Não leva a saída das ações, o caminho completo dos anexos nem nada que o chat não mostre.
 - **Buscar na conversa.** **⌘F** (ou a lupa da barra do chat, ou "Buscar na conversa" em ⌘K) abre uma barra no alto do chat:
   digite e ela mostra "3 de 12", leva você à mensagem e marca o trecho. **↩** / **↓** / **⌘G** vão para o próximo resultado,
   **⇧↩** / **↑** / **⇧⌘G** para o anterior (dá a volta), o botão de lista mostra um trecho de cada resultado para escolher, e **Esc** fecha.
