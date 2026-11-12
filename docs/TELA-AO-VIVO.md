@@ -1,8 +1,8 @@
 # Tela ao vivo — especificação (só o navegador do Orb)
 
-Quando o Orb usa o próprio navegador, o chat mostra um cartão compacto com a página **ao vivo**: o cursor do Orb indo ao
-elemento, o clique, o texto entrando. Clicar amplia no Inspetor; quando a página precisa de você (login, código, captcha),
-você assume ali mesmo, sem a página recarregar. Apps do Mac ficam fora por enquanto (gravação de tela contínua e indicador
+Quando o Orb usa o próprio navegador, o chat mostra um cartão com a página **ao vivo** e grande: o cursor do Orb indo ao
+elemento, o clique, o texto entrando. "Assumir" passa o navegador a você ali mesmo, sem a página recarregar; "Ampliar"
+abre a mesma página numa janela. Apps do Mac ficam fora por enquanto (gravação de tela contínua e indicador
 de gravação do macOS ainda não medidos).
 
 Decidido em 2026-10-20 com um time de quatro papéis (captura, computer use, design, produto) em duas rodadas e um conselho
@@ -28,16 +28,35 @@ passagem de hoje, com a nova cara; "Assumir" ainda abre a janela pelo `browse_sh
 abre a aba "Tela" no Inspetor (só ver). Toggle em Ajustes → "Mostrar a tela do navegador no chat" (ligado).
 **Etapa 2 — Assumir pela tela (feita, ver 7).** Na janela ampliada, clique e teclado vão ao Chrome pelo WebSocket; a página não recarrega.
 `browse_show` (janela de verdade) fica de reserva: "Abrir em uma janela" para passkey, captcha que barra clique simulado.
+**Etapa 2b — Página grande e Assumir no cartão (feita em 2026-11-12, ver 3).**
 **Etapa 3 — Faixa** de uma linha acima do compositor quando o cartão sai da tela (mesmo stream, sem segunda conexão).
+**Etapa 4 — Passagem resolvida no cartão (aberta).** No "Precisa de você" o Orb ainda reabre o navegador numa janela de
+verdade (`browse_show`) e o cartão só mostra o cadeado. O passo seguinte é a pessoa assumir ali mesmo, com a janela de
+verdade como reserva para passkey e captcha que barra clique simulado.
 
-## 3. O cartão (etapa 1)
+## 3. O cartão
+
+Desde 2026-11-12 o cartão é a página grande dentro da conversa, não mais uma miniatura de 92 pt: a comparação com o
+concorrente mostrou que o cursor, a fluidez de 60 quadros/s e o Assumir ficavam escondidos atrás de um clique.
 
 - **Item próprio da transcrição**, um por uso do navegador (do primeiro `browse_*` ao fim do turno). As linhas de
   ferramenta continuam abaixo dele.
-- **Tamanho:** largura da coluna até 560 pt, **altura fixa 92 pt** em todos os estados (o layout nunca pula).
-  Miniatura 160 × 100 pt (proporção da página), raio 8, `Palette.line`. Fundo `Palette.surface`, raio 12, padding 10.
-- **À direita da miniatura:** linha 1 = chip de estado + host (11 pt); linha 2 = legenda (`WorkLine.headline`, 12 pt,
-  `Palette.secondary`, shimmer só trabalhando); linha 3 = botões pílula pequenos.
+- **Forma:** uma pequena janela de navegador, em três faixas dentro de um `.card()`.
+  - **Barra de cima (36 pt):** chip de estado + site (trunca no meio, cede espaço primeiro); à direita, o que muda como se
+    vê: "Ocultar tela"/"Mostrar tela" e "Ampliar".
+  - **Página:** de borda a borda, inteira (`resizeAspect`), na proporção dos próprios quadros
+    (`LiveFrameStore.pageAspect`, entre 1,25 e 2,2; 1,6 antes do primeiro quadro), então não há barras nem corte e o clique
+    da pessoa cai no ponto certo. No máximo **320 pt de altura**: uma página mais quadrada estreita o cartão em vez de
+    tomar a conversa. A largura segue a coluna, até 560 pt.
+  - **Barra de baixo:** a legenda (`WorkLine.headline`) e, ao lado, o que a pessoa pode fazer: "Assumir" e "Parar Orb".
+    Sem espaço para os dois numa linha, a legenda corta (o `help` traz inteira) e os rótulos encurtam; a legenda do
+    "Precisa de você" não corta, sobe para cima dos botões.
+- **Assumir no próprio cartão:** o botão passa o navegador à pessoa ali mesmo. A página recebe clique, rolagem e teclado
+  (o teclado vai para ela na hora, sem um primeiro clique), o cartão ganha contorno `Palette.accent` e a barra de baixo
+  mostra "Devolver ao Orb". Um clique na página enquanto o Orb dirige só amplia: assumir é sempre um botão, para um
+  clique perdido na conversa não parar o Orb. Sair da conversa (abrir outro Orb, grupo ou página) devolve o que foi
+  assumido no cartão (`LiveFeedHub.chatLeft`); rolar a conversa não devolve. Se a janela ampliada abrir, o controle passa
+  a ser dela e termina quando ela fecha.
 - **Cursor do Orb** desenhado em camada sobre a imagem (seta + bolinha na cor do Orb). Com a animação ligada (Ajustes →
   Navegador, "Animar o cursor e a rolagem na tela do navegador", padrão), viaja 0,2 s com curva de entrada e saída até o
   ponto da ação, e **a ação espera esse tempo** (`BrowserHub.point(at:)`, cancelável por Parar): ao chegar, o cursor "aperta"
@@ -47,16 +66,20 @@ abre a aba "Tela" no Inspetor (só ver). Toggle em Ajustes → "Mostrar a tela d
   movimento do sistema: salta com fade, sem anel, sem espera, sem pulso. O ponto vem da caixa do
   elemento que o driver já resolve (`ref` → caixa) + `metadata` de rolagem do quadro.
 - **Quadros fora da lista:** a linha da transcrição é `Equatable` pelo id e pelo estado; a imagem vem de um objeto
-  observável próprio (`LiveFrameStore`), então um quadro novo redesenha só a miniatura.
+  observável próprio (`LiveFrameStore`), então um quadro novo redesenha só a página. A proporção é observada, mas só é
+  escrita quando muda (viewport novo), nunca por quadro.
 
-| Estado | Chip | Miniatura | Legenda | Botões |
-|---|---|---|---|---|
-| Ao vivo | ● Ao vivo (`Palette.ok`, pulso leve) | página + cursor | o que o Orb faz | Ampliar · Parar · Privado |
-| Precisa de você | Precisa de você (`Palette.warn`, parado) | **opaca**: cadeado + "Página de login" | motivo do modelo ("Entre na sua conta para eu continuar") | Assumir · Terminei · Cancelar |
-| Você no controle (etapa 2) | Você está no controle (`Palette.accentText`) | página, sem cursor do Orb, contorno azul 1,5 pt | "O Orb espera você" | Terminei · Devolver ao Orb |
-| Protegido | — | borrada + cadeado | "Conteúdo protegido" | Ampliar |
-| Erro | — | último quadro esmaecido | "O navegador fechou · última ação: …" | — |
-| Terminou | linha de uma altura de ferramenta | sem imagem | "Usou o navegador · checkout.acessosfit · 2 min · 14 ações · terminou em /pagamentos" | Ver última tela (só se ainda na memória) |
+| Estado | Chip | Página | Legenda | Em cima | Embaixo |
+|---|---|---|---|---|---|
+| Ao vivo | ● Ao vivo (`Palette.ok`, pulso leve) | página + cursor | o que o Orb faz | Ocultar tela · Ampliar | Assumir · Parar Orb |
+| Conectando | Conectando | vazia, ou o último quadro esmaecido | "Abrindo o navegador…" | Ocultar tela · Ampliar | Parar Orb |
+| Precisa de você | Precisa de você (`Palette.warn`, parado) | **opaca**: cadeado + "Página de login" | o que fazer ("Entre na sua conta para o Orb continuar") | — | Terminei · Cancelar |
+| Você no controle | Você no controle (`Palette.accentText`) | página, sem cursor do Orb, recebe a entrada | "O Orb espera você devolver" | Ampliar | Devolver ao Orb |
+| Protegido | — | opaca: cadeado | "Página protegida: assuma para ver" | Ampliar | Assumir |
+| Oculto pela pessoa | ● Ao vivo | borrada + cadeado "Privado" | o que o Orb faz | Mostrar tela | Parar Orb |
+| Pausado | Pausado | último quadro esmaecido | "Pausado: outro Orb está na tela" | Ampliar | Parar Orb |
+| Erro | — | último quadro esmaecido | "O navegador fechou · última ação: …" | — | — |
+| Terminou | linha de uma altura de ferramenta | sem imagem | "Usou o navegador · checkout.acessosfit · 2 min · 14 ações · terminou em /pagamentos" | | Ver última tela (só se ainda na memória) |
 
 "Precisa de você" entra uma vez com `Motion.emphasis` e contorno `Palette.warn` a 40 %; sem pulso contínuo nem som (a
 notificação do sistema que já existe para o cartão de passagem continua).
@@ -68,7 +91,8 @@ reunião com tela compartilhada.
 
 1. Nenhum quadro vai a disco, histórico, log ou modelo. O `command` do stream também não (pode trazer texto digitado).
 2. Página que casa com `BrowserHandoff.reason` ou tem campo de senha visível → miniatura e ampliada opacas (cadeado),
-   sem toggle. Na etapa 2, em "Você no controle" a ampliada mostra a página (você precisa ver para digitar), a miniatura não.
+   sem toggle. Em "Você no controle", o cartão e a janela mostram a página (você precisa ver para digitar); a aba Tela
+   do painel, que é só para ver, continua opaca.
 3. "Ver última tela": cache só em memória, as **10** últimas imagens do app inteiro, nunca de página protegida; some ao
    fechar o app ou sair do cache (o botão some junto).
 4. `NSWindow.sharingType = .none` **não** é usado (o usuário manda capturas do app; e desde o macOS 15.4 a captura
@@ -121,8 +145,8 @@ do Inspetor, que tem no máximo 420 pt. A aba Tela continua para "Ver última te
 - Teclado: o texto vem de `NSEvent.characters`, que já aplica o layout (ABNT2, ç, letras com acento). Teclas com nome vão
   por `keyCode`, e ⌘ fica com o app. ⌘V digita um caractere por tecla, com quebra de linha como Enter e no máximo 20.000
   caracteres: o stream recusa texto longo numa tecla só e o evento `char` (medido).
-- Privacidade: com a pessoa no controle, a página protegida aparece só na janela. A miniatura fica opaca ("Na janela"),
-  e o quadro não vira "última tela". Ao devolver, o quadro é solto.
+- Privacidade: com a pessoa no controle, a página protegida aparece no cartão e na janela (seção 3), e o quadro não vira
+  "última tela". Ao devolver, o quadro é solto.
 - Resolução: o stream passou de 480 para 960 px, para o texto ficar legível na janela. Medido numa página animada a
   10 qps: Chrome com ~27 % de um núcleo, contra ~16 % a 480 px. Página parada não custa nada. Vale para navegadores
   abertos depois da mudança.
@@ -130,5 +154,5 @@ do Inspetor, que tem no máximo 420 pt. A aba Tela continua para "Ver última te
 
 ## 8. Fora de escopo
 
-Apps do Mac (SCStream); gravação ou replay; quadros para o modelo; controle pela miniatura compacta; tela ao vivo na
+Apps do Mac (SCStream); gravação ou replay; quadros para o modelo; tela ao vivo na
 lateral; stream sem ninguém olhando; esconder a janela em capturas.

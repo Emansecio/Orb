@@ -2,7 +2,8 @@
 import AppKit
 import SwiftUI
 
-/// Scenes for review: `Orb --snapshot transcript-browser-live|transcript-browser-need|transcript-browser-done|inspector-screen|
+/// Scenes for review: `Orb --snapshot transcript-browser-live|transcript-browser-control|transcript-browser-private|
+/// transcript-browser-protected|transcript-browser-need|transcript-browser-done|inspector-screen|
 /// browser-window|browser-window-control|browser-window-protected out.png`.
 /// The store is seeded with a drawn page (no browser runs), so the card, the hand-off and the panel's tab show with a
 /// picture. Dev aid; nothing is saved.
@@ -37,6 +38,11 @@ enum LiveScreenSnapshots {
             return [user, intro, TranscriptItem(.browserView(view)), tool("Abrindo página", "https://checkout.acessosfit.com.br"),
                     tool("Clicando em Pagamentos", ""),
                     TranscriptItem(.bot(text: "Hoje entraram 2 pagamentos e 1 está pendente.", isStreaming: false))]
+        case "transcript-browser-protected":
+            let card = TranscriptItem(.browserView(view))
+            model.session(bot.id).browserViewID = card.id
+            seed(store, url: "https://checkout.acessosfit.com.br/login", isProtected: true)
+            return [user, intro, card, tool("Abrindo página", "https://checkout.acessosfit.com.br", state: .running)]
         default:
             let card = TranscriptItem(.browserView(view))
             model.session(bot.id).browserViewID = card.id
@@ -50,7 +56,12 @@ enum LiveScreenSnapshots {
     /// The panel's tab on a live page.
     static func tab(model: AppModel, botID: UUID) {
         LiveScreenLayerView.countsOffscreenWindows = true
-        seed(model.liveScreens.store(botID), url: "https://checkout.acessosfit.com.br/pagamentos", isProtected: false)
+        let store = model.liveScreens.store(botID)
+        seed(store, url: "https://checkout.acessosfit.com.br/pagamentos", isProtected: false)
+        Task {
+            await streamGaveUp(store)
+            seed(store, url: "https://checkout.acessosfit.com.br/pagamentos", isProtected: false)
+        }
     }
 
     /// The browser's window: the Orb driving (`browser-window`), the person in control (`-control`), a login page (`-protected`).
@@ -63,12 +74,17 @@ enum LiveScreenSnapshots {
         if screen != "browser-window-control" { model.live(botID).setWork(WorkLine(verb: "Clicando em", target: "Pagamentos")) }
         // The window's own acquire opens a stream (to no browser) and says "Conectando": the scene is set again once it is up.
         Task {
-            try? await Task.sleep(for: .milliseconds(300))
+            await streamGaveUp(store)
             store.setProtected(isProtected)
             store.setPhase(.live)
             if screen == "browser-window-control" { store.setUserInControl(true) }
             if !isProtected || screen == "browser-window-control" { store.deliver(frame()) }
         }
+    }
+
+    /// Waits for the stream a scene's view opened (to no browser) to give up, at most 5 s: only then does a state set by hand stay.
+    private static func streamGaveUp(_ store: LiveFrameStore) async {
+        for _ in 0..<50 where store.phase != .failed { try? await Task.sleep(for: .milliseconds(100)) }
     }
 
     private static func seed(_ store: LiveFrameStore, url: String?, isProtected: Bool) {
@@ -79,10 +95,26 @@ enum LiveScreenSnapshots {
         store.deliver(frame())
     }
 
-    /// The Orb's pointer on the "Pagamentos" entry of the menu, once the views are listening for it (pointers are not replayed).
-    static func point(model: AppModel, botID: UUID) async {
-        try? await Task.sleep(for: .milliseconds(500))
-        model.liveScreens.store(botID).point(LivePointer(rect: CGRect(x: 60, y: 120, width: 160, height: 48), kind: .click))
+    /// The chat's scene once the card is up. Its own acquire opens a stream (to no browser) that fails: the scene is set again,
+    /// and the Orb's pointer goes to the "Pagamentos" entry of the menu (pointers are not replayed, so the views must be listening).
+    static func settle(_ screen: String, model: AppModel, botID: UUID) async {
+        guard screen != "transcript-browser-done" else { return }
+        let store = model.liveScreens.store(botID)
+        await streamGaveUp(store)
+        store.setPhase(.live)
+        switch screen {
+        case "transcript-browser-control": store.setUserInControl(true)
+        case "transcript-browser-private": store.isPrivate = true
+        // The stream's own start took the seeded protection down (the hub knows of no protected page here).
+        case "transcript-browser-protected": store.setProtected(true)
+        default: break
+        }
+        if !store.isProtected { store.deliver(frame()) }
+        if screen == "transcript-browser-live" {
+            // The card has to be live again (its layer shows the pointer only then) before the pointer is told where to go.
+            try? await Task.sleep(for: .milliseconds(200))
+            store.point(LivePointer(rect: CGRect(x: 60, y: 120, width: 160, height: 48), kind: .click))
+        }
         try? await Task.sleep(for: .milliseconds(400))
     }
 

@@ -53,6 +53,18 @@ final class LiveFrameStore {
     /// The person took the browser over in the live screen's window: their clicks and keys go to the page, the Orb's tools wait,
     /// and the window shows the page even when it is protected (the thumbnail never does).
     private(set) var isUserInControl = false
+    /// The page's width over its height, as its pictures have it: the card in the chat gives the page that shape, so it is shown
+    /// whole with no bars. Written only when the shape changes (a new viewport), never per frame.
+    private(set) var pageAspect = LiveFrameStore.defaultAspect
+
+    nonisolated static let defaultAspect: CGFloat = 1.6
+
+    /// The shape the card takes for a picture of `width` x `height` pixels: the picture's own, within what a card in the chat can
+    /// be (a phone-shaped viewport would make it taller than the window; the picture then fits inside, with bars).
+    nonisolated static func aspect(width: Int, height: Int) -> CGFloat {
+        guard width > 0, height > 0 else { return defaultAspect }
+        return min(max(CGFloat(width) / CGFloat(height), 1.25), 2.2)
+    }
 
     @ObservationIgnored private(set) var lastFrame: LiveFrame?
     @ObservationIgnored private var frameObservers: [UUID: (LiveFrame) -> Void] = [:]
@@ -101,6 +113,8 @@ final class LiveFrameStore {
     func deliver(_ frame: LiveFrame) {
         guard !isProtected || isUserInControl else { return }
         lastFrame = frame
+        let aspect = Self.aspect(width: frame.image.width, height: frame.image.height)
+        if abs(aspect - pageAspect) > 0.005 { pageAspect = aspect }
         for observer in frameObservers.values { observer(frame) }
     }
 

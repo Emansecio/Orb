@@ -237,6 +237,8 @@ final class AppModel {
     private(set) var lastSelectedBotID: UUID?
     var selection: SidebarItem? {
         didSet {
+            // A browser taken over on a chat's card goes back to its Orb when that chat leaves the screen.
+            if oldValue != selection { liveScreens.chatLeft() }
             if let jump = inicioJump, selection != .bot(jump.bot), oldValue != selection {
                 sessions[jump.bot]?.opening = nil
                 inicioJump = nil

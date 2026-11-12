@@ -62,6 +62,8 @@ final class LiveScreenLayerView: NSView {
         didSet {
             guard isInteractive != oldValue else { return }
             if !isInteractive, window?.firstResponder === self { window?.makeFirstResponder(nil) }
+            // Taken over with a button: the keys go to the page at once, without a first click on it (which the page would get).
+            if isInteractive { window?.makeFirstResponder(self) }
             updateTrackingAreas()
             if let shown { apply(shown) }
         }

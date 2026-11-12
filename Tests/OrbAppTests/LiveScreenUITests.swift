@@ -45,13 +45,34 @@ struct LiveScreenLogicTests {
     }
 
     @Test func eachStateHasItsOwnButtons() {
-        #expect(State.live.buttons == [.enlarge, .stop, .hide])
-        #expect(State.connecting.buttons == [.enlarge, .stop, .hide])
+        #expect(State.live.buttons == [.takeOver, .stop, .enlarge, .hide])
+        #expect(State.connecting.buttons == [.stop, .enlarge, .hide], "no page to take over yet")
         #expect(State.needsYou.buttons == [.done, .cancel])
-        #expect(State.protected.buttons == [.enlarge])
-        #expect(State.privateView.buttons == [.reveal, .stop])
-        #expect(State.paused.buttons == [.enlarge, .stop])
+        #expect(State.protected.buttons == [.takeOver, .enlarge])
+        #expect(State.privateView.buttons == [.stop, .reveal])
+        #expect(State.paused.buttons == [.stop, .enlarge])
         #expect(State.failed.buttons.isEmpty && State.ended.buttons.isEmpty)
+    }
+
+    @Test func theCardOffersToTakeOverExactlyWhereTheWindowDoes() {
+        for state in [State.live, .connecting, .needsYou, .protected, .privateView, .youControl, .paused, .failed, .ended] {
+            #expect(state.buttons.contains(.takeOver) == LiveScreenWindow.canTakeOver(state), "\(state)")
+        }
+    }
+
+    @Test func theButtonsThatChangeTheViewSitOnTheTopBar() {
+        typealias Button = LiveCardState.Button
+        #expect(Button.enlarge.isOnTopBar && Button.hide.isOnTopBar && Button.reveal.isOnTopBar)
+        for button in [Button.stop, .done, .cancel, .takeOver, .giveBack] { #expect(!button.isOnTopBar, "\(button)") }
+    }
+
+    @Test func theCardTakesThePagesShapeWithinLimits() {
+        #expect(LiveFrameStore.aspect(width: 960, height: 600) == 1.6)
+        #expect(LiveFrameStore.aspect(width: 1280, height: 720) == 1280.0 / 720)
+        #expect(LiveFrameStore.aspect(width: 390, height: 844) == 1.25, "a phone-shaped page does not make a card taller than the chat")
+        #expect(LiveFrameStore.aspect(width: 3000, height: 600) == 2.2)
+        #expect(LiveFrameStore.aspect(width: 0, height: 600) == LiveFrameStore.defaultAspect)
+        #expect(LiveFrameStore.aspect(width: 960, height: 0) == LiveFrameStore.defaultAspect)
     }
 
     @Test func onlyTheLiveStatesPulseAndShowThePointer() {
@@ -129,7 +150,7 @@ struct LiveScreenLogicTests {
         #expect(caption(.privateView, work: "Pensando…") == "Visualização do navegador")
         #expect(caption(.connecting, work: "Pensando…") == "Pensando…")
         #expect(caption(.connecting, work: nil) == "Abrindo o navegador…")
-        #expect(caption(.protected) == "Conteúdo protegido")
+        #expect(caption(.protected) == "Página protegida: assuma para ver")
         #expect(caption(.failed) == "O navegador fechou")
         #expect(caption(.failed, last: "Clicando em Pagamentos") == "O navegador fechou · última ação: Clicando em Pagamentos")
         #expect(LiveScreenText.spoken(caption: "Clicando em Pagamentos") == "Tela ao vivo, navegador, Clicando em Pagamentos")
@@ -482,6 +503,20 @@ final class LiveScreenLayerTests {
         LiveFrame(image: image(), viewport: CGSize(width: 1280, height: 800), scroll: .zero, timestamp: .now, isStale: stale)
     }
 
+    @Test func theStoreFollowsTheShapeOfThePagesPictures() {
+        let store = LiveFrameStore(botID: UUID())
+        #expect(store.pageAspect == LiveFrameStore.defaultAspect)
+        store.deliver(LiveFrame(image: image(160, 90), viewport: CGSize(width: 1280, height: 720), scroll: .zero, timestamp: .now, isStale: false))
+        #expect(store.pageAspect == 160.0 / 90)
+        // A protected page's picture is not taken in, so it does not reshape the card either.
+        store.setProtected(true)
+        store.deliver(frame())
+        #expect(store.pageAspect == 160.0 / 90)
+        store.setProtected(false)
+        store.deliver(frame())
+        #expect(store.pageAspect == 1.6)
+    }
+
     /// A layer view in a window nobody sees; `visible` says whether it counts as on screen.
     private func layerView(_ model: AppModel, visible: Bool = true) -> (LiveScreenLayerView, NSWindow, UUID) {
         let id = model.bots[0].id
@@ -491,6 +526,26 @@ final class LiveScreenLayerTests {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 120), styleMask: [], backing: .buffered, defer: true)
         window.contentView = view
         return (view, window, id)
+    }
+
+    @Test func openingAnotherChatGivesBackABrowserTakenOnTheCard() {
+        let model = model()
+        let id = model.bots[0].id
+        model.selection = .bot(id)
+        model.liveScreens.takeControl(id, fromChat: true)
+        model.selection = .bot(id)
+        #expect(model.liveScreens.store(id).isUserInControl, "the same chat is still on screen")
+        model.selection = .inicio
+        #expect(!model.liveScreens.store(id).isUserInControl)
+    }
+
+    @Test func takingThePageOverGivesItTheKeysAndGivingItBackLetsThemGo() {
+        let (view, window, _) = layerView(model())
+        #expect(window.firstResponder !== view)
+        view.isInteractive = true
+        #expect(window.firstResponder === view, "typing works at once, without a click the page would get")
+        view.isInteractive = false
+        #expect(window.firstResponder !== view)
     }
 
     @Test func onScreenItRegistersAndAcquiresAndDrawsTheLastFrameAtOnce() {

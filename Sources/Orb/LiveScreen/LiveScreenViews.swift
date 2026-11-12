@@ -2,7 +2,7 @@ import SwiftUI
 
 // The live screen's interface (docs/TELA-AO-VIVO.md, 3): the card in the chat while the turn uses the browser, the line it
 // leaves after, and the panel's "Tela" tab. What changes rarely (the state, the host, the caption) is read here; what
-// changes up to ten times a second (the picture, the pointer) is drawn by `LiveScreenLayerView` and never reaches a body.
+// changes up to sixty times a second (the picture, the pointer) is drawn by `LiveScreenLayerView` and never reaches a body.
 
 /// The chat's row for one use of the Orb's browser: the live card while the turn uses it, the closing line after.
 struct LiveScreenRow: View {
@@ -46,15 +46,18 @@ struct LiveChip: View {
 
 // MARK: - The card
 
-/// 92 pt tall in every state, so the chat never jumps: the page on the left, on the right what it is (chip and host),
-/// what the Orb does (caption) and the buttons.
+/// The Orb's browser in the chat, as a small browser window: a bar with what it is (state and site), the page live and large
+/// with the Orb's pointer on it, and under it what the Orb does and what the person can do about it. The person takes the
+/// browser over right here ("Assumir"): the page then takes their clicks, wheel and keys. The page keeps its pictures' shape
+/// (`LiveFrameStore.pageAspect`), so the card's height only changes with the column's width.
 private struct LiveScreenCard: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
     let view: BrowserViewItem
     let botID: UUID
 
-    static let thumbnail = CGSize(width: 135, height: 72)
+    /// The tallest the page is drawn: the card leaves room in the chat for what the Orb says while it works.
+    static let maxPageHeight: CGFloat = 320
 
     var body: some View {
         let live = model.live(botID)
@@ -67,28 +70,30 @@ private struct LiveScreenCard: View {
         let host = LiveScreenText.host(of: store.url) ?? (view.host.isEmpty ? nil : view.host)
         let caption = LiveScreenText.caption(for: state, work: work?.headline, handoffPage: handoff?.command,
                                              lastAction: work?.headline.trimmingCharacters(in: CharacterSet(charactersIn: "…")))
-        HStack(alignment: .top, spacing: 12) {
-            page(state, handoff: handoff, orb: live.look.orb)
-            VStack(alignment: .leading, spacing: 0) {
-                chipLine(state, host: host)
-                Spacer(minLength: 2)
-                captionLine(caption)
-                Spacer(minLength: 2)
-                buttons(state, handoff: handoff, store: store)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        VStack(spacing: 0) {
+            topBar(state, host: host, store: store)
+            Rectangle().fill(Palette.line).frame(height: 1)
+            page(state, handoff: handoff, orb: live.look.orb, aspect: store.pageAspect)
+            Rectangle().fill(Palette.line).frame(height: 1)
+            bottomBar(state, caption: caption, handoff: handoff)
         }
-        .padding(10)
-        .frame(height: 92)
         .card(radius: Radius.card)
+        // No taller than `maxPageHeight`: a page nearer a square makes the card narrower, never the chat's whole height.
+        .frame(maxWidth: Self.maxPageHeight * store.pageAspect, alignment: .leading)
         .overlay {
-            // "Precisa de você" comes in once, with emphasis, and stays still: no pulse, no sound.
+            // "Precisa de você" comes in once, with emphasis, and stays still: no pulse, no sound. In the person's hands the
+            // card is outlined as the window's page is.
             if state == .needsYou {
                 RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Palette.warn.opacity(0.4), lineWidth: 1)
                     .entrance(EntranceStyle(distance: 0, scale: 0.97, animation: Motion.emphasis))
                     .allowsHitTesting(false)
+            } else if state == .youControl {
+                RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Palette.accent, lineWidth: 1.5)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
             }
         }
+        .motion(Motion.content, value: state)
         .chatCard()
         // ⌘↩ finishes the hand-off and Esc cancels it, as on the permission card this one stands for. No button is drawn
         // pressed here, so the answer is immediate.
@@ -108,88 +113,106 @@ private struct LiveScreenCard: View {
 
     // MARK: Pieces
 
-    private func page(_ state: LiveCardState, handoff: ApprovalRequest?, orb: OrbConfig) -> some View {
-        ZStack {
+    /// What it is: the state's chip and the site. On the right, what changes how it is seen (hide it, see it larger).
+    private func topBar(_ state: LiveCardState, host: String?, store: LiveFrameStore) -> some View {
+        HStack(spacing: Spacing.s) {
+            if let chip = state.chip {
+                LiveChip(chip: chip, state: state).fixedSize()
+            }
+            if let host {
+                // The site gives way first: the state and the buttons keep their words whole.
+                Text(host).font(Typography.small).foregroundStyle(Palette.faint).lineLimit(1).truncationMode(.middle)
+                    .help(host).layoutPriority(-1)
+            }
+            Spacer(minLength: Spacing.s)
+            if state.buttons.contains(.hide) {
+                Button("Ocultar tela") { store.isPrivate = true }.buttonStyle(GhostStyle()).help(Tip.hideScreen)
+            }
+            if state.buttons.contains(.reveal) {
+                Button("Mostrar tela") { store.isPrivate = false }.buttonStyle(SecondaryPillStyle()).help(Tip.revealScreen)
+            }
+            if state.buttons.contains(.enlarge) {
+                Button("Ampliar") { enlarge() }.buttonStyle(GhostStyle()).hangsOnTrailingEdge().help(Tip.enlargeScreen)
+            }
+        }
+        .controlSize(.small)
+        .padding(.horizontal, Spacing.m)
+        .frame(height: 36)
+    }
+
+    private func page(_ state: LiveCardState, handoff: ApprovalRequest?, orb: OrbConfig, aspect: CGFloat) -> some View {
+        let inControl = state == .youControl
+        return ZStack {
             Palette.raised
-            LiveScreenSurface(hub: model.liveScreens, botID: botID, showsPage: state.showsFrames, isBlurred: state.veil == .blur,
+            // In the person's hands the page shows whatever it is (they need to see a login to type in it), as in the window.
+            LiveScreenSurface(hub: model.liveScreens, botID: botID, wide: true, fits: true, isInteractive: inControl,
+                              showsPage: inControl || state.showsFrames, isBlurred: state.veil == .blur,
                               isDimmed: state.dimsPage, showsPointer: state.showsPointer, pointerColor: orb.pointerColor)
-            if state.veil != .none {
-                LiveScreenVeil(veil: state.veil, text: LiveScreenText.veilText(for: state, handoffPage: handoff?.command), compact: true)
+            if !inControl, state.veil != .none {
+                LiveScreenVeil(veil: state.veil, text: LiveScreenText.veilText(for: state, handoffPage: handoff?.command))
                     .transition(.opacity)
             }
         }
-        .frame(width: Self.thumbnail.width, height: Self.thumbnail.height)
-        .clipShape(.rect(cornerRadius: Radius.small))
-        .overlay(RoundedRectangle(cornerRadius: Radius.small).strokeBorder(Palette.line))
+        .aspectRatio(aspect, contentMode: .fit)
+        .frame(maxWidth: .infinity)
         .motion(Motion.content, value: state.veil)
-        .contentShape(.rect(cornerRadius: Radius.small))
-        .onTapGesture { if state.enlarges { enlarge() } }
-        .help(state.enlarges ? Tip.enlargeScreen : "")
+        .motion(Motion.content, value: aspect)
+        .contentShape(.rect)
+        // A click on the page the Orb drives opens it larger; taking it over is a button, so a stray click never stops the Orb.
+        .onTapGesture { if state.enlarges, !inControl { enlarge() } }
+        .help(state.enlarges && !inControl ? Tip.enlargeScreen : "")
         .accessibilityHidden(true)
     }
 
-    private func chipLine(_ state: LiveCardState, host: String?) -> some View {
-        HStack(spacing: 8) {
-            if let chip = state.chip {
-                LiveChip(chip: chip, state: state)
-            }
-            if let host {
-                Text(host).lineLimit(1).truncationMode(.middle)
-            }
-        }
-        .font(Typography.small)
-        .foregroundStyle(Palette.faint)
-        .motion(Motion.content, value: state)
-    }
-
-    private func captionLine(_ caption: String) -> some View {
-        Text(caption)
-            .font(Typography.label)
-            .foregroundStyle(Palette.secondary)
-            .lineLimit(1)
-            .truncationMode(.tail)
-    }
-
-    private func buttons(_ state: LiveCardState, handoff: ApprovalRequest?, store: LiveFrameStore) -> some View {
-        let kinds = state.buttons
+    /// What the Orb does (or what the person has to do) and, beside it, what they can do. A column too narrow for both on one
+    /// line cuts the caption (its `help` has it whole), except a hand-off's, which says what to do: that one goes above the buttons.
+    private func bottomBar(_ state: LiveCardState, caption: String, handoff: ApprovalRequest?) -> some View {
+        let kinds = state.buttons.filter { !$0.isOnTopBar }
         let showsKeys = handoff.map { model.showsApprovalKeys($0.id, of: botID) } ?? false
-        // A narrow column first shortens the words ("Parar Orb" to "Parar"), and only then drops the last buttons rather
-        // than wrapping: the card keeps its height.
-        @ViewBuilder func row(_ count: Int, short: Bool = false) -> some View {
-            let shown = Array(kinds.prefix(count))
+        let text = Text(caption).font(Typography.label).foregroundStyle(Palette.secondary)
+        @ViewBuilder func actions(short: Bool) -> some View {
             HStack(spacing: Spacing.xs) {
-                ForEach(shown.filter { $0 != .stop }, id: \.self) { button($0, handoff: handoff, store: store, showsKeys: showsKeys, short: short) }
-                // Stopping the Orb is not one more choice among the others: it sits apart, at the end of the row.
-                if shown.contains(.stop) {
-                    Spacer(minLength: Spacing.s)
-                    button(.stop, handoff: handoff, store: store, showsKeys: showsKeys, short: short)
+                ForEach(kinds, id: \.self) { button($0, handoff: handoff, showsKeys: showsKeys, short: short) }
+            }
+            .fixedSize()
+        }
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: Spacing.m) {
+                text.lineLimit(1).fixedSize()
+                Spacer(minLength: 0)
+                actions(short: false)
+            }
+            if state == .needsYou {
+                VStack(alignment: .leading, spacing: Spacing.s) {
+                    text.fixedSize(horizontal: false, vertical: true)
+                    actions(short: false)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                HStack(spacing: Spacing.m) {
+                    text.lineLimit(1).truncationMode(.tail).help(caption)
+                    Spacer(minLength: 0)
+                    actions(short: true)
                 }
             }
         }
-        return ViewThatFits(in: .horizontal) {
-            row(kinds.count)
-            row(kinds.count, short: true)
-            row(max(kinds.count - 1, 1), short: true)
-            row(1, short: true)
-        }
         .controlSize(.small)
-        .frame(height: ControlHeight.compact, alignment: .leading)
+        .padding(.horizontal, Spacing.m)
+        .padding(.vertical, Spacing.s)
+        .frame(minHeight: 40)
     }
 
-    @ViewBuilder private func button(_ kind: LiveCardState.Button, handoff: ApprovalRequest?, store: LiveFrameStore,
-                                     showsKeys: Bool, short: Bool) -> some View {
+    @ViewBuilder private func button(_ kind: LiveCardState.Button, handoff: ApprovalRequest?, showsKeys: Bool, short: Bool) -> some View {
         switch kind {
-        case .enlarge:
-            Button("Ampliar") { enlarge() }.buttonStyle(SecondaryPillStyle()).help(Tip.enlargeScreen)
+        case .enlarge, .hide, .reveal:
+            // On the top bar.
+            EmptyView()
         case .stop:
             // Stops the whole Orb (its chains with other Orbs too), not just the turn as the composer's Stop does.
             StopOrbButton(botID: botID, short: short)
-        case .hide:
-            Button(short ? "Ocultar" : "Ocultar tela") { store.isPrivate = true }.buttonStyle(SecondaryPillStyle()).help(Tip.hideScreen)
-                .accessibilityLabel("Ocultar tela")
-        case .reveal:
-            Button(short ? "Mostrar" : "Mostrar tela") { store.isPrivate = false }.buttonStyle(PrimaryPillStyle()).help(Tip.revealScreen)
-                .accessibilityLabel("Mostrar tela")
+        case .takeOver:
+            Button("Assumir") { withAnimation(Motion.content) { model.liveScreens.takeControl(botID, fromChat: true) } }
+                .buttonStyle(SecondaryPillStyle()).help(Tip.takeOverBrowser)
         case .done:
             Button { if let handoff { model.decide(.once, approvalID: handoff.id, botID: botID) } } label: {
                 HStack(spacing: 7) {
@@ -201,7 +224,7 @@ private struct LiveScreenCard: View {
             .help("\(Tip.handoffDone) (\(AppShortcut.commandReturn.label))")
             .accessibilityHint("Atalho: ⌘↩")
         case .giveBack:
-            Button(short ? "Devolver" : "Devolver ao Orb") { model.liveScreens.giveBackControl(botID) }
+            Button(short ? "Devolver" : "Devolver ao Orb") { withAnimation(Motion.content) { model.liveScreens.giveBackControl(botID) } }
                 .buttonStyle(PrimaryPillStyle()).help(Tip.giveBackBrowser)
                 .accessibilityLabel("Devolver ao Orb")
         case .cancel:
@@ -219,7 +242,7 @@ private struct LiveScreenCard: View {
 
     // MARK: Actions
 
-    /// Opens the Orb's browser in a window of its own, live and large, where the person can take it over.
+    /// Opens the Orb's browser in a window of its own, live and larger still.
     private func enlarge() {
         LiveScreenWindow.open(botID, with: openWindow)
     }

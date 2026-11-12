@@ -347,7 +347,7 @@ enum TranscriptSample {
             // Seeded in the task below: the launch read of the conversation would otherwise replace this one after the
             // scene was built.
             items = []
-        case "transcript-browser-live", "transcript-browser-need", "transcript-browser-done":
+        case _ where screen.hasPrefix("transcript-browser-"):
             items = LiveScreenSnapshots.items(screen, model: model, bot: bot)
         case "transcript-rich":
             // Colors in code, the buttons of a table, a change in `edit_file` and the way back to the end.
@@ -467,7 +467,7 @@ enum TranscriptSample {
                     TaskPlan.Step(text: "Reunir os preços", state: .done), TaskPlan.Step(text: "Escrever o resumo", state: .inProgress),
                     TaskPlan.Step(text: "Conferir os números", state: .pending)]))
             }
-            if screen == "transcript-browser-live" { await LiveScreenSnapshots.point(model: model, botID: bot.id) }
+            if screen.hasPrefix("transcript-browser-") { await LiveScreenSnapshots.settle(screen, model: model, botID: bot.id) }
             // The bar over the top of the conversation (⌘F), and the first message taken back into the field (Editar).
             if screen == "transcript-find" { try? await Task.sleep(for: .seconds(1)); model.request(.findInConversation, of: bot.id) }
             if screen == "transcript-edit" {

@@ -30,6 +30,8 @@ struct LiveScreenWindow: View {
         .frame(minWidth: 520, minHeight: 380)
         .background(Palette.chrome)
         .background(LiveScreenWindowMarker())
+        // A takeover begun on the chat's card goes on here: it no longer ends with the chat, but with this window.
+        .onAppear { model.liveScreens.windowOpened(botID) }
         // Closing the window gives the browser back: the Orb never waits on a window nobody can see.
         .onDisappear { model.liveScreens.giveBackControl(botID) }
     }

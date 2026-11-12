@@ -67,7 +67,8 @@ enum LiveCardState: Equatable, Sendable {
     case protected
     /// Hidden by the person ("Privado"): blurred.
     case privateView
-    /// The person took the browser over in the window: the thumbnail does not show the page (the window does).
+    /// The person took the browser over, on the card or in the window: both show the page and take their clicks and keys (the
+    /// panel's tab, which is only to look at, stays covered).
     case youControl
     /// Another Orb's screen is the one streaming now.
     case paused
@@ -79,8 +80,12 @@ enum LiveCardState: Equatable, Sendable {
     /// How the page is covered.
     enum Veil: Equatable, Sendable { case none, blur, opaque }
 
-    /// A button of the card's third line.
-    enum Button: Equatable, Sendable { case enlarge, stop, hide, reveal, done, cancel, giveBack }
+    /// A button of the card: `enlarge`, `hide` and `reveal` sit on its top bar, the others under the page, beside the caption.
+    enum Button: Equatable, Sendable {
+        case enlarge, stop, hide, reveal, done, cancel, takeOver, giveBack
+
+        var isOnTopBar: Bool { self == .enlarge || self == .hide || self == .reveal }
+    }
 
     /// Most urgent first: the hand-off, then a protected page, the person's own "Privado" (a broken stream still shows its last
     /// frame, so it hides that too), a broken stream, and last what the stream says.
@@ -135,12 +140,14 @@ enum LiveCardState: Equatable, Sendable {
 
     var buttons: [Button] {
         switch self {
-        case .live, .connecting: [.enlarge, .stop, .hide]
-        case .paused: [.enlarge, .stop]
+        // Taking over needs a page that is there to use: live, or protected (the person sees it once they have it).
+        case .live: [.takeOver, .stop, .enlarge, .hide]
+        case .connecting: [.stop, .enlarge, .hide]
+        case .paused: [.stop, .enlarge]
         case .needsYou: [.done, .cancel]
-        case .protected: [.enlarge]
-        case .privateView: [.reveal, .stop]
-        case .youControl: [.enlarge, .giveBack]
+        case .protected: [.takeOver, .enlarge]
+        case .privateView: [.stop, .reveal]
+        case .youControl: [.giveBack, .enlarge]
         case .failed, .ended: []
         }
     }
@@ -225,8 +232,8 @@ enum LiveScreenText {
             ["Escrevendo…", "Pensando…"].contains(work ?? "") ? "Visualização do navegador" : (work ?? "Abrindo o navegador…")
         case .connecting: work ?? "Abrindo o navegador…"
         case .needsYou: handoffCaption(page: handoffPage ?? "")
-        case .youControl: "O Orb espera você devolver o navegador"
-        case .protected: "Conteúdo protegido"
+        case .youControl: "O Orb espera você devolver"
+        case .protected: "Página protegida: assuma para ver"
         case .paused: "Pausado: outro Orb está na tela"
         case .failed: lastAction.map { "O navegador fechou · última ação: \($0)" } ?? "O navegador fechou"
         case .ended: ""
@@ -238,7 +245,7 @@ enum LiveScreenText {
         switch state {
         case .needsYou: handoffVeil(page: handoffPage ?? "")
         case .privateView: "Privado"
-        case .youControl: "Na janela"
+        case .youControl: "Você no controle"
         default: "Protegido"
         }
     }

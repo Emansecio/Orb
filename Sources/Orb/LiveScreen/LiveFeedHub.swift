@@ -194,9 +194,10 @@ final class LiveFeedHub {
 
     /// The person takes the Orb's browser over from the live screen's window: the Orb's browser tools wait (`BrowserControl`),
     /// and the window shows the page and sends it what they click and type (`send`).
-    func takeControl(_ botID: UUID) {
+    func takeControl(_ botID: UUID, fromChat: Bool = false) {
         let store = store(botID)
         guard !store.isUserInControl else { return }
+        if fromChat { chatControl.insert(botID) }
         store.setUserInControl(true)
         source.setUserControl(true, botID: botID)
         let wasDropping = protection(botID).dropsFrames
@@ -207,11 +208,26 @@ final class LiveFeedHub {
 
     /// Back to the Orb (the button, the window closed, the Orb deleted): its waiting tools go on and look at the page again.
     func giveBackControl(_ botID: UUID) {
+        chatControl.remove(botID)
         guard let store = stores[botID], store.isUserInControl else { return }
         _ = protection(botID).setUserControls(false)
         if protection(botID).isProtected { newestJPEG[botID] = nil }
         store.setUserInControl(false)
         source.setUserControl(false, botID: botID)
+    }
+
+    /// The Orbs whose browser the person took over on the chat's card and not in the window: the card goes with the chat, so
+    /// leaving the chat gives those back (the window gives its own back when it closes). The Orb never waits on a page nobody sees.
+    private(set) var chatControl: Set<UUID> = []
+
+    /// The chat on screen changed: what was taken over on a card of the one that left goes back to its Orb.
+    func chatLeft() {
+        for botID in chatControl { giveBackControl(botID) }
+    }
+
+    /// The browser's window opened for this Orb: the takeover is the window's from here on (closing it gives it back).
+    func windowOpened(_ botID: UUID) {
+        chatControl.remove(botID)
     }
 
     /// One message of the person's input (`LiveInput`) to the page, only while they have the browser and its stream is the one

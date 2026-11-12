@@ -291,6 +291,26 @@ struct LiveScreenControlHubTests {
         #expect(await rig.opened(2))
     }
 
+    @Test func leavingTheChatGivesBackOnlyWhatWasTakenOnItsCard() {
+        let rig = LiveRig()
+        let onCard = rig.orb(), inWindow = rig.orb(), movedToWindow = rig.orb()
+        rig.hub.takeControl(onCard, fromChat: true)
+        rig.hub.takeControl(inWindow)
+        // Taken on the card, then the window opened: the window answers for it from there on.
+        rig.hub.takeControl(movedToWindow, fromChat: true)
+        rig.hub.windowOpened(movedToWindow)
+        rig.hub.chatLeft()
+        #expect(!rig.hub.store(onCard).isUserInControl && rig.source.userControl(onCard) == false)
+        #expect(rig.hub.store(inWindow).isUserInControl, "the window gives its own back when it closes")
+        #expect(rig.hub.store(movedToWindow).isUserInControl)
+        // Given back by hand: a later takeover in the window is not the chat's.
+        rig.hub.takeControl(onCard, fromChat: true)
+        rig.hub.giveBackControl(onCard)
+        rig.hub.takeControl(onCard)
+        rig.hub.chatLeft()
+        #expect(rig.hub.store(onCard).isUserInControl)
+    }
+
     @Test func aDeletedOrbGivesTheBrowserBack() async {
         let rig = LiveRig()
         let bot = rig.orb()
@@ -332,14 +352,16 @@ struct LiveScreenControlHubTests {
 // MARK: - The card while the person has the browser
 
 struct LiveCardControlTests {
-    @Test func theCardSaysThePersonHasItAndHidesThePage() {
+    @Test func theCardSaysThePersonHasIt() {
         let state = LiveCardState.of(outcome: .running, phase: .live, isProtected: false, isPrivate: false, handoff: false,
                                      userControls: true)
         #expect(state == .youControl)
+        // The veil is for the panel's tab, which is only to look at; the card and the window show the page to who drives it.
         #expect(state.veil == .opaque && !state.showsFrames && !state.showsPointer)
-        #expect(state.buttons == [.enlarge, .giveBack])
+        #expect(LiveScreenText.veilText(for: state, handoffPage: nil) == "Você no controle")
+        #expect(state.buttons == [.giveBack, .enlarge])
         #expect(state.chip == "Você no controle")
-        #expect(LiveScreenText.caption(for: state, work: nil, handoffPage: nil, lastAction: nil) == "O Orb espera você devolver o navegador")
+        #expect(LiveScreenText.caption(for: state, work: nil, handoffPage: nil, lastAction: nil) == "O Orb espera você devolver")
         #expect(LiveScreenText.announcement(for: state) != nil)
         // A broken stream is not hidden behind "you control": the window shows the failure.
         #expect(LiveCardState.of(outcome: .running, phase: .failed, isProtected: false, isPrivate: false, handoff: false,
