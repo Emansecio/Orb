@@ -332,6 +332,15 @@ ambiente dele). O que muda é como o histórico chega a ele (`ClaudePipeSession.
   aparece com `plan: "idle"`. Qualquer outra chamada (um turno novo que não continua, uma nova tentativa, um corte do histórico)
   começa um processo novo com a conversa reconstruída, e o cache do prompt é o do provedor (`arrangesPromptCache`).
 
+## Nível próprio das rotinas
+
+As rodadas de rotina guardam o histórico de uma rodada para a seguinte e o reenviam a cada passo: em 25 dias de uso real
+foram metade de todos os tokens de entrada (65 mil por chamada em média). Por isso o nível delas é separado do chat:
+`AppModel.routineContextMemory` (Ajustes → Orbs → "Contexto das rotinas", padrão **Econômico**, também para arquivos de
+antes do ajuste) e, por rotina, `Routine.contextMemory` (editor → Avançado → "Contexto da rotina"; `nil` segue o das
+rotinas). `AppModel.contextLevel(of:)` escolhe: enquanto `BotSession.routineID` não é nulo vale o da rotina, senão o
+do chat; o orçamento (`contextBudget`) e o medidor leem dali. A conversa do chat não é afetada.
+
 ## Economia de tokens
 
 Medidas que não são "compactar" mas decidem quanto cada mensagem custa:

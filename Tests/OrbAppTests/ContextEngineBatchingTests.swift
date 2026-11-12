@@ -534,6 +534,41 @@ struct ContextSettingsTests {
         return (model, root)
     }
 
+    @Test func aRoutinesRunIsKeptAtTheRoutinesLevelNotTheChats() throws {
+        let (model, root) = try model()
+        defer { removeTestFolder(root) }
+        let bot = model.bots[0]
+        let routine = Routine(name: "Leads", botID: bot.id, prompt: "confere", schedule: .everyHours(1))
+        model.routines = [routine]
+        #expect(model.routineContextMemory == .economical, "a file from before the setting takes the smaller level")
+        #expect(model.contextBudget(for: bot)?.tokens == 80_000 && model.contextLevel(of: bot.id) == .balanced)
+
+        model.session(bot.id).routineID = routine.id
+        #expect(model.contextBudget(for: bot)?.tokens == 40_000 && model.contextLevel(of: bot.id) == .economical)
+        model.routineContextMemory = .balanced
+        #expect(model.contextBudget(for: bot)?.tokens == 80_000)
+        // The routine's own level wins over the one of all routines.
+        model.routines[0].contextMemory = .economical
+        #expect(model.contextBudget(for: bot)?.tokens == 40_000)
+        // A run of a routine that is gone falls back to the one of all routines.
+        model.routines = []
+        #expect(model.contextLevel(of: bot.id) == .balanced)
+        model.session(bot.id).routineID = nil
+        model.contextMemory = .wide
+        #expect(model.contextLevel(of: bot.id) == .wide)
+    }
+
+    @Test func theRoutinesLevelSurvivesTheFileAndAnOlderFileTakesTheDefault() throws {
+        var state = AppState.initial
+        state.routineContextMemory = .wide
+        state.routines = [Routine(name: "Leads", botID: state.bots[0].id, prompt: "confere", schedule: .everyHours(1))]
+        state.routines[0].contextMemory = .balanced
+        let kept = try JSONDecoder().decode(AppState.self, from: JSONEncoder().encode(state))
+        #expect(kept.routineContextMemory == .wide && kept.routines[0].contextMemory == .balanced)
+        let old = try JSONDecoder().decode(AppState.self, from: Data(#"{"bots":[],"contextMemory":"wide"}"#.utf8))
+        #expect(old.routineContextMemory == .economical && old.contextMemory == .wide)
+    }
+
     @Test func theBudgetFollowsTheMemoryLevelAndWhatWasLearned() throws {
         let (model, root) = try model()
         defer { removeTestFolder(root) }

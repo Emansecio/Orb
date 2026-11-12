@@ -18,7 +18,7 @@ extension AppModel {
             stated = catalog > 0 || (learnedContexts[ref.text]?.isFresh() ?? false)
         }
         return ContextInput(botID: botID, conversation: conversation, budget: contextBudget(for: bot),
-                            windowIsStated: stated, usage: session.routineID == nil && session.workingChatID == nil ? live(botID).lastUsage : nil, memory: contextMemory)
+                            windowIsStated: stated, usage: session.routineID == nil && session.workingChatID == nil ? live(botID).lastUsage : nil, memory: contextLevel(of: botID))
     }
 
     /// "Compactar agora" from the meter or the card: compacts and says what happened to VoiceOver.

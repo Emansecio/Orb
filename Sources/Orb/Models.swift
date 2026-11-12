@@ -676,6 +676,8 @@ struct Routine: Identifiable, Codable, Sendable {
     var precheck: RoutinePrecheck?
     /// Open and completed follow-ups live beyond the bounded history of runs.
     var followUps: [RoutineFollowUp] = []
+    /// How much of its history this routine's runs keep word for word; nil means the level of all routines.
+    var contextMemory: ContextMemoryLevel?
 
     static let keptRuns = 10
 
@@ -747,6 +749,7 @@ extension Routine {
         // A goal this version cannot read leaves a plain routine, never a routine that does not load.
         goal = (try? c.decodeIfPresent(RoutineGoal.self, forKey: .goal)) ?? nil
         precheck = (try? c.decodeIfPresent(RoutinePrecheck.self, forKey: .precheck)) ?? nil
+        contextMemory = (try? c.decodeIfPresent(ContextMemoryLevel.self, forKey: .contextMemory)) ?? nil
         followUps = try c.lossyArray(.followUps)
     }
 }

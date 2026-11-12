@@ -64,6 +64,7 @@ enum Tip {
     static let runOnceNow = "Roda a rotina assim que for criada, para ver se funciona"
     static let cronExpression = "Cinco campos: minuto, hora, dia do mês, mês e dia da semana. Ex.: 0 9 * * 1-5 roda às 9h de segunda a sexta"
     static let routinePermissions = "Define como a rotina pede permissão, já que ninguém responde"
+    static let routineContext = "Quanto do histórico esta rotina reenvia a cada rodada; menos gasta menos"
     static let allRoutines = "Abre a página Rotinas, com as de todos os Orbs"
     static func routineToggle(isOn: Bool) -> String { isOn ? "Pausa esta rotina" : "Ativa esta rotina" }
     static let routineDatePassed = "A data desta rotina já passou. Edite a data para ligar de novo"
@@ -360,7 +361,7 @@ enum Tip {
         [attach, attachPictures, removeAttachment, previewAttachment, previewImage, missingAttachment, moreAttachments,
          manageGrants, adjustContext, chooseModel, forgetWindow, suggestion, routineIdea, queueAfterTask, steerNow,
          newRoutine, editRoutine, deleteRoutine, runRoutineNow, runRoutineAgain, queuedRoutine, routineConversation,
-         copyReport, openReportFile, runOnceNow, routinePermissions, allRoutines,
+         copyReport, openReportFile, runOnceNow, routinePermissions, routineContext, allRoutines,
          routineToggle(isOn: true), routineToggle(isOn: false), routineDatePassed,
          customizeOrb, refreshFolder, removeGrant, removeAllGrants, recreateFolder, changeFolder, manageConnectors, cancelLogin,
          macPermissions, showInstructions, openFolderInFinder("Orb"), openFolderInTerminal("Orb"),

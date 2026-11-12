@@ -17,6 +17,8 @@ final class AppModel {
     var defaultModel: String { didSet { scheduleStateSave() } }
     /// How much conversation the Orbs remember word for word before the start is folded into a summary.
     var contextMemory: ContextMemoryLevel { didSet { scheduleStateSave() } }
+    /// The level of the routines' runs (Ajustes → Orbs); a routine may have its own (`Routine.contextMemory`).
+    var routineContextMemory: ContextMemoryLevel { didSet { scheduleStateSave() } }
     var profile: UserProfile { didSet { scheduleStateSave() } }
     /// Prices the user corrected on the Uso page, by "provider/model".
     var priceCorrections: [String: ModelPrice] { didSet { scheduleStateSave() } }
@@ -459,6 +461,7 @@ final class AppModel {
         providers = state.providers
         defaultModel = state.defaultModel
         contextMemory = state.contextMemory
+        routineContextMemory = state.routineContextMemory
         profile = state.profile
         learnedContexts = state.learnedContexts
         priceCorrections = state.priceCorrections
@@ -2073,8 +2076,16 @@ final class AppModel {
     private func contextBudget(ref: ModelRef, account: ProviderAccount, botID: UUID) -> ContextBudget {
         let learned = learnedContexts[ref.text].flatMap { $0.isFresh() ? $0.tokens : nil }
         let budget = ContextBudget(model: account.models.first { $0.id == ref.model }, provider: ref.provider,
-                                   format: ref.provider == .custom ? account.format : nil, level: contextMemory, learnedWindow: learned)
+                                   format: ref.provider == .custom ? account.format : nil, level: contextLevel(of: botID),
+                                   learnedWindow: learned)
         return sessions[botID]?.measuredOverhead.map { budget.refined(overheadTokens: $0) } ?? budget
+    }
+
+    /// The level the Orb's conversation on the model's side is kept at: the chat's, or, while a routine's run has the
+    /// Orb, that routine's own or the one of all routines.
+    func contextLevel(of botID: UUID) -> ContextMemoryLevel {
+        guard let running = sessions[botID]?.routineID else { return contextMemory }
+        return routines.first { $0.id == running }?.contextMemory ?? routineContextMemory
     }
 
     /// How full the context of the Orb's conversation is, for the meter. nil while the Orb has no usable model.
@@ -2963,6 +2974,7 @@ final class AppModel {
         providers = state.providers
         defaultModel = state.defaultModel
         contextMemory = state.contextMemory
+        routineContextMemory = state.routineContextMemory
         profile = state.profile
         learnedContexts = state.learnedContexts
         priceCorrections = state.priceCorrections
@@ -3029,6 +3041,7 @@ final class AppModel {
         }
         return AppState(bots: bots, routines: routines, skills: skills, connectors: connectorSecrets.redact(connectors),
                         providers: providers, defaultModel: defaultModel, unread: unread, replies: replies, contextMemory: contextMemory,
+                        routineContextMemory: routineContextMemory,
                         learnedContexts: learnedContexts, profile: profile, priceCorrections: priceCorrections, groups: groups,
                         categories: categories, chats: chats, inicio: inicio)
     }

@@ -477,6 +477,7 @@ struct OrbsSettings: View {
             pulseSection
             OpenTalksSection(talks: $openTalks)
             ContextMemorySettings()
+            RoutineContextSettings()
             LearnedWindowsSettings(rows: $learnedWindows)
         }
         .formStyle(.grouped)

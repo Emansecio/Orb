@@ -1078,6 +1078,11 @@ struct RoutineEditor: View {
                         Text(PermissionMode.readOnly.label).tag(PermissionMode?.some(.readOnly))
                     }
                     .help(Tip.routinePermissions)
+                    Picker("Contexto da rotina", selection: $routine.contextMemory) {
+                        Text("Igual às outras rotinas (\(model.routineContextMemory.label))").tag(ContextMemoryLevel?.none)
+                        ForEach(ContextMemoryLevel.allCases, id: \.self) { Text($0.label).tag(ContextMemoryLevel?.some($0)) }
+                    }
+                    .help(Tip.routineContext)
                     Text(advancedExplanation)
                         .font(Typography.small)
                         .foregroundStyle(Palette.muted)
@@ -1199,7 +1204,7 @@ struct RoutineEditor: View {
         opensNew = !isStored
         if original == nil { original = routine }
         let calendar = Calendar.current
-        showsAdvanced = routine.permissionMode != nil
+        showsAdvanced = routine.permissionMode != nil || routine.contextMemory != nil
         tracksGoal = routine.goal != nil
         leadsWithGoal = tracksGoal
         goalTarget = routine.goal?.target ?? ""

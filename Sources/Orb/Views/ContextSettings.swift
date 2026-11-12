@@ -22,6 +22,25 @@ struct ContextMemorySettings: View {
     }
 }
 
+/// "Contexto das rotinas": the same three levels for the runs of routines, which pay for their history at every run.
+struct RoutineContextSettings: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        Section {
+            ForEach(ContextMemoryLevel.allCases, id: \.self) { level in
+                RadioChoiceRow(title: level.label, summary: level.summary, isSelected: model.routineContextMemory == level) {
+                    model.routineContextMemory = level
+                }
+            }
+        } header: {
+            Text("Contexto das rotinas")
+        } footer: { FormFootnote {
+            Text("Cada rodada reenvia o histórico da rotina, então um nível menor gasta menos a cada vez. Uma rotina pode ter o seu, em Avançado.")
+        } }
+    }
+}
+
 /// One option of a group of radio rows: a title and a gray line under it. "Contexto das conversas" and
 /// "Redefinir o Orb" use it, so the two look and read alike.
 struct RadioChoiceRow: View {

@@ -21,6 +21,9 @@ struct AppState: Codable, Sendable {
     var replies: [String: ReplyPreview] = [:]
     /// How much conversation the Orbs remember word for word before folding the start into a summary.
     var contextMemory = ContextMemoryLevel.balanced
+    /// The same for the runs of routines, which carry their history from one run to the next and are paid for at every
+    /// run: less by default. A file from before it existed takes that default.
+    var routineContextMemory = ContextMemoryLevel.economical
     /// Context windows models turned out to have (a request was refused for its size), by "provider/model".
     var learnedContexts: [String: LearnedContext] = [:]
     /// Who the user is, for every Orb (Ajustes → Geral → Você).
@@ -1213,6 +1216,7 @@ extension AppState {
         // A preview is only a convenience: one that can't be read is dropped, never the file.
         replies = c.recordingLoss([String: ReplyPreview].self, forKey: .replies) ?? [:]
         contextMemory = try c.value(.contextMemory, default: .balanced)
+        routineContextMemory = try c.value(.routineContextMemory, default: .economical)
         learnedContexts = c.recordingLoss([String: LearnedContext].self, forKey: .learnedContexts) ?? [:]
         do { profile = try c.value(.profile, default: UserProfile()) } catch { DecodeLoss.record() }
         // One damaged correction is dropped alone; the others stay.
