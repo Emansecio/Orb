@@ -197,7 +197,7 @@ enum Tip {
     static let noOrbForSkill = "Nenhum Orb pode usar esta skill"
     static let installed = "Instalada"
     static let openSkillDetails = "Abre os detalhes e as instruções desta skill"
-    static let discardProposal = "Descarta a proposta do Orb; ela não é salva"
+    static let discardProposal = "Descarta a proposta; o Orb não sugere a mesma de novo sozinho"
     static let keepProposal = "Fecha sem decidir; a proposta continua esperando"
     static let saveProposal = "Instala a skill para os Orbs poderem usá-la"
     static let clearSearch = "Limpa a busca"

@@ -297,6 +297,14 @@ struct SkillProposal: Equatable, Sendable {
         return Double(shared) / Double(mine.count) >= 0.5
     }
 
+    /// Whether this is a proposal the user already turned down (`declined`). A new skill: the same command, or the same
+    /// task in other words. An improvement of a skill that exists: nearly the same text again, because another fix to
+    /// the same skill is welcome.
+    func wasDeclined(as declined: SkillDigest, improving: Bool) -> Bool {
+        if improving { return declined.slug == slug && MemoryText.similarity(declined.instructions, instructions) >= 0.75 }
+        return declined.slug == slug || Self.repeats(declined, slug: slug, summary: summary, body: instructions)
+    }
+
     /// Everyday commands that two unrelated skills share.
     private static let everydayCommands: Set<String> = [
         "git status", "git diff", "git add", "git commit", "git push", "git pull", "git log", "git checkout", "git branch", "git stash",

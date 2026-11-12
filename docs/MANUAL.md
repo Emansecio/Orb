@@ -848,8 +848,10 @@ tem a **Galeria**, os **Instalados** e **Explorar**.
   e lê o `SKILL.md` no GitHub de quem publicou, com **prévia completa antes de instalar** (instale só de fontes em que você
   confia: a skill vira instrução para o Orb). Use com `/comando` no começo da mensagem, ou pelo botão "Usar". "Nova skill" cria a sua.
   O Orb também lê sozinho a skill que serve para a tarefa.
-- **Skills aprendidas.** Depois de uma tarefa longa, o Orb revisa o que fez e, se aprendeu algo que vale repetir (uma técnica,
-  uma correção sua, uma skill que estava errada), **propõe** uma skill, ou uma melhoria de uma que você já tem. O chat mostra
+- **Skills aprendidas.** Depois de uma tarefa longa, ou de uma mais curta em que você o corrigiu ou em que uma skill foi
+  usada, o Orb revisa o que fez e, se aprendeu algo que vale repetir (uma técnica, uma correção sua, uma skill que estava
+  errada), **propõe** uma skill, ou uma melhoria de uma que você já tem. O que você descarta ele não sugere de novo sozinho;
+  se quiser a skill depois, peça na conversa. O chat mostra
   "Skill proposta: /nome" num cartão com o botão **Revisar**, que fica ali enquanto a proposta espera, mesmo com a conversa
   seguindo (o mesmo vale para "Guardado na memória" e a unificação de memória): abre o texto inteiro, que você edita, e **Salvar skill** ou **Descartar**.
   Nada é salvo sem você, e a proposta rasa (genérica, sem passos concretos, armadilhas e como verificar, com data do dia ou segredo) nem chega a você.

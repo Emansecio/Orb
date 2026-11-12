@@ -293,7 +293,10 @@ extension BotSession {
             }
             // What the review counts, as Hermes does: steps of the model that ask for tools (ten reads at once are one),
             // in Orb's own engine and in conversations (a routine's run is nobody's lesson).
-            if message.role == .assistant, !message.toolCalls.isEmpty, reviewBase != nil, routineID == nil { stepsSinceSkill += 1 }
+            if message.role == .assistant, !message.toolCalls.isEmpty, reviewBase != nil, routineID == nil {
+                if stepsSinceSkill == 0 { reviewSince = reviewFrom }
+                stepsSinceSkill += 1
+            }
             if message.role == .user {
                 conversation?.taskPaused = false
                 recordMarks()

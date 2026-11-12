@@ -19,6 +19,7 @@ documento descreve o que existe no código. Como a memória se combina com a com
     procedimentos/*.md        como fazer as tarefas que se repetem (não envelhecem)
     sessoes/*.md              um resumo de cada trecho de conversa (envelhecem e são compactadas)
     _propostas/<comando>.md   skills que o Orb propôs e esperam a sua decisão (não são páginas de memória)
+    _propostas/_recusadas.json  as propostas que você descartou, para a revisão não repeti-las
     _skills.json              cópia das skills que o Orb pode usar, escrita pelo app (não é página de memória)
     _arquivo/                 texto completo das páginas de sessão compactadas (mesmos caminhos)
     _arquivo/atualizacoes/<página>/<ms>.md   o texto anterior de cada página que uma correção substituiu
@@ -319,10 +320,26 @@ skill vai dentro de `remember` e `recall`.
   é redefinido, nunca roda junto com um turno, nem num Orb "Só leitura". O aviso de proposta não cai na conversa de uma rotina: espera o fim do próximo turno. O prompt pede skill no nível da classe de tarefa, "lições, não
   registros", melhorar antes de criar, incorporar o procedimento da memória sobre o mesmo assunto e responder "Nothing to save."
   quando não há técnica não trivial, correção sua ou skill errada. Em Ajustes → Orbs dá para desligar.
+- **Trecho curto com sinal (desde 2026-11-12).** A contagem de 10 nunca chegava à conversa curta em que você corrige o Orb,
+  que é a que mais ensina. Com 4 passos ou mais (`SkillReview.earlyThreshold`) o fim do turno também pergunta, se o trecho
+  mostra um sinal (`SkillReview.hasSign`): você escreveu de novo depois de o Orb trabalhar, ou uma skill foi usada (`/nome`
+  seu, ou `recall "/nome"` do Orb). Aí só o porteiro decide: ele recebe `earlyGateInstructions` (na dúvida, **não**), e sem
+  modelo barato, ou sem resposta clara, nada roda e os passos seguem contando até os 10.
+- **O porteiro lê o trecho inteiro.** A contagem atravessa turnos, mas o porteiro lia só o último: a correção feita dois
+  turnos antes ficava de fora. `BotSession.reviewSince` guarda onde a contagem começou, e o porteiro lê dali.
+- **Revisão interrompida não se perde.** Se você escreve antes de a revisão terminar, os passos voltam para a contagem e o
+  fim do próximo turno tenta de novo, sobre o trecho inteiro (antes a contagem já tinha zerado e a lição se perdia). Se a
+  revisão já tinha proposto algo quando parou, não há nova tentativa; interrompida de novo, o trecho é solto
+  (`BotSession.reviewStopped`), para quem responde na hora não pagar uma revisão a cada turno.
+- **O que você descartou não volta.** "Descartar proposta" guarda a proposta em `_propostas/_recusadas.json` (as 12 mais
+  recentes). O porteiro e o prompt da revisão recebem a lista, e `remember` recusa à revisão a mesma proposta: comando igual
+  ou a mesma tarefa com outras palavras; numa melhoria de skill existente, só o texto quase igual (similaridade ≥ 0,75),
+  porque outra correção à mesma skill é bem-vinda. Proposta feita **num turno** (você pode ter pedido) passa e tira a
+  entrada da lista.
 - **Aprovar.** Depois do turno ou da revisão, o chat ganha **um** aviso por proposta nova ("Skill proposta: /x — Nome" ou "Melhoria
   proposta para /x") num cartão com o botão **Revisar**, que fica enquanto a proposta espera (mesmo com a conversa seguindo) e abre o editor de skills com o texto inteiro e editável. **Salvar skill** cria a
   skill (origem `aprendida`, `learnedBy` e escopo só o Orb que propôs; você amplia em "Usar com") ou troca as instruções da que
-  existe, mantendo id, usos e escopo. **Descartar** apaga a proposta; fechar o editor a deixa esperando. Quem apaga o procedimento
+  existe, mantendo id, usos e escopo. **Descartar** apaga a proposta e a registra como recusada; fechar o editor a deixa esperando. Quem apaga o procedimento
   que a skill absorveu é você.
 - **Segredos.** `MemorySanitizer.scrub` tira o valor literal de chaves, tokens, `usuário:senha@` em URL, `curl -u` e `CHAVE=valor`. Só
   é referência (e passa) `$(…)`, `${…}`, uma variável inteira (`$NOME` em maiúsculas ou `$nome` em minúsculas, seguida de fim,

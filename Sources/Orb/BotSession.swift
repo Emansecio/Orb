@@ -244,6 +244,12 @@ final class BotSession {
     /// proposed a skill (not kept across launches, as in Hermes): at `SkillReview.threshold` the end of a turn starts a
     /// review of the conversation.
     @ObservationIgnored var stepsSinceSkill = 0
+    /// Where in the conversation's messages that count began (`reviewFrom` of the turn of its first step): the count
+    /// spans turns, so the gate reads from here, not only the latest turn.
+    @ObservationIgnored var reviewSince = 0
+    /// The last review was stopped by a message and its steps count again: stopped once more, they are let go, so a
+    /// user who always answers at once does not pay for a review at the end of every turn.
+    @ObservationIgnored var reviewStopped = false
     /// The request of the latest turn of Orb's own engine, with the history it sent but not its message: what a review
     /// asks the model with, so the system prompt, the tools and the history are the ones the provider has in its cache.
     @ObservationIgnored var reviewBase: TurnRequest?

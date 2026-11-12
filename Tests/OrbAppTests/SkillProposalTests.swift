@@ -509,6 +509,32 @@ struct SkillProposalValidationTests {
         #expect(await bank.proposals().map(\.slug) == ["publicar-site"])
     }
 
+    @Test func whatTheUserTurnedDownIsRefusedToTheReviewUntilAskedForInATurn() async {
+        let bank = bank()
+        _ = await bank.proposeSkill(SkillSamples.good)
+        await bank.declineProposal("publicar-site")
+        #expect(await bank.proposals().isEmpty)
+        // The same one, and the same task under another name and in other words.
+        for again in [SkillSamples.good, SkillSamples.changed("name: publicar-site", "name: subir-site-producao")] {
+            guard case .refused(let reason) = await bank.proposeSkill(again, unprompted: true) else { Issue.record("kept"); return }
+            #expect(reason.contains("already declined this proposal (/publicar-site)"))
+        }
+        #expect(await bank.proposeSkill(SkillSamples.writing, unprompted: true) == .proposed(slug: "resumo-do-dia", isUpdate: false))
+        // In a turn the user may have asked for it: it is kept, and no longer counts as turned down.
+        #expect(await bank.proposeSkill(SkillSamples.good) == .proposed(slug: "publicar-site", isUpdate: false))
+        #expect(await bank.declinedProposals().isEmpty)
+    }
+
+    @Test func aDeclinedImprovementStillLetsAnotherFixToTheSameSkillThrough() async {
+        let bank = bank()
+        await bank.publishSkills([SkillDigest(slug: "resumo-do-dia", name: "Resumo", summary: "Resume o dia", instructions: "Resuma.", improvable: true)])
+        #expect(await bank.proposeSkill(SkillSamples.writing) == .proposed(slug: "resumo-do-dia", isUpdate: true))
+        await bank.declineProposal("resumo-do-dia")
+        guard case .refused = await bank.proposeSkill(SkillSamples.writing, unprompted: true) else { Issue.record("kept"); return }
+        let other = SkillSamples.changed("name: publicar-site", "name: resumo-do-dia")
+        #expect(await bank.proposeSkill(other, unprompted: true) == .proposed(slug: "resumo-do-dia", isUpdate: true))
+    }
+
     @Test func aRefusedProposalLeavesNothingBehind() async {
         let bank = bank()
         guard case .refused(let reason) = await bank.proposeSkill("name: x") else { Issue.record("kept"); return }

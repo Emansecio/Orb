@@ -180,7 +180,7 @@ os pedidos e os grupos: [COLABORACAO.md](COLABORACAO.md).
 `SessionSummary` + `MemoryIntent` + `KeptMemories` (memórias guardadas e o perfil de cada uma).
 Detalhes em [MEMORIA.md](MEMORIA.md). As skills que o Orb propõe vivem aí também (`SkillProposal`, `MemoryBank+Skills`,
 `_propostas/`, `_skills.json`); a revisão que as propõe é `Engine/SkillReview.swift` + `AppModel+SkillReview.swift`, e o contador
-(`stepsSinceSkill`, de passos do modelo), o pedido guardado (`reviewBase`, com `reviewFrom`) e a tarefa (`skillReview`) ficam no `BotSession`.
+(`stepsSinceSkill`, de passos do modelo, e `reviewSince`, onde ele começou), o pedido guardado (`reviewBase`, com `reviewFrom`) e a tarefa (`skillReview`) ficam no `BotSession`.
 
 ### Importar de outro assistente (`Import/`)
 
@@ -270,7 +270,7 @@ ComposerView ── AppModel.submit ─┬─ Orb livre ─► AppModel.send ─
 8. **Fim** (`finishTurn`): zera status; agenda a página de sessão da memória (30 min depois); fecha a execução da rotina;
    notifica (se o app está em segundo plano) e conta não lidas; o Orb comemora (`happy`) ou erra (`error`); entrega a fila que
    ficou; grava a conversa de uma vez; começa a próxima rotina que esperava por este Orb. Por último (fora de rotinas): avisa
-   da skill que o turno propôs e, se os passos do modelo com ferramentas chegaram a 10 (e a tarefa não parou no limite), começa em segundo plano a
+   da skill que o turno propôs e, se os passos do modelo com ferramentas chegaram a 10, ou a 4 num trecho com correção sua ou skill usada (e a tarefa não parou no limite), começa em segundo plano a
    revisão da conversa (`reviewSkillsIfDue`: mesmo pedido e histórico do turno, só `recall`/`remember` skill, cancelada por qualquer
    mensagem e por redefinir; o prompt da revisão só orienta o turno, `promptOnlySteers`, então as saídas do turno seguem inteiras
    como na última chamada dele; com 5 propostas esperando, a revisão nem chama o modelo).

@@ -9,11 +9,16 @@ extension MemoryBank {
     static let skillsFile = "_skills.json"
     /// Proposals waiting for you at once; more than this is the Orb talking to itself.
     static let maximumProposals = 5
+    /// What you turned down, inside `_propostas/` (so it goes wherever the proposals go), newest first.
+    static let declinedFile = "_recusadas.json"
+    static let maximumDeclined = 12
 
     // MARK: Proposals
 
     /// Keeps `text` (a whole SKILL.md) for you to decide on, or says why not. The same command replaces its proposal.
-    func proposeSkill(_ text: String) -> SkillProposalOutcome {
+    /// `unprompted`: the background review proposes it, not a turn in which you may have asked for it. What you already
+    /// turned down is refused then; proposed in a turn, it is kept and no longer counts as turned down.
+    func proposeSkill(_ text: String, unprompted: Bool = false) -> SkillProposalOutcome {
         guard !isClosed else { return .refused("The memory is not available now.") }
         let skills = skillDigests()
         // The proposals still waiting count as skills too: otherwise a second one for the same task passes while the first
@@ -26,6 +31,12 @@ extension MemoryBank {
         case .failure(let refusal): return .refused(refusal.message)
         case .success(let valid): proposal = valid
         }
+        let improves = skills.contains { $0.slug == proposal.slug }
+        let declined = declinedProposals()
+        let again = declined.first { proposal.wasDeclined(as: $0, improving: improves) }
+        if let again, unprompted {
+            return .refused("The user already declined this proposal (/\(again.slug)). Do not propose it again: answer \"Nothing to save.\".")
+        }
         guard proposals().filter({ $0.slug != proposal.slug }).count < Self.maximumProposals else {
             return .refused("\(Self.maximumProposals) proposals are already waiting for the user. Do not propose more until they decide.")
         }
@@ -34,7 +45,8 @@ extension MemoryBank {
         guard (try? Data(proposal.markdown().utf8).write(to: folder.appending(path: proposal.slug + ".md"), options: .atomic)) != nil else {
             return .refused("The proposal could not be written (folder unavailable).")
         }
-        return .proposed(slug: proposal.slug, isUpdate: skills.contains { $0.slug == proposal.slug })
+        if let again { writeDeclined(declined.filter { $0.slug != again.slug }) } // kept now: no longer turned down
+        return .proposed(slug: proposal.slug, isUpdate: improves)
     }
 
     /// What waits for you, newest first.
@@ -54,6 +66,24 @@ extension MemoryBank {
     func discardProposal(_ slug: String) {
         guard !slug.isEmpty, slug == Skill.cleanSlug(slug) else { return }
         try? FileManager.default.removeItem(at: directory.appending(path: "\(Self.proposalsFolder)/\(slug).md"))
+    }
+
+    /// You did not want it: it goes away, and the review does not propose the same again (`proposeSkill`).
+    func declineProposal(_ slug: String) {
+        guard !isClosed, let proposal = proposal(slug) else { return }
+        let digest = SkillDigest(slug: slug, name: slug, summary: proposal.summary, instructions: proposal.instructions, improvable: true)
+        writeDeclined([digest] + declinedProposals().filter { $0.slug != slug })
+        discardProposal(slug)
+    }
+
+    func declinedProposals() -> [SkillDigest] {
+        (try? Data(contentsOf: directory.appending(path: "\(Self.proposalsFolder)/\(Self.declinedFile)")))
+            .flatMap { try? JSONDecoder().decode([SkillDigest].self, from: $0) } ?? []
+    }
+
+    private func writeDeclined(_ declined: [SkillDigest]) {
+        guard let data = try? JSONEncoder().encode(Array(declined.prefix(Self.maximumDeclined))) else { return }
+        try? data.write(to: directory.appending(path: "\(Self.proposalsFolder)/\(Self.declinedFile)"), options: .atomic)
     }
 
     /// The skill was renamed: its proposal follows (the file name and the `name:` inside it). Nothing moves when the new

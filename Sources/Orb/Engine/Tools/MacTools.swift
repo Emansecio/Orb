@@ -421,7 +421,7 @@ struct RememberTool: AgentTool {
         let fact = try arguments.requiredString("fact")
         guard let memory = context.memory else { throw ToolError("A memória não está disponível agora.") }
         if arguments["tipo"]?.string == Self.skillKind {
-            switch await memory.proposeSkill(fact) {
+            switch await memory.proposeSkill(fact, unprompted: context.skillReview) {
             case .proposed(let slug, let isUpdate):
                 return "Proposal kept: /\(slug)\(isUpdate ? " (replaces the current instructions)" : ""). The user reviews it in the app and nothing changes until they approve; do not propose it again."
             case .refused(let reason):

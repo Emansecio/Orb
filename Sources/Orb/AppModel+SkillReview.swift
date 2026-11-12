@@ -46,21 +46,31 @@ extension AppModel {
 
     /// Starts the review of the conversation when the turn that just ended took enough steps with tools: in the
     /// background, without a word in the chat, with the system prompt, tools and history of the turn (so the provider's
-    /// cache is still warm).
+    /// cache is still warm). Fewer steps are enough when the stretch shows a sign (`SkillReview.hasSign`), and then only
+    /// a yes from the gate runs the review.
     /// Not in an Orb that only reads and not while anything else
-    /// has the Orb; a message from the user stops it (`send`).
+    /// has the Orb; a message from the user stops it (`send`), and the stretch waits for the end of the next turn.
     /// `messages` are those of the conversation the turn worked on: when it ended in another one than the one on show,
     /// `session.conversation` is already the other (`endWorkElsewhere`), and `reviewFrom` counts the turn's.
     func reviewSkillsIfDue(_ session: BotSession, messages: [ChatMessage]?) {
-        guard proposesSkills, session.stepsSinceSkill >= SkillReview.threshold, session.skillReview == nil,
+        let steps = session.stepsSinceSkill
+        guard proposesSkills, steps >= SkillReview.earlyThreshold, session.skillReview == nil,
               session.turnTask == nil, !isResetting, var request = session.reviewBase,
               let current = bot(session.id), current.permissionMode != .readOnly,
               let messages, session.reviewFrom <= messages.count else { return }
+        // The stretch the count spans: from the turn of its first step, in this conversation's messages (a count that
+        // began in another conversation, or before a compaction, starts at the latest turn at worst).
+        let since = min(session.reviewSince, session.reviewFrom)
+        let early = steps < SkillReview.threshold
+        // Before the count is due only the gate decides, so without a cheap model to ask there is nothing to start.
+        let hasGate = modelRef(for: current).flatMap { ref in account(ref.provider).flatMap { Self.skillGate(in: $0, orb: ref.model) } } != nil
+        guard !early || (hasGate && SkillReview.hasSign(messages[since...])) else { return }
         session.stepsSinceSkill = 0
+        let isRetry = session.reviewStopped
+        session.reviewStopped = false
         // The history the turn sent (its summary and condensed stretch, not the raw messages) and what the turn added
         // to it: the prefix of the turn's last model call, which is what the provider has in its cache.
         request.history += messages[session.reviewFrom...]
-        request.prompt = SkillReview.prompt
         request.maxSteps = SkillReview.maxSteps
         request.onlyTools = SkillReview.tools
         request.context.skillReview = true
@@ -69,23 +79,43 @@ extension AppModel {
         // turn's last call sent whole is sent whole again (and the provider's cache holds).
         request.promptOnlySteers = true
         let botID = session.id
-        let reviewFrom = session.reviewFrom
         let usedModel = session.turnModel ?? modelRef(for: current)?.text
-        session.skillReview = Task {
+        session.skillReview = Task { [request] in
+            var request = request
+            let bank = memory.bank(for: botID)
+            let waiting = await bank.proposals()
+            // The stretch is still unreviewed: its steps count again, and the end of a later turn reads the whole of it.
+            @MainActor func putBack() {
+                session.stepsSinceSkill += steps
+                session.reviewSince = min(since, session.reviewSince)
+            }
+            // Stopped before it ended (the user wrote): the end of the next turn tries once more, and only once.
+            @MainActor func stopped() {
+                guard !isRetry else { return }
+                putBack()
+                session.reviewStopped = true
+            }
             // No room for another proposal: the review could only end in a refusal, and it would be paid for first.
             // (The count starts over, so the next try is after `SkillReview.threshold` more steps.)
-            guard await memory.bank(for: botID).proposals().count < MemoryBank.maximumProposals else {
+            guard waiting.count < MemoryBank.maximumProposals else {
                 if !Task.isCancelled { session.skillReview = nil }
                 return
             }
+            let declined = await bank.declinedProposals()
             // The gate: one short call on the cheap model decides whether the full review (the whole history again, and
             // almost always "Nothing to save.") is worth paying for. Without a cheap model, or without a clear answer,
-            // the review runs as it always did.
-            if let ref = modelRef(for: current), await askSkillGate(botID: botID, ref: ref, messages: messages[reviewFrom...]) == false {
-                if !Task.isCancelled { session.skillReview = nil }
+            // the review runs as it always did, unless the count was not due yet: then only a yes runs it.
+            var verdict: Bool?
+            if let ref = modelRef(for: current) {
+                verdict = await askSkillGate(botID: botID, ref: ref, messages: messages[since...], declined: declined, early: early)
+            }
+            guard !Task.isCancelled else { return stopped() }
+            if verdict == false || (early && verdict == nil) {
+                if verdict == nil { putBack() } // the gate gave no answer: the count goes on to where a review needs none
+                session.skillReview = nil
                 return
             }
-            guard !Task.isCancelled else { return }
+            request.prompt = SkillReview.prompt(declined: declined)
             // Nothing of it reaches the chat or the history, but what it costs is real: each call goes to the usage
             // history as the app's own (`auxiliary`), so the Uso page shows it apart from the chat's.
             // A call stopped midway (the user wrote) is billed for the input the provider already reported, as in a turn.
@@ -102,7 +132,11 @@ extension AppModel {
             }
             if let unfinished, let usedModel { recordUsage(UsageTotals(unfinished), botID: botID, model: usedModel, source: .auxiliary) }
             usageLog.flush()
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else {
+                // Stopped after it had already proposed: there is nothing left to try again for.
+                if await bank.proposals() == waiting { stopped() }
+                return
+            }
             session.skillReview = nil
             // "Propor skills" was switched off while the review ran: its result is not announced.
             guard proposesSkills else { return }
@@ -173,14 +207,15 @@ extension AppModel {
 
     /// The gate's verdict on the turn: true or false, nil when there is none (no cheap model, a failure, an unreadable
     /// answer) and the review should run. Cancelled, it also gives nil: the caller leaves on `Task.isCancelled`.
-    private func askSkillGate(botID: UUID, ref: ModelRef, messages: ArraySlice<ChatMessage>) async -> Bool? {
+    private func askSkillGate(botID: UUID, ref: ModelRef, messages: ArraySlice<ChatMessage>, declined: [SkillDigest], early: Bool) async -> Bool? {
         guard let account = account(ref.provider), account.isEnabled, isUsable(account),
               let model = Self.skillGate(in: account, orb: ref.model),
               let client = clientOverride?() ?? account.client(for: account.models.first { $0.id == model },
                                                                credentials: Self.credentials(for: ref.provider),
                                                                conversationID: botID.uuidString + "-porteiro") else { return nil }
         let transcript = ChunkSummarizer.transcript(of: messages, characters: SkillReview.gateCharacters)
-        let prompt = SkillReview.gatePrompt(transcript: transcript, skillNames: skills(for: botID).map { "/" + $0.slug })
+        let prompt = SkillReview.gatePrompt(transcript: transcript, skillNames: skills(for: botID).map { "/" + $0.slug },
+                                            declined: declined, early: early)
         let verdict = await SkillReview.askGate(prompt, client: client, model: model)
         if let usage = verdict.usage, !isResetting, bot(botID) != nil {
             recordAuxiliaryUsage(usage, botID: botID, model: ModelRef(provider: ref.provider, model: model).text)
@@ -195,7 +230,8 @@ extension AppModel {
         return ChunkSummarizer.model(in: account, orb: orb)?.id
     }
 
-    /// You decided: the proposal goes away. Saved, it is also said (VoiceOver) and the Orb is pleased.
+    /// You decided: the proposal goes away. Saved, it is also said (VoiceOver) and the Orb is pleased; turned down, the
+    /// Orb's memory keeps it so the review does not bring the same one back.
     func finishSkillDraft(_ draft: SkillDraft, saved skill: Skill? = nil) {
         let bank = memory.bank(for: draft.botID)
         Task {
@@ -204,6 +240,8 @@ extension AppModel {
             if let modified = draft.modified, let current = await bank.proposal(draft.slug), current.modified != modified {
                 append(.notice("A proposta /\(draft.slug) mudou enquanto você a revisava. A versão nova continua esperando sua decisão."),
                        to: draft.botID)
+            } else if skill == nil {
+                await bank.declineProposal(draft.slug)
             } else {
                 await bank.discardProposal(draft.slug)
             }

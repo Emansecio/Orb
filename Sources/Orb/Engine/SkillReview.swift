@@ -9,11 +9,31 @@ enum SkillReview {
     /// Steps (a model answer that asks for tools, however many calls it makes at once; across turns, not saved by a
     /// proposal in between) after which a turn ends with a review.
     static let threshold = 10
+    /// Steps after which a turn ends with a review when the stretch shows a sign (`hasSign`): a correction or a skill
+    /// that misled comes in short conversations too, and the count alone never reached them. Only the gate decides then.
+    static let earlyThreshold = 4
     /// Model calls of one review: reading a skill, looking for a procedure, proposing and answering, with room to fix a refusal.
     static let maxSteps = 6
     static let tools: Set<String> = ["recall", "remember"]
     /// Ajustes → Orbs: whether the Orbs review their work and propose skills (on unless turned off).
     static let settingKey = "proposeSkills"
+
+    // MARK: The signs
+
+    /// What makes a short stretch worth asking the gate about: the user wrote again after the Orb worked (where a
+    /// correction is), or a skill was used (run with /name, or read by the Orb), which may have turned out wrong.
+    static func hasSign(_ stretch: ArraySlice<ChatMessage>) -> Bool {
+        var worked = false
+        for message in stretch {
+            if message.role == .assistant, !message.toolCalls.isEmpty {
+                worked = true
+                if message.toolCalls.contains(where: { $0.name == "recall" && JSONValue.parse($0.arguments)?["query"]?.string?.hasPrefix("/") == true }) { return true }
+            } else if message.isConversationRequest, message.itemID != nil { // a bubble: not the app's nudge to go on
+                if worked || TurnPreface.requestWords(message.content).hasPrefix("Skill \"") { return true }
+            }
+        }
+        return false
+    }
 
     // MARK: The gate
 
@@ -38,11 +58,22 @@ enum SkillReview {
         Answer with one word: YES or NO.
         """
 
-    /// The request of the gate: the instructions, the skills the Orb already has and the stretch of the turn, condensed.
-    static func gatePrompt(transcript: String, skillNames: [String]) -> [ChatMessage] {
+    /// The gate asked before the count was due (`earlyThreshold`): the doubt goes the other way, because a wrong yes
+    /// pays for a review the count had not asked for.
+    static let earlyGateInstructions = gateInstructions.replacingOccurrences(
+        of: "When in doubt, answer YES.", with: "This is a short stretch of work: when in doubt, answer NO.")
+
+    /// The request of the gate: the instructions, the skills the Orb already has, what the user turned down and the
+    /// stretch, condensed.
+    static func gatePrompt(transcript: String, skillNames: [String], declined: [SkillDigest] = [], early: Bool = false) -> [ChatMessage] {
         let known = skillNames.isEmpty ? "none" : skillNames.joined(separator: ", ")
-        return [.system(gateInstructions),
-                .user("Skills the assistant already has: \(known)\n\nConversation:\n\n" + transcript)]
+        let refused = declined.isEmpty ? "" : "\nSkills the user already declined (the same lesson again is a NO): " + declinedList(declined)
+        return [.system(early ? earlyGateInstructions : gateInstructions),
+                .user("Skills the assistant already has: \(known)\(refused)\n\nConversation:\n\n" + transcript)]
+    }
+
+    private static func declinedList(_ declined: [SkillDigest]) -> String {
+        declined.map { "/\($0.slug) (\(MemoryText.clip(MemoryText.flatten($0.summary), 160)))" }.joined(separator: "; ")
     }
 
     /// What the gate answered: true (review), false (nothing to save), nil when it is neither (noise, empty).
@@ -126,4 +157,11 @@ enum SkillReview {
         If the tool refuses it, read the reasons, fix the text once and send it again; if it is refused again, answer \
         "Nothing to save.". When done, say in one short sentence what you proposed. Write the skill in the user's language.
         """
+
+    /// `prompt`, and what the user already turned down: proposing it again costs their attention twice.
+    static func prompt(declined: [SkillDigest]) -> String {
+        guard !declined.isEmpty else { return prompt }
+        return prompt + "\n\nThe user already declined these proposals. Do not propose them again, with these or other words: "
+            + declinedList(declined) + "."
+    }
 }

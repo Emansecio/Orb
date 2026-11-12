@@ -9,6 +9,11 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
 }
 
 /// The Orb's skills in its tools, and the skills it proposes while it works.
+/// How many of the calls were a review (the full one, not the gate).
+private func reviews(_ script: CallScript) async -> Int {
+    await script.calls.filter { $0.messages.last?.content.hasPrefix(SkillReview.prompt) == true }.count
+}
+
 @Suite(.serialized) final class SkillFlowTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbSkillFlow-\(UUID().uuidString)")
 
@@ -263,6 +268,63 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
         try? await Task.sleep(for: .milliseconds(100))
         #expect(await bank.proposals().isEmpty)
         #expect(model.notices(botID).isEmpty)
+    }
+
+    @Test @MainActor func aStoppedReviewLeavesItsStretchForTheEndOfTheNextTurn() async {
+        // The count started over when the review began: a user who answered before it ended lost the lesson for good.
+        let script = CallScript(steps(10) + [said("pronto"), said("Nothing to save.")], holdsCall: 12)
+        let (model, botID) = setUp(script)
+        let session = model.session(botID)
+        #expect(model.send("publica", to: botID))
+        await waitUntilIdle(model, botID)
+        await waitUntil("the review to ask the model") { await script.calls.count == 12 }
+        #expect(model.send("e agora outra coisa", to: botID))
+        await script.release()
+        await waitUntilIdle(model, botID)
+        // The stopped review hands its steps back as it winds down: before the second turn ended (reviewed there), or after.
+        await waitUntil("the stretch to count again") { await reviews(script) == 2 || session.stepsSinceSkill == 10 }
+        if session.stepsSinceSkill == 10 {
+            #expect(model.send("mais uma", to: botID))
+            await waitUntilIdle(model, botID)
+        }
+        await waitUntil("the second review") { await reviews(script) == 2 && session.skillReview == nil }
+        #expect(session.stepsSinceSkill == 0)
+    }
+
+    @Test @MainActor func aReviewStoppedTwiceLetsItsStretchGo() async {
+        // Someone who always answers at once would otherwise pay for a review at the end of every turn.
+        let script = CallScript(steps(10) + [said("pronto"), said("Nothing to save.")], holdsCall: 12)
+        let (model, botID) = setUp(script)
+        let session = model.session(botID)
+        session.reviewStopped = true // the review of this stretch was already stopped once
+        #expect(model.send("publica", to: botID))
+        await waitUntilIdle(model, botID)
+        await waitUntil("the review to ask the model") { await script.calls.count == 12 }
+        #expect(!session.reviewStopped)
+        #expect(model.send("e agora outra coisa", to: botID))
+        await script.release()
+        await waitUntilIdle(model, botID)
+        #expect(model.send("mais uma", to: botID))
+        await waitUntilIdle(model, botID)
+        #expect(await reviews(script) == 1 && session.stepsSinceSkill == 0 && session.skillReview == nil && !session.reviewStopped)
+    }
+
+    @Test func aShortStretchHasASignWhenTheUserWroteAgainOrASkillWasUsed() {
+        func asked(_ text: String) -> ChatMessage {
+            var message = ChatMessage.user(text)
+            message.itemID = UUID()
+            return message
+        }
+        func did(_ query: String) -> ChatMessage {
+            ChatMessage(role: .assistant, content: "", toolCalls: [ToolCallRequest(id: "1", name: "recall", arguments: #"{"query":"\#(query)"}"#)])
+        }
+        func sign(_ messages: [ChatMessage]) -> Bool { SkillReview.hasSign(messages[...]) }
+        #expect(!sign([asked("publica"), did("deploy"), .tool("1", "ok")]))
+        #expect(sign([asked("publica"), did("deploy"), .tool("1", "ok"), asked("não, primeiro os testes")]))
+        #expect(!sign([asked("publica"), asked("e rápido"), did("deploy")]), "nothing was done yet to correct")
+        #expect(!sign([asked("publica"), did("deploy"), .user("Continue.")]), "the app's nudge is not the user")
+        #expect(sign([asked("publica"), did("/publicar-site")]), "the Orb read a skill")
+        #expect(sign([asked("Skill \"Publicar\":\nRode o deploy.\n\nUser request: agora"), did("deploy")]), "the user ran a skill")
     }
 
     @Test @MainActor func onlyStepsOfOrbsOwnEngineInConversationsCount() {
@@ -629,6 +691,83 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
             let found = await model.store.readUsage(from: .now.addingTimeInterval(-86_400), to: .now.addingTimeInterval(86_400)).buckets
             return found.contains { $0.key.source == .auxiliary && $0.key.model == "custom/claude-haiku-4-5" && $0.totals.input == 7 }
         }
+    }
+
+    @Test @MainActor func theGateReadsEveryTurnTheCountSpansNotOnlyTheLast() async throws {
+        let script = CallScript(steps(6) + [said("um")] + steps(6) + [said("dois"), said("NÃO")])
+        let (model, botID) = setUpGated(script)
+        #expect(model.send("primeiro pedido marcante", to: botID))
+        await waitUntilIdle(model, botID)
+        #expect(model.send("segundo pedido", to: botID))
+        await waitUntilIdle(model, botID)
+        await waitUntil("the gate to answer") { await script.calls.count == 15 && model.session(botID).skillReview == nil }
+        let read = try #require(await script.calls[14].messages.last?.content)
+        #expect(read.contains("primeiro pedido marcante") && read.contains("segundo pedido"))
+    }
+
+    @Test @MainActor func aCorrectionInAShortStretchAsksTheGateBeforeTheCountIsDue() async throws {
+        // Four steps and then the user writes again: where a correction is, and the count of ten never got there.
+        for (answer, reviewed) in [("SIM", true), ("NÃO", false)] {
+            let script = CallScript(steps(4) + [said("um"), said("dois"), said(answer), said("Nothing to save.")])
+            let (model, botID) = setUpGated(script)
+            #expect(model.send("publica o site", to: botID))
+            await waitUntilIdle(model, botID)
+            #expect(model.session(botID).stepsSinceSkill == 4 && model.session(botID).skillReview == nil, "one turn alone shows no sign")
+            #expect(model.send("não, primeiro rode os testes", to: botID))
+            await waitUntilIdle(model, botID)
+            await waitUntil("the gate, and the review it lets run") {
+                await script.calls.count == (reviewed ? 8 : 7) && model.session(botID).skillReview == nil
+            }
+            let calls = await script.calls
+            let gate = try #require(calls[6].messages.last?.content)
+            #expect(calls[6].model == "claude-haiku-4-5" && gate.contains("publica o site"))
+            #expect(calls[6].system == SkillReview.earlyGateInstructions && calls[6].system.contains("when in doubt, answer NO"))
+            #expect(await reviews(script) == (reviewed ? 1 : 0))
+            #expect(model.session(botID).stepsSinceSkill == 0)
+        }
+    }
+
+    @Test @MainActor func beforeTheCountIsDueOnlyAClearYesRunsTheReview() async throws {
+        // No cheap model: nothing starts and the count goes on.
+        let plain = CallScript(steps(4) + [said("um"), said("dois")])
+        let (model, botID) = setUp(plain)
+        #expect(model.send("publica o site", to: botID))
+        await waitUntilIdle(model, botID)
+        #expect(model.send("não, primeiro rode os testes", to: botID))
+        await waitUntilIdle(model, botID)
+        #expect(model.session(botID).stepsSinceSkill == 4 && model.session(botID).skillReview == nil)
+        #expect(await plain.calls.count == 6)
+
+        // A gate that babbles: no review, and the steps count on towards the review that needs no gate.
+        let babbling = CallScript(steps(4) + [said("um"), said("dois"), said("talvez, não sei dizer")])
+        let (gated, gatedID) = setUpGated(babbling)
+        #expect(gated.send("publica o site", to: gatedID))
+        await waitUntilIdle(gated, gatedID)
+        #expect(gated.send("não, primeiro rode os testes", to: gatedID))
+        await waitUntilIdle(gated, gatedID)
+        await waitUntil("the gate to answer") { await babbling.calls.count == 7 && gated.session(gatedID).skillReview == nil }
+        #expect(gated.session(gatedID).stepsSinceSkill == 4)
+        #expect(await reviews(babbling) == 0)
+    }
+
+    @Test @MainActor func aProposalTheUserDiscardedIsNotBroughtBackByTheReview() async throws {
+        let script = CallScript(steps(10) + [said("pronto"), said("SIM"), proposing(SkillSamples.good), said("Nothing to save.")])
+        let (model, botID) = setUpGated(script)
+        await propose(SkillSamples.good, in: model, botID)
+        model.finishSkillDraft(try #require(await model.skillDraft("publicar-site", from: botID)))
+        let bank = model.memory.bank(for: botID)
+        await waitUntil("the proposal to go") { await bank.proposals().isEmpty }
+        #expect(await bank.declinedProposals().map(\.slug) == ["publicar-site"])
+
+        #expect(model.send("publica o site", to: botID))
+        await waitUntilIdle(model, botID)
+        await waitUntil("the review to end") { await script.calls.count == 14 && model.session(botID).skillReview == nil }
+        let calls = await script.calls
+        #expect(calls[11].messages.last?.content.contains("already declined (the same lesson again is a NO): /publicar-site") == true)
+        #expect(calls[12].messages.last?.content == SkillReview.prompt(declined: await bank.declinedProposals()))
+        #expect(calls[12].messages.last?.content.contains("/publicar-site (Publica o site") == true)
+        #expect(calls[13].messages.last?.content.contains("already declined this proposal") == true, "the tool refuses it too")
+        #expect(await bank.proposals().isEmpty && model.notices(botID).isEmpty)
     }
 
     @Test @MainActor func aYesFromTheGateRunsTheReviewAsAlways() async throws {
