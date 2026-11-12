@@ -256,6 +256,31 @@ struct ContextWindowTests {
         #expect(ContextWindow.fit(messages, budget: .fallback).stableToolCallID == nil)
     }
 
+    @Test func onClaudeCodeTheOutputsOfATaskStayWholeUntilTheTaskCrowdsTheWindow() {
+        // A preview in the middle of a task changes what the parked process was sent: the process is dropped and the whole
+        // prompt is written to the cache again, which costs far more than the preview saves.
+        var messages = [ChatMessage.user("pedido")]
+        for step in 0..<8 {
+            messages.append(ChatMessage(role: .assistant, content: "", toolCalls: [call("c\(step)")]))
+            messages.append(.tool("c\(step)", String(repeating: "o", count: 10_000)))
+        }
+        // 80,000 characters of outputs in a budget of 140,000: past 40% of it, far from full.
+        let other = ContextBudget(tokens: 40_000)
+        #expect(messages.modelContext(budget: other).filter { $0.role == .tool }.prefix(5).allSatisfy { $0.content.count < 5_000 })
+        var claude = ContextBudget(tokens: 40_000)
+        claude.freshShare = ContextBudget(model: nil, provider: .claudeCode, level: .balanced).freshShare
+        #expect(claude.freshShare == 1 && ContextBudget(model: nil, provider: .openai, level: .balanced).freshShare == ContextWindow.freshShare)
+        let sent = messages.modelContext(budget: claude)
+        #expect(sent.filter { $0.role == .tool }.allSatisfy { $0.content.count == 10_000 })
+        // So each step's request starts with the one before it, which is what lets the process go on.
+        let before = Array(messages.dropLast(2)).modelContext(budget: claude)
+        #expect(sent.starts(with: before))
+        // A task that does not fit is still shortened: that rewrite cannot be avoided.
+        var tight = ContextBudget(tokens: 17_000)
+        tight.freshShare = 1
+        #expect(messages.modelContext(budget: tight).filter { $0.role == .tool }.prefix(5).allSatisfy { $0.content.count < 5_000 })
+    }
+
     @Test func hugeOutputsOfTheLastFinishedTurnAreShortenedAtTheRealCallSite() {
         // What AppModel.send passes: the stored messages, without the new prompt.
         let stored = turn("leia o arquivo", steps: 1, output: 200_000)

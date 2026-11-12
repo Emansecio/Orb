@@ -176,7 +176,7 @@ struct ContextWindow: Sendable, Equatable {
         }
         let costs = taskOutputs.map { raw[$0].content.count + (raw[$0].toolCallID.flatMap { argumentSizes[$0] } ?? 0) }
         var freshCost = costs[settled...].reduce(0, +)
-        let freshLimit = Int(Double(limit) * freshShare)
+        let freshLimit = Int(Double(limit) * budget.freshShare)
         if taskOutputs.count - settled >= freshToolOutputs + freshBatch, freshCost > freshLimit {
             while taskOutputs.count - settled > freshToolOutputs, freshCost > freshLimit / 2 {
                 freshCost -= costs[settled]

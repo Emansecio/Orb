@@ -332,6 +332,16 @@ ambiente dele). O que muda é como o histórico chega a ele (`ClaudePipeSession.
   aparece com `plan: "idle"`. Qualquer outra chamada (um turno novo que não continua, uma nova tentativa, um corte do histórico)
   começa um processo novo com a conversa reconstruída, e o cache do prompt é o do provedor (`arrangesPromptCache`).
 
+## Saídas inteiras no Claude Code (`ContextBudget.freshShare`)
+
+Nos outros provedores as saídas de uma tarefa em andamento viram prévias em lote quando passam de 40% do orçamento: o
+cache regrava só o que vem depois. No Claude Code o lote muda o que o processo parado recebeu, o processo é descartado e
+o novo regrava o prompt inteiro. Medido (01 a 12/11): de 250 processos descartados com um vivo, 164 foram isso (a
+requisição ~24 mil caracteres menor, 17 s depois do passo anterior), 11,7 M de tokens regravados. A prévia economiza um
+décimo do tamanho dela por passo seguinte e o processo novo custa 1,25 vez o prompt inteiro: só compensaria depois de
+uns 50 passos. Por isso, no Claude Code, `freshShare` é 1: as saídas ficam inteiras até a tarefa encher a janela (aí o
+corte é inevitável) e viram prévias na virada de turno, como sempre.
+
 ## Tamanho real do token, por modelo (`LearnedDensity`)
 
 O orçamento corta o histórico em caracteres e contava 3,5 caracteres por token para todo modelo. Num modelo de tokens mais

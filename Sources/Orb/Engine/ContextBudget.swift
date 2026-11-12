@@ -114,6 +114,15 @@ struct ContextBudget: Sendable, Equatable {
         (window ?? tokens) >= Self.wideNotesWindow ? ConversationLedger.wideDigestRoom : ConversationLedger.digestRoom
     }
 
+    /// Share of the budget the whole outputs of a task in progress may take before the oldest become previews
+    /// (`ContextWindow.freshShare`). 1 for Claude Code: there a preview in the middle of a task changes what the parked
+    /// process was sent, the process is dropped and the new one writes the whole prompt to the cache again. Measured in
+    /// 12 days of use: 164 of the 250 processes dropped with one alive were this (the request about 24 thousand
+    /// characters shorter, 17 s after the step before), 11.7 M tokens written again; a preview saves a tenth of its size
+    /// at each later step and the new process costs 1.25 times the whole prompt, so it only pays back after some 50
+    /// steps. The outputs still become previews when the task crowds the window, and at the next turn.
+    var freshShare = ContextWindow.freshShare
+
     /// Characters a token of this model takes, as its own answers measured it (`LearnedDensity`); `charactersPerToken`
     /// until enough of them were seen. The history is cut by characters, so this is what makes "80 thousand tokens" be
     /// 80 thousand of the model's tokens and not of an average one's.
@@ -163,7 +172,10 @@ struct ContextBudget: Sendable, Equatable {
         }
         if let learnedWindow, learnedWindow > 0 { window = min(window, learnedWindow) }
         self.init(modelWindow: window, replyTokens: Self.replyTokens(window: window, format: wire), level: level)
-        if provider == .claudeCode || wire == .claudeCode { coldAfter = Self.claudeCodeCacheColdAfter }
+        if provider == .claudeCode || wire == .claudeCode {
+            coldAfter = Self.claudeCodeCacheColdAfter
+            freshShare = 1
+        }
     }
 
     /// Room for the reply: up to 16,000 output tokens in the Messages format, which sends it as its cap (see
