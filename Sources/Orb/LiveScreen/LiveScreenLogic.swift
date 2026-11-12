@@ -144,7 +144,7 @@ enum LiveCardState: Equatable, Sendable {
         case .live: [.takeOver, .stop, .enlarge, .hide]
         case .connecting: [.stop, .enlarge, .hide]
         case .paused: [.stop, .enlarge]
-        case .needsYou: [.done, .cancel]
+        case .needsYou: [.cancel, .done] // the answer that goes on is last, at the card's edge, as on a permission card
         case .protected: [.takeOver, .enlarge]
         case .privateView: [.stop, .reveal]
         case .youControl: [.giveBack, .enlarge]

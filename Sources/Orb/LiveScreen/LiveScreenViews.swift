@@ -56,8 +56,12 @@ private struct LiveScreenCard: View {
     let view: BrowserViewItem
     let botID: UUID
 
-    /// The tallest the page is drawn: the card leaves room in the chat for what the Orb says while it works.
-    static let maxPageHeight: CGFloat = 320
+    /// The tallest the page is drawn: a page of the usual shape fills the width of the chat's other cards (`cardWidth`),
+    /// and one nearer a square makes the card narrower instead of taller.
+    static let maxPageHeight = cardWidth / LiveFrameStore.defaultAspect
+    /// How tall the page's place is while it shows nothing (a login the person must not see through the Orb): a lock and
+    /// a word do not need the room of a page, and what the person has to do is in the bar below.
+    static let coveredHeight: CGFloat = 132
 
     var body: some View {
         let live = model.live(botID)
@@ -78,7 +82,7 @@ private struct LiveScreenCard: View {
             bottomBar(state, caption: caption, handoff: handoff)
         }
         .card(radius: Radius.card)
-        // No taller than `maxPageHeight`: a page nearer a square makes the card narrower, never the chat's whole height.
+        // No taller than `maxPageHeight`: never the chat's whole height.
         .frame(maxWidth: Self.maxPageHeight * store.pageAspect, alignment: .leading)
         .overlay {
             // "Precisa de você" comes in once, with emphasis, and stays still: no pulse, no sound. In the person's hands the
@@ -129,7 +133,8 @@ private struct LiveScreenCard: View {
                 Button("Ocultar tela") { store.isPrivate = true }.buttonStyle(GhostStyle()).help(Tip.hideScreen)
             }
             if state.buttons.contains(.reveal) {
-                Button("Mostrar tela") { store.isPrivate = false }.buttonStyle(SecondaryPillStyle()).help(Tip.revealScreen)
+                // The same quiet words as "Ocultar tela", whose place it takes.
+                Button("Mostrar tela") { store.isPrivate = false }.buttonStyle(GhostStyle()).hangsOnTrailingEdge().help(Tip.revealScreen)
             }
             if state.buttons.contains(.enlarge) {
                 Button("Ampliar") { enlarge() }.buttonStyle(GhostStyle()).hangsOnTrailingEdge().help(Tip.enlargeScreen)
@@ -142,7 +147,10 @@ private struct LiveScreenCard: View {
 
     private func page(_ state: LiveCardState, handoff: ApprovalRequest?, orb: OrbConfig, aspect: CGFloat) -> some View {
         let inControl = state == .youControl
-        return ZStack {
+        let isCovered = !inControl && state.veil == .opaque
+        // One place whose height changes, not two branches: the page's view (and its stream) stays the same through it.
+        return PagePlace(aspect: aspect, height: isCovered ? Self.coveredHeight : nil) {
+          ZStack {
             Palette.raised
             // In the person's hands the page shows whatever it is (they need to see a login to type in it), as in the window.
             LiveScreenSurface(hub: model.liveScreens, botID: botID, wide: true, fits: true, isInteractive: inControl,
@@ -152,9 +160,8 @@ private struct LiveScreenCard: View {
                 LiveScreenVeil(veil: state.veil, text: LiveScreenText.veilText(for: state, handoffPage: handoff?.command))
                     .transition(.opacity)
             }
+          }
         }
-        .aspectRatio(aspect, contentMode: .fit)
-        .frame(maxWidth: .infinity)
         .motion(Motion.content, value: state.veil)
         .motion(Motion.content, value: aspect)
         .contentShape(.rect)
@@ -185,7 +192,8 @@ private struct LiveScreenCard: View {
             if state == .needsYou {
                 VStack(alignment: .leading, spacing: Spacing.s) {
                     text.fixedSize(horizontal: false, vertical: true)
-                    actions(short: false)
+                    // At the card's edge, where the wide card has them.
+                    actions(short: false).frame(maxWidth: .infinity, alignment: .trailing)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             } else {
@@ -248,6 +256,22 @@ private struct LiveScreenCard: View {
     }
 }
 
+/// The place of the card's page: as wide as it is given, and as tall as the page's shape makes that width, or `height`
+/// when the page is covered.
+private struct PagePlace: Layout {
+    var aspect: CGFloat
+    var height: CGFloat?
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? cardWidth
+        return CGSize(width: width, height: height ?? width / max(aspect, 0.1))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for subview in subviews { subview.place(at: bounds.origin, proposal: ProposedViewSize(bounds.size)) }
+    }
+}
+
 /// "Parar Orb" on the card and on the tab: red text and a stop sign, so it is not read as one more of the neutral pills beside
 /// it. It stops the whole Orb (its chains with other Orbs too), not just the turn as the composer's Stop does.
 private struct StopOrbButton: View {
@@ -295,11 +319,11 @@ private struct LiveScreenClosedLine: View {
 
     var body: some View {
         HStack(spacing: 8) {
+            // The mark of a finished action (`ToolCallLine`), so the line sits in the column of the ones around it.
             Image(systemName: ToolCall.Kind.browser.symbol)
                 .font(Typography.small)
-                .foregroundStyle(Palette.faint)
-                .frame(width: 22, height: 22)
-                .background(Palette.raised, in: .rect(cornerRadius: 6))
+                .foregroundStyle(Palette.muted)
+                .frame(width: 14)
                 .accessibilityHidden(true)
             Text(LiveScreenText.closingLine(view))
                 .font(Typography.label)
@@ -410,7 +434,7 @@ struct LiveScreenTab: View {
                         .buttonStyle(GhostStyle()).controlSize(.small).hangsOnTrailingEdge().help(Tip.hideScreen)
                 } else if state == .privateView {
                     Button("Mostrar tela") { store.isPrivate = false }
-                        .buttonStyle(SecondaryPillStyle()).controlSize(.small).help(Tip.revealScreen)
+                        .buttonStyle(GhostStyle()).controlSize(.small).hangsOnTrailingEdge().help(Tip.revealScreen)
                 }
             }
             .motion(Motion.content, value: state)

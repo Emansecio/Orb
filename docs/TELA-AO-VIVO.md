@@ -46,8 +46,9 @@ concorrente mostrou que o cursor, a fluidez de 60 quadros/s e o Assumir ficavam 
     vê: "Ocultar tela"/"Mostrar tela" e "Ampliar".
   - **Página:** de borda a borda, inteira (`resizeAspect`), na proporção dos próprios quadros
     (`LiveFrameStore.pageAspect`, entre 1,25 e 2,2; 1,6 antes do primeiro quadro), então não há barras nem corte e o clique
-    da pessoa cai no ponto certo. No máximo **320 pt de altura**: uma página mais quadrada estreita o cartão em vez de
-    tomar a conversa. A largura segue a coluna, até 560 pt.
+    da pessoa cai no ponto certo. A largura é a dos outros cartões do chat (`cardWidth`, 560 pt), o que dá 350 pt de
+    altura na proporção usual; uma página mais quadrada estreita o cartão em vez de passar disso. Coberta (login,
+    página protegida), a área da página encolhe para 132 pt: um cadeado não precisa do espaço de uma página.
   - **Barra de baixo:** a legenda (`WorkLine.headline`) e, ao lado, o que a pessoa pode fazer: "Assumir" e "Parar Orb".
     Sem espaço para os dois numa linha, a legenda corta (o `help` traz inteira) e os rótulos encurtam; a legenda do
     "Precisa de você" não corta, sobe para cima dos botões.
@@ -73,7 +74,7 @@ concorrente mostrou que o cursor, a fluidez de 60 quadros/s e o Assumir ficavam 
 |---|---|---|---|---|---|
 | Ao vivo | ● Ao vivo (`Palette.ok`, pulso leve) | página + cursor | o que o Orb faz | Ocultar tela · Ampliar | Assumir · Parar Orb |
 | Conectando | Conectando | vazia, ou o último quadro esmaecido | "Abrindo o navegador…" | Ocultar tela · Ampliar | Parar Orb |
-| Precisa de você | Precisa de você (`Palette.warn`, parado) | **opaca**: cadeado + "Página de login" | o que fazer ("Entre na sua conta para o Orb continuar") | — | Terminei · Cancelar |
+| Precisa de você | Precisa de você (`Palette.warn`, parado) | **opaca**: cadeado + "Página de login" | o que fazer ("Entre na sua conta para o Orb continuar") | — | Cancelar · Terminei (a resposta que segue fica por último, na borda, como no cartão de permissão) |
 | Você no controle | Você no controle (`Palette.accentText`) | página, sem cursor do Orb, recebe a entrada | "O Orb espera você devolver" | Ampliar | Devolver ao Orb |
 | Protegido | — | opaca: cadeado | "Página protegida: assuma para ver" | Ampliar | Assumir |
 | Oculto pela pessoa | ● Ao vivo | borrada + cadeado "Privado" | o que o Orb faz | Mostrar tela | Parar Orb |

@@ -47,7 +47,7 @@ struct LiveScreenLogicTests {
     @Test func eachStateHasItsOwnButtons() {
         #expect(State.live.buttons == [.takeOver, .stop, .enlarge, .hide])
         #expect(State.connecting.buttons == [.stop, .enlarge, .hide], "no page to take over yet")
-        #expect(State.needsYou.buttons == [.done, .cancel])
+        #expect(State.needsYou.buttons == [.cancel, .done])
         #expect(State.protected.buttons == [.takeOver, .enlarge])
         #expect(State.privateView.buttons == [.stop, .reveal])
         #expect(State.paused.buttons == [.stop, .enlarge])
