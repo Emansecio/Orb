@@ -51,10 +51,10 @@ import Testing
 
     @Test func theFileIsThePinnedReleaseForTheArchitecture() {
         let arm = BrowserPlatform(architecture: .arm64), intel = BrowserPlatform(architecture: .x86_64)
-        #expect(BrowserPlatform.agentBrowserVersion == "0.39.1")
+        #expect(BrowserPlatform.agentBrowserVersion == "0.43.0")
         #expect(arm.agentBrowserAsset == "agent-browser-darwin-arm64" && intel.agentBrowserAsset == "agent-browser-darwin-x64")
-        #expect(arm.agentBrowserURL.absoluteString == "https://github.com/vercel-labs/agent-browser/releases/download/v0.39.1/agent-browser-darwin-arm64")
-        #expect(intel.agentBrowserURL.absoluteString == "https://github.com/vercel-labs/agent-browser/releases/download/v0.39.1/agent-browser-darwin-x64")
+        #expect(arm.agentBrowserURL.absoluteString == "https://github.com/vercel-labs/agent-browser/releases/download/v0.43.0/agent-browser-darwin-arm64")
+        #expect(intel.agentBrowserURL.absoluteString == "https://github.com/vercel-labs/agent-browser/releases/download/v0.43.0/agent-browser-darwin-x64")
         for platform in [arm, intel] {
             #expect(platform.agentBrowserSHA256.count == 64 && platform.agentBrowserSHA256.allSatisfy { $0.isHexDigit && !$0.isUppercase })
         }

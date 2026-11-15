@@ -36,7 +36,7 @@ private final class FakeCommandLine: @unchecked Sendable {
         log.withLock { $0 }.map { arguments in
             var rest = arguments[...]
             while let first = rest.first, first.hasPrefix("--") {
-                rest = rest.dropFirst(["--json", "--headed", "--allow-file-access"].contains(first) ? 1 : 2)
+                rest = rest.dropFirst(["--json", "--headed", "--allow-file-access", "--no-webmcp"].contains(first) ? 1 : 2)
             }
             return Array(rest)
         }

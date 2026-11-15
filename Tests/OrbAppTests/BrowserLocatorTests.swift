@@ -148,7 +148,7 @@ struct BrowserLocatorTests {
     }
 
     @Test func theBrowserLaunchesWithTheOrbsProfileAndNoWindowAndHidesTheAutomationSwitch() {
-        let hidden = ["--args", "--disable-blink-features=AutomationControlled"]
+        let hidden = ["--args", "--disable-blink-features=AutomationControlled", "--no-webmcp"]
         #expect(config().launchArguments == hidden + ["--profile", "/data/navegador/orb/chrome"])
         #expect(config(headed: true).launchArguments == hidden + ["--profile", "/data/navegador/orb/chrome", "--headed"])
         // Without the app's folder there is no launcher: the browser itself is named, so Brave or another is never picked by accident.
@@ -193,6 +193,10 @@ struct BrowserLocatorTests {
 
     @Test func everyBrowserClosesItselfWhenForgotten() {
         #expect(config().extraEnvironment["AGENT_BROWSER_IDLE_TIMEOUT_MS"] == "1800000")
+    }
+
+    @Test func theBrowserDoesNotLookUpChromesReleaseNotesOnTheWeb() {
+        #expect(config().extraEnvironment["AGENT_BROWSER_NO_VERSION_CHECK"] == "1")
     }
 
     @Test func eachOrbHasItsOwnSessionAndTheNameStaysTheOneEarlierVersionsUsed() {

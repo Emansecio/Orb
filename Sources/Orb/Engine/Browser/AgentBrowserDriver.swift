@@ -150,6 +150,10 @@ struct AgentBrowserConfig: Sendable, Equatable {
         // 10 fps, Chrome used about 27 % of a core against 16 % at 480 px, and a still page costs nothing (frames come only on change).
         environment["AGENT_BROWSER_STREAM_MAX_WIDTH"] = "960"
         environment["AGENT_BROWSER_STREAM_QUALITY"] = "60"
+        // Since 0.41.2 agent-browser looks up Chrome's release notes on the web at launch to warn of an outdated browser, in a
+        // `warning` the app never reads: a request to a third party for nothing. The Mac's Chrome updates itself, and the one the app
+        // installed is updated in Settings → Browser.
+        environment["AGENT_BROWSER_NO_VERSION_CHECK"] = "1"
         return environment
     }
 
@@ -162,6 +166,9 @@ struct AgentBrowserConfig: Sendable, Equatable {
         // agent-browser turns the automation switch on: without this flag `navigator.webdriver` is true, which the bot checks and the
         // search engines answer with a captcha (measured).
         arguments += ["--args", "--disable-blink-features=AutomationControlled"]
+        // agent-browser turns its WebMCP features on (the page's own tools for an AI agent): nothing here uses them, and a page
+        // that finds them knows an agent is browsing.
+        arguments.append("--no-webmcp")
         if let profile { arguments += ["--profile", profile.path] }
         if headed { arguments.append("--headed") }
         if allowFileAccess { arguments.append("--allow-file-access") }
@@ -215,6 +222,9 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
     private let aliveUntil = OSAllocatedUnfairLock<ContinuousClock.Instant?>(initialState: nil)
     static let aliveWindow = Duration.seconds(3)
     private let generations = OSAllocatedUnfairLock(initialState: 0)
+    /// Whether each agent-browser (by path and modification date, so an update in Settings asks again) reads a lone `--` as the end
+    /// of its options (`endsOptionsAtDoubleDash`).
+    private let doubleDash = OSAllocatedUnfairLock<[String: Bool]>(initialState: [:])
 
     var generation: Int { generations.withLock { $0 } }
 
@@ -252,7 +262,9 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
     /// Runs one command and returns the `data` of the reply, or throws what went wrong. `text`: the words after the command name
     /// are text of the page (what to type, a script, an address), never options: the command line takes an argument that is exactly
     /// one of its options (`--json`, `--headed`) for the option wherever it stands, and `--` does not stop that, so such text goes
-    /// through `batch`, whose own quoting passes it as it is.
+    /// through `batch`, whose own quoting passes it as it is. Since 0.42 a lone `--` is the end of the options even there, and text
+    /// that is exactly `--` came out empty (measured on 0.42.0 and 0.43.0: `fill` reported success and left the field blank), so a
+    /// `--` of its own goes before it; before 0.42 that same `--` would be typed too.
     ///
     /// Only `open` (`launching`) starts a browser, with the flags of the Orb's profile and browser. Any other command first checks
     /// that the session's background process is there: `agent-browser` starts a browser of its own choosing (the one in
@@ -307,6 +319,11 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
     private func perform(_ command: [String], launching: Bool, text: Bool, timeout: Duration) async throws -> JSONValue {
         let current = config
         current.prepareState()
+        var command = command
+        if text, let index = command.indices.dropFirst().first(where: { command[$0] == "--" }),
+           await endsOptionsAtDoubleDash(current) {
+            command.insert("--", at: index)
+        }
         let literal = text && command.dropFirst().contains { $0.hasPrefix("-") }
         let tail = literal ? ["batch", Self.shellLine(command)] : command
         let arguments = current.globalArguments + (launching ? current.launchArguments : []) + tail
@@ -340,6 +357,25 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
             }
             return reply.data ?? .null
         }
+    }
+
+    /// The first agent-browser that reads a lone `--` as the end of its options (`perform`).
+    static let doubleDashEndsOptionsSince = "0.42.0"
+
+    /// Whether this agent-browser is 0.42 or later, asked once with `--version` (only when a text is exactly `--`). Unknown counts as
+    /// no and is asked again next time.
+    private func endsOptionsAtDoubleDash(_ current: AgentBrowserConfig) async -> Bool {
+        let modified = (try? FileManager.default.attributesOfItem(atPath: current.executable)[.modificationDate] as? Date)?
+            .timeIntervalSince1970 ?? 0
+        let key = "\(current.executable)|\(modified)"
+        if let known = doubleDash.withLock({ $0[key] }) { return known }
+        let environment = current.environment(base: await self.environment())
+        guard let output = try? await run(current.executable, ["--version"], environment, Self.commandTimeout), !output.timedOut,
+              case let reply = output.output.trimmingCharacters(in: .whitespacesAndNewlines), reply.hasPrefix("agent-browser "),
+              let version = BrowserVersion.find(in: reply) else { return false }
+        let ends = !BrowserVersion.isNewer(Self.doubleDashEndsOptionsSince, than: version)
+        doubleDash.withLock { $0[key] = ends }
+        return ends
     }
 
     static let connectRetries = 3

@@ -110,12 +110,13 @@ abas, janela), e um driver real, `AgentBrowserDriver`, que roda a linha de coman
 e cancelamento; o processo em segundo plano do próprio agent-browser mantém o navegador aberto entre os comandos. Há **um navegador só**, um
 Chromium (o Chrome ou o Brave de Applications; sem eles, o Chrome for Testing que o app instalou), em dois modos (`BrowserMode`): `background`
 (headless, o padrão: não abre janela nem tira o foco) e `visible` (`--headed`). `AgentBrowserConfig.launchArguments` monta o lançamento:
-`--executable-path <lançador>`, `--args --disable-blink-features=AutomationControlled`, `--profile <pasta do Orb>` e, no modo visível, `--headed`.
+`--executable-path <lançador>`, `--args --disable-blink-features=AutomationControlled`, `--no-webmcp` (o WebMCP, canal de ferramentas da
+página para um agente de IA, fica desligado: nada aqui o usa, e uma página que o encontra sabe que há um agente navegando), `--profile <pasta do Orb>` e, no modo visível, `--headed`.
 O lançador (`navegador/lancadores/<navegador>-<versão>.sh`, `AgentBrowserConfig.launcherScript`) é um `exec '<navegador>' "$@" '--user-agent=<Chrome N>'`:
 o `--args` do agent-browser divide na vírgula e um user agent tem uma ("KHTML, like Gecko"), e o `--user-agent` do próprio agent-browser vai pelo
 protocolo DevTools e deixa os service workers dizendo "HeadlessChrome" (medido em docs/historico/REVISAO-NAVEGADOR-2026-10-16.md); o blink flag é o que
 faz `navigator.webdriver` ser falso, sem o que o DuckDuckGo e o Google respondem com captcha. O texto de um campo que é exatamente uma opção da
-linha de comando (`--json`) seria comido por ela, e `--` não impede: esse texto vai por `batch`, com aspas simples. Só `open` lança um navegador, com as
+linha de comando (`--json`) seria comido por ela, e `--` não impede: esse texto vai por `batch`, com aspas simples. Desde a 0.42 um `--` sozinho encerra as opções até no `batch`, e um texto que é exatamente `--` saía vazio: nesse caso o driver põe outro `--` antes dele, depois de perguntar a versão uma vez (`endsOptionsAtDoubleDash`). Só `open` lança um navegador, com as
 opções do Orb: o agent-browser inicia um navegador à escolha dele (o Brave ou o Chrome de Applications, sem perfil nem opções) para qualquer comando que não encontra processo em segundo plano (`get url`, `snapshot`,
 `tab`… conferido), então `send` pergunta `session list` antes de todo comando que não é `open`, `close` ou `session` (a resposta vale por 3 s depois de qualquer comando que deu certo) e, sem a sessão, lança `noPage`
 ("chame browse_open") sem mandar o comando; se mesmo assim a resposta de um comando disser `lifecycle.launched`, o navegador que ele iniciou é fechado na hora e o resultado também é `noPage`. Uma sessão que já roda não
@@ -141,7 +142,7 @@ resultado de uma ação cuja página foi trocada por um snapshot mais novo perde
 como o `browse_snapshot` antigo vira uma linha (`ContextWindow`). `BrowserControl`, recusa de senha e cartão, `pastCover`, risco e `readsLivePage` ficam como estavam.
 
 **Instalação (`BrowserInstaller`).** Instala dentro de `navegador/` na pasta de dados (`BrowserInstallLayout`): `bin/agent-browser`, `chrome/chrome-<versão>/` (só sem Chrome nem Brave no Mac) e
-`instalados.json`. O agent-browser é **fixo** (`BrowserPlatform.agentBrowserVersion`, 0.39.1): o app baixa `releases/download/v0.39.1/agent-browser-darwin-<arm64|x64>` e confere o SHA-256 gravado no código
+`instalados.json`. O agent-browser é **fixo** (`BrowserPlatform.agentBrowserVersion`, 0.43.0): o app baixa `releases/download/v0.43.0/agent-browser-darwin-<arm64|x64>` e confere o SHA-256 gravado no código
 (`BrowserPlatform.pinnedHashes`); nada de "latest". O Chrome for Testing é o `agent-browser install` rodado com um `HOME` da pasta de trabalho (ele não tem variável para a pasta de
 destino), e a pasta `chrome-<versão>` é movida para `navegador/chrome`. Tudo roda fora da main, por `ProcessRunner` (que ganhou `onOutput` para ler "42/184 MB" como progresso) e por `URLSession` (download com progresso, só segue
 redirecionamento para `https`); nada com `sudo`. Cada peça é baixada e testada (`--version`) numa pasta `.instalando-<id>` e só então trocada pela antiga (`replaceItemAt`), então cancelar (`Task.cancel`, que mata o processo e a
@@ -152,7 +153,7 @@ transferência) ou falhar não estraga o que havia. `uninstall` remove os arquiv
 Limpeza: ao sair (`willTerminate`) `BrowserHub.terminateAllNow` roda `agent-browser close` de cada sessão que o hub guarda e, depois, de **cada sessão `orb-*` que `session list` mostra** (as que uma execução anterior do
 app deixou: o processo em segundo plano do navegador sobrevive ao app), e espera (até 4 s); `close(botID:)`, `closeAll()` (atualizar ou remover algo em Ajustes) e `deleteData` também fecham por nome (`deleteData`
 espera o navegador sumir antes de apagar o perfil), e `browse_close` sempre manda fechar a sessão do Orb; `AppModel.update` fecha o navegador do Orb quando o modo muda ou "Navegar na web" é desligado; o agent-browser
-fecha sozinho um navegador parado há 30 minutos (`AGENT_BROWSER_IDLE_TIMEOUT_MS`).
+fecha sozinho um navegador parado há 30 minutos (`AGENT_BROWSER_IDLE_TIMEOUT_MS`). O app também desliga a consulta que o agent-browser faz na web, ao lançar, às notas de versão do Chrome (`AGENT_BROWSER_NO_VERSION_CHECK`): o aviso que ela gera nunca é lido, e o Chrome do app se atualiza em Ajustes.
 `BrowserHub` guarda um `BrowserSession` por Orb (sessão `orb-<id>-chrome`, o sufixo que as primeiras versões chamavam de motor; perfil em `navegador/<orb>/chrome` na pasta de dados; `adoptOldProfile` renomeia o `cloak` de um
 Orb que usava o CloakBrowser), serializa
 os comandos (`AsyncMutex`: ferramentas que só olham rodam juntas no turno) e lembra os refs do último snapshot, para dar nome ao clique no cartão e

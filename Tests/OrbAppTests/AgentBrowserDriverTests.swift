@@ -119,8 +119,42 @@ struct AgentBrowserDriverTests {
         #expect(page == BrowserPage(url: "https://a.test/", title: "A"))
         try await driver.click("e1")
         let all = calls.withLock { $0 }
-        #expect(all[0] == ["--session", "orb-test-chrome", "--json", "--args", "--disable-blink-features=AutomationControlled", "--profile", "/p", "open", "https://a.test/"])
+        #expect(all[0] == ["--session", "orb-test-chrome", "--json", "--args", "--disable-blink-features=AutomationControlled",
+                           "--no-webmcp", "--profile", "/p", "open", "https://a.test/"])
         #expect(all[1] == ["--session", "orb-test-chrome", "--json", "click", "@e1"])
+    }
+
+    /// Each `fill` as it went after the global flags (a text that starts with "-" goes in a `batch` line), and how many times the
+    /// version was asked.
+    private func fillLines(version: String, texts: [String]) async throws -> (lines: [[String]], versionAsks: Int) {
+        let (driver, calls) = make { arguments in
+            arguments == ["--version"] ? version : abOK(#"[{"command":["fill"],"error":null,"result":{"filled":"@e1"},"success":true}]"#)
+        }
+        for text in texts { try await driver.fill("e1", text: text) }
+        let all = calls.withLock { $0 }
+        let lines = all.filter { $0.contains("fill") || $0.contains("batch") }.map { Array($0.dropFirst(3)) }
+        return (lines, all.filter { $0 == ["--version"] }.count)
+    }
+
+    @Test func aTextThatIsExactlyTwoDashesGetsAnEndOfOptionsBeforeItFromVersion042() async throws {
+        // 0.42 and later read a lone `--` as the end of the options: without one before it the field came out empty (measured).
+        let new = try await fillLines(version: "agent-browser 0.43.0\n", texts: ["--", "--"])
+        #expect(new.lines == [["batch", "'fill' '@e1' '--' '--'"], ["batch", "'fill' '@e1' '--' '--'"]])
+        #expect(new.versionAsks == 1, "asked once for the same agent-browser")
+        // Before 0.42 the `--` is typed as it is, so none is added.
+        let old = try await fillLines(version: "agent-browser 0.39.1", texts: ["--"])
+        #expect(old.lines == [["batch", "'fill' '@e1' '--'"]])
+        #expect(try await fillLines(version: "agent-browser 0.42.0", texts: ["--"]).lines == [["batch", "'fill' '@e1' '--' '--'"]])
+    }
+
+    @Test func otherTextsNeverAskTheVersionAndAnUnknownVersionAddsNothing() async throws {
+        let other = try await fillLines(version: "agent-browser 0.43.0", texts: ["--json", "a -- b", "---"])
+        #expect(other.versionAsks == 0)
+        #expect(other.lines == [["batch", "'fill' '@e1' '--json'"], ["fill", "@e1", "a -- b"], ["batch", "'fill' '@e1' '---'"]])
+        // A reply that is not the version (an old or broken binary) adds nothing and is asked again next time.
+        let unknown = try await fillLines(version: #"{"success":true,"data":{"x":1.5}}"#, texts: ["--", "--"])
+        #expect(unknown.lines == [["batch", "'fill' '@e1' '--'"], ["batch", "'fill' '@e1' '--'"]])
+        #expect(unknown.versionAsks == 2)
     }
 
     @Test func aScrollInStepsIsOneBatchOfScrollsAndWaits() async throws {
@@ -221,7 +255,8 @@ struct AgentBrowserDriverTests {
         #expect(driver.config.headed)
         let commands = calls.withLock { $0.map { Array($0.dropFirst(3)) } }
         #expect(commands == [["session", "list"], ["get", "url"], ["close"], ["session", "list"],
-                             ["--args", "--disable-blink-features=AutomationControlled", "--profile", "/p", "--headed", "open", "https://a.test/login"]])
+                             ["--args", "--disable-blink-features=AutomationControlled", "--no-webmcp", "--profile", "/p", "--headed",
+                              "open", "https://a.test/login"]])
         _ = try await driver.setHeaded(false)
         #expect(!driver.config.headed)
         try await driver.close()
@@ -316,7 +351,7 @@ struct AgentBrowserDriverTests {
 
         let logged = FakeAgentBrowser.commands(in: fake.log)
         #expect(logged.first == ["--session", "orb-real", "--json", "--args", "--disable-blink-features=AutomationControlled",
-                                 "--profile", "/p", "open", "https://fake.test/start"])
+                                 "--no-webmcp", "--profile", "/p", "open", "https://fake.test/start"])
         #expect(logged.last == ["--session", "orb-real", "--json", "close"])
     }
 
