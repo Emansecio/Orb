@@ -1847,6 +1847,9 @@ final class AppModel {
             session.resumedAfterJobs = 0
         }
         session.turnAskedByUser = origin.isUser && session.routineID == nil
+        // A request of yours hands back the browser you opened, as "Devolver ao Orb" does: the Orb is going to work, and its
+        // browser tools would otherwise wait in silence for a window you have stopped using ("pronto, loguei").
+        if session.turnAskedByUser { giveBrowserBack(botID) }
         setStatus("Pensando", of: botID)
         session.resetWork()
         session.showWork(WorkPhrase.line(status: "Pensando"))

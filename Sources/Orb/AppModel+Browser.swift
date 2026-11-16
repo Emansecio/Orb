@@ -95,8 +95,8 @@ extension AppModel {
         }
     }
 
-    /// The person is done with the browser they opened: its window goes back to the background (unless the Orb is set to
-    /// Visível) and the Orb's tools go on.
+    /// The person is done with the browser they opened (the button, its window closed, or a message of theirs to the Orb): its
+    /// window goes back to the background (unless the Orb is set to Visível) and the Orb's tools go on.
     func giveBrowserBack(_ botID: UUID) {
         guard browserWithPerson.remove(botID) != nil else { return }
         // Still opening (the watcher starts once the window is up): the open hands it back when it is done, since a close now

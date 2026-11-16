@@ -282,6 +282,7 @@ extension AppModel {
            text.count <= OrbQuestion.answerLimit, let reply = OrbQuestion.clean(text), let question = openQuestion(of: botID) {
             decide(.once, reply: reply, approvalID: question, botID: botID)
             setDraft("", for: botID)
+            giveBrowserBack(botID) // writing to the Orb hands back the browser you opened, as `send` does
             return true
         }
         // "/compactar" is a command of the composer, not a message: queued, it would reach the model as one. It waits in
@@ -341,6 +342,8 @@ extension AppModel {
         let room = AttachmentText.room(historyCharacters: bot(botID).flatMap(contextBudget(for:))?.characters ?? ContextBudget.fallback.characters)
         prompt += AttachmentText.block(for: files, texts: attachmentTexts.cached(files), room: room)
         lane.enqueue(SteeredMessage(text: typed, files: files, pictures: pictures, prompt: prompt, delivery: delivery))
+        // Writing to the Orb hands back the browser you opened, as `send` does: the turn may be waiting for it right now.
+        giveBrowserBack(botID)
         live(botID).scrolled() // scrolls the chat down to the "na fila" bubble, which changes no transcript revision
     }
 

@@ -236,15 +236,37 @@ import Testing
         return (model, botID)
     }
 
-    @Test @MainActor func openingHoldsTheBrowserUntilItIsHandedBack() async throws {
-        let (model, botID) = model()
-        let setup = FakeBrowserSetup(profiles: profiles.url)
-        model.browserHub = setup.hub
-        // The browser holds the profile (as Chromium locks it), so the watcher finds the window there.
+    /// The browser holds the Orb's profile (as Chromium locks it), so the watcher finds the window there.
+    private func lockProfile(_ setup: FakeBrowserSetup, _ botID: UUID) throws {
         let profile = try #require(setup.hub.profileFolder(botID: botID))
         try FileManager.default.createDirectory(at: profile, withIntermediateDirectories: true)
         try FileManager.default.createSymbolicLink(atPath: profile.appending(path: "SingletonLock").path,
                                                    withDestinationPath: "host.local-\(getpid())")
+    }
+
+    /// The Orb answers with `script`.
+    @MainActor private func connect(_ model: AppModel, _ script: CallScript) {
+        model.providers = [ProviderAccount(kind: .custom)]
+        model.defaultModel = "custom/modelo"
+        model.clientOverride = { CallScriptModel(script: script, appendsFinished: true) }
+    }
+
+    /// The person opens the Orb's browser, and its window stays up (the watcher runs).
+    @MainActor private func openWindow(_ model: AppModel, _ botID: UUID) async throws -> FakeBrowserSetup {
+        let setup = FakeBrowserSetup(profiles: profiles.url)
+        model.browserHub = setup.hub
+        try lockProfile(setup, botID)
+        model.openBrowserForPerson(botID)
+        #expect(await waitUntil("the window to be up") { model.personBrowserWatchers[botID] != nil })
+        #expect(setup.hub.control.isHeld(botID))
+        return setup
+    }
+
+    @Test @MainActor func openingHoldsTheBrowserUntilItIsHandedBack() async throws {
+        let (model, botID) = model()
+        let setup = FakeBrowserSetup(profiles: profiles.url)
+        model.browserHub = setup.hub
+        try lockProfile(setup, botID)
         model.openBrowserForPerson(botID)
         #expect(model.browserWithPerson.contains(botID))
         #expect(await waitUntil("the window to open") { setup.driver.calls.contains("setHeaded true") })
@@ -265,10 +287,7 @@ import Testing
             $0.tabs = [BrowserTab(id: "t1", title: "Pedidos", url: "https://loja.test/pedidos", isActive: true)]
         }
         model.browserHub = setup.hub
-        let profile = try #require(setup.hub.profileFolder(botID: botID))
-        try FileManager.default.createDirectory(at: profile, withIntermediateDirectories: true)
-        try FileManager.default.createSymbolicLink(atPath: profile.appending(path: "SingletonLock").path,
-                                                   withDestinationPath: "host.local-\(getpid())")
+        try lockProfile(setup, botID)
         model.openBrowserForPerson(botID)
         #expect(await waitUntil("the watcher to start") { model.personBrowserWatchers[botID] != nil })
         model.giveBrowserBack(botID)
@@ -343,6 +362,66 @@ import Testing
             if case .notice(let text) = item.kind { text } else { nil }
         } ?? []
         #expect(notices.contains { $0.contains("Ajustes → Navegador") })
+    }
+
+    // MARK: Writing to the Orb
+
+    // "pronto, loguei" with the browser still open: the Orb's browse_open waited, in silence, until the window was closed.
+    @Test @MainActor func aMessageToTheOrbHandsBackTheBrowserThePersonOpened() async throws {
+        let (model, botID) = model()
+        let script = CallScript([[.text("Vou olhar.")]])
+        connect(model, script)
+        let setup = try await openWindow(model, botID)
+        #expect(model.submit("pronto, loguei", to: botID))
+        #expect(!model.browserWithPerson.contains(botID))
+        #expect(await waitUntil("the Orb to have it again") { !setup.hub.control.isHeld(botID) })
+        #expect(model.personBrowserWatchers[botID] == nil)
+        #expect(await waitUntil("the window to go to the background") { setup.driver.calls.contains("setHeaded false") })
+        await waitUntilIdle(model, botID)
+    }
+
+    @Test @MainActor func aMessageDuringTheTurnHandsItBackButOpeningItAfterTheRequestDoesNot() async throws {
+        let (model, botID) = model()
+        let script = CallScript([[.text("Feito.")]], holdsCall: 1)
+        connect(model, script)
+        #expect(model.submit("confere o painel", to: botID))
+        await waitUntil("the model call") { await script.calls.count == 1 }
+        // Opened while the Orb works on the request: it waits for the person, as before.
+        let setup = try await openWindow(model, botID)
+        #expect(model.browserWithPerson.contains(botID))
+        #expect(model.submit("pode seguir", to: botID))   // into the running turn
+        #expect(model.composerLane(botID).queued.map(\.text) == ["pode seguir"])
+        #expect(!model.browserWithPerson.contains(botID))
+        #expect(await waitUntil("the Orb to have it again") { !setup.hub.control.isHeld(botID) })
+        await script.release()
+        await waitUntilIdle(model, botID)
+    }
+
+    @Test @MainActor func answeringTheOrbsQuestionInTheComposerHandsItBack() async throws {
+        let (model, botID) = model()
+        let ask = LLMEvent.toolCalls([ToolCallRequest(id: "q1", name: AskUserTool.name, arguments: #"{"question":"Já entrou?"}"#)])
+        let script = CallScript([[ask], [.text("Certo.")]])
+        connect(model, script)
+        #expect(model.submit("entra no painel", to: botID))
+        #expect(await waitUntil("the question") { model.openQuestion(of: botID) != nil })
+        let setup = try await openWindow(model, botID)
+        #expect(model.submit("sim", to: botID))
+        #expect(!model.browserWithPerson.contains(botID))
+        #expect(await waitUntil("the Orb to have it again") { !setup.hub.control.isHeld(botID) })
+        await waitUntilIdle(model, botID)
+    }
+
+    @Test @MainActor func aTurnThePersonDidNotAskForLeavesTheBrowserWithThem() async throws {
+        let (model, botID) = model()
+        let script = CallScript([[.text("Nada a retomar.")]])
+        connect(model, script)
+        let setup = try await openWindow(model, botID)
+        #expect(model.send("retome o plano", to: botID, origin: .pulse))
+        await waitUntilIdle(model, botID)
+        #expect(model.browserWithPerson.contains(botID))
+        #expect(setup.hub.control.isHeld(botID))
+        model.giveBrowserBack(botID)
+        #expect(await waitUntil("the Orb to have it again") { !setup.hub.control.isHeld(botID) })
     }
 
     @Test @MainActor func anOrbWithoutTheWebOpensNothing() {
