@@ -971,6 +971,7 @@ private struct SidebarOrbFilterField: View {
             if !query.isEmpty {
                 Button("Limpar filtro", systemImage: "xmark.circle.fill") { query = "" }
                     .labelStyle(.iconOnly)
+                    .help("Limpar filtro")
                     .buttonStyle(.borderless)
                     .foregroundStyle(Palette.muted)
                     .font(Typography.small)

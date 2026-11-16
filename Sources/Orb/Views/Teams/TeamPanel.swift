@@ -93,6 +93,7 @@ private struct TeamMissionInspectorTab: View {
                         .menuIndicator(.hidden)
                         .buttonStyle(CircleGhostStyle(side: 26, fontSize: 12))
                         .fixedSize()
+                        .iconTip(Tip.moreOptions(of: team.name))
                     }
                 }
                 .padding(14)
@@ -155,6 +156,7 @@ private struct TeamMembersInspectorTab: View {
                         .menuIndicator(.hidden)
                         .buttonStyle(CircleGhostStyle(side: 24, fontSize: 11))
                         .fixedSize()
+                        .iconTip(Tip.moreOptions(of: member.name))
                     }
                     .padding(10)
                     .card(radius: Radius.medium, fill: Palette.surface)
