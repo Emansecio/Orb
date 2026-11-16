@@ -78,7 +78,11 @@ final class LineProcess: Sendable {
         try? stdout.fileHandleForWriting.close()
         try? stderr.fileHandleForWriting.close()
         ChildProcessGroups.insert(pid)
-        SpawnedProcess.watch(pid) { _ in
+        // The read ends live until the child is gone, not only as long as this object: a child told to stop (stdin closed,
+        // the client dropped) may still write while it winds down, and a closed pipe would kill it with SIGPIPE before it
+        // ends on its own, so the grace period of `terminate(after:)` never happened.
+        SpawnedProcess.watch(pid) { [stdout, stderr] _ in
+            withExtendedLifetime((stdout, stderr)) {}
             exited.withLock { $0 = true }
             ChildProcessGroups.remove(pid)
         }

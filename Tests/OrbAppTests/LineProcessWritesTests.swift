@@ -8,6 +8,22 @@ import Testing
 
 struct LineProcessWritesTests {
     private let environment = ["PATH": "/usr/bin:/bin"]
+    private let folder = TempFolder(creating: true)
+
+    // Stopping a Claude Code process closes its stdin and drops the client: the child must still be able to write while it
+    // winds down, or a closed stdout kills it (SIGPIPE) before it ends on its own. It made the pipe tests flaky on the CI.
+    @Test func aChildCanStillWriteAfterItsProcessIsReleased() async throws {
+        let marker = folder.appending("ended")
+        do {
+            let process = try LineProcess(executable: URL(fileURLWithPath: "/bin/sh"),
+                                          arguments: ["-c", #"cat >/dev/null; echo tchau; echo tchau >&2; touch "$0""#, marker.path],
+                                          directory: folder.url, environment: environment)
+            process.closeInput()
+        }
+        #expect(await waitUntil("the child to finish writing after its input ended") {
+            FileManager.default.fileExists(atPath: marker.path)
+        })
+    }
 
     @Test func writingToAChildThatDoesNotReadNeverBlocksTheCaller() async throws {
         let process = try LineProcess(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "sleep 30"],
