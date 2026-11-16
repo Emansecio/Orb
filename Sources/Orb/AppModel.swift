@@ -25,6 +25,14 @@ final class AppModel {
     // MARK: MultiOrb (WP0)
     /// The groups of Orbs (`normalizeGroups` keeps them true to `bots`).
     var groups: [OrbGroup] { didSet { scheduleStateSave() } }
+    /// Autonomous Teams generated from ideas; members live exclusively inside each Team.
+    var teams: [OrbTeam] { didSet { scheduleStateSave() } }
+    /// Teams whose member sub-list is expanded in the sidebar.
+    var expandedTeamIDs: Set<UUID> = []
+    /// Shared Mission threads per Team, loaded from `times/<teamID>/thread.json`.
+    var teamThreads: [UUID: [TranscriptItem]] = [:]
+    /// The "Novo time" proposal sheet (Phase 2) is open.
+    var showNewTeam = false
     /// The sidebar's categories of Orbs (see `SidebarCategory`): only how the list is laid out, nothing an Orb reads.
     var categories: [SidebarCategory] { didSet { scheduleStateSave() } }
     var inicio: InicioHistory { didSet { if inicio != oldValue { scheduleStateSave() } } }
@@ -38,6 +46,8 @@ final class AppModel {
     var skillToOpen: UUID?
     /// Orbs asking each other for work.
     @ObservationIgnored lazy var delegation: DelegationHub = DelegationHub(model: self)
+    /// Continuous background orchestrator for autonomous Teams (`Times`).
+    @ObservationIgnored lazy var teamHub = TeamHub(model: self)
     /// What is in flight (an Orb's own task, a group's request, an Orb's request to another), kept on disk so the next launch goes on with it.
     @ObservationIgnored lazy var workJournal = WorkJournal(store: store)
     /// A group's thread and its live state, made when the group is first opened.
@@ -265,6 +275,11 @@ final class AppModel {
                 if selection != oldValue { liveBot(id)?.glanced() } // its sidebar Orb glances toward the chat
             }
             if case .group(let id) = selection { groupHub.markRead(id) } // MultiOrb (WP5): looking at the group reads it
+            if case .team(let id) = selection { markTeamRead(id) }
+            if case .teamMember(let teamID, _) = selection {
+                expandedTeamIDs.insert(teamID)
+                markTeamRead(teamID)
+            }
             // The microphone belongs to the Orb on screen: leaving it closes the dictation, keeping what was said.
             if let dictating = dictation.botID, selection != .bot(dictating) { Task { await dictation.finish() } }
         }
@@ -469,6 +484,7 @@ final class AppModel {
         learnedDensities = state.learnedDensities
         priceCorrections = state.priceCorrections
         groups = state.groups
+        teams = state.teams.compactMap { $0.normalized() }
         let readCategories = SidebarOrder.normalized(state.categories, botIDs: state.bots.map(\.id))
         categories = readCategories
         let journalRead = store.readInicioJournal()
@@ -1509,6 +1525,8 @@ final class AppModel {
             Task { await refreshMemory(id, onlyIfChanged: true) } // picks up pages edited by hand meanwhile, without reading every page when none changed
         case .group(let id):
             groupHub.markRead(id) // what a member said while the app was behind
+        case .team(let id), .teamMember(let id, _):
+            markTeamRead(id)
         default:
             break
         }
@@ -3006,6 +3024,7 @@ final class AppModel {
         learnedDensities = state.learnedDensities
         priceCorrections = state.priceCorrections
         groups = state.groups
+        teams = state.teams.compactMap { $0.normalized() }
         categories = SidebarOrder.normalized(state.categories, botIDs: state.bots.map(\.id))
         inicio = state.inicio
         bots = state.bots
@@ -3051,7 +3070,16 @@ final class AppModel {
             selection = sidebarBotIDs.first.map(SidebarItem.bot)
         } else if case .group(let id) = selection, !groups.contains(where: { $0.id == id }) {
             selection = sidebarBotIDs.first.map(SidebarItem.bot)
+        } else if case .team(let id) = selection, !teams.contains(where: { $0.id == id }) {
+            selection = sidebarBotIDs.first.map(SidebarItem.bot)
+        } else if case .teamMember(let teamID, let memberID) = selection {
+            if let team = team(teamID) {
+                if team.member(id: memberID) == nil { selection = .team(teamID) }
+            } else {
+                selection = sidebarBotIDs.first.map(SidebarItem.bot)
+            }
         }
+        expandedTeamIDs.formIntersection(Set(teams.map(\.id)))
         if let id = lastSelectedBotID, !botIDs.contains(id) { lastSelectedBotID = nil }
     }
 
@@ -3069,7 +3097,7 @@ final class AppModel {
         return AppState(bots: bots, routines: routines, skills: skills, connectors: connectorSecrets.redact(connectors),
                         providers: providers, defaultModel: defaultModel, unread: unread, replies: replies, contextMemory: contextMemory,
                         routineContextMemory: routineContextMemory,
-                        learnedContexts: learnedContexts, learnedDensities: learnedDensities, profile: profile, priceCorrections: priceCorrections, groups: groups,
+                        learnedContexts: learnedContexts, learnedDensities: learnedDensities, profile: profile, priceCorrections: priceCorrections, groups: groups, teams: teams,
                         categories: categories, chats: chats, inicio: inicio)
     }
 

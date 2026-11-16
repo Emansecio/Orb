@@ -132,7 +132,7 @@ enum ResetGuard {
     /// The only things a reset removes from the data folder: what the app itself writes there. Anything else in the
     /// folder (a stranger's file, the migration marker) stays, so a folder chosen by mistake loses nothing it does
     /// not own.
-    static let ownedFolders: Set<String> = ["conversations", "memoria", "anexos", "saidas", "conectores", "uso", ProfilePhoto.folderName]
+    static let ownedFolders: Set<String> = ["conversations", "memoria", "anexos", "saidas", "conectores", "uso", ProfilePhoto.folderName, TeamFiles.rootFolder]
 
     /// Whether the entry `name` of the data folder is the app's own (`state.json`, its set-aside copies, the unsent
     /// drafts and the folders above).

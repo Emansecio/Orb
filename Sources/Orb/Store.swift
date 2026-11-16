@@ -34,6 +34,8 @@ struct AppState: Codable, Sendable {
     var priceCorrections: [String: ModelPrice] = [:]
     /// The groups of Orbs (see `OrbGroup`); their threads are in `conversations/_grupos/`.
     var groups: [OrbGroup] = []
+    /// Autonomous Teams generated from ideas (`times/<teamID>/`).
+    var teams: [OrbTeam] = []
     /// The sidebar's categories of Orbs (see `SidebarCategory`); older files have none.
     var categories: [SidebarCategory] = []
     /// The conversations of each Orb that has more than one (by Orb id; see `OrbChats`). Older files have none.
@@ -576,6 +578,97 @@ struct Store: Sendable {
     // (`saveSideConversation(prefix:)`, with `grupoPrefix`), under the group's names.
     func deleteGroupSideConversation(group groupID: UUID, for botID: UUID) {
         deleteSideConversation(prefix: Self.grupoPrefix, id: groupID, for: botID)
+    }
+
+    // MARK: Teams
+
+    /// Root folder of a Team on disk (`times/<teamID>/`).
+    func teamDirectory(_ teamID: UUID) -> URL {
+        directory.appendingPathComponent("\(TeamFiles.rootFolder)/\(teamID.uuidString)", isDirectory: true)
+    }
+
+    /// Shared Mission thread of a Team (`times/<teamID>/thread.json`).
+    func teamThreadURL(_ teamID: UUID) -> URL {
+        teamDirectory(teamID).appendingPathComponent(TeamFiles.threadFile)
+    }
+
+    /// Live board memory directory of a Team (`times/<teamID>/quadro/`).
+    func teamBoardDirectory(_ teamID: UUID) -> URL {
+        teamDirectory(teamID).appendingPathComponent(TeamFiles.boardFolder, isDirectory: true)
+    }
+
+    /// Per-member conversation log (`times/<teamID>/membros/<memberID>.json`).
+    func teamMemberConversationURL(team teamID: UUID, member memberID: UUID) -> URL {
+        teamDirectory(teamID)
+            .appendingPathComponent(TeamFiles.membersFolder, isDirectory: true)
+            .appendingPathComponent("\(memberID.uuidString).json")
+    }
+
+    /// Dedicated workspace used when a Team has no git repository (`times/<teamID>/espaco/`).
+    func teamWorkspaceDirectory(_ teamID: UUID) -> URL {
+        teamDirectory(teamID).appendingPathComponent(TeamFiles.workspaceFolder, isDirectory: true)
+    }
+
+    /// Structured command/file audit log for a Team (`times/<teamID>/audit.jsonl`).
+    func teamAuditURL(_ teamID: UUID) -> URL {
+        teamDirectory(teamID).appendingPathComponent(TeamFiles.auditFile)
+    }
+
+    func saveTeamThread(_ conversation: Conversation, team teamID: UUID, then done: (@Sendable (Bool) -> Void)? = nil) {
+        let url = teamThreadURL(teamID)
+        enqueue(touching: [url], dropped: { done?(false) }) {
+            let result = writeConversation(conversation, to: url, cached: true)
+            done?(result != .failed)
+        }
+    }
+
+    func readTeamThread(team teamID: UUID) -> StoreRead<Conversation> {
+        let url = teamThreadURL(teamID)
+        return Self.gate.reading(url) {
+            read(Conversation.self, from: url, ifUnreadable: "a conversa do time começou vazia")
+        }
+    }
+
+    func saveTeamMemberConversation(_ conversation: Conversation, team teamID: UUID, member memberID: UUID,
+                                    then done: (@Sendable (Bool) -> Void)? = nil) {
+        let url = teamMemberConversationURL(team: teamID, member: memberID)
+        enqueue(touching: [url], dropped: { done?(false) }) {
+            let result = writeConversation(conversation, to: url, cached: true)
+            done?(result != .failed)
+        }
+    }
+
+    func readTeamMemberConversation(team teamID: UUID, member memberID: UUID) -> StoreRead<Conversation> {
+        let url = teamMemberConversationURL(team: teamID, member: memberID)
+        return Self.gate.reading(url) {
+            read(Conversation.self, from: url, ifUnreadable: "o histórico do integrante começou vazio")
+        }
+    }
+
+    /// Ensures the Team's isolated folders exist on disk and removes all Team data together when deleted.
+    func prepareTeamDirectories(team teamID: UUID, needsWorkspace: Bool) {
+        let root = teamDirectory(teamID)
+        let workspace = teamWorkspaceDirectory(teamID)
+        let board = teamBoardDirectory(teamID)
+        let members = root.appendingPathComponent(TeamFiles.membersFolder, isDirectory: true)
+        enqueue(touching: [root]) {
+            let fm = FileManager.default
+            try? fm.createDirectory(at: board, withIntermediateDirectories: true)
+            try? fm.createDirectory(at: members, withIntermediateDirectories: true)
+            if needsWorkspace { try? fm.createDirectory(at: workspace, withIntermediateDirectories: true) }
+        }
+    }
+
+    func deleteTeamFiles(team teamID: UUID) {
+        let folder = teamDirectory(teamID)
+        let threadURL = teamThreadURL(teamID)
+        enqueue(touching: [folder, threadURL]) {
+            Self.gate.waitForReaders(of: threadURL)
+            Self.gate.waitForReaders(of: folder)
+            try? FileManager.default.removeItem(at: folder)
+            encoders.remove(threadURL)
+            forgetFailure(of: threadURL)
+        }
     }
 
     /// Moves a routine's conversation to another Orb's folder (the routine changed Orb), after the writes already queued.
@@ -1231,6 +1324,7 @@ extension AppState {
         }
         priceCorrections = c.recordingLoss([String: Price].self, forKey: .priceCorrections)?.compactMapValues(\.value) ?? [:]
         groups = try c.lossyArray(.groups)
+        teams = try c.lossyArray(.teams)
         categories = try c.lossyArray(.categories)
         // An Orb's list that can't be read is dropped alone (its conversations' files stay); the others stay.
         struct Chats: Decodable {

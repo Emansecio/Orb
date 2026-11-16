@@ -12,6 +12,7 @@ enum MultiOrbSnapshots {
             ?? CreationSnapshots.view(screen, model: model)
             ?? WizardSnapshots.view(screen, model: model)
             ?? GroupSnapshots.view(screen, model: model)
+            ?? TeamSnapshots.view(screen, model: model)
             ?? MultiOrbSnapshotsFinal.view(screen, model: model)
     }
 }

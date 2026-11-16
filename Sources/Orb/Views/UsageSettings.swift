@@ -72,11 +72,14 @@ final class UsageModel {
         model.usageLog.flush() // what the turns just used is on its way to the disk: the read below waits for it
         let interval = period.interval(now: now, calendar: calendar)
         let read = await model.store.readUsage(from: interval.start, to: interval.end, calendar: calendar)
-        let orbs = Dictionary(model.bots.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+        // Teams record under their own id (members never enter `bots`), so they sit beside the Orbs as one row each.
+        let orbs = Dictionary(model.bots.map { ($0.id, $0.name) } + model.teams.map { ($0.id, $0.name) },
+                              uniquingKeysWith: { first, _ in first })
+        let teamIDs = Set(model.teams.map(\.id))
         let book = model.priceBook
         let made = await Task.detached(priority: .userInitiated) {
             UsageReport.make(buckets: read.buckets, period: period, now: now, calendar: calendar, book: book, orbNames: orbs,
-                             rememberedNames: read.names)
+                             rememberedNames: read.names, teamIDs: teamIDs)
         }.value
         // Before the staleness check: the file that was set aside is gone for the newer read, so only this one can tell.
         for notice in read.notices { model.addNotice(AppModel.described(notice, bots: model.bots, routines: model.routines)) }
@@ -113,7 +116,7 @@ struct UsageSettings: View {
                 } else {
                     totalSection(report)
                     chartSection(report)
-                    rowsSection("Detalhes por Orb", rows: report.orbRows, report: report, isModel: false)
+                    rowsSection(report.orbRows.contains { $0.detail != nil } ? "Detalhes por Orb e time" : "Detalhes por Orb", rows: report.orbRows, report: report, isModel: false)
                     rowsSection("Detalhes por modelo", rows: report.modelRows, report: report, isModel: true)
                     hourSection(report)
                 }

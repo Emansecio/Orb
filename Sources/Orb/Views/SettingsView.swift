@@ -439,6 +439,28 @@ struct OrbsSettings: View {
         model.orbsCanTalk = on
     }
 
+    @ViewBuilder private var teamsSection: some View {
+        Section("Times") {
+            Picker("Permissão padrão de novos times", selection: Binding(
+                get: { model.defaultTeamPermissionMode },
+                set: { model.defaultTeamPermissionMode = $0 }
+            )) {
+                ForEach(PermissionMode.allCases) { mode in
+                    Text(mode.label).tag(mode)
+                }
+            }
+            if model.defaultTeamPermissionMode == .bypass {
+                Label("Modo autônomo padrão: integrantes executam comandos e edições sem confirmação.", systemImage: "exclamationmark.triangle.fill")
+                    .font(Typography.small)
+                    .foregroundStyle(Palette.warn)
+            }
+            ModelPicker(selection: Binding(
+                get: { model.lastScouterModel },
+                set: { model.lastScouterModel = $0 }
+            ), title: "Modelo padrão do Olheiro", allowsDefault: true)
+        }
+    }
+
     /// "Pulso": a Orb wakes by itself now and then. Read again each time the tab opens and every few seconds with it (the
     /// day's count moves while Orbs work).
     @ViewBuilder private var pulseSection: some View {
@@ -535,6 +557,7 @@ struct OrbsSettings: View {
                 .help(Tip.summarizeSessions)
             }
             pulseSection
+            teamsSection
             OpenTalksSection(talks: $openTalks)
             ContextMemorySettings()
             RoutineContextSettings()

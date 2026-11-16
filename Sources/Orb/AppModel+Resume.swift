@@ -22,6 +22,12 @@ extension AppModel {
             for entry in entries {
                 switch entry.kind {
                 case .groupRun: resumeGroupRun(entry)
+                case .teamRun:
+                    if let teamID = entry.teamID, team(teamID) != nil {
+                        teamHub.start(teamID)
+                    } else if let teamID = entry.teamID {
+                        workJournal.dropTeamRun(teamID)
+                    }
                 case .request: resumeRequest(entry)
                 case .pulse:
                     // A pulse is opportunistic: the next one looks again, so a cut one is dropped instead of resumed.

@@ -164,6 +164,10 @@ struct SidebarView: View {
                         .transition(.adapted(.arrive, reduceMotion: reduceMotion))
                 }
                 // MARK: end MultiOrb (WP6)
+
+                SidebarTeamsSection(selectionSpace: selectionSpace)
+                    .padding(.top, 16)
+                    .transition(.adapted(.arrive, reduceMotion: reduceMotion))
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)

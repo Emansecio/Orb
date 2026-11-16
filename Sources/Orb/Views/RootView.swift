@@ -51,6 +51,9 @@ struct RootView: View {
             NewGroupSheet(startingWith: model.newGroupStart)
         }
         // MARK: end MultiOrb (WP6)
+        .sheet(isPresented: $model.showNewTeam, onDismiss: { MemoryRelief.orbsClosed() }) {
+            NewTeamSheet()
+        }
         .systemSheets()
         .alert("Atenção com seus dados", isPresented: Binding(
             get: { !model.dataNotices.isEmpty },
@@ -73,6 +76,16 @@ extension RootView {
         if case .group(let id)? = model.selection, !model.groups.contains(where: { $0.id == id }) {
             model.selection = model.sidebarBotIDs.first.map { .bot($0) }
         }
+        if case .team(let id)? = model.selection, model.team(id) == nil {
+            model.selection = model.sidebarBotIDs.first.map { .bot($0) }
+        }
+        if case .teamMember(let teamID, let memberID)? = model.selection {
+            if let team = model.team(teamID) {
+                if team.member(id: memberID) == nil { model.selection = .team(teamID) }
+            } else {
+                model.selection = model.sidebarBotIDs.first.map { .bot($0) }
+            }
+        }
         let fixed = WelcomeSelection.resolved(model.selection, botIDs: model.botIDs)
         if fixed != model.selection { model.selection = fixed }
     }
@@ -83,7 +96,7 @@ extension RootView {
 /// parts and cross-fades its transcript), so it carries no Orb id. The moments a selection points at nothing yet (an
 /// Orb that was just deleted, before the root view picks another) are still the Orb's page, so they cause no fade.
 enum DetailPage: Hashable {
-    case orb, inicio, routines, connectors, skills, welcome
+    case orb, team, inicio, routines, connectors, skills, welcome
 
     static func page(for selection: SidebarItem?, botIDs: [UUID]) -> DetailPage {
         switch selection {
@@ -91,6 +104,7 @@ enum DetailPage: Hashable {
         case .routines: .routines
         case .connectors: .connectors
         case .skills: .skills
+        case .team?, .teamMember?: .team
         case .group?: .orb // MARK: MultiOrb (WP6): a page of its own once the group screens exist
         case .bot, nil: botIDs.isEmpty ? .welcome : .orb
         }
@@ -140,10 +154,14 @@ private struct DetailView: View {
                     GroupPanel(groupID: id)
                         .id(id)
                         .transition(.opacity)
+                } else if let id = model.selectedTeamID {
+                    TeamPanel(teamID: id)
+                        .id(id)
+                        .transition(.opacity)
                 }
             }
             // The two sides of one click (the chat and the panel) change at the same pace.
-            .motion(Motion.crossFade, value: selectedBotID ?? model.selectedGroupID)
+            .motion(Motion.crossFade, value: selectedBotID ?? model.selectedGroupID ?? model.selectedTeamID)
             .belowToolbar()
             .inspectorColumnWidth(min: 244, ideal: 300, max: 420)
         }
@@ -155,8 +173,13 @@ private struct DetailView: View {
     }
 
     // MARK: MultiOrb (WP6)
-    /// The Orb's panel is on screen: the user's choice, on the Orb's page, with an Orb or a group selected.
-    private var panelShows: Bool { model.showInspector && DetailPage.page(for: model.selection, botIDs: model.botIDs) == .orb && (selectedBotID != nil || model.selectedGroupID != nil) }
+    /// The Orb's panel is on screen: the user's choice, on the Orb's or Team's page, with an Orb, group or Team selected.
+    private var panelShows: Bool {
+        let page = DetailPage.page(for: model.selection, botIDs: model.botIDs)
+        let hasOrbTarget = page == .orb && (selectedBotID != nil || model.selectedGroupID != nil)
+        let hasTeamTarget = page == .team && model.selectedTeamID != nil
+        return model.showInspector && (hasOrbTarget || hasTeamTarget)
+    }
 
     @ViewBuilder private var content: some View {
         switch model.selection {
@@ -179,6 +202,18 @@ private struct DetailView: View {
             if model.groups.contains(where: { $0.id == id }) {
                 GroupChatView(groupID: id)
                     .id(id)
+                    .transition(.opacity)
+            }
+        case .team(let id):
+            if model.team(id) != nil {
+                TeamChatView(teamID: id)
+                    .id(id)
+                    .transition(.opacity)
+            }
+        case .teamMember(let teamID, let memberID):
+            if model.teamMember(teamID: teamID, memberID: memberID) != nil {
+                TeamMemberChatView(teamID: teamID, memberID: memberID)
+                    .id(memberID)
                     .transition(.opacity)
             }
         case nil:

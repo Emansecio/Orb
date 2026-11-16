@@ -1,7 +1,7 @@
 #if DEBUG || ORB_DEV_TOOLS
 import SwiftUI
 
-/// `Orb --snapshot settings-usage | settings-usage-empty out.png`: the Uso tab of Ajustes, with a month of made-up use (three Orbs,
+/// `Orb --snapshot settings-usage | settings-usage-empty out.png`: the Uso tab of Ajustes, with a month of made-up use (three Orbs and a Team,
 /// models paid by use, by plan and on this Mac, one without a price) written into the data folder (a fresh temporary one, or the
 /// one `ORB_DATA_DIR` names; see `DevRun`), or with none at all. `-usagePeriod today|week|month30|thisMonth` and
 /// `-usageChartBy model` on the command line pick another view without saving anything.
@@ -36,7 +36,14 @@ enum UsageSnapshots {
         let theo = Bot(name: "Theo", role: "Revisa o código", orb: OrbConfig(color: "menta"))
         let known = Dictionary(model.bots.map { ($0.name, $0.id) }, uniquingKeysWith: { first, _ in first })
         if known["Luna"] == nil { model.bots += [luna, theo] }
-        let orbs = [atlas, known["Luna"] ?? luna.id, known["Theo"] ?? theo.id]
+        // A Team records under its own id, so it shows as one row tagged "Time" beside the Orbs.
+        if model.teams.isEmpty {
+            let members = [TeamMember(name: "Arquiteto", role: "Planeja"), TeamMember(name: "Revisor QA", role: "Revisa")]
+            model.addTeam(OrbTeam(name: "Auditoria de UX", idea: "Auditar a interface", orchestratorID: members[0].id,
+                                  members: members, mission: TeamMission(objective: "Entregar a auditoria")),
+                          select: false)
+        }
+        let orbs = [atlas, known["Luna"] ?? luna.id, known["Theo"] ?? theo.id] + model.teams.prefix(1).map(\.id)
         var state: UInt64 = 20_261_009
         func next(_ bound: Int) -> Int {
             state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
@@ -52,7 +59,7 @@ enum UsageSnapshots {
             for hour in [9, 10, 11, 14, 15, 16, 17, 21] where next(100) < (hour == 21 ? 25 : 70) {
                 guard let start = calendar.date(byAdding: .hour, value: hour, to: day), start <= .now else { continue }
                 for entry in models where next(10) < entry.weight + 1 {
-                    let orb = orbs[(next(10) < 6) ? 0 : 1 + next(2)]
+                    let orb = orbs[(next(10) < 6) ? 0 : 1 + next(orbs.count - 1)]
                     let isPlan = entry.provider == .claudeCode
                     let requests = isPlan ? 1 + next(2) : 2 + next(9)
                     let usage = TokenUsage(input: requests * (800 + next(2_400)), output: requests * (200 + next(1_200)),
@@ -66,7 +73,8 @@ enum UsageSnapshots {
                 }
             }
         }
-        model.store.addUsage(rows, names: Dictionary(uniqueKeysWithValues: model.bots.map { ($0.id, $0.name) }))
+        model.store.addUsage(rows, names: Dictionary(uniqueKeysWithValues: model.bots.map { ($0.id, $0.name) }
+                                                + model.teams.map { ($0.id, $0.name) }))
         model.store.flush()
     }
 }

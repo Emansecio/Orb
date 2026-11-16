@@ -676,6 +676,8 @@ struct ToolContext: Sendable {
     var proposeOrb: ProposalHandler?
     /// What `orb_draft` asks of the creation assistant; nil outside it.
     var draft: BridgeHandler?
+    /// What `team_proposal` asks of the Team Scouter (`Olheiro`); nil outside it.
+    var teamProposal: BridgeHandler?
     /// The group's shared board, in a group's turn.
     var groupMemory: MemoryBank?
     /// The boards of the groups the Orb is in, by name, in its own chat (`group_recall` reads them).

@@ -121,8 +121,9 @@ struct UsageReport: Equatable, Sendable {
     static let othersID = "outros"
 
     /// `orbNames`: the Orbs the app has now, by id (a deleted Orb keeps the name the history remembers, `rememberedNames`).
+    /// `teamIDs`: ids in `orbNames` that are Teams; a Team's members record under the Team's id, so its row is the Team's total.
     static func make(buckets: [UsageBucket], period: UsagePeriod, now: Date, calendar: Calendar = .current, book: PriceBook,
-                     orbNames: [UUID: String], rememberedNames: [UUID: String] = [:]) -> UsageReport {
+                     orbNames: [UUID: String], rememberedNames: [UUID: String] = [:], teamIDs: Set<UUID> = []) -> UsageReport {
         let interval = period.interval(now: now, calendar: calendar)
         var report = UsageReport(period: period, interval: interval)
 
@@ -182,7 +183,8 @@ struct UsageReport: Equatable, Sendable {
         }
 
         report.orbRows = byOrb.map { id, sum in
-            UsageRow(id: id.uuidString, name: orbNames[id] ?? rememberedNames[id] ?? "Orb apagado", state: state(sum), cost: sum.cost,
+            UsageRow(id: id.uuidString, name: orbNames[id] ?? rememberedNames[id] ?? "Orb apagado",
+                     detail: teamIDs.contains(id) ? "Time" : nil, state: state(sum), cost: sum.cost,
                      equivalent: sum.equivalent, tokens: sum.tokens, cached: sum.cached, requests: sum.requests,
                      share: total > 0 ? value(sum) / total : nil, hasUnpriced: sum.hasUnpriced)
         }.sorted(by: order)

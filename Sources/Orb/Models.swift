@@ -1068,6 +1068,8 @@ enum SidebarItem: Hashable {
     case inicio
     case bot(UUID)
     case group(UUID)
+    case team(UUID)
+    case teamMember(teamID: UUID, memberID: UUID)
     case routines
     case connectors
     case skills

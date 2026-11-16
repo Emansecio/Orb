@@ -19,6 +19,25 @@ struct UsageReportTests {
                          orbNames: [atlas: "Atlas", luna: "Luna"])
     }
 
+    // MARK: Teams
+
+    @Test func aTeamIsOneTaggedRowBesideTheOrbs() {
+        let team = UUID()
+        let total = UsageTotals(requests: 2, input: 1_000_000)
+        let now = utcDate(2026, 10, 9, 15, 30)
+        let made = UsageReport.make(buckets: [bucket(utcDate(2026, 10, 9, 10), orb: atlas, model: sonnet, total),
+                                              bucket(utcDate(2026, 10, 9, 11), orb: team, model: sonnet, total),
+                                              bucket(utcDate(2026, 10, 9, 12), orb: team, model: gpt, total)],
+                                    period: .today, now: now, calendar: utcCalendar, book: PriceBook(),
+                                    orbNames: [atlas: "Atlas", team: "Auditoria de UX"], teamIDs: [team])
+        #expect(made.orbRows.count == 2)
+        let teamRow = made.orbRows.first { $0.id == team.uuidString }
+        #expect(teamRow?.name == "Auditoria de UX")
+        #expect(teamRow?.detail == "Time")
+        #expect(teamRow?.requests == 4)
+        #expect(made.orbRows.first { $0.id == atlas.uuidString }?.detail == nil)
+    }
+
     // MARK: Periods
 
     @Test func theFourPeriodsStartWhereTheirNamesSay() {

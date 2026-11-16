@@ -10,6 +10,8 @@ struct WorkEntry: Codable, Equatable, Sendable, Identifiable {
         case groupRun
         /// A request one Orb made of another outside any group.
         case request
+        /// Continuous execution of an autonomous Team (`teamID`).
+        case teamRun
         /// An Orb's pulse run (`botID`). Never resumed: the next pulse covers it (`AppModel.resumeInterruptedWork` drops it).
         case pulse
         case unknown
@@ -30,6 +32,8 @@ struct WorkEntry: Codable, Equatable, Sendable, Identifiable {
     var lostJobs = 0
     /// `groupRun`: the group, the run's id in the thread and what was asked.
     var groupID: UUID?
+    /// `teamRun`: the Team id (`teamID`).
+    var teamID: UUID?
     var runID: UUID?
     var text: String?
     /// `request`: the message as it was sent.
@@ -51,6 +55,7 @@ extension WorkEntry {
         chatID = (try? c.decodeIfPresent(UUID.self, forKey: .chatID)) ?? nil
         lostJobs = try c.value(.lostJobs, default: 0)
         groupID = (try? c.decodeIfPresent(UUID.self, forKey: .groupID)) ?? nil
+        teamID = (try? c.decodeIfPresent(UUID.self, forKey: .teamID)) ?? nil
         runID = (try? c.decodeIfPresent(UUID.self, forKey: .runID)) ?? nil
         text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? nil
         envelope = (try? c.decodeIfPresent(OrbEnvelope.self, forKey: .envelope)) ?? nil
@@ -237,6 +242,36 @@ final class WorkJournal {
     func dropGroupRun(_ groupID: UUID) {
         awaitingGroupResume.remove(groupID)
         remove { $0.kind == .groupRun && $0.groupID == groupID }
+    }
+
+    // MARK: Teams
+
+    func syncTeamRuns(_ active: [(teamID: UUID, runID: UUID, objective: String, startedAt: Date)]) {
+        guard !frozen else { return }
+        var changed = false
+        for item in active {
+            let text = item.objective.clipped(to: 2_000)
+            if let index = live.firstIndex(where: { $0.kind == .teamRun && $0.teamID == item.teamID }) {
+                if live[index].runID != item.runID || live[index].text != text {
+                    live[index].runID = item.runID
+                    live[index].text = text
+                    live[index].startedAt = item.startedAt
+                    changed = true
+                }
+            } else {
+                live.append(WorkEntry(kind: .teamRun, startedAt: item.startedAt, teamID: item.teamID,
+                                      runID: item.runID, text: text))
+                changed = true
+            }
+        }
+        let ids = Set(active.map(\.teamID))
+        let before = live.count
+        live.removeAll { $0.kind == .teamRun && !ids.contains($0.teamID ?? UUID()) }
+        if changed || live.count != before { persist() }
+    }
+
+    func dropTeamRun(_ teamID: UUID) {
+        remove { $0.kind == .teamRun && $0.teamID == teamID }
     }
 
     // MARK: Requests between Orbs

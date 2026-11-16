@@ -46,3 +46,10 @@ leva a chamada ao `DelegationHub`. `orbs` (`ask`, `tell`, `list`), `group_create
   pulsos que esperam e grava `pulseStopped` (`detail == OrbEvent.pulseOff` quando foi desligado); um grupo parado pelo teto grava
   `groupStopped` com `detail == OrbEvent.budgetStop`.
 
+## Times autônomos (`Teams/`, `Views/Teams/`)
+
+- **Modelo e escopo (`OrbTeam`, `TeamFiles`, `AppModel+Teams.swift`).** Um `OrbTeam` vive em `AppState.teams` com seus `TeamMember`s exclusivos (não entram em `AppState.bots`; promoção opcional copia para os Orbs pessoais via `promoteMemberToOrb`). Arquivos do time ficam isolados em `times/<teamID>/` (`thread.jsonl`, `board.md`, `audit.jsonl` e fallback `espaco/`).
+- **Criação pelo Olheiro (`TeamProposal`, `TeamProposalTool`, `TeamScouterRunner`, `NewTeamSheet`).** A pessoa escolhe o modelo do Olheiro, que lê a pasta do projeto (quando informada) e propõe nome, objetivo, etapas, critérios de pronto e integrantes via `team_propose` para ajuste interativo antes da criação.
+- **Execução, worktrees e portões de qualidade (`TeamHub`, `TeamWorkFolders`, `TeamQualityGates`, `TeamBoard`, `TeamLoopRecovery`).** O `TeamHub` executa etapas em paralelo usando worktrees git isoladas (`WorkFolders.mergeBranch` e `cleanUpBranch` preservando irmãs paralelas) ou `times/<teamID>/espaco/`. Cada etapa passa por checagem programática (`CompletionWatch`) e revisão independente (`reviewerMemberID != ownerMemberID`, `ReviewVerdict`), com auditoria final integrada ao término da missão. `TeamStagnationDetector` evita voltas improdutivas e `WorkJournal` (`.teamRun`) retoma times interrompidos na reabertura.
+- **Visões (`TeamChatView`, `TeamMemberChatView`, `TeamPanel`, `InicioView`, `SettingsView`).** O fio compartilhado do time e os integrantes ficam numa ala própria na barra lateral (`SidebarTeamsSection`), com inspetor de 4 abas (`Missão`, `Integrantes`, `Quadro`, `Uso`) e preferências padrão (`defaultTeamPermissionMode`, `defaultScouterModel`) em Ajustes → Orbs.
+

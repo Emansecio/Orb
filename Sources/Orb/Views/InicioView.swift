@@ -76,6 +76,10 @@ struct InicioView: View {
                         .transition(.opacity)
                     working
                         .transition(.opacity)
+                    if !model.teams.isEmpty {
+                        teamsOverview
+                            .transition(.opacity)
+                    }
                     Color.clear.frame(height: 0)
                         .background(InicioScrollAnchorBridge(anchor: scrollAnchor))
                         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named("inicio-scroll")).minY } action: { scrollAnchor.observe(viewportY: $0) }
@@ -157,6 +161,56 @@ struct InicioView: View {
                         .padding(.vertical, 3)
                         .background(Palette.accent.opacity(0.14), in: .capsule)
                 }
+            }
+        }
+    }
+
+    @ViewBuilder private var teamsOverview: some View {
+        VStack(alignment: .leading, spacing: Spacing.s) {
+            Text("Times")
+                .sectionTitleStyle()
+            ForEach(model.teams) { team in
+                let progress = team.mission.progress
+                HStack(spacing: 12) {
+                    Button {
+                        model.selection = .team(team.id)
+                    } label: {
+                        HStack(spacing: 10) {
+                            StackedAvatars(members: team.members.map {
+                                StackedAvatars.Member(id: $0.id, orb: $0.orb, activity: $0.state.orbActivity)
+                            }, size: 22, overlap: 8)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(team.name)
+                                    .font(Typography.text.weight(.medium))
+                                    .foregroundStyle(Palette.ink)
+                                    .lineLimit(1)
+                                Text(TeamRowText.subtitle(for: team))
+                                    .font(Typography.small)
+                                    .foregroundStyle(team.status == .waitingUser ? Palette.warn : Palette.faint)
+                                    .lineLimit(1)
+                            }
+                            Spacer(minLength: 6)
+                            if let summary = progress.stageSummary {
+                                Text(summary)
+                                    .font(Typography.small)
+                                    .foregroundStyle(Palette.muted)
+                            }
+                        }
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+
+                    if team.status.isWorking {
+                        Button("Pausar") { model.pauseTeam(team.id) }
+                            .chipButton()
+                    } else if team.status != .completed {
+                        Button("Retomar") { model.startTeam(team.id) }
+                            .chipButton()
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .card()
             }
         }
     }

@@ -127,6 +127,53 @@ enum WorkFolders {
         var kept: [Kept] = []
     }
 
+    enum MergeOutcome: Sendable, Equatable {
+        case merged(commit: String)
+        case conflict(String)
+        case unavailable(String)
+    }
+
+    /// Merges `branch` cleanly into the main checkout of `project` (`git merge --no-ff`). Aborts immediately on conflict so
+    /// the main checkout never stays in a broken half-merged state.
+    static func mergeBranch(_ branch: String, into project: URL, message: String, gitPath: String? = nil) async -> MergeOutcome {
+        let project = project.standardizedFileURL
+        guard WorkspaceSnapshot.hasRepository(project), let git = Git.make(path: gitPath) else {
+            return .unavailable("git repository is unavailable")
+        }
+        return await GitQueue.shared.run {
+            let exists = await git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(branch)"], in: project)
+            guard exists.output != nil else { return .unavailable("branch \(branch) does not exist") }
+            let identity = ["-c", "user.name=Orb", "-c", "user.email=orb@local", "-c", "commit.gpgsign=false"]
+            let merged = await git.run(identity + ["merge", "--no-ff", branch, "-m", message], in: project)
+            guard merged.succeeded else {
+                _ = await git.run(["merge", "--abort"], in: project)
+                return .conflict(firstLine(merged.text))
+            }
+            let head = await git.run(["rev-parse", "--short", "HEAD"], in: project).output ?? ""
+            return .merged(commit: head)
+        }
+    }
+
+    /// Removes a single integrated worktree and branch if merged in HEAD, leaving sibling parallel worktrees intact.
+    static func cleanUpBranch(_ branch: String, in project: URL, root: URL, gitPath: String? = nil) async -> Bool {
+        let project = project.standardizedFileURL
+        guard WorkspaceSnapshot.hasRepository(project), let git = Git.make(path: gitPath) else { return false }
+        return await GitQueue.shared.run {
+            let base = canonical(root).path + "/"
+            let match = await worktrees(in: project, git: git).first { entry in
+                entry.branch == branch && canonical(URL(fileURLWithPath: entry.path)).path.hasPrefix(base)
+            }
+            guard let match else { return false }
+            let merged = Set((await git.run(["branch", "--merged", "HEAD", "--format=%(refname:short)"], in: project).output ?? "")
+                .split(separator: "\n").map(String.init))
+            guard merged.contains(branch), await git.run(["worktree", "remove", match.path], in: project).succeeded else { return false }
+            _ = await git.run(["branch", "-d", branch], in: project)
+            _ = await git.run(["worktree", "prune"], in: project)
+            removeIfEmpty(root.appending(path: "\(slug(project.lastPathComponent))-\(hash(project.path))"))
+            return true
+        }
+    }
+
     /// When a run ends: removes the worktrees of `run` whose branch is already in the project's HEAD (and the branch), leaves the
     /// others and says which. Never forces: a worktree with uncommitted changes stays.
     static func cleanUp(project: URL, run: UUID, root: URL, gitPath: String? = nil) async -> CleanUp {
