@@ -118,7 +118,7 @@ extension TranscriptRowModel {
         case .events(let kind, let items):
             FoldedThread(items: items, summary: { EventsSummary(kind: kind, items: items, unfolded: $0).alignedWithReplyText() }, child: child)
         case .exchange(let items):
-            FoldedThread(items: items, summary: { ExchangeSummary(items: items, botID: botID, unfolded: $0).alignedWithReplyText() },
+            FoldedThread(items: items, summary: { ExchangeSummary(items: items, botID: botID, unfolded: $0).padding(.leading, gutter) },
                          child: child)
         case .proposals(let items):
             FoldedThread(items: items, summary: { ProposalsSummary(count: items.count, unfolded: $0).alignedWithReplyText() }, child: child)

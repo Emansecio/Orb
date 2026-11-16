@@ -68,6 +68,20 @@ struct GroupPresenceTests {
         #expect(GroupPresence.text([item("Pesquisador", .working), item("Revisor", .working)]) == "Pesquisador e Revisor estão trabalhando…")
     }
 
+    @Test func membersAtWorkSayTheirStepEachOne() {
+        var researcher = item("Pesquisador", .working)
+        researcher.step = "Buscando na web"
+        var reviewer = item("Revisor", .working)
+        reviewer.step = "Lendo rascunho.md"
+        #expect(GroupPresence.text([researcher]) == "Pesquisador: Buscando na web")
+        #expect(GroupPresence.text([researcher, reviewer]) == "Pesquisador: Buscando na web · Revisor: Lendo rascunho.md")
+        #expect(GroupPresence.text([researcher, item("Atlas", .writing)]) == "Pesquisador: Buscando na web · Atlas está escrevendo")
+        // Waiting for you still comes first and alone; the sidebar has no room for the steps.
+        #expect(GroupPresence.text([researcher, item("Revisor", .waitingYou)]) == "Revisor está esperando você")
+        #expect(GroupPresence.sidebarText([researcher]) == "Pesquisador está trabalhando…")
+        #expect(GroupPresence.sidebarText([researcher, reviewer]) == "2 Orbs trabalhando…")
+    }
+
     @Test func aWaitingMemberIsNamedAloneFirst() {
         #expect(GroupPresence.text([item("Pesquisador", .waitingYou)]) == "Pesquisador está esperando você")
         #expect(GroupPresence.text([item("Pesquisador", .writing), item("Revisor", .waitingYou)]) == "Revisor está esperando você")

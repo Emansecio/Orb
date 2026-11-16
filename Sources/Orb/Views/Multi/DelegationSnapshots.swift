@@ -38,7 +38,15 @@ enum DelegationSnapshots {
             let live = model.live(atlas.id)
             live.setChainWork(WorkPhrase.waiting(for: [team.researcher.name, team.reviewer.name]))
             live.setPartner(PartnerTint(botID: team.researcher.id, color: team.researcher.orb.color))
-            return chat(model, atlas, waiting(team))
+            let items = waiting(team)
+            // The Revisor works on the last request: its card says what it does and offers its work.
+            if case .orbMessage(let ask)? = items.last?.kind {
+                model.session(team.reviewer.id).servingRequest = ask.requestID
+                let reviewer = model.live(team.reviewer.id)
+                reviewer.setStatus("Lendo")
+                reviewer.setWork(WorkLine(verb: "Lendo", target: "precos.md", style: .code))
+            }
+            return chat(model, atlas, items)
         case "delegation-group":
             let group = OrbGroup(name: "Lançamento", memberIDs: [atlas.id, team.researcher.id, team.reviewer.id],
                                  orchestratorID: team.researcher.id)
@@ -106,7 +114,8 @@ enum DelegationSnapshots {
         func line(_ direction: OrbMessageItem.Direction, _ kind: OrbMessageItem.Kind, from: OrbRef, to: OrbRef, _ text: String,
                   fromChat: Bool? = true) -> TranscriptItem {
             TranscriptItem(.orbMessage(OrbMessageItem(direction: direction, kind: kind, state: .replied, from: from, to: to,
-                                                      text: text, requestID: request, chainID: chain, fromChat: fromChat)))
+                                                      text: text, requestID: request, chainID: chain,
+                                                      groupID: fromChat == true ? groupID : nil, fromChat: fromChat)))
         }
         return [
             TranscriptItem(.user(text: "Cria o grupo Lançamento com o Pesquisador e o Revisor e pede os preços dos concorrentes",
@@ -236,6 +245,11 @@ enum DelegationSnapshots {
             FoldedThread(items: items, startsUnfolded: true,
                          summary: { ExchangeSummary(items: items, botID: team.atlas.id, unfolded: $0) },
                          child: { TranscriptRow(item: $0, botID: team.atlas.id, orb: team.atlas.orb).equatable() })
+            // A request that went wrong, opened: "Pedir de novo" beside "Ver troca".
+            OrbMessageRow(message: OrbMessageItem(direction: .sent, kind: .ask, state: .failed, from: OrbRef(team.atlas),
+                                                  to: OrbRef(team.lia), text: "Escreve um resumo de duas linhas.",
+                                                  requestID: UUID(), chainID: UUID()),
+                          botID: team.atlas.id, startsUnfolded: true)
         }
         .padding(TranscriptLayout.edge)
         .frame(width: TranscriptLayout.column, alignment: .leading)

@@ -18,6 +18,8 @@ struct GroupPresenceItem: Equatable {
     var name: String
     var orb: OrbConfig
     var state: GroupPresenceState
+    /// What it does now, as its working line says it ("Lendo README.md"); nil before its first step.
+    var step: String? = nil
 }
 
 /// The presence line's words, as plain values the tests read.
@@ -31,12 +33,19 @@ enum GroupPresence {
     }
 
     /// "Pesquisador está escrevendo…", "Pesquisador e Revisor estão trabalhando…", "Pesquisador está esperando você"; nil
-    /// when nobody is in a turn. A member waiting for you is named first and alone, whatever the others do.
+    /// when nobody is in a turn. A member waiting for you is named first and alone, whatever the others do. Members at work
+    /// with a step say it, each one: "Pesquisador: Buscando na web · Revisor: Lendo rascunho.md".
     static func text(_ items: [GroupPresenceItem]) -> String? {
         guard !items.isEmpty else { return nil }
         let waiting = items.filter { $0.state == .waitingYou }
         if !waiting.isEmpty {
             return "\(names(waiting)) \(waiting.count == 1 ? "está esperando você" : "estão esperando você")"
+        }
+        if items.contains(where: { $0.state == .working && $0.step != nil }) {
+            return items.map { item in
+                if item.state == .working, let step = item.step { return "\(item.name): \(step)" }
+                return "\(item.name) \(verb(item.state, plural: false))"
+            }.joined(separator: " · ")
         }
         if items.count == 1 {
             return "\(items[0].name) \(verb(items[0].state, plural: false))…"
@@ -51,6 +60,8 @@ enum GroupPresence {
     /// The sidebar row's version: several names in a narrow row would end in a cut "…", so they become a count
     /// ("2 Orbs trabalhando…"). One Orb, or someone waiting for you, keeps the full sentence (the strip names them).
     static func sidebarText(_ items: [GroupPresenceItem]) -> String? {
+        // The sidebar's row has no room for each member's step.
+        let items = items.map { var item = $0; item.step = nil; return item }
         guard items.count > 1, !items.contains(where: { $0.state == .waitingYou }) else { return text(items) }
         let allWriting = Set(items.map(\.state)) == [.writing]
         return "\(items.count) Orbs \(allWriting ? "escrevendo" : "trabalhando")…"
@@ -102,6 +113,8 @@ struct GroupPresenceStrip: View {
                     .font(Typography.label)
                     .foregroundStyle(waiting ? Palette.warn : Palette.muted)
                     .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(text)
                     .contentTransition(.opacity)
                 if !waiting {
                     Image(systemName: "ellipsis")

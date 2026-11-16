@@ -224,6 +224,105 @@ struct TranscriptFoldingTests {
         #expect(ExchangeWords.line(for: answer) == "O grupo Lançamento respondeu a Pesquisador")
     }
 
+    @Test("Com um grupo, o chat de quem pediu também não repete o próprio nome")
+    func groupLineLeavesThisChatsOrbOut() {
+        let chain = UUID()
+        let group = OrbRef(id: researcher.id, name: "Lançamento")
+        var ask = msg(.ask, from: atlas, to: group, chain: chain)
+        ask.fromChat = true
+        var answer = msg(.reply, .reply, from: group, to: atlas, chain: chain)
+        answer.fromChat = true
+        #expect(ExchangeWords.line(for: ask, in: atlas.id) == "Pediu ao grupo Lançamento")
+        #expect(ExchangeWords.line(for: answer, in: atlas.id) == "O grupo Lançamento respondeu")
+        // Read from another chat, or in the group's own thread, the line names both sides as before.
+        #expect(ExchangeWords.line(for: ask, in: reviewer.id) == "Atlas pediu ao grupo Lançamento")
+        var post = ask
+        post.direction = .post
+        #expect(ExchangeWords.line(for: post, in: atlas.id) == ExchangeWords.line(for: post))
+    }
+
+    @Test("Estado de várias mensagens: problema primeiro, depois espera, respondido só quando todas foram")
+    func overallState() {
+        #expect(OrbMessageItem.State.overall([.replied, .replied]) == .replied)
+        #expect(OrbMessageItem.State.overall([.replied, .open]) == .open)
+        #expect(OrbMessageItem.State.overall([.open, .failed, .replied]) == .failed)
+        #expect(OrbMessageItem.State.overall([.lost, .refused]) == .refused)
+        #expect(OrbMessageItem.State.overall([.replied, .cancelled]) == .cancelled)
+        #expect(OrbMessageItem.State.overall([]) == .replied)
+    }
+
+    @Test("Pedir de novo escreve o pedido para a pessoa enviar, ao Orb ou ao grupo")
+    func retryDraft() {
+        let chain = UUID()
+        var ask = msg(.ask, .sent, .failed, from: atlas, to: lia, chain: chain)
+        ask.text = "Escreve um resumo."
+        #expect(OrbMessageRow.retryDraft(for: ask) == "Peça de novo à Lia: Escreve um resumo.")
+        #expect(!OrbMessageRow.speaksWithGroup(ask))
+        ask.to = OrbRef(id: researcher.id, name: "Lançamento")
+        ask.fromChat = true
+        ask.groupID = UUID()
+        #expect(OrbMessageRow.speaksWithGroup(ask))
+        #expect(OrbMessageRow.retryDraft(for: ask) == "Peça de novo ao grupo Lançamento: Escreve um resumo.")
+        #expect([OrbMessageItem.State.failed, .refused, .lost].allSatisfy(OrbMessageRow.wentWrong))
+        #expect(![OrbMessageItem.State.open, .replied, .cancelled].contains(where: OrbMessageRow.wentWrong))
+    }
+
+    @Test("Linha de quem trabalha num pedido: o passo e o tempo, sem tempo antes de um segundo")
+    func workLineText() {
+        #expect(ExchangeWorkLine.text(name: "Revisor", phrase: "Lendo README.md", elapsed: "45 s") == "Revisor: Lendo README.md · 45 s")
+        #expect(ExchangeWorkLine.text(name: "Revisor", phrase: nil, elapsed: "") == "Revisor: Trabalhando…")
+        #expect(ExchangeWorkLine.text(name: "Revisor", phrase: "Pensando…", elapsed: nil) == "Revisor: Pensando…")
+    }
+
+    // MARK: The group's thread
+
+    private func post(_ kind: OrbMessageItem.Kind, from: OrbRef, to: OrbRef?, request: UUID, fromChat: Bool? = nil) -> TranscriptItem {
+        TranscriptItem(.orbMessage(OrbMessageItem(direction: .post, kind: kind, state: .open, from: from, to: to, text: "texto",
+                                                  requestID: request, chainID: UUID(), fromChat: fromChat)))
+    }
+
+    @Test("Pedidos seguidos do mesmo Orb no grupo dobram numa linha; um sozinho ou de outro Orb, não")
+    func groupAssignmentsFold() {
+        let first = post(.ask, from: atlas, to: researcher, request: UUID())
+        let second = post(.ask, from: atlas, to: reviewer, request: UUID())
+        let other = post(.ask, from: researcher, to: lia, request: UUID())
+        let words = post(.reply, from: researcher, to: nil, request: UUID())
+        #expect(GroupThreadFolding.rows([first, second, other]) == [.assignments([first, second]), .single(other)])
+        #expect(GroupThreadFolding.rows([first, words, second]) == [.single(first), .single(words), .single(second)])
+        // A request sent "a seu pedido" stays in view, alone.
+        let fromChat = post(.ask, from: atlas, to: lia, request: UUID(), fromChat: true)
+        #expect(GroupThreadFolding.rows([first, fromChat]) == [.single(first), .single(fromChat)])
+        // The run keeps its first item's id while it grows.
+        let third = post(.ask, from: atlas, to: lia, request: UUID())
+        #expect(GroupThreadFolding.rows([first, second, third]).first?.id == first.id)
+        #expect(GroupThreadFolding.rows([]).isEmpty)
+    }
+
+    @Test("Título da dobra: quantos pedidos e a quem")
+    func groupAssignmentsTitle() {
+        let toResearcher = post(.ask, from: atlas, to: researcher, request: UUID())
+        let toReviewer = post(.ask, from: atlas, to: reviewer, request: UUID())
+        let toLia = post(.ask, from: atlas, to: lia, request: UUID())
+        #expect(GroupThreadFolding.title([toResearcher, toReviewer]) == "Atlas fez 2 pedidos: Pesquisador e Revisor")
+        #expect(GroupThreadFolding.title([toResearcher, toReviewer, toLia]) == "Atlas fez 3 pedidos: Pesquisador, Revisor e Lia")
+        let again = post(.ask, from: atlas, to: lia, request: UUID())
+        #expect(GroupThreadFolding.title([toLia, again]) == "Atlas fez 2 pedidos à Lia")
+    }
+
+    @Test("Cada pedido do grupo aponta para a sua resposta, e a resposta diz quem pediu")
+    func groupLinks() {
+        let request = UUID()
+        let ask = post(.ask, from: atlas, to: researcher, request: request)
+        let reply = post(.reply, from: researcher, to: nil, request: request)
+        let toYou = post(.reply, from: atlas, to: nil, request: UUID())
+        let links = GroupThreadFolding.links([ask, toYou, reply])
+        #expect(links.replyOf == [ask.id: reply.id])
+        #expect(links.askerOf == [reply.id: "Atlas"])
+        // A second answer to the same request does not take the link from the first.
+        let later = post(.reply, from: researcher, to: nil, request: request)
+        #expect(GroupThreadFolding.links([ask, reply, later]).replyOf[ask.id] == reply.id)
+    }
+
     @Test("Lista em português")
     func listing() {
         #expect(PortugueseList.join([]) == "")

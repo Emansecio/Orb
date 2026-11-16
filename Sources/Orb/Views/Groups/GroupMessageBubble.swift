@@ -54,6 +54,8 @@ struct GroupMessageBubble: View {
     var isLastSpeaker = false
     /// The first of a run of words from this Orb: the avatar and the name line. Others continue under it.
     var showsHeader = true
+    /// The Orb whose request in the thread these words answer ("em resposta ao Atlas"); nil for an answer to you.
+    var inReplyTo: String?
 
     @State private var hovering = false
 
@@ -91,7 +93,8 @@ struct GroupMessageBubble: View {
             Button("Copiar como Markdown") { Clipboard.copy(message.text) }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(Self.spokenKind(message.kind)) de \(name)\(isOrchestrator ? ", orquestrador" : "")")
+        .accessibilityLabel("\(Self.spokenKind(message.kind)) de \(name)\(isOrchestrator ? ", orquestrador" : "")"
+                            + (inReplyTo.map { ", em resposta \(PortugueseArticle.contraction(for: $0)) \($0)" } ?? ""))
         .accessibilityAction(named: "Copiar resposta") { Clipboard.copy(MarkdownBlocks.plainText(of: message.text)) }
     }
 
@@ -122,6 +125,13 @@ struct GroupMessageBubble: View {
                     .font(Typography.small)
                     .foregroundStyle(Palette.faint)
                     .labelStyle(.titleAndIcon)
+            }
+            if let inReplyTo {
+                Label("em resposta \(PortugueseArticle.contraction(for: inReplyTo)) \(inReplyTo)", systemImage: "arrowshape.turn.up.left")
+                    .font(Typography.small)
+                    .foregroundStyle(Palette.faint)
+                    .labelStyle(.titleAndIcon)
+                    .lineLimit(1)
             }
         }
         .padding(.top, Spacing.xs)
@@ -188,11 +198,15 @@ struct GroupAssignmentLine: View {
     let message: OrbMessageItem
     let from: BotLook?
     let to: BotLook?
+    /// The answer to this request in the thread, which "Ver resposta" scrolls to; nil while none came.
+    var replyID: UUID?
     @State private var expanded = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.showThreadItem) private var showThreadItem
 
     var body: some View {
         let toName = to?.name ?? message.to?.name ?? "outro Orb"
+        let fromName = from?.name ?? message.from.name
         VStack(alignment: .leading, spacing: 6) {
             Button {
                 withAnimation(Motion.adapted(Motion.content, reduceMotion: reduceMotion)) { expanded.toggle() }
@@ -203,8 +217,8 @@ struct GroupAssignmentLine: View {
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(Palette.hint)
                     miniAvatar(to)
-                    Text(GroupAssignmentLine.sentence(kind: message.kind, toName: toName, text: message.text,
-                                                      fromChat: message.fromChat == true))
+                    Text(GroupAssignmentLine.sentence(fromName: fromName, kind: message.kind, toName: toName,
+                                                      text: message.text, fromChat: message.fromChat == true))
                         .font(Typography.label)
                         .foregroundStyle(Palette.muted)
                         .lineLimit(1)
@@ -229,12 +243,18 @@ struct GroupAssignmentLine: View {
                     .frame(maxWidth: 680, alignment: .leading)
                     .card(radius: Radius.medium)
                     .transition(.adapted(.unfold, reduceMotion: reduceMotion))
+                if let replyID, let showThreadItem {
+                    Button("Ver resposta") { showThreadItem.run(replyID) }
+                        .buttonStyle(GhostStyle(tint: nil))
+                        .help("Rola até a resposta \(PortugueseArticle.contraction(for: toName) == "à" ? "da" : "do") \(toName)")
+                        .transition(.adapted(.unfold, reduceMotion: reduceMotion))
+                }
             }
         }
         .padding(.leading, gutter)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Pedido de \(from?.name ?? message.from.name) a \(toName)\(message.fromChat == true ? ", a seu pedido" : "")")
+        .accessibilityLabel("Pedido de \(fromName) a \(toName)\(message.fromChat == true ? ", a seu pedido" : "")")
         .accessibilityValue(ExchangeStateMark.spoken(message.state))
     }
 
@@ -249,13 +269,14 @@ struct GroupAssignmentLine: View {
         .accessibilityHidden(true)
     }
 
-    /// "pediu ao Pesquisador: Levante três…" (or "avisou a Lia: …" for a tell: "avisar" takes the article, not "ao"), the first
-    /// line of the text cut to 90 characters.
-    /// A request a member sent from its chat because you asked says so: "pediu ao Atlas, a seu pedido: …".
-    static func sentence(kind: OrbMessageItem.Kind, toName: String, text: String, fromChat: Bool = false) -> String {
+    /// "Atlas pediu ao Pesquisador: Levante três…" (or "Atlas avisou a Lia: …" for a tell: "avisar" takes the article, not
+    /// "ao"), the first line of the text cut to 90 characters. The sender is named: two small avatars alone did not say who
+    /// asked. A request a member sent from its chat because you asked says so: "Pesquisador pediu ao Atlas, a seu pedido: …".
+    static func sentence(fromName: String, kind: OrbMessageItem.Kind, toName: String, text: String,
+                         fromChat: Bool = false) -> String {
         let to = kind == .tell ? "avisou \(PortugueseArticle.article(for: toName))"
             : "pediu \(PortugueseArticle.contraction(for: toName))"
-        return "\(to) \(toName)\(fromChat ? ", a seu pedido" : ""): \(oneLine(text))"
+        return "\(fromName) \(to) \(toName)\(fromChat ? ", a seu pedido" : ""): \(oneLine(text))"
     }
 
     /// The first line of the text, cut to 90 characters (the line says the rest is in the card).
@@ -263,4 +284,60 @@ struct GroupAssignmentLine: View {
         let line = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
         return line.count > 90 ? String(line.prefix(89)) + "…" : line
     }
+}
+
+/// The line of one Orb's requests one after another in a group's thread, folded: the asker, an arrow, the Orbs asked (up to
+/// three, stacked), "Atlas fez 3 pedidos: Pesquisador, Revisor e Lia", the state of all of them and the chevron.
+struct AssignmentsSummary: View {
+    let items: [TranscriptItem]
+    let unfolded: Bool
+
+    var body: some View {
+        let messages = items.compactMap { item -> OrbMessageItem? in
+            if case .orbMessage(let message) = item.kind { return message }
+            return nil
+        }
+        var targets: [UUID] = []
+        for id in messages.compactMap(\.to?.id) where !targets.contains(id) { targets.append(id) }
+        let title = GroupThreadFolding.title(items)
+        return HStack(spacing: 6) {
+            if let asker = messages.first?.from.id { MiniOrb(botID: asker) }
+            Image(systemName: "arrow.right")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(Palette.hint)
+                .accessibilityHidden(true)
+            HStack(spacing: -6) {
+                ForEach(targets.prefix(3), id: \.self) { MiniOrb(botID: $0) }
+            }
+            Text(title)
+                .font(Typography.label)
+                .foregroundStyle(Palette.muted)
+                .lineLimit(1)
+                .help(title)
+            Spacer(minLength: 4)
+            ExchangeStateMark(state: .overall(messages.map(\.state)), showsWord: false)
+            // The chevron turns its sign rather than turning: nothing rotates in a row that folds under Reduce Motion.
+            Image(systemName: unfolded ? "chevron.down" : "chevron.right")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(Palette.faint)
+                .accessibilityHidden(true)
+        }
+        .padding(.leading, gutter)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title)
+        .accessibilityValue(ExchangeStateMark.spoken(.overall(messages.map(\.state))))
+    }
+}
+
+/// Scrolls a group's thread to one of its items (an assignment's "Ver resposta"). Always equal, as `EnlargeBlockAction`: a new
+/// closure at each draw of the thread would redraw every line that reads it.
+struct ShowThreadItemAction: Equatable {
+    let run: @MainActor (UUID) -> Void
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool { true }
+}
+
+extension EnvironmentValues {
+    /// nil outside a group's thread.
+    @Entry var showThreadItem: ShowThreadItemAction?
 }

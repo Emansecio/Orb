@@ -82,6 +82,9 @@ private struct SampleGroups {
         } else if working {
             live.update(runState: .running, typing: [research.id, review.id], work: nil, needsYou: false, unread: 0,
                         usage: GroupUsage(turnsUsed: 9, tokensUsed: 96_000))
+            // What each member does, for the presence line.
+            model.live(research.id).setWork(WorkLine(verb: "Buscando", target: "preços do TickTick", style: .quoted))
+            model.live(review.id).setWork(WorkLine(verb: "Lendo", target: "rascunho.md", style: .code))
         } else {
             live.update(runState: .idle, typing: [], work: nil, needsYou: false, unread: 0, usage: nil)
         }

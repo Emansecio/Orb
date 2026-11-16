@@ -1893,8 +1893,9 @@ private actor Names {
         let asked = try #require(thread.first)
         #expect(asked.from.name == "Pesquisador" && asked.to?.name == "Atlas" && asked.kind == .ask && asked.fromChat == true)
         #expect(asked.text == "Levantem o mercado." && asked.state == .replied)
-        #expect(GroupAssignmentLine.sentence(kind: asked.kind, toName: "Atlas", text: asked.text, fromChat: true)
-            == "pediu ao Atlas, a seu pedido: Levantem o mercado.")
+        #expect(GroupAssignmentLine.sentence(fromName: asked.from.name, kind: asked.kind, toName: "Atlas", text: asked.text,
+                                             fromChat: true)
+            == "Pesquisador pediu ao Atlas, a seu pedido: Levantem o mercado.")
         #expect(thread.contains { $0.from.name == "Atlas" && $0.to?.name == "Revisor" && $0.kind == .ask })
         let final = try #require(thread.last)
         #expect(final.kind == .reply && final.text == "Mercado levantado e revisado." && final.to?.name == "Pesquisador")

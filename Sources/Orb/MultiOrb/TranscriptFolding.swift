@@ -539,11 +539,17 @@ enum ExchangeWords {
         }
     }
 
-    /// The line as the chat of `botID` reads it: that Orb is not named ("Pediu ajuda ao Revisor", "Revisor respondeu"). A
-    /// message of a group, or between two other Orbs, reads as `line(for:)`.
+    /// The line as the chat of `botID` reads it: that Orb is not named ("Pediu ajuda ao Revisor", "Revisor respondeu", and
+    /// with a group, "Pediu ao grupo Lançamento", "O grupo Lançamento respondeu"). A message between two other Orbs reads as
+    /// `line(for:)`.
     static func line(for message: OrbMessageItem, in botID: UUID) -> String {
-        guard message.fromChat != true else { return line(for: message) }
         let to = message.to?.name ?? "outro Orb"
+        if message.fromChat == true {
+            guard message.direction != .post else { return line(for: message) }
+            if message.kind == .ask, message.from.id == botID { return "Pediu ao grupo \(to)" }
+            if message.kind == .reply, message.to?.id == botID { return "O grupo \(message.from.name) respondeu" }
+            return line(for: message)
+        }
         if message.from.id == botID {
             switch message.kind {
             case .ask: return "Pediu ajuda \(PortugueseArticle.contraction(for: to)) \(to)"
@@ -573,5 +579,92 @@ enum PortugueseList {
         case 1: return names[0]
         default: return names.dropLast().joined(separator: ", ") + " e " + names[names.count - 1]
         }
+    }
+}
+
+/// One row of a group's thread: an item as it is, or one Orb's requests one after another (two or more), folded into one line
+/// ("Atlas fez 2 pedidos: Pesquisador e Revisor"). Its id is its first item's, so a run keeps its state while it grows.
+enum GroupThreadRow: Identifiable, Equatable {
+    case single(TranscriptItem)
+    case assignments([TranscriptItem])
+
+    var id: UUID {
+        switch self {
+        case .single(let item): item.id
+        case .assignments(let items): items[0].id
+        }
+    }
+}
+
+/// The folding of a group's thread and the links between its requests and their answers. Pure, so the tests read it.
+enum GroupThreadFolding {
+    /// The thread's rows: adjacent requests (`.ask` posts, not sent from a chat "a seu pedido") of the same Orb become one row.
+    static func rows(_ items: [TranscriptItem]) -> [GroupThreadRow] {
+        var rows: [GroupThreadRow] = []
+        rows.reserveCapacity(items.count)
+        var run: [TranscriptItem] = []
+        func flush() {
+            if run.count >= 2 { rows.append(.assignments(run)) } else { rows += run.map(GroupThreadRow.single) }
+            run.removeAll(keepingCapacity: true)
+        }
+        for item in items {
+            guard let asker = assignmentAsker(item) else {
+                flush()
+                rows.append(.single(item))
+                continue
+            }
+            if let first = run.first, assignmentAsker(first) != asker { flush() }
+            run.append(item)
+        }
+        flush()
+        return rows
+    }
+
+    /// The Orb that asked, for a request that folds with its neighbours; nil for anything else.
+    private static func assignmentAsker(_ item: TranscriptItem) -> UUID? {
+        guard case .orbMessage(let message) = item.kind, message.direction == .post, message.kind == .ask,
+              message.fromChat != true else { return nil }
+        return message.from.id
+    }
+
+    /// Each request of the thread with its answer, and each answer with the Orb that asked, in one pass. A request
+    /// (`.ask` post) and its answer (`.reply` post) share the request's id; an answer to you has no request in the thread.
+    static func links(_ items: [TranscriptItem]) -> (replyOf: [UUID: UUID], askerOf: [UUID: String]) {
+        var asks: [UUID: (item: UUID, asker: String)] = [:]
+        var replyOf: [UUID: UUID] = [:], askerOf: [UUID: String] = [:]
+        for item in items {
+            guard case .orbMessage(let message) = item.kind, message.direction == .post else { continue }
+            if message.kind == .ask {
+                asks[message.requestID] = (item.id, message.from.name)
+            } else if message.kind == .reply, let ask = asks[message.requestID], replyOf[ask.item] == nil {
+                replyOf[ask.item] = item.id
+                askerOf[item.id] = ask.asker
+            }
+        }
+        return (replyOf, askerOf)
+    }
+
+    /// "Atlas fez 2 pedidos: Pesquisador e Revisor"; the same Orb asked twice: "Atlas fez 2 pedidos ao Pesquisador".
+    static func title(_ items: [TranscriptItem]) -> String {
+        let messages = items.compactMap { item -> OrbMessageItem? in
+            if case .orbMessage(let message) = item.kind { return message }
+            return nil
+        }
+        guard let asker = messages.first?.from.name else { return "\(items.count) pedidos" }
+        var targets: [String] = []
+        for name in messages.compactMap(\.to?.name) where !targets.contains(name) { targets.append(name) }
+        let lead = "\(asker) fez \(messages.count) pedidos"
+        if targets.count == 1 { return "\(lead) \(PortugueseArticle.contraction(for: targets[0])) \(targets[0])" }
+        return targets.isEmpty ? lead : "\(lead): \(PortugueseList.join(targets))"
+    }
+}
+
+extension OrbMessageItem.State {
+    /// The state a line that holds several messages shows: a problem first (failed, refused, no answer), then a wait, then
+    /// answered when every message was; cancelled otherwise.
+    static func overall(_ states: [OrbMessageItem.State]) -> OrbMessageItem.State {
+        for problem in [OrbMessageItem.State.failed, .refused, .lost] where states.contains(problem) { return problem }
+        if states.contains(.open) { return .open }
+        return states.allSatisfy { $0 == .replied } ? .replied : .cancelled
     }
 }

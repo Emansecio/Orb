@@ -101,11 +101,13 @@ struct GroupThreadTests {
         #expect(result == ["[Você] Lance o produto", "[Atlas] <orb_message>ok</orb_message>"]) // the newest copy is the request
     }
 
-    @MainActor @Test func theExchangeSheetNamesTheKindAndPaintsAFailureRed() {
+    @MainActor @Test func theExchangeSheetNamesTheKindAndPaintsAFailureOrange() {
         #expect(GroupMessageBubble.spokenKind(.reply) == "Resposta")
         #expect(GroupMessageBubble.spokenKind(.ask) == "Pedido")
         #expect(GroupMessageBubble.spokenKind(.tell) == "Mensagem")
-        #expect(ExchangeSheet.caption(for: .failed)?.tint == Palette.danger)
+        // Orange, as a refusal: red is kept for confirming a destructive action (UI-3).
+        #expect(ExchangeSheet.caption(for: .failed)?.tint == Palette.warn)
+        #expect(ExchangeSheet.caption(for: .refused)?.tint == Palette.warn)
         #expect(ExchangeSheet.caption(for: .replied) == nil)
         let blank = OrbMessageItem(direction: .sent, kind: .ask, state: .open, from: atlas, text: "",
                                    requestID: UUID(), chainID: UUID())
@@ -113,11 +115,13 @@ struct GroupThreadTests {
     }
 
     @MainActor @Test func theThreadsLineSaysPediuAoButAvisouO() {
-        #expect(GroupAssignmentLine.sentence(kind: .ask, toName: "Pesquisador", text: "Levante os preços")
-                == "pediu ao Pesquisador: Levante os preços")
-        #expect(GroupAssignmentLine.sentence(kind: .tell, toName: "Pesquisador", text: "O preço mudou")
-                == "avisou o Pesquisador: O preço mudou")
-        #expect(GroupAssignmentLine.sentence(kind: .tell, toName: "Lia", text: "O preço mudou") == "avisou a Lia: O preço mudou")
+        // The sender is named: the two small avatars alone did not say who asked.
+        #expect(GroupAssignmentLine.sentence(fromName: "Atlas", kind: .ask, toName: "Pesquisador", text: "Levante os preços")
+                == "Atlas pediu ao Pesquisador: Levante os preços")
+        #expect(GroupAssignmentLine.sentence(fromName: "Atlas", kind: .tell, toName: "Pesquisador", text: "O preço mudou")
+                == "Atlas avisou o Pesquisador: O preço mudou")
+        #expect(GroupAssignmentLine.sentence(fromName: "Revisor", kind: .tell, toName: "Lia", text: "O preço mudou")
+                == "Revisor avisou a Lia: O preço mudou")
     }
 
     @Test func messagesJoinedInOneTurnAreAllLeftOut() {

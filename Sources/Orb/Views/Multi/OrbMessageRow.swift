@@ -12,6 +12,7 @@ struct OrbMessageRow: View {
     let botID: UUID
     @State private var unfolded: Bool
     @State private var showsExchange = false
+    @State private var showsWork = false
     /// The card is narrower than `narrowBelow`: the state goes without its word (the icon, the colour and the dot say it), so
     /// the sentence keeps the room. Changes only when the width crosses it, not at every step of a resize.
     @State private var isNarrow = false
@@ -29,12 +30,16 @@ struct OrbMessageRow: View {
         let awaits = message.state == .open
         let line = ExchangeWords.line(for: message, in: botID)
         let preview = Self.preview(message.text)
+        let isGroup = Self.speaksWithGroup(message)
+        // This chat's Orb asked: while the one asked works on it, the card says what it does; if it went wrong, it can be asked again.
+        let ownAsk = message.direction == .sent && message.kind == .ask && message.from.id == botID
         VStack(alignment: .leading, spacing: 0) {
             Button {
                 unfolded.toggle()
             } label: {
                 HStack(spacing: Spacing.m) {
-                    ExchangeGlyph(from: message.from.id, to: to.id, awaits: awaits)
+                    ExchangeGlyph(from: side(message.from, isGroup: isGroup && message.kind == .reply),
+                                  to: side(to, isGroup: isGroup && message.kind == .ask), awaits: awaits)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(line)
                             .font(.system(size: 12, weight: .medium))
@@ -65,6 +70,13 @@ struct OrbMessageRow: View {
             .accessibilityValue(ExchangeStateMark.spoken(message.state))
             .accessibilityHint(unfolded ? "Recolhe a mensagem" : "Desdobra a mensagem")
 
+            if awaits, ownAsk, !isGroup {
+                ExchangeWorkLine(botID: to.id, requestID: message.requestID) { showsWork = true }
+                    .padding(.horizontal, Spacing.m)
+                    .padding(.bottom, Spacing.s)
+                    .transition(AnyTransition.adapted(.unfold, reduceMotion: reduceMotion))
+            }
+
             if unfolded {
                 VStack(alignment: .leading, spacing: Spacing.m) {
                     Text(message.text.isEmpty ? "Sem texto." : message.text)
@@ -72,8 +84,22 @@ struct OrbMessageRow: View {
                         .foregroundStyle(Palette.ink)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    HStack {
+                    let wentWrong = ownAsk && Self.wentWrong(message.state)
+                    if wentWrong, let reason = failureReason() {
+                        Text("Motivo: \(reason)")
+                            .font(Typography.label)
+                            .foregroundStyle(Palette.warn)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    HStack(spacing: Spacing.s) {
                         Spacer(minLength: 0)
+                        if wentWrong {
+                            // Into the composer, not sent: the person reads it and sends it, or changes it.
+                            Button("Pedir de novo") { model.addToDraft(Self.retryDraft(for: message), for: botID) }
+                                .buttonStyle(GhostStyle(tint: nil))
+                                .help("Escreve o pedido de novo na sua mensagem; você confere e envia")
+                        }
                         Button("Ver troca") { showsExchange = true }
                             .buttonStyle(GhostStyle(tint: nil))
                     }
@@ -94,6 +120,41 @@ struct OrbMessageRow: View {
             let messages = found.isEmpty ? [message] : found
             ExchangeSheet(messages: messages, parties: ExchangeSource.parties(of: messages))
         }
+        .sheet(isPresented: $showsWork) {
+            SideWorkSheet(botID: to.id, requestID: message.requestID)
+        }
+    }
+
+    /// One side of the exchange: the Orb, or, for a group, its members (the orchestrator first, as `ref` carries its id), without
+    /// this chat's Orb, which is already the other side.
+    private func side(_ ref: OrbRef, isGroup: Bool) -> [UUID] {
+        guard isGroup, let group = message.groupID.flatMap(model.group) else { return [ref.id] }
+        return [ref.id] + group.memberIDs.filter { $0 != ref.id && $0 != botID }
+    }
+
+    /// The answer that said why the request went wrong, from this chat (read only once the card is unfolded).
+    private func failureReason() -> String? {
+        let reply = model.orbTranscript(botID).items.lazy.compactMap { item -> OrbMessageItem? in
+            if case .orbMessage(let reply) = item.kind, reply.direction == .reply, reply.requestID == message.requestID { return reply }
+            return nil
+        }.first
+        return reply.map { MemoryText.clip(MemoryText.flatten($0.text), 300) }.flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    /// A request sent from the chat to a group, or its answer: the group speaks as one, under its orchestrator's id.
+    static func speaksWithGroup(_ message: OrbMessageItem) -> Bool {
+        message.fromChat == true && message.direction != .post && message.groupID != nil
+    }
+
+    static func wentWrong(_ state: OrbMessageItem.State) -> Bool {
+        [.failed, .refused, .lost].contains(state)
+    }
+
+    /// What "Pedir de novo" writes for the person to send: "Peça de novo ao Revisor: Confere os impostos."
+    static func retryDraft(for message: OrbMessageItem) -> String {
+        let to = message.to?.name ?? "outro Orb"
+        let target = speaksWithGroup(message) ? "ao grupo \(to)" : "\(PortugueseArticle.contraction(for: to)) \(to)"
+        return "Peça de novo \(target): \(message.text)"
     }
 
     /// The start of the message under the sentence: its first line, at most 200 characters. A reply can be 6,000 long, and
@@ -130,8 +191,8 @@ struct ExchangeStateMark: View {
 
     private var tint: Color {
         switch state {
-        case .failed: Palette.danger
-        case .refused: Palette.warn
+        // Orange, not red: red is kept for confirming a destructive action (UI-3).
+        case .failed, .refused: Palette.warn
         case .replied: Palette.muted
         case .lost: Palette.warn // no answer came: the person may need to decide
         case .open, .cancelled: Palette.faint
@@ -233,8 +294,8 @@ struct FoldedThread<Summary: View, Child: View>: View {
     }
 }
 
-/// The line of a folded exchange: the Orbs it speaks with, stacked (up to three, 6 pt over each other), the count and the
-/// partners ("3 mensagens com Revisor"), and the chevron.
+/// The line of a folded exchange, drawn as the card of one message so both read as one family: the Orbs it speaks with,
+/// stacked (up to three), the count and the partners ("3 mensagens com Revisor"), the state of all of them and the chevron.
 struct ExchangeSummary: View {
     let items: [TranscriptItem]
     let botID: UUID
@@ -242,21 +303,29 @@ struct ExchangeSummary: View {
 
     var body: some View {
         let partners = TranscriptFolding.partners(of: items, botID: botID)
-        HStack(spacing: 8) {
-            HStack(spacing: -6) {
-                ForEach(partners.prefix(3), id: \.id) { partner in
-                    MiniOrb(botID: partner.id)
-                }
-            }
+        let state = OrbMessageItem.State.overall(items.compactMap { item in
+            if case .orbMessage(let message) = item.kind { return message.state }
+            return nil
+        })
+        HStack(spacing: Spacing.m) {
+            MiniOrbs(ids: partners.map(\.id))
             Text(TranscriptFolding.exchangeTitle(items, botID: botID))
-                .font(Typography.label)
-                .foregroundStyle(Palette.muted)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Palette.secondary)
                 .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(-1)
+            ExchangeStateMark(state: state)
             // The chevron turns its sign rather than turning: nothing rotates in a row that folds under Reduce Motion.
             Image(systemName: unfolded ? "chevron.down" : "chevron.right")
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(Palette.faint)
         }
+        .padding(.horizontal, Spacing.m)
+        .padding(.vertical, Spacing.s)
+        .card(radius: Radius.card, stroke: state == .open ? Palette.accentText.opacity(0.3) : Palette.line)
+        .frame(maxWidth: cardWidth, alignment: .leading)
         .accessibilityElement(children: .combine)
+        .accessibilityValue(ExchangeStateMark.spoken(state))
     }
 }

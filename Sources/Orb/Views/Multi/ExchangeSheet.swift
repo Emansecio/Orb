@@ -155,7 +155,7 @@ struct ExchangeSheet: View {
         switch state {
         case .open: ("Aguardando resposta", Palette.faint)
         case .replied: nil
-        case .failed: ("Não deu certo", Palette.danger)
+        case .failed: ("Não deu certo", Palette.warn) // red is kept for destructive confirmations (UI-3)
         case .refused: ("Recusado", Palette.warn)
         case .cancelled: ("Cancelado", Palette.faint)
         // Warn, not faint: no answer is waiting for a decision.

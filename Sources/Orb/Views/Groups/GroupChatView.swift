@@ -30,7 +30,8 @@ extension AppModel {
             let bot = live(id)
             return GroupPresenceItem(id: id, name: look.name, orb: look.orb,
                                      state: GroupPresence.state(of: bot.activity, needsYou: bot.needsYou,
-                                                                isOrchestrator: id == group.orchestratorID))
+                                                                isOrchestrator: id == group.orchestratorID),
+                                     step: bot.shownWork?.phrase)
         }
     }
 }
@@ -226,6 +227,7 @@ private struct GroupThreadView: View {
         let lastSpeaker = items.last { Self.answerer($0) != nil }?.id
         let continuing = Self.continuingAnswers(items)
         let lastSentID = items.last { if case .user = $0.kind { true } else { false } }?.id
+        let links = GroupThreadFolding.links(items)
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Spacing.cardSpacing) {
@@ -233,15 +235,23 @@ private struct GroupThreadView: View {
                         GroupEmptyState(group: group)
                             .transition(.opacity)
                     }
-                    ForEach(items) { item in
-                        GroupRow(item: item, orchestratorID: group.orchestratorID, isLastSpeaker: item.id == lastSpeaker,
-                                 continuesPrevious: continuing.contains(item.id), look: look(of: item),
-                                 toLook: toLook(of: item))
-                            .equatable()
-                            // Each row comes in by itself, as in an Orb's chat; the list does not animate.
-                            .modifier(RowEntrance(id: item.id, style: item.kind.entrance, isNew: entrances.isNew(item.id),
-                                                  entrances: entrances))
-                            .transition(.identity)
+                    ForEach(GroupThreadFolding.rows(items)) { row in
+                        Group {
+                            switch row {
+                            case .single(let item):
+                                groupRow(item, lastSpeaker: lastSpeaker, continuing: continuing, links: links)
+                            case .assignments(let run):
+                                FoldedThread(items: run) { unfolded in
+                                    AssignmentsSummary(items: run, unfolded: unfolded)
+                                } child: { item in
+                                    groupRow(item, lastSpeaker: lastSpeaker, continuing: continuing, links: links)
+                                }
+                            }
+                        }
+                        // Each row comes in by itself, as in an Orb's chat; the list does not animate.
+                        .modifier(RowEntrance(id: row.id, style: Self.entrance(of: row), isNew: entrances.isNew(row.id),
+                                              entrances: entrances))
+                        .transition(.identity)
                     }
                     Color.clear.frame(height: 1).id(bottomID)
                 }
@@ -265,6 +275,9 @@ private struct GroupThreadView: View {
                     proxy.scrollTo(bottomID, anchor: .bottom)
                 }
             }
+            .environment(\.showThreadItem, ShowThreadItemAction { [reduceMotion] id in
+                withAnimation(ScrollMotion.animation(reduceMotion: reduceMotion)) { proxy.scrollTo(id, anchor: .center) }
+            })
             .onChange(of: lastSentID) {
                 // What you just sent always shows, and brings the thread back to following its end (when it was
                 // following, the change of the thread above already scrolls).
@@ -272,6 +285,21 @@ private struct GroupThreadView: View {
                 followsBottom = true
                 withAnimation(ScrollMotion.animation(reduceMotion: reduceMotion)) { proxy.scrollTo(bottomID, anchor: .bottom) }
             }
+        }
+    }
+
+    private func groupRow(_ item: TranscriptItem, lastSpeaker: UUID?, continuing: Set<UUID>,
+                          links: (replyOf: [UUID: UUID], askerOf: [UUID: String])) -> some View {
+        GroupRow(item: item, orchestratorID: group.orchestratorID, isLastSpeaker: item.id == lastSpeaker,
+                 continuesPrevious: continuing.contains(item.id), look: look(of: item), toLook: toLook(of: item),
+                 replyID: links.replyOf[item.id], inReplyTo: links.askerOf[item.id])
+            .equatable()
+    }
+
+    private static func entrance(of row: GroupThreadRow) -> EntranceStyle {
+        switch row {
+        case .single(let item): item.kind.entrance
+        case .assignments(let items): items[0].kind.entrance
         }
     }
 
@@ -315,10 +343,15 @@ private struct GroupRow: View, Equatable {
     let look: BotLook?
     /// The look of the Orb an assignment goes to.
     let toLook: BotLook?
+    /// An assignment's answer in the thread.
+    let replyID: UUID?
+    /// The Orb whose request an answer replies to.
+    let inReplyTo: String?
 
     nonisolated static func == (a: GroupRow, b: GroupRow) -> Bool {
         a.item == b.item && a.orchestratorID == b.orchestratorID && a.isLastSpeaker == b.isLastSpeaker
             && a.continuesPrevious == b.continuesPrevious && a.look == b.look && a.toLook == b.toLook
+            && a.replyID == b.replyID && a.inReplyTo == b.inReplyTo
     }
 
     var body: some View {
@@ -329,12 +362,12 @@ private struct GroupRow: View, Equatable {
             if GroupRow.isAnswer(message) {
                 GroupMessageBubble(message: message, look: look,
                                    isOrchestrator: message.from.id == orchestratorID, isLastSpeaker: isLastSpeaker,
-                                   showsHeader: !continuesPrevious)
+                                   showsHeader: !continuesPrevious, inReplyTo: inReplyTo)
                 // Words of the same Orb that follow each other sit under the first, 10 pt apart (the list gives 14): a
                 // paragraph's gap and a little more, without bubbles to tell them apart.
                 .padding(.top, continuesPrevious ? -4 : 0)
             } else {
-                GroupAssignmentLine(message: message, from: look, to: toLook)
+                GroupAssignmentLine(message: message, from: look, to: toLook, replyID: replyID)
             }
         case .event(let event):
             EventLineView(event: event, centered: true)
