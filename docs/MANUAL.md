@@ -532,7 +532,8 @@ Cada conversa também guarda o último modelo usado nela: voltar a ela, ou abrir
 conversa nova começa com o que estava em uso. O
 que uma conversa disse vai para a memória quando você sai dela, e aí as outras encontram. Com mais de uma, a lateral lista as
 conversas do Orb aberto embaixo dele: as três mais recentes, a que está na tela e as que têm algo não lido ("N conversas mais antigas" mostra
-o resto), com o título tirado da primeira mensagem. O menu de cada uma renomeia ou apaga; o que ela guardou na memória fica.
+o resto), com o título tirado da primeira mensagem e, ao lado, o horário da última mudança: a sua mensagem ou o que chegou
+depois dela (o fim de uma rotina, um aviso, uma resposta). O menu de cada uma renomeia ou apaga; o que ela guardou na memória fica.
 A seta ao lado do nome do Orb (ou **Recolher conversas** no menu dele) esconde a lista embaixo da linha e fica assim até você
 abrir de novo. Passar o mouse sobre qualquer Orb mostra um **+** ao lado do nome, que abre uma conversa nova nele.
 
@@ -542,7 +543,7 @@ espera ela acabar.
 
 A resposta de um pedido a outro Orb volta para a conversa que pediu, mesmo com outra na tela: o Orb continua nela por trás, do
 mesmo jeito. Os avisos de outros Orbs, o fim de uma rotina, um processo em segundo plano que terminou e as novidades dos grupos
-vão para a conversa em que você escreveu por último. O que chega numa conversa que não está na tela deixa um ponto ao lado
+vão para a conversa que mudou por último. O que chega numa conversa que não está na tela deixa um ponto ao lado
 dela na lateral, até você abri-la; se a conversa que pediu foi apagada, a resposta vai para a mais recente.
 
 Conversas guardadas por versões antigas do Orb (o antigo "Nova conversa", de antes de 11/10) voltam para dentro da primeira

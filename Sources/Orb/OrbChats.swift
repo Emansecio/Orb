@@ -1,14 +1,15 @@
 import Foundation
 
 /// The conversations of an Orb that has more than one (an Orb with only its first has none): which one the chat shows,
-/// and each one's title, when you last wrote in it and whether something landed in it unseen, newest first. Saved with the app's state; each conversation is a
+/// and each one's title, when it last changed and whether something landed in it unseen, newest first. Saved with the app's state; each conversation is a
 /// file of its own (`Store.conversationURL`), and the first one's id is the Orb's. They share the Orb's memory, folder and
 /// tools, never their history.
 struct OrbChats: Codable, Equatable, Sendable {
     struct Entry: Codable, Equatable, Sendable, Identifiable {
         var id: UUID
         var title: String
-        /// When you last wrote in it (when it was made, before that).
+        /// When it last changed: your last message there, or what landed in it since (a routine's line, another Orb's answer,
+        /// a notice), or when it was made.
         var updated: Date
         /// Something landed in it while another one was on show (an answer, a notice, the end of a turn): true until you
         /// open it. nil, not false, so the file only names the ones that have it.
@@ -48,14 +49,20 @@ struct OrbChats: Codable, Equatable, Sendable {
 
     /// You wrote `text` in the conversation: it goes to the top, and a new one takes its title from its first message.
     mutating func wrote(_ text: String, in id: UUID, at date: Date) {
-        guard let index = list.firstIndex(where: { $0.id == id }) else { return }
+        guard landed(in: id, at: date), list[0].title == Self.newTitle else { return }
+        let title = RoutineRun.preview(of: text, limit: Self.titleLength)
+        if !title.isEmpty { list[0].title = title }
+    }
+
+    /// Something landed in the conversation (a routine's run, a notice, another Orb's answer): its row shows when, and it
+    /// goes to the top, as when you write in it. False for a conversation that is not in the list any more.
+    @discardableResult
+    mutating func landed(in id: UUID, at date: Date) -> Bool {
+        guard let index = list.firstIndex(where: { $0.id == id }) else { return false }
         var entry = list.remove(at: index)
         entry.updated = date
-        if entry.title == Self.newTitle {
-            let title = RoutineRun.preview(of: text, limit: Self.titleLength)
-            if !title.isEmpty { entry.title = title }
-        }
         list.insert(entry, at: 0)
+        return true
     }
 
     /// An empty name keeps the one it had.

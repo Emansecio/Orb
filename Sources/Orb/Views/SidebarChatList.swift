@@ -102,8 +102,8 @@ enum SidebarMarker: Equatable {
     }
 }
 
-/// One conversation in the list: its title and when you last wrote in it; a ring while the Orb works on it, a dot when
-/// something landed in it unseen.
+/// One conversation in the list: its title and when it last changed (your message or what landed in it since); a ring while
+/// the Orb works on it, a dot when something landed in it unseen.
 private struct SidebarChatRow: View {
     let entry: OrbChats.Entry
     let isShown: Bool

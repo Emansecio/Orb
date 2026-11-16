@@ -541,10 +541,13 @@ extension BotSession {
         }
         // The messages of the conversation the turn worked on: `endWorkElsewhere` below puts the one on show in its place.
         let reviewMessages = conversation?.messages
+        // The row shows when the conversation last changed, as a routine's line does, and not only when you last wrote there.
+        // (A pulse that answered NOTHING left nothing to read, so it leaves no trace in the list either.)
         if let working = workingChatID {
-            if pulseLeftLine { model.markUnread(working, of: id) } // it ended where you were not looking (a NOTHING left nothing)
+            if pulseLeftLine { model.chatGotActivity(in: working, of: id) } // it ended where you were not looking
             endWorkElsewhere() // the one on show takes the turn machinery back
         } else if routineID == nil {
+            if pulseLeftLine, let chat = conversationChat { model.chatGotActivity(in: chat, of: id) }
             scheduleSave(delay: 0) // a routine's was written by `finishRoutineRun`
         }
         if routineID == nil {

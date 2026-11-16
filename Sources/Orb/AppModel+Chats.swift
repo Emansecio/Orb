@@ -124,7 +124,7 @@ extension AppModel {
     // MARK: Where things land
 
     /// The conversation of the Orb that gets what does not belong to one of them: a notice from another Orb, a routine's
-    /// run, a process that ended, a group's news. The one you wrote in last (the list is newest first); the first one
+    /// run, a process that ended, a group's news. The one that changed last (the list is newest first); the first one
     /// while the Orb has only that.
     func latestChat(of botID: UUID) -> UUID { live(botID).chats?.list.first?.id ?? botID }
 
@@ -139,23 +139,26 @@ extension AppModel {
         return chat
     }
 
-    /// A line in one of the Orb's conversations (`chat`, or the latest) wherever it is (`BotSession.changeChat`): one that
-    /// is not on show gets its dot.
-    /// `marksUnread` false: a line that may yet go with nothing to read (the pulse's `pulseResumed`).
+    /// A line in one of the Orb's conversations (`chat`, or the latest) wherever it is (`BotSession.changeChat`): its row
+    /// shows that time and it goes to the top, and one that is not on show gets its dot.
+    /// `marksUnread` false: a line that may yet go with nothing to read (the pulse's `pulseResumed`), which then leaves no
+    /// dot and no time in the list for it.
     @discardableResult
     func appendToChat(_ kind: TranscriptItem.Kind, of botID: UUID, in chat: UUID? = nil, marksUnread: Bool = true) -> (chat: UUID, item: UUID)? {
         guard bot(botID) != nil else { return nil }
         let session = session(botID), target = chatOrLatest(chat, of: botID), item = TranscriptItem(kind)
         if target == session.conversationChat { session.ensureLoaded() } // read with the rest, as a line of the chat always was
         session.changeChat(target) { $0.items.append(item) }
-        if marksUnread { markUnread(target, of: botID) }
+        if marksUnread { chatGotActivity(in: target, of: botID) }
         return (target, item.id)
     }
 
-    /// Something landed in one of the Orb's conversations: when it is not the one on show, its row gets a dot until you
-    /// open it.
-    func markUnread(_ chat: UUID, of botID: UUID) {
-        guard var chats = live(botID).chats else { return }
+    /// Something changed in one of the Orb's conversations without you writing there (a routine's run, a notice, the answer
+    /// of a task that ended behind another one): its row shows when, not only when you last wrote in it, it goes to the top,
+    /// and one that is not on show gets its dot until you open it.
+    func chatGotActivity(in chat: UUID, of botID: UUID) {
+        guard var chats = live(botID).chats, chats.title(of: chat) != nil else { return }
+        chats.landed(in: chat, at: .now)
         chats.markUnread(chat)
         setChats(chats, for: botID)
     }

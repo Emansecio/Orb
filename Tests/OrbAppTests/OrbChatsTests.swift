@@ -47,6 +47,20 @@ struct OrbChatsListTests {
         #expect(chats.title(of: orb) == OrbChats.firstTitle)
     }
 
+    @Test func whatLandsInAConversationMovesItUpWithThatTime() {
+        let orb = UUID(), other = UUID(), gone = UUID()
+        let (written, landed) = (Date.now.addingTimeInterval(-3600), Date.now)
+        var chats = OrbChats(first: orb, updated: .distantPast)
+        chats.add(other, at: written) // you wrote there an hour ago: it is on top
+        chats.active = other
+        chats.landed(in: orb, at: landed) // a routine's line landed in the Orb's first one
+        #expect(chats.list.map(\.id) == [orb, other], "the conversation that changed goes to the top")
+        #expect(chats.list.map(\.updated) == [landed, written], "its row shows the last change, not only your message")
+        var unchanged = chats
+        let landedThere = unchanged.landed(in: gone, at: landed) // a conversation that is gone changes nothing
+        #expect(!landedThere && unchanged == chats)
+    }
+
     @Test func aLongFirstMessageIsCutAndABlankNameKeepsTheOldOne() {
         let orb = UUID(), new = UUID()
         var chats = OrbChats(first: orb, updated: .now)
@@ -712,12 +726,48 @@ struct OrbChatsListTests {
 
         model.appendToChat(.notice("Aqui."), of: orb, in: orb)
         #expect(notices() == ["Aqui."])
-        #expect(model.live(orb).chats?.list.last?.unread == nil, "the one on show is being read")
+        #expect(model.live(orb).chats?.list.first { $0.id == orb }?.unread == nil, "the one on show is being read")
 
         model.openChat(other, of: orb)
         await model.loadedConversation(orb)
         #expect(notices() == ["A rotina terminou."])
-        #expect(model.live(orb).chats?.list.first?.unread == nil)
+        #expect(model.live(orb).chats?.list.first { $0.id == other }?.unread == nil, "opening it reads it")
+    }
+
+    @Test @MainActor func aRoutineLineShowsInTheRowAndRaisesItsConversation() async throws {
+        let (model, orb) = setUp(Model())
+        let other = UUID()
+        var chats = OrbChats(first: orb, updated: .distantPast)
+        chats.add(other, at: .distantPast)
+        chats.active = orb
+        chats.wrote("primeiro assunto", in: orb, at: .now.addingTimeInterval(-600)) // written in ten minutes ago: on top
+        model.setChats(chats, for: orb)
+        await model.loadedConversation(orb)
+
+        let before = Date.now
+        model.appendToChat(.notice("A rotina terminou."), of: orb, in: other) // the older one, behind the one on show
+        let after = try #require(model.live(orb).chats)
+        #expect(after.list.map(\.id) == [other, orb], "the conversation that received the line goes to the top")
+        #expect(after.list[0].updated >= before, "its row shows the routine's run, not only when you last wrote there")
+        #expect(after.list[0].unread == true)
+    }
+
+    @Test @MainActor func theAnswerThatEndsBehindAnotherShowsInItsConversationRow() async throws {
+        let gate = TestGate()
+        let client = Model(gate: gate)
+        let (model, orb) = setUp(client)
+        #expect(model.send("trabalho longo", to: orb, fromUser: true))
+        await waitUntil("the model call") { await client.calls.count >= 1 }
+        model.newChat(for: orb)
+        let new = try #require(model.live(orb).chats?.active)
+
+        let before = Date.now
+        await gate.open()
+        await waitUntilIdle(model, orb)
+        let after = try #require(model.live(orb).chats)
+        #expect(after.list.first?.id == orb, "the answer is the newest change of the Orb's list")
+        #expect(after.list[0].updated >= before, "the row says when the answer came")
+        #expect(after.list.last?.id == new)
     }
 
     @Test @MainActor func onlyTheFirstConversationIsToldWhereYouLeftOff() async throws {
