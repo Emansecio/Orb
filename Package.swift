@@ -15,7 +15,10 @@ let package = Package(
         .target(
             name: "Orb",
             path: "Sources/Orb",
-            exclude: ["Resources"]
+            exclude: ["Resources"],
+            // The driver compares a source's content, not just its date, before recompiling it: a fresh checkout (CI
+            // restoring .build, or switching branches) rebuilds only what changed.
+            swiftSettings: [.unsafeFlags(["-enable-incremental-file-hashing"])]
         ),
         .executableTarget(
             name: "OrbMain",
@@ -38,7 +41,10 @@ let package = Package(
             // Any change to a declaration of the app recompiles every test file (~290), and a third of that time was debug
             // info nobody reads: Swift Testing reports failures by source location, not through it (measured: a batch of 24
             // test files in 36 s instead of 59 s). The app keeps its debug info.
-            swiftSettings: [.unsafeFlags(["-Xfrontend", "-gnone"], .when(configuration: .debug))]
+            swiftSettings: [
+                .unsafeFlags(["-enable-incremental-file-hashing"]),
+                .unsafeFlags(["-Xfrontend", "-gnone"], .when(configuration: .debug)),
+            ]
         )
     ]
 )

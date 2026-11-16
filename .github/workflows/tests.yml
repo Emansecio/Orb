@@ -1,7 +1,7 @@
 name: Testes
 
-# Um commit só de documentação (docs/ e os .md da raiz) não muda o que se compila nem o que se testa: não roda o CI,
-# que leva mais de 10 minutos. Nenhum teste lê esses arquivos.
+# Um commit só de documentação (docs/ e os .md da raiz) não muda o que se compila nem o que se testa: não roda o CI.
+# Nenhum teste lê esses arquivos.
 on:
   push:
     branches: [main]
@@ -43,6 +43,7 @@ jobs:
       # instalado na imagem: /Applications/Xcode_<versão>.app, sem beta nem release candidate. Se a imagem não tiver
       # nenhum versionado, cai no /Applications/Xcode.app (o Xcode padrão da imagem).
       - name: Selecionar o Xcode mais novo
+        id: xcode
         run: |
           set -euo pipefail
           latest="$(ls -d /Applications/Xcode_*.app 2>/dev/null | grep -E '/Xcode_[0-9]+(\.[0-9]+)*\.app$' | sort -V | tail -n 1 || true)"
@@ -59,14 +60,34 @@ jobs:
           sudo xcode-select -s "$latest/Contents/Developer"
           xcodebuild -version
           swift --version
+          # Chave do cache de build: um compilador diferente invalida tudo o que está em .build.
+          echo "id=$(basename "$latest" .app)-$(swift --version 2>&1 | shasum | cut -c1-12)" >> "$GITHUB_OUTPUT"
 
-      # Sem cache de .build de propósito: o SwiftPM decide o que recompilar pela data dos arquivos, e num checkout novo
-      # todos os fontes são mais recentes que o cache, então ele recompilaria tudo igual. Não há dependências externas
-      # (nem Package.resolved) para baixar. Se o tempo de build incomodar, reavaliar.
+      # O .build da última execução: o driver compara o conteúdo (hash) dos fontes, não só a data
+      # (-enable-incremental-file-hashing no Package.swift), então num checkout novo só recompila o que mudou.
+      - name: Restaurar o build anterior
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            .build
+            !.build/debug/index
+          key: build-debug-${{ steps.xcode.outputs.id }}-${{ github.sha }}
+          restore-keys: build-debug-${{ steps.xcode.outputs.id }}-
 
       # Um build só para o app e os testes: o swift build sozinho deixava o alvo de testes para o swift test compilar depois.
       - name: Compilar
         run: swift build --build-tests
+
+      # Uma parte só grava (as quatro compilam o mesmo), antes dos testes: um teste que falha não perde o build.
+      - name: Guardar o build
+        if: matrix.shard == 1 && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .build
+            !.build/debug/index
+          key: build-debug-${{ steps.xcode.outputs.id }}-${{ github.sha }}
 
       # Em série dentro de cada parte (ORB_TEST_WIDTH=1): a máquina do CI tem poucos núcleos, e com milhares de testes em
       # paralelo os que esperam por algo (processos, servidores falsos, prazos de rede) estouram o tempo. A saída vai
@@ -152,6 +173,7 @@ jobs:
 
       # Mesmo Xcode do job swift (ver o comentário lá).
       - name: Selecionar o Xcode mais novo
+        id: xcode
         run: |
           set -euo pipefail
           latest="$(ls -d /Applications/Xcode_*.app 2>/dev/null | grep -E '/Xcode_[0-9]+(\.[0-9]+)*\.app$' | sort -V | tail -n 1 || true)"
@@ -168,9 +190,32 @@ jobs:
           sudo xcode-select -s "$latest/Contents/Developer"
           xcodebuild -version
           swift --version
+          # Chave do cache de build: um compilador diferente invalida tudo o que está em .build.
+          echo "id=$(basename "$latest" .app)-$(swift --version 2>&1 | shasum | cut -c1-12)" >> "$GITHUB_OUTPUT"
 
+      - name: Restaurar o build anterior
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            .build
+            !.build/release/index
+          key: build-release-${{ steps.xcode.outputs.id }}-${{ github.sha }}
+          restore-keys: build-release-${{ steps.xcode.outputs.id }}-
+
+      # O que este job confere é o #if (DEBUG ausente no release), não o otimizador: sem otimização e sem
+      # whole-module, compila em paralelo e de forma incremental. O build otimizado de verdade é o do scripts/bundle.sh.
       - name: Compilar (release)
-        run: swift build -c release
+        run: swift build -c release -Xswiftc -Onone -Xswiftc -no-whole-module-optimization -Xswiftc -incremental
+
+      - name: Guardar o build
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .build
+            !.build/release/index
+          key: build-release-${{ steps.xcode.outputs.id }}-${{ github.sha }}
 
   # Os testes JVM do app Android (pareamento, quadros, notificações, capturas com o Paparazzi). Em Linux: não precisam
   # de macOS nem de emulador.
