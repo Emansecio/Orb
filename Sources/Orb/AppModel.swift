@@ -2442,13 +2442,16 @@ final class AppModel {
                 return
             }
             let read = await store.readRoutineConversationAsync(routine: routine.id, for: botID)
+            // What its own conversation did just before, when another one is on show (the one the run would park): read here.
+            let home = chat(of: routine)
+            let homeLines = home == shownChat(of: botID) ? nil : await readChat(home, of: botID).value.map(RoutineBackground.lines)
             startingRoutines[botID] = nil
             // Paused while the precheck or the read was under way (up to 90 s): "off" means off for a scheduled run too.
             if gated, routines.first(where: { $0.id == routine.id })?.isEnabled == false {
                 if !isResetting, bot(botID) != nil, sessions[botID]?.turnTask == nil { startNextQueuedWork(for: botID) }
                 return
             }
-            beginRoutine(routine.id, of: botID, read: read, gated: gated, wakeNote: wakeNote)
+            beginRoutine(routine.id, of: botID, read: read, gated: gated, wakeNote: wakeNote, homeLines: homeLines)
             // It did not run (nothing to send, the routine or the Orb gone meanwhile): what waits for the Orb goes on now,
             // as after a turn, instead of waiting for the next message.
             if !isResetting, bot(botID) != nil, sessions[botID]?.turnTask == nil { startNextQueuedWork(for: botID) }
@@ -2473,7 +2476,9 @@ final class AppModel {
                            + "ou o Mac dormindo, e a rotina segue no próximo horário.", at: now)
     }
 
-    private func beginRoutine(_ routineID: UUID, of botID: UUID, read: StoreRead<Conversation>, gated: Bool = true, wakeNote: String? = nil) {
+    /// `homeLines`: what the routine's conversation did just before (`RoutineBackground.lines`), read when it was not on show.
+    private func beginRoutine(_ routineID: UUID, of botID: UUID, read: StoreRead<Conversation>, gated: Bool = true, wakeNote: String? = nil,
+                              homeLines: [String]? = nil) {
         // Waiting again keeps what the run was asked with: "run now" stays ungated, a ring keeps its note.
         func queue() {
             if !queuedRoutines.contains(routineID) { queuedRoutines.append(routineID) }
@@ -2509,7 +2514,11 @@ final class AppModel {
         if let wakeNote {
             own.items.append(TranscriptItem(.notice(wakeNote.isEmpty ? "Acordada por sinal externo." : "Acordada por sinal externo: " + wakeNote)))
         }
-        session.startRoutineRun(routine.id, conversation: own, at: started)
+        // The run belongs to the conversation the routine was made in: narrated there only, told what that one just did (the
+        // one on show is parked and told nothing when it is another).
+        let home = chat(of: routine)
+        session.startRoutineRun(routine.id, conversation: own, at: started, narrating: home,
+                                background: home == session.chatID ? nil : homeLines ?? [])
         let hasPrompt = !routine.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         if hasPrompt, send(routine.prompt, to: botID) {
             setStatus(routineStatus("Pensando", for: botID), of: botID)
@@ -2606,7 +2615,8 @@ final class AppModel {
         guard !isResetting, bot(botID) != nil, routines.contains(where: { $0.id == routineID }) else { return false }
         let session = session(botID)
         ensureLoaded(botID)
-        session.startRoutineRun(routineID, conversation: conversation, at: started, chain: chain)
+        let home = routines.first { $0.id == routineID }.map(chat(of:))
+        session.startRoutineRun(routineID, conversation: conversation, at: started, chain: chain, narrating: home)
         if send(text, to: botID, origin: origin) {
             setStatus(routineStatus("Pensando", for: botID), of: botID)
             return true
@@ -2686,9 +2696,10 @@ final class AppModel {
         recordRun(run, routineID: routineID)
         let outcome: OrbEvent.Outcome = !succeeded ? .failed : run.check?.status == .done ? .goalReached
             : run.check?.status == .attention ? .attention : .finished
-        // In the chat itself: a run that waited can end while the Orb works on another Orb's request, its chat parked.
+        // In the conversation the routine was made in (the latest, if it is gone), wherever that one is: a run that waited can
+        // end while the Orb works on another Orb's request, its chat parked, and another conversation may be on show.
         appendToChat(.event(OrbEvent(kind: .routineRun, actor: OrbRef(bot), detail: routine.name, note: run.summary,
-                                     file: run.reportFile, outcome: outcome, runID: run.id)), of: botID)
+                                     file: run.reportFile, outcome: outcome, runID: run.id)), of: botID, in: routine.chat)
     }
 
     /// Writes a finished run's conversation. One that could not be written (a full disk) is kept here, the only copy,

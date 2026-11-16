@@ -62,8 +62,8 @@ struct SidebarChatList: View {
         .confirmationDialog("Apagar “\(deleting?.title ?? "")”?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
                             presenting: deleting) { entry in
             Button("Apagar conversa", role: .destructive) { model.deleteChat(entry.id, of: botID) }
-        } message: { _ in
-            Text("A conversa sai da lista e o arquivo dela é apagado. O que o Orb guardou na memória fica.")
+        } message: { entry in
+            Text(Self.deleteMessage(routines: model.routines(for: botID, chat: entry.id).count))
         }
     }
 
@@ -73,6 +73,16 @@ struct SidebarChatList: View {
         guard let session = model.sessions[botID] else { return nil }
         if let working = session.workingChatID { return working }
         return model.live(botID).isWorking && session.routineID == nil ? chats.active : nil
+    }
+
+    /// The confirmation of "Apagar conversa": the routines made in it go with it (`AppModel.deleteChat`), so it says how many.
+    nonisolated static func deleteMessage(routines: Int) -> String {
+        let base = "A conversa sai da lista e o arquivo dela é apagado. O que o Orb guardou na memória fica."
+        switch routines {
+        case 0: return base
+        case 1: return base + " A rotina desta conversa também é apagada."
+        default: return base + " As \(routines) rotinas desta conversa também são apagadas."
+        }
     }
 
     /// What the button that unfolds the rest says: it names what is hidden.

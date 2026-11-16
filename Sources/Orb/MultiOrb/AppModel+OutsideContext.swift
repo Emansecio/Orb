@@ -31,7 +31,7 @@ extension AppModel {
         // chat was doing before it acts for it.
         if session.routineID != nil, session.sideKind == nil || session.sideKind == .routine || session.sideKind == .pulse,
            origin.isUser, let chat = session.parkedChat {
-            let lines = RoutineBackground.lines(chat: chat)
+            let lines = session.routineBackground ?? RoutineBackground.lines(chat: chat)
             return lines.isEmpty ? OutsideContext() : OutsideContext(kind: .routine(lines), room: RoutineBackground.room)
         }
         return OutsideContext()

@@ -21,20 +21,27 @@ extension AppModel {
     /// Returns what the Orb is told, and what the chat shows as the tool's result.
     func schedule(_ arguments: JSONValue, orb botID: UUID) throws -> String {
         guard let orb = bot(botID) else { throw ToolError("Este Orb não existe mais.") }
-        let own = routines(for: botID)
+        // A conversation sees, changes and deletes only its own tasks: one made in another is not there for it.
+        let chat = toolChat(botID)
+        let all = routines(for: botID)
+        let own = chat.map { routines(for: botID, chat: $0) } ?? all
         switch try ScheduleCommand(arguments) {
         case .create(let name, let prompt, let schedule, let goal, let enabled, let runNow, let precheck):
             // A run that reads an e-mail or a page must not be able to plant tasks that outlive it.
             if let refusal = sideRunRefusal(botID, routine: "Uma tarefa agendada não cria outras tarefas.") { throw refusal }
-            guard own.count < Self.scheduledTaskLimit else {
+            guard all.count < Self.scheduledTaskLimit else {
                 throw ToolError("Este Orb já tem \(Self.scheduledTaskLimit) tarefas agendadas. Apague alguma antes (action delete).")
             }
-            guard !own.contains(where: { $0.name.sameName(as: name) }) else {
-                throw ToolError("Já existe uma tarefa chamada “\(name)”. Escolha outro nome ou apague a antiga.")
+            // Names stay one per Orb: the Rotinas page and the chat's "Rotina criada" line find a task by its name.
+            if let twin = all.first(where: { $0.name.sameName(as: name) }) {
+                throw ToolError(own.contains { $0.id == twin.id }
+                                ? "Já existe uma tarefa chamada “\(name)”. Escolha outro nome ou apague a antiga."
+                                : "Já existe uma tarefa chamada “\(name)” em outra conversa deste Orb. Escolha outro nome.")
             }
             var routine = Routine(name: name, botID: botID, prompt: prompt, schedule: schedule, goal: goal.map { RoutineGoal(target: $0) })
             routine.isEnabled = enabled
             routine.precheck = precheck
+            routine.chatID = chat ?? shownChat(of: botID)
             routines.append(routine)
             show(routine, of: botID)
             if runNow { runRoutine(routine.id, manual: true) }
@@ -102,6 +109,16 @@ extension AppModel {
         }
     }
 
+    /// The conversation a turn of the Orb works for: a chat's turn, its own (`BotSession.conversationChat`); a routine's run,
+    /// the routine's. nil for another side run (a request, a group, a pulse), which may only list and pause: all of the Orb's.
+    private func toolChat(_ botID: UUID) -> UUID? {
+        guard let session = sessions[botID] else { return nil }
+        if let chat = session.conversationChat { return chat }
+        guard let running = session.routineID, session.sideKind == nil || session.sideKind == .routine,
+              let routine = routines.first(where: { $0.id == running }) else { return nil }
+        return chat(of: routine)
+    }
+
     /// Why a turn that is not the Orb's own chat may not change its tasks (nil in the chat). `routine` is the refusal of a
     /// routine's run; a request from another Orb and a group's turn (`routineID` marks them too) are told what they are and what
     /// to do instead.
@@ -136,7 +153,7 @@ extension AppModel {
     /// Lets the panel show the new task, when it is on screen for this Orb: its tab opens and the row is highlighted
     /// for a moment (with the tap that goes with it). Another Orb's panel, or none, is left alone.
     private func show(_ routine: Routine, of botID: UUID) {
-        guard showInspector, selectedBotID == botID else { return }
+        guard showInspector, selectedBotID == botID, chat(of: routine) == shownChat(of: botID) else { return }
         freshRoutine = routine.id
         request(.showTab(.routines), of: botID)
         Task { [weak self] in
@@ -156,7 +173,7 @@ extension [Routine] {
             throw ToolError("Há \(matches.count) tarefas chamadas “\(name)”. Peça ao usuário para renomear uma na tela de Rotinas.")
         }
         if let found = matches.first { return found }
-        throw ToolError("Não achei a tarefa “\(name)”. As deste Orb: \(isEmpty ? "nenhuma" : map { "“\($0.name)”" }.joined(separator: ", ")).")
+        throw ToolError("Não achei a tarefa “\(name)”. As desta conversa: \(isEmpty ? "nenhuma" : map { "“\($0.name)”" }.joined(separator: ", ")).")
     }
 }
 

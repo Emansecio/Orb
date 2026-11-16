@@ -713,8 +713,15 @@ struct Routine: Identifiable, Codable, Sendable {
     /// The model of this routine's runs ("provider/model"); nil means the Orb's. A routine that runs often pays for its
     /// history at every run, so it may be worth a cheaper model than the one the Orb talks with (`RoutineCost`).
     var model: String?
+    /// The conversation of the Orb (`OrbChats`) the routine was made in, the only one that sees it, narrates its runs and
+    /// gets their lines. nil in routines made before routines had one: those were made in the Orb's first conversation
+    /// (`chat`).
+    var chatID: UUID?
 
     static let keptRuns = 10
+
+    /// The conversation the routine belongs to; the Orb's first one (whose id is the Orb's) for an older routine.
+    var chat: UUID { chatID ?? botID }
 
     var nextRun: Date { schedule.next(after: lastRun ?? createdAt) }
 
@@ -786,6 +793,7 @@ extension Routine {
         precheck = (try? c.decodeIfPresent(RoutinePrecheck.self, forKey: .precheck)) ?? nil
         contextMemory = (try? c.decodeIfPresent(ContextMemoryLevel.self, forKey: .contextMemory)) ?? nil
         model = (try? c.decodeIfPresent(String.self, forKey: .model)) ?? nil
+        chatID = (try? c.decodeIfPresent(UUID.self, forKey: .chatID)) ?? nil
         followUps = try c.lossyArray(.followUps)
     }
 }

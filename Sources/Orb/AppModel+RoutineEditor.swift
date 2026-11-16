@@ -11,6 +11,8 @@ extension Routine {
         var result = current
         if edited.name != original.name { result.name = edited.name }
         if edited.botID != original.botID { result.botID = edited.botID }
+        // A conversation is one Orb's: moved to another Orb, the routine takes the conversation the editor gave it there.
+        if edited.chatID != original.chatID || edited.botID != original.botID { result.chatID = edited.chatID }
         if edited.prompt != original.prompt { result.prompt = edited.prompt }
         if edited.permissionMode != original.permissionMode { result.permissionMode = edited.permissionMode }
         if edited.contextMemory != original.contextMemory { result.contextMemory = edited.contextMemory }

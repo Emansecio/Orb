@@ -205,6 +205,68 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(model.transcript(bot.id).count <= 1) // at most the routine's one line
     }
 
+    /// A routine works for the conversation it was made in: with another one on show its steps are not narrated there, it is
+    /// told what its own conversation just did, never the one on show, and its line lands in its own (it showed in the
+    /// conversation on show, as if every conversation had it).
+    @Test @MainActor func aRoutineRunsForItsOwnConversationNotTheOneOnShow() async throws {
+        let gate = TestGate()
+        let stub = StubModel(gate: gate)
+        let (model, bot, routine) = setUp(stub, chat: chatWith("assunto da primeira"))
+        let second = UUID()
+        var chats = OrbChats(first: bot.id, updated: .now)
+        chats.add(second, at: .now.addingTimeInterval(-60))
+        chats.active = bot.id // the first one on show
+        chats.wrote("assunto da primeira", in: bot.id, at: .now) // and the latest: where an Orb-wide line would go
+        model.setChats(chats, for: bot.id)
+        store.save(chatWith("assunto da segunda"), for: bot.id, chat: second)
+        store.flush()
+        model.routines[0].chatID = second // made in the second one
+        await model.loadedConversation(bot.id)
+        let shown = model.transcript(bot.id).map(\.id)
+        #expect(shown.count == 2)
+
+        model.runRoutine(routine.id)
+        await model.routineStarted()
+        await waitUntil("the model call") { await stub.calls.count >= 1 }
+        #expect(model.transcript(bot.id).map(\.id) == shown, "not narrated in another conversation")
+        await gate.open()
+        await waitUntilIdle(model, bot.id)
+
+        let prompt = try #require(await stub.calls.received.last?.last { $0.role == .user }).content
+        #expect(prompt.contains("User: assunto da segunda"))
+        #expect(!prompt.contains("assunto da primeira"), "the conversation on show is not the routine's")
+        #expect(notices(model.transcript(bot.id)).isEmpty, "its line is not in the one on show")
+        model.openChat(second, of: bot.id)
+        await model.loadedConversation(bot.id)
+        #expect(notices(model.transcript(bot.id)).last?.hasPrefix("Rotina “Resumo da manhã” terminou") == true)
+    }
+
+    /// Deleting a conversation deletes the routines made in it, and only those; an older routine whose first conversation is
+    /// gone belongs to the latest one, so it is never out of every conversation.
+    @Test @MainActor func deletingAConversationDeletesItsRoutinesAndNotTheOthers() async throws {
+        let (model, bot, routine) = setUp()
+        let second = UUID()
+        var chats = OrbChats(first: bot.id, updated: .now)
+        chats.add(second, at: .now)
+        chats.active = bot.id
+        model.setChats(chats, for: bot.id)
+        var own = Routine(name: "Da segunda", botID: bot.id, prompt: "x", schedule: .daily(hour: 9, minute: 0))
+        own.chatID = second
+        model.routines.append(own)
+        #expect(model.routines(for: bot.id, chat: second).map(\.id) == [own.id])
+        #expect(model.routines(for: bot.id, chat: bot.id).map(\.id) == [routine.id])
+
+        model.deleteChat(second, of: bot.id)
+        #expect(model.routines.map(\.id) == [routine.id])
+
+        var left = OrbChats(first: bot.id, updated: .now)
+        left.add(second, at: .now)
+        left.remove(bot.id) // the first conversation deleted before routines had one
+        model.setChats(left, for: bot.id)
+        #expect(model.chat(of: routine) == second)
+        #expect(model.routines(for: bot.id, chat: second).map(\.id) == [routine.id])
+    }
+
     /// The `schedule` tool's run and run_now start the same run as the Rotinas page's button.
     /// The run happened in a conversation of its own: the chat's next turn is told its report (once), so "o que a rotina
     /// achou?" has an answer.

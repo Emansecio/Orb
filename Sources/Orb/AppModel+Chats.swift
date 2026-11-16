@@ -71,11 +71,13 @@ extension AppModel {
         chats.compactMap { store.readConversation(botID, chat: $0).value?.gatewaySessionID }
     }
 
-    /// Deletes one of the Orb's conversations with its file (what it gave the memory stays there). The one on show gives
-    /// way to the newest one left first.
+    /// Deletes one of the Orb's conversations with its file (what it gave the memory stays there), and the routines made in
+    /// it (the confirmation says so): they work for that conversation only. The one on show gives way to the newest one left
+    /// first.
     func deleteChat(_ chat: UUID, of botID: UUID) {
         guard canDeleteChat(chat, of: botID), var chats = live(botID).chats else { return }
         delegation.cancelChains(startedIn: chat, of: botID) // its "stopped" line lands in the conversation that is going away
+        let ownRoutines = routines(for: botID, chat: chat).map(\.id) // before it goes: then they would seem the latest one's
         chats.remove(chat)
         let session = session(botID)
         // Its Claude Code process, if one is idle, would keep the deleted conversation alive (and its session file) until it expires;
@@ -105,6 +107,7 @@ extension AppModel {
             }
         }
         store.deleteConversation(botID, chat: chat) // after the write of it leaving, on the same queue
+        for id in ownRoutines { deleteRoutine(id) }
     }
 
     /// The title of the conversation a turn still works on after you opened another one; nil when there is none.
@@ -123,8 +126,8 @@ extension AppModel {
 
     // MARK: Where things land
 
-    /// The conversation of the Orb that gets what does not belong to one of them: a notice from another Orb, a routine's
-    /// run, a process that ended, a group's news. The one that changed last (the list is newest first); the first one
+    /// The conversation of the Orb that gets what does not belong to one of them: a notice from another Orb, a process that
+    /// ended, a group's news (a routine's run goes to its own conversation, `chat(of:)`). The one that changed last (the list is newest first); the first one
     /// while the Orb has only that.
     func latestChat(of botID: UUID) -> UUID { live(botID).chats?.list.first?.id ?? botID }
 
@@ -137,6 +140,18 @@ extension AppModel {
     func chatOrLatest(_ chat: UUID?, of botID: UUID) -> UUID {
         guard let chat, isChat(chat, of: botID) else { return latestChat(of: botID) }
         return chat
+    }
+
+    /// The conversation on show in the Orb's chat (the one it opens to while another Orb is on screen).
+    func shownChat(of botID: UUID) -> UUID { sessions[botID]?.chatID ?? live(botID).chats?.active ?? botID }
+
+    /// The conversation a routine works for (`Routine.chat`): the one it was made in, or the latest when that one is gone
+    /// (an older routine whose first conversation was deleted), so no routine is left out of every conversation.
+    func chat(of routine: Routine) -> UUID { chatOrLatest(routine.chat, of: routine.botID) }
+
+    /// The routines of one of the Orb's conversations: a routine made in one conversation is not seen from the others.
+    func routines(for botID: UUID, chat: UUID) -> [Routine] {
+        routines.filter { $0.botID == botID && self.chat(of: $0) == chat }
     }
 
     /// A line in one of the Orb's conversations (`chat`, or the latest) wherever it is (`BotSession.changeChat`): its row

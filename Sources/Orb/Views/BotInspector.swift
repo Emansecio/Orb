@@ -810,11 +810,14 @@ struct BotInspector: View {
 
     @ViewBuilder
     private func routinesTab(_ bot: Bot) -> some View {
-        let routines = model.routines(for: bot.id)
+        // Only the routines of the conversation on show: one made in another conversation works for that one alone.
+        let chat = model.shownChat(of: bot.id)
+        let routines = model.routines(for: bot.id, chat: chat)
         // Each routine is a card of its own, with no heading: "Rotinas" is already the tab's name right above.
         if routines.isEmpty {
             PanelSection {
-                PanelEmptyNote("Nenhuma rotina ainda", systemImage: "clock.badge",
+                PanelEmptyNote(model.routines(for: bot.id).isEmpty ? "Nenhuma rotina ainda" : "Nenhuma rotina nesta conversa",
+                               systemImage: "clock.badge",
                                detail: "Peça a \(bot.name) no chat, como “verifique meus e-mails a cada 30 minutos”, ou crie uma aqui.")
             }
         }
@@ -825,7 +828,7 @@ struct BotInspector: View {
         }
         PanelSection {
             let newRoutine = Button("Nova rotina…", systemImage: "plus") {
-                editingRoutine = Routine(name: "", botID: bot.id, prompt: "", schedule: .daily(hour: 9, minute: 0))
+                editingRoutine = Routine(name: "", botID: bot.id, prompt: "", schedule: .daily(hour: 9, minute: 0), chatID: chat)
             }
             .buttonStyle(SecondaryPillStyle())
             .controlSize(.small)

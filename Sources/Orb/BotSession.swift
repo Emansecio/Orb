@@ -38,6 +38,9 @@ final class BotSession {
     /// The conversation on show when the side run began (`startRoutineRun`): the only one its steps are narrated in. One
     /// opened meanwhile, a new one above all, shows its own items alone. Stale once the run ends, when nothing reads it.
     @ObservationIgnored var narratedChat: UUID?
+    /// What the routine's own conversation did just before its run, when another one was on show as it began (the parked
+    /// chat is then not the routine's): read for the run's first message only (`AppModel.outsideContext`).
+    @ObservationIgnored var routineBackground: [String]?
     /// The conversation a turn still works on after you opened another one (`openChat`): `conversation` is that one,
     /// and the one you opened waits in `parkedChat` until the turn ends (`endWorkElsewhere`). nil the rest of the time.
     var workingChatID: UUID?

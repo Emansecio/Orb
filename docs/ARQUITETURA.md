@@ -321,7 +321,11 @@ renomear ou remover chave exige migração.
   resposta) usa o mesmo estacionamento: `workingChatID` é a conversa do turno, em `conversation`, e a que está na tela fica em
   `parkedChat` até o turno acabar (`BotSession.workElsewhere` / `endWorkElsewhere`). `conversationChat` diz qual conversa está em
   `conversation` (nil durante rotina, pedido ou grupo). O envelope de um pedido guarda a conversa que pediu (`OrbEnvelope.chat`) e
-  a resposta volta para ela; avisos, rotinas, processos e grupos vão para a mais recente (`AppModel.latestChat`). O que muda numa
+  a resposta volta para ela; avisos, processos e grupos vão para a mais recente (`AppModel.latestChat`). Uma rotina é da conversa
+  em que nasceu (`Routine.chatID`; nil, nas antigas, é a primeira, de id igual ao do Orb; `AppModel.chat(of:)` cai na mais recente
+  se ela sumiu): `routines(for:chat:)` filtra o painel e a ferramenta `schedule` (`toolChat`), a execução é narrada só nela
+  (`narratedChat`), recebe dela o `<orb_recent_chat>` (`routineBackground`, lido do arquivo quando outra está na tela) e a linha do
+  fim vai para ela. Apagar a conversa apaga as rotinas dela (`deleteChat`). O que muda numa
   conversa fora da memória vai direto ao arquivo, na fila de gravação (`BotSession.changeChat` → `Store.amend`); uma leitura que
   estava a caminho é refeita (`AppModel.readChat`, contador `amends`), para nunca instalar uma cópia mais velha.
 - As poucas exceções à isolação (`nonisolated(unsafe)` em caches `NSCache` e tabelas de filas) estão marcadas e guardadas por

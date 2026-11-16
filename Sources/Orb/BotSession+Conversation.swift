@@ -189,8 +189,11 @@ extension BotSession {
     /// first (its pending save would otherwise write the routine's conversation in its place): while the routine runs,
     /// only the routine's file changes.
     /// The same for a request from another Orb or a turn in a group (`kind`, `chain`, `serving`: see `sideKind`).
+    /// `narrating`: the conversation the run belongs to (a routine's, `Routine.chat`), the only one its steps are narrated in;
+    /// nil, the one on show. `background`: what that conversation did just before (`RoutineBackground.lines`), when it is not
+    /// the one on show, which is the one parked here.
     func startRoutineRun(_ routineID: UUID, conversation own: Conversation, at started: Date, kind: SideRunKind? = nil,
-                         chain: ChainContext? = nil, serving: UUID? = nil) {
+                         chain: ChainContext? = nil, serving: UUID? = nil, narrating: UUID? = nil, background: [String]? = nil) {
         cancelChunkNote() // the note being written is about the chat that is parked now
         chunkAttempts = [:] // the counts are by message index: another conversation must not inherit them
         model?.cancelEditing(id, keepingEditedText: true) // the edit belongs to the chat that is parked now
@@ -202,7 +205,8 @@ extension BotSession {
             model?.notePlan(chat, chat: chatID, of: id)
             model?.store.save(chat, for: id, chat: chatID)
         }
-        narratedChat = chatID
+        narratedChat = narrating ?? chatID
+        routineBackground = background
         parkedChat = chat
         conversation = own
         sideKind = kind

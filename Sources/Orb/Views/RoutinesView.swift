@@ -1001,7 +1001,18 @@ struct RoutineEditor: View {
                 Picker("Orb", selection: $routine.botID) {
                     ForEach(model.bots) { Text($0.name).tag($0.id) }
                 }
-                .onChange(of: routine.botID) { moveProblem = nil }
+                .onChange(of: routine.botID) {
+                    moveProblem = nil
+                    routine.chatID = model.shownChat(of: routine.botID) // the old Orb's conversation is not one of the new one's
+                }
+                // The routine works for one conversation only: the one it was made in, unless chosen here.
+                if let chats = model.live(routine.botID).chats, chats.list.count > 1 {
+                    let chat = model.chat(of: routine)
+                    Picker("Conversa", selection: Binding(get: { chat }, set: { routine.chatID = $0 })) {
+                        ForEach(chats.list) { Text($0.title).tag($0.id) }
+                    }
+                    .help(chats.title(of: chat) ?? "")
+                }
                 if let moveProblem {
                     Text(moveProblem).font(Typography.label).foregroundStyle(Palette.warn)
                 }
@@ -1255,6 +1266,8 @@ struct RoutineEditor: View {
 
     private func load() {
         opensNew = !isStored
+        // A new routine works for the Orb's conversation on show (the one the panel or the empty chat belongs to).
+        if opensNew == true, routine.chatID == nil { routine.chatID = model.shownChat(of: routine.botID) }
         if original == nil { original = routine }
         let calendar = Calendar.current
         showsAdvanced = routine.permissionMode != nil || routine.contextMemory != nil || routine.model != nil
@@ -1385,6 +1398,16 @@ enum RoutinesSnapshots {
         switch screen {
         case "routine-editor":
             guard let routine = model.routines.first else { return nil }
+            return AnyView(RoutineEditor(routine: routine))
+        case "routine-editor-chats":
+            // Its Orb has two conversations: "Conversa", under "Orb", says which one the routine works for.
+            guard let routine = model.routines.first else { return nil }
+            var chats = OrbChats(first: routine.botID, updated: .now)
+            let other = UUID()
+            chats.add(other, at: .now)
+            chats.rename(other, to: "Planejamento da semana com a equipe de vendas")
+            chats.active = routine.botID
+            model.setChats(chats, for: routine.botID)
             return AnyView(RoutineEditor(routine: routine))
         case "routine-editor-cost":
             // A routine every 30 minutes on the dearest of three priced models: the advice and its way out.

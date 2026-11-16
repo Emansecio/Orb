@@ -101,6 +101,13 @@ struct OrbChatsListTests {
         #expect(SidebarChatList.visible(chats, showsAll: false).count == 6)
     }
 
+    @Test func deletingAConversationSaysTheRoutinesThatGoWithIt() {
+        let base = "A conversa sai da lista e o arquivo dela é apagado. O que o Orb guardou na memória fica."
+        #expect(SidebarChatList.deleteMessage(routines: 0) == base)
+        #expect(SidebarChatList.deleteMessage(routines: 1) == base + " A rotina desta conversa também é apagada.")
+        #expect(SidebarChatList.deleteMessage(routines: 3) == base + " As 3 rotinas desta conversa também são apagadas.")
+    }
+
     @Test func theButtonThatUnfoldsTheRestNamesWhatIsHidden() {
         #expect(SidebarChatList.olderLabel(1) == "1 conversa mais antiga")
         #expect(SidebarChatList.olderLabel(3) == "3 conversas mais antigas")

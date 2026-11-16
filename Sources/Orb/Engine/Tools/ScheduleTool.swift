@@ -157,7 +157,7 @@ struct ScheduleTool: AgentTool {
     static let sideRunSpec = ToolSpec(
         name: "schedule",
         description: """
-        Your scheduled tasks (routines). From a run you can only list them and pause one (name); to create, change or \
+        Your scheduled tasks (routines) in this conversation. From a run you can only list them and pause one (name); to create, change or \
         delete one, propose it in your final message and the user does it in the chat.
         """,
         parameters: .schema([
@@ -175,7 +175,7 @@ struct ScheduleTool: AgentTool {
     private static let fullSpec = ToolSpec(
         name: "schedule",
         description: """
-        Your scheduled tasks (routines), run while the app is open. create: prompt is what each run does, self-contained \
+        Your scheduled tasks (routines) in this conversation, run while the app is open. create: prompt is what each run does, self-contained \
         (nobody answers in a run); goal (optional): what success looks like, pausing it once met; precheck (optional): \
         argv of a program run before each run — JSON {"skip": true} on its last stdout line excuses the run, anything \
         else runs. update: the name and what changes (goal "" removes the goal, precheck [] removes the check); pause, \

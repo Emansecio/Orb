@@ -542,9 +542,16 @@ lado dela na lateral), a faixa acima da caixa de mensagem diz qual é, com **Vol
 espera ela acabar.
 
 A resposta de um pedido a outro Orb volta para a conversa que pediu, mesmo com outra na tela: o Orb continua nela por trás, do
-mesmo jeito. Os avisos de outros Orbs, o fim de uma rotina, um processo em segundo plano que terminou e as novidades dos grupos
+mesmo jeito. Os avisos de outros Orbs, um processo em segundo plano que terminou e as novidades dos grupos
 vão para a conversa que mudou por último. O que chega numa conversa que não está na tela deixa um ponto ao lado
 dela na lateral, até você abri-la; se a conversa que pediu foi apagada, a resposta vai para a mais recente.
+
+Uma rotina é da conversa em que foi criada (no chat, pelo painel ou pelo editor com ela na tela): só essa conversa a vê na aba
+Rotinas do painel e na ferramenta de agendamento do Orb, só ela mostra a execução enquanto roda, recebe o fim de cada execução
+e é contada pela rotina como "o que acabou de acontecer". Pausar ou apagar a rotina numa conversa não mexe nas das outras, e
+dois nomes iguais no mesmo Orb continuam proibidos. O editor da rotina, com mais de uma conversa no Orb, tem **Conversa** para
+passá-la a outra. Apagar uma conversa apaga as rotinas dela, e a confirmação diz quantas. Rotinas criadas antes disso ficam com
+a primeira conversa do Orb.
 
 Conversas guardadas por versões antigas do Orb (o antigo "Nova conversa", de antes de 11/10) voltam para dentro da primeira
 na primeira abertura, na ordem em que aconteceram.

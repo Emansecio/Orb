@@ -521,6 +521,52 @@ struct SchedulePermissionTests {
         #expect(model.routines.count == 1 && model.routines[0].isEnabled)
     }
 
+    /// A task made in one of the Orb's conversations is that conversation's: another conversation does not list, pause or
+    /// delete it (deleting it from there deleted it in every one).
+    @Test @MainActor func aTaskIsSeenAndChangedOnlyFromTheConversationItWasMadeIn() throws {
+        let (model, atlas, _) = setUp()
+        let second = UUID()
+        var chats = OrbChats(first: atlas.id, updated: .now)
+        chats.add(second, at: .now)
+        chats.active = atlas.id
+        model.setChats(chats, for: atlas.id)
+        _ = try run(model, atlas, call("create", name: "Manhã", prompt: "resuma", when: daily9)) // in the first one
+        #expect(model.routines.first?.chatID == atlas.id)
+
+        model.session(atlas.id).chatID = second
+        #expect(try run(model, atlas, call("list")) == "Nenhuma tarefa agendada.")
+        for action in ["pause", "run", "delete"] {
+            #expect(throws: ToolError.self, "\(action)") { try run(model, atlas, call(action, name: "Manhã")) }
+        }
+        #expect(model.routines.count == 1 && model.routines[0].isEnabled)
+        // A name stays one per Orb, and the refusal says where the other one is.
+        let twin = #expect(throws: ToolError.self) { try run(model, atlas, call("create", name: "manhã", prompt: "y", when: daily9)) }
+        #expect(twin?.message.contains("em outra conversa") == true)
+        _ = try run(model, atlas, call("create", name: "Tarde", prompt: "z", when: daily9))
+        #expect(model.routines(for: atlas.id, chat: second).map(\.name) == ["Tarde"])
+        #expect(model.routines(for: atlas.id, chat: atlas.id).map(\.name) == ["Manhã"])
+
+        model.session(atlas.id).chatID = atlas.id
+        #expect(try run(model, atlas, call("delete", name: "Manhã")) == "Apaguei “Manhã”.")
+        #expect(model.routines.map(\.name) == ["Tarde"], "the other conversation keeps its own")
+    }
+
+    /// During a routine's run its tasks are the ones of the routine's conversation, whichever is on show.
+    @Test @MainActor func aRunOfATaskSeesTheTasksOfItsOwnConversation() throws {
+        let (model, atlas, _) = setUp()
+        let second = UUID()
+        var chats = OrbChats(first: atlas.id, updated: .now)
+        chats.add(second, at: .now)
+        model.setChats(chats, for: atlas.id)
+        model.session(atlas.id).chatID = second
+        _ = try run(model, atlas, call("create", name: "Tarde", prompt: "z", when: daily9))
+        model.session(atlas.id).chatID = atlas.id
+        _ = try run(model, atlas, call("create", name: "Manhã", prompt: "resuma", when: daily9))
+        model.session(atlas.id).routineID = model.routines[0].id // "Tarde" runs, the first conversation on show
+        let list = try run(model, atlas, call("list"))
+        #expect(list.contains("“Tarde”") && !list.contains("“Manhã”"))
+    }
+
     @Test @MainActor func aNameIsMatchedWhateverTheCaseAndAccentsButNeverGuessed() throws {
         let (model, atlas, _) = setUp()
         _ = try run(model, atlas, call("create", name: "Resumo de e-mails", prompt: "x", when: daily9))
@@ -603,6 +649,15 @@ struct SchedulePermissionTests {
         let now = Date.now.addingTimeInterval(60)
         let rescheduled = Routine.merged(edited: edited, original: original, current: current, now: now)
         #expect(rescheduled.schedule == .daily(hour: 7, minute: 0) && rescheduled.createdAt == now && rescheduled.lastRun == nil)
+
+        // The conversation is kept unless the editor changed it, and moving to another Orb takes the one given there.
+        current.chatID = UUID()
+        #expect(Routine.merged(edited: edited, original: original, current: current).chatID == current.chatID)
+        var moved = original
+        moved.botID = UUID()
+        #expect(Routine.merged(edited: moved, original: original, current: current).chatID == nil)
+        moved.chatID = UUID()
+        #expect(Routine.merged(edited: moved, original: original, current: current).chatID == moved.chatID)
     }
 
     @Test @MainActor func twoTasksDoNotShareAName() throws {
