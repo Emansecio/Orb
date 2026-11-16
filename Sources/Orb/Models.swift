@@ -236,6 +236,8 @@ struct TranscriptItem: Identifiable, Codable, Sendable, Equatable {
     /// What the turn this answer ended used (`ReplySpend`), kept when the turn ends; nil for every other line, for an
     /// answer whose provider reported nothing and for conversations from before it was kept.
     var spend: ReplySpend?
+    /// Readable reasoning/thinking summary returned by the model for this reply; nil when none or unsupported.
+    var reasoning: String?
 
     init(_ kind: Kind, duringTask: Bool = false) {
         self.kind = kind
@@ -251,6 +253,19 @@ struct TranscriptItem: Identifiable, Codable, Sendable, Equatable {
         duringTask = try? c.decodeIfPresent(Bool.self, forKey: .duringTask) // a mark that cannot be read is no loss
         reaction = try? c.decodeIfPresent(Reaction.self, forKey: .reaction)
         spend = try? c.decodeIfPresent(ReplySpend.self, forKey: .spend)
+        reasoning = try? c.decodeIfPresent(String.self, forKey: .reasoning)
+    }
+}
+
+/// Extracts readable thinking/reasoning text from a model trace, omitting empty or opaque encrypted-only parts.
+enum ReasoningText {
+    static func extract(from trace: ReasoningTrace?) -> String? {
+        guard let trace else { return nil }
+        let parts = trace.parts.compactMap { part -> String? in
+            let trimmed = part.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: "\n\n")
     }
 }
 

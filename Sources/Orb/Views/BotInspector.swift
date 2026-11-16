@@ -57,7 +57,7 @@ struct BotInspector: View {
             let contentKey = ContentKey(tab: tab, bot: botID)
             VStack(spacing: 0) {
                 header(bot)
-                InspectorTabBar(selection: $tab)
+                InspectorTabBar(selection: $tab, botID: bot.id)
                 // The content swaps in a ZStack, cross-fading (§2.13): a grouped Form's own diff is unpredictable, so each
                 // tab is a Form of its own. The key is the tab and the Orb: changing Orbs fades the content too, while the
                 // panel itself (header, tab bar, tasks) stays. The scroll returns to the top with every swap, and the tasks
@@ -264,15 +264,28 @@ struct BotInspector: View {
                 .motion(Motion.crossFade, value: bot.id)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            // "Personalizar" is an icon in the corner: it used to take a whole line under the name for a rare action.
-            Button("Personalizar", systemImage: "paintpalette") { openLookEditor() }
-                .labelStyle(.iconOnly)
-                .buttonStyle(CircleGhostStyle(side: 26, fontSize: 13))
-                .foregroundStyle(Palette.muted)
-                .iconTip("\(Tip.customizeOrb) (\(summary))", label: "Personalizar")
+            HStack(spacing: Spacing.xs) {
+                Button("Personalizar", systemImage: "paintpalette") { openLookEditor() }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(CircleGhostStyle(side: 26, fontSize: 13))
+                    .foregroundStyle(Palette.muted)
+                    .iconTip("\(Tip.customizeOrb) (\(summary))", label: "Personalizar")
+                MoreMenu(name: bot.name) {
+                    Button("Renomear…", systemImage: "pencil") {
+                        tab = .general
+                        isFocusingName = true
+                    }
+                    Button(CommandName.openFolder, systemImage: "folder") { model.openFolder(of: bot.id) }
+                    Divider()
+                    Button("Apagar este Orb…", systemImage: "trash", role: .destructive) {
+                        model.askToDelete(bot.id)
+                    }
+                    .accessibilityLabel("Apagar \(bot.name)")
+                }
+            }
         }
-        // The same side padding as the form's cards below, so the header, the tabs and the cards share edges.
-        .padding(.horizontal, Spacing.xl)
+        // The same side padding as the form's cards below (`PanelMetrics.pageInset`), so header, tabs and cards share edges.
+        .padding(.horizontal, PanelMetrics.pageInset)
         .padding(.top, Spacing.sheetHeaderTop)
         .padding(.bottom, Spacing.m)
     }
@@ -563,24 +576,15 @@ struct BotInspector: View {
         .transition(.quiet)
     }
 
-    /// Under the cards: who made an Orb another made, then, past a divider, "Apagar este Orb…" in neutral text (red is for
-    /// the confirmation button alone). Both sit outside the cards, on the same inset as the notes under a section.
+    /// Under the cards: who made an Orb another made ("Apagar" lives in the header's `⋯` menu).
+    @ViewBuilder
     private func panelFooter(_ bot: Bot) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.s) {
-            if bot.createdByName != nil {
-                CreatedByLine(bot: bot) // MultiOrb (WP3)
-            }
-            Divider().padding(.top, Spacing.xs)
-            // One sheet for the sidebar and here (DeleteOrbDialog.swift). The name is not in the label (it is in the header
-            // above, and a long one was cut), but VoiceOver still hears whose Orb it is.
-            Button("Apagar este Orb…") { model.askToDelete(bot.id) }
-                .buttonStyle(QuietTextStyle())
-                .font(Typography.label)
-                .accessibilityLabel("Apagar \(bot.name)")
+        if bot.createdByName != nil {
+            CreatedByLine(bot: bot) // MultiOrb (WP3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, FormFootnote<EmptyView>.headingInset)
+                .padding(.top, 8)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.leading, FormFootnote<EmptyView>.headingInset)
-        .padding(.top, 8)
     }
 
     // MARK: Pasta e acessos
@@ -672,12 +676,15 @@ struct BotInspector: View {
                 Text(isHome ? "Pasta pessoal" : bot.workingURL.lastPathComponent)
                     .lineLimit(2)
                     .truncationMode(.middle)
-                Text(OrbFolder.display(bot.workingURL)) // "~" for the home folder too, as in Conectores
-                    .font(Typography.small.monospaced())
-                    .foregroundStyle(Palette.muted)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .textSelection(.enabled)
+                HStack(spacing: 4) {
+                    Text(OrbFolder.display(bot.workingURL)) // "~" for the home folder too, as in Conectores
+                        .font(Typography.small.monospaced())
+                        .foregroundStyle(Palette.muted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                    FolderPathCopyButton(path: bot.workingURL.path)
+                }
             }
             .help(bot.workingURL.path)
             Spacer(minLength: Spacing.s)
@@ -903,12 +910,13 @@ struct BotInspector: View {
 /// The panel's tabs: an icon over a short name, the chosen one lit.
 private struct InspectorTabBar: View {
     @Binding var selection: InspectorTab
+    let botID: UUID
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The one highlight slides from the old tab to the new one through this namespace.
     @Namespace private var highlight
 
     var body: some View {
-        // Every name when they all fit (244 pt, the panel's minimum, does with the 20 pt sides: about 195 pt of 204);
+        // Every name when they all fit (244 pt, the panel's minimum, does with the 14 pt sides: about 207 pt of 216);
         // narrower than that, only the chosen tab keeps its name (the rest keep their tip and their VoiceOver label)
         // instead of each one cut ("Memó…") or squeezed.
         ViewThatFits(in: .horizontal) {
@@ -918,7 +926,7 @@ private struct InspectorTabBar: View {
         // Bound to the selection alone, as in the sidebar: the highlight slides and the lit title changes with it; it
         // jumps under Reduce Motion.
         .animation(Motion.selection(reduceMotion: reduceMotion), value: selection)
-        .padding(.horizontal, Spacing.xl)
+        .padding(.horizontal, PanelMetrics.pageInset)
         .padding(.bottom, 8)
         // A hairline under the bar: the tab's content scrolls under it, not into the buttons.
         .overlay(alignment: .bottom) {
@@ -942,6 +950,9 @@ private struct InspectorTabBar: View {
                         Image(systemName: tab.symbol)
                             .frame(height: 16)
                             .font(Typography.text)
+                            .overlay(alignment: .topTrailing) {
+                                if tab == .screen { LiveScreenTabDot(botID: botID) }
+                            }
                         if showsEveryName || isSelected {
                             // One weight for every state: the semibold of the chosen tab widened it and moved its neighbors.
                             // `fixedSize` so the bar measures the whole name and `ViewThatFits` can tell when it does not fit.
@@ -979,6 +990,44 @@ private struct InspectorTabBar: View {
     }
 }
 
+private struct LiveScreenTabDot: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let botID: UUID
+
+    var body: some View {
+        if model.liveScreens.store(botID).phase != .idle {
+            BreathingDot(color: Palette.ok, breathes: !reduceMotion)
+                .frame(width: 5, height: 5)
+                .offset(x: 4, y: -1)
+                .accessibilityHidden(true)
+        }
+    }
+}
+
+private struct FolderPathCopyButton: View {
+    let path: String
+    @State private var flash = CopiedFlash()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Button {
+            Clipboard.copy(path)
+            flash.trigger()
+        } label: {
+            Image(systemName: flash.isOn ? "checkmark" : "doc.on.doc")
+                .font(.system(size: 9.5, weight: .medium))
+                .foregroundStyle(flash.isOn ? Palette.ink : Palette.faint)
+                .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
+                .frame(width: 16, height: 16)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .help(flash.isOn ? "Caminho copiado" : "Copiar caminho da pasta")
+        .accessibilityLabel(flash.isOn ? "Caminho copiado" : "Copiar caminho da pasta")
+    }
+}
+
 /// The Orb's name and role, edited in place. A name with only blanks is not accepted: the old one comes back.
 private struct InspectorHeader: View {
     @Environment(AppModel.self) private var model
@@ -992,6 +1041,8 @@ private struct InspectorHeader: View {
     @State private var isEditingRole = false
     /// Why the name was not kept as typed (blank, or cut at the limit): shown under the field for a few seconds.
     @State private var nameProblem: String?
+    @State private var hoveringName = false
+    @State private var hoveringRole = false
 
     private enum Field { case name, role }
 
@@ -1005,14 +1056,27 @@ private struct InspectorHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             // Two lines before it is cut, Return still ending the edit, as in the role below.
-            TextField("Nome", text: $name, prompt: Text("Nome"), axis: .vertical)
-                .lineLimit(1...2)
-                .font(.system(size: 15, weight: .semibold))
-                .focused($focus, equals: .name)
-                .onKeyPress(.return) {
-                    focus = nil
-                    return .handled
+            HStack(spacing: 4) {
+                TextField("Nome", text: $name, prompt: Text("Nome"), axis: .vertical)
+                    .lineLimit(1...2)
+                    .font(.system(size: 15, weight: .semibold))
+                    .focused($focus, equals: .name)
+                    .onKeyPress(.return) {
+                        focus = nil
+                        return .handled
+                    }
+                if hoveringName && focus != .name {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Palette.hint)
+                        .accessibilityHidden(true)
                 }
+            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .hoverFill(hoveringName && focus != .name, in: .rect(cornerRadius: 6))
+            .padding(.horizontal, -4)
+            .onHover { hoveringName = $0 }
             if let nameProblem {
                 Text(nameProblem)
                     .font(Typography.small)
@@ -1037,16 +1101,30 @@ private struct InspectorHeader: View {
             } else {
                 // A plain button with the same look, so the keyboard reaches it (Space/Return open the field).
                 Button { isEditingRole = true } label: {
-                    Text(role.isEmpty ? "Papel" : role)
-                        .font(Typography.label)
-                        .foregroundStyle(role.isEmpty ? Palette.faint : Palette.secondary)
-                        .lineLimit(2) // a role is a sentence: two lines before the cut (all of it in the hover text)
-                        .multilineTextAlignment(.leading)
-                        .truncationMode(.tail)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
+                    HStack(alignment: .top, spacing: 4) {
+                        Text(role.isEmpty ? "Papel" : role)
+                            .font(Typography.label)
+                            .foregroundStyle(role.isEmpty ? Palette.faint : Palette.secondary)
+                            .lineLimit(2) // a role is a sentence: two lines before the cut (all of it in the hover text)
+                            .multilineTextAlignment(.leading)
+                            .truncationMode(.tail)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        if hoveringRole {
+                            Image(systemName: "pencil")
+                                .font(.system(size: 9.5))
+                                .foregroundStyle(Palette.hint)
+                                .padding(.top, 2)
+                                .accessibilityHidden(true)
+                        }
+                    }
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .hoverFill(hoveringRole, in: .rect(cornerRadius: 6))
+                    .padding(.horizontal, -4)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .onHover { hoveringRole = $0 }
                 // The whole role is one hover away when the line cuts it.
                 .help(role.isEmpty ? "Clique para escrever o papel" : role)
                 .accessibilityLabel("Papel: \(role)")

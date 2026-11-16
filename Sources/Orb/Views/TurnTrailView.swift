@@ -4,8 +4,11 @@ import SwiftUI
 /// reads the transcript itself, so a new reply does not draw it again, and it only shows where it does not cover the text.
 struct RequestRail: View {
     let transcript: OrbTranscript
+    var activeID: UUID? = nil
     let go: (UUID) -> Void
     @State private var isWide = false
+    @State private var isHoveringRail = false
+    @State private var hoveredTitle: String?
 
     private static let minimum = 2
     private static let limit = 40
@@ -13,23 +16,53 @@ struct RequestRail: View {
     private static let wide = TranscriptLayout.column + 96
 
     var body: some View {
+        let wide = Self.wide
         Color.clear
             .allowsHitTesting(false)
-            .onGeometryChange(for: Bool.self) { $0.size.width >= Self.wide } action: { isWide = $0 }
+            .onGeometryChange(for: Bool.self) { $0.size.width >= wide } action: { isWide = $0 }
             .overlay(alignment: .trailing) {
                 if isWide, transcript.requests.count >= Self.minimum { rail }
             }
     }
 
     private var rail: some View {
-        VStack(alignment: .trailing, spacing: 2) {
-            // The latest request is the current one (the chat does not track what is scrolled into view): it stands in ink.
-            let current = transcript.requests.last?.id
-            ForEach(RequestMark.thinned(transcript.requests, limit: Self.limit)) { mark in
-                RequestRailMark(title: mark.title, isCurrent: mark.id == current) { go(mark.id) }
+        let marks = RequestMark.thinned(transcript.requests, limit: Self.limit)
+        let current = activeID.flatMap { id in marks.contains { $0.id == id } ? id : nil } ?? marks.last?.id
+        return HStack(spacing: Spacing.s) {
+            if let hoveredTitle {
+                Text(hoveredTitle)
+                    .font(Typography.small)
+                    .foregroundStyle(Palette.ink)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .card(radius: Radius.small, fill: Palette.surface, stroke: Palette.lineStrong)
+                    .frame(maxWidth: 220, alignment: .trailing)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
             }
+            VStack(alignment: .trailing, spacing: 2) {
+                ForEach(marks) { mark in
+                    RequestRailMark(title: mark.title, isCurrent: mark.id == current, onHover: { hovering in
+                        hoveredTitle = hovering ? mark.title : (hoveredTitle == mark.title ? nil : hoveredTitle)
+                    }) { go(mark.id) }
+                }
+            }
+            .padding(.horizontal, 5)
+            .padding(.vertical, 6)
+            .background {
+                if isHoveringRail {
+                    Capsule(style: .continuous)
+                        .fill(Palette.surface.opacity(0.85))
+                        .overlay(Capsule(style: .continuous).strokeBorder(Palette.line))
+                }
+            }
+            .onHover { isHoveringRail = $0 }
+            .animation(Motion.hover(isHoveringRail), value: isHoveringRail)
         }
         .padding(.trailing, Spacing.l)
+        .animation(Motion.fade, value: hoveredTitle)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Pedidos da conversa")
     }
@@ -38,6 +71,7 @@ struct RequestRail: View {
 private struct RequestRailMark: View {
     let title: String
     var isCurrent = false
+    var onHover: (Bool) -> Void = { _ in }
     let action: () -> Void
     @State private var isHovering = false
 
@@ -45,15 +79,17 @@ private struct RequestRailMark: View {
         Button(action: action) {
             Capsule()
                 .fill(isHovering || isCurrent ? Palette.ink : Palette.muted)
-                .frame(width: isHovering ? 18 : 14, height: 2)
+                .frame(width: isHovering || isCurrent ? 18 : 13, height: 2)
                 .frame(width: 22, height: 9, alignment: .trailing)
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .onHover { isHovering = $0 }
+        .onHover { hovering in
+            isHovering = hovering
+            onHover(hovering)
+        }
         .animation(Motion.hover(isHovering), value: isHovering)
         .clickablePointer()
-        .help(title)
         .accessibilityLabel("Ir para o pedido: \(title)")
     }
 }

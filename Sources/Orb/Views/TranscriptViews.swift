@@ -61,7 +61,8 @@ struct TranscriptRow: View, Equatable {
             BotMessage(orb: orb, botID: botID, text: text, live: isStreaming ? model.liveText(for: item.id, of: botID) : nil,
                        isLastReply: isLastReply, showsAvatar: showsAvatar, isNarration: isNarration, offersRedo: offersRedo,
                        highlight: find?.query, rated: rated(item, if: !isNarration),
-                       stamp: isNarration || isStreaming ? nil : WorkAnswer(date: item.date, spend: item.spend))
+                       stamp: isNarration || isStreaming ? nil : WorkAnswer(date: item.date, spend: item.spend),
+                       reasoning: isStreaming ? nil : item.reasoning)
         case .tool(let call):
             ToolCallLine(call: call, retries: retries, botID: botID, rated: rated(item))
         case .approval(let request):
@@ -426,8 +427,12 @@ private struct BotMessage: View {
     var rated: Rated?
     /// When the reply came and what its request used, said beside its buttons under the pointer.
     var stamp: WorkAnswer?
+    /// Readable reasoning/thinking summary returned for this reply.
+    var reasoning: String?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var hovering = false
+    @State private var showsReasoning = false
     /// The reasons of "Não gostei" are open: the buttons stay up without the pointer.
     @State private var isAskingWhy = false
     /// What is selected in the reply's text, for "Citar".
@@ -558,7 +563,52 @@ private struct BotMessage: View {
         if let live {
             ParagraphStack(live: live)
         } else {
-            MarkdownChunk(source: text, highlight: highlight).equatable()
+            VStack(alignment: .leading, spacing: Spacing.s) {
+                if let reasoning, !reasoning.isEmpty {
+                    ReasoningFold(text: reasoning, isOpen: $showsReasoning, reduceMotion: reduceMotion)
+                }
+                MarkdownChunk(source: text, highlight: highlight).equatable()
+            }
+        }
+    }
+}
+
+private struct ReasoningFold: View {
+    let text: String
+    @Binding var isOpen: Bool
+    let reduceMotion: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) { isOpen.toggle() }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "brain")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Palette.faint)
+                    Text("Raciocínio")
+                        .font(Typography.small.weight(.medium))
+                        .foregroundStyle(Palette.muted)
+                    FoldChevron(isOpen: isOpen, size: 9)
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .clickablePointer()
+            .help(isOpen ? "Recolhe o raciocínio do modelo" : "Mostra o raciocínio do modelo")
+            if isOpen {
+                Text(text)
+                    .font(Typography.label)
+                    .foregroundStyle(Palette.muted)
+                    .lineSpacing(3)
+                    .textSelection(.enabled)
+                    .padding(.leading, 10)
+                    .overlay(alignment: .leading) {
+                        Rectangle().fill(Palette.lineStrong).frame(width: 1)
+                    }
+                    .transition(.adapted(.unfold, reduceMotion: reduceMotion))
+            }
         }
     }
 }
@@ -1735,17 +1785,26 @@ private struct NoticeLine: View {
                 VStack(alignment: .leading, spacing: 8) {
                     if let failure {
                         let parts = NoticeAction.failureParts(of: failure)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Label("Não deu certo", systemImage: "exclamationmark.triangle.fill")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(Palette.danger)
-                            Text(parts.sentence)
-                                .font(Typography.label)
-                                .foregroundStyle(Palette.muted)
-                                .multilineTextAlignment(.leading)
-                                .textSelection(.enabled)
-                            if let provider = parts.provider { providerDetail(provider) }
+                        VStack(alignment: .leading, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Label("Não deu certo", systemImage: "exclamationmark.triangle.fill")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(Palette.danger)
+                                Text(parts.sentence)
+                                    .font(Typography.label)
+                                    .foregroundStyle(Palette.muted)
+                                    .multilineTextAlignment(.leading)
+                                    .textSelection(.enabled)
+                                if let provider = parts.provider { providerDetail(provider) }
+                            }
+                            if showsButtons {
+                                buttons(actions, otherModels: otherModels)
+                                    .transition(.opacity)
+                            }
                         }
+                        .frame(maxWidth: cardWidth, alignment: .leading)
+                        .padding(12)
+                        .card(radius: Radius.card, fill: Palette.danger.opacity(0.06), stroke: Palette.danger.opacity(0.24))
                     } else if let symbol = NoticeAction.systemWarningSymbol(text) {
                         // The app's voice, not the Orb's: an icon, the small type and room above set it apart from the reply.
                         Label {
@@ -1762,7 +1821,7 @@ private struct NoticeLine: View {
                             .foregroundStyle(Palette.muted)
                             .multilineTextAlignment(.leading)
                     }
-                    if showsButtons {
+                    if failure == nil && showsButtons {
                         buttons(actions, otherModels: otherModels)
                             .transition(.opacity)
                     }

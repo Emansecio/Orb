@@ -80,21 +80,39 @@ enum SettingsRouter {
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(SettingsRouter.tabKey) private var storedTab = ""
     @AppStorage(SettingsRouter.requestKey) private var request = ""
     @State private var tab = SettingsTab(rawValue: UserDefaults.standard.string(forKey: SettingsRouter.tabKey) ?? "") ?? .general
+    @Namespace private var tabSpace
 
     var body: some View {
-        TabView(selection: $tab) {
-            settingsTab(.general) { GeneralSettings() }
-            settingsTab(.orbs) { OrbsSettings() }
-            settingsTab(.models) { ProviderSettings() }
-            settingsTab(.browser) { BrowserSettings() }
-            settingsTab(.phone) { PhoneSettings() }
-            settingsTab(.usage) { UsageSettings() }
-            settingsTab(.permissions) { MacPermissionsView() }
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(SettingsTab.allCases) { item in
+                    SettingsSidebarRow(tab: item, isSelected: item == tab, space: tabSpace) {
+                        tab = item
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(Spacing.m)
+            .frame(width: 176)
+            .frame(maxHeight: .infinity, alignment: .topLeading)
+            .background(Palette.chrome)
+            .animation(Motion.selection(reduceMotion: reduceMotion), value: tab)
+
+            Rectangle().fill(Palette.line).frame(width: 1)
+
+            ZStack {
+                tabContent(tab)
+                    .id(tab)
+                    .transition(.pageSwap)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .motion(Motion.crossFade, value: tab)
         }
-        .frame(width: 640, height: tab.height)
+        .frame(width: 720, height: tab.height)
         .onAppear {
             tab = SettingsRouter.initialTab(request: request, stored: storedTab, isProviderReady: model.isProviderReady || !model.hasCheckedConnections)
             request = ""
@@ -107,10 +125,52 @@ struct SettingsView: View {
         .onChange(of: tab) { storedTab = tab.rawValue }
     }
 
-    private func settingsTab(_ tab: SettingsTab, @ViewBuilder content: () -> some View) -> some View {
-        content()
-            .tabItem { Label(tab.title, systemImage: tab.symbol) }
-            .tag(tab)
+    @ViewBuilder
+    private func tabContent(_ tab: SettingsTab) -> some View {
+        switch tab {
+        case .general: GeneralSettings()
+        case .orbs: OrbsSettings()
+        case .models: ProviderSettings()
+        case .browser: BrowserSettings()
+        case .phone: PhoneSettings()
+        case .usage: UsageSettings()
+        case .permissions: MacPermissionsView()
+        }
+    }
+}
+
+private struct SettingsSidebarRow: View {
+    let tab: SettingsTab
+    let isSelected: Bool
+    let space: Namespace.ID
+    let action: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: Spacing.s) {
+                Image(systemName: tab.symbol)
+                    .font(Typography.text)
+                    .frame(width: Spacing.iconColumn)
+                    .foregroundStyle(isSelected ? Palette.ink : Palette.muted)
+                Text(tab.title)
+                    .font(Typography.text.weight(.medium))
+                    .foregroundStyle(isSelected ? Palette.ink : Palette.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .hoverFill(isHovering && !isSelected, in: .rect(cornerRadius: Radius.small))
+            .background {
+                if isSelected { SlidingSelectionFill(space: space, radius: Radius.small) }
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 

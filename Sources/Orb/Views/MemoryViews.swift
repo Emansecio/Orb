@@ -26,6 +26,7 @@ struct MemoryTab: View {
     /// Opens the sheet with everything, on one kind when given.
     let showAll: (MemoryKind?) -> Void
     @State private var query = ""
+    @State private var kindFilter: MemoryKind?
     @State private var folded = FoldedTextCache()
 
     /// Rows per group in the panel; the sheet shows the rest.
@@ -33,9 +34,11 @@ struct MemoryTab: View {
 
     var body: some View {
         let memory = model.live(botID).memory
-        let groups = MemoryGroups.make(memory.items, matching: query, cache: folded)
+        let availableKinds = MemoryGroups.kinds.filter { kind in memory.items.contains { $0.kind == kind } }
+        let activeFilter = kindFilter.flatMap { availableKinds.contains($0) ? $0 : nil }
+        let groups = MemoryGroups.make(memory.items, matching: query, kind: activeFilter, cache: folded)
         // A short memory fits the panel whole; only a long one is cut to a few rows per group.
-        let truncates = query.isEmpty && memory.items.count > MemoryGroups.searchableAbove
+        let truncates = query.isEmpty && activeFilter == nil && memory.items.count > MemoryGroups.searchableAbove
 
         PanelSection {
             // From this Orb's own `permission` (assigned only when it changes), not `model.bot(_:)`: that reads the list of
@@ -53,6 +56,9 @@ struct MemoryTab: View {
                     .transition(.quiet)
             } else if memory.items.count > MemoryGroups.searchableAbove {
                 MemorySearchField(query: $query)
+            }
+            if availableKinds.count > 1 {
+                MemoryKindFilterStrip(kinds: availableKinds, selection: $kindFilter)
             }
             if !memory.items.isEmpty && groups.isEmpty {
                 Text("Nada na memória com “\(query)”.")
@@ -202,6 +208,48 @@ struct MemorySearchField: View {
                     .foregroundStyle(Palette.muted)
                     .help(Tip.clearSearch)
             }
+        }
+    }
+}
+
+private struct MemoryKindFilterStrip: View {
+    let kinds: [MemoryKind]
+    @Binding var selection: MemoryKind?
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 6) {
+                chip("Tudo", isSelected: selection == nil) { selection = nil }
+                ForEach(kinds, id: \.self) { kind in
+                    chip(shortLabel(kind), isSelected: selection == kind) {
+                        selection = selection == kind ? nil : kind
+                    }
+                }
+            }
+            .padding(.vertical, 2)
+        }
+        .scrollIndicators(.never)
+    }
+
+    private func chip(_ title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .buttonStyle(.plain)
+            .font(Typography.small.weight(isSelected ? .semibold : .regular))
+            .foregroundStyle(isSelected ? Palette.ink : Palette.muted)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(isSelected ? Palette.ghostSelected : Palette.raised, in: .capsule)
+            .overlay(Capsule().strokeBorder(isSelected ? Palette.lineStrong : Palette.line))
+            .clickablePointer()
+    }
+
+    private func shortLabel(_ kind: MemoryKind) -> String {
+        switch kind {
+        case .preferencia: "Preferências"
+        case .fato: "Fatos"
+        case .procedimento: "Procedimentos"
+        case .sessao: "Resumos"
+        case .identidade: "Identidade"
         }
     }
 }

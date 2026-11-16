@@ -141,23 +141,23 @@ struct BrowserPickerRows: View {
                 // Another mode closes the browser: not the window the person is using.
                 .disabled(withPerson)
                 .help(withPerson ? Tip.browserModeWhilePerson : Tip.browserMode)
-                .padding(.leading, Self.indent)
+                .browserSubRow(indent: Self.indent)
                 .foldContent()
                 if let line = problemLine(BrowserPickerCopy.browserLine(status: status, orbName: bot.name)) {
                     statusLine(line)
-                        .padding(.leading, Self.indent)
+                        .browserSubRow(indent: Self.indent)
                         .foldContent()
                 }
                 picker("Pesquisa", selection: providerBinding) {
                     ForEach(SearchProvider.allCases) { Text($0.label).tag($0) }
                 }
                 .help(BrowserPickerCopy.searchSummary(bot.searchProvider))
-                .padding(.leading, Self.indent)
+                .browserSubRow(indent: Self.indent)
                 .foldContent()
                 if let line = BrowserPickerCopy.searchLine(bot.searchProvider, browserIsReady: status?.isReady, hasKey: hasKey)
                     .flatMap(problemLine) {
                     statusLine(line)
-                        .padding(.leading, Self.indent)
+                        .browserSubRow(indent: Self.indent)
                         .foldContent()
                 }
             }
@@ -284,18 +284,16 @@ struct BrowserPickerRows: View {
         .accessibilityElement(children: .contain)
     }
 
-    /// "Abrir o navegador": the Orb's browser in its window, for the person; while they have it, bringing it forward and handing
-    /// it back. Pills with the browser's symbol, not quiet links: it is the one thing here the person comes to do.
+    /// "Abrir o navegador": compact chip aligned under "Navegar na web".
     private func personBrowserRow(withPerson: Bool) -> some View {
         // Side by side when they fit; the panel at its narrowest stacks them.
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 8) { personBrowserButtons(withPerson: withPerson) }
             VStack(alignment: .leading, spacing: 6) { personBrowserButtons(withPerson: withPerson) }
         }
-        .buttonStyle(SecondaryPillStyle())
-        .controlSize(.small)
+        .chipButton()
         .padding(.leading, Self.indent)
-        .padding(.vertical, 4)
+        .padding(.vertical, 2)
     }
 
     @ViewBuilder private func personBrowserButtons(withPerson: Bool) -> some View {
@@ -346,5 +344,18 @@ struct BrowserPickerRows: View {
             }
         }
         .accessibilityElement(children: .contain)
+    }
+}
+
+private extension View {
+    func browserSubRow(indent: CGFloat) -> some View {
+        padding(.leading, indent)
+            .overlay(alignment: .leading) {
+                Rectangle()
+                    .fill(Palette.line)
+                    .frame(width: 1)
+                    .padding(.leading, 10)
+                    .accessibilityHidden(true)
+            }
     }
 }

@@ -17,36 +17,43 @@ struct SidebarCategorySection: View {
     let drag: SidebarDragPreview?
     let selectionSpace: Namespace.ID
     let rowSpace: Namespace.ID
+    var filterWords: [String] = []
 
     var body: some View {
-        let ids = category.botIDs.filter { model.botIDs.contains($0) }
-        VStack(alignment: .leading, spacing: 1) {
-            Group {
-                if model.categoryNaming == .rename(category.id) {
-                    CategoryNameField(initial: category.name, symbol: "chevron.right", turned: !category.isCollapsed) { name in
-                        model.renameCategory(category.id, to: name)
+        let categoryIDs = category.botIDs.filter { model.botIDs.contains($0) }
+        let ids = filterWords.isEmpty ? categoryIDs : categoryIDs.filter {
+            SidebarOrbFilter.matches(model.live($0).look, words: filterWords)
+        }
+        let isFiltering = !filterWords.isEmpty
+        if !isFiltering || !ids.isEmpty {
+            VStack(alignment: .leading, spacing: 1) {
+                Group {
+                    if model.categoryNaming == .rename(category.id) {
+                        CategoryNameField(initial: category.name, symbol: "chevron.right", turned: !category.isCollapsed) { name in
+                            model.renameCategory(category.id, to: name)
+                        }
+                    } else {
+                        SidebarCategoryHeader(category: category, ids: ids,
+                                              isTargeted: category.isCollapsed && drag?.slot.categoryID == category.id,
+                                              selectionSpace: selectionSpace)
                     }
-                } else {
-                    SidebarCategoryHeader(category: category, ids: ids,
-                                          isTargeted: category.isCollapsed && drag?.slot.categoryID == category.id,
-                                          selectionSpace: selectionSpace)
                 }
-            }
-            .sidebarDropItem(.header(category.id), drag)
-            if !category.isCollapsed {
-                ForEach(ids, id: \.self) { id in
-                    SidebarBotRow(botID: id, index: order.firstIndex(of: id) ?? order.count, selectionSpace: selectionSpace, rowSpace: rowSpace)
-                        .sidebarDropItem(.row(id), drag)
-                        .transition(.adapted(.unfold, reduceMotion: reduceMotion))
-                }
-                if ids.isEmpty {
-                    Text("Arraste um Orb para cá")
-                        .font(Typography.small)
-                        .foregroundStyle(Palette.faint)
-                        .padding(.leading, SidebarCategoryLayout.titleInset)
-                        .padding(.vertical, 4)
-                        .sidebarDropItem(.placeholder(category.id), drag)
-                        .transition(.adapted(.unfold, reduceMotion: reduceMotion))
+                .sidebarDropItem(.header(category.id), drag)
+                if !category.isCollapsed || isFiltering {
+                    ForEach(ids, id: \.self) { id in
+                        SidebarBotRow(botID: id, index: order.firstIndex(of: id) ?? order.count, selectionSpace: selectionSpace, rowSpace: rowSpace)
+                            .sidebarDropItem(.row(id), drag)
+                            .transition(.adapted(.unfold, reduceMotion: reduceMotion))
+                    }
+                    if ids.isEmpty && !isFiltering {
+                        Text("Arraste um Orb para cá")
+                            .font(Typography.small)
+                            .foregroundStyle(Palette.faint)
+                            .padding(.leading, SidebarCategoryLayout.titleInset)
+                            .padding(.vertical, 4)
+                            .sidebarDropItem(.placeholder(category.id), drag)
+                            .transition(.adapted(.unfold, reduceMotion: reduceMotion))
+                    }
                 }
             }
         }

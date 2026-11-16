@@ -60,6 +60,7 @@ extension BotSession {
         runningCalls = [:]
         actionsThisTurn = 0
         turnCutShort = false
+        pendingReasoning = nil
     }
 
     /// Publishes a phrase of the working line, with this turn's routine and count of actions. Changed once per step of
@@ -288,6 +289,9 @@ extension BotSession {
             model.announceApproval(request, of: id)
         case .message(let message):
             ensureLoaded()
+            if message.role == .assistant, let trace = ReasoningText.extract(from: message.reasoning) {
+                pendingReasoning = trace
+            }
             changeConversation {
                 $0.absorb(message)
                 if message.role == .assistant { $0.lastModelCall = .now }
@@ -675,16 +679,20 @@ extension BotSession {
 
     func closeStreaming() {
         flushText()
+        let reasoning = pendingReasoning
+        pendingReasoning = nil
         if let live = liveText {
             liveText = nil
             let text = live.text.trimmingCharacters(in: .whitespacesAndNewlines)
             mutateItems { items in
                 guard let index = items.lastIndex(where: { $0.id == live.itemID }) else { return }
                 items[index].kind = .bot(text: text, isStreaming: false)
+                if let reasoning { items[index].reasoning = reasoning }
             }
         } else if let last = conversation?.items.last, case .bot(let text, true) = last.kind {
             mutateItems { items in
                 items[items.count - 1].kind = .bot(text: text.trimmingCharacters(in: .whitespacesAndNewlines), isStreaming: false)
+                if let reasoning { items[items.count - 1].reasoning = reasoning }
             }
         }
     }

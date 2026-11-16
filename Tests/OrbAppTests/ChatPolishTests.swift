@@ -84,3 +84,24 @@ import Testing
         #expect(replies.last?.spend == nil && replies.first?.spend?.tokens == 2_250)
     }
 }
+
+@Suite struct ReasoningDisplayTests {
+    @Test func reasoningTextExtractsReadablePartsAndIgnoresOpaqueBlobs() {
+        let trace = ReasoningTrace(format: .messages, provider: "anthropic", model: "claude",
+                                   parts: [ReasoningPart(kind: .redactedThinking, text: "", data: "opaque"),
+                                           ReasoningPart(kind: .thinking, text: "  Analisando o arquivo.  ", signature: "sig"),
+                                           ReasoningPart(kind: .encrypted, text: "Verificando testes.", data: "enc")])
+        #expect(ReasoningText.extract(from: trace) == "Analisando o arquivo.\n\nVerificando testes.")
+        let empty = ReasoningTrace(format: .responses, provider: "openai", model: "o3",
+                                   parts: [ReasoningPart(kind: .encrypted, text: "   ", data: "enc")])
+        #expect(ReasoningText.extract(from: empty) == nil)
+        #expect(ReasoningText.extract(from: nil) == nil)
+    }
+
+    @Test func transcriptItemDecodesReasoningTolerantly() throws {
+        var item = TranscriptItem(.bot(text: "Pronto.", isStreaming: false))
+        #expect(try JSONDecoder().decode(TranscriptItem.self, from: JSONEncoder().encode(item)).reasoning == nil)
+        item.reasoning = "Passo 1"
+        #expect(try JSONDecoder().decode(TranscriptItem.self, from: JSONEncoder().encode(item)).reasoning == "Passo 1")
+    }
+}

@@ -138,6 +138,7 @@ struct ContextMeterChip: View {
     let compact: Bool
     @State private var isOpen = false
     @State private var isHovering = false
+    @State private var warnPulse = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -145,6 +146,11 @@ struct ContextMeterChip: View {
             if let reading = gauge.reading, reading.botID == botID { chip(reading) }
         }
         .motion(value: gauge.reading?.botID == botID)
+        .onChange(of: gauge.reading?.tone) { old, new in
+            if let new, new != .calm, old == .calm || (old == .warming && new == .full) {
+                warnPulse += 1
+            }
+        }
     }
 
     private func chip(_ reading: ContextReading) -> some View {
@@ -167,6 +173,11 @@ struct ContextMeterChip: View {
         }
         .onHover { isHovering = $0 }
         .buttonStyle(ComposerChipStyle())
+        .phaseAnimator(reduceMotion ? [0] : [0, 1, 2], trigger: warnPulse) { view, phase in
+            view.scaleEffect(phase == 1 ? 1.07 : 1)
+        } animation: { phase in
+            phase == 1 ? Motion.press : Motion.content
+        }
         .transition(.opacity) // appears with a fade once the first message is measured
         .help("Contexto desta conversa: \(reading.spokenState)")
         .accessibilityLabel("Contexto da conversa")
@@ -246,7 +257,18 @@ struct ContextPopover: View {
                     .foregroundStyle(Palette.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            ProgressCapsule(fraction: reading.fraction, tone: reading.tone)
+            ProgressCapsule(overheadShare: reading.fill.windowTokens > 0 ? Double(reading.fill.overheadTokens) / Double(reading.fill.windowTokens) : 0,
+                            historyShare: reading.fill.windowTokens > 0 ? Double(reading.fill.historyTokens) / Double(reading.fill.windowTokens) : 0,
+                            fraction: reading.fraction, tone: reading.tone)
+            if reading.fill.overheadTokens > 0 {
+                HStack(spacing: Spacing.m) {
+                    legendDot(Palette.faint, "Instruções: ~\(ContextWords.approx(reading.fill.overheadTokens))")
+                    legendDot(reading.tone == .calm ? Palette.secondary : reading.tone.color,
+                              "Conversa: ~\(ContextWords.approx(reading.fill.historyTokens))")
+                }
+                .font(Typography.small)
+                .foregroundStyle(Palette.faint)
+            }
             if !reading.windowIsStated {
                 Text("O provedor não informou a janela deste modelo: o limite é uma estimativa, que o Orb corrige se uma conversa for recusada.")
                     .font(Typography.small)
@@ -259,6 +281,13 @@ struct ContextPopover: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Uso do contexto")
         .accessibilityValue(reading.spokenState)
+    }
+
+    private func legendDot(_ color: Color, _ label: String) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(color).frame(width: 6, height: 6).accessibilityHidden(true)
+            Text(label)
+        }
     }
 
     // MARK: What is kept
@@ -384,20 +413,33 @@ struct ContextPopover: View {
     }
 }
 
-/// A thin bar for the share of the window in use.
+/// A thin segmented bar for the share of the window in use (fixed instructions/tools overhead + conversation history).
 private struct ProgressCapsule: View {
+    let overheadShare: Double
+    let historyShare: Double
     let fraction: Double
     let tone: ContextTone
 
     var body: some View {
         Capsule()
             .fill(Palette.lineStrong)
-            .frame(height: 4)
+            .frame(height: 5)
             .overlay(alignment: .leading) {
                 GeometryReader { proxy in
-                    Capsule()
-                        .fill(tone.color)
-                        .frame(width: max(proxy.size.width * min(max(fraction, 0), 1), fraction > 0 ? 4 : 0))
+                    let total = min(max(fraction, 0), 1)
+                    let overhead = min(max(overheadShare, 0), total)
+                    let history = max(total - overhead, 0)
+                    HStack(spacing: overhead > 0 && history > 0 ? 1 : 0) {
+                        if overhead > 0 {
+                            Rectangle().fill(Palette.faint)
+                                .frame(width: max(proxy.size.width * overhead, 3))
+                        }
+                        if history > 0 {
+                            Rectangle().fill(tone == .calm ? Palette.secondary : tone.color)
+                                .frame(width: max(proxy.size.width * history, 3))
+                        }
+                    }
+                    .clipShape(.capsule)
                 }
             }
             .accessibilityHidden(true)

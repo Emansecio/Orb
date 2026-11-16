@@ -187,11 +187,14 @@ enum PaletteBuilder {
 struct CommandPalette: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var query = ""
     @State private var selected = 0
     @State private var entries: [PaletteEntry] = []
     @State private var folded: [(title: String, rest: String)] = []
     @FocusState private var isFocused: Bool
+    @Namespace private var selectionSpace
+    @State private var appeared = false
 
     private var results: [PaletteEntry] { PaletteSearch.rank(entries, folded: folded, query: query) }
 
@@ -239,13 +242,14 @@ struct CommandPalette: View {
                                 }
                                 // A real button: VoiceOver can activate the row, not only read it.
                                 Button { selected = index; run(results) } label: {
-                                    PaletteRow(entry: entry, isSelected: index == selected)
+                                    PaletteRow(entry: entry, isSelected: index == selected, space: selectionSpace)
                                 }
                                 .buttonStyle(.plain)
                                 .id(entry.id)
                             }
                         }
                         .padding(Spacing.s)
+                        .animation(Motion.selection(reduceMotion: reduceMotion), value: selected)
                     }
                     .onChange(of: selected) {
                         guard results.indices.contains(selected) else { return }
@@ -273,10 +277,14 @@ struct CommandPalette: View {
         }
         .frame(width: 540, height: 430)
         .background(Palette.chrome)
+        .scaleEffect(reduceMotion || appeared ? 1 : 0.985)
+        .opacity(reduceMotion || appeared ? 1 : 0)
+        .animation(Motion.adapted(Motion.enter, reduceMotion: reduceMotion), value: appeared)
         .onChange(of: query) { selected = 0 }
         .onAppear {
             isFocused = true
             build()
+            appeared = true
         }
     }
 
@@ -352,6 +360,7 @@ struct CommandPalette: View {
 private struct PaletteRow: View {
     let entry: PaletteEntry
     let isSelected: Bool
+    let space: Namespace.ID
     @State private var isHovering = false
 
     var body: some View {
@@ -390,7 +399,7 @@ private struct PaletteRow: View {
         .padding(.horizontal, Spacing.s + Spacing.hairline)
         .padding(.vertical, Spacing.xs + Spacing.hairline)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background { RoundedRectangle(cornerRadius: Radius.small).fill(Palette.ghostSelected).opacity(isSelected ? 1 : 0) }
+        .background { if isSelected { SlidingSelectionFill(space: space, radius: Radius.small) } }
         // The pointer lights the row too; the keyboard's selection keeps its own, stronger fill.
         .hoverFill(isHovering && !isSelected, in: .rect(cornerRadius: Radius.small))
         .contentShape(.rect)

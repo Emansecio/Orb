@@ -13,15 +13,38 @@ struct EventLineView: View {
     var botID: UUID?
     @State private var showsExchange = false
     @State private var showsPlan = false
+    @State private var showsDetail = false
+
+    private var resolvedEvent: OrbEvent {
+        var copy = event
+        if let actor = copy.actor, let name = model.liveBot(actor.id)?.look.name, !name.isEmpty {
+            copy.actor = OrbRef(id: actor.id, name: name)
+        }
+        if let subject = copy.subject, let name = model.liveBot(subject.id)?.look.name, !name.isEmpty {
+            copy.subject = OrbRef(id: subject.id, name: name)
+        }
+        return copy
+    }
+
+    private var expandableDetail: String? {
+        guard [.pulseRan, .pulseResumed, .browserUsed].contains(event.kind) else { return nil }
+        let parts = [event.note, event.context].compactMap { text -> String? in
+            guard let text else { return nil }
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: "\n\n")
+    }
 
     var body: some View {
-        if event.kind == .delegationReceived, let asker = event.actor, let chain = event.chainID {
+        let displayEvent = resolvedEvent
+        if displayEvent.kind == .delegationReceived, let asker = displayEvent.actor, let chain = displayEvent.chainID {
             Button {
                 showsExchange = true
             } label: {
                 HStack(spacing: 6) {
                     MiniOrb(botID: asker.id)
-                    Text(event.sentence)
+                    Text(displayEvent.sentence)
                         .font(Typography.label)
                         .foregroundStyle(Palette.muted)
                         .lineLimit(2)
@@ -33,21 +56,21 @@ struct EventLineView: View {
             }
             .buttonStyle(.plain)
             .help("Ver a troca")
-            .accessibilityLabel(event.sentence)
+            .accessibilityLabel(displayEvent.sentence)
             .accessibilityHint("Abre a troca, somente leitura")
             .accessibilityIdentifier("event-line")
             .sheet(isPresented: $showsExchange) {
-                let found = ExchangeSource.messages(chain: chain, request: event.requestID, of: asker.id, in: model)
-                ExchangeSheet(messages: found, parties: ExchangeSource.parties(of: found, event: event))
+                let found = ExchangeSource.messages(chain: chain, request: displayEvent.requestID, of: asker.id, in: model)
+                ExchangeSheet(messages: found, parties: ExchangeSource.parties(of: found, event: displayEvent))
             }
-        } else if event.kind == .routineRun {
-            RoutineRunLine(event: event)
-        } else if event.kind == .planDone, let plan = event.plan {
+        } else if displayEvent.kind == .routineRun {
+            RoutineRunLine(event: displayEvent)
+        } else if displayEvent.kind == .planDone, let plan = displayEvent.plan {
             // The steps open in the same popover the plan's ring uses while the plan is open.
             Button {
                 showsPlan.toggle()
             } label: {
-                line(opens: true)
+                line(displayEvent, opens: true)
             }
             .buttonStyle(.plain)
             .help("Ver as etapas")
@@ -56,24 +79,47 @@ struct EventLineView: View {
                     .padding(Spacing.m)
                     .frame(width: 320, alignment: .leading)
             }
-            .accessibilityLabel(event.sentence)
+            .accessibilityLabel(displayEvent.sentence)
             .accessibilityHint("Mostra as etapas")
+            .accessibilityIdentifier("event-line")
+        } else if let detailText = expandableDetail {
+            Button {
+                showsDetail.toggle()
+            } label: {
+                line(displayEvent, opens: true)
+            }
+            .buttonStyle(.plain)
+            .help("Ver detalhes")
+            .popover(isPresented: $showsDetail, arrowEdge: .bottom) {
+                ScrollView {
+                    Text(detailText)
+                        .font(Typography.label)
+                        .foregroundStyle(Palette.secondary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(Spacing.m)
+                }
+                .frame(width: 320)
+                .frame(maxHeight: 240)
+            }
+            .accessibilityLabel(displayEvent.sentence)
+            .accessibilityHint("Mostra os detalhes")
             .accessibilityIdentifier("event-line")
         } else if let group = openableGroup {
             Button {
                 model.selection = .group(group)
             } label: {
-                line(opens: true)
+                line(displayEvent, opens: true)
             }
             .buttonStyle(.plain)
             .help("Abrir o grupo")
-            .accessibilityLabel(event.sentence)
+            .accessibilityLabel(displayEvent.sentence)
             .accessibilityHint("Abre o grupo")
             .accessibilityIdentifier("event-line")
-        } else if event.kind == .orbCreated, !centered, let created = event.subject, model.canUndoCreation(of: created.id) {
+        } else if displayEvent.kind == .orbCreated, !centered, let created = displayEvent.subject, model.canUndoCreation(of: created.id) {
             // The Orb exists and nobody has used it: the creator's line offers to take it back. It goes away with the Orb.
             HStack(spacing: Spacing.s) {
-                line(opens: false)
+                line(displayEvent, opens: false)
                     .accessibilityElement(children: .combine)
                     .accessibilityIdentifier("event-line")
                 Button("Desfazer") { model.undoCreation(of: created.id) }
@@ -83,29 +129,29 @@ struct EventLineView: View {
                     .accessibilityLabel("Desfazer a criação de \(created.name)")
                     .accessibilityIdentifier("undo-orb-creation")
             }
-        } else if event.kind == .deletionAsked, !centered, let itemID, let botID, model.canAnswerDeletion(event) {
+        } else if displayEvent.kind == .deletionAsked, !centered, let itemID, let botID, model.canAnswerDeletion(displayEvent) {
             // An Orb asked to delete something in a turn nobody watched: only this click deletes it.
             HStack(spacing: Spacing.s) {
-                line(opens: false)
+                line(displayEvent, opens: false)
                     .accessibilityElement(children: .combine)
                     .accessibilityIdentifier("event-line")
-                    .help(event.note ?? "")
-                Button("Apagar", role: .destructive) { model.answerDeletion(event, item: itemID, of: botID, accept: true) }
+                    .help(displayEvent.note ?? "")
+                Button("Apagar", role: .destructive) { model.answerDeletion(displayEvent, item: itemID, of: botID, accept: true) }
                     .buttonStyle(.link)
                     .font(Typography.label)
-                    .help(event.note ?? "")
-                    .accessibilityLabel("Apagar, como pedido: \(event.sentence)")
+                    .help(displayEvent.note ?? "")
+                    .accessibilityLabel("Apagar, como pedido: \(displayEvent.sentence)")
                     .accessibilityIdentifier("deletion-accept")
-                Button("Manter") { model.answerDeletion(event, item: itemID, of: botID, accept: false) }
+                Button("Manter") { model.answerDeletion(displayEvent, item: itemID, of: botID, accept: false) }
                     .buttonStyle(.link)
                     .font(Typography.label)
-                    .accessibilityLabel("Manter e recusar o pedido: \(event.sentence)")
+                    .accessibilityLabel("Manter e recusar o pedido: \(displayEvent.sentence)")
                     .accessibilityIdentifier("deletion-keep")
             }
-        } else if event.kind == .deletionAsked, event.outcome == nil, !centered, itemID != nil, botID != nil {
+        } else if displayEvent.kind == .deletionAsked, displayEvent.outcome == nil, !centered, itemID != nil, botID != nil {
             // Unanswered but no longer valid (renamed, gone, the group changed): said, so it does not look pending.
             HStack(spacing: Spacing.s) {
-                line(opens: false)
+                line(displayEvent, opens: false)
                 Text("não vale mais")
                     .font(Typography.label)
                     .foregroundStyle(Palette.muted)
@@ -113,7 +159,7 @@ struct EventLineView: View {
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("event-line")
         } else {
-            line(opens: false)
+            line(displayEvent, opens: false)
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("event-line")
         }
@@ -127,15 +173,15 @@ struct EventLineView: View {
     }
 
     /// The symbol and the sentence; with the chevron of the lines that open something.
-    private func line(opens: Bool) -> some View {
+    private func line(_ shown: OrbEvent, opens: Bool) -> some View {
         HStack(spacing: 6) {
-            Image(systemName: Self.symbol(for: event.kind))
+            Image(systemName: Self.symbol(for: shown.kind))
                 .font(Typography.small)
                 .foregroundStyle(Palette.muted)
                 // One width for every symbol, so the sentences start on the same column.
                 .frame(width: 20)
                 .accessibilityHidden(true)
-            Text(event.sentence)
+            Text(shown.sentence)
                 .font(Typography.label)
                 .foregroundStyle(Palette.muted)
                 .multilineTextAlignment(centered ? .center : .leading)

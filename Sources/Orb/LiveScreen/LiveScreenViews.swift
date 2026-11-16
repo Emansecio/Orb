@@ -315,16 +315,31 @@ private struct LiveScreenClosedLine: View {
     let itemID: UUID
     let view: BrowserViewItem
     let botID: UUID
-    @State private var hasLastScreen = false
+    @State private var lastImage: NSImage?
 
     var body: some View {
         HStack(spacing: 8) {
-            // The mark of a finished action (`ToolCallLine`), so the line sits in the column of the ones around it.
-            Image(systemName: ToolCall.Kind.browser.symbol)
-                .font(Typography.small)
-                .foregroundStyle(Palette.muted)
-                .frame(width: 14)
+            if let lastImage {
+                Button { showLastScreen() } label: {
+                    Image(nsImage: lastImage)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 36, height: 22)
+                        .clipShape(.rect(cornerRadius: 4))
+                        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Palette.lineStrong))
+                }
+                .buttonStyle(.plain)
+                .clickablePointer()
+                .help(Tip.lastScreen)
                 .accessibilityHidden(true)
+            } else {
+                // The mark of a finished action (`ToolCallLine`), so the line sits in the column of the ones around it.
+                Image(systemName: ToolCall.Kind.browser.symbol)
+                    .font(Typography.small)
+                    .foregroundStyle(Palette.muted)
+                    .frame(width: 14)
+                    .accessibilityHidden(true)
+            }
             // Whole when it fits; else without where it ended; cut at the end only as a last resort (the help has it whole).
             ViewThatFits(in: .horizontal) {
                 closing(LiveScreenText.closingLine(view)).fixedSize()
@@ -332,7 +347,7 @@ private struct LiveScreenClosedLine: View {
                 closing(LiveScreenText.closingLine(view, short: true))
             }
             .help(LiveScreenText.closingLine(view))
-            if hasLastScreen {
+            if lastImage != nil {
                 Button("Ver última tela") { showLastScreen() }
                     .buttonStyle(.plain)
                     .font(Typography.label)
@@ -347,7 +362,12 @@ private struct LiveScreenClosedLine: View {
         .frame(minHeight: 36)
         .card()
         .chatCard()
-        .onAppear { hasLastScreen = model.liveScreens.hasLastScreen(of: itemID) }
+        .task(id: itemID) {
+            guard let jpeg = model.liveScreens.lastScreen(of: itemID) else { return }
+            let image = await Task.detached(priority: .utility) { LiveJPEG.image(from: jpeg) }.value
+            guard !Task.isCancelled else { return }
+            lastImage = image.map { NSImage(cgImage: $0, size: .zero) }
+        }
     }
 
     private func closing(_ text: String) -> some View {

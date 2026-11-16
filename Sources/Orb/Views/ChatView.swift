@@ -123,8 +123,9 @@ extension ChatView {
     /// Under the name, the conversation on show, when the Orb has more than one. The model is the composer's (its picker
     /// says it), and what the Orb is doing is said in one place, the working line at the end of the chat, not here too.
     private func subtitle(_ live: BotLive) -> String {
-        guard let chats = live.chats else { return "" }
-        return chats.title(of: chats.active) ?? ""
+        if let chats = live.chats, let title = chats.title(of: chats.active) { return title }
+        if live.permission.mode == .bypass { return ModelCardSummary.bypassLine }
+        return EmptyChatContent.folderText(for: live.bot) ?? ""
     }
 
     /// The "Resultado indisponível" alert is open while a notice waits; closing it drops the notice.
@@ -376,6 +377,8 @@ private struct TranscriptList: View {
     @State private var openRuns: Set<UUID> = []
     /// Step disclosures have their own state: the first step and its outer work row share an item id.
     @State private var openSteps: Set<UUID> = []
+    /// User request items currently in the viewport, used to highlight the matching mark in `RequestRail`.
+    @State private var visibleRequests: Set<UUID> = []
 
     var body: some View {
         let transcript = model.orbTranscript(look.id)
@@ -404,12 +407,13 @@ private struct TranscriptList: View {
                 .transition(.opacity)
         }
         .motion(Motion.crossFade, value: generation)
-        .onChange(of: generation) {
+            .onChange(of: generation) {
             followsBottom = true
             follower.follows = true
             isAwayFromEnd = false
             leftAt = nil
             arrived = 0
+            visibleRequests = []
         }
     }
 
@@ -511,7 +515,8 @@ private struct TranscriptList: View {
             .modifier(KeepsBottom(follows: follows))
             .modifier(AwayFromEnd(isAway: $isAwayFromEnd))
             .overlay(alignment: .trailing) {
-                RequestRail(transcript: transcript) { goToRequest($0, proxy) }
+                let activeRequestID = transcript.requests.last { visibleRequests.contains($0.id) }?.id
+                RequestRail(transcript: transcript, activeID: activeRequestID) { goToRequest($0, proxy) }
             }
             .overlay(alignment: .bottom) {
                 ZStack {
@@ -627,6 +632,12 @@ private struct TranscriptList: View {
             if let trail = model.orbTranscript(look.id).trails[rowID] { TurnTrailView(trail: trail, botID: look.id) }
         }
         .padding(.top, opensTurn && date == nil ? TurnGap.extra : 0)
+        .onAppear {
+            if opensTurn || breaks[rowID] != nil || rowID == model.orbTranscript(look.id).items.first?.id {
+                visibleRequests.insert(rowID)
+            }
+        }
+        .onDisappear { visibleRequests.remove(rowID) }
     }
 
     /// One item of the chat as a row, entering by itself when it is new.
@@ -1027,6 +1038,7 @@ struct AwayFromEnd: ViewModifier {
 
 /// An arrow over the end of the chat, with how many replies came while the reader was away.
 struct JumpToEndButton: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let arrived: Int
     let action: () -> Void
 
@@ -1037,6 +1049,11 @@ struct JumpToEndButton: View {
         Button(action: action) {
             HStack(spacing: Spacing.xs) {
                 Image(systemName: "arrow.down")
+                    .phaseAnimator(reduceMotion || arrived == 0 ? [0] : [0, 1, 2], trigger: arrived) { view, phase in
+                        view.offset(y: phase == 1 ? 2 : 0)
+                    } animation: { phase in
+                        phase == 1 ? Motion.press : Motion.content
+                    }
                 if arrived > 0 { Text(arrived == 1 ? "1 nova" : "\(arrived) novas").monospacedDigit() }
             }
             .font(Typography.small.weight(.medium))

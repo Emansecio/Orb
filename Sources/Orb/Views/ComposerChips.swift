@@ -18,8 +18,13 @@ struct ComposerChipStyle: ButtonStyle {
             .padding(.horizontal, 8)
             .frame(minWidth: 28, minHeight: 28)
             .hoverFill(configuration.isPressed || isHovering, pressed: configuration.isPressed, in: .capsule,
-                       color: tint.map { $0.opacity(0.22) } ?? Palette.ghostSelected,
-                       resting: tint.map { $0.opacity(0.13) } ?? (filled ? Palette.raised : nil))
+                       color: tint.map { $0.opacity(0.18) } ?? Palette.ghostSelected,
+                       resting: tint.map { $0.opacity(0.08) } ?? (filled ? Palette.raised : nil))
+            .overlay {
+                if let tint {
+                    Capsule().strokeBorder(tint.opacity(0.28), lineWidth: 0.75)
+                }
+            }
             .contentShape(.capsule)
             .onHover { isHovering = $0 }
     }
@@ -47,7 +52,9 @@ struct PermissionChip: View {
         Button { isOpen.toggle() } label: {
             HStack(spacing: 4) {
                 Image(systemName: permission.mode.symbol)
-                if Self.showsName(permission.mode, compact: compact) { Text(permission.mode.label).lineLimit(1) }
+                if Self.showsName(permission.mode, compact: compact) {
+                    Text(permission.mode == .bypass ? "Sem pedir" : permission.mode.label).lineLimit(1)
+                }
             }
             .foregroundStyle(Self.tint(permission.mode))
         }

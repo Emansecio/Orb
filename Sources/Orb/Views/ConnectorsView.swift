@@ -278,9 +278,11 @@ private struct ConnectorCard: View {
                     .lineLimit(1)
                     .help(usedBy.isEmpty ? "Ligue “Conectores” no painel de um Orb, ou escolha os Orbs em Editar" : "")
             }
+            Spacer(minLength: 0)
             HStack(spacing: 6) {
                 // Ready, in use, connecting, error: the badge changes in place by fading.
                 statusBadge
+                    .transition(.opacity)
                     .animateChanges(of: StatusBadgeKey(isEnabled: connector.isEnabled, status: status))
                 Spacer(minLength: 0)
                 Button("Testar", action: runTest)
@@ -305,6 +307,7 @@ private struct ConnectorCard: View {
             }
         }
         .padding(Spacing.cardPadding)
+        .frame(maxHeight: .infinity, alignment: .top)
         .card(radius: Radius.large)
         .overlay {
             if isHighlighted { RoundedRectangle(cornerRadius: Radius.large).strokeBorder(Palette.accent, lineWidth: 2).transition(.opacity) }

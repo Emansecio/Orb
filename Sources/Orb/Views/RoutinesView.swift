@@ -405,6 +405,7 @@ private struct RoutineCard: View {
                 RunHistory(runs: routine.runs, onOpen: onOpenRun)
             }
             // The same buttons as the routine's card in the Orb's panel: ghosts for what opens something, a pill for the run.
+            Spacer(minLength: 0)
             HStack(spacing: Spacing.xs + Spacing.hairline) {
                 Button("Editar", systemImage: "pencil", action: onEdit)
                     .buttonStyle(GhostStyle())
@@ -427,6 +428,7 @@ private struct RoutineCard: View {
             .controlSize(.small)
         }
         .padding(Spacing.cardPadding)
+        .frame(maxHeight: .infinity, alignment: .top)
         .card(radius: Radius.large)
         .animateChanges(of: routine.isEnabled)
         .animateChanges(of: lastRunFailed)

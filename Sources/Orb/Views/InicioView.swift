@@ -36,8 +36,9 @@ struct InicioView: View {
     @State private var readingBelowTop = false
     @State private var returningFocus: InicioRowFocus?
     @State private var scrollAnchor = InicioScrollAnchor()
-    @FocusState private var focusedRow: InicioRowFocus?
+    @FocusState private var focusedRowState: InicioRowFocus?
     @AccessibilityFocusState private var accessibilityFocusedRow: InicioRowFocus?
+    @State private var inspectingApproval: UUID?
 
     private static let columnWidth: CGFloat = 860
 
@@ -53,8 +54,14 @@ struct InicioView: View {
                 Color.clear.frame(height: 0).id("inicio-top")
                     .onGeometryChange(for: Bool.self) { $0.frame(in: .named("inicio-scroll")).minY < -40 } action: { readingBelowTop = $0 }
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("Início").font(.system(size: 28, weight: .semibold)).foregroundStyle(Palette.ink)
-                        .accessibilityAddTraits(.isHeader)
+                    HStack(alignment: .firstTextBaseline, spacing: Spacing.m) {
+                        Text("Início").font(.system(size: 28, weight: .semibold)).foregroundStyle(Palette.ink)
+                            .accessibilityAddTraits(.isHeader)
+                        Spacer()
+                        if !model.botIDs.isEmpty {
+                            fleetSummary
+                        }
+                    }
                     Text(model.inicioVisitBase == nil ? "Resultados recentes dos seus Orbs" : "O que mudou desde sua última visita")
                         .font(Typography.text).foregroundStyle(Palette.muted)
                 }
@@ -125,8 +132,33 @@ struct InicioView: View {
     private func restoreSheetFocus() {
         guard sheet == nil, model.selection == .inicio, let row = returningFocus else { return }
         returningFocus = nil
-        focusedRow = row
+        focusedRowState = row
         accessibilityFocusedRow = row
+    }
+
+    @ViewBuilder private var fleetSummary: some View {
+        let workingCount = model.workingIDs.count
+        let pendingCount = model.pendingApprovals.count + flaggedRuns.count
+        if workingCount > 0 || pendingCount > 0 {
+            HStack(spacing: Spacing.s) {
+                if pendingCount > 0 {
+                    Label("\(pendingCount) \(pendingCount == 1 ? "pendência" : "pendências")", systemImage: "exclamationmark.circle")
+                        .font(Typography.small.weight(.medium))
+                        .foregroundStyle(Palette.warn)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Palette.warn.opacity(0.12), in: .capsule)
+                }
+                if workingCount > 0 {
+                    Label("\(workingCount) \(workingCount == 1 ? "ativo" : "ativos")", systemImage: "circle.dotted")
+                        .font(Typography.small.weight(.medium))
+                        .foregroundStyle(Palette.accentText)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Palette.accent.opacity(0.14), in: .capsule)
+                }
+            }
+        }
     }
 
     @ViewBuilder private var attention: some View {
@@ -135,15 +167,37 @@ struct InicioView: View {
         if !pending.isEmpty || !flagged.isEmpty {
             section("Precisa de você", count: pending.count + flagged.count, tone: .needsYou) {
                 ForEach(pending) { item in
-                    row(botID: item.bot.id, focus: .approval(item.request.id), title: item.request.title, detail: "Aguardando sua resposta", date: nil) {
-                        openPending(item.bot.id, approval: item.request.id)
-                    }
+                    pendingApprovalRow(item)
                 }
                 ForEach(flagged, id: \.1.id) { routine, run in
                     row(botID: routine.botID, focus: .attention(run.id), title: run.summary, detail: "Resultado da rotina pede atenção", date: run.date) {
                         openRun(routine.id, run.id, from: .attention(run.id))
                     }
                 }
+            }
+        }
+    }
+
+    private func pendingApprovalRow(_ item: PendingApproval) -> some View {
+        let preview = ApprovalPreview.of(item.request).rows.first?.command
+        let canRespondHere = item.request.question == nil && !item.request.isHandoff
+        return HStack(alignment: .center, spacing: Spacing.m) {
+            row(botID: item.bot.id, focus: .approval(item.request.id), title: item.request.title,
+                detail: preview ?? "Aguardando sua resposta", codeDetail: preview != nil,
+                showsChevron: !canRespondHere, date: nil) {
+                openPending(item.bot.id, approval: item.request.id)
+            }
+            if canRespondHere {
+                Button("Responder") { inspectingApproval = item.request.id }
+                    .buttonStyle(SecondaryPillStyle())
+                    .controlSize(.small)
+                    .help("Ver o pedido e decidir sem sair do Início")
+                    .popover(isPresented: Binding(get: { inspectingApproval == item.request.id },
+                                                  set: { if !$0 { inspectingApproval = nil } }), arrowEdge: .leading) {
+                        ApprovalCard(request: item.request, botID: item.bot.id)
+                            .frame(width: 440)
+                            .padding(Spacing.m)
+                    }
             }
         }
     }
@@ -313,7 +367,7 @@ struct InicioView: View {
         }
     }
 
-    private func row(botID: UUID, focus: InicioRowFocus, title: String, showsOrb: Bool = true, detail: String, badge: String? = nil, status: String? = nil, date: Date?,
+    private func row(botID: UUID, focus: InicioRowFocus, title: String, showsOrb: Bool = true, detail: String, codeDetail: Bool = false, badge: String? = nil, status: String? = nil, showsChevron: Bool = true, date: Date?,
                      action: @escaping () -> Void) -> some View {
         HStack(alignment: .center, spacing: 10) {
             if !showsOrb {
@@ -348,6 +402,8 @@ struct InicioView: View {
                                     .padding(.horizontal, 7).padding(.vertical, 1).background(Capsule().fill(Palette.ghostHover))
                                 Text(MarkdownCache.attributed(detail)).font(Typography.small).foregroundStyle(Palette.muted).lineLimit(1)
                             }
+                        } else if codeDetail {
+                            Text(detail).font(Typography.codeSmall).foregroundStyle(Palette.muted).lineLimit(1).truncationMode(.middle)
                         } else {
                             Text(MarkdownCache.attributed(detail)).font(Typography.small).foregroundStyle(Palette.muted).lineLimit(1).multilineTextAlignment(.leading)
                         }
@@ -355,11 +411,11 @@ struct InicioView: View {
                         }
                         Spacer(minLength: 4)
                         if let date { DayAware { now in Text(ReplyTime.label(date, now: now)).font(Typography.small).foregroundStyle(Palette.muted) } }
-                        Image(systemName: "chevron.right").font(Typography.small).foregroundStyle(Palette.faint)
+                        if showsChevron { Image(systemName: "chevron.right").font(Typography.small).foregroundStyle(Palette.faint) }
                     }.contentShape(.rect)
                 }.buttonStyle(.plain)
                     .focusable()
-                    .focused($focusedRow, equals: focus)
+                    .focused($focusedRowState, equals: focus)
                     .accessibilityFocused($accessibilityFocusedRow, equals: focus)
                     .onKeyPress(keys: [.return, .space]) { _ in action(); return .handled }
             }

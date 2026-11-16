@@ -496,4 +496,12 @@ struct SidebarCategoryLayoutTests {
         model.selection = .inicio
         #expect(model.draftTargetID == model.commandBotID)
     }
+
+    @Test func sidebarOrbFilterMatchesNameAndRoleWithoutCaseOrAccents() {
+        let look = BotLook(Bot(name: "Secretária Executiva", role: "Agenda e cobranças", orb: OrbConfig()))
+        #expect(SidebarOrbFilter.matches(look, words: []))
+        #expect(SidebarOrbFilter.matches(look, words: ["secretaria"]))
+        #expect(SidebarOrbFilter.matches(look, words: ["cobrancas", "agenda"]))
+        #expect(!SidebarOrbFilter.matches(look, words: ["secretaria", "financas"]))
+    }
 }

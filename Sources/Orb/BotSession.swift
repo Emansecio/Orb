@@ -162,6 +162,8 @@ final class BotSession {
     @ObservationIgnored var liveText: LiveText?
     /// Streamed text not shown yet: deltas are published at most every `textFlushInterval`.
     @ObservationIgnored var pendingText: String?
+    /// Readable reasoning summary received on the last assistant message, attached when the reply closes.
+    @ObservationIgnored var pendingReasoning: String?
     @ObservationIgnored var textFlush: Task<Void, Never>?
     /// Until when the Orb keeps talking (it stops when no text arrived for `speakingQuiet`).
     @ObservationIgnored var speakingUntil: ContinuousClock.Instant?

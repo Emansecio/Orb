@@ -29,13 +29,20 @@ struct SidebarView: View {
     /// "Orbs" and "Outros" fold their lists: session-only, so nothing stays hidden across launches.
     @State private var orbsUnfolded = true
     @State private var looseUnfolded = true
+    @State private var showsFilter = false
+    @State private var orbFilter = ""
+    @FocusState private var filterFocused: Bool
 
     var body: some View {
         let order = model.sidebarBotIDs
         // Worked out once per body: each of these is a computed property or a set comparison, and the drop delegate,
         // the preference callback and the two modifiers below all need them.
-        let looseIDs = model.looseBotIDs
-        let sections = SidebarDrop.sections(loose: looseIDs, categories: model.categories, botIDs: model.botIDs)
+        let filterWords = showsFilter ? SearchText.words(orbFilter) : []
+        let isFiltering = !filterWords.isEmpty
+        let allLooseIDs = model.looseBotIDs
+        let looseIDs = isFiltering ? allLooseIDs.filter { SidebarOrbFilter.matches(model.live($0).look, words: filterWords) } : allLooseIDs
+        let matchingCategoryIDs = isFiltering ? model.categories.flatMap { $0.botIDs.filter { model.botIDs.contains($0) && SidebarOrbFilter.matches(model.live($0).look, words: filterWords) } } : []
+        let sections = SidebarDrop.sections(loose: allLooseIDs, categories: model.categories, botIDs: model.botIDs)
         let listChanged = settledBotIDs.map { Set($0) != Set(model.botIDs) } ?? false
         let isNamingNewCategory = if case .new = model.categoryNaming { true } else { false }
         let nestedLoose = !model.categories.isEmpty && !looseIDs.isEmpty
@@ -60,11 +67,31 @@ struct SidebarView: View {
                     // "Orbs" folds the whole list; "Outros" gathers the loose ones once a category exists to sort them
                     // from, so every list under "Orbs" is a foldable group.
                     SidebarFoldHeader(title: "Orbs", unfolded: orbsUnfolded, ids: model.botIDs, selectionSpace: selectionSpace) {
-                        NewOrbMenu().padding(.trailing, 2)
+                        HStack(spacing: Spacing.xs) {
+                            if model.botIDs.count > 1 {
+                                SidebarFilterButton(isActive: showsFilter) {
+                                    withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) {
+                                        showsFilter.toggle()
+                                        if showsFilter { orbsUnfolded = true; filterFocused = true } else { orbFilter = "" }
+                                    }
+                                }
+                            }
+                            NewOrbMenu()
+                        }
+                        .padding(.trailing, 2)
                     } action: {
                         withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) { orbsUnfolded.toggle() }
                     }
                     .sidebarDropFrame(.looseTitle)
+                    if showsFilter && model.botIDs.count > 1 {
+                        SidebarOrbFilterField(query: $orbFilter, focused: $filterFocused) {
+                            withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) {
+                                orbFilter = ""
+                                showsFilter = false
+                            }
+                        }
+                        .transition(.adapted(.unfold, reduceMotion: reduceMotion))
+                    }
                     if orbsUnfolded {
                         if model.botIDs.isEmpty {
                             // No Orbs: an invitation in the list's own place. It shows the welcome screen (what you get with
@@ -90,7 +117,7 @@ struct SidebarView: View {
                             }
                             .sidebarDropItem(.othersTitle, drag)
                         }
-                        if !nestedLoose || looseUnfolded {
+                        if !nestedLoose || looseUnfolded || isFiltering {
                             ForEach(looseIDs, id: \.self) { id in
                                 SidebarBotRow(botID: id, index: order.firstIndex(of: id) ?? order.count, selectionSpace: selectionSpace, rowSpace: rowSpace)
                                     .sidebarDropItem(.row(id), drag)
@@ -99,8 +126,15 @@ struct SidebarView: View {
                         }
                         // The categories, after the loose Orbs: only how the list is laid out.
                         ForEach(model.categories) { category in
-                            SidebarCategorySection(category: category, order: order, drag: drag, selectionSpace: selectionSpace, rowSpace: rowSpace)
+                            SidebarCategorySection(category: category, order: order, drag: drag, selectionSpace: selectionSpace, rowSpace: rowSpace, filterWords: filterWords)
                                 .transition(.adapted(.arrive, reduceMotion: reduceMotion))
+                        }
+                        if isFiltering && looseIDs.isEmpty && matchingCategoryIDs.isEmpty {
+                            Text("Nenhum Orb encontrado")
+                                .font(Typography.small)
+                                .foregroundStyle(Palette.faint)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
                         }
                     }
                 }
@@ -363,6 +397,8 @@ struct SidebarRow<Content: View>: View {
     var help = ""
     /// What the row carries when it is dragged (an Orb's row, onto a category); nil for a row that is not dragged.
     var dragPayload: String?
+    /// Optional double-click action (runs simultaneously so single click stays immediate).
+    var doubleAction: (() -> Void)?
     let action: () -> Void
     @ViewBuilder let content: (Bool) -> Content
     /// Runs as the drag starts, before the row is over anything.
@@ -391,6 +427,7 @@ struct SidebarRow<Content: View>: View {
                 // dragged answers the click with a tap, and is still a button for VoiceOver.
                 row
                     .onTapGesture(perform: action)
+                    .simultaneousGesture(TapGesture(count: 2).onEnded { doubleAction?() })
                     .onDrag {
                         dragBegan()
                         return NSItemProvider(object: dragPayload as NSString)
@@ -401,6 +438,7 @@ struct SidebarRow<Content: View>: View {
             } else {
                 Button(action: action) { row }
                     .buttonStyle(.plain)
+                    .simultaneousGesture(TapGesture(count: 2).onEnded { doubleAction?() })
             }
         }
         .help(help)
@@ -510,6 +548,7 @@ struct SidebarBotRow: View {
     let selectionSpace: Namespace.ID
     /// Moved into or out of a category, the row slides from where it was to where it went.
     let rowSpace: Namespace.ID
+    @State private var isRenaming = false
 
     var body: some View {
         let live = model.live(botID)
@@ -521,7 +560,7 @@ struct SidebarBotRow: View {
         // The name and the reply under it are cut to one line each: the hover text has the name whole.
         VStack(alignment: .leading, spacing: 0) {
             SidebarRow(isSelected: isSelected, selectionSpace: selectionSpace, paintsSelection: chats == nil || folded, help: live.look.name,
-                       dragPayload: live.look.name) { // the name, not the id: dropped in a text field or another app it reads as the Orb
+                       dragPayload: isRenaming ? nil : live.look.name, doubleAction: { isRenaming = true }) { // the name, not the id: dropped in a text field or another app it reads as the Orb
                 model.selection = .bot(botID)
             } content: { isHovering in
                 BotRowContent(row: BotRow(look: live.look, workText: live.shownWork?.headline, shimmers: live.shownWork?.shimmers ?? false, activity: live.activity, isSelected: isSelected,
@@ -530,8 +569,10 @@ struct SidebarBotRow: View {
                                           partner: live.partner,
                                           hint: isHovering && index < 9 ? AppShortcut.bot(at: index).label : nil,
                                           landing: live.landing, botID: botID, chatsFolded: chats == nil ? nil : folded,
-                                          showsNewChat: isHovering))
-                    .equatable()
+                                          showsNewChat: isHovering, isRenaming: isRenaming)) {
+                    isRenaming = false
+                }
+                .equatable()
             } dragBegan: {
                 model.draggedBotID = botID
             }
@@ -670,6 +711,8 @@ struct BotRow: Equatable {
     var chatsFolded: Bool?
     /// The pointer is on the row: the "+" that opens a new conversation shows beside the shortcut.
     var showsNewChat = false
+    /// The Orb's name is currently being edited inline on this row.
+    var isRenaming = false
 
     static func time(of reply: ReplyPreview?, now: Date = .now, calendar: Calendar = .current) -> String? {
         reply.map { ReplyTime.label($0.date, now: now, calendar: calendar) }
@@ -686,10 +729,15 @@ private struct BotRowContent: View, Equatable {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let row: BotRow
+    let finishRenaming: () -> Void
     /// The selected row has looked at the chat and nothing has happened since: it rests like the others.
     @State private var selectionSettled = false
+    /// Plays one brief arrival pulse on the status ring when attention or unread work arrives.
+    @State private var ringPulse = 0
 
-    nonisolated static func == (a: BotRowContent, b: BotRowContent) -> Bool { a.row == b.row }
+    nonisolated static func == (a: BotRowContent, b: BotRowContent) -> Bool {
+        a.row == b.row
+    }
 
     /// The ring around the avatar: amber while the Orb waits for you (even mid-exchange: you come first), the partner's
     /// color while two Orbs exchange messages (MultiOrb, WP2), blue while it works.
@@ -705,17 +753,29 @@ private struct BotRowContent: View, Equatable {
             // Only the selected bot and bots with something going on move; the rest rest (no frames at all).
             BotAvatar(orb: look.orb, size: 30, activity: activity, celebration: row.celebration,
                       paused: activity == .idle && (!row.isSelected || selectionSettled), ack: row.ack, landing: row.landing, glance: row.glance, cue: row.cue)
-                // A 1.5 pt ring that says what is going on at a glance. It fades in and out (opacity only, so it is the same
-                // under Reduce Motion).
+                // A 1.5 pt ring that says what is going on at a glance. Pulses once when attention is needed.
                 .overlay {
                     if let ring {
                         Circle()
                             .strokeBorder(ring.opacity(0.55), lineWidth: 1.5)
                             .frame(width: 36, height: 36)
+                            .phaseAnimator(reduceMotion ? [0] : [0, 1, 2], trigger: ringPulse) { view, phase in
+                                view
+                                    .scaleEffect(phase == 1 ? 1.14 : 1)
+                                    .opacity(phase == 1 ? 0.95 : 1)
+                            } animation: { phase in
+                                phase == 1 ? .easeOut(duration: 0.22) : .easeInOut(duration: 0.32)
+                            }
                             .transition(.opacity)
                     }
                 }
                 .animation(Motion.fade, value: ring)
+                .onChange(of: row.needsYou) { old, new in
+                    if !old && new { ringPulse += 1 }
+                }
+                .onChange(of: row.unread) { old, new in
+                    if new > old && !row.isSelected { ringPulse += 1 }
+                }
                 // The selected Orb stays awake for its glance, then rests too (an idle Orb that never stops costs frames forever).
                 .task(id: SelectionRest(selected: row.isSelected, idle: activity == .idle, glance: row.glance)) {
                     selectionSettled = false
@@ -725,67 +785,79 @@ private struct BotRowContent: View, Equatable {
                 }
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
-                    let name = Text(look.name)
-                        .font(Typography.text.weight(.medium))
-                        .foregroundStyle(Palette.ink)
-                        .lineLimit(1)
-                    // The shortcut takes the time's place while the pointer is on the row. The name comes first: the time
-                    // shows only where both fit.
-                    if let hint = row.hint {
-                        name
-                        Spacer(minLength: 4)
-                        Text(hint)
-                            .font(Typography.small)
-                            .foregroundStyle(Palette.muted)
-                            .accessibilityHidden(true)
-                    } else if let replyTime = row.replyTime {
-                        ViewThatFits(in: .horizontal) {
-                            HStack(spacing: 4) {
-                                name.fixedSize()
-                                Spacer(minLength: 4)
-                                DayAware { now in
-                                    Text(BotRow.time(of: row.reply, now: now) ?? replyTime)
-                                        .font(Typography.small.monospacedDigit())
-                                        .foregroundStyle(Palette.faint)
+                    if row.isRenaming {
+                        InlineNameField(initial: look.name, label: "Nome do Orb", font: Typography.text.weight(.medium),
+                                        limit: AppModel.nameLimit, normalize: {
+                                            let clipped = AppModel.clippedName($0)
+                                            return clipped.isEmpty ? nil : clipped
+                                        }, save: { model.rename(row.botID, to: $0) }, finish: finishRenaming)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: Radius.small))
+                            .overlay(RoundedRectangle(cornerRadius: Radius.small).strokeBorder(Palette.lineStrong))
+                    } else {
+                        let name = Text(look.name)
+                            .font(Typography.text.weight(.medium))
+                            .foregroundStyle(Palette.ink)
+                            .lineLimit(1)
+                        // The shortcut takes the time's place while the pointer is on the row. The name comes first: the time
+                        // shows only where both fit.
+                        if let hint = row.hint {
+                            name
+                            Spacer(minLength: 4)
+                            Text(hint)
+                                .font(Typography.small)
+                                .foregroundStyle(Palette.muted)
+                                .accessibilityHidden(true)
+                        } else if let replyTime = row.replyTime {
+                            ViewThatFits(in: .horizontal) {
+                                HStack(spacing: 4) {
+                                    name.fixedSize()
+                                    Spacer(minLength: 4)
+                                    DayAware { now in
+                                        Text(BotRow.time(of: row.reply, now: now) ?? replyTime)
+                                            .font(Typography.small.monospacedDigit())
+                                            .foregroundStyle(Palette.faint)
+                                    }
+                                }
+                                HStack(spacing: 4) {
+                                    name
+                                    Spacer(minLength: 0)
                                 }
                             }
-                            HStack(spacing: 4) {
-                                name
-                                Spacer(minLength: 0)
-                            }
+                        } else {
+                            name
+                            Spacer(minLength: 4)
                         }
-                    } else {
-                        name
-                        Spacer(minLength: 4)
-                    }
-                    // A strip of fixed width at the right: the "+" that opens a new conversation (under the pointer only) and the
-                    // chevron that folds the open Orb's list. Both 16 pt high, the name's line. The "+" is always in the layout and
-                    // only fades, so the pointer passing over the row never shortens a long name.
-                    HStack(spacing: 0) {
-                        Button { model.newChat(for: row.botID) } label: { SectionPlus(size: 16) }
-                            .buttonStyle(.plain)
-                            .help("\(CommandName.newChat) (\(AppShortcut.newChat.label))")
-                            .opacity(row.showsNewChat ? 1 : 0)
-                            .allowsHitTesting(row.showsNewChat)
-                            // Nor a stop for the keyboard while it is not seen.
-                            .disabled(!row.showsNewChat)
-                            .animation(Motion.fade, value: row.showsNewChat)
-                            .accessibilityHidden(true)
-                        if let folded = row.chatsFolded {
-                            Button {
-                                withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) { model.setChatsCollapsed(!folded, for: row.botID) }
-                            } label: {
-                                Image(systemName: "chevron.right")
-                                    .font(SectionPlus.chevron)
-                                    .rotationEffect(.degrees(folded ? 0 : 90))
-                                    .animation(Motion.panel(reduceMotion: reduceMotion), value: folded)
-                                    .foregroundStyle(Palette.faint)
-                                    .frame(width: 16, height: 16)
-                                    .contentShape(.rect)
+                        // A strip of fixed width at the right: the "+" that opens a new conversation (under the pointer only) and the
+                        // chevron that folds the open Orb's list. Both 16 pt high, the name's line. The "+" is always in the layout and
+                        // only fades, so the pointer passing over the row never shortens a long name.
+                        HStack(spacing: 0) {
+                            Button { model.newChat(for: row.botID) } label: { SectionPlus(size: 16) }
+                                .buttonStyle(.plain)
+                                .help("\(CommandName.newChat) (\(AppShortcut.newChat.label))")
+                                .opacity(row.showsNewChat ? 1 : 0)
+                                .allowsHitTesting(row.showsNewChat)
+                                // Nor a stop for the keyboard while it is not seen.
+                                .disabled(!row.showsNewChat)
+                                .animation(Motion.fade, value: row.showsNewChat)
+                                .accessibilityHidden(true)
+                            if let folded = row.chatsFolded {
+                                Button {
+                                    withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) { model.setChatsCollapsed(!folded, for: row.botID) }
+                                } label: {
+                                    Image(systemName: "chevron.right")
+                                        .font(SectionPlus.chevron)
+                                        .rotationEffect(.degrees(folded ? 0 : 90))
+                                        .animation(Motion.panel(reduceMotion: reduceMotion), value: folded)
+                                        .foregroundStyle(Palette.faint)
+                                        .frame(width: 16, height: 16)
+                                        .contentShape(.rect)
+                                }
+                                .buttonStyle(.plain)
+                                .help(folded ? "Mostra as conversas deste Orb" : "Recolhe as conversas deste Orb")
+                                .accessibilityHidden(true)
                             }
-                            .buttonStyle(.plain)
-                            .help(folded ? "Mostra as conversas deste Orb" : "Recolhe as conversas deste Orb")
-                            .accessibilityHidden(true)
                         }
                     }
                 }
@@ -817,10 +889,11 @@ private struct BotRowContent: View, Equatable {
                                 if row.unread >= 2 {
                                     Text(row.unread > 99 ? "99+" : "\(row.unread)")
                                         .font(Typography.small.weight(.semibold).monospacedDigit())
-                                        .foregroundStyle(Palette.onInk)
+                                        .foregroundStyle(Palette.accentText)
                                         .padding(.horizontal, 5)
                                         .frame(minWidth: 16, minHeight: 16)
-                                        .background(Capsule().fill(Palette.accentText))
+                                        .background(Capsule().fill(Palette.accent.opacity(0.22)))
+                                        .overlay(Capsule().strokeBorder(Palette.accentText.opacity(0.32), lineWidth: 0.75))
                                 } else {
                                     Circle()
                                         .fill(Palette.accentText)
@@ -840,6 +913,71 @@ private struct BotRowContent: View, Equatable {
             .animateChanges(of: needsYou)
         }
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// Pure filter matching Orbs by name or role without case or accent sensitivity.
+enum SidebarOrbFilter {
+    static func matches(_ look: BotLook, words: [String]) -> Bool {
+        guard !words.isEmpty else { return true }
+        let haystack = MemoryText.fold(look.name + " " + look.role)
+        return words.allSatisfy { haystack.contains($0) }
+    }
+}
+
+private struct SidebarFilterButton: View {
+    let isActive: Bool
+    let action: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(isActive ? Palette.accentText : isHovering ? Palette.secondary : Palette.faint)
+                .frame(width: 20, height: 20)
+                .hoverFill(isHovering || isActive, in: .rect(cornerRadius: Radius.small))
+                .contentShape(.rect)
+                .onHover { isHovering = $0 }
+                .animation(Motion.fade, value: isHovering)
+        }
+        .buttonStyle(.plain)
+        .help(isActive ? "Fechar filtro de Orbs" : "Filtrar Orbs por nome ou papel")
+        .accessibilityLabel(isActive ? "Fechar filtro de Orbs" : "Filtrar Orbs")
+    }
+}
+
+private struct SidebarOrbFilterField: View {
+    @Binding var query: String
+    var focused: FocusState<Bool>.Binding
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(Typography.small)
+                .foregroundStyle(Palette.muted)
+                .accessibilityHidden(true)
+            TextField("Filtrar Orbs", text: $query, prompt: Text("Filtrar Orbs"))
+                .textFieldStyle(.plain)
+                .font(Typography.label)
+                .foregroundStyle(Palette.ink)
+                .focused(focused)
+                .onExitCommand(perform: dismiss)
+            if !query.isEmpty {
+                Button("Limpar filtro", systemImage: "xmark.circle.fill") { query = "" }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(Palette.muted)
+                    .font(Typography.small)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: Radius.small))
+        .overlay(RoundedRectangle(cornerRadius: Radius.small).strokeBorder(Palette.lineStrong))
+        .padding(.horizontal, 4)
+        .padding(.bottom, 4)
     }
 }
 

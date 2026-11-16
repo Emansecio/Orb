@@ -424,14 +424,22 @@ struct ComposerView: View {
 
     @ViewBuilder private func slashSuggestions(_ matches: [Skill]) -> some View {
         if !matches.isEmpty {
-            VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(matches.enumerated()), id: \.element.id) { index, skill in
                     SkillRow(skill: skill, isHighlighted: index == min(slashIndex, matches.count - 1)) { complete(skill) }
                 }
+                Divider().opacity(0.5).padding(.top, 2)
+                Text("↑↓ escolher · ⇥ completar · esc fechar")
+                    .font(Typography.small)
+                    .foregroundStyle(Palette.faint)
+                    .padding(.horizontal, Spacing.m)
+                    .padding(.top, 5)
+                    .padding(.bottom, 3)
             }
             .padding(.vertical, Spacing.xs)
             .card(radius: Radius.card, fill: Palette.raised)
             .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
+            .animation(Motion.press, value: slashIndex)
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Skills sugeridas")
             .transition(.adapted(.asymmetric(insertion: .opacity.combined(with: .offset(y: 4)), removal: .opacity),

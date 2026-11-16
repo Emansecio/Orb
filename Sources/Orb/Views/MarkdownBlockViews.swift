@@ -183,6 +183,7 @@ enum FindMarking {
 /// alone sets it apart, and it is the reply's only frame.
 struct CodeBlockView: View, Equatable {
     @Environment(\.enlargeBlock) private var enlarge
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let language: String?
     let code: String
     /// The code is still being written (this is the last block of a reply that streams).
@@ -193,6 +194,7 @@ struct CodeBlockView: View, Equatable {
     /// re-split — cutting the whole code at each flush made a flush cost grow with the code's length.
     @State private var streamCut = StreamCut()
     @State private var showsWhole = false
+    @State private var wrapsLines = true
     /// A ```html block as the page it writes (`PageSandbox`, no scripts), on request: code is what such a block usually is.
     @State private var showsPage = false
 
@@ -254,15 +256,23 @@ struct CodeBlockView: View, Equatable {
     }
 
     var body: some View {
+        let foldedHead = !streaming && highlight == nil ? Self.head(of: code) : nil
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                Text(language ?? "código")
+                Text(headerTitle(foldedHead: foldedHead))
                     .font(Typography.small)
                     .foregroundStyle(Palette.muted)
                 Spacer(minLength: 8)
                 if isPage {
                     BlockHeaderButton(title: showsPage ? "Código" : "Prévia", symbol: showsPage ? "chevron.left.forwardslash.chevron.right" : "eye",
                                       help: showsPage ? Tip.showSource : Tip.previewPage) { showsPage.toggle() }
+                }
+                if !streaming && !showsPage {
+                    BlockHeaderButton(title: wrapsLines ? "Rolar" : "Quebrar",
+                                      symbol: wrapsLines ? "arrow.left.and.right" : "text.alignleft",
+                                      help: wrapsLines ? "Desativa a quebra de linhas longas" : "Quebra linhas longas na largura do bloco") {
+                        wrapsLines.toggle()
+                    }
                 }
                 if !streaming, let enlarge { EnlargeButton { enlarge.run(.code(language: language, code: code, isClosed: true)) } }
                 CopyTextButton(text: code, help: Tip.copyCode, label: "Copiar código", copiedLabel: "Código copiado")
@@ -272,24 +282,40 @@ struct CodeBlockView: View, Equatable {
             .padding(.bottom, 2)
             if showsPage, isPage {
                 RichPicture(request: RichRequest(kind: .page, source: code), title: "Prévia da página")
+            } else if wrapsLines {
+                codeText(foldedHead: foldedHead)
+                    .padding(.horizontal, 10)
+                    .padding(.top, 4)
+                    .padding(.bottom, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-            codeText
-                .padding(.horizontal, 10)
-                .padding(.top, 4)
-                .padding(.bottom, 10)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                ScrollView(.horizontal) {
+                    codeText(foldedHead: foldedHead)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .padding(.horizontal, 10)
+                        .padding(.top, 4)
+                        .padding(.bottom, 10)
+                }
+                .scrollIndicators(.automatic)
             }
         }
         .background(Palette.raised, in: .rect(cornerRadius: Radius.small))
+        .animation(FoldMotion.animation(reduceMotion: reduceMotion), value: showsWhole)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(language.map { "Código em \($0)" } ?? "Código")
+    }
+
+    private func headerTitle(foldedHead: (text: String, hiddenLines: Int)?) -> String {
+        let base = language ?? "código"
+        guard let foldedHead, !showsWhole else { return base }
+        return "\(base) · \(Self.headLines + foldedHead.hiddenLines) linhas"
     }
 
     /// One `Text` for the whole code, which keeps selection and "Copiar" whole. While a long block streams it is drawn in
     /// pieces of `pieceLines` complete lines instead: the closed ones do not change (they keep what was drawn of them)
     /// and only the last, the one being written, is laid out and drawn again at each flush, so the cost of a flush no
     /// longer grows with the length of the code.
-    @ViewBuilder private var codeText: some View {
+    @ViewBuilder private func codeText(foldedHead: (text: String, hiddenLines: Int)?) -> some View {
         if streaming, let pieces = streamCut.pieces(of: code) {
             // The stack's spacing is the line spacing, so the seams between pieces are the same as between lines.
             VStack(alignment: .leading, spacing: 2) {
@@ -298,11 +324,11 @@ struct CodeBlockView: View, Equatable {
                 }
                 CodeLines(text: pieces.tail)
             }
-        } else if !streaming, highlight == nil, let head = Self.head(of: code) {
+        } else if let foldedHead {
             // A search result shows the whole block: what it found may be in the folded part.
             VStack(alignment: .leading, spacing: 6) {
-                CodeLines(text: showsWhole ? code : head.text, language: language)
-                ShowAllButton(isShowing: $showsWhole, hidden: head.hiddenLines)
+                CodeLines(text: showsWhole ? code : foldedHead.text, language: language)
+                ShowAllButton(isShowing: $showsWhole, hidden: foldedHead.hiddenLines)
             }
         } else {
             CodeLines(text: code, highlight: highlight, language: streaming ? nil : language)
