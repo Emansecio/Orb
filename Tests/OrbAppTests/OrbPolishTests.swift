@@ -306,15 +306,6 @@ struct OrbPolishTests {
 
     // MARK: The selection glance
 
-    @Test func theGlanceTurnsSlowerLooksLessAndIsIgnoredWhenRepeated() {
-        #expect(OrbGlance.look.x == 0.6 && OrbGlance.duration == 0.6 && OrbGlance.minimumGap == 1.2)
-        // The turn takes 0.16 s now.
-        #expect(OrbGlance.weight(0.08) < 1 && OrbGlance.weight(0.16) == 1 && OrbGlance.weight(0.3) == 1)
-        #expect(OrbGlance.blinkAt == 0.16)
-        // The eyes still lead the head by 50 ms.
-        #expect(OrbGlance.eyeLead == 0.05)
-    }
-
     @Test func theSelectionGlanceBlinksWithTheSameFactor() {
         var pose = OrbPose()
         OrbGlance.apply(to: &pose, elapsed: OrbGlance.blinkAt + Blinker.close + 0.01, blinkFactor: 0)

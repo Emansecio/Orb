@@ -233,14 +233,8 @@ private struct MemoryKindFilterStrip: View {
 
     private func chip(_ title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
         Button(title, action: action)
-            .buttonStyle(.plain)
-            .font(Typography.small.weight(isSelected ? .semibold : .regular))
-            .foregroundStyle(isSelected ? Palette.ink : Palette.muted)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4)
-            .background(isSelected ? Palette.ghostSelected : Palette.raised, in: .capsule)
-            .overlay(Capsule().strokeBorder(isSelected ? Palette.lineStrong : Palette.line))
-            .clickablePointer()
+            .buttonStyle(ChipStyle(isSelected: isSelected))
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private func shortLabel(_ kind: MemoryKind) -> String {
@@ -263,7 +257,7 @@ private struct MemoryHelp: View {
             Text("Como a memória funciona")
                 .font(Typography.text.weight(.semibold))
             Text("\(name) guarda preferências, fatos e procedimentos que aprende com você, e um resumo de cada conversa (salvo depois de 30 minutos sem mensagens ou ao começar outra).")
-            Text("Conversas antigas são compactadas, nunca apagadas sem você. Tudo fica em arquivos .md na pasta da memória, um por lembrança.")
+            Text("Conversas antigas são compactadas, nunca apagadas sem você. Tudo fica em arquivos de texto na pasta da memória, um por lembrança.")
                 .foregroundStyle(Palette.muted)
         }
         .font(Typography.label)
@@ -455,7 +449,7 @@ struct MemorySheet: View {
                 .labelStyle(FixedIconLabelStyle())
                 .help(Tip.memoryFolder)
                 .hangsOnLeadingEdge()
-                Text("Um arquivo .md por lembrança.")
+                Text("Um arquivo de texto por lembrança.")
                     .font(Typography.label)
                     .foregroundStyle(Palette.muted)
                     .lineLimit(1)

@@ -418,33 +418,6 @@ struct BrowseToolTests {
         #expect(setup.driver.calls.contains("setHeaded false") && hidden.contains("background") && !session.isShowingWindow)
     }
 
-    @Test func stoppingWhileTheWindowIsOpenHidesItFromATaskOfItsOwn() async throws {
-        let fake = FakeBrowserSetup()
-        var context = fake.context()
-        // The card waits like an approval does: until the person answers, or the task is cancelled (Parar).
-        context.handoff = { _ in
-            while !Task.isCancelled { try? await Task.sleep(for: .milliseconds(5)) }
-            return false
-        }
-        let task = Task { try await BrowseShowTool().run(.object([:]), context: context) }
-        await waitUntil("the window to open") { fake.driver.calls.contains("setHeaded true") }
-        try await Task.sleep(for: .milliseconds(30)) // the call is waiting on the card now
-        task.cancel()
-        await #expect(throws: ToolError.self) { _ = try await task.value }
-        // The cancelled task cannot run the commands that close the window: a task of the tool's own does.
-        await waitUntil("the window to be hidden") { fake.driver.calls.contains("setHeaded false") }
-        let session = try await fake.hub.session(botID: fake.botID, mode: .background)
-        await waitUntil("the Orb to know it is hidden") { !session.isShowingWindow }
-    }
-
-    @Test func cancelarHidesTheWindowInTheCallItself() async throws {
-        let fake = FakeBrowserSetup()
-        var context = fake.context()
-        context.handoff = { _ in false } // Cancelar: not a stopped task
-        _ = await message(BrowseShowTool(), context: context)
-        #expect(fake.driver.calls == ["setHeaded true", "setHeaded false"])
-    }
-
     // MARK: Keys
 
     @Test func browsePressTakesNamedKeysAndNothingThatTypes() async throws {

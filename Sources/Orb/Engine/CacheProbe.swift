@@ -11,9 +11,11 @@ enum CacheProbe {
     nonisolated(unsafe) static var folder: URL?
 
     /// A hash that survives relaunches (Swift's `Hasher` is seeded per process): 64-bit FNV-1a as hex.
-    static func hash(_ text: String) -> String {
+    static func hash(_ text: String) -> String { hashBytes(text.utf8) }
+
+    static func hashBytes(_ bytes: some Sequence<UInt8>) -> String {
         var hash: UInt64 = 0xcbf2_9ce4_8422_2325
-        for byte in text.utf8 {
+        for byte in bytes {
             hash ^= UInt64(byte)
             hash = hash &* 0x0000_0100_0000_01b3
         }

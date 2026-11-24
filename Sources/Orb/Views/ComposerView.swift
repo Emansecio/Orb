@@ -60,29 +60,29 @@ struct ComposerView: View {
         let situation = Situation(live: model.live(botID), workingChat: model.workingChatTitle(botID),
                                   routineName: model.runningRoutineName(botID), holdsRoutine: model.holdsRoutine(botID))
         let hintText = hint(situation)
+        let shownHint = DictationButton.hint(model.dictation, botID: botID) == nil ? hintText : ""
         VStack(spacing: 0) {
             card(lane, hint: hintText, situation)
-            // What dictation says is inside the card; the line under it keeps the hints of the keys.
-            Text(DictationButton.hint(model.dictation, botID: botID) == nil ? hintText : "")
-                .font(Typography.small)
-                .foregroundStyle(Palette.muted)
-                .lineLimit(1)
-                .frame(height: 14)
-                .padding(.top, Spacing.xs + Spacing.hairline)
-                .opacity(hintText.isEmpty ? 0 : 1)
-                // The line changes with the focus, the first letter and the queue, never with a key: it cross-fades
-                // (opacity only, so it holds under Reduce Motion too) instead of cutting.
-                .contentTransition(.opacity)
-                .animation(Motion.fade, value: hintText)
-                .accessibilityHidden(true)
+            if !shownHint.isEmpty {
+                Text(shownHint)
+                    .font(Typography.small)
+                    .foregroundStyle(Palette.muted)
+                    .lineLimit(1)
+                    .frame(height: 14)
+                    .padding(.top, Spacing.xs + Spacing.hairline)
+                    .contentTransition(.opacity)
+                    .transition(.opacity)
+                    .accessibilityHidden(true)
+            }
         }
+        .animation(Motion.fade, value: shownHint)
         // Padded first, then capped: the card lines up with the replies' text (`composerLeading`), not with the
-        // transcript's edge, so the column has one left edge and the card's borders stand out of the text evenly.
+        // transcript's edge, so the column has one left edge.
         .padding(.leading, TranscriptLayout.edge + TranscriptLayout.composerLeading)
         .padding(.trailing, TranscriptLayout.edge + TranscriptLayout.composerTrailing)
         .frame(maxWidth: TranscriptLayout.column)
         .padding(.top, Spacing.xs + Spacing.hairline)
-        .padding(.bottom, Spacing.s)
+        .padding(.bottom, Spacing.m)
         .frame(maxWidth: .infinity)
         .background {
             // Its own view: it reads the transcript (the steered messages), which this body must not observe.
@@ -165,6 +165,11 @@ struct ComposerView: View {
                     .transition(.adapted(.unfold, reduceMotion: reduceMotion))
                     .accessibilityHidden(true) // the microphone button says it as its value
             }
+            if situation.holdsRoutine || situation.workingChat != nil || !jobs.isEmpty || lane.editing != nil {
+                Rectangle().fill(Palette.line).frame(height: 1)
+                    .padding(.horizontal, Spacing.xs)
+                    .transition(.opacity)
+            }
 
             // The whole message is laid out in a scroll view as tall as it is, up to `maxHeight`: past that the wheel and
             // the trackpad scroll the message (not the chat behind it) and its scroller shows. The field's own limit
@@ -236,9 +241,7 @@ struct ComposerView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 if error == Dictation.deniedMessage, let url = Dictation.microphoneSettingsURL {
                     Button("Abrir Ajustes do Sistema") { NSWorkspace.shared.open(url) }
-                        .buttonStyle(.plain)
-                        .font(Typography.small.weight(.medium))
-                        .foregroundStyle(Palette.accentText)
+                        .buttonStyle(LinkTextStyle(font: Typography.small.weight(.medium)))
                 }
             }
             Spacer(minLength: Spacing.s)
@@ -347,7 +350,7 @@ struct ComposerView: View {
         let waitsOnChain = situation.live.chainWork != nil
         let action = ComposerAction.current(isWorking: situation.live.isWorking, canSend: canSend, waitsOnChain: waitsOnChain)
         let secondaryStop = action.showsSecondaryStop(waitsOnChain: waitsOnChain)
-        return HStack(spacing: Spacing.hairline) {
+        return HStack(spacing: Spacing.xs) {
             ComposerPlusMenu(botID: botID, attach: { isImporting = true }) { draft.wrappedValue = AppModel.draft(inserting: $0, into: draft.wrappedValue); isFocused = true }
             PermissionChip(botID: botID, compact: isCompact) { isFocused = true }
             if model.browserWithPerson.contains(botID) { PersonBrowserChip(botID: botID, compact: isCompact) }
@@ -438,7 +441,6 @@ struct ComposerView: View {
             }
             .padding(.vertical, Spacing.xs)
             .card(radius: Radius.card, fill: Palette.raised)
-            .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
             .animation(Motion.press, value: slashIndex)
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Skills sugeridas")
@@ -985,11 +987,11 @@ struct ComposerSurface: View {
     static func stroke(isFocused: Bool, isDropTargeted: Bool, isDictating: Bool = false) -> Color {
         if isDropTargeted { return Palette.accentText }
         if isDictating { return Palette.danger.opacity(0.45) }
-        return isFocused ? Palette.lineStrong : Palette.line
+        return isFocused ? Color.white.opacity(0.22) : Palette.line
     }
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: Radius.composer)
+        let shape = RoundedRectangle(cornerRadius: Radius.composer, style: .continuous)
         let shadow = Self.shadow(isDropTargeted: isDropTargeted)
         shape.fill(Self.fill(isFocused: isFocused))
             .shadow(color: shadow.color, radius: 18, y: shadow.y)

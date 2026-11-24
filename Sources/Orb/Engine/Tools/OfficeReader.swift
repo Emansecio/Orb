@@ -1,7 +1,8 @@
+import Compression
 import Foundation
 
-/// Reads Excel workbooks (.xlsx, .xlsm) and PowerPoint decks (.pptx) as text. Both are zip files of XML, opened with the
-/// system's `unzip`; nothing is written to disk.
+/// Reads Excel workbooks (.xlsx, .xlsm) and PowerPoint decks (.pptx) as text. Both are zip files of XML, opened in-process
+/// with `Compression` (zero `/usr/bin/unzip` forks; falls back to `unzip` only for uncommon compression methods).
 enum OfficeReader {
     static let extensions: Set<String> = ["xlsx", "xlsm", "pptx"]
     /// Most rows of one sheet that are shown; a spreadsheet of a million rows is for `run_command`.
@@ -13,22 +14,25 @@ enum OfficeReader {
 
     static func text(at url: URL) throws -> String {
         let isDeck = url.pathExtension.lowercased() == "pptx"
-        guard let names = entries(of: url) else {
+        let source = ZipSource(url: url)
+        guard let names = source.entries(), !names.isEmpty else {
             throw ToolError("Não consegui abrir \(url.lastPathComponent): o arquivo está corrompido ou não é um \(isDeck ? "PowerPoint" : "Excel") válido.")
         }
-        return isDeck ? try deck(url, names: names) : try workbook(url, names: names)
+        return isDeck ? try deck(source, url: url, names: names) : try workbook(source, url: url, names: names)
     }
 
     // MARK: Workbook
 
-    private static func workbook(_ url: URL, names: [String]) throws -> String {
-        let strings = part(url, "xl/sharedStrings.xml").map { SharedStringsParser.parse($0) } ?? []
-        let sheets = sheetList(url, names: names)
+    private static func workbook(_ source: ZipSource, url: URL, names: [String]) throws -> String {
+        let nameSet = Set(names)
+        let strings = nameSet.contains("xl/sharedStrings.xml")
+            ? source.part("xl/sharedStrings.xml").map { SharedStringsParser.parse($0) } ?? [] : []
+        let sheets = sheetList(source, names: names, nameSet: nameSet)
         if sheets.isEmpty { throw ToolError("A planilha \(url.lastPathComponent) não tem abas legíveis.") }
         var blocks: [String] = []
         for (index, sheet) in sheets.enumerated() {
             try Task.checkCancellation() // ⌘. reaches a big workbook between its sheets
-            guard let data = part(url, sheet.path) else { continue }
+            guard let data = source.part(sheet.path) else { continue }
             let rows = SheetParser.parse(data, strings: strings, maxRows: maxRows + 1)
             blocks.append(sheetBlock(number: index + 1, name: sheet.name, rows: rows.rows, cutColumns: rows.cutColumns))
         }
@@ -46,14 +50,15 @@ enum OfficeReader {
     }
 
     /// The sheets in workbook order with the file each one lives in.
-    private static func sheetList(_ url: URL, names: [String]) -> [(name: String, path: String)] {
-        let listed = part(url, "xl/workbook.xml").map { WorkbookParser.parse($0) } ?? []
-        let relationships = part(url, "xl/_rels/workbook.xml.rels").map { RelationshipsParser.parse($0) } ?? [:]
+    private static func sheetList(_ source: ZipSource, names: [String], nameSet: Set<String>) -> [(name: String, path: String)] {
+        let listed = nameSet.contains("xl/workbook.xml") ? source.part("xl/workbook.xml").map { WorkbookParser.parse($0) } ?? [] : []
+        let relationships = nameSet.contains("xl/_rels/workbook.xml.rels")
+            ? source.part("xl/_rels/workbook.xml.rels").map { RelationshipsParser.parse($0) } ?? [:] : [:]
         var sheets: [(String, String)] = []
         for item in listed {
             guard let target = relationships[item.relationship] else { continue }
             let path = target.hasPrefix("/") ? String(target.dropFirst()) : "xl/" + target
-            if names.contains(path) { sheets.append((item.name, path)) }
+            if nameSet.contains(path) { sheets.append((item.name, path)) }
         }
         if !sheets.isEmpty { return sheets }
         // Without a readable index, the sheets in numeric order.
@@ -62,15 +67,17 @@ enum OfficeReader {
 
     // MARK: Deck
 
-    private static func deck(_ url: URL, names: [String]) throws -> String {
+    private static func deck(_ source: ZipSource, url: URL, names: [String]) throws -> String {
+        let nameSet = Set(names)
         let slides = numbered(names, prefix: "ppt/slides/slide")
         guard !slides.isEmpty else { throw ToolError("A apresentação \(url.lastPathComponent) não tem slides legíveis.") }
         var blocks: [String] = []
         for (index, path) in slides.enumerated() {
             try Task.checkCancellation()
-            guard let data = part(url, path) else { continue }
+            guard let data = source.part(path) else { continue }
             var block = "## Slide \(index + 1)\n" + (DrawingTextParser.parse(data).joined(separator: "\n"))
-            if let notes = notesPart(url, slidePath: path).flatMap({ part(url, $0) }) {
+            if let notesPath = notesPart(source, slidePath: path, nameSet: nameSet), nameSet.contains(notesPath),
+               let notes = source.part(notesPath) {
                 let text = DrawingTextParser.parse(notes).filter { Int($0) == nil }.joined(separator: "\n")
                 if !text.isEmpty { block += "\n[Notas do apresentador]\n" + text }
             }
@@ -82,9 +89,10 @@ enum OfficeReader {
     /// The part with a slide's speaker notes: the one its relationships file points to (PowerPoint numbers the notes parts in
     /// sequence among the slides that have notes, so slide 3 may own `notesSlide1.xml`). Without a relationships file, the part
     /// with the slide's own number.
-    private static func notesPart(_ url: URL, slidePath: String) -> String? {
+    private static func notesPart(_ source: ZipSource, slidePath: String, nameSet: Set<String>) -> String? {
         let file = slidePath.dropFirst("ppt/slides/".count)
-        guard let data = part(url, "ppt/slides/_rels/\(file).rels") else {
+        let relsPath = "ppt/slides/_rels/\(file).rels"
+        guard nameSet.contains(relsPath), let data = source.part(relsPath) else {
             let number = slidePath.dropFirst("ppt/slides/slide".count).dropLast(".xml".count)
             return "ppt/notesSlides/notesSlide\(number).xml"
         }
@@ -108,14 +116,160 @@ enum OfficeReader {
         }.sorted { $0.0 < $1.0 }.map(\.1)
     }
 
-    /// The names inside the zip, nil when it cannot be read as one.
-    private static func entries(of url: URL) -> [String]? {
-        guard let data = run(["-Z1", url.path], limit: 8_000_000) else { return nil }
-        let names = String(decoding: data, as: UTF8.self).split(separator: "\n").map(String.init)
-        return names.isEmpty ? nil : names
+    /// In-process ZIP reader over mmap + `Compression` (stored & raw deflate, including ZIP64); falls back to `/usr/bin/unzip`
+    /// only when an archive uses an uncommon compression method or layout.
+    private struct ZipSource {
+        let url: URL
+        let archive: NativeZip?
+
+        init(url: URL) {
+            self.url = url
+            self.archive = (try? Data(contentsOf: url, options: .mappedIfSafe)).flatMap(NativeZip.init)
+        }
+
+        func entries() -> [String]? {
+            if let archive { return archive.names }
+            guard let data = OfficeReader.run(["-Z1", url.path], limit: 8_000_000) else { return nil }
+            let names = String(decoding: data, as: UTF8.self).split(separator: "\n").map(String.init)
+            return names.isEmpty ? nil : names
+        }
+
+        func part(_ name: String) -> Data? {
+            if let archive {
+                switch archive.extract(name, limit: OfficeReader.maxPartBytes) {
+                case .data(let data): return data
+                case .tooLarge, .missing: return nil
+                case .unsupported: break
+                }
+            }
+            return OfficeReader.run(["-p", url.path, name], limit: OfficeReader.maxPartBytes)
+        }
     }
 
-    private static func part(_ url: URL, _ name: String) -> Data? { run(["-p", url.path, name], limit: maxPartBytes) }
+    private struct NativeZip {
+        struct Entry { let method: UInt16; let compressedSize: Int; let localOffset: Int }
+        enum Extraction { case data(Data), missing, tooLarge, unsupported }
+
+        let data: Data
+        let names: [String]
+        let entries: [String: Entry]
+
+        init?(_ data: Data) {
+            guard data.count >= 22 else { return nil }
+            let minOffset = max(0, data.count - 65_557)
+            var eocdOffset: Int?
+            for offset in stride(from: data.count - 22, through: minOffset, by: -1) {
+                if Self.u32(data, offset) == 0x0605_4b50 { eocdOffset = offset; break }
+            }
+            guard let eocd = eocdOffset else { return nil }
+            var cdSize = Int(Self.u32(data, eocd + 12))
+            var cdOffset = Int(Self.u32(data, eocd + 16))
+            if cdOffset == 0xFFFF_FFFF || cdSize == 0xFFFF_FFFF {
+                // ZIP64 End of Central Directory Locator sits 20 bytes before EOCD.
+                guard eocd >= 20, Self.u32(data, eocd - 20) == 0x0706_4b50 else { return nil }
+                let z64 = Int(Self.u64(data, eocd - 12))
+                guard z64 >= 0, z64 + 56 <= data.count, Self.u32(data, z64) == 0x0606_4b50 else { return nil }
+                cdSize = Int(Self.u64(data, z64 + 40))
+                cdOffset = Int(Self.u64(data, z64 + 48))
+            }
+            guard cdOffset >= 0, cdSize >= 0, cdOffset + cdSize <= data.count else { return nil }
+            var names: [String] = []
+            var entries: [String: Entry] = [:]
+            var cursor = cdOffset
+            let end = cdOffset + cdSize
+            while cursor + 46 <= end {
+                guard Self.u32(data, cursor) == 0x0201_4b50 else { return nil }
+                let method = Self.u16(data, cursor + 10)
+                var compSize = Int(Self.u32(data, cursor + 20))
+                var uncompSize = Int(Self.u32(data, cursor + 24))
+                let nameLen = Int(Self.u16(data, cursor + 28))
+                let extraLen = Int(Self.u16(data, cursor + 30))
+                let commentLen = Int(Self.u16(data, cursor + 32))
+                var localOffset = Int(Self.u32(data, cursor + 42))
+                let headerEnd = cursor + 46 + nameLen + extraLen + commentLen
+                guard headerEnd <= end else { return nil }
+                let name = String(decoding: data[(cursor + 46)..<(cursor + 46 + nameLen)], as: UTF8.self)
+                if compSize == 0xFFFF_FFFF || uncompSize == 0xFFFF_FFFF || localOffset == 0xFFFF_FFFF {
+                    var ex = cursor + 46 + nameLen
+                    let exEnd = ex + extraLen
+                    while ex + 4 <= exEnd {
+                        let tag = Self.u16(data, ex), len = Int(Self.u16(data, ex + 2))
+                        var p = ex + 4
+                        if tag == 0x0001, p + len <= exEnd {
+                            if uncompSize == 0xFFFF_FFFF, p + 8 <= ex + 4 + len { uncompSize = Int(Self.u64(data, p)); p += 8 }
+                            if compSize == 0xFFFF_FFFF, p + 8 <= ex + 4 + len { compSize = Int(Self.u64(data, p)); p += 8 }
+                            if localOffset == 0xFFFF_FFFF, p + 8 <= ex + 4 + len { localOffset = Int(Self.u64(data, p)) }
+                            break
+                        }
+                        ex += 4 + len
+                    }
+                }
+                names.append(name)
+                entries[name] = Entry(method: method, compressedSize: compSize, localOffset: localOffset)
+                cursor = headerEnd
+            }
+            guard !names.isEmpty else { return nil }
+            self.data = data
+            self.names = names
+            self.entries = entries
+        }
+
+        func extract(_ name: String, limit: Int) -> Extraction {
+            guard let entry = entries[name] else { return .missing }
+            let o = entry.localOffset
+            guard o >= 0, o + 30 <= data.count, Self.u32(data, o) == 0x0403_4b50 else { return .unsupported }
+            let start = o + 30 + Int(Self.u16(data, o + 26)) + Int(Self.u16(data, o + 28))
+            let end = start + entry.compressedSize
+            guard start >= 0, end <= data.count else { return .unsupported }
+            if entry.method == 0 {
+                return entry.compressedSize > limit ? .tooLarge : .data(Data(data[start..<end]))
+            }
+            guard entry.method == 8 else { return .unsupported }
+            return inflate(data[start..<end], limit: limit)
+        }
+
+        private func inflate(_ slice: Data, limit: Int) -> Extraction {
+            var stream = compression_stream(dst_ptr: UnsafeMutablePointer<UInt8>(bitPattern: 1)!, dst_size: 0,
+                                            src_ptr: UnsafePointer<UInt8>(bitPattern: 1)!, src_size: 0, state: nil)
+            guard compression_stream_init(&stream, COMPRESSION_STREAM_DECODE, COMPRESSION_ZLIB) == COMPRESSION_STATUS_OK else {
+                return .unsupported
+            }
+            defer { compression_stream_destroy(&stream) }
+            let chunkSize = 65_536
+            var out = Data()
+            var scratch = [UInt8](repeating: 0, count: chunkSize)
+            return slice.withUnsafeBytes { raw -> Extraction in
+                guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return .data(Data()) }
+                stream.src_ptr = base
+                stream.src_size = raw.count
+                while true {
+                    let produced: (status: compression_status, count: Int) = scratch.withUnsafeMutableBufferPointer { dst in
+                        stream.dst_ptr = dst.baseAddress!
+                        stream.dst_size = dst.count
+                        let status = compression_stream_process(&stream, Int32(COMPRESSION_STREAM_FINALIZE.rawValue))
+                        return (status, dst.count - stream.dst_size)
+                    }
+                    if produced.count > 0 {
+                        if out.count + produced.count > limit { return .tooLarge }
+                        out.append(contentsOf: scratch[0..<produced.count])
+                    }
+                    if produced.status == COMPRESSION_STATUS_END { return .data(out) }
+                    if produced.status != COMPRESSION_STATUS_OK { return .unsupported }
+                    if produced.count == 0 && stream.src_size == 0 { return .data(out) }
+                }
+            }
+        }
+
+        private static func u16(_ d: Data, _ i: Int) -> UInt16 {
+            UInt16(d[i]) | (UInt16(d[i + 1]) << 8)
+        }
+        private static func u32(_ d: Data, _ i: Int) -> UInt32 {
+            UInt32(d[i]) | (UInt32(d[i + 1]) << 8) | (UInt32(d[i + 2]) << 16) | (UInt32(d[i + 3]) << 24)
+        }
+        private static func u64(_ d: Data, _ i: Int) -> UInt64 {
+            UInt64(u32(d, i)) | (UInt64(u32(d, i + 4)) << 32)
+        }
+    }
 
     /// `unzip` with its output read up to `limit` bytes; nil when it fails or has more than that.
     private static func run(_ arguments: [String], limit: Int) -> Data? {

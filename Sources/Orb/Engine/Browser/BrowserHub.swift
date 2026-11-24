@@ -511,6 +511,9 @@ final class BrowserHub: Sendable {
     private let locate: @Sendable () async -> BrowserStatus
     private let makeDriver: @Sendable (AgentBrowserConfig) -> any BrowserDriver
     private let sessions = OSAllocatedUnfairLock<[UUID: BrowserSession]>(initialState: [:])
+    /// Most recently used Orb IDs (newest last) so idle browsers stay bounded by `maxActiveSessions`.
+    private let sessionOrder = OSAllocatedUnfairLock<[UUID]>(initialState: [])
+    static let maxActiveSessions = 3
     /// What the tools say a ref is ("Entrar" for e3), by Orb and conversation (a ref belongs to the tab it was read in), readable
     /// without waiting (the approval card shows it).
     private let labels = OSAllocatedUnfairLock<[LabelKey: [String: String]]>(initialState: [:])
@@ -567,9 +570,16 @@ final class BrowserHub: Sendable {
         }
     }
 
+    /// Cached `BrowserStatus` for 60 s so every turn does not re-scan PATH and Chrome's `Info.plist`.
+    private let cachedStatus = OSAllocatedUnfairLock<(status: BrowserStatus, until: ContinuousClock.Instant)?>(initialState: nil)
+
+    func invalidateStatusCache() { cachedStatus.withLock { $0 = nil } }
+
     func status() async -> BrowserStatus {
+        if let hit = cachedStatus.withLock({ $0 }), hit.until > .now { return hit.status }
         let status = await locate()
         remember(status)
+        cachedStatus.withLock { $0 = (status, .now + .seconds(60)) }
         return status
     }
 
@@ -596,6 +606,8 @@ final class BrowserHub: Sendable {
         Self.adoptOldProfile(for: botID, in: profilesDirectory)
         var config = AgentBrowserConfig(executable: status.agentBrowser ?? "agent-browser", session: AgentBrowserConfig.sessionName(botID: botID),
                                         browser: status.program, profile: profileFolder(botID: botID), stateDirectory: profilesDirectory)
+        // Explicit socket directory enables the ~20 µs in-process PID liveness check (`daemonIsAliveInProcess`).
+        config.socketDirectory = profilesDirectory?.appending(path: "sockets")
         config.headed = mode == .visible
         config.visibleByDefault = mode == .visible
         config.proxy = proxy
@@ -636,6 +648,7 @@ final class BrowserHub: Sendable {
         // The profile's caches are being emptied (a moment): the browser opens after, not on top of it.
         while cleaning.withLock({ $0.contains(botID) }) { try await Task.sleep(for: .milliseconds(100)) }
         if let existing = sessions.withLock({ $0[botID] }), existing.mode == mode, existing.proxy == proxy(botID: botID) {
+            sessionOrder.withLock { order in order.removeAll { $0 == botID }; order.append(botID) }
             await settleClosing(botID: botID)
             return existing
         }
@@ -655,6 +668,33 @@ final class BrowserHub: Sendable {
                 scheduleClose(botID: botID, driver: replaced.driver)
             }
             return session
+        }
+        let victims: [(UUID, BrowserSession)] = {
+            let candidates = sessionOrder.withLock { order -> [UUID] in
+                order.removeAll { $0 == botID }
+                order.append(botID)
+                return order
+            }
+            let evicted = sessions.withLock { sessions -> [(UUID, BrowserSession)] in
+                var dropped: [(UUID, BrowserSession)] = []
+                var count = sessions.count
+                for id in candidates where count > Self.maxActiveSessions {
+                    guard id != botID, let current = sessions[id], current.mode != .visible else { continue }
+                    sessions.removeValue(forKey: id)
+                    dropped.append((id, current))
+                    count -= 1
+                }
+                return dropped
+            }
+            if !evicted.isEmpty {
+                let evictedIDs = Set(evicted.map(\.0))
+                sessionOrder.withLock { $0.removeAll { evictedIDs.contains($0) } }
+                scoped.withLock { views in for id in evictedIDs { views[id] = nil } }
+            }
+            return evicted
+        }()
+        for (victimID, victimSession) in victims {
+            scheduleClose(botID: victimID, driver: victimSession.driver)
         }
         await settleClosing(botID: botID)
         return session
@@ -869,6 +909,8 @@ final class BrowserHub: Sendable {
             if let held { scheduleClose(botID: botID, driver: held.driver) }
             return held
         }
+        sessionOrder.withLock { $0.removeAll { $0 == botID } }
+        scoped.withLock { $0[botID] = nil }
         if held != nil { await settleClosing(botID: botID) }
         return held
     }
@@ -949,6 +991,8 @@ final class BrowserHub: Sendable {
             defer { sessions = [:] }
             return Array(sessions.values)
         }
+        sessionOrder.withLock { $0.removeAll() }
+        scoped.withLock { $0 = [:] }
         labels.withLock { $0 = [:] }
         sensitivePages.withLock { $0 = [] }
         for session in all { try? await session.driver.close() }

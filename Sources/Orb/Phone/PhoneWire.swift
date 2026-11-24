@@ -199,9 +199,12 @@ enum PhoneWire {
 
     static func millis(_ date: Date) -> Int64 { Int64((date.timeIntervalSince1970 * 1000).rounded()) }
 
+    private static let sharedEncoder = JSONEncoder()
+    private static let encoderLock = NSLock()
+
     static func encode(_ frame: some Encodable) -> Data {
         // Every frame is made of strings, numbers and booleans: encoding cannot fail.
-        (try? JSONEncoder().encode(frame)) ?? Data("{}".utf8)
+        encoderLock.withLock { (try? sharedEncoder.encode(frame)) ?? Data("{}".utf8) }
     }
 }
 

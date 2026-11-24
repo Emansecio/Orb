@@ -364,7 +364,7 @@ private struct LiveScreenClosedLine: View {
         .chatCard()
         .task(id: itemID) {
             guard let jpeg = model.liveScreens.lastScreen(of: itemID) else { return }
-            let image = await Task.detached(priority: .utility) { LiveJPEG.image(from: jpeg) }.value
+            let image = await Task.detached(priority: .utility) { LiveJPEG.thumbnail(from: jpeg, maxPixelSize: 80) }.value
             guard !Task.isCancelled else { return }
             lastImage = image.map { NSImage(cgImage: $0, size: .zero) }
         }

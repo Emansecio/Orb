@@ -35,6 +35,8 @@ enum Palette {
 
     // Ink
     static let ink = Color(hex: 0xFCFCFC)
+    /// Softened white for long-form prose bodies so headings, bold and code stand out without halation.
+    static let proseInk = Color(hex: 0xEDEDED)
     static let secondary = Color(hex: 0xFCFCFC, opacity: 0.74)
     static let muted = Color(hex: 0xFCFCFC, opacity: 0.6)
     /// Quietest ink that still reads as text: about 5.6:1 on `canvas` and on `chrome` (AA for 11-12 pt).
@@ -59,11 +61,13 @@ enum Palette {
     // Semantic
     static let accent = Color(hex: 0x1084FE)
     static let accentText = Color(hex: 0x459FFE)
+    static let accentFill = Color(hex: 0x1084FE, opacity: 0.16)
     static let ok = Color(hex: 0x00C972)
     /// Red: something ran and failed (a command, a run, a connection, a login), or an action that destroys.
     static let danger = Color(hex: 0xFF263C)
     /// Orange: nothing failed, but it needs you or deserves care (an approval waiting, a sign-in, a risky setting).
     static let warn = Color(hex: 0xFF9800)
+    static let warnFill = Color(hex: 0xFF9800, opacity: 0.12)
     // What a search in the conversation marks: the text it found, and the wash that fades behind the message it brought into view.
     static let findMatch = Color(hex: 0xFF9800, opacity: 0.4)
     static let findWash = Color(hex: 0x1084FE, opacity: 0.16)
@@ -503,7 +507,7 @@ struct PrimaryPillStyle: ButtonStyle {
         configuration.label
             .pillLabel()
             .font(metrics.font)
-            .foregroundStyle(isDestructive ? Color.white : Palette.onInk)
+            .foregroundStyle(isDestructive ? Palette.ink : Palette.onInk)
             .padding(.horizontal, metrics.horizontal)
             .frame(minHeight: metrics.height)
             .background {

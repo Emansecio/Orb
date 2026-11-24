@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// A five-field cron line, "30 8 * * 1-5": minute, hour, day of the month, month, day of the week (0 or 7 = domingo).
 /// Each field takes `*`, a number, a range (`1-5`), a list (`1,15`), a step (`*/30`, `8-18/2`) and, for months and days of
@@ -6,6 +7,23 @@ import Foundation
 /// is enough, as in every cron.
 struct CronExpression: Hashable, Sendable {
     struct Invalid: Error, Equatable { let reason: String }
+
+    private static let cache = OSAllocatedUnfairLock<[String: Result<CronExpression, Invalid>]>(initialState: [:])
+    private static let cacheLimit = 128
+
+    /// Parsed expression with a bounded cache so `Schedule.next` and `RoutineCost` never re-parse the same cron line.
+    static func parsed(_ text: String) throws -> CronExpression {
+        if let hit = cache.withLock({ $0[text] }) { return try hit.get() }
+        let result: Result<CronExpression, Invalid>
+        do { result = .success(try CronExpression(text)) }
+        catch let invalid as Invalid { result = .failure(invalid) }
+        catch { throw error }
+        cache.withLock { map in
+            if map.count >= cacheLimit { map.removeAll(keepingCapacity: true) }
+            map[text] = result
+        }
+        return try result.get()
+    }
 
     let minutes: [Int], hours: [Int]
     let days: Set<Int>, months: Set<Int>, weekdays: Set<Int>
@@ -38,26 +56,62 @@ struct CronExpression: Hashable, Sendable {
 
     /// The first time after `date` that matches, in `calendar`'s time zone; nil when none does in `searchYears`.
     func next(after date: Date, calendar: Calendar) -> Date? {
-        let start = calendar.startOfDay(for: date)
-        for offset in 0..<(Self.searchYears * 366) {
-            guard let day = calendar.date(byAdding: .day, value: offset, to: start) else { return nil }
+        var day = calendar.startOfDay(for: date)
+        guard let limit = calendar.date(byAdding: .year, value: Self.searchYears, to: day) else { return nil }
+        let startComponents = calendar.dateComponents([.hour, .minute], from: date)
+        let startDay = day
+        let sortedMonths = months.sorted()
+
+        while day <= limit {
             let parts = calendar.dateComponents([.year, .month, .day, .weekday], from: day)
-            guard let month = parts.month, months.contains(month), matches(day: parts.day, weekday: parts.weekday) else { continue }
-            // Daylight saving can move a skipped time forward past a later one, so the loop order is not the time order:
-            // take the earliest real instant of the day (two times landing on the same instant count once).
-            var earliest: Date?
-            for hour in hours {
-                for minute in minutes {
-                    var time = parts
-                    time.weekday = nil
-                    time.hour = hour
-                    time.minute = minute
-                    // A time skipped by daylight saving comes out moved forward, which is still a run that day.
-                    guard let candidate = calendar.date(from: time), candidate > date else { continue }
-                    if earliest.map({ candidate < $0 }) ?? true { earliest = candidate }
+            guard let year = parts.year, let month = parts.month else { return nil }
+            if !months.contains(month) {
+                // Jump straight to day 1 of the next matching month instead of stepping day by day.
+                let nextMonth = sortedMonths.first { $0 > month }
+                var target = DateComponents()
+                target.year = nextMonth == nil ? year + 1 : year
+                target.month = nextMonth ?? sortedMonths[0]
+                target.day = 1
+                guard let jumped = calendar.date(from: target), jumped > day else { return nil }
+                day = jumped
+                continue
+            }
+            if matches(day: parts.day, weekday: parts.weekday) {
+                let nextDay = calendar.date(byAdding: .day, value: 1, to: day) ?? day.addingTimeInterval(25 * 3600)
+                let dstTransition = calendar.timeZone.nextDaylightSavingTimeTransition(after: day.addingTimeInterval(-1))
+                let hasDST = dstTransition.map { $0 < nextDay } ?? false
+                if !hasDST {
+                    // Normal day (363+/365): times are strictly monotonic, so the first valid slot after `date` wins.
+                    let minHour = (day == startDay) ? (startComponents.hour ?? 0) : 0
+                    let minMinute = (day == startDay) ? (startComponents.minute ?? 0) : -1
+                    for hour in hours where hour >= minHour {
+                        for minute in minutes {
+                            if day == startDay && hour == minHour && minute <= minMinute { continue }
+                            var time = parts
+                            time.weekday = nil
+                            time.hour = hour
+                            time.minute = minute
+                            if let candidate = calendar.date(from: time), candidate > date { return candidate }
+                        }
+                    }
+                } else {
+                    // Daylight saving can move a skipped time forward past a later one, so check every slot of this day.
+                    var earliest: Date?
+                    for hour in hours {
+                        for minute in minutes {
+                            var time = parts
+                            time.weekday = nil
+                            time.hour = hour
+                            time.minute = minute
+                            guard let candidate = calendar.date(from: time), candidate > date else { continue }
+                            if earliest.map({ candidate < $0 }) ?? true { earliest = candidate }
+                        }
+                    }
+                    if let earliest { return earliest }
                 }
             }
-            if let earliest { return earliest }
+            guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { return nil }
+            day = next
         }
         return nil
     }

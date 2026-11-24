@@ -67,6 +67,10 @@ struct InicioView: View {
                 }
                 if model.botIDs.isEmpty {
                     VStack(spacing: 12) {
+                        Image(systemName: "circle.hexagongrid")
+                            .font(.system(size: 32, weight: .light))
+                            .foregroundStyle(Palette.hint)
+                            .accessibilityHidden(true)
                         Text("Ainda não há Orbs").font(Typography.title).foregroundStyle(Palette.ink)
                         Text("Crie seu primeiro Orb para começar.").font(Typography.text).foregroundStyle(Palette.muted)
                         Button("Criar Orb") { model.selection = nil }.buttonStyle(PrimaryPillStyle())
@@ -166,9 +170,7 @@ struct InicioView: View {
     }
 
     @ViewBuilder private var teamsOverview: some View {
-        VStack(alignment: .leading, spacing: Spacing.s) {
-            Text("Times")
-                .sectionTitleStyle()
+        section("Times", count: model.teams.count, tone: .card) {
             ForEach(model.teams) { team in
                 let progress = team.mission.progress
                 HStack(spacing: 12) {
@@ -202,15 +204,15 @@ struct InicioView: View {
 
                     if team.status.isWorking {
                         Button("Pausar") { model.pauseTeam(team.id) }
-                            .chipButton()
+                            .buttonStyle(SecondaryPillStyle())
+                            .controlSize(.small)
                     } else if team.status != .completed {
                         Button("Retomar") { model.startTeam(team.id) }
-                            .chipButton()
+                            .buttonStyle(SecondaryPillStyle())
+                            .controlSize(.small)
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .card()
+                .padding(.vertical, 6)
             }
         }
     }
@@ -249,7 +251,7 @@ struct InicioView: View {
                     .popover(isPresented: Binding(get: { inspectingApproval == item.request.id },
                                                   set: { if !$0 { inspectingApproval = nil } }), arrowEdge: .leading) {
                         ApprovalCard(request: item.request, botID: item.bot.id)
-                            .frame(width: 440)
+                            .frame(minWidth: 320, maxWidth: 440)
                             .padding(Spacing.m)
                     }
             }
@@ -311,11 +313,11 @@ struct InicioView: View {
         return section("Novidades", count: news.count, tone: .plain) {
             // The filter sits in the header, beside the count it changes, instead of on a row of its own above the list.
             if orbs.count > 1 {
-                Menu(filter.flatMap { model.bot($0)?.name } ?? "Todos os Orbs") {
+                Menu(filter.flatMap { model.liveBot($0)?.look.name } ?? "Todos os Orbs") {
                     Button("Todos os Orbs") { orbFilter = nil }
                     Divider()
                     ForEach(orbs, id: \.self) { id in
-                        Toggle(model.bot(id)?.name ?? "Orb indisponível", isOn: Binding(get: { filter == id }, set: { orbFilter = $0 ? id : nil }))
+                        Toggle(model.liveBot(id)?.look.name ?? "Orb indisponível", isOn: Binding(get: { filter == id }, set: { orbFilter = $0 ? id : nil }))
                     }
                 }
                 .menuStyle(.button).buttonStyle(GhostStyle()).controlSize(.small).fixedSize().hangsOnTrailingEdge()
@@ -330,13 +332,15 @@ struct InicioView: View {
                 }
             } else {
                 DayAware { now in
+                    let days = InicioDays.group(shown, now: now)
                     VStack(alignment: .leading, spacing: Spacing.m) {
-                        ForEach(InicioDays.group(shown, now: now)) { day in
+                        ForEach(days) { day in
                             Text(day.title).font(Typography.label.weight(.semibold)).foregroundStyle(Palette.secondary)
-                                .accessibilityAddTraits(.isHeader).padding(.top, Spacing.xs)
+                                .accessibilityAddTraits(.isHeader)
+                                .padding(.top, day.id == days.first?.id ? Spacing.xs : Spacing.m)
                             ForEach(day.items) { item in
                                 eventRow(item)
-                                if item.id != day.items.last?.id { Divider() }
+                                if item.id != day.items.last?.id { Divider().padding(.leading, 42) }
                             }
                         }
                     }
@@ -423,21 +427,22 @@ struct InicioView: View {
 
     private func row(botID: UUID, focus: InicioRowFocus, title: String, showsOrb: Bool = true, detail: String, codeDetail: Bool = false, badge: String? = nil, status: String? = nil, showsChevron: Bool = true, date: Date?,
                      action: @escaping () -> Void) -> some View {
-        HStack(alignment: .center, spacing: 10) {
+        let look = showsOrb ? model.liveBot(botID)?.look : nil
+        return HStack(alignment: .center, spacing: 10) {
             if !showsOrb {
                 Color.clear.frame(width: 32, height: 1) // under the avatar of the row that opens the Orb's run
-            } else if let bot = model.bot(botID) {
+            } else if let look {
                 Button { model.selection = .bot(botID) } label: {
-                    LiveBotAvatar(botID: botID, orb: bot.orb, size: 32, restsWhenIdle: true)
-                }.buttonStyle(.plain).help("Abrir conversa de \(bot.name)").accessibilityLabel("Abrir conversa de \(bot.name)")
+                    BotAvatar(orb: look.orb, size: 32, animated: false)
+                }.buttonStyle(.plain).help("Abrir conversa de \(look.name)").accessibilityLabel("Abrir conversa de \(look.name)")
                     .focusable()
                     .onKeyPress(keys: [.return, .space]) { _ in model.selection = .bot(botID); return .handled }
             }
             VStack(alignment: .leading, spacing: 3) {
-                if showsOrb, let bot = model.bot(botID) {
-                    Button(bot.name) { model.selection = .bot(botID) }
+                if showsOrb, let look {
+                    Button(look.name) { model.selection = .bot(botID) }
                         .buttonStyle(.plain).font(Typography.small.weight(.semibold)).foregroundStyle(Palette.secondary)
-                        .help("Abrir conversa de \(bot.name)")
+                        .help("Abrir conversa de \(look.name)")
                         .focusable()
                         .onKeyPress(keys: [.return, .space]) { _ in model.selection = .bot(botID); return .handled }
                 } else if showsOrb {
@@ -452,16 +457,15 @@ struct InicioView: View {
                         if let badge {
                             // The channel as a pill ahead of the step, the check on its own line below.
                             HStack(spacing: 6) {
-                                Text(badge).font(Typography.small).foregroundStyle(Palette.secondary)
-                                    .padding(.horizontal, 7).padding(.vertical, 1).background(Capsule().fill(Palette.ghostHover))
-                                Text(MarkdownCache.attributed(detail)).font(Typography.small).foregroundStyle(Palette.muted).lineLimit(1)
+                                CatalogBadge(text: badge)
+                                Text(MarkdownCache.attributed(detail)).font(Typography.small).foregroundStyle(Palette.muted).lineLimit(1).help(detail)
                             }
                         } else if codeDetail {
-                            Text(detail).font(Typography.codeSmall).foregroundStyle(Palette.muted).lineLimit(1).truncationMode(.middle)
+                            Text(detail).font(Typography.codeSmall).foregroundStyle(Palette.muted).lineLimit(1).truncationMode(.middle).help(detail)
                         } else {
-                            Text(MarkdownCache.attributed(detail)).font(Typography.small).foregroundStyle(Palette.muted).lineLimit(1).multilineTextAlignment(.leading)
+                            Text(MarkdownCache.attributed(detail)).font(Typography.small).foregroundStyle(Palette.muted).lineLimit(1).multilineTextAlignment(.leading).help(detail)
                         }
-                        if let status { Text(status).font(Typography.small).foregroundStyle(Palette.muted).lineLimit(1) }
+                        if let status { Text(status).font(Typography.small).foregroundStyle(Palette.muted).lineLimit(1).help(status) }
                         }
                         Spacer(minLength: 4)
                         if let date { DayAware { now in Text(ReplyTime.label(date, now: now)).font(Typography.small).foregroundStyle(Palette.muted) } }
@@ -547,22 +551,24 @@ private struct InicioFollowUpSheet: View {
         let followUp = routine?.followUps.first { $0.id == followUpID }
         Group {
             if let routine, let followUp {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(followUp.nextStep).font(Typography.text).foregroundStyle(Palette.ink)
-                    Text("Canal: \(followUp.channel)").font(Typography.label).foregroundStyle(Palette.secondary)
-                    if let action = followUp.lastAction { Text("Última ação: \(action)").font(Typography.label).foregroundStyle(Palette.secondary) }
-                    if let checked = followUp.lastChecked {
-                        Text("Última verificação: \(RoutineText.stamp(checked))").font(Typography.label).foregroundStyle(Palette.muted)
-                    } else { Text("Sem verificação registrada").font(Typography.label).foregroundStyle(Palette.muted) }
-                    if let source = followUp.source {
-                        Text("Origem: \(source)").font(Typography.small).foregroundStyle(Palette.muted).textSelection(.enabled)
-                        if let url = URL(string: source), ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil {
-                            Link("Ver origem", destination: url).font(Typography.label)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(followUp.nextStep).font(Typography.text).foregroundStyle(Palette.ink)
+                        Text("Canal: \(followUp.channel)").font(Typography.label).foregroundStyle(Palette.secondary)
+                        if let action = followUp.lastAction { Text("Última ação: \(action)").font(Typography.label).foregroundStyle(Palette.secondary) }
+                        if let checked = followUp.lastChecked {
+                            Text("Última verificação: \(RoutineText.stamp(checked))").font(Typography.label).foregroundStyle(Palette.muted)
+                        } else { Text("Sem verificação registrada").font(Typography.label).foregroundStyle(Palette.muted) }
+                        if let source = followUp.source {
+                            Text("Origem: \(source)").font(Typography.small).foregroundStyle(Palette.muted).textSelection(.enabled)
+                            if let url = URL(string: source), ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil {
+                                Link("Ver origem", destination: url).font(Typography.label)
+                            }
                         }
+                        Text(followUp.resolved ? "Concluído" : "Em aberto").font(Typography.small).foregroundStyle(Palette.muted)
                     }
-                    Text(followUp.resolved ? "Concluído" : "Em aberto").font(Typography.small).foregroundStyle(Palette.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(Spacing.sheetEdge)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading).padding(20)
                 .orbSheet(followUp.subject, subtitle: routine.name, size: .medium) {
                     SheetFooterBar {
                         Button("Ver rotina", systemImage: "clock.arrow.circlepath") {
@@ -577,7 +583,12 @@ private struct InicioFollowUpSheet: View {
             } else {
                 ContentUnavailableView("Este acompanhamento não está mais aqui", systemImage: "text.bubble")
                     .frame(width: 540, height: 300)
-                    .overlay(alignment: .bottom) { Button("Fechar") { dismiss() }.padding() }
+                    .overlay(alignment: .bottom) {
+                        Button("Fechar") { dismiss() }
+                            .buttonStyle(PrimaryPillStyle())
+                            .keyboardShortcut(.cancelAction)
+                            .padding()
+                    }
             }
         }
     }

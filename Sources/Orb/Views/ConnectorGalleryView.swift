@@ -201,6 +201,7 @@ private struct ServiceCard: View {
 
     var body: some View {
         Button(action: action) {
+            let textDim: Double = (status == .soon || status == .off) ? 0.65 : 1
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .center, spacing: 12) {
                     ServiceTile(mark: service.mark)
@@ -208,6 +209,7 @@ private struct ServiceCard: View {
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(Palette.ink)
                         .lineLimit(1)
+                        .opacity(textDim)
                     Spacer(minLength: 0)
                 }
                 Text(service.summary)
@@ -215,6 +217,7 @@ private struct ServiceCard: View {
                     .foregroundStyle(Palette.muted)
                     .lineLimit(2, reservesSpace: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .opacity(textDim)
                     .help(service.summary)
                 if case .needsAttention(let message) = status {
                     note(message).transition(.opacity)
@@ -231,7 +234,6 @@ private struct ServiceCard: View {
             }
             .padding(Spacing.catalogCardPadding)
             .hoverCard(isHovering && status != .soon, radius: Radius.large, strongOutline: true)
-            .opacity(status == .soon || status == .off ? 0.7 : 1)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)

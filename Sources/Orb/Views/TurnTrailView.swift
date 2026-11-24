@@ -128,7 +128,7 @@ struct PlanCard: View {
             }
             .padding(Spacing.m)
             .frame(maxWidth: cardWidth, alignment: .leading)
-            .card(radius: Radius.small)
+            .card(radius: Radius.card)
             .padding(.leading, gutter)
         }
     }
@@ -168,13 +168,12 @@ struct TurnTrailView: View {
                 .foregroundStyle(Palette.muted)
                 .lineLimit(1)
                 .truncationMode(.tail)
+                .help(words)
             if case .routine(let name) = change, goneRoutines.contains(name) {
                 Text("(apagada)").foregroundStyle(Palette.warn)
             } else if let action {
                 Button(action) { open(change) }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(Palette.accentText)
-                    .clickablePointer()
+                    .buttonStyle(LinkTextStyle(font: Typography.small))
                     .accessibilityLabel("\(action): \(words)")
             }
         }

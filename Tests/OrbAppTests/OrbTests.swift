@@ -407,6 +407,8 @@ struct OrbTests {
         }
         #expect(OrbFlourish.hop.offset(at: 0.3).lift > 0.08)
         #expect(OrbFlourish.lookAround.offset(at: 0.3 * OrbFlourish.lookAround.duration).look.x < -0.5)
+        let wiggleTilt = stride(from: 0.0, to: OrbFlourish.wiggle.duration, by: 0.005).map { abs(OrbFlourish.wiggle.offset(at: $0).tilt) }.max() ?? 0
+        #expect(wiggleTilt <= 7 && wiggleTilt > 6)
     }
 
     @Test func spontaneousFlourishesFollowTheTemperament() {

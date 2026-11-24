@@ -252,16 +252,6 @@ struct ContextModelTests {
         #expect(ContextReading.make(input) == nil)
     }
 
-    @Test func claudeCodeOrbsAreMeasuredLikeAnyOtherWithTheirOwnWindow() throws {
-        let (model, id, root) = makeModel()
-        defer { removeTestFolder(root) }
-        model.providers = [ProviderAccount(kind: .claudeCode)]
-        model.defaultModel = "claudeCode/sonnet"
-        model.seedConversation(conversation(turns: 2), for: id)
-        let input = try #require(model.contextInput(for: id))
-        #expect(input.budget?.window == 200_000)
-    }
-
     @Test func learnedWindowsAreListedAndForgotten() {
         let (model, id, root) = makeModel()
         defer { removeTestFolder(root) }

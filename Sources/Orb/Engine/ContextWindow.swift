@@ -438,7 +438,7 @@ enum ContextText {
     /// Text that already carries such a marker keeps its count: what it left out is added to what is cut now, and
     /// whatever follows the marker (like the path of a saved output) stays at the end.
     static func preview(_ text: String, limit: Int) -> String {
-        guard text.count > limit + 80 else { return text }
+        guard text.utf8.count > limit + 80, text.count > limit + 80 else { return text }
         // The note of a saved output (its path) is the way back to the whole text: it always stays, whole.
         if text.hasSuffix("]"), let note = text.range(of: savedNoteOpen, options: .backwards),
            text[note.lowerBound...].count <= maxSavedNote {
@@ -461,7 +461,7 @@ enum ContextText {
 
     /// Tool-call arguments with every string longer than `stringLimit` cut. Still valid JSON.
     static func shortenArguments(_ arguments: String, stringLimit: Int) -> String {
-        guard arguments.count > stringLimit else { return arguments }
+        guard arguments.utf8.count > stringLimit, arguments.count > stringLimit else { return arguments }
         guard let parsed = JSONValue.parse(arguments) else {
             return JSONValue.object(["truncated_arguments": .string(clip(arguments, stringLimit))]).jsonString
         }

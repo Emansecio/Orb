@@ -92,8 +92,8 @@ actor MemoryBank {
     private var nextIndexAttempt = Date.distantPast
     private var lastReconcile = Date.distantPast
     private var lastCheckpoint = Date.distantPast
-    /// Reused across messages (`related`); the actor serializes its use.
-    private let tagger = NLTagger(tagSchemes: [.lexicalClass, .lemma])
+    /// Created lazily on first topic tagging (`relatedHits`) and released when the Orb goes idle.
+    private var tagger: NLTagger?
     private var lastBump: [String: Date] = [:]
     /// Each page's origin, by path, with the date of the version it was read from (a hand edit changes the date and it is
     /// read again): `mergeCandidates` and `consolidablePreferences` ask after every turn, and reading one file per page took
@@ -385,7 +385,12 @@ actor MemoryBank {
         var subject = terms
         if terms.count >= 3 {
             let text = context.isEmpty ? message : message + ". " + context
-            let nouns = MemoryText.topicNouns(String(text.prefix(Self.taggedLength)), tagger: tagger)
+            let currentTagger = tagger ?? {
+                let made = NLTagger(tagSchemes: [.lexicalClass, .lemma])
+                tagger = made
+                return made
+            }()
+            let nouns = MemoryText.topicNouns(String(text.prefix(Self.taggedLength)), tagger: currentTagger)
             if !nouns.isEmpty { subject = terms.filter { MemoryText.isTopic($0, in: nouns) } }
         }
         let required = subject.count >= 3 ? 2 : 1
@@ -589,6 +594,20 @@ actor MemoryBank {
         return compacted
     }
 
+    /// Closes the SQLite handle and drops transient caches while the Orb is idle; reopened lazily on next use.
+    func releaseIdleResources() {
+        index = nil
+        tagger = nil
+        isPrepared = false
+        lastReconcile = .distantPast
+    }
+
+    /// Asks SQLite to free unused page-cache memory without closing the connection.
+    func shrinkMemory() {
+        index?.shrinkMemory()
+        tagger = nil
+    }
+
     // MARK: Panel
 
     func snapshot(now: Date = .now) -> MemorySnapshot {
@@ -712,7 +731,7 @@ actor MemoryBank {
             var failure = MemoryIndex.Failure.unavailable
             do {
                 let index = try MemoryIndex(url: url, busyTimeout: busyTimeout)
-                switch index.health {
+                switch index.healthIfDue() {
                 case .ok: return index
                 case .busy: failure = .busy
                 case .corrupt: failure = .corrupt
@@ -789,15 +808,27 @@ actor MemoryBank {
     func pageOrigins(of kinds: [MemoryKind]) -> [String: MemoryOrigin] {
         let marks = kinds.map { _ in "?" }.joined(separator: ", ")
         var known: [String: MemoryOrigin] = [:]
-        for row in index?.rows("SELECT path, mtime FROM pages WHERE kind IN (\(marks))", kinds.map { .text($0.rawValue) }) ?? [] {
-            let path = row.text(0), mtime = row.double(1) ?? 0
-            if let cached = origins[path], abs(cached.mtime - mtime) < 0.001 {
+        var backfills: [(String, String)] = []
+        for row in index?.rows("SELECT path, mtime, origin FROM pages WHERE kind IN (\(marks))", kinds.map { .text($0.rawValue) }) ?? [] {
+            let path = row.text(0), mtime = row.double(1) ?? 0, storedOrigin = row.text(2)
+            if let origin = MemoryOrigin(rawValue: storedOrigin) {
+                origins[path] = (mtime, origin)
+                known[path] = origin
+            } else if let cached = origins[path], abs(cached.mtime - mtime) < 0.001 {
                 known[path] = cached.origin
             } else if let page = read(path) {
                 origins[path] = (mtime, page.origin)
                 known[path] = page.origin
+                backfills.append((page.origin.rawValue, path))
             } else {
                 origins[path] = nil
+            }
+        }
+        if !backfills.isEmpty {
+            index?.transaction {
+                for (origin, path) in backfills {
+                    index?.run("UPDATE pages SET origin = ? WHERE path = ?", [.text(origin), .text(path)])
+                }
             }
         }
         return known
@@ -810,9 +841,11 @@ actor MemoryBank {
     /// `titleReadLimit` newest and the `titleReadUsed` most used, so a log that outgrows the first never hides the second.
     func titleItems(_ kind: MemoryKind, now: Date) -> [(item: MemorySnapshot.Item, score: Double)] {
         index?.rows("""
-            SELECT path, title, updated, compacted, access_count, last_access, salience FROM pages WHERE kind = ?1
-              AND (id IN (SELECT id FROM pages WHERE kind = ?1 ORDER BY updated DESC, path LIMIT ?2)
-                OR id IN (SELECT id FROM pages WHERE kind = ?1 ORDER BY access_count DESC, path LIMIT ?3))
+            SELECT path, title, updated, compacted, access_count, last_access, salience FROM pages WHERE id IN (
+                SELECT id FROM (SELECT id FROM pages WHERE kind = ?1 ORDER BY updated DESC, path LIMIT ?2)
+                UNION
+                SELECT id FROM (SELECT id FROM pages WHERE kind = ?1 ORDER BY access_count DESC, path LIMIT ?3)
+            )
             ORDER BY updated DESC, path
             """, [.text(kind.rawValue), .int(Self.titleReadLimit), .int(Self.titleReadUsed)]).map { row in
             let updated = row.double(2) ?? 0
@@ -867,12 +900,13 @@ actor MemoryBank {
         mergeShortScan = nil // the candidates depend on origin and compaction, not on the page count alone
         origins[page.path] = (mtime, page.origin)
         let stored = index?.run("""
-            INSERT INTO pages(path, kind, title, body, created, updated, compacted, mtime) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO pages(path, kind, title, body, created, updated, compacted, mtime, origin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(path) DO UPDATE SET kind = excluded.kind, title = excluded.title, body = excluded.body,
-                created = excluded.created, updated = excluded.updated, compacted = excluded.compacted, mtime = excluded.mtime
+                created = excluded.created, updated = excluded.updated, compacted = excluded.compacted, mtime = excluded.mtime,
+                origin = excluded.origin
             """, [.text(page.path), .text(page.kind.rawValue), .text(page.title), .text(page.body),
                   .real(page.created.timeIntervalSince1970), .real(page.updated.timeIntervalSince1970),
-                  .int(page.compacted ? 1 : 0), .real(mtime)])
+                  .int(page.compacted ? 1 : 0), .real(mtime), .text(page.origin.rawValue)])
         // The file is the truth; if the index missed it, the next use re-reads the folder.
         if stored == false { lastReconcile = .distantPast }
     }
@@ -907,10 +941,14 @@ actor MemoryBank {
     }
 
     private func bump(_ paths: [String], now: Date) {
-        for path in paths where now.timeIntervalSince(lastBump[path] ?? .distantPast) > 60 {
-            lastBump[path] = now
-            index?.run("UPDATE pages SET access_count = access_count + 1, last_access = ? WHERE path = ?",
-                       [.real(now.timeIntervalSince1970), .text(path)])
+        let due = paths.filter { now.timeIntervalSince(lastBump[$0] ?? .distantPast) > 60 }
+        guard !due.isEmpty else { return }
+        index?.transaction {
+            for path in due {
+                lastBump[path] = now
+                index?.run("UPDATE pages SET access_count = access_count + 1, last_access = ? WHERE path = ?",
+                           [.real(now.timeIntervalSince1970), .text(path)])
+            }
         }
     }
 
@@ -1148,6 +1186,18 @@ final class MemoryLibrary: Sendable {
             if state.closed.contains(orbID) || state.isSealed { bank.close() } else { state.banks[orbID] = bank }
             return bank
         }
+    }
+
+    /// Releases SQLite handle and transient tagger of an idle Orb's bank (no-op if not open).
+    func releaseIdle(for orbID: UUID) async {
+        guard let bank = openBank(for: orbID) else { return }
+        await bank.releaseIdleResources()
+    }
+
+    /// Asks every open bank to shrink SQLite page caches and drop idle taggers under memory pressure.
+    func shrinkAll() async {
+        let banks = state.withLock { Array($0.banks.values) }
+        for bank in banks { await bank.shrinkMemory() }
     }
 
     func closeBank(_ orbID: UUID) {

@@ -106,20 +106,6 @@ struct OrbRhythmTests {
         return (Double(blinks) / minutes, Double(fixations) / minutes, Double(gestures) / minutes)
     }
 
-    @Test func theTemperamentsFollowTheTable() {
-        let balanced = OrbTemperament.equilibrado.traits, lively = OrbTemperament.animado.traits
-        let shy = OrbTemperament.timido.traits, curious = OrbTemperament.curioso.traits, calm = OrbTemperament.calmo.traits
-        #expect(balanced.blinkGap == 2.5...8 && balanced.blinkSkew == 1.5 && balanced.saccadeHold == 1.25 && balanced.flourishes.isEmpty)
-        #expect(lively.blinkGap == 1.8...5.5 && lively.saccadeHold == 0.75 && lively.flourishGap == 18...40 && lively.doubleBlink == 0.15)
-        #expect(shy.blinkGap == 2.2...7 && shy.saccadeHold == 1.25 && shy.doubleBlink == 0.25)
-        #expect(shy.flourishes == [.bashful] && shy.flourishGap == 45...90)
-        #expect(curious.blinkGap == 2...6.5 && curious.saccadeHold == 0.95 && curious.flourishGap == 14...30)
-        #expect(calm.blinkGap == 3.5...9 && calm.saccadeHold == 1.8 && calm.flourishGap == 40...90 && calm.flourishes == [.sigh])
-        // The wiggle is gentler: 7 degrees.
-        let tilt = stride(from: 0.0, to: OrbFlourish.wiggle.duration, by: 0.005).map { abs(OrbFlourish.wiggle.offset(at: $0).tilt) }.max() ?? 0
-        #expect(tilt <= 7 && tilt > 6)
-    }
-
     @Test func theRhythmsMatchTheRecommendedFrequencies() {
         // Per minute, with a little room for chance (two hours of each).
         let table: [(OrbTemperament, blinks: ClosedRange<Double>, saccades: ClosedRange<Double>, gestures: ClosedRange<Double>)] = [

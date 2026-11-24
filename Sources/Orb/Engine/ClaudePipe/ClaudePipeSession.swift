@@ -289,9 +289,9 @@ enum ClaudePipeSession {
     }
 
     private static func imageBlock(_ image: ImageAttachment) -> JSONValue? {
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: image.path)), !data.isEmpty else { return nil }
+        guard let encoded = ImageWire.base64(ofFileAt: image.path) else { return nil }
         return .object(["type": .string("image"), "source": .object([
-            "type": .string("base64"), "media_type": .string(image.mediaType), "data": .string(data.base64EncodedString()),
+            "type": .string("base64"), "media_type": .string(image.mediaType), "data": .string(encoded),
         ])])
     }
 

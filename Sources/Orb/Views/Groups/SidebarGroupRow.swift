@@ -33,11 +33,37 @@ enum GroupRowText {
 struct SidebarGroupsSection: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage("orb.sidebarGroupsUnfolded") private var unfolded = true
     let selectionSpace: Namespace.ID
 
     var body: some View {
+        let collapsed = !unfolded
+        let holdsSelection = collapsed && model.groups.contains { model.selection == .group($0.id) }
         VStack(alignment: .leading, spacing: 1) {
-            SectionTitle("Grupos") {
+            HStack(spacing: 0) {
+                SidebarRow(isSelected: holdsSelection, selectionSpace: selectionSpace,
+                           help: collapsed ? "Mostra os grupos" : "Recolhe os grupos") {
+                    withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) { unfolded.toggle() }
+                } content: { _ in
+                    HStack(spacing: 4) {
+                        Text("Grupos")
+                            .font(Typography.label.weight(.medium))
+                            .foregroundStyle(holdsSelection ? Palette.ink : Palette.faint)
+                            .lineLimit(1)
+                        Image(systemName: "chevron.right")
+                            .font(SectionPlus.chevron)
+                            .rotationEffect(.degrees(collapsed ? 0 : 90))
+                            .animation(Motion.panel(reduceMotion: reduceMotion), value: collapsed)
+                            .foregroundStyle(Palette.faint)
+                        Spacer(minLength: 4)
+                        if collapsed, !model.groups.isEmpty {
+                            Text("\(model.groups.count)")
+                                .font(Typography.small.monospacedDigit())
+                                .foregroundStyle(Palette.faint)
+                        }
+                    }
+                    .frame(minHeight: SidebarCategoryLayout.headerContentHeight)
+                }
                 Button { model.showNewGroup = true } label: { SectionPlus() }
                     .buttonStyle(.plain)
                     .disabled(model.botIDs.count < 2)
@@ -45,18 +71,30 @@ struct SidebarGroupsSection: View {
                     .accessibilityLabel("Novo grupo")
                     .accessibilityIdentifier("sidebar-new-group")
             }
-            if model.groups.isEmpty {
-                // An empty section explains itself, as "Arraste um Orb para cá" does for a category.
-                Text("Junte Orbs para trabalharem juntos")
-                    .font(Typography.small)
-                    .foregroundStyle(Palette.faint)
-                    .padding(.leading, SidebarCategoryLayout.titleInset)
-                    .padding(.vertical, 4)
+            if unfolded {
+                if model.groups.isEmpty {
+                    SidebarRow(isSelected: false, selectionSpace: selectionSpace, isDashed: true,
+                               help: Tip.newGroup()) {
+                        model.showNewGroup = true
+                    } content: { _ in
+                        HStack(spacing: 6) {
+                            Image(systemName: "plus")
+                                .font(SectionPlus.glyph)
+                                .foregroundStyle(Palette.muted)
+                            Text("Juntar Orbs em um grupo")
+                                .font(Typography.label)
+                                .foregroundStyle(Palette.muted)
+                                .lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: SidebarCategoryLayout.headerContentHeight, alignment: .leading)
+                    }
+                    .disabled(model.botIDs.count < 2)
                     .transition(.adapted(.arrive, reduceMotion: reduceMotion))
-            }
-            ForEach(model.groups) { group in
-                SidebarGroupRow(group: group, selectionSpace: selectionSpace)
-                    .transition(.adapted(.arrive, reduceMotion: reduceMotion))
+                }
+                ForEach(model.groups) { group in
+                    SidebarGroupRow(group: group, selectionSpace: selectionSpace)
+                        .transition(.adapted(.arrive, reduceMotion: reduceMotion))
+                }
             }
         }
         // A group made or deleted comes and goes like an Orb's row, and the ones below slide.
@@ -98,6 +136,7 @@ struct SidebarGroupRow: View {
                         .font(Typography.text.weight(.medium))
                         .foregroundStyle(Palette.ink)
                         .lineLimit(1)
+                        .help(group.name)
                     Text(GroupRowText.secondLine(presence: presence, orbCount: looks.count))
                         .font(Typography.small)
                         .foregroundStyle(live.needsYou ? Palette.warn : Palette.faint)

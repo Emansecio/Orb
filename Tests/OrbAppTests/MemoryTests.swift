@@ -1,6 +1,4 @@
-import CoreGraphics
 import Foundation
-import ImageIO
 import SQLite3
 import Testing
 @testable import Orb
@@ -266,31 +264,6 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: library.directory(for: kept).path))
         let files = try FileManager.default.contentsOfDirectory(atPath: target.appending(path: "fatos").path)
         #expect(files.count == 1)
-    }
-
-    // MARK: Claude Code
-
-    /// A screenshot stand-in: writes a real PNG and returns it as the picture, the way `ScreenshotTool` does.
-    private struct PictureTool: AgentTool {
-        var spec: ToolSpec { ToolSpec(name: "foto", description: "Foto", parameters: .schema([:])) }
-        var kind: ToolCall.Kind { .computer }
-        var capability: Capability? { nil }
-        func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
-        func summary(_ arguments: JSONValue) -> (title: String, detail: String) { ("Foto", "") }
-        func run(_ arguments: JSONValue, context: ToolContext) async throws -> String { "só texto" }
-        func runWithImages(_ arguments: JSONValue, context: ToolContext) async throws -> ToolResult {
-            guard let store = context.imageStore, let botID = context.botID, context.acceptsImages else { return ToolResult(text: "só texto") }
-            let space = CGColorSpace(name: CGColorSpace.sRGB)!
-            let bitmap = CGContext(data: nil, width: 40, height: 30, bitsPerComponent: 8, bytesPerRow: 0, space: space,
-                                   bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
-            bitmap.setFillColor(CGColor(red: 0.2, green: 0.4, blue: 0.9, alpha: 1))
-            bitmap.fill(CGRect(x: 0, y: 0, width: 40, height: 30))
-            let data = NSMutableData()
-            let destination = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil)!
-            CGImageDestinationAddImage(destination, bitmap.makeImage()!, nil)
-            CGImageDestinationFinalize(destination)
-            return ToolResult(text: "com imagem", images: [try store.add(data as Data, name: "foto.png", botID: botID)])
-        }
     }
 
     @Test func theMemoryToolsAreSearchedFreelyButSavingAsks() {
@@ -760,5 +733,24 @@ struct MemoryIntentTests {
         #expect(MemoryBank.identityBlock("curta", MemoryBank.identityShare) == "curta")
         let huge = String(repeating: "x", count: MemoryBank.identityShare + 500) + "\n" + MemoryBank.identityNotesHeader + "\n- uma nota"
         #expect(MemoryBank.identityBlock(huge, MemoryBank.identityShare).contains("[…]")) // the text alone does not fit
+    }
+
+    @Test func memoryIndexFinalizesUncachedStatementsBeyondCacheCap() throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "stmt-cap-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { removeTestFolder(folder) }
+        let dbURL = folder.appending(path: "index.sqlite")
+        do {
+            let index = try MemoryIndex(url: dbURL)
+            // Execute >64 distinct SQL strings so uncached statements must be finalized instead of leaking.
+            for i in 0..<80 {
+                let result = index.rows("SELECT \(i) AS n")
+                #expect(result.first?.int(0) == i)
+            }
+            index.shrinkMemory()
+        }
+        // Reopening and checking health confirms sqlite3_close succeeded cleanly with no leaked statements.
+        let reopened = try MemoryIndex(url: dbURL)
+        #expect(reopened.health == MemoryIndex.Health.ok)
     }
 }

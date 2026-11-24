@@ -46,16 +46,60 @@ enum JSONValue: Codable, Hashable, Sendable {
     var bool: Bool? { if case .bool(let value) = self { value } else { nil } }
     var array: [JSONValue]? { if case .array(let value) = self { value } else { nil } }
 
+    /// Parses JSON bytes using Foundation's C/Swift `JSONSerialization` (zero `DecodingError` throws per node).
+    static func parse(_ data: Data) -> JSONValue? {
+        if data.allSatisfy({ $0 == 0x20 || $0 == 0x09 || $0 == 0x0A || $0 == 0x0D }) { return .object([:]) }
+        guard let raw = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) else { return nil }
+        return JSONValue(foundation: raw)
+    }
+
     /// Parses JSON text; nil if invalid. Empty text parses as an empty object (models send "" for no arguments).
     static func parse(_ text: String) -> JSONValue? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return .object([:]) }
-        return try? JSONDecoder().decode(JSONValue.self, from: Data(trimmed.utf8))
+        return parse(Data(trimmed.utf8))
+    }
+
+    private init?(foundation value: Any) {
+        if value is NSNull {
+            self = .null
+        } else if let number = value as? NSNumber {
+            if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                self = .bool(number.boolValue)
+            } else {
+                self = .number(number.doubleValue)
+            }
+        } else if let string = value as? String {
+            self = .string(string)
+        } else if let array = value as? [Any] {
+            var out: [JSONValue] = []
+            out.reserveCapacity(array.count)
+            for item in array {
+                guard let v = JSONValue(foundation: item) else { return nil }
+                out.append(v)
+            }
+            self = .array(out)
+        } else if let dict = value as? [String: Any] {
+            var out: [String: JSONValue] = [:]
+            out.reserveCapacity(dict.count)
+            for (k, v) in dict {
+                guard let parsed = JSONValue(foundation: v) else { return nil }
+                out[k] = parsed
+            }
+            self = .object(out)
+        } else {
+            return nil
+        }
+    }
+
+    /// Compact JSON bytes (deterministic key order).
+    var jsonData: Data {
+        (try? WireEncoder.encode(self)) ?? Data("null".utf8)
     }
 
     /// Compact JSON text.
     var jsonString: String {
-        (try? WireEncoder.encode(self)).flatMap { String(data: $0, encoding: .utf8) } ?? "null"
+        String(decoding: jsonData, as: UTF8.self)
     }
 
     /// Shorthand for a JSON Schema object with string-keyed properties. `required` is left out when empty (an empty

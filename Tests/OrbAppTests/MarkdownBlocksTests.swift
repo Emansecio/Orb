@@ -454,4 +454,22 @@ import Testing
         #expect(MarkdownCache.count == 2 + 3 * 2) // a finished table keeps every cell
         MarkdownCache.removeAll()
     }
+
+    @MainActor @Test func floorMeasureTracksStreamingLastRowAndClosedPrefixAccurately() {
+        let measure = TableBlockView.FloorMeasure()
+        var current = table(rows: 10)
+        _ = measure.floors(of: current)
+        // Simulate character-by-character streaming into the last row without breaking column width calculation.
+        for chunk in [" pa", "la", "vra", "muitolonga", "mesmo"] {
+            current.rows[current.rows.count - 1][1] += chunk
+            let floors = measure.floors(of: current)
+            #expect(floors == TableBlockView.columnFloors(of: current))
+            #expect(measure.lines == TableBlockView.columnLines(of: current, floors: floors))
+        }
+        // Appending another row commits the previous streaming row and measures the new one.
+        current.rows.append(["nova", "curta", "x"])
+        let afterNewRow = measure.floors(of: current)
+        #expect(afterNewRow == TableBlockView.columnFloors(of: current))
+        #expect(measure.lines == TableBlockView.columnLines(of: current, floors: afterNewRow))
+    }
 }

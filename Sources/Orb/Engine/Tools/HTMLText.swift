@@ -65,7 +65,7 @@ enum HTMLText {
             return "\n\n\u{E000}\(codeBlocks.count - 1)\u{E001}\n\n"
         }
         // Source line breaks are not breaks of the text: the tags decide where lines end.
-        text = Rule(#"\s+"#, " ").apply(to: text)
+        text = whitespaceRule.apply(to: text)
 
         var hasSiteLinks = false
         (text, hasSiteLinks) = inlineLinks(text, baseURL: baseURL)
@@ -289,12 +289,21 @@ enum HTMLText {
         "interlanguage-link", "mw-indicators", "skip-link", "noprint", "printfooter", "headerlink",
     ]
 
+    private static let whitespaceRule = Rule(#"\s+"#, " ")
+    private static let headingTagRegex = try! NSRegularExpression(pattern: #"<h[1-6]\b"#, options: .caseInsensitive)
+    private static let displayNoneRegex = try! NSRegularExpression(pattern: #"(^|;)\s*display\s*:\s*none"#, options: .caseInsensitive)
+    private static let skipLinkRegex = try! NSRegularExpression(pattern: #"^(skip to|jump to|pular para|ir para)\b"#, options: .caseInsensitive)
+
+    private static func matches(_ regex: NSRegularExpression, in text: String) -> Bool {
+        regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
+    }
+
     /// Drops the furniture: a `<header>` with no heading in it, and the elements `isFurniture` flags, in one pass
     /// (their contents go with them). If that would leave almost nothing, the page is used as it was: a script
     /// that sets `aria-hidden` on the whole app while a dialog is open must not blank the page.
     private static func pruned(_ html: String) -> String {
         var result = headerRegex.replacing(in: html) { groups in
-            groups[1].range(of: #"<h[1-6]\b"#, options: [.regularExpression, .caseInsensitive]) == nil ? "" : nil
+            !matches(headingTagRegex, in: groups[1]) ? "" : nil
         }
         result = droppingElements(from: result)
         return textLength(result) * 6 < textLength(html) ? html : result
@@ -367,8 +376,7 @@ enum HTMLText {
         if let hidden = attributes["hidden"], hidden.isEmpty || ["hidden", "until-found"].contains(hidden.lowercased()) { return true }
         if attributes["aria-hidden"]?.lowercased() == "true" { return true }
         if let role = attributes["role"]?.lowercased(), droppedRoles.contains(role) { return true }
-        if let style = attributes["style"],
-           style.range(of: #"(^|;)\s*display\s*:\s*none"#, options: [.regularExpression, .caseInsensitive]) != nil { return true }
+        if let style = attributes["style"], matches(displayNoneRegex, in: style) { return true }
         if let classes = attributes["class"] {
             return classes.split(whereSeparator: \.isWhitespace).contains { droppedClasses.contains($0.lowercased()) }
         }
@@ -547,7 +555,7 @@ enum HTMLText {
                 in: inner, range: NSRange(inner.startIndex..., in: inner), withTemplate: "")))
             if raw.hasPrefix("#") {
                 // "Skip to content" and the like are for keyboards, not for reading.
-                if label.range(of: #"^(skip to|jump to|pular para|ir para)\b"#, options: [.regularExpression, .caseInsensitive]) != nil {
+                if matches(skipLinkRegex, in: label) {
                     result.replaceCharacters(in: match.range, with: "")
                 }
                 continue

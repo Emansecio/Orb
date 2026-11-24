@@ -29,10 +29,9 @@ struct TeamPanel: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .padding(.horizontal, 14)
+            .padding(.horizontal, PanelMetrics.pageInset)
             .padding(.vertical, 10)
-
-            Divider().overlay(Palette.line)
+            .overlay(alignment: .bottom) { Rectangle().fill(Palette.line).frame(height: 1) }
 
             if let team = model.team(teamID) {
                 ZStack {
@@ -64,43 +63,36 @@ private struct TeamMissionInspectorTab: View {
     @State private var isConfirmingDelete = false
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                TeamProgressCard(team: team)
+        PanelPage {
+            TeamProgressCard(team: team)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Controles")
-                        .font(Typography.label.weight(.medium))
-                        .foregroundStyle(Palette.faint)
-                    HStack(spacing: 8) {
-                        if team.status.isWorking {
-                            Button("Pausar time") { model.pauseTeam(team.id) }
-                                .buttonStyle(SecondaryPillStyle())
-                                .controlSize(.small)
-                        } else {
-                            Button(team.status == .completed ? "Retomar" : "Iniciar") { model.startTeam(team.id) }
-                                .buttonStyle(SecondaryPillStyle())
-                                .controlSize(.small)
-                        }
-                        Spacer()
-                        Menu {
-                            Button("Apagar time…", systemImage: "trash", role: .destructive) { isConfirmingDelete = true }
-                        } label: {
-                            Image(systemName: "ellipsis")
-                                .accessibilityHidden(true)
-                        }
-                        .menuStyle(.borderlessButton)
-                        .menuIndicator(.hidden)
-                        .buttonStyle(CircleGhostStyle(side: 26, fontSize: 12))
-                        .fixedSize()
-                        .iconTip(Tip.moreOptions(of: team.name))
+            PanelSection {
+                HStack(spacing: 8) {
+                    if team.status.isWorking {
+                        Button("Pausar time") { model.pauseTeam(team.id) }
+                            .buttonStyle(SecondaryPillStyle())
+                            .controlSize(.small)
+                    } else {
+                        Button(team.status == .completed ? "Retomar" : "Iniciar") { model.startTeam(team.id) }
+                            .buttonStyle(SecondaryPillStyle())
+                            .controlSize(.small)
                     }
+                    Spacer()
+                    Menu {
+                        Button("Apagar time…", systemImage: "trash", role: .destructive) { isConfirmingDelete = true }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .accessibilityHidden(true)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .buttonStyle(CircleGhostStyle(side: 26, fontSize: 12))
+                    .fixedSize()
+                    .iconTip(Tip.moreOptions(of: team.name))
                 }
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .card()
+            } header: {
+                Text("Controles").sectionTitleStyle()
             }
-            .padding(14)
         }
         .confirmationDialog("Apagar o time “\(team.name)”?", isPresented: $isConfirmingDelete, titleVisibility: .visible) {
             Button("Apagar time", role: .destructive) { model.deleteTeam(team.id) }
@@ -116,15 +108,17 @@ private struct TeamMembersInspectorTab: View {
     let team: OrbTeam
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
+        PanelPage {
+            PanelSection {
                 ForEach(team.members) { member in
                     HStack(spacing: 10) {
                         Button {
                             model.selection = .teamMember(teamID: team.id, memberID: member.id)
                         } label: {
                             HStack(spacing: 10) {
-                                BotAvatar(orb: member.orb, size: 26, activity: member.state.orbActivity)
+                                SettlingOrb(idle: member.state.orbActivity == .idle) { paused in
+                                    BotAvatar(orb: member.orb, size: 26, activity: member.state.orbActivity, paused: paused)
+                                }
                                 VStack(alignment: .leading, spacing: 1) {
                                     Text(member.name)
                                         .font(Typography.text.weight(.medium))
@@ -158,11 +152,8 @@ private struct TeamMembersInspectorTab: View {
                         .fixedSize()
                         .iconTip(Tip.moreOptions(of: member.name))
                     }
-                    .padding(10)
-                    .card(radius: Radius.medium, fill: Palette.surface)
                 }
             }
-            .padding(14)
         }
     }
 }
@@ -174,51 +165,39 @@ private struct TeamBoardInspectorTab: View {
     @State private var auditEntries: [TeamAuditEntry] = []
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Quadro vivo")
-                        .font(Typography.label.weight(.medium))
-                        .foregroundStyle(Palette.faint)
-                    Text(boardBrief.isEmpty ? "Nenhum registro salvo ainda." : boardBrief)
-                        .font(Typography.small)
-                        .foregroundStyle(Palette.secondary)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .card()
+        PanelPage {
+            PanelSection {
+                Text(boardBrief.isEmpty ? "Nenhum registro salvo ainda." : boardBrief)
+                    .font(Typography.small)
+                    .foregroundStyle(Palette.secondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            } header: {
+                Text("Quadro vivo").sectionTitleStyle()
+            }
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Auditoria recente")
-                        .font(Typography.label.weight(.medium))
+            PanelSection {
+                if auditEntries.isEmpty {
+                    Text("Sem eventos gravados.")
+                        .font(Typography.small)
                         .foregroundStyle(Palette.faint)
-                    if auditEntries.isEmpty {
-                        Text("Sem eventos gravados.")
-                            .font(Typography.small)
-                            .foregroundStyle(Palette.faint)
-                    } else {
-                        ForEach(auditEntries) { entry in
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text("\(entry.memberName): \(entry.summary)")
-                                    .font(Typography.small.weight(.medium))
-                                    .foregroundStyle(Palette.ink)
-                                if !entry.commit.isEmpty {
-                                    Text("Commit \(entry.commit)")
-                                        .font(Typography.codeSmall)
-                                        .foregroundStyle(Palette.faint)
-                                }
+                } else {
+                    ForEach(auditEntries) { entry in
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("\(entry.memberName): \(entry.summary)")
+                                .font(Typography.small.weight(.medium))
+                                .foregroundStyle(Palette.ink)
+                            if !entry.commit.isEmpty {
+                                Text("Commit \(entry.commit)")
+                                    .font(Typography.codeSmall)
+                                    .foregroundStyle(Palette.faint)
                             }
-                            .padding(.vertical, 2)
                         }
                     }
                 }
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .card()
+            } header: {
+                Text("Auditoria recente").sectionTitleStyle()
             }
-            .padding(14)
         }
         .task(id: team.updatedAt) {
             let bank = model.memory.teamBank(for: team.id)
@@ -239,45 +218,26 @@ private struct TeamUsageInspectorTab: View {
     @State private var cost = 0.0
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Consumo nos últimos 30 dias")
-                        .font(Typography.label.weight(.medium))
-                        .foregroundStyle(Palette.faint)
-                    HStack {
-                        Text("Chamadas")
-                            .font(Typography.label)
-                            .foregroundStyle(Palette.secondary)
-                        Spacer()
-                        Text("\(requests)")
-                            .font(Typography.text.weight(.semibold))
-                            .foregroundStyle(Palette.ink)
-                    }
-                    HStack {
-                        Text("Tokens")
-                            .font(Typography.label)
-                            .foregroundStyle(Palette.secondary)
-                        Spacer()
-                        Text(GroupUsageText.tokens(tokens))
-                            .font(Typography.text.weight(.semibold))
-                            .foregroundStyle(Palette.ink)
-                    }
-                    HStack {
-                        Text("Custo estimado")
-                            .font(Typography.label)
-                            .foregroundStyle(Palette.secondary)
-                        Spacer()
-                        Text(String(format: "US$ %.4f", cost))
-                            .font(Typography.text.weight(.semibold))
-                            .foregroundStyle(Palette.ink)
-                    }
+        PanelPage {
+            PanelSection {
+                LabeledContent("Chamadas") {
+                    Text("\(requests)")
+                        .font(Typography.text.weight(.semibold))
+                        .foregroundStyle(Palette.ink)
                 }
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .card()
+                LabeledContent("Tokens") {
+                    Text(GroupUsageText.tokens(tokens))
+                        .font(Typography.text.weight(.semibold))
+                        .foregroundStyle(Palette.ink)
+                }
+                LabeledContent("Custo estimado") {
+                    Text(String(format: "US$ %.4f", cost))
+                        .font(Typography.text.weight(.semibold))
+                        .foregroundStyle(Palette.ink)
+                }
+            } header: {
+                Text("Consumo nos últimos 30 dias").sectionTitleStyle()
             }
-            .padding(14)
         }
         .task(id: team.updatedAt) {
             let now = Date.now

@@ -20,10 +20,10 @@ struct TeamProgressCard: View {
 
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(Palette.chipFill)
+                    Capsule().fill(Palette.lineStrong)
                     Capsule()
                         .fill(team.status == .completed ? Palette.ok : Palette.accent)
-                        .frame(width: max(0, proxy.size.width * progress.fraction))
+                        .frame(width: progress.fraction > 0 ? max(5, proxy.size.width * progress.fraction) : 0)
                         .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: progress.fraction)
                 }
             }

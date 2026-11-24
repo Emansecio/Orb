@@ -1601,7 +1601,7 @@ final class DelegationHub: DelegationService {
     private func planOrbDelete(_ arguments: JSONValue, by botID: UUID) throws -> (orb: OrbRef, confirmation: String) {
         guard let model, !isShuttingDown else { throw ToolError("The app is closing.") }
         guard model.orbsCanManageGroups else {
-            throw ToolError("The user switched off \"Orbs organizam o time\": tell them which Orb you would delete and why.")
+            throw ToolError("The user switched off \"Orbs organizam grupos\": tell them which Orb you would delete and why.")
         }
         let typed = (arguments["name"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let wanted = DelegationRules.fold(typed)

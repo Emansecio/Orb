@@ -38,42 +38,6 @@ struct MultiOrbWorkLineTests {
     }
 }
 
-@Suite("Orb conversando")
-struct OrbActivityConversingTests {
-    @Test("Rótulo, símbolo e ausência de rosto próprio")
-    func labelsAndFace() {
-        #expect(OrbActivity.conversing.label == "Conversando")
-        #expect(OrbActivity.conversing.symbol == "bubble.left.and.bubble.right")
-        #expect(OrbActivity.conversing.eyes == nil)
-        #expect(OrbActivity.conversing.brows == nil)
-        #expect(OrbActivity.conversing.bubble == nil)
-        #expect(!OrbActivity.conversing.isTool)
-    }
-
-    @Test("Mesmo rosto que atento (sem piscada de troca), quieto e com a taxa mínima de quadros")
-    func motionQuiet() {
-        #expect(OrbActivity.conversing.hasSameFace(as: .attentive, mouth: "sorriso"))
-        #expect(OrbActivity.conversing.energy == 0)
-        #expect(OrbActivity.conversing.minFrameRate == 10)
-        #expect(OrbActivity.conversing.wander == 0.2)
-    }
-
-    @Test("Prioridade: conversando perde para ferramenta e fala, vence atento e parado")
-    func priority() {
-        func activity(composing: Bool = false, conversing: Bool = false, isWorking: Bool = false, tool: ToolCall.Kind? = nil,
-                      speaking: Bool = false) -> OrbActivity {
-            BotLive.activity(awaitingApproval: false, failed: false, celebrating: false, isWorking: isWorking, tool: tool,
-                             speaking: speaking, listening: false, composing: composing, conversing: conversing)
-        }
-        #expect(activity(conversing: true) == .conversing)
-        #expect(activity(composing: true, conversing: true) == .conversing)
-        #expect(activity(composing: true) == .attentive)
-        #expect(activity() == .idle)
-        #expect(activity(isWorking: true, tool: .orbs, speaking: true) == .conversing)
-        #expect(activity(conversing: true, isWorking: true, speaking: true) == .speaking)
-    }
-}
-
 @Suite("Pesquisa nas linhas entre Orbs")
 struct MultiOrbSearchTests {
     @Test("Eventos e mensagens entre Orbs entram na busca pelo texto que mostram")

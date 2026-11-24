@@ -72,7 +72,11 @@ struct ChatView: View {
             .onChange(of: botID) { orbChanged() }
             .onChange(of: model.sessions[botID]?.chatID) { chatChanged() } // another of the Orb's conversations
             .onChange(of: model.inicioJump) { takeInicioJump() }
-            .onChange(of: model.orbTranscript(botID).revision) { takeInicioJump() }
+            .background {
+                if model.inicioJump != nil {
+                    InicioJumpRevisionWatcher(botID: botID, onRevision: takeInicioJump)
+                }
+            }
             .onChange(of: model.sessions[botID]?.isLoading) { takeInicioJump() }
             .alert("Resultado indisponível", isPresented: navigationNoticeShown) {
                 Button("OK") { model.inicioNavigationNotice = nil }
@@ -377,8 +381,8 @@ private struct TranscriptList: View {
     @State private var openRuns: Set<UUID> = []
     /// Step disclosures have their own state: the first step and its outer work row share an item id.
     @State private var openSteps: Set<UUID> = []
-    /// User request items currently in the viewport, used to highlight the matching mark in `RequestRail`.
-    @State private var visibleRequests: Set<UUID> = []
+    /// User request items currently in the viewport, read only by `RequestRail` so scrolling never rebuilds the list.
+    @State private var visibleRequests = VisibleRequestTracker()
 
     var body: some View {
         let transcript = model.orbTranscript(look.id)
@@ -413,7 +417,7 @@ private struct TranscriptList: View {
             isAwayFromEnd = false
             leftAt = nil
             arrived = 0
-            visibleRequests = []
+            visibleRequests.reset()
         }
     }
 
@@ -473,7 +477,7 @@ private struct TranscriptList: View {
                     // so the conversation does not move again after the message sent goes in, nor down when it ends.
                     PlanCard(transcript: transcript)
                     let showsLine = isWorking || live.chainWork != nil
-                    let hasActivity = transcript.rows?.contains { if case .activity = $0 { true } else { false } } == true
+                    let hasActivity: Bool = if case .activity = transcript.rows?.last { true } else { false }
                     if !hasActivity && (showsLine || !items.isEmpty) {
                         ZStack(alignment: .leading) {
                             if showsLine {
@@ -515,8 +519,7 @@ private struct TranscriptList: View {
             .modifier(KeepsBottom(follows: follows))
             .modifier(AwayFromEnd(isAway: $isAwayFromEnd))
             .overlay(alignment: .trailing) {
-                let activeRequestID = transcript.requests.last { visibleRequests.contains($0.id) }?.id
-                RequestRail(transcript: transcript, activeID: activeRequestID) { goToRequest($0, proxy) }
+                TrackedRequestRail(transcript: transcript, tracker: visibleRequests) { goToRequest($0, proxy) }
             }
             .overlay(alignment: .bottom) {
                 ZStack {
@@ -631,13 +634,13 @@ private struct TranscriptList: View {
             row()
             if let trail = model.orbTranscript(look.id).trails[rowID] { TurnTrailView(trail: trail, botID: look.id) }
         }
-        .padding(.top, opensTurn && date == nil ? TurnGap.extra : 0)
+        .padding(.top, date != nil ? Spacing.m : (opensTurn ? TurnGap.extra : 0))
         .onAppear {
-            if opensTurn || breaks[rowID] != nil || rowID == model.orbTranscript(look.id).items.first?.id {
-                visibleRequests.insert(rowID)
-            }
+            if opensTurn { visibleRequests.insert(rowID) }
         }
-        .onDisappear { visibleRequests.remove(rowID) }
+        .onDisappear {
+            if opensTurn { visibleRequests.remove(rowID) }
+        }
     }
 
     /// One item of the chat as a row, entering by itself when it is new.
@@ -1137,16 +1140,30 @@ struct LoadingTranscript: View {
     @State private var isVisible = false
 
     var body: some View {
-        ProgressView()
-            .controlSize(.small)
-            .frame(maxWidth: .infinity)
-            .padding(.top, TranscriptLayout.emptyStateTop)
-            .opacity(isVisible ? 1 : 0)
-            .accessibilityLabel("Carregando a conversa")
-            .task {
-                try? await Task.sleep(for: Motion.spinnerDelay)
-                withAnimation(Motion.fade) { isVisible = true }
+        VStack(alignment: .leading, spacing: Spacing.xl) {
+            HStack {
+                Spacer(minLength: TranscriptLayout.bubbleSpacer)
+                Capsule().fill(Palette.raised).frame(width: 180, height: 32)
             }
+            HStack(alignment: .top, spacing: 14) {
+                Circle().fill(Palette.raised).frame(width: 30, height: 30)
+                VStack(alignment: .leading, spacing: Spacing.s) {
+                    Capsule().fill(Palette.raised).frame(width: 260, height: 12)
+                    Capsule().fill(Palette.raised).frame(width: 190, height: 12)
+                }
+                .padding(.top, 4)
+                Spacer(minLength: 0)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, TranscriptLayout.emptyStateTop)
+        .opacity(isVisible ? 1 : 0)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Carregando a conversa")
+        .task {
+            try? await Task.sleep(for: Motion.spinnerDelay)
+            withAnimation(Motion.fade) { isVisible = true }
+        }
     }
 }
 
@@ -1244,14 +1261,26 @@ private struct OrbContextLine: View {
     let capabilities: [String]
 
     var body: some View {
-        VStack(spacing: 3) {
-            if let folder { Label(folder, systemImage: "folder") }
+        VStack(spacing: Spacing.s) {
+            if let folder {
+                Label(folder, systemImage: "folder")
+                    .font(Typography.label)
+                    .foregroundStyle(Palette.faint)
+            }
             if !capabilities.isEmpty {
-                Text(capabilities.joined(separator: "  ·  "))
+                WrappingLayout(spacing: 6, centered: true) {
+                    ForEach(capabilities, id: \.self) { name in
+                        Text(name)
+                            .font(Typography.small)
+                            .foregroundStyle(Palette.muted)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 3)
+                            .background(Palette.chipFill, in: .capsule)
+                    }
+                }
+                .frame(maxWidth: 420)
             }
         }
-        .font(Typography.label)
-        .foregroundStyle(Palette.faint)
         .multilineTextAlignment(.center)
         .accessibilityElement(children: .combine)
     }
@@ -1299,8 +1328,7 @@ struct SuggestionButton: View {
             .font(Typography.text)
             .padding(.horizontal, Spacing.m)
             .padding(.vertical, Spacing.s)
-            .hoverFill(isHovering, in: .rect(cornerRadius: Radius.card), color: Palette.raised, resting: Palette.surface)
-            .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Palette.line))
+            .card(fill: isHovering ? Palette.raised : Palette.surface)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -1432,8 +1460,7 @@ private struct WorkingLine: View {
             if model.routineWaitingForYou(look.id) != nil || model.requestWaitingForYou(look.id) {
                 // The card is in the routine's or the request's conversation (or the group's screen), not in this chat.
                 Button("Ver pedido") { model.showApprovalOwner(look.id) }
-                    .buttonStyle(.link)
-                    .font(Typography.label)
+                    .buttonStyle(LinkTextStyle(font: Typography.label))
                     .lineLimit(1)
                     .fixedSize()
                     .layoutPriority(1) // never the part that is cut off: it is the way to the routine's card
@@ -1561,5 +1588,47 @@ enum TurnGap {
     static func opens(_ row: TranscriptRowModel, first: UUID?) -> Bool {
         guard case .single(let item) = row else { return false }
         return opens(item, first: first)
+    }
+}
+
+/// Tracks which user requests are on screen outside `TranscriptList.body` so scrolling only updates `RequestRail`.
+@MainActor @Observable
+private final class VisibleRequestTracker {
+    private(set) var visible: Set<UUID> = []
+
+    func insert(_ id: UUID) {
+        if !visible.contains(id) { visible.insert(id) }
+    }
+
+    func remove(_ id: UUID) {
+        if visible.contains(id) { visible.remove(id) }
+    }
+
+    func reset() {
+        if !visible.isEmpty { visible.removeAll(keepingCapacity: true) }
+    }
+}
+
+private struct TrackedRequestRail: View {
+    let transcript: OrbTranscript
+    let tracker: VisibleRequestTracker
+    let onSelect: (UUID) -> Void
+
+    var body: some View {
+        let activeID = transcript.requests.last { tracker.visible.contains($0.id) }?.id
+        RequestRail(transcript: transcript, activeID: activeID, go: onSelect)
+    }
+}
+
+/// Observes `orbTranscript(botID).revision` only while a jump from Início is pending, keeping `ChatView.body` isolated
+/// from per-step transcript updates during normal turns.
+private struct InicioJumpRevisionWatcher: View {
+    @Environment(AppModel.self) private var model
+    let botID: UUID
+    let onRevision: () -> Void
+
+    var body: some View {
+        Color.clear
+            .onChange(of: model.orbTranscript(botID).revision) { onRevision() }
     }
 }

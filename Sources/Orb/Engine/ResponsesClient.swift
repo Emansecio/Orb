@@ -66,7 +66,11 @@ struct ResponsesClient: LLMClient {
                 model: model, messages: messages, tools: tools, toolsAsInputItem: asItem,
                 promptCacheKey: cacheKey, provider: provider, toolChoice: toolChoice,
                 maxOutputTokens: maxTokens, effort: effort)
-            if probing { fingerprintBox.withLock { $0 = CacheProbe.fingerprint(of: body) } }
+            if probing {
+                let (data, fp) = try WireEncoder.encodeWithResponsesFingerprint(body, trailing: Self.trailingKeys)
+                fingerprintBox.withLock { $0 = fp }
+                return data
+            }
             return try WireEncoder.encode(body, trailing: Self.trailingKeys)
         }, request: {
             ProviderTransport.authorizedRequest(baseURL.appending(path: "responses"), apiKey: $0, headers: extraHeaders)

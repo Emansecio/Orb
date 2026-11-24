@@ -34,6 +34,7 @@ struct MarkdownChunk: View, Equatable {
                     switch segment {
                     case .prose(let run):
                         SelectableProse(blocks: run, cursor: cursor, cached: cached, highlight: highlight)
+                            .padding(.top, index > 0 ? Self.lead(run) : 0)
                     case .block(let block):
                         MarkdownBlockView(block: block, cursor: cursor, highlight: highlight).equatable()
                     }
@@ -83,13 +84,13 @@ struct MarkdownBlockView: View, Equatable {
         }
     }
 
-    /// On the app's type scale: 17 and 15 over the 14 pt body; from the third level on, the body's size in semibold (a
-    /// size between 14 and 15 only blurred the steps).
+    /// On the app's type scale: 20, 17, 15 over the 14 pt body; from H4 on, 14 pt semibold in `Palette.secondary`.
     static func headingSize(_ level: Int) -> CGFloat {
         switch level {
         case 1: 20
         case 2: 17
-        default: 15
+        case 3: 15
+        default: 14
         }
     }
 }
@@ -278,23 +279,21 @@ struct CodeBlockView: View, Equatable {
                 CopyTextButton(text: code, help: Tip.copyCode, label: "Copiar código", copiedLabel: "Código copiado")
             }
             .padding(.horizontal, 10)
-            .padding(.top, 7)
-            .padding(.bottom, 2)
+            .padding(.vertical, 7)
+            Rectangle().fill(Palette.line).frame(height: 1)
             if showsPage, isPage {
                 RichPicture(request: RichRequest(kind: .page, source: code), title: "Prévia da página")
             } else if wrapsLines {
                 codeText(foldedHead: foldedHead)
                     .padding(.horizontal, 10)
-                    .padding(.top, 4)
-                    .padding(.bottom, 10)
+                    .padding(.vertical, 8)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 ScrollView(.horizontal) {
                     codeText(foldedHead: foldedHead)
                         .fixedSize(horizontal: true, vertical: false)
                         .padding(.horizontal, 10)
-                        .padding(.top, 4)
-                        .padding(.bottom, 10)
+                        .padding(.vertical, 8)
                 }
                 .scrollIndicators(.automatic)
             }
@@ -390,6 +389,8 @@ struct CopyTextButton: View {
         self.copiedLabel = copiedLabel
     }
 
+    @State private var isHovering = false
+
     var body: some View {
         Button {
             Clipboard.copy(text())
@@ -404,11 +405,13 @@ struct CopyTextButton: View {
                     .contentTransition(.opacity)
             }
             .font(Typography.small.weight(.medium))
-            .foregroundStyle(flash.isOn ? Palette.ink : Palette.muted)
+            .foregroundStyle(flash.isOn || isHovering ? Palette.ink : Palette.muted)
             // On the view that changes, not `withAnimation`: a reply sets "never animate" on everything it draws.
             .animation(flash.isOn ? Motion.press : Motion.content, value: flash.isOn)
         }
         .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .clickablePointer()
         .help(help)
         .accessibilityLabel(flash.isOn ? copiedLabel : label)
     }
@@ -500,37 +503,55 @@ struct TableBlockView: View, Equatable {
     /// they do not (a retry, another table in this place) the table is measured whole.
     @MainActor final class FloorMeasure {
         private var header: [String] = []
-        private var rows: [[String]] = []
+        /// Committed (closed) rows whose widths are folded into `committedFloors` / `committedLines`.
+        private var committedRows: [[String]] = []
+        private var committedFloors: [CGFloat] = []
+        private var committedLines: [CGFloat] = []
         private(set) var floors: [CGFloat] = []
         /// What `columnLines` returns for the same table, folded in the same way.
         private(set) var lines: [CGFloat] = []
 
         /// The floors `columnFloors` computes, measuring only what grew since the last call.
+        /// Keeps the last row out of `committedRows` so characters streaming into it never invalidate the cached prefix.
         func floors(of table: MarkdownTable) -> [CGFloat] {
             let columns = max(table.header.count, table.rows.map(\.count).max() ?? 0)
-            guard table.header == header, table.rows.starts(with: rows), floors.count == columns else {
-                header = table.header
-                rows = table.rows
-                floors = TableBlockView.columnFloors(of: table)
-                lines = TableBlockView.columnLines(of: table, floors: floors)
-                return floors
-            }
+            let closedCount = max(0, table.rows.count - 1)
+            let closed = table.rows.prefix(closedCount)
             let regular = NSFont.systemFont(ofSize: 13)
-            for row in table.rows.dropFirst(rows.count) {
-                for (column, cell) in row.enumerated() where column < floors.count {
-                    if floors[column] < TableBlockView.maxFloor {
-                        // A word narrower than the floor cannot lift it, so the measure starts from it.
-                        let word = TableBlockView.widestWord([cell], font: regular, seed: floors[column] - 2)
-                        floors[column] = min(ceil(word) + 2, TableBlockView.maxFloor)
-                    }
-                    if lines[column] < TableBlockView.maxLine {
-                        let line = TableBlockView.widestLine([cell], font: regular, seed: lines[column] - 2)
-                        lines[column] = max(min(ceil(line) + 2, TableBlockView.maxLine), floors[column])
-                    }
+            if table.header != header || !closed.starts(with: committedRows) || committedFloors.count != columns {
+                header = table.header
+                committedRows = Array(closed)
+                let base = MarkdownTable(header: table.header, rows: committedRows, alignments: table.alignments)
+                committedFloors = TableBlockView.columnFloors(of: base)
+                committedLines = TableBlockView.columnLines(of: base, floors: committedFloors)
+            } else if closedCount > committedRows.count {
+                for row in closed.dropFirst(committedRows.count) {
+                    Self.fold(row, regular: regular, floors: &committedFloors, lines: &committedLines)
+                }
+                committedRows = Array(closed)
+            }
+            var currentFloors = committedFloors
+            var currentLines = committedLines
+            if let last = table.rows.last {
+                Self.fold(last, regular: regular, floors: &currentFloors, lines: &currentLines)
+            }
+            floors = currentFloors
+            lines = currentLines
+            return currentFloors
+        }
+
+        private static func fold(_ row: [String], regular: NSFont, floors: inout [CGFloat], lines: inout [CGFloat]) {
+            for (column, cell) in row.enumerated() where column < floors.count {
+                if floors[column] < TableBlockView.maxFloor {
+                    // A word narrower than the floor cannot lift it, so the measure starts from it.
+                    let word = TableBlockView.widestWord([cell], font: regular, seed: floors[column] - 2)
+                    floors[column] = min(ceil(word) + 2, TableBlockView.maxFloor)
+                }
+                if lines[column] < TableBlockView.maxLine {
+                    let line = TableBlockView.widestLine([cell], font: regular, seed: lines[column] - 2)
+                    lines[column] = max(min(ceil(line) + 2, TableBlockView.maxLine), floors[column])
                 }
             }
-            rows = table.rows
-            return floors
         }
     }
 
@@ -544,7 +565,7 @@ struct TableBlockView: View, Equatable {
         VStack(alignment: .leading, spacing: 0) {
             // Outside what scrolls sideways, so a wide table keeps its buttons in view.
             HStack(spacing: Spacing.m) {
-                Text("tabela")
+                Text("Tabela")
                     .font(Typography.small)
                     .foregroundStyle(Palette.muted)
                 Spacer(minLength: Spacing.s)
@@ -555,14 +576,20 @@ struct TableBlockView: View, Equatable {
                                label: "Copiar tabela em CSV", copiedLabel: "Tabela copiada em CSV")
             }
             .padding(.horizontal, Self.inset)
-            .padding(.top, 7)
-            .padding(.bottom, 2)
+            .padding(.vertical, 7)
+            .background(Color.white.opacity(0.025))
+            Rectangle().fill(Palette.line).frame(height: 1)
             ViewThatFits(in: .horizontal) {
                 grid(floors).frame(minWidth: needed, idealWidth: needed, maxWidth: .infinity, alignment: .leading)
                 // The grid's own height: without it the scroll view took the height it was offered (a band of empty
                 // space over and under the rows) and the rows got one line each, cut short.
                 ScrollView(.horizontal) {
                     grid(lines).frame(width: Self.width(of: lines)).fixedSize(horizontal: false, vertical: true)
+                }
+                .overlay(alignment: .trailing) {
+                    LinearGradient(colors: [.clear, Palette.raised.opacity(0.9)], startPoint: .leading, endPoint: .trailing)
+                        .frame(width: 24)
+                        .allowsHitTesting(false)
                 }
             }
         }
@@ -663,10 +690,10 @@ struct TableBlockView: View, Equatable {
     /// flush; the cells of the row being written are not kept in `MarkdownCache` (each half-written state would be).
     @ViewBuilder private func rows(_ floors: [CGFloat]) -> some View {
         if streaming, let pieces = Self.pieces(of: table.rows) {
-            ForEach(Array(pieces.closed.enumerated()), id: \.offset) { _, piece in
-                TableRows(rows: piece, alignments: table.alignments, floors: floors, writing: false)
+            ForEach(Array(pieces.closed.enumerated()), id: \.offset) { pieceIndex, piece in
+                TableRows(rows: piece, alignments: table.alignments, floors: floors, writing: false, startsWithRule: pieceIndex > 0)
             }
-            TableRows(rows: pieces.tail, alignments: table.alignments, floors: floors, writing: true)
+            TableRows(rows: pieces.tail, alignments: table.alignments, floors: floors, writing: true, startsWithRule: true)
         } else {
             TableRows(rows: table.rows, alignments: table.alignments, floors: floors, writing: streaming, highlight: highlight)
         }
@@ -687,10 +714,14 @@ private struct TableRows: View, Equatable {
     let alignments: [MarkdownTable.Alignment]
     let floors: [CGFloat]
     let writing: Bool
+    var startsWithRule = false
     var highlight: String?
 
     var body: some View {
         ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+            if index > 0 || startsWithRule {
+                Rectangle().fill(Color.white.opacity(0.05)).frame(height: 1).gridCellUnsizedAxes(.horizontal)
+            }
             GridRow {
                 ForEach(Array(row.enumerated()), id: \.offset) { column, cell in
                     TableCell(source: cell, alignment: alignments.alignment(at: column), minWidth: floors.floor(at: column), cached: !(writing && index == rows.count - 1), highlight: highlight)
@@ -709,6 +740,7 @@ private struct TableCell: View {
 
     var body: some View {
         Text(markdownText(source, cached: cached, highlight: highlight))
+            .lineSpacing(2)
             .frame(minWidth: minWidth, maxWidth: .infinity, alignment: alignment)
     }
 }

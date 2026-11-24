@@ -333,11 +333,7 @@ struct ConnectorTemplateTests {
         #expect(all.first { $0.id == "github" }?.badges == ["Pede 1 chave", "Remoto"])
     }
 
-    @Test func theGalleryNoLongerOffersTheAbandonedPackages() throws {
-        // Slack's archived `server-slack` and Notion's unmaintained npm server are not offered...
-        #expect(!ConnectorTemplate.all.contains { $0.config.arguments.contains { $0.contains("server-slack") || $0.contains("notion-mcp-server") } })
-        #expect(!ConnectorTemplate.all.contains { ["slack", "notion"].contains($0.id) && !$0.isRemote })
-        // ...but a connector already installed from them is still recognized: it keeps its guided form and its summary.
+    @Test func retiredConnectorsKeepTheirGuidedFormAndDoNotOverlapCurrentTemplates() throws {
         let old = try #require(ConnectorTemplate.retired.first { $0.id == "slack" })
         let installed = old.config.withNewID()
         #expect(ConnectorTemplate.matching(installed)?.id == "slack")

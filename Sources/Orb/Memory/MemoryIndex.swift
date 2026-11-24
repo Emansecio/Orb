@@ -37,6 +37,9 @@ final class MemoryIndex {
 
     /// Why an index could not be opened: another process holds it (try again later, never delete it), the file is
     /// damaged (rebuild it from the pages), or it is not there to open at all (folder missing, no permission).
+    /// Prepared statement cache (safe without a lock because `MemoryIndex` is owned exclusively by one `MemoryBank` actor).
+    private var statements: [String: OpaquePointer] = [:]
+
     enum Failure: Error { case busy, corrupt, unavailable }
 
     /// Whether the file is a usable index.
@@ -52,30 +55,41 @@ final class MemoryIndex {
         if version != 0, version != Self.schemaVersion {
             sqlite3_exec(db, "DROP TABLE IF EXISTS pages_fts; DROP TABLE IF EXISTS pages; DROP TABLE IF EXISTS meta;", nil, nil, nil)
         }
-        // A checkpoint brings the log back to this size (without it, the file stays as large as it ever grew).
-        var schema = "PRAGMA synchronous = NORMAL;\nPRAGMA journal_size_limit = 1048576;\n"
-        if rows("PRAGMA journal_mode").first?.text(0).lowercased() != "wal" { schema += "PRAGMA journal_mode = WAL;\n" }
-        if version != Self.schemaVersion { schema += "PRAGMA user_version = \(Self.schemaVersion);\n" }
-        schema += """
-        CREATE TABLE IF NOT EXISTS pages (
-            id INTEGER PRIMARY KEY, path TEXT UNIQUE NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL,
-            body TEXT NOT NULL, created REAL NOT NULL, updated REAL NOT NULL, compacted INTEGER NOT NULL DEFAULT 0,
-            mtime REAL NOT NULL DEFAULT 0, access_count INTEGER NOT NULL DEFAULT 0, last_access REAL,
-            salience REAL NOT NULL DEFAULT 1);
-        CREATE INDEX IF NOT EXISTS pages_kind ON pages(kind, updated);
-        CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(title, body, content='pages', content_rowid='id',
-            tokenize='unicode61 remove_diacritics 2');
-        CREATE TRIGGER IF NOT EXISTS pages_ai AFTER INSERT ON pages BEGIN
-            INSERT INTO pages_fts(rowid, title, body) VALUES (new.id, new.title, new.body); END;
-        CREATE TRIGGER IF NOT EXISTS pages_ad AFTER DELETE ON pages BEGIN
-            INSERT INTO pages_fts(pages_fts, rowid, title, body) VALUES ('delete', old.id, old.title, old.body); END;
-        CREATE TRIGGER IF NOT EXISTS pages_au AFTER UPDATE OF title, body ON pages BEGIN
-            INSERT INTO pages_fts(pages_fts, rowid, title, body) VALUES ('delete', old.id, old.title, old.body);
-            INSERT INTO pages_fts(rowid, title, body) VALUES (new.id, new.title, new.body); END;
-        CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-        """
+        // Session pragmas: WAL checkpoint ceiling + tighter 512 KB page cache + in-memory temp B-trees + 4 MB mmap.
+        var schema = "PRAGMA synchronous = NORMAL;\nPRAGMA cache_size = -512;\nPRAGMA journal_size_limit = 1048576;\nPRAGMA temp_store = MEMORY;\nPRAGMA mmap_size = 4194304;\n"
+        if version != Self.schemaVersion {
+            if rows("PRAGMA journal_mode").first?.text(0).lowercased() != "wal" { schema += "PRAGMA journal_mode = WAL;\n" }
+            schema += "PRAGMA user_version = \(Self.schemaVersion);\n"
+            schema += """
+            CREATE TABLE IF NOT EXISTS pages (
+                id INTEGER PRIMARY KEY, path TEXT UNIQUE NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL,
+                body TEXT NOT NULL, created REAL NOT NULL, updated REAL NOT NULL, compacted INTEGER NOT NULL DEFAULT 0,
+                mtime REAL NOT NULL DEFAULT 0, access_count INTEGER NOT NULL DEFAULT 0, last_access REAL,
+                salience REAL NOT NULL DEFAULT 1, origin TEXT NOT NULL DEFAULT '');
+            CREATE INDEX IF NOT EXISTS pages_kind ON pages(kind, updated);
+            CREATE INDEX IF NOT EXISTS pages_kind_access ON pages(kind, access_count DESC, path);
+            CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(title, body, content='pages', content_rowid='id',
+                tokenize='unicode61 remove_diacritics 2');
+            CREATE TRIGGER IF NOT EXISTS pages_ai AFTER INSERT ON pages BEGIN
+                INSERT INTO pages_fts(rowid, title, body) VALUES (new.id, new.title, new.body); END;
+            CREATE TRIGGER IF NOT EXISTS pages_ad AFTER DELETE ON pages BEGIN
+                INSERT INTO pages_fts(pages_fts, rowid, title, body) VALUES ('delete', old.id, old.title, old.body); END;
+            CREATE TRIGGER IF NOT EXISTS pages_au AFTER UPDATE OF title, body ON pages BEGIN
+                INSERT INTO pages_fts(pages_fts, rowid, title, body) VALUES ('delete', old.id, old.title, old.body);
+                INSERT INTO pages_fts(rowid, title, body) VALUES (new.id, new.title, new.body); END;
+            CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            """
+        }
         let result = sqlite3_exec(db, schema, nil, nil, nil)
         guard result == SQLITE_OK else { throw Self.failure(result) }
+        // Non-destructive additive migration for existing v1 databases (preserves `access_count` and `last_access`).
+        if version == Self.schemaVersion {
+            let columns = Set(rows("PRAGMA table_info(pages)").map { $0.text(1) })
+            if !columns.contains("origin") {
+                _ = sqlite3_exec(db, "ALTER TABLE pages ADD COLUMN origin TEXT NOT NULL DEFAULT '';", nil, nil, nil)
+            }
+            _ = sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS pages_kind_access ON pages(kind, access_count DESC, path);", nil, nil, nil)
+        }
     }
 
     private static func failure(_ code: Int32) -> Failure {
@@ -101,19 +115,53 @@ final class MemoryIndex {
         }
     }
 
-    deinit { sqlite3_close(db) }
+    /// Runs `PRAGMA quick_check` at most once every 7 days on healthy openings to avoid scanning every B-tree on every app launch.
+    func healthIfDue(now: Date = .now) -> Health {
+        let last = rows("SELECT value FROM meta WHERE key = 'last_quick_check'").first.flatMap { Double($0.text(0)) }
+        if let last, now.timeIntervalSince1970 - last < 7 * 86_400 { return .ok }
+        let checked = health
+        if checked == .ok {
+            _ = run("INSERT INTO meta(key, value) VALUES ('last_quick_check', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    [.text(String(now.timeIntervalSince1970))])
+        }
+        return checked
+    }
+
+    deinit {
+        for statement in statements.values { sqlite3_finalize(statement) }
+        statements.removeAll()
+        sqlite3_close(db)
+    }
+
+    func shrinkMemory() {
+        _ = run("PRAGMA shrink_memory")
+    }
 
     @discardableResult
     func run(_ sql: String, _ arguments: [Value] = []) -> Bool {
-        guard let statement = prepare(sql, arguments) else { return false }
-        defer { sqlite3_finalize(statement) }
+        guard let (statement, cached) = prepare(sql, arguments) else { return false }
+        defer {
+            if cached {
+                sqlite3_reset(statement)
+                sqlite3_clear_bindings(statement)
+            } else {
+                sqlite3_finalize(statement)
+            }
+        }
         let code = sqlite3_step(statement)
         return code == SQLITE_DONE || code == SQLITE_ROW
     }
 
     func rows(_ sql: String, _ arguments: [Value] = []) -> [Row] {
-        guard let statement = prepare(sql, arguments) else { return [] }
-        defer { sqlite3_finalize(statement) }
+        guard let (statement, cached) = prepare(sql, arguments) else { return [] }
+        defer {
+            if cached {
+                sqlite3_reset(statement)
+                sqlite3_clear_bindings(statement)
+            } else {
+                sqlite3_finalize(statement)
+            }
+        }
         var rows: [Row] = []
         while sqlite3_step(statement) == SQLITE_ROW {
             rows.append(Row(values: (0..<sqlite3_column_count(statement)).map { column in
@@ -137,11 +185,27 @@ final class MemoryIndex {
         if began, !run("COMMIT") { run("ROLLBACK") }
     }
 
-    private func prepare(_ sql: String, _ arguments: [Value]) -> OpaquePointer? {
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
-            sqlite3_finalize(statement)
-            return nil
+    private func prepare(_ sql: String, _ arguments: [Value]) -> (OpaquePointer, cached: Bool)? {
+        let statement: OpaquePointer
+        let cached: Bool
+        if let existing = statements[sql] {
+            statement = existing
+            cached = true
+        } else {
+            var created: OpaquePointer?
+            let flags: UInt32 = statements.count < 64 ? UInt32(SQLITE_PREPARE_PERSISTENT) : 0
+            guard sqlite3_prepare_v3(db, sql, -1, flags, &created, nil) == SQLITE_OK,
+                  let created else {
+                sqlite3_finalize(created)
+                return nil
+            }
+            if statements.count < 64 {
+                statements[sql] = created
+                cached = true
+            } else {
+                cached = false
+            }
+            statement = created
         }
         for (offset, argument) in arguments.enumerated() {
             let position = Int32(offset + 1)
@@ -152,6 +216,6 @@ final class MemoryIndex {
             case .null: sqlite3_bind_null(statement, position)
             }
         }
-        return statement
+        return (statement, cached)
     }
 }

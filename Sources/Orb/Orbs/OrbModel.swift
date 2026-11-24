@@ -370,6 +370,7 @@ enum OrbImages {
     /// decoded in the background as usual.
     static func trim() {
         cache.removeAllObjects()
+        greyscale.removeAllObjects()
     }
 
     /// For tests: drops these bitmaps from the shared cache, as its byte limit or memory pressure would.

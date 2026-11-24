@@ -242,9 +242,24 @@ struct WorkspaceSnapshot: Sendable, Equatable, Codable {
 
     private static func readGit(_ folder: URL, shell: ShellEnvironment, gitPath: String?, timeout: Duration,
                                 environmentTimeout: Duration) async -> Git {
-        var gitEnvironment = await environment(from: shell, within: environmentTimeout)
+        // Fast path: check standard macOS git paths before waiting on `zsh -lic` (which can stall 2–5 s on cold start).
+        let fastExecutable: String? = gitPath ?? {
+            let manager = FileManager.default
+            for candidate in ["/opt/homebrew/bin/git", "/usr/local/bin/git"] where manager.isExecutableFile(atPath: candidate) {
+                return candidate
+            }
+            return developerToolsAreInstalled() && manager.isExecutableFile(atPath: systemGit) ? systemGit : nil
+        }()
+        var gitEnvironment: [String: String]
+        let executable: String
+        if let fastExecutable {
+            gitEnvironment = ProcessInfo.processInfo.environment
+            executable = fastExecutable
+        } else {
+            gitEnvironment = await environment(from: shell, within: environmentTimeout)
+            executable = findGit(in: gitEnvironment)
+        }
         gitEnvironment["GIT_OPTIONAL_LOCKS"] = "0"
-        let executable = gitPath ?? findGit(in: gitEnvironment)
         if executable == systemGit && !developerToolsAreInstalled() {
             // The system's git is only a stub then: running it opens the installer dialog, again on every snapshot.
             return Git(note: "git is not installed on this Mac (the developer tools are missing), so its state is unknown")

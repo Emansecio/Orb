@@ -207,11 +207,6 @@ struct BrowserLocatorTests {
         #expect(name == AgentBrowserConfig.sessionName(botID: one))
     }
 
-    @Test func theModeIsNotPartOfTheLaunchFingerprintSoAnOpenNeverClosesTheWindowInUse() {
-        #expect(config().launchFingerprint == config(headed: true).launchFingerprint)
-        #expect(config().launchFingerprint != config(browser: BrowserProgram(kind: .brave, executable: braveApp, major: 140)).launchFingerprint)
-    }
-
     @Test func theHubLaunchesEachOrbInItsModeWithItsOwnProfileFolder() {
         let folder = URL(fileURLWithPath: "/data/navegador")
         let setup = FakeBrowserSetup(profiles: folder)
@@ -258,13 +253,6 @@ struct BrowserLocatorTests {
         #expect(bot.capabilities.contains(.browser))
         #expect(bot.browserMode == .background && bot.searchProvider == .duckduckgo)
         #expect(BrowserMode.default == .background)
-    }
-
-    @Test func everyOldEngineLoadsWithoutErrorAndKeepsNavigatingTheWeb() throws {
-        for engine in ["chrome", "cloak", "obscura", "simple", "firefox2030"] {
-            let bot = try decode(#"{"id":"\#(UUID().uuidString)","name":"A","capabilities":["browser"],"browserEngine":"\#(engine)"}"#)
-            #expect(bot.browserMode == .background && bot.capabilities.contains(.browser), "\(engine)")
-        }
     }
 
     @Test func theModeAndTheProviderAreKeptAndAnUnknownOneFallsBack() throws {

@@ -130,6 +130,27 @@ import Testing
         #expect(world.configs.allSatisfy { $0.executable == layout.agentBrowser.path })
     }
 
+    @Test func browserHubSetsSocketDirectoryClearsScopedSessionsAndCapsIdleBrowsers() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "OrbHubCap-\(UUID().uuidString)")
+        defer { removeTestFolder(root) }
+        let world = FakeBrowserWorld()
+        let hub = world.hub(profiles: root)
+        let botA = UUID(), botB = UUID(), botC = UUID(), botD = UUID()
+
+        let scopedA = try await hub.session(botID: botA, mode: .background, scope: "chat-1")
+        #expect(world.configs.first?.socketDirectory == root.appending(path: "sockets"))
+        _ = await hub.close(botID: botA)
+        let reopenedA = try await hub.session(botID: botA, mode: .background, scope: "chat-1")
+        #expect(reopenedA !== scopedA, "closing the Orb browser must drop cached scoped sessions")
+
+        // Opening 4 background sessions exceeds maxActiveSessions (3) and evicts the oldest one (botA).
+        _ = try await hub.session(botID: botB, mode: .background)
+        _ = try await hub.session(botID: botC, mode: .background)
+        _ = try await hub.session(botID: botD, mode: .background)
+        #expect(hub.existingSession(botID: botA) == nil)
+        #expect(hub.existingSession(botID: botD) != nil)
+    }
+
     @Test func closingAnOrbsBrowserClosesWhatAnotherProcessStartedForItWhateverTheOldEngineWas() async {
         let world = FakeBrowserWorld()
         let hub = world.hub()

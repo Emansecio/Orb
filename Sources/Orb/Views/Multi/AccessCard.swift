@@ -54,7 +54,7 @@ struct AccessCard: View {
                     .font(Typography.label.weight(.medium))
                     .foregroundStyle(Palette.muted)
             }
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 5) {
                 ForEach(AccessLines.lines(for: access), id: \.self) { line in
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         // Not a check: the lines are what the Orb will get once allowed, nothing is done yet.
@@ -71,8 +71,8 @@ struct AccessCard: View {
             }
             if !access.reason.isEmpty {
                 Text(access.reason)
-                    .font(Typography.text)
-                    .foregroundStyle(Palette.secondary)
+                    .font(Typography.label)
+                    .foregroundStyle(Palette.muted)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             }

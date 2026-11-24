@@ -54,10 +54,10 @@ struct SidebarTeamsSection: View {
                         HStack(spacing: 6) {
                             Image(systemName: "plus")
                                 .font(SectionPlus.glyph)
-                                .foregroundStyle(Palette.faint)
+                                .foregroundStyle(Palette.muted)
                             Text("Criar Time a partir de uma ideia")
-                                .font(Typography.small)
-                                .foregroundStyle(Palette.faint)
+                                .font(Typography.label)
+                                .foregroundStyle(Palette.muted)
                                 .lineLimit(1)
                         }
                         .frame(maxWidth: .infinity, minHeight: SidebarCategoryLayout.headerContentHeight, alignment: .leading)
@@ -319,7 +319,7 @@ private struct SidebarTeamMemberRow: View {
             model.selection = .teamMember(teamID: team.id, memberID: member.id)
         } label: {
             HStack(spacing: 8) {
-                SettlingOrb(idle: activity == .idle && !isSelected) { paused in
+                SettlingOrb(idle: activity == .idle, wake: isSelected ? 1 : 0) { paused in
                     BotAvatar(orb: member.orb, size: 22, activity: activity, paused: paused)
                 }
                 VStack(alignment: .leading, spacing: 0) {

@@ -377,6 +377,11 @@ final class UILiveElements: @unchecked Sendable {
         }
     }
 
+    func pruneExpired() {
+        let now = ContinuousClock.now
+        lock.withLock { prune(now: now) }
+    }
+
     func forget(bot: UUID?, pid: Int32) {
         _ = lock.withLock { readings.removeValue(forKey: Key(bot: bot, pid: pid)) }
     }

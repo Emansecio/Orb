@@ -9,16 +9,33 @@ enum TimeSeparators {
 
     /// The rows a separator goes above, by the id of each, with the time it shows (when its row began). `spans`: each
     /// row's id, its first item's date and its latest one (what the chat has at hand for every row), in order.
-    static func breaks(spans: [(id: UUID, start: Date, end: Date)], calendar: Calendar = .current) -> [UUID: Date] {
+    static func breaks(spans: [(id: UUID, start: Date, end: Date)], startingAfter initialLast: Date? = nil,
+                       calendar: Calendar = .current) -> [UUID: Date] {
         var breaks: [UUID: Date] = [:]
-        var last: Date?
+        var last: Date? = initialLast
+        var dayStart: Date? = initialLast.map { calendar.startOfDay(for: $0) }
+        var dayEnd: Date? = dayStart.flatMap { calendar.date(byAdding: .day, value: 1, to: $0) }
         for row in spans {
-            if let last, row.start.timeIntervalSince(last) < pause, calendar.isDate(row.start, inSameDayAs: last) {
-                // Same moment: nothing between them.
+            let sameDay: Bool
+            if let last, row.start.timeIntervalSince(last) < pause {
+                if let start = dayStart, let end = dayEnd, row.start >= start, row.start < end {
+                    sameDay = true
+                } else {
+                    sameDay = calendar.isDate(row.start, inSameDayAs: last)
+                }
             } else {
-                breaks[row.id] = row.start
+                sameDay = false
             }
-            last = max(row.end, last ?? row.end)
+            if !sameDay { breaks[row.id] = row.start }
+            let nextLast = max(row.end, last ?? row.end)
+            if nextLast != last {
+                last = nextLast
+                if dayStart == nil || dayEnd == nil || nextLast < dayStart! || nextLast >= dayEnd! {
+                    let start = calendar.startOfDay(for: nextLast)
+                    dayStart = start
+                    dayEnd = calendar.date(byAdding: .day, value: 1, to: start)
+                }
+            }
         }
         return breaks
     }

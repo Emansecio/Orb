@@ -127,9 +127,8 @@ struct PermissionPopover: View {
                             .font(Typography.label.weight(.medium))
                         Spacer()
                         Button("Gerenciar", action: manage)
-                            .buttonStyle(.link)
+                            .buttonStyle(LinkTextStyle(font: Typography.label))
                             .help(Tip.manageGrants)
-                            .font(Typography.label)
                     }
                     Text(PermissionMode.grantsNote)
                         .help(PermissionMode.grantsNoteDetail)
@@ -384,7 +383,8 @@ struct RoutineStrip: View {
             Spacer(minLength: 4)
             Button("Parar", systemImage: "stop.fill") { model.stopTurn(botID) }
                 .labelStyle(.iconOnly)
-                .buttonStyle(ComposerChipStyle())
+                .buttonStyle(CircleGhostStyle(side: 24, fontSize: 10))
+                .foregroundStyle(Palette.secondary)
                 .help(ComposerAction.stop.help(isRoutine: true))
         }
         .font(Typography.small)
@@ -462,7 +462,8 @@ struct JobsStrip: View {
                         .foregroundStyle(Palette.faint)
                     Button("Parar", systemImage: "stop.fill") { model.stopJob(job.id, of: botID) }
                         .labelStyle(.iconOnly)
-                        .buttonStyle(ComposerChipStyle())
+                        .buttonStyle(CircleGhostStyle(side: 24, fontSize: 10))
+                        .foregroundStyle(Palette.secondary)
                         .help("Parar este processo e o que ele iniciou")
                 }
                 .accessibilityElement(children: .contain) // the stop button stays reachable

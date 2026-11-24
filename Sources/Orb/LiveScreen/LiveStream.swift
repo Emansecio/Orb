@@ -118,6 +118,18 @@ enum LiveJPEG {
         guard let source = CGImageSourceCreateWithData(jpeg as CFData, nil) else { return nil }
         return CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
     }
+
+    /// Downsampled thumbnail of a retained JPEG so small chat cards don't hold multi-MB full-res RGBA bitmaps.
+    static func thumbnail(from jpeg: Data, maxPixelSize: Int) -> CGImage? {
+        guard let source = CGImageSourceCreateWithData(jpeg as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+    }
 }
 
 /// The place between the receiving loop and the decoder: one frame waiting at most, a newer one replaces it (a late frame is

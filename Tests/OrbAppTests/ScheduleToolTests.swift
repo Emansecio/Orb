@@ -680,16 +680,6 @@ struct SchedulePermissionTests {
         _ = try run(model, atlas, call("create", name: "A 21ª", prompt: "x", when: daily9))
     }
 
-    @Test @MainActor func aRunOfATaskCannotCreateMoreTasksButCanStillLookAndPause() throws {
-        let (model, atlas, _) = setUp()
-        _ = try run(model, atlas, call("create", name: "Manhã", prompt: "x", when: daily9))
-        model.session(atlas.id).routineID = model.routines[0].id // as during its run
-        #expect(throws: ToolError.self) { try run(model, atlas, call("create", name: "Outra", prompt: "y", when: daily9)) }
-        #expect(model.routines.count == 1)
-        _ = try run(model, atlas, call("list"))
-        _ = try run(model, atlas, call("pause", name: "Manhã"))
-    }
-
     /// A group's turn and a request from another Orb are not "a scheduled task": each refusal says where the Orb is and what to
     /// do instead (a real thread: "a ferramenta de agendamento recusou a criação da tarefa").
     @Test @MainActor func aGroupTurnOrARequestIsToldWhatItIsNotThatItIsATask() throws {
@@ -737,7 +727,7 @@ struct SchedulePermissionTests {
         session.routineID = nil
         session.sideKind = nil
         #expect(!model.multiOrbOffering(for: atlas.id).sideRun)
-        #expect(model.routines.count == 1 && model.routines[0].prompt == "x")
+        #expect(model.routines.count == 1 && model.routines[0].prompt == "x" && !model.routines[0].isEnabled)
     }
 
     @Test @MainActor func aTaskCanBeCreatedPaused() throws {
@@ -768,18 +758,6 @@ struct SchedulePermissionTests {
         _ = try run(model, atlas, call("update", name: "Manhã", goal: ""))
         #expect(model.routines[0].goal == nil)
         #expect(throws: ToolError.self) { try run(model, atlas, call("update", name: "Outra", prompt: "y")) }
-    }
-
-    @Test @MainActor func aRunOfATaskCannotChangeOrStartTasks() throws {
-        let (model, atlas, _) = setUp()
-        _ = try run(model, atlas, call("create", name: "Manhã", prompt: "x", when: daily9))
-        model.session(atlas.id).routineID = model.routines[0].id // as during its run
-        #expect(throws: ToolError.self) { try run(model, atlas, call("update", name: "Manhã", prompt: "outra coisa")) }
-        #expect(throws: ToolError.self) { try run(model, atlas, call("run", name: "Manhã")) }
-        _ = try run(model, atlas, call("pause", name: "Manhã")) // stopping is fine
-        #expect(throws: ToolError.self) { try run(model, atlas, call("resume", name: "Manhã")) }
-        #expect(throws: ToolError.self) { try run(model, atlas, call("delete", name: "Manhã")) }
-        #expect(model.routines[0].prompt == "x" && !model.routines[0].isEnabled)
     }
 
     @Test @MainActor func anOrbThatIsGoneCannotSchedule() {

@@ -366,8 +366,7 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
             return error
         }
         do {
-            Self.sweepStaleRuns(in: folders.scratch)
-            Self.sweepStaleRuns(in: folders.projectDirectory, onlySessionFiles: true)
+            Self.scheduleStaleSweepIfDue(scratch: folders.scratch, projectDirectory: folders.projectDirectory)
             try fileManager.createDirectory(at: runFolder, withIntermediateDirectories: true)
             try fileManager.createDirectory(at: folders.workingDirectory, withIntermediateDirectories: true)
 
@@ -426,6 +425,22 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
     /// Run folders a crashed app left behind (older than a day). With `onlySessionFiles`, the folder is the CLI's project folder
     /// of the neutral cwd, and what a crash leaves there is a `<session>.jsonl` with the whole conversation, which "forget"
     /// promises not to keep.
+    private static let lastSweep = OSAllocatedUnfairLock<ContinuousClock.Instant?>(initialState: nil)
+
+    /// Sweeps stale scratch/session folders off the critical TTFT path at most once per hour.
+    private static func scheduleStaleSweepIfDue(scratch: URL, projectDirectory: URL) {
+        let shouldRun = lastSweep.withLock { last -> Bool in
+            if let last, ContinuousClock.now - last < .seconds(3_600) { return false }
+            last = .now
+            return true
+        }
+        guard shouldRun else { return }
+        Task.detached(priority: .utility) {
+            Self.sweepStaleRuns(in: scratch)
+            Self.sweepStaleRuns(in: projectDirectory, onlySessionFiles: true)
+        }
+    }
+
     static func sweepStaleRuns(in scratch: URL, onlySessionFiles: Bool = false) {
         let fileManager = FileManager.default
         guard let entries = try? fileManager.contentsOfDirectory(at: scratch, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }

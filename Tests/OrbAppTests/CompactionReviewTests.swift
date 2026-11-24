@@ -280,7 +280,7 @@ struct StepsNoteTests {
     let botID: UUID
     let root: URL
 
-    init(_ conversation: Conversation, claudeCode: Bool = false) {
+    init(_ conversation: Conversation) {
         var conversation = conversation
         root = FileManager.default.temporaryDirectory.appending(path: "OrbCompactionReview-\(UUID().uuidString)")
         conversation.items = conversation.messages.compactMap { message in
@@ -298,7 +298,7 @@ struct StepsNoteTests {
         store.flush()
         model = AppModel(store: store, runsBackgroundWork: false)
         model.providers = [ProviderAccount(kind: .custom)] // no address: a turn fails before any network call
-        model.defaultModel = claudeCode ? "claudeCode/sonnet" : "custom/modelo"
+        model.defaultModel = "custom/modelo"
     }
 
     func notices(startingWith prefix: String? = nil) -> [String] {
@@ -313,8 +313,8 @@ struct StepsNoteTests {
 
     deinit { for harness in harnesses { removeTestFolder(harness.root) } }
 
-    @MainActor private func harness(_ conversation: Conversation, claudeCode: Bool = false) -> AppHarness {
-        let made = AppHarness(conversation, claudeCode: claudeCode)
+    @MainActor private func harness(_ conversation: Conversation) -> AppHarness {
+        let made = AppHarness(conversation)
         harnesses.append(made)
         return made
     }
@@ -375,15 +375,5 @@ struct StepsNoteTests {
         #expect(app.model.send("/compactar", to: app.botID))   // a routine or quick ask, not typed by the user
         await waitUntil("the turn to end") { !app.model.isWorking(app.botID) }
         #expect(app.model.transcript(app.botID).contains { if case .user(let text, _) = $0.kind { text == "/compactar" } else { false } })
-    }
-
-    @Test @MainActor func claudeCodesManualCompactionReportsEstimatedNumbersLikeAnyOther() throws {
-        var seeded = Conversation()
-        seeded.messages = (0..<24).flatMap { work($0 == 0 ? firstRequest : "pedido número \($0) do projeto", steps: 1, output: 20_000, reply: "resposta \($0)", tag: "g\($0)") }
-        let app = harness(seeded, claudeCode: true)
-        let result = app.model.compactNow(botID: app.botID)
-        #expect(result.status == .compacted)
-        #expect(result.tokensBefore > result.tokensAfter && result.tokensAfter > 0)
-        #expect(app.notices(startingWith: "Compactei a conversa:").first?.contains("tokens)") == true)
     }
 }

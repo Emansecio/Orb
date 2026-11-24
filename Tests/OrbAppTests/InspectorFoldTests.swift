@@ -61,11 +61,6 @@ struct InspectorFoldTests {
         #expect(CapabilityCopy.scopeCount(title: "Conectores", count: 2) == "2 conectores")
     }
 
-    @Test func bypassAloneIsAMarkOnTheClosedRow() {
-        // "Sem pedir permissão" is a choice: a mark on the closed row, not a reason to open the card.
-        #expect(ModelCardSummary.warning(mode: .bypass, unavailableNote: nil) == ModelCardSummary.bypassLine)
-    }
-
     @Test func theClosedRowNamesTheChosenModelThenTheDefaultThenPadrao() {
         let names = ["anthropic/sonnet": "Sonnet 5.5", "openai/gpt": "GPT"]
         func name(_ selection: String) -> String { names[selection] ?? selection }

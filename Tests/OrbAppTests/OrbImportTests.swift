@@ -532,11 +532,6 @@ import Testing
         #expect(OrbImport(source: "Hermes").plan().summary.isEmpty)
     }
 
-    @Test func theSheetsWordsAreFixed() {
-        #expect(ImportText.title == "Importar de outro assistente" && CommandName.importOrb == "Importar de outro assistente…")
-        #expect(ImportText.confirm == "Usar esta importação" && ImportText.notCreatedYet == "Nada foi criado ainda.")
-    }
-
     @Test func removingAnImportTakesBackOnlyWhatItFilledIn() {
         var found = OrbImport(source: "ChatGPT")
         found.name = "Atlas"
@@ -683,12 +678,5 @@ import Testing
         let system = SystemPrompt.make(bot: bot, skills: skills, environment: mac)
         #expect(system.count - plain.count <= ImportLimits.skills * (ImportLimits.skillSummary + 40), "\(system.count - plain.count) characters")
         #expect(!system.contains("Seja objetivo e claro"))
-    }
-
-    @Test @MainActor func importingNeverTouchesTheRealMac() throws {
-        // The folders the reader opens are the ones given; the app's own data lives in the model's temporary store.
-        let model = model()
-        #expect(model.store.directory.path.hasPrefix(root.path))
-        #expect(OrbImportReader.detectLocal(home: root).isEmpty)
     }
 }

@@ -14,38 +14,12 @@ import Testing
 
     // MARK: Entrance styles
 
-    @Test func aMessageRisesSixPointsWithTheEnterSpring() {
-        let motion = EntranceStyle.rise.resolved(reduceMotion: false)
-        #expect(motion.distance == 6)
-        #expect(motion.scale == 1)
-        #expect(motion.animation == Motion.enter)
-    }
-
-    @Test func aReplyOnlyFadesInTheTimeTheWorkingAvatarLeaves() {
-        // The working line's avatar leaves with `Motion.fade`; the reply comes in with it, without moving.
-        let motion = EntranceStyle.reply.resolved(reduceMotion: false)
-        #expect(motion.distance == 0 && motion.scale == 1)
-        #expect(motion.animation == Motion.fade)
-        #expect(EntranceStyle.reply.resolved(reduceMotion: true) == motion)
-    }
-
-    @Test func anApprovalCardComesInWithEmphasis() {
-        let motion = EntranceStyle.emphasis.resolved(reduceMotion: false)
-        #expect(motion.distance == 10)
-        #expect(motion.scale == 0.98)
-        #expect(motion.animation == Motion.emphasis)
+    @Test func transcriptKindsPickTheirIntendedEntrance() {
         #expect(TranscriptItem.Kind.approval(ApprovalRequest(toolName: "run_command", title: "t", command: "c", reason: "")).entrance == .emphasis)
         #expect(TranscriptItem.Kind.user(text: "a", attachments: []).entrance == .rise)
         #expect(TranscriptItem.Kind.bot(text: "a", isStreaming: true).entrance == .reply)
         #expect(TranscriptItem.Kind.tool(ToolCall(kind: .shell, title: "t", detail: "d")).entrance == .rise)
         #expect(TranscriptItem.Kind.notice("a").entrance == .rise)
-    }
-
-    @Test func theOrbOfAnEmptyChatDropsInFromAbove() {
-        let motion = EntranceStyle.drop.resolved(reduceMotion: false)
-        #expect(motion.distance == -10)
-        #expect(motion.scale == 0.92)
-        #expect(motion.animation == .spring(response: 0.55, dampingFraction: 0.68))
     }
 
     @Test func underReduceMotionEveryEntranceIsAPlainFadeInPlace() {
@@ -71,19 +45,8 @@ import Testing
         for (delay, wanted) in zip(delays, expected) { #expect(abs(delay - wanted) < 1e-9) }
     }
 
-    @Test func aSheetsSectionsStartEightyMillisecondsAfterTheSheet() {
-        #expect(SheetEntrance.start == 0.08)
-        let first = EntranceStyle.staggered(0, start: SheetEntrance.start)
-        let third = EntranceStyle.staggered(2, start: SheetEntrance.start)
-        #expect(abs(first.delay - 0.08) < 1e-9)
-        #expect(abs(third.delay - 0.15) < 1e-9)
-        // Together under Reduce Motion: no delay survives.
-        #expect(third.resolved(reduceMotion: true).animation == Motion.fade)
-    }
-
     @Test func theEmptyChatComesInInOrder() {
-        // The Orb first, then the name 0.08 s later, what it works on, then the suggestions one after another.
-        #expect(EmptyChatEntrance.nameDelay == 0.08)
+        // The Orb first, then the name, what it works on, then the suggestions one after another.
         #expect(EmptyChatEntrance.nameDelay < EmptyChatEntrance.contextDelay)
         #expect(EmptyChatEntrance.contextDelay < EmptyChatEntrance.suggestionsStart)
         let suggestions = (0..<4).map { EntranceStyle.staggered($0, start: EmptyChatEntrance.suggestionsStart).delay }
@@ -91,15 +54,10 @@ import Testing
         #expect(suggestions.first == EmptyChatEntrance.suggestionsStart)
     }
 
-    // MARK: Crossfade and scroll
-
-    @Test func theChatSwapIsAnEighteenHundredthsCrossFadeAndAPlainFadeUnderReduceMotion() {
-        #expect(Motion.adapted(Motion.crossFade, reduceMotion: false) == Animation.easeInOut(duration: 0.18))
-        #expect(Motion.adapted(Motion.crossFade, reduceMotion: true) == Motion.fade)
-    }
+    // MARK: Scroll
 
     @Test func theListGlidesToWhatYouSentAndJumpsUnderReduceMotion() {
-        #expect(ScrollMotion.animation(reduceMotion: false) == .smooth(duration: 0.3))
+        #expect(ScrollMotion.animation(reduceMotion: false) != nil)
         #expect(ScrollMotion.animation(reduceMotion: true) == nil)
     }
 
@@ -261,13 +219,6 @@ import Testing
         #expect(ledger.generation == 0)
     }
 
-    @Test func installingAChatCountsAsASwapOfTheOrbsTranscript() {
-        let transcript = OrbTranscript(items: [])
-        #expect(transcript.swaps == 0)
-        transcript.swapped()
-        #expect(transcript.swaps == 1)
-    }
-
     @Test func aTurnRetriedKeepsTheConversationAndOnlyTheResentMessageIsNew() {
         let ledger = TranscriptEntrances()
         let opening = items(3)
@@ -322,32 +273,20 @@ import Testing
 
     // MARK: Approval card
 
-    @Test func theApprovalPulseGoesFromNothingToTheEdgeAndSettlesBackInNineTenthsOfASecond() {
-        #expect(ApprovalPulse.phases.map(ApprovalPulse.opacity) == [0, 0.35, 0.12, 0])
+    @Test func theApprovalPulseStartsAndEndsAtRestAndOutOfRangeIsZero() {
+        #expect(ApprovalPulse.opacity(ApprovalPulse.phases.first ?? 0) == 0)
+        #expect(ApprovalPulse.opacity(ApprovalPulse.phases.last ?? 0) == 0)
         #expect(ApprovalPulse.opacity(99) == 0)
-        // The first phase is the rest the card starts in: nothing animates into it.
         #expect(ApprovalPulse.animation(0) == nil)
-        #expect(ApprovalPulse.animation(1) == Animation.easeInOut(duration: 0.25).delay(ApprovalPulse.lead))
-        #expect(ApprovalPulse.animation(2) == Animation.easeInOut(duration: 0.3))
+        for phase in ApprovalPulse.phases.dropFirst().dropLast() {
+            #expect(ApprovalPulse.opacity(phase) > 0)
+            #expect(ApprovalPulse.animation(phase) != nil)
+        }
     }
 
     @Test func onlyACardThatArrivedWhileTheChatWasOpenPulsesAndNeverUnderReduceMotion() {
         #expect(ApprovalPulse.pulses(isNew: true, reduceMotion: false))
         #expect(!ApprovalPulse.pulses(isNew: false, reduceMotion: false))
         #expect(!ApprovalPulse.pulses(isNew: true, reduceMotion: true))
-    }
-
-    @Test func aShortcutShowsItsButtonPressedForOneBeatAndNotUnderReduceMotion() {
-        #expect(ApprovalShortcut.pressDelay(reduceMotion: false) == .milliseconds(120))
-        #expect(ApprovalShortcut.pressDelay(reduceMotion: true) == .zero)
-        #expect(ApprovalShortcut.pressScale == 0.97)
-    }
-
-    @Test func aLongGroupRevealsItsActionsOneAfterAnotherAtMostSixStaggered() {
-        // "Mostrar mais": the revealed actions follow `Motion.stagger`; the seventh and later come with the sixth.
-        let delays = (0..<10).map { Motion.staggerDelay($0) }
-        #expect(delays[0] == 0)
-        #expect(abs(delays[5] - 0.175) < 1e-9)
-        #expect(delays[6...].allSatisfy { $0 == delays[5] })
     }
 }

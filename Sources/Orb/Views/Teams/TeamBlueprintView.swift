@@ -45,16 +45,18 @@ struct TeamBlueprintView: View {
 }
 
 private struct EmptyBlueprintCard: View {
+    private static let placeholderMembers: [StackedAvatars.Member] = [
+        StackedAvatars.Member(id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!, orb: TeamMemberDraft.preset(at: 0)),
+        StackedAvatars.Member(id: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!, orb: TeamMemberDraft.preset(at: 1)),
+        StackedAvatars.Member(id: UUID(uuidString: "00000000-0000-0000-0000-000000000003")!, orb: TeamMemberDraft.preset(at: 2)),
+    ]
+
     let isThinking: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
-                StackedAvatars(members: [
-                    StackedAvatars.Member(id: UUID(), orb: TeamMemberDraft.preset(at: 0)),
-                    StackedAvatars.Member(id: UUID(), orb: TeamMemberDraft.preset(at: 1)),
-                    StackedAvatars.Member(id: UUID(), orb: TeamMemberDraft.preset(at: 2)),
-                ], size: 26, overlap: 9)
+                StackedAvatars(members: Self.placeholderMembers, size: 26, overlap: 9)
                 Text(isThinking ? "Montando a escalação…" : "A prancheta do time aparece aqui")
                     .font(Typography.text.weight(.semibold))
                     .foregroundStyle(Palette.ink)
@@ -284,7 +286,9 @@ private struct TeamMemberDraftCard: View {
                         avatarHop += 1
                     }
                 } label: {
-                    BotAvatar(orb: member.orb, size: 28, poke: avatarHop)
+                    SettlingOrb(idle: true, wake: avatarHop) { paused in
+                        BotAvatar(orb: member.orb, size: 28, paused: paused, poke: avatarHop)
+                    }
                 }
                 .buttonStyle(.plain)
                 .help("Trocar aparência do integrante")

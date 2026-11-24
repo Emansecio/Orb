@@ -109,13 +109,6 @@ struct LiveScreenPointerTests {
         #expect(setup.driver.calls.contains("click e1") && !setup.driver.calls.contains("box e1"))
         #expect(heard.withLock { $0.isEmpty })
     }
-
-    @Test func theFakeBrowserSaysItsStreamPort() async throws {
-        let session = try await setup.hub.session(botID: setup.botID, mode: .background)
-        #expect(try await session.driver.streamPort() == nil)
-        setup.driver.state.withLock { $0.streamPort = 51955 }
-        #expect(try await session.driver.streamPort() == 51955)
-    }
 }
 
 struct LiveScreenSensitivePageTests {

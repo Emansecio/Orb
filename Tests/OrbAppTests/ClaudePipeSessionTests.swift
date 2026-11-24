@@ -264,22 +264,20 @@ struct ClaudePipeSessionTests {
     // MARK: folders
 
     @Test func projectDirectoryEscapesTheRealPath() throws {
-        let base = FileManager.default.temporaryDirectory.appending(path: "pipe é \(UUID().uuidString)", directoryHint: .isDirectory)
+        let id = UUID().uuidString
+        let base = FileManager.default.temporaryDirectory.appending(path: "pipe é 😀 \(id)", directoryHint: .isDirectory)
         let cwd = base.appending(path: "cwd", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: cwd, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: base) }
         let home = URL(fileURLWithPath: "/Users/someone")
         let folders = ClaudePipeFolders(workingDirectory: cwd, scratch: base.appending(path: "runs"), home: home)
 
-        let real = String(cString: realpath(cwd.path, nil)!)
-        // One dash per UTF-16 unit that is not an ASCII letter or digit (as many as the CLI's JavaScript regex gives).
-        let expected = String(decoding: real.utf16.map { u -> UInt16 in
-            (0x30...0x39).contains(u) || (0x41...0x5A).contains(u) || (0x61...0x7A).contains(u) ? u : 0x2D
-        }, as: UTF16.self)
         #expect(folders.projectDirectory.deletingLastPathComponent().path == "/Users/someone/.claude/projects")
-        #expect(folders.projectDirectory.lastPathComponent == expected)
-        #expect(!folders.projectDirectory.lastPathComponent.contains("/"))
-        #expect(real.hasPrefix("/private/") || !cwd.path.hasPrefix("/var/"))
+        let name = folders.projectDirectory.lastPathComponent
+        #expect(name.hasPrefix("-private-var-") || !cwd.path.hasPrefix("/var/"))
+        // APFS normalizes "é" to "e" + combining acute (1 UTF-16 unit -> "-") and "😀" is a surrogate pair (2 UTF-16 units -> "--").
+        #expect(name.hasSuffix("-pipe-e-----\(id)-cwd"))
+        #expect(!name.contains("/"))
     }
 
     @Test func projectDirectoryOfAFolderThatDoesNotExistYetUsesTheRealParent() {

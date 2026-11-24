@@ -193,16 +193,4 @@ import Testing
         #expect(live.isCelebrating)
         removeTestFolder(root)
     }
-
-    @Test @MainActor func aRoutineThatFinishesInAnotherOrbCelebratesLightly() {
-        let level = OrbCelebration.level(seconds: 120, actions: 20, ranRoutine: true, selected: false)
-        #expect(level == .light)
-    }
-
-    // MARK: Numbers of the beats
-
-    @Test @MainActor func theOrbWaitsLongerBeforeCallingItQuietAndStopsWatchingLater() {
-        #expect(BotSession.speakingQuiet == .milliseconds(1200))
-        #expect(BotLive.composingQuiet == .milliseconds(3000))
-    }
 }

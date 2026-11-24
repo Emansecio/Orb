@@ -2376,30 +2376,6 @@ private actor Names {
         #expect(team.botTexts(team.pesquisador) == ["Pedi ao grupo."])
     }
 
-    @Test func stoppingTheGroupDoesNotWriteInTheOrchestratorsPrivateChat() async throws {
-        let valve = TestGate()
-        let team = Team { seen in
-            switch seen.who {
-            case "Atlas":
-                if seen.toolResult != nil { return say("Pedi ao Pesquisador.") }
-                return orbsCall("ask", to: "Pesquisador", "Pesquise.")
-            default:
-                await valve.wait()
-                return say("Achei 42.")
-            }
-        }
-        defer { team.cleanUp() }
-        let group = group(team)
-        team.model.postUserMessage("Descubra o número", to: group.id)
-        await waitUntil("the researcher to be asked") { team.request(from: team.atlas, to: team.pesquisador) != nil }
-        team.model.stopGroup(group.id)
-        await valve.open()
-        await team.settle()
-        #expect(team.model.groupLive(group.id).runState == .idle)
-        #expect(!team.events(team.atlas).contains { $0.kind == .chainStopped })
-        #expect(team.model.groupSession(group.id)?.items.contains { if case .event(let event) = $0.kind { event.kind == .groupStopped } else { false } } == true)
-    }
-
     // MARK: Bug hunt fixes
 
     @Test func anAskThatWasStoppedCanBeRepeatedAtOnce() async throws {
@@ -2734,7 +2710,7 @@ private actor Names {
         team.model.orbsCanManageGroups = false
         defer { team.model.orbsCanManageGroups = true }
         #expect(team.model.multiOrbOffering(for: team.atlas.id).groupEdit == false)
-        #expect(await edit(team, ["group": "Lançamento", "edit": "rename", "name": "Novo"]).hasPrefix("O usuário desligou “Orbs organizam o time”"))
+        #expect(await edit(team, ["group": "Lançamento", "edit": "rename", "name": "Novo"]).hasPrefix("O usuário desligou “Orbs organizam grupos”"))
         #expect(team.model.group(group.id)?.name == "Lançamento")
     }
 

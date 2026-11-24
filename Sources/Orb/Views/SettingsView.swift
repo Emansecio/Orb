@@ -251,7 +251,7 @@ struct GeneralSettings: View {
                     NSWorkspace.shared.activateFileViewerSelecting([OrbFolder.defaultBase])
                 }
                 dataRow("Redefinir o Orb", "Volta ao primeiro uso. Você escolhe se guarda as memórias.", button: "Redefinir…",
-                        isEnabled: true, tint: Palette.danger, help: Tip.resetOrb) {
+                        isEnabled: true, help: Tip.resetOrb) {
                     isShowingReset = true
                 }
             } header: {
@@ -485,7 +485,11 @@ struct OrbsSettings: View {
                 }
                 .help(Tip.pulseDailyTokens)
                 LabeledContent("Usados hoje", value: GroupUsageText.tokens(pulseUsed))
-                LabeledContent("Último pulso", value: pulseLast ?? "Nenhum ainda")
+                LabeledContent("Último pulso") {
+                    Text(pulseLast ?? "Nenhum ainda")
+                        .lineLimit(1)
+                        .help(pulseLast ?? "Nenhum ainda")
+                }
             }
         }
         .onAppear { loadPulse() }
@@ -508,7 +512,7 @@ struct OrbsSettings: View {
 
     var body: some View {
         Form {
-            Section("Orbs") {
+            Section("Colaboração entre Orbs") {
                 Toggle(isOn: Binding(get: { orbsCanTalk }, set: { setOrbsCanTalk($0) })) {
                     toggleLabel("Orbs podem conversar entre si",
                                 "Os Orbs pedem ajuda uns aos outros sem cartão por mensagem, cada um com as próprias permissões. Não afeta grupos.")
@@ -523,7 +527,7 @@ struct OrbsSettings: View {
                 }
                 Toggle(isOn: Binding(get: { orbsCanStartGroups }, set: { orbsCanStartGroups = $0; model.orbsCanStartGroups = $0 })) {
                     toggleLabel("Orbs podem acionar grupos",
-                                "O Orb cria um grupo ou manda um pedido a um grupo de que faz parte; a resposta final do grupo volta para o chat. Sem \"Orbs agem por conta própria\", só quando você pede no chat.")
+                                "O Orb cria um grupo ou manda um pedido a um grupo de que faz parte; a resposta final do grupo volta para o chat. Sem “Orbs agem por conta própria”, só quando você pede no chat.")
                 }
                 .help(Tip.orbsCanStartGroups)
                 .onAppear { orbsCanStartGroups = model.orbsCanStartGroups }
@@ -534,7 +538,7 @@ struct OrbsSettings: View {
                 .help(Tip.orbsActOnOwn)
                 .onAppear { orbsActOnOwn = model.orbsActOnOwn }
                 Toggle(isOn: Binding(get: { orbsCanManageGroups }, set: { orbsCanManageGroups = $0; model.orbsCanManageGroups = $0 })) {
-                    toggleLabel("Orbs organizam o time",
+                    toggleLabel("Orbs organizam grupos",
                                 "Os Orbs adicionam e tiram membros, trocam o orquestrador e renomeiam grupos sozinhos, e podem pedir para apagar um Orb. Apagar um grupo ou um Orb sempre pede sua confirmação.")
                 }
                 .help(Tip.orbsCanManageGroups)
@@ -545,6 +549,8 @@ struct OrbsSettings: View {
                 }
                 .help(Tip.orbsCreateWithoutAsking)
                 .onAppear { orbsCreateWithoutAsking = model.orbsCreateWithoutAsking }
+            }
+            Section("Aprendizado") {
                 Toggle(isOn: $proposeSkills) {
                     toggleLabel("Propor skills com o que os Orbs aprendem",
                                 "Depois de tarefas longas, o Orb pode propor uma skill. Nada é salvo sem você aprovar.")

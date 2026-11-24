@@ -16,8 +16,9 @@ struct GroupPanel: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .padding(.horizontal, Spacing.l)
-                .padding(.vertical, Spacing.m)
+                .padding(.horizontal, PanelMetrics.pageInset)
+                .padding(.vertical, 10)
+                .overlay(alignment: .bottom) { Rectangle().fill(Palette.line).frame(height: 1) }
                 ZStack {
                     switch tab {
                     case .members:
@@ -106,7 +107,8 @@ private struct GroupMembersTab: View {
                 // The dashed avatar lines up with the avatars above (the rows' own 8 pt), not with the button's hover shape.
                 .padding(.leading, Spacing.s - Spacing.ghostInset)
             }
-            .padding(.horizontal, Spacing.l)
+            .padding(.horizontal, PanelMetrics.pageInset)
+            .padding(.top, PanelMetrics.pageTop)
             .padding(.bottom, 16)
         }
     }
@@ -283,7 +285,8 @@ private struct GroupSettingsTab: View {
                     .buttonStyle(GhostStyle(tint: Palette.danger))
                     .deleteGroupDialog(group, isPresented: $isConfirmingDelete)
             }
-            .padding(16)
+            .padding(.horizontal, PanelMetrics.pageInset)
+            .padding(.vertical, PanelMetrics.pageTop)
         }
         .onAppear { nameDraft = group.name }
         // A task, not an `onChange`: when the request also switched the tab, this view is new and `focusName` was set before it.

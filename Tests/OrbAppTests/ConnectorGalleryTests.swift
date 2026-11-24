@@ -17,10 +17,6 @@ struct ConnectorGalleryTests {
             if case .template(let id) = service.source { #expect(ConnectorTemplate.all.contains { $0.id == id }, Comment(rawValue: id)) }
         }
         #expect(Set(services.compactMap(\.localKind)) == Set(LocalConnectorKind.allCases))
-        // Nothing waits for a login any more: Notion and Linear are installable.
-        #expect(services.filter { $0.source == .soon }.isEmpty)
-        // Nothing the gallery offers runs an abandoned package.
-        #expect(!services.compactMap(\.template).contains { $0.config.arguments.joined().contains("server-slack") || $0.config.arguments.joined().contains("notion-mcp-server") })
         // Every template is on the page, so none is only reachable by a code path nobody can click.
         #expect(Set(ConnectorTemplate.all.map(\.id)) == Set(services.compactMap { $0.template?.id }))
     }

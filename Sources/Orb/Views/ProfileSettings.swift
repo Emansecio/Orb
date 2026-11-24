@@ -120,8 +120,13 @@ private struct LimitedTextField: View {
     var body: some View {
         TextField(title, text: $text, prompt: Text(prompt), axis: axis)
             .labelsHidden()
-            // A bordered field: bare text with a gray placeholder did not read as something to type in.
-            .textFieldStyle(.roundedBorder)
+            .textFieldStyle(.plain)
+            .font(Typography.text)
+            .sheetTextField(fill: Palette.raised, radius: Radius.small)
+            .overlay {
+                RoundedRectangle(cornerRadius: Radius.small)
+                    .strokeBorder(Palette.line, lineWidth: 1)
+            }
             .onChange(of: text) {
                 let cut = String(text.prefix(limit))
                 if cut != text { text = cut }

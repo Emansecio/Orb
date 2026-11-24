@@ -102,11 +102,12 @@ enum ImageProcessing {
         }
 
         let hasAlpha = ![CGImageAlphaInfo.none, .noneSkipFirst, .noneSkipLast].contains(image.alphaInfo)
-        if hasAlpha, hasTransparentPixels(image), let png = encode(image, as: .png, quality: nil), png.count <= pngKeepLimit {
+        let transparent = hasAlpha && hasTransparentPixels(image)
+        if transparent, let png = encode(image, as: .png, quality: nil), png.count <= pngKeepLimit {
             return Prepared(data: png, mediaType: "image/png", fileExtension: "png", width: image.width, height: image.height)
         }
-        // JPEG has no alpha: transparent areas are flattened onto white instead of turning black.
-        let flat = hasAlpha ? (flattened(image) ?? image) : image
+        // JPEG has no alpha: only genuinely transparent images need flattening onto white.
+        let flat = transparent ? (flattened(image) ?? image) : image
         guard let jpeg = encode(flat, as: .jpeg, quality: jpegQuality) else { throw ImageAttachmentError.unreadable(name: name) }
         return Prepared(data: jpeg, mediaType: "image/jpeg", fileExtension: "jpg", width: flat.width, height: flat.height)
     }
@@ -128,6 +129,32 @@ enum ImageProcessing {
 
     /// True when some pixel is not fully opaque (many screenshots carry an alpha channel that is all 255).
     static func hasTransparentPixels(_ image: CGImage) -> Bool {
+        // Fast path: scan 32-bit RGBA/ARGB pixel buffers directly using SIMD without allocating a full-res CGContext.
+        if image.bitsPerComponent == 8, image.bitsPerPixel == 32,
+           let alphaByte = alphaByteOffset(for: image.alphaInfo),
+           let cfData = image.dataProvider?.data,
+           let base = CFDataGetBytePtr(cfData) {
+            let length = CFDataGetLength(cfData)
+            let bpr = image.bytesPerRow
+            if bpr >= image.width * 4, length >= bpr * image.height {
+                for row in 0..<image.height {
+                    let line = base + row * bpr
+                    var col = 0
+                    let simdEnd = image.width - (image.width % 4)
+                    while col < simdEnd {
+                        let o = col * 4 + alphaByte
+                        let v = SIMD4<UInt8>(line[o], line[o + 4], line[o + 8], line[o + 12])
+                        if v != SIMD4<UInt8>(repeating: 255) { return true }
+                        col += 4
+                    }
+                    while col < image.width {
+                        if line[col * 4 + alphaByte] < 255 { return true }
+                        col += 1
+                    }
+                }
+                return false
+            }
+        }
         guard let context = rgbaContext(width: image.width, height: image.height, alpha: .premultipliedLast),
               let base = context.data else { return false }
         context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
@@ -137,6 +164,14 @@ enum ImageProcessing {
             for column in 0..<context.width where line[column * 4 + 3] < 255 { return true }
         }
         return false
+    }
+
+    private static func alphaByteOffset(for info: CGImageAlphaInfo) -> Int? {
+        switch info {
+        case .premultipliedLast, .last: 3
+        case .premultipliedFirst, .first: 0
+        default: nil
+        }
     }
 
     private static func flattened(_ image: CGImage) -> CGImage? {
@@ -173,6 +208,11 @@ struct ImageStore: Sendable {
     /// Same for bytes already in memory (a picture pasted from the clipboard, a screenshot).
     func add(_ data: Data, name: String, botID: UUID, enforcingLimit: Bool = true) throws -> ImageAttachment {
         let prepared = try ImageProcessing.prepare(data, name: name, enforcingLimit: enforcingLimit)
+        return try addPrepared(prepared, botID: botID)
+    }
+
+    /// Saves an already-encoded image (e.g. a JPEG produced by `ScreenshotTool`) straight to `anexos/` without a second decode/encode pass.
+    func addPrepared(_ prepared: ImageProcessing.Prepared, botID: UUID) throws -> ImageAttachment {
         let folder = folder(for: botID)
         let file = folder.appending(path: "\(UUID().uuidString).\(prepared.fileExtension)")
         do {
@@ -191,6 +231,10 @@ struct ImageStore: Sendable {
 
     func attach(_ data: Data, name: String, botID: UUID) async throws -> ImageAttachment {
         try await Task.detached { try self.add(data, name: name, botID: botID) }.value
+    }
+
+    func attachPrepared(_ prepared: ImageProcessing.Prepared, botID: UUID) async throws -> ImageAttachment {
+        try await Task.detached { try self.addPrepared(prepared, botID: botID) }.value
     }
 
     /// The picture a path stands for when the file is one this store saved (nil for any other file).
@@ -310,7 +354,15 @@ enum ImageWire {
         }
     }
 
-    private static func base64(ofFileAt path: String) -> String? {
+    static func clearCache() {
+        cache.withLock {
+            $0.entries.removeAll()
+            $0.order.removeAll()
+            $0.bytes = 0
+        }
+    }
+
+    static func base64(ofFileAt path: String) -> String? {
         let url = URL(fileURLWithPath: path)
         let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
         let key = "\(path)|\(values?.fileSize ?? -1)|\(values?.contentModificationDate?.timeIntervalSince1970 ?? 0)"

@@ -59,12 +59,6 @@ import Testing
         #expect(try emptyModel().hasCheckedConnections)
     }
 
-    @Test func theKeptListIsReadAgainWhenAMemoryArrives() {
-        #expect(WelcomeKeptKey(listIsEmpty: true, keptVersion: 0) != WelcomeKeptKey(listIsEmpty: true, keptVersion: 1))
-        #expect(WelcomeKeptKey(listIsEmpty: true, keptVersion: 0) != WelcomeKeptKey(listIsEmpty: false, keptVersion: 0))
-        #expect(WelcomeKeptKey(listIsEmpty: true, keptVersion: 2) == WelcomeKeptKey(listIsEmpty: true, keptVersion: 2))
-    }
-
     @Test @MainActor func deletingTheLastOrbWithItsMemoryBumpsTheVersionOnceItIsKept() async throws {
         let model = try emptyModel()
         let bot = model.createBot(name: "Nina", role: "Cuida da agenda", orb: OrbConfig(), model: "", mode: .ask, folder: .home)
@@ -229,18 +223,6 @@ import Testing
         ledger.reset() // the list got an Orb
         #expect(WelcomeLedger.plays(ledger)) // and was emptied again
         #expect(!WelcomeLedger.plays(nil)) // a snapshot has no entrance
-    }
-
-    @Test func theEntranceOrderIsTheSpecifiedOne() {
-        #expect(WelcomeEntrance.lia.delay == 0.06)
-        #expect(WelcomeEntrance.bento.delay == 0.10)
-        #expect(WelcomeEntrance.title.delay == 0.16)
-        #expect(WelcomeEntrance.subtitle.delay == 0.20)
-        #expect(WelcomeEntrance.point(0).delay == 0.26)
-        #expect(abs(WelcomeEntrance.point(1).delay - 0.295) < 0.0001)
-        #expect(abs(WelcomeEntrance.point(2).delay - 0.33) < 0.0001)
-        #expect(WelcomeEntrance.actions.delay == 0.40)
-        #expect(WelcomeEntrance.keptCard.delay == 0.44)
     }
 
     @Test func underReduceMotionEverythingFadesTogether() {
@@ -478,15 +460,5 @@ extension WelcomeTests {
         let draft = await pending.value
         #expect(draft != nil)
         #expect(model.botIDs.count == 1)
-    }
-}
-
-// MARK: - The sidebar's foot
-
-extension WelcomeTests {
-    @Test func theShortcutIsTheMenusCommandAndDoesNotNeedTheButton() {
-        // ⌘N is the app menu's command (OrbApp), not a button of the list: its label stays in the catalog and the tips.
-        #expect(AppShortcut.newBot.label == "⌘N")
-        #expect(Tip.createOrbSheet().contains("⌘N"))
     }
 }

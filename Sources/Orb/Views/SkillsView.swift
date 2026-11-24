@@ -381,6 +381,8 @@ private struct InstalledSkillRow: View {
                     HStack(spacing: 6) {
                         Text(skill.name)
                             .font(.system(size: 14, weight: .semibold))
+                            .lineLimit(1)
+                            .help(skill.name)
                             .opacity(dimmed)
                         // One line: in a narrow window it broke letter by letter ("/organiza r"). The copy button keeps the whole command.
                         Text("/\(skill.slug)")
@@ -404,25 +406,27 @@ private struct InstalledSkillRow: View {
                             .foregroundStyle(Palette.muted)
                             .lineLimit(2)
                     }
-                    HStack(spacing: 6) {
-                        if !skill.isEnabled {
-                            CatalogBadge(text: "Desativada", symbol: "pause.circle")
-                        }
-                        // No badge for the app's own skills: it is the default, and the delete dialog says where it came from.
-                        if skill.source == Skill.builtInSource {
-                            EmptyView()
-                        } else if skill.source == Skill.learnedSource {
-                            CatalogBadge(text: SkillBadge.learned(by: model.bots.first { $0.id == skill.learnedBy }?.name), symbol: "sparkles")
-                        } else if let source = skill.source {
-                            CatalogBadge(text: SkillBadge.origin(of: source), symbol: skill.isFromCatalog ? "shippingbox" : "wand.and.stars")
-                        } else {
-                            CatalogBadge(text: "Criada por você", symbol: "person")
-                        }
-                        if !skill.orbIDs.isEmpty {
-                            CatalogBadge(text: OrbScopeText.summary(orbIDs: skill.orbIDs, bots: model.bots), symbol: "person.2")
-                        }
-                        if skill.uses > 0 {
-                            CatalogBadge(text: skill.uses == 1 ? "1 uso" : "\(skill.uses) usos")
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            if !skill.isEnabled {
+                                CatalogBadge(text: "Desativada", symbol: "pause.circle")
+                            }
+                            // No badge for the app's own skills: it is the default, and the delete dialog says where it came from.
+                            if skill.source == Skill.builtInSource {
+                                EmptyView()
+                            } else if skill.source == Skill.learnedSource {
+                                CatalogBadge(text: SkillBadge.learned(by: model.bots.first { $0.id == skill.learnedBy }?.name), symbol: "sparkles")
+                            } else if let source = skill.source {
+                                CatalogBadge(text: SkillBadge.origin(of: source), symbol: skill.isFromCatalog ? "shippingbox" : "wand.and.stars")
+                            } else {
+                                CatalogBadge(text: "Criada por você", symbol: "person")
+                            }
+                            if !skill.orbIDs.isEmpty {
+                                CatalogBadge(text: OrbScopeText.summary(orbIDs: skill.orbIDs, bots: model.bots), symbol: "person.2")
+                            }
+                            if skill.uses > 0 {
+                                CatalogBadge(text: skill.uses == 1 ? "1 uso" : "\(skill.uses) usos")
+                            }
                         }
                     }
                 }

@@ -170,7 +170,10 @@ final class LiveFeedHub {
     /// before the stream closes are nobody's.
     func endUse(_ botID: UUID, itemID: UUID) {
         usesOpen.remove(botID)
-        defer { newestJPEG[botID] = nil }
+        defer {
+            newestJPEG[botID] = nil
+            if holds[botID] == nil, connection?.botID != botID { stores[botID]?.clear() }
+        }
         guard protections[botID]?.isProtected != true, stores[botID]?.isPrivate != true, let jpeg = newestJPEG[botID] else { return }
         lastScreens.removeAll { $0.itemID == itemID }
         lastScreens.append(LastScreen(itemID: itemID, botID: botID, jpeg: jpeg))

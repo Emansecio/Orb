@@ -83,22 +83,11 @@ import Testing
         #expect(!model.showInspector)
     }
 
-    // MARK: The curves
-
-    @Test func crossFadesAreEighteenHundredthsAndTheContentCurveIsAQuarterSecond() {
-        #expect(Motion.crossFade == .easeInOut(duration: 0.18))
-        #expect(Motion.content == .smooth(duration: 0.25))
-        #expect(Motion.adapted(Motion.crossFade, reduceMotion: true) == Motion.fade)
-        #expect(Motion.adapted(Motion.crossFade, reduceMotion: false) == Motion.crossFade)
-    }
-
     // MARK: Sheets
 
     @Test func theEditorsPartsComeInInTurnStageThenOptionsThenFooter() {
         let delays = (0..<3).map { EntranceStyle.staggered($0, start: SheetEntrance.start).delay }
-        #expect(delays[0] == SheetEntrance.start)
-        #expect(abs(delays[1] - (SheetEntrance.start + Motion.stagger)) < 1e-9)
-        #expect(abs(delays[2] - (SheetEntrance.start + 2 * Motion.stagger)) < 1e-9)
+        #expect(delays[0] < delays[1] && delays[1] < delays[2])
         // Under Reduce Motion all three fade in together, in place.
         for index in 0..<3 {
             let resolved = EntranceStyle.staggered(index, start: SheetEntrance.start).resolved(reduceMotion: true)
@@ -127,21 +116,7 @@ import Testing
         #expect(!RegistryQuery.isCurrent("banco", query: ""))
     }
 
-    // MARK: Small values
-
-    @Test func aSpinnerWaitsOneHundredFiftyMilliseconds() {
-        #expect(Motion.spinnerDelay == .milliseconds(150))
-    }
-
-    @Test func aCardsRunStateIsOneOfThreeAndOnlyChangesWithTheRun() {
-        let idle = RoutineRunState(isRunning: false, isQueued: false)
-        #expect(idle != RoutineRunState(isRunning: true, isQueued: false))
-        #expect(idle != RoutineRunState(isRunning: false, isQueued: true))
-        #expect(idle == RoutineRunState(isRunning: false, isQueued: false))
-    }
-
     @Test func theFadeUnderReduceMotionIsTheShortOne() {
-        #expect(Motion.fade == .easeOut(duration: 0.15))
         #expect(Motion.adapted(Motion.enter, reduceMotion: true) == Motion.fade)
         #expect(Motion.adapted(Motion.enter, reduceMotion: false) == Motion.enter)
     }

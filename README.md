@@ -264,12 +264,12 @@ Neste Mac, o Dock aponta para `build/Orb.app`. Após cada build, atualize o apli
 `./scripts/bundle.sh release` e abra `build/Orb.app`. Se o Orb estiver aberto, encerre-o normalmente e reabra-o após
 o bundle ficar pronto: o processo antigo pode perder acesso às chaves do Keychain. `swift build` sozinho não atualiza o app.
 
-Os testes rodam com `scripts/test.sh`, que passa ao `swift test` qualquer opção e limita os testes simultâneos a metade dos núcleos (a suíte inteira leva cerca de 1 minuto num Mac de 8 núcleos):
+Os testes rodam com `scripts/test.sh`, que passa ao `swift test` qualquer opção e limita os testes simultâneos a metade dos núcleos. Rode só a área alterada; a suíte inteira (cerca de 1 minuto num Mac de 8 núcleos) só a pedido explícito:
 
 ```bash
-scripts/test.sh
-# Para validar apenas a área alterada (o filtro aceita uma expressão regular):
+# O mínimo: as suítes da área alterada (o filtro aceita uma expressão regular):
 scripts/test.sh --filter 'WaitingTests|ChildProcessTests'
+scripts/test.sh   # a suíte inteira; só a pedido explícito
 ```
 
 `swift test` já compila o necessário. Use `--skip-build` somente ao repetir uma execução sem alterações nos fontes. Os testes que mexem no Mac de verdade ficam desligados por padrão: os de navegadores reais pedem `ORB_REAL_BROWSER_TESTS=1` (e `ORB_REAL_BROWSER_WINDOW=1` para o que abre janela), os de Acessibilidade exigem `ORB_AX_SMOKE=1` e a permissão do macOS.

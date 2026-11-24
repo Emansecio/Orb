@@ -314,30 +314,6 @@ struct OrbDriverTests {
         #expect(view.isWatchingForReturn)
     }
 
-    @Test func everyTemperamentRunsAtItsOwnRhythmFromTheFirstConfiguration() {
-        func rhythm(_ temperament: OrbTemperament, after other: OrbTemperament? = nil) -> [Double] {
-            let view = OrbAnimationView(frame: NSRect(x: 0, y: 0, width: 30, height: 30))
-            func configure(_ temperament: OrbTemperament) {
-                view.configure(config: OrbConfig(temperament: temperament), activity: .idle, size: 30, followsPointer: false,
-                               interactive: false, live: false)
-            }
-            if let other { configure(other) }
-            configure(temperament)
-            return view.rhythmForTesting
-        }
-        for temperament in OrbTemperament.allCases {
-            let traits = temperament.traits
-            let expected = [traits.blinkGap.lowerBound, traits.blinkGap.upperBound, traits.blinkSkew, traits.doubleBlink,
-                            traits.saccadeReach, traits.saccadeHold]
-            #expect(rhythm(temperament) == expected, "\(temperament) configured first")
-            for other in OrbTemperament.allCases where other != temperament {
-                #expect(rhythm(temperament, after: other) == expected, "\(temperament) after \(other)")
-            }
-        }
-        // The default one included: its saccades hold the fixation 1.25 times as long as the helper's own default.
-        #expect(rhythm(.equilibrado).last == OrbTemperament.equilibrado.traits.saccadeHold)
-    }
-
     // MARK: Background bitmaps
 
     @Test func layersAppearOnceTheirBitmapsAreDecoded() async throws {

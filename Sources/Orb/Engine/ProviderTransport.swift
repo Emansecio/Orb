@@ -79,7 +79,7 @@ enum ProviderTransport {
                 defer { activity.finish() }
                 do {
                     let payload = try body()
-                    let (bytes, response) = try await open(session, credentials: credentials) { key in
+                    let (chunks, response) = try await openChunked(session, credentials: credentials) { key in
                         var request = request(key)
                         request.httpMethod = "POST"
                         request.timeoutInterval = idleTimeout
@@ -88,7 +88,7 @@ enum ProviderTransport {
                         request.httpBody = payload
                         return request
                     }
-                    try await check(response, body: { try await prefix(of: bytes) })
+                    try await check(response, body: { try await prefix(of: chunks) })
 
                     var decoder = SSEDecoder()
                     var sawDone = false
@@ -116,9 +116,11 @@ enum ProviderTransport {
                         return mapper.isFinished
                     }
                     reading: do {
-                        for try await byte in bytes {
-                            if !sawEvent, head.count < errorBodyLimit { head.append(byte) }
-                            if let event = decoder.feed(byte), try handle(event) { break reading }
+                        for try await chunk in chunks {
+                            if !sawEvent, head.count < errorBodyLimit {
+                                head.append(chunk.prefix(errorBodyLimit - head.count))
+                            }
+                            if try decoder.feed(chunk, onEvent: handle) { break reading }
                         }
                         if let event = decoder.finish() {
                             // A connection closed in the middle of an event is a dropped connection, not a bad reply.
@@ -185,6 +187,26 @@ enum ProviderTransport {
         }
         for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
         return request
+    }
+
+    static func openChunked(_ session: URLSession, credentials: CredentialsProvider,
+                            request build: (String?) -> URLRequest) async throws -> (AsyncThrowingStream<Data, Error>, URLResponse) {
+        let token = try await credentials(false)
+        let first = try await ChunkedHTTPStream.open(build(token), using: session)
+        guard (first.1 as? HTTPURLResponse)?.statusCode == 401 else { return first }
+        let renewed = try await credentials(true)
+        guard renewed != token else { return first }
+        return try await ChunkedHTTPStream.open(build(renewed), using: session)
+    }
+
+    private static func prefix(of chunks: AsyncThrowingStream<Data, Error>) async throws -> Data {
+        var data = Data()
+        for try await chunk in chunks {
+            let room = errorBodyLimit - data.count
+            if room > 0 { data.append(chunk.prefix(room)) }
+            if data.count >= errorBodyLimit { break }
+        }
+        return data
     }
 
     /// Opens a streaming request with the current credential. A 401 means the credential went stale (an expired

@@ -125,8 +125,10 @@ final class Dictation {
         let closing = Task { @MainActor [weak self] in
             await capture.finish()
             guard let self, self.capture === capture else { return }
+            // Release AVAudioEngine and both SpeechAnalyzers immediately instead of holding them during the LLM review.
+            self.capture = nil
             await self.reviewText()
-            guard self.capture === capture else { return }
+            guard self.phase == .finishing else { return }
             self.end()
         }
         self.closing = closing

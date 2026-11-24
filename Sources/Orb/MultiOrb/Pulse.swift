@@ -310,8 +310,12 @@ extension AppModel {
 
     /// Called by the scheduler after the routines (so it keeps their wake-from-sleep hold). One pass at a time.
     func runPulseIfDue(now: Date = .now) {
-        syncActivities() // the timer holds the app awake while the pulse is on (Orbs added or deleted change that)
         guard pulseTask == nil, pulseIsOn, bots.count > 1, !isResetting else { return }
+        if let last = pulseState.lastPulse, last <= now,
+           pulseState.day == PulseState.dayKey(now),
+           now.timeIntervalSince(last) < Double(pulseMinutes) * 60 || pulseState.tokensToday >= pulseDailyTokens {
+            return
+        }
         pulseTask = Task { [weak self] in
             await self?.pulseTick(now: now)
             self?.pulseTask = nil
@@ -322,8 +326,9 @@ extension AppModel {
     /// demand (no model, no token) and starts a pulse on the first free one that has some, telling it which.
     func pulseTick(now: Date = .now) async {
         guard pulseIsOn, bots.count > 1, !isResetting else { return }
+        let before = pulseState
         pulseState.roll(to: now)
-        defer { savePulseState() }
+        defer { if pulseState != before { savePulseState() } }
         guard let last = pulseState.lastPulse else { pulseState.lastPulse = now; return }
         if last > now { pulseState.lastPulse = now; return } // the clock went back: the interval counts from here
         guard now.timeIntervalSince(last) >= Double(pulseMinutes) * 60, pulseState.tokensToday < pulseDailyTokens else { return }

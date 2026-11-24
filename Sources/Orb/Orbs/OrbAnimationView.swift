@@ -150,16 +150,11 @@ final class OrbAnimationView: NSView {
     var isBubbleShown: Bool { !bubble.isHidden }
     /// For tests: a selection glance is playing.
     var isGlancing: Bool { glanceStart != nil }
-    /// For tests: a cue's blink is playing, the jump and the flourish that play, and the activity and joy on screen (not
+    /// For tests: a cue's blink is playing, the jump that plays, and the activity and joy on screen (not
     /// the ones asked for, which can be waiting out the pause between two tools).
     var isCueBlinking: Bool { cueBlinkStart != nil }
     var currentJumpForTesting: OrbJump? { jump?.kind }
-    var currentFlourishForTesting: OrbFlourish? { flourishes.current }
     var shownForTesting: (activity: OrbActivity, celebration: OrbCelebration) { (shown, crossover.shownStyle) }
-    /// For tests: the rhythm the blinks and saccades run at.
-    var rhythmForTesting: [Double] {
-        [blinker.gap.lowerBound, blinker.gap.upperBound, blinker.skew, blinker.doubleChance, saccades.reach, saccades.hold]
-    }
     /// For tests: how fast the jelly wobble spring is going (kicks pile up here while no frames run).
     var wobbleVelocityForTesting: Double { wobble.velocity }
     /// For tests: the placed layers, back to front, with what they show.

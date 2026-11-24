@@ -482,9 +482,10 @@ extension BotSession {
             if succeeded, !paidByPulse { model.writeStretchNote(of: id) }
         }
         let bank = model.memory.bank(for: botID)
+        let shouldRefreshMemory = model.selection == .bot(botID) || !model.live(botID).memory.items.isEmpty || !model.live(botID).memory.identity.isEmpty
         Task {
             await bank.sweep() // once a day: the brief no longer waits for it
-            await model.refreshMemory(botID, onlyIfChanged: true)
+            if shouldRefreshMemory { await model.refreshMemory(botID, onlyIfChanged: true) }
         }
         model.usageLog.flush() // what the turn used is written now, not after the batch's delay
         model.live(id).runningTool = nil

@@ -240,11 +240,20 @@ private struct TemplateCard: View {
                 Text(template.title)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Palette.ink)
-                HStack(spacing: 6) {
-                    Text(template.whenText)
-                        .font(Typography.small.weight(.medium))
-                        .foregroundStyle(Palette.secondary)
-                    if template.goal != nil { CatalogBadge(text: "Com meta", symbol: "target") }
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 6) {
+                        Text(template.whenText)
+                            .font(Typography.small.weight(.medium))
+                            .foregroundStyle(Palette.secondary)
+                            .fixedSize()
+                        if template.goal != nil { CatalogBadge(text: "Com meta", symbol: "target") }
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(template.whenText)
+                            .font(Typography.small.weight(.medium))
+                            .foregroundStyle(Palette.secondary)
+                        if template.goal != nil { CatalogBadge(text: "Com meta", symbol: "target") }
+                    }
                 }
                 // A short description that always ends in a full stop; the whole prompt is the tooltip.
                 Text(template.blurb)
@@ -326,7 +335,6 @@ private struct RoutineCard: View {
                     }
                     .buttonStyle(.plain)
                     .help("Abrir \(botName) e suas rotinas")
-                    modeBadge
                     Spacer()
                     toggle
                 }
@@ -336,15 +344,19 @@ private struct RoutineCard: View {
                     .font(.system(size: 15, weight: .semibold))
                     .lineLimit(2)
                     .opacity(dimming)
-                if lastRunFailed {
-                    CatalogBadge(text: "Falhou", symbol: "exclamationmark.triangle.fill", tint: Palette.danger)
-                        .fixedSize()
-                }
                 if !showsOrb {
                     // Under the Orb's section header the card starts here: the routine's name, the switch at its end.
-                    modeBadge
                     Spacer(minLength: 8)
                     toggle
+                }
+            }
+            if lastRunFailed || modeBadge != nil {
+                HStack(spacing: 6) {
+                    if lastRunFailed {
+                        CatalogBadge(text: "Falhou", symbol: "exclamationmark.triangle.fill", tint: Palette.danger)
+                            .fixedSize()
+                    }
+                    modeBadge
                 }
             }
             VStack(alignment: .leading, spacing: 4) {
@@ -407,13 +419,10 @@ private struct RoutineCard: View {
             // The same buttons as the routine's card in the Orb's panel: ghosts for what opens something, a pill for the run.
             Spacer(minLength: 0)
             HStack(spacing: Spacing.xs + Spacing.hairline) {
-                Button("Editar", systemImage: "pencil", action: onEdit)
-                    .buttonStyle(GhostStyle())
-                    .help(Tip.editRoutine)
-                    .hangsOnLeadingEdge()
                 Button("Ver conversa", systemImage: "text.bubble", action: onOpen)
                     .buttonStyle(GhostStyle())
                     .help(Tip.routineConversation)
+                    .hangsOnLeadingEdge()
                 MoreMenu(name: routine.name, tip: "Mais ações: editar ou apagar a rotina") {
                     Button("Editar rotina…", systemImage: "pencil", action: onEdit)
                         .help(Tip.editRoutine)
@@ -1048,7 +1057,10 @@ struct RoutineEditor: View {
                 // taking their new height at once looks calmer than a table sliding them.
                 if kind == .weekly {
                     Picker("Dia", selection: $weekday) {
-                        ForEach(1...7, id: \.self) { Text(Calendar.app.weekdaySymbols[$0 - 1].capitalized).tag($0) }
+                        ForEach(1...7, id: \.self) { day in
+                            let name = Calendar.app.weekdaySymbols[day - 1]
+                            Text(name.prefix(1).uppercased() + name.dropFirst()).tag(day)
+                        }
                     }
                     .transition(.quiet)
                 }

@@ -202,17 +202,6 @@ struct ComposerSupportTests {
         #expect(ComposerAction.stop.title(isRoutine: false) == "Parar")
     }
 
-    @Test func pasteIsTakenOnlyInTheComposersOwnKeyWindowWithoutASheet() {
-        func takes(window: Bool = true, key: Bool = true, sheet: Bool = false, focused: Bool = true) -> Bool {
-            PasteGate.takes(eventIsInComposerWindow: window, isKey: key, hasSheet: sheet, isFocused: focused)
-        }
-        #expect(takes())
-        #expect(!takes(window: false)) // the menu bar panel, Settings, a popover
-        #expect(!takes(key: false))
-        #expect(!takes(sheet: true)) // a sheet over the chat keeps its own ⌘V
-        #expect(!takes(focused: false))
-    }
-
     // MARK: Permission chip
 
     @Test func theChipSaysTheModeAndCountsGrantsOnlyWhereTheOrbAsks() {
@@ -518,10 +507,5 @@ struct ComposerSupportTests {
         // No text field with the keys: nothing taken.
         #expect(window.makeFirstResponder(nil))
         #expect(!NewLineKey.insert(in: window))
-    }
-
-    @Test func aSkillPickedFromThePlusMenuGoesInFrontOfWhatWasTyped() {
-        #expect(AppModel.draft(inserting: "resumir", into: "resuma este texto") == "/resumir resuma este texto")
-        #expect(AppModel.draft(inserting: "resumir", into: "/outra texto") == "/resumir texto")
     }
 }

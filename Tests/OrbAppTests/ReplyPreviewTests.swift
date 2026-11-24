@@ -121,12 +121,4 @@ import Testing
         let again = try JSONDecoder().decode(AppState.self, from: JSONEncoder().encode(state))
         #expect(again.replies == state.replies)
     }
-
-    @Test @MainActor func theRowOfAnOrbPublishesItsOwnPreview() {
-        let live = BotLive(Bot(name: "A", role: "x", orb: OrbConfig()))
-        #expect(live.lastReply == nil)
-        let preview = ReplyPreview(text: "Feito.", date: .now)
-        live.setLastReply(preview)
-        #expect(live.lastReply == preview)
-    }
 }

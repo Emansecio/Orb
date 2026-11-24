@@ -55,32 +55,6 @@ struct OrbDesignTests {
         #expect(bytes > 0 && bytes < 8_000_000)
     }
 
-    // MARK: Hair and accessories removed
-
-    @Test func hairAndAccessoriesLeaveEveryOrb() throws {
-        // A look saved while hair, accessories and their colors existed: they are ignored, the rest stays.
-        let json = #"{"color":"ceu","eyes":"ovais","mouth":"sorriso","cheeks":"blush","temperament":"timido","hair":"coque","hairColor":5913378,"accessories":["fones","oculos-sol"],"accentColor":16732043,"autoColors":2}"#
-        let old = try JSONDecoder().decode(OrbConfig.self, from: Data(json.utf8))
-        #expect(old.color == "ceu" && old.eyes == "ovais" && old.mouth == "sorriso" && old.cheeks == "blush")
-        #expect(old.temperament == .timido)
-        // No hair or accessory layer is drawn.
-        let paths = old.layers().map(\.path)
-        #expect(paths == ["body/ceu", "cheeks/blush", "mouth/sorriso", "eyes/ovais"])
-        #expect(!paths.contains { $0.hasPrefix("hair/") || $0.hasPrefix("accessories/") })
-        // Saved again, the look no longer carries any of the removed keys.
-        let saved = try #require(String(data: JSONEncoder().encode(old), encoding: .utf8))
-        for key in ["hair", "accessories", "hairColor", "accentColor", "autoColors"] {
-            #expect(!saved.contains("\"\(key)\""), "\(key)")
-        }
-        #expect(try JSONDecoder().decode(OrbConfig.self, from: Data(saved.utf8)) == old)
-        // The editor and the catalog offer none of them, and the art is gone.
-        #expect(OrbCategory.allCases.map(\.rawValue) == ["color", "shape", "temperament", "eyes", "mouth", "brows", "cheeks"])
-        let root = try #require(catalog.root)
-        for folder in ["hair", "accessories"] {
-            #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent(folder).path), "\(folder)")
-        }
-    }
-
     // MARK: Sortear
 
     @Test func randomLooksHangTogether() {

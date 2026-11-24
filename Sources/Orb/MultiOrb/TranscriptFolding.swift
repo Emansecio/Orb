@@ -347,7 +347,7 @@ enum TranscriptFolding {
                   !(start < boundary && boundary < stretch.range.upperBound) else { continue }
             let work = items[stretch.range]
             guard work.contains(where: isToolLine), work.allSatisfy(foldsIntoWork),
-                  rows(for: work.filter { !isNotice($0) }, foldsWork: false).count >= 2 else { continue }
+                  hasAtLeastTwoWorkRows(work) else { continue }
             // Up to the answer; without one, up to the last thing done (a notice that the app closed comes at the next
             // launch, hours later).
             let began = start > 0 ? items[start - 1].date : items[start].date
@@ -357,6 +357,29 @@ enum TranscriptFolding {
             stretches[start] = stretch
         }
         return stretches
+    }
+
+    /// True when the non-notice items of a finished request's work would take at least two rows without folding (matches
+    /// `rows(for: work.filter { !isNotice($0) }, foldsWork: false).count >= 2` without allocating).
+    private static func hasAtLeastTwoWorkRows(_ work: ArraySlice<TranscriptItem>) -> Bool {
+        var count = 0
+        var index = work.startIndex
+        while index < work.endIndex {
+            let item = work[index]
+            if isNotice(item) { index = work.index(after: index); continue }
+            count += 1
+            if count >= 2 { return true }
+            index = work.index(after: index)
+            if isToolLine(item) {
+                while index < work.endIndex {
+                    let next = work[index]
+                    if isNotice(next) { index = work.index(after: index); continue }
+                    guard joinsToolRun(next) else { break }
+                    index = work.index(after: index)
+                }
+            }
+        }
+        return false
     }
 
     /// Where the work of the request `start..<end` ends and how, before the checks every stretch passes; nil when it does not

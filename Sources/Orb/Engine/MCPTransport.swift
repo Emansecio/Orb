@@ -184,7 +184,7 @@ actor StdioTransport: MCPTransport {
 
     private static func message(in line: Data) -> JSONValue? {
         func decode(_ data: some DataProtocol) -> JSONValue? {
-            guard let message = try? JSONDecoder().decode(JSONValue.self, from: Data(data)), case .object = message else { return nil }
+            guard let message = JSONValue.parse(Data(data)), case .object = message else { return nil }
             return message
         }
         if let message = decode(line) { return message }
@@ -334,22 +334,15 @@ actor HTTPTransport: MCPTransport {
                 return !answered
             }
         } else {
-            // A declared length over the ceiling is refused before reading; otherwise the bytes pile up in one buffer and the
-            // ceiling is checked every 64 KB (so the body may overshoot it by less than that before the error).
+            // A declared length over the ceiling is refused before reading; otherwise chunks pile up and the ceiling is checked per chunk.
             if response.expectedContentLength > Int64(maxMessageBytes) { throw tooLarge }
             var data = Data()
             if response.expectedContentLength > 0 { data.reserveCapacity(Int(response.expectedContentLength)) }
-            var sinceCheck = 0
-            for try await byte in bytes {
-                data.append(byte)
-                sinceCheck += 1
-                if sinceCheck == 65_536 {
-                    sinceCheck = 0
-                    if data.count > maxMessageBytes { throw tooLarge }
-                }
+            for try await chunk in bytes {
+                data.append(chunk)
+                if data.count > maxMessageBytes { throw tooLarge }
             }
-            if data.count > maxMessageBytes { throw tooLarge }
-            answered = await deliver(String(decoding: data, as: UTF8.self), replyTo: message)
+            answered = await deliver(data, replyTo: message)
         }
         guard answered else { throw ToolError("O conector \(name) encerrou a resposta sem resultado.") }
     }
@@ -357,14 +350,18 @@ actor HTTPTransport: MCPTransport {
     private var tooLarge: ToolError { ToolError("O conector \(name) mandou uma resposta grande demais.") }
 
     /// Hands a message to the connection; true if it is the response to `request`.
-    private func deliver(_ text: String, replyTo request: JSONValue? = nil) async -> Bool {
-        guard let message = JSONValue.parse(text), case .object = message else { return false }
+    private func deliver(_ data: Data, replyTo request: JSONValue? = nil) async -> Bool {
+        guard let message = JSONValue.parse(data), case .object = message else { return false }
         let isReply = request != nil && message["method"] == nil && message["id"] == request?["id"]
         if isReply, request?["method"]?.string == "initialize" {
             protocolVersion = message["result"]?["protocolVersion"]?.string
         }
         await receive?(message)
         return isReply
+    }
+
+    private func deliver(_ text: String, replyTo request: JSONValue? = nil) async -> Bool {
+        await deliver(Data(text.utf8), replyTo: request)
     }
 
     // MARK: Legacy HTTP+SSE
@@ -412,7 +409,7 @@ actor HTTPTransport: MCPTransport {
     // MARK: Plumbing
 
     private func load(_ target: URL, method: String, body: JSONValue? = nil,
-                      timeout: TimeInterval = 300) async throws -> (URLSession.AsyncBytes, HTTPURLResponse) {
+                      timeout: TimeInterval = 300) async throws -> (AsyncThrowingStream<Data, Error>, HTTPURLResponse) {
         // A refused token is renewed once and the request repeated; a second refusal means the login is over.
         var renewing = false
         while true {
@@ -425,7 +422,7 @@ actor HTTPTransport: MCPTransport {
             let bearer = try await token?(renewing)
             if let bearer { request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization") }
             if let body {
-                request.httpBody = Data(body.jsonString.utf8)
+                request.httpBody = body.jsonData
                 request.setValue("application/json", forHTTPHeaderField: "Content-Type")
                 request.setValue("application/json, text/event-stream", forHTTPHeaderField: "Accept")
             } else if method == "GET" {
@@ -435,15 +432,17 @@ actor HTTPTransport: MCPTransport {
                 if let sessionID { request.setValue(sessionID, forHTTPHeaderField: "Mcp-Session-Id") }
                 if let protocolVersion { request.setValue(protocolVersion, forHTTPHeaderField: "MCP-Protocol-Version") }
             }
-            let (bytes, response) = try await session.bytes(for: request)
+            let (chunks, response) = try await ChunkedHTTPStream.open(request, using: session) { _, task, _, next in
+                RedirectGuard.follows(from: task.originalRequest?.url, to: next.url) ? next : nil
+            }
             guard let response = response as? HTTPURLResponse else {
                 throw ToolError("O conector \(name) enviou uma resposta inválida.")
             }
-            guard token != nil, [401, 403].contains(response.statusCode) else { return (bytes, response) }
+            guard token != nil, [401, 403].contains(response.statusCode) else { return (chunks, response) }
             let challenge = MCPChallenge(header: response.value(forHTTPHeaderField: "WWW-Authenticate"))
             if response.statusCode == 403 {
                 // Signed in, but not for this: more permission, asked for by the person, never repeated here.
-                guard challenge.error == "insufficient_scope" else { return (bytes, response) }
+                guard challenge.error == "insufficient_scope" else { return (chunks, response) }
                 throw MCPAuthRequired(reason: .moreScope, challenge: challenge)
             }
             if bearer != nil && !renewing {
@@ -451,17 +450,18 @@ actor HTTPTransport: MCPTransport {
                 continue
             }
             // Without a token, only a Bearer challenge (or a connector made to sign in) asks for a login; any other 401 is the server's own message.
-            if bearer == nil && !(challenge.isBearer || challenge.resourceMetadata != nil || declaresLogin) { return (bytes, response) }
+            if bearer == nil && !(challenge.isBearer || challenge.resourceMetadata != nil || declaresLogin) { return (chunks, response) }
             throw MCPAuthRequired(reason: bearer == nil ? .signIn : .expired, challenge: challenge)
         }
     }
 
     /// Throws for non-2xx responses, quoting the start of the body (e.g. why a token was refused).
-    private func check(_ response: HTTPURLResponse, _ bytes: URLSession.AsyncBytes) async throws {
+    private func check(_ response: HTTPURLResponse, _ chunks: AsyncThrowingStream<Data, Error>) async throws {
         guard !(200..<300).contains(response.statusCode) else { return }
         var data = Data()
-        for try await byte in bytes {
-            data.append(byte)
+        for try await chunk in chunks {
+            let room = 300 - data.count
+            if room > 0 { data.append(chunk.prefix(room)) }
             if data.count >= 300 { break }
         }
         let body = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -470,27 +470,22 @@ actor HTTPTransport: MCPTransport {
     }
 
     /// Server-Sent Events: calls `handle(event, data)` per event (multi-line data joined by "\n") until it returns false.
-    private func readEvents(_ bytes: URLSession.AsyncBytes,
+    private func readEvents(_ chunks: AsyncThrowingStream<Data, Error>,
                             _ handle: (String, String) async throws -> Bool) async throws {
         var decoder = SSEDecoder()
-        var pending = 0      // bytes read since the last blank line (the event being read, comments included)
-        var lineBytes = 0    // bytes of the line in progress
-        var previous: UInt8 = 0
-        for try await byte in bytes {
-            defer { previous = byte }
-            if byte == 0x0A || byte == 0x0D {
-                // The LF of a CRLF: the CR already ended the line (the decoder still sees it, to clear its own CR state).
-                if byte == 0x0A, previous == 0x0D {
-                } else if lineBytes == 0 { pending = 0 } else { pending += 1; lineBytes = 0 }   // blank line: event boundary
-            } else {
-                lineBytes += 1
-                pending += 1
+        var batch: [SSEEvent] = []
+        for try await chunk in chunks {
+            batch.removeAll(keepingCapacity: true)
+            var exceeded = false
+            _ = decoder.feed(chunk) { event in
+                if event.data.utf8.count > maxMessageBytes { exceeded = true; return true }
+                batch.append(event)
+                return false
             }
-            if pending > maxMessageBytes { throw tooLarge }
-            if let sse = decoder.feed(byte) {
-                pending = 0
+            for sse in batch {
                 if try await !handle(sse.name ?? "message", sse.data) { return }
             }
+            if exceeded || decoder.bufferedBytes > maxMessageBytes { throw tooLarge }
         }
         // The server closed without the final blank line: the last event still counts.
         if let sse = decoder.finish() { _ = try await handle(sse.name ?? "message", sse.data) }

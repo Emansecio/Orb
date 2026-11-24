@@ -84,14 +84,6 @@ struct ReasoningEffortTests {
         #expect(none["reasoning"] == nil)
     }
 
-    @Test func theAccountHandsTheLevelToTheClient() throws {
-        var chatgpt = ProviderAccount(kind: .chatgpt)
-        chatgpt.baseURL = "https://chatgpt.com/backend-api/codex"
-        let model = ProviderModel(id: "gpt-6-sol", name: "GPT-6-Sol", format: .responses, efforts: ["low", "high"])
-        let client = try #require(chatgpt.client(for: model, credentials: { _ in "t" }, conversationID: "c", effort: "high") as? ResponsesClient)
-        #expect(client.reasoningEffort == "high")
-    }
-
     @Test func anOrbSavedBeforeTheChoiceExistedUsesTheModelsDefault() throws {
         var bot = AppState.initial.bots[0]
         bot.effort = "max"

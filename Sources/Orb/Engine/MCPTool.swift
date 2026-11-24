@@ -313,6 +313,7 @@ actor MCPManager {
             entries[id]?.status = running
             entries[id]?.lastUsed = .now
             store?.saveConnectorCatalog(catalog, for: id)
+            await evictExcessConnections(keeping: id)
             startSweeper()
             publish()
             return connection
@@ -498,16 +499,30 @@ actor MCPManager {
         }
     }
 
+    /// Caps concurrent live MCP server processes by closing the least-recently-used idle server.
+    private static let maxConnections = 6
+
+    private func evictExcessConnections(keeping activeID: UUID) async {
+        while entries.values.filter({ $0.connection != nil }).count > Self.maxConnections {
+            guard let victim = entries
+                .filter({ $0.key != activeID && $0.value.connection != nil && $0.value.starting == nil && $0.value.calls == 0 })
+                .min(by: { $0.value.lastUsed < $1.value.lastUsed })?.key else { return }
+            await stopServer(victim, becoming: idleStatus(of: victim))
+        }
+    }
+
     /// Stops the servers nobody has used for `idleLimit` (never one with a call in flight). False once none is left
     /// running, which ends the sweeper (the next start begins it again).
     private func sweep() async -> Bool {
+        var changed = false
         for id in Array(entries.keys) {
             guard let entry = entries[id], entry.connection != nil, entry.starting == nil, entry.calls == 0,
                   ContinuousClock.now - entry.lastUsed >= idleLimit else { continue }
             let idle = idleStatus(of: id)
             await stopServer(id, becoming: idle)
+            changed = true
         }
-        publish()
+        if changed { publish() }
         if entries.values.contains(where: { $0.connection != nil }) { return true }
         sweeper = nil
         return false

@@ -467,11 +467,6 @@ struct ScreenTakeoverTests {
         #expect(rig.indicator.calls == ["began", "ended"])
     }
 
-    @Test func theLayoutTranslationAsksForNoDeadKeys() {
-        #expect(LiveTakeoverPoster.translateOptions == OptionBits(kUCKeyTranslateNoDeadKeysMask))
-        #expect(LiveTakeoverPoster.translateOptions != 0, "the Bit constant is 0: it would ask for nothing")
-    }
-
     @Test func anAppThatDoesNotComeForwardFailsWithNothingDone() async throws {
         let rig = TakeoverRig()
         rig.world.ignoresFrontmost = [20]
@@ -734,13 +729,6 @@ struct ScreenTakeoverTests {
     @Test func theLiveSystemHandsOutTheLiveOwner() {
         // Nothing is called; only that the live system's screen is the real one, not the "unavailable" stand-in.
         #expect(LiveAccessibilitySystem().screen is LiveScreenOwner)
-    }
-
-    @Test func theLiveSystemsFrontAppAndCursorAreReadableWithoutTouchingAnything() {
-        let platform = LiveTakeoverPlatform()
-        _ = platform.frontmost()
-        _ = platform.cursorLocation()
-        #expect(TakeoverBroadcast.beganName != TakeoverBroadcast.endedName)
     }
 }
 

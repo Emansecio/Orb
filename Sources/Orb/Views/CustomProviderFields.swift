@@ -148,6 +148,7 @@ private struct ModelChips: View {
 /// Lays children left to right and wraps to a new line when a row is full.
 struct WrappingLayout: Layout {
     var spacing: CGFloat = 6
+    var centered = false
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         arrange(proposal.width ?? .infinity, subviews).size
@@ -161,21 +162,34 @@ struct WrappingLayout: Layout {
     }
 
     private func arrange(_ width: CGFloat, _ subviews: Subviews) -> (size: CGSize, points: [CGPoint]) {
-        var points: [CGPoint] = []
+        var rows: [[(size: CGSize, x: CGFloat)]] = [[]]
         var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0, widest: CGFloat = 0
+        var rowHeights: [CGFloat] = []
         for subview in subviews {
             let size = subview.sizeThatFits(.unspecified)
             if x > 0, x + size.width > width {
+                rowHeights.append(rowHeight)
+                rows.append([])
                 x = 0
                 y += rowHeight + spacing
                 rowHeight = 0
             }
-            points.append(CGPoint(x: x, y: y))
+            rows[rows.count - 1].append((size, x))
             x += size.width + spacing
             rowHeight = max(rowHeight, size.height)
             widest = max(widest, x - spacing)
         }
-        return (CGSize(width: widest, height: y + rowHeight), points)
+        rowHeights.append(rowHeight)
+        let totalWidth = centered && width.isFinite ? width : widest
+        var points: [CGPoint] = []
+        var rowY: CGFloat = 0
+        for (row, height) in zip(rows, rowHeights) {
+            let rowWidth = row.last.map { $0.x + $0.size.width } ?? 0
+            let lead = centered ? max(0, (totalWidth - rowWidth) / 2) : 0
+            for item in row { points.append(CGPoint(x: lead + item.x, y: rowY)) }
+            rowY += height + spacing
+        }
+        return (CGSize(width: totalWidth, height: y + rowHeight), points)
     }
 }
 

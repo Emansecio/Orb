@@ -58,7 +58,6 @@ struct HoverTipsTests {
         #expect(Tip.newGroup().contains(AppShortcut.newGroup.label))
         #expect(Tip.settings().contains(AppShortcut.settings.label))
         #expect(Tip.inspector(isShowing: true).contains(AppShortcut.toggleInspector.label))
-        #expect(Tip.createOrbSheet().contains(AppShortcut.newBot.label))
         #expect(Tip.findInConversation().contains(AppShortcut.find.label))
         #expect(Tip.findNext().contains(AppShortcut.findNext.label))
         #expect(Tip.findPrevious().contains(AppShortcut.findPrevious.label))

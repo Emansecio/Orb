@@ -24,6 +24,9 @@ APP="${ORB_BUNDLE_PATH:-build/Orb.app}"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Orb"
+if [[ "$CONFIG" == "release" ]]; then
+  strip -x "$APP/Contents/MacOS/Orb"
+fi
 cp -R Sources/Orb/Resources/Orbs "$APP/Contents/Resources/Orbs"
 cp -R Sources/Orb/Resources/Rich "$APP/Contents/Resources/Rich"
 

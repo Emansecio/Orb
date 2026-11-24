@@ -218,6 +218,8 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
     private let lastEnvironment = OSAllocatedUnfairLock<[String: String]?>(initialState: nil)
     /// What this driver launched the browser with (`launchFingerprint`), once it did.
     private let launched = OSAllocatedUnfairLock<String?>(initialState: nil)
+    /// Last `launchFingerprint` whose state directory/launcher script was verified on disk.
+    private let preparedFingerprint = OSAllocatedUnfairLock<String?>(initialState: nil)
     /// Until when a command that worked proves the background process is there, so the next command need not ask.
     private let aliveUntil = OSAllocatedUnfairLock<ContinuousClock.Instant?>(initialState: nil)
     static let aliveWindow = Duration.seconds(3)
@@ -302,11 +304,25 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
     private func requireRunningSession() async throws {
         if closed.withLock({ $0 }) { throw BrowserDriverError.noPage }
         if let until = aliveUntil.withLock({ $0 }), until > .now { return }
+        if daemonIsAliveInProcess() {
+            aliveUntil.withLock { $0 = .now + Self.aliveWindow }
+            return
+        }
         guard try await listSessions().contains(config.session) else {
             markClosed()
             throw BrowserDriverError.noPage
         }
         aliveUntil.withLock { $0 = .now + Self.aliveWindow }
+    }
+
+    /// Fast in-process check (~20 µs): `agent-browser` writes `<socketDir>/<session>.pid` for its live daemon.
+    private func daemonIsAliveInProcess() -> Bool {
+        let current = config
+        guard let dir = current.socketDirectory else { return false }
+        let pidFile = dir.appending(path: "\(current.session).pid")
+        guard let text = try? String(contentsOf: pidFile, encoding: .utf8),
+              let pid = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)), pid > 0 else { return false }
+        return kill(pid, 0) == 0 || errno == EPERM
     }
 
     /// The sessions `agent-browser` has a background process for (`session list`).
@@ -318,7 +334,11 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
 
     private func perform(_ command: [String], launching: Bool, text: Bool, timeout: Duration) async throws -> JSONValue {
         let current = config
-        current.prepareState()
+        let fingerprint = current.launchFingerprint
+        if preparedFingerprint.withLock({ $0 != fingerprint }) {
+            current.prepareState()
+            preparedFingerprint.withLock { $0 = fingerprint }
+        }
         var command = command
         if text, let index = command.indices.dropFirst().first(where: { command[$0] == "--" }),
            await endsOptionsAtDoubleDash(current) {

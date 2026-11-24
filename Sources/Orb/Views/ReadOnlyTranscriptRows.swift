@@ -1,5 +1,10 @@
 import SwiftUI
 
+extension EnvironmentValues {
+    /// Set inside `ActivityCard`, so nested work/command blocks step up to `Palette.raised` instead of surface-on-surface.
+    @Entry var insideActivityCard = false
+}
+
 /// The running request's card: the same one in the chat and in a routine's conversation.
 struct ActivityCard<Content: View>: View {
     @ViewBuilder let content: () -> Content
@@ -8,9 +13,9 @@ struct ActivityCard<Content: View>: View {
         VStack(alignment: .leading, spacing: Spacing.cardSpacing, content: content)
             .padding(.vertical, Spacing.catalogCardPadding)
             .padding(.trailing, Spacing.catalogCardPadding)
+            .environment(\.insideActivityCard, true)
             .background {
-                RoundedRectangle(cornerRadius: Radius.card)
-                    .fill(Palette.surface)
+                CardSurface(radius: Radius.card)
                     .padding(.leading, gutter - 12)
             }
     }

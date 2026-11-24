@@ -305,13 +305,6 @@ struct SyntheticInputTests {
         await #expect(throws: Refused.self) { try await live.keys([KeyStroke.parse("return")], to: 1) }
     }
 
-    @Test func secureInputIsReportedFromTheSystemQuery() {
-        var live = input()
-        #expect(!live.secureInputActive)
-        live.secureInput = { true }
-        #expect(live.secureInputActive)
-    }
-
     // MARK: Mouse
 
     @Test func aClickIsMouseDownAndUpAimedAtTheWindow() throws {

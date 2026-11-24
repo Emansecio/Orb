@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 import SwiftUI
 import WebKit
 
@@ -27,13 +28,12 @@ struct RichBlockFrame<Content: View>: View {
                 CopyTextButton(text: source, help: Tip.copyCode, label: "Copiar código", copiedLabel: "Código copiado")
             }
             .padding(.horizontal, 10)
-            .padding(.top, 7)
-            .padding(.bottom, 2)
+            .padding(.vertical, 7)
+            Rectangle().fill(Palette.line).frame(height: 1)
             if showsSource {
                 CodeLines(text: source, language: language)
                     .padding(.horizontal, 10)
-                    .padding(.top, 4)
-                    .padding(.bottom, 10)
+                    .padding(.vertical, 8)
             } else {
                 content()
             }
@@ -50,6 +50,7 @@ struct BlockHeaderButton: View {
     let symbol: String
     let help: String
     let action: () -> Void
+    @State private var isHovering = false
 
     var body: some View {
         Button(action: action) {
@@ -58,9 +59,10 @@ struct BlockHeaderButton: View {
                 Text(title)
             }
             .font(Typography.small.weight(.medium))
-            .foregroundStyle(Palette.muted)
+            .foregroundStyle(isHovering ? Palette.ink : Palette.muted)
         }
         .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
         .clickablePointer()
         .help(help)
     }
@@ -69,15 +71,17 @@ struct BlockHeaderButton: View {
 /// Opens a block in the enlarged view.
 struct EnlargeButton: View {
     let action: () -> Void
+    @State private var isHovering = false
 
     var body: some View {
         Button(action: action) {
             Image(systemName: "arrow.up.left.and.arrow.down.right")
                 .font(Typography.small.weight(.medium))
-                .foregroundStyle(Palette.muted)
+                .foregroundStyle(isHovering ? Palette.ink : Palette.muted)
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
         .clickablePointer()
         .help(Tip.enlargeBlock)
         .accessibilityLabel("Ampliar")
@@ -92,11 +96,11 @@ struct RichDrawingView: View, Equatable {
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool { lhs.request == rhs.request }
 
-    private var title: String { request.kind == .math ? "fórmula" : "diagrama" }
+    private var title: String { request.kind == .math ? "Fórmula" : "Diagrama" }
 
     var body: some View {
         RichBlockFrame(title: title, source: request.source, language: nil, block: block, showsSource: $showsSource) {
-            RichPicture(request: request, title: title.capitalized)
+            RichPicture(request: request, title: title)
         }
     }
 }
@@ -112,7 +116,9 @@ struct RichPicture: View {
     init(request: RichRequest, title: String) {
         self.request = request
         self.title = title
-        _outcome = State(initialValue: RichRenderer.shared.known(request))
+        let known = RichRenderer.shared.known(request)
+        _outcome = State(initialValue: known)
+        _picture = State(initialValue: known.flatMap(RichPictures.cached))
     }
 
     var body: some View {
@@ -162,11 +168,11 @@ struct PageBlockView: View {
 
     var body: some View {
         if isEnabled {
-            RichBlockFrame(title: "página interativa", source: html, language: "html", block: block, showsSource: $showsSource) {
+            RichBlockFrame(title: "Página interativa", source: html, language: "html", block: block, showsSource: $showsSource) {
                 RichPicture(request: RichRequest(kind: .page, source: html), title: "Página interativa")
                 if let enlarge {
                     Button("Abrir página") { enlarge.run(block) }
-                        .buttonStyle(PrimaryPillStyle())
+                        .buttonStyle(SecondaryPillStyle())
                         .help(Tip.openPage)
                         .padding(.horizontal, 10)
                         .padding(.bottom, 10)
@@ -178,13 +184,34 @@ struct PageBlockView: View {
     }
 }
 
-/// Pictures read from the renderer's folder, off the main thread.
+/// Pictures read and decoded off the main thread, with a bounded memory cache so scrolling never flashes or re-decodes.
 enum RichPictures {
+    nonisolated(unsafe) private static let cache: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.totalCostLimit = 32 << 20
+        return cache
+    }()
+
+    static func clear() { cache.removeAllObjects() }
+
+    static func cached(_ outcome: RichOutcome) -> NSImage? {
+        guard case .image(let url, _) = outcome else { return nil }
+        return cache.object(forKey: url.path as NSString)
+    }
+
     static func load(_ outcome: RichOutcome) async -> NSImage? {
         guard case .image(let url, let size) = outcome else { return nil }
-        let data = await Task.detached(priority: .utility) { try? Data(contentsOf: url) }.value
-        guard let data, let image = NSImage(data: data) else { return nil }
-        image.size = size
+        let key = url.path as NSString
+        if let hit = cache.object(forKey: key) { return hit }
+        let decoded = await Task.detached(priority: .utility) { () -> (CGImage, Int)? in
+            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+            let options: [CFString: Any] = [kCGImageSourceShouldCacheImmediately: true, kCGImageSourceShouldCache: true]
+            guard let cg = CGImageSourceCreateImageAtIndex(source, 0, options as CFDictionary) else { return nil }
+            return (cg, cg.bytesPerRow * cg.height)
+        }.value
+        guard let (cg, cost) = decoded else { return nil }
+        let image = NSImage(cgImage: cg, size: size)
+        cache.setObject(image, forKey: key, cost: cost)
         return image
     }
 }
@@ -231,6 +258,9 @@ struct EnlargedBlockSheet: View {
                     .lineLimit(1)
                     .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: Spacing.m)
+                if case .code(_, let code, _) = block {
+                    CopyTextButton(text: code, help: Tip.copyCode, label: "Copiar código", copiedLabel: "Código copiado")
+                }
                 SheetCloseButton { dismiss() }
                     .keyboardShortcut(.cancelAction)
             }
@@ -254,7 +284,7 @@ struct EnlargedBlockSheet: View {
                     .padding(Spacing.sheetEdge)
             }
         case .table(let table):
-            ScrollView { TableBlockView(table: table).padding(Spacing.sheetEdge) }
+            ScrollView { TableBlockView(table: table).environment(\.enlargeBlock, nil).padding(Spacing.sheetEdge) }
         case .chart(let spec, _):
             ChartCanvas(spec: spec).padding(Spacing.sheetEdge)
         case .diagram(let source):

@@ -34,13 +34,6 @@ struct ResponsesClientTests {
         #expect(assembler.toolCalls == [ToolCallRequest(id: "call_7", name: "list_directory", arguments: #"{"path":"~"}"#)])
     }
 
-    @Test func failuresAreThrown() throws {
-        var assembler = ResponsesStreamAssembler()
-        #expect(throws: LLMError.self) {
-            try assembler.ingest(#require(JSONValue.parse(#"{"type":"response.failed","response":{"error":{"message":"quota"}}}"#)))
-        }
-    }
-
     // MARK: Cache, reasoning
 
     @Test func sendsPromptCacheKeyAndAsksForEncryptedReasoning() {
@@ -198,6 +191,11 @@ struct ResponsesClientTests {
             _ = try assembler.ingest(thirdEvent)
         })
         #expect(thirdError == .stream(type: "rate_limit_exceeded", message: "Slow down"))
+        let fourthEvent = try #require(JSONValue.parse(#"{"type":"response.failed","response":{"error":{"message":"quota"}}}"#))
+        let fourthError = try #require(#expect(throws: LLMError.self) {
+            _ = try assembler.ingest(fourthEvent)
+        })
+        #expect(fourthError == .stream(type: "error", message: "quota"))
     }
 
     // MARK: End to end (stubbed network)

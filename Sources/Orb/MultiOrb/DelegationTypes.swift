@@ -186,7 +186,7 @@ enum DelegationRefusal: Error, Equatable, Sendable {
         case .groupEdit(let why):
             switch why {
             case .switchedOff:
-                "O usuário desligou “Orbs organizam o time” nos Ajustes: ele muda o grupo na tela dele. Diga o que você mudaria."
+                "O usuário desligou “Orbs organizam grupos” nos Ajustes: ele muda o grupo na tela dele. Diga o que você mudaria."
             case .noGroup(let name, let known):
                 "Não há grupo chamado “\(name)”." + (known.isEmpty ? " O usuário não tem grupos." : " Grupos: " + known.joined(separator: ", ") + ".")
             case .unknownEdit(let edit):

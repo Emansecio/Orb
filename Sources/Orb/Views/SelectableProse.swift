@@ -57,8 +57,10 @@ enum ProseText {
     // Palette colors are fixed values (no appearance variants), so their AppKit twins and the checkbox pictures are made
     // once: `make` runs on every flush of a streaming reply and used to rebuild them each time.
     private static let inkColor = NSColor(Palette.ink)
+    private static let proseInkColor = NSColor(Palette.proseInk)
     private static let secondaryColor = NSColor(Palette.secondary)
     private static let mutedColor = NSColor(Palette.muted)
+    private static let faintAlpha: CGFloat = 0.52
     private static let checkboxDone = checkboxImage(done: true)
     private static let checkboxTodo = checkboxImage(done: false)
 
@@ -67,9 +69,9 @@ enum ProseText {
     /// the blocks' spacing, which the streamed pieces share).
     static func headingLead(_ level: Int) -> CGFloat {
         switch level {
-        case 1: 10
-        case 2: 8
-        default: 6
+        case 1: 14
+        case 2: 10
+        default: 8
         }
     }
 
@@ -77,6 +79,82 @@ enum ProseText {
     static let inlineCodeDrop: CGFloat = 1
     /// Code among the words: its pill, drawn behind each line it takes (`ProseTextView.drawBackground`).
     static let inlineCodeKey = NSAttributedString.Key("OrbInlineCode")
+
+    struct Built {
+        let text: NSAttributedString
+        let hasQuote: Bool
+        let hasInlineCode: Bool
+    }
+
+    private final class CacheKey: NSObject {
+        let blocks: [MarkdownBlock]
+        let isQuiet: Bool
+        private let cachedHash: Int
+
+        init(blocks: [MarkdownBlock], isQuiet: Bool) {
+            self.blocks = blocks
+            self.isQuiet = isQuiet
+            var hasher = Hasher()
+            hasher.combine(blocks.count)
+            for block in blocks {
+                switch block {
+                case .paragraph(let s): hasher.combine(0); hasher.combine(s)
+                case .heading(let l, let s): hasher.combine(1); hasher.combine(l); hasher.combine(s)
+                case .quote(let s): hasher.combine(2); hasher.combine(s)
+                case .list(let items):
+                    hasher.combine(3)
+                    for item in items { hasher.combine(item.text); hasher.combine(item.depth) }
+                default: hasher.combine(4)
+                }
+            }
+            hasher.combine(isQuiet)
+            cachedHash = hasher.finalize()
+        }
+
+        override var hash: Int { cachedHash }
+        override func isEqual(_ object: Any?) -> Bool {
+            guard let other = object as? CacheKey else { return false }
+            return isQuiet == other.isQuiet && blocks == other.blocks
+        }
+    }
+
+    private final class CacheEntry: NSObject {
+        let built: Built
+        init(_ built: Built) { self.built = built }
+    }
+
+    private static let builtCache: NSCache<CacheKey, CacheEntry> = {
+        let cache = NSCache<CacheKey, CacheEntry>()
+        cache.totalCostLimit = 8 << 20
+        return cache
+    }()
+
+    static func clearCache() { builtCache.removeAllObjects() }
+
+    static func built(_ blocks: [MarkdownBlock], cursor: Bool, cached: Bool, highlight: String?, isQuiet: Bool) -> Built {
+        if !cursor, cached, highlight == nil {
+            let key = CacheKey(blocks: blocks, isQuiet: isQuiet)
+            if let hit = builtCache.object(forKey: key) { return hit.built }
+            let raw = make(blocks, cursor: false, cached: true, highlight: nil)
+            let finalText = isQuiet ? quieter(raw) : raw
+            let entry = Built(text: finalText, hasQuote: contains(quoteKey, in: finalText),
+                              hasInlineCode: contains(inlineCodeKey, in: finalText))
+            builtCache.setObject(CacheEntry(entry), forKey: key, cost: max(finalText.length * 4, 64))
+            return entry
+        }
+        let raw = make(blocks, cursor: cursor, cached: cached, highlight: highlight)
+        let finalText = isQuiet ? quieter(raw) : raw
+        return Built(text: finalText, hasQuote: contains(quoteKey, in: finalText),
+                     hasInlineCode: contains(inlineCodeKey, in: finalText))
+    }
+
+    private static func contains(_ key: NSAttributedString.Key, in text: NSAttributedString) -> Bool {
+        var found = false
+        text.enumerateAttribute(key, in: NSRange(location: 0, length: text.length)) { value, _, stop in
+            if value != nil { found = true; stop.pointee = true }
+        }
+        return found
+    }
 
     static func make(_ blocks: [MarkdownBlock], cursor: Bool, cached: Bool, highlight: String?) -> NSAttributedString {
         let text = NSMutableAttributedString()
@@ -88,12 +166,13 @@ enum ProseText {
             let start = text.length
             switch block {
             case .paragraph(let source):
-                text.append(inline(source, cached: cached, highlight: highlight, style: paragraphStyle()))
+                text.append(inline(source, cached: cached, highlight: highlight, style: paragraphStyle(), color: proseInkColor))
             case .heading(let level, let source):
                 let style = paragraphStyle()
                 style.paragraphSpacingBefore = headingLead(level)
                 text.append(inline(source, cached: cached, highlight: highlight, style: style,
-                                   size: MarkdownBlockView.headingSize(level), weight: .semibold))
+                                   size: MarkdownBlockView.headingSize(level), weight: .semibold,
+                                   color: level >= 4 ? secondaryColor : inkColor))
             case .quote(let source):
                 let style = paragraphStyle()
                 style.headIndent = quoteIndent
@@ -110,7 +189,7 @@ enum ProseText {
             case .code, .table, .rule, .image, .chart, .diagram, .math, .page:
                 continue // never in a run (`ProseSegment`)
             }
-            // The space after each block, as the stack of blocks had it; none after the last.
+            // The space after each block, as the stack of blocks had it; none after the last (matches streaming height).
             let range = NSRange(location: start, length: text.length - start)
             text.enumerateAttribute(.paragraphStyle, in: range) { value, part, _ in
                 guard let style = (value as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle else { return }
@@ -137,7 +216,7 @@ enum ProseText {
         }
         quiet.enumerateAttribute(.foregroundColor, in: all, options: .longestEffectiveRangeNotRequired) { value, range, _ in
             guard let color = value as? NSColor else { return }
-            quiet.addAttribute(.foregroundColor, value: color.withAlphaComponent(color.alphaComponent * quietAlpha), range: range)
+            quiet.addAttribute(.foregroundColor, value: color.withAlphaComponent(max(color.alphaComponent * quietAlpha, faintAlpha)), range: range)
         }
         return quiet
     }
@@ -216,11 +295,12 @@ enum ProseText {
             if intent.contains(.emphasized) {
                 font = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
             }
-            var attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color, .paragraphStyle: style]
-            if let background = run[AttributeScopes.SwiftUIAttributes.BackgroundColorAttribute.self] {
+            let runColor = (color == proseInkColor && (intent.contains(.stronglyEmphasized) || intent.contains(.code))) ? inkColor : color
+            var attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: runColor, .paragraphStyle: style]
+            if intent.contains(.code) { attributes[Self.inlineCodeKey] = true }
+            if let background = run[AttributeScopes.SwiftUIAttributes.BackgroundColorAttribute.self],
+               !(intent.contains(.code) && background == Palette.ghostSelected) {
                 attributes[.backgroundColor] = NSColor(background)
-            } else if intent.contains(.code) {
-                attributes[Self.inlineCodeKey] = true
             }
             if intent.contains(.strikethrough) { attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
             if let link = run.link { attributes[.link] = link }
@@ -329,21 +409,30 @@ final class ProseTextView: NSTextView, @preconcurrency NSLayoutManagerDelegate, 
     }
 
     /// `fades`: the text is the one being written, and what it adds to the text shown fades in (`TextFade`).
-    func show(_ text: NSAttributedString, cursor: Bool, fades: Bool) {
+    func show(_ text: NSAttributedString, cursor: Bool, fades: Bool,
+              hasQuote knownQuote: Bool? = nil, hasInlineCode knownInlineCode: Bool? = nil) {
         let body = (text.string as NSString).substring(to: text.length - (cursor ? (ProseText.cursor as NSString).length : 0))
         let added = fades ? TextFade.added(body, after: shownBody) : nil
         // Words still fading keep fading while the text only grows (or loses its cursor); anything else shows at once.
         if shownBody.map({ !(body as NSString).hasPrefix($0) }) ?? true { fade.finish() }
         shownBody = body
         textStorage?.setAttributedString(text)
-        hasInlineCode = false
-        text.enumerateAttribute(ProseText.inlineCodeKey, in: NSRange(location: 0, length: text.length)) { value, _, stop in
-            if value != nil { hasInlineCode = true; stop.pointee = true }
+        if let knownInlineCode {
+            hasInlineCode = knownInlineCode
+        } else {
+            hasInlineCode = false
+            text.enumerateAttribute(ProseText.inlineCodeKey, in: NSRange(location: 0, length: text.length)) { value, _, stop in
+                if value != nil { hasInlineCode = true; stop.pointee = true }
+            }
         }
         if let added { fade.fade(added) } else { fade.restore() }
-        hasQuote = false
-        text.enumerateAttribute(ProseText.quoteKey, in: NSRange(location: 0, length: text.length)) { value, _, stop in
-            if value != nil { hasQuote = true; stop.pointee = true }
+        if let knownQuote {
+            hasQuote = knownQuote
+        } else {
+            hasQuote = false
+            text.enumerateAttribute(ProseText.quoteKey, in: NSRange(location: 0, length: text.length)) { value, _, stop in
+                if value != nil { hasQuote = true; stop.pointee = true }
+            }
         }
         sizes = [:]
         sizeOrder = []
@@ -354,9 +443,8 @@ final class ProseTextView: NSTextView, @preconcurrency NSLayoutManagerDelegate, 
     /// again at that narrower width the lines break in the same places, since each of them fits. While the width is
     /// changing fast the text is laid out at a step below it (never wider, so nothing sticks out; the height is that of
     /// the text drawn, so nothing is cut), and at the exact width once it has been still for `ProseWidth.settle`.
-    func size(forWidth width: CGFloat, steps: Bool = false) -> CGSize {
+    func size(forWidth width: CGFloat, steps: Bool = false, measuresLongestLine: Bool = true) -> CGSize {
         let now = ProcessInfo.processInfo.systemUptime
-        // Text that hugs its lines (a bubble) is asked several widths at once: it is always laid out at the exact one.
         let moving = widthMotion.note(width, at: now) && steps
         let layoutWidth = ProseWidth.layoutWidth(width, moving: moving)
         if moving { scheduleSettle() }
@@ -370,12 +458,18 @@ final class ProseTextView: NSTextView, @preconcurrency NSLayoutManagerDelegate, 
         }
         layout.ensureLayout(for: container)
         let used = layout.usedRect(for: container)
-        // The container's used rect can span its whole width; each line's own used rect is as wide as its words.
-        var longest: CGFloat = 0
-        layout.enumerateLineFragments(forGlyphRange: layout.glyphRange(for: container)) { _, line, _, _, _ in
-            longest = max(longest, line.maxX)
+        let measuredWidth: CGFloat
+        if measuresLongestLine {
+            // The container's used rect can span its whole width; each line's own used rect is as wide as its words.
+            var longest: CGFloat = 0
+            layout.enumerateLineFragments(forGlyphRange: layout.glyphRange(for: container)) { _, line, _, _, _ in
+                longest = max(longest, line.maxX)
+            }
+            measuredWidth = min(ceil(longest), layoutWidth)
+        } else {
+            measuredWidth = layoutWidth
         }
-        let size = CGSize(width: min(ceil(longest), layoutWidth), height: ceil(used.height))
+        let size = CGSize(width: measuredWidth, height: ceil(used.height))
         if sizeOrder.count >= ProseWidth.cacheLimit, let oldest = sizeOrder.first {
             sizeOrder.removeFirst()
             sizes[oldest] = nil
@@ -405,14 +499,18 @@ final class ProseTextView: NSTextView, @preconcurrency NSLayoutManagerDelegate, 
         invalidateIntrinsicContentSize()
     }
 
-    /// `Palette.conversationLineSpacing` between the lines of a paragraph (breaks inside it included), none after its last.
+    /// Narration uses `Palette.narrationLineSpacing` instead of `conversationLineSpacing`.
+    var isQuiet = false
+
+    /// `Palette.conversationLineSpacing` (or `narrationLineSpacing`) between the lines of a paragraph, none after its last.
     func layoutManager(_ layoutManager: NSLayoutManager, lineSpacingAfterGlyphAt glyphIndex: Int,
                        withProposedLineFragmentRect rect: NSRect) -> CGFloat {
         // `mutableString` is the storage's own string: `string` would copy the whole text for every line fragment.
         guard let text = textStorage?.mutableString else { return 0 }
         let next = layoutManager.characterIndexForGlyph(at: glyphIndex) + 1
         guard next < text.length else { return 0 }
-        return text.character(at: next) == 0x0A || text.character(at: next - 1) == 0x0A ? 0 : Palette.conversationLineSpacing
+        let spacing = isQuiet ? Palette.narrationLineSpacing : Palette.conversationLineSpacing
+        return text.character(at: next) == 0x0A || text.character(at: next - 1) == 0x0A ? 0 : spacing
     }
 
     /// A fade runs only on screen: it starts once the view is in a window and ends, at once, when it leaves it.
@@ -478,30 +576,40 @@ final class ProseTextView: NSTextView, @preconcurrency NSLayoutManagerDelegate, 
         if selectedRange().length > 0 || fileLink(at: event) != nil { super.rightMouseDown(with: event) } else { nextResponder?.rightMouseDown(with: event) }
     }
 
-    /// The bar beside a quote.
+    private static let pillFill = NSColor(Palette.raised)
+    private static let quoteBarFill = NSColor(Palette.faint)
+
+    /// The bar beside a quote and pills behind inline code, scanned only in the visible rect.
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)
         guard hasQuote || hasInlineCode, let textStorage, let layoutManager, let textContainer else { return }
+        let origin = textContainerOrigin
+        let containerRect = rect.offsetBy(dx: -origin.x, dy: -origin.y)
+        let visibleGlyphs = layoutManager.glyphRange(forBoundingRect: containerRect, in: textContainer)
+        guard visibleGlyphs.length > 0 else { return }
+        let visibleChars = layoutManager.characterRange(forGlyphRange: visibleGlyphs, actualGlyphRange: nil)
         if hasInlineCode {
-            let origin = textContainerOrigin
-            NSColor(Palette.raised).setFill()
-            textStorage.enumerateAttribute(ProseText.inlineCodeKey, in: NSRange(location: 0, length: textStorage.length)) { value, range, _ in
+            Self.pillFill.setFill()
+            textStorage.enumerateAttribute(ProseText.inlineCodeKey, in: visibleChars) { value, range, _ in
                 guard value != nil else { return }
                 let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
                 layoutManager.enumerateEnclosingRects(forGlyphRange: glyphs, withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
                                                       in: textContainer) { rect, _ in
-                    let pill = rect.offsetBy(dx: origin.x, dy: origin.y).insetBy(dx: -3, dy: 0)
+                    var pill = rect.offsetBy(dx: origin.x, dy: origin.y).insetBy(dx: -3, dy: 0)
+                    if pill.minX < 0 { pill.size.width += pill.minX; pill.origin.x = 0 }
                     NSBezierPath(roundedRect: pill, xRadius: 4, yRadius: 4).fill()
                 }
             }
         }
-        NSColor(Palette.lineStrong).setFill()
-        textStorage.enumerateAttribute(ProseText.quoteKey, in: NSRange(location: 0, length: textStorage.length)) { value, range, _ in
-            guard value != nil else { return }
-            let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
-            let bounds = layoutManager.boundingRect(forGlyphRange: glyphs, in: textContainer)
-            let bar = NSRect(x: textContainerOrigin.x, y: bounds.minY + textContainerOrigin.y, width: 2, height: bounds.height)
-            NSBezierPath(roundedRect: bar, xRadius: 1, yRadius: 1).fill()
+        if hasQuote {
+            Self.quoteBarFill.setFill()
+            textStorage.enumerateAttribute(ProseText.quoteKey, in: visibleChars) { value, range, _ in
+                guard value != nil else { return }
+                let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+                let bounds = layoutManager.boundingRect(forGlyphRange: glyphs, in: textContainer)
+                let bar = NSRect(x: origin.x, y: bounds.minY + origin.y, width: 2.5, height: bounds.height)
+                NSBezierPath(roundedRect: bar, xRadius: 1.25, yRadius: 1.25).fill()
+            }
         }
     }
 }
@@ -542,6 +650,7 @@ struct SelectableProse: NSViewRepresentable {
     private func update(_ view: ProseTextView, context: Context) {
         view.selection = context.environment.proseSelection
         let isQuiet = context.environment.proseIsQuiet
+        view.isQuiet = isQuiet
         let shown = Shown(blocks: blocks, cursor: cursor, highlight: highlight, isQuiet: isQuiet)
         guard context.coordinator.shown != shown else { return }
         context.coordinator.shown = shown
@@ -557,19 +666,21 @@ struct SelectableProse: NSViewRepresentable {
     }
 
     private func show(in view: ProseTextView, isQuiet: Bool, fades: Bool) {
-        var text = ProseText.make(blocks, cursor: cursor, cached: cached, highlight: highlight)
+        let built = ProseText.built(blocks, cursor: cursor, cached: cached, highlight: highlight, isQuiet: isQuiet)
+        var text = built.text
         if !cursor, cached {
             let linked = NSMutableAttributedString(attributedString: text)
             PathLinks.link(linked)
             text = linked
         }
-        view.show(isQuiet ? ProseText.quieter(text) : text, cursor: cursor, fades: fades)
+        view.show(text, cursor: cursor, fades: fades, hasQuote: built.hasQuote, hasInlineCode: built.hasInlineCode)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: ProseTextView, context: Context) -> CGSize? {
         let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? 10_000
-        let size = nsView.size(forWidth: width, steps: !context.environment.proseHugsText)
-        return CGSize(width: context.environment.proseHugsText ? size.width : width, height: size.height)
+        let hugs = context.environment.proseHugsText
+        let size = nsView.size(forWidth: width, steps: width < 10_000, measuresLongestLine: hugs)
+        return CGSize(width: hugs ? size.width : width, height: size.height)
     }
 }
 

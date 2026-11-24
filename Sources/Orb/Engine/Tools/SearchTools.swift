@@ -107,9 +107,14 @@ enum FileWalker {
     static let maxFiles = 200_000
 
     /// `truncated` is set when the walk stopped early (too many files or out of time).
-    static func files(under root: URL, deadline: ContinuousClock.Instant) throws -> (files: [WalkedFile], truncated: Bool) {
+    static func files(under root: URL, deadline: ContinuousClock.Instant,
+                      needSize: Bool = true, needModified: Bool = true) throws -> (files: [WalkedFile], truncated: Bool) {
         let base = root.resolvingLinkChain
-        let keys: [URLResourceKey] = [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey, .contentModificationDateKey]
+        let basePrefix = base.path.hasSuffix("/") ? base.path : base.path + "/"
+        var keys: [URLResourceKey] = [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey]
+        if needSize { keys.append(.fileSizeKey) }
+        if needModified { keys.append(.contentModificationDateKey) }
+        let keySet = Set(keys)
         guard let enumerator = FileManager.default.enumerator(at: base, includingPropertiesForKeys: keys, options: [.skipsPackageDescendants], errorHandler: { _, _ in true }) else {
             return ([], false)
         }
@@ -117,31 +122,36 @@ enum FileWalker {
         let isHome = base.path == FileManager.default.homeDirectoryForCurrentUser.resolvingLinkChain.path
         var files: [WalkedFile] = []
         var visited = 0
-        while let item = enumerator.nextObject() as? URL {
+        while let item = autoreleasepool(invoking: { enumerator.nextObject() as? URL }) {
             visited += 1
             if visited.isMultiple(of: 256) {
                 try Task.checkCancellation()
                 if ContinuousClock.now > deadline { return (files, true) }
             }
-            guard var values = try? item.resourceValues(forKeys: Set(keys)) else { continue }
-            if values.isSymbolicLink == true {
-                // Resource values describe the link itself. A link to a file counts as that file (dotfiles repos are
-                // full of them); links to folders are not entered.
-                guard let target = try? item.resolvingLinkChain.resourceValues(forKeys: Set(keys)) else { continue }
-                values = target
-            } else if values.isDirectory == true {
-                if skippedDirectories.contains(item.lastPathComponent)
-                    || (isHome && enumerator.level == 1 && homeSkippedDirectories.contains(item.lastPathComponent)) {
-                    enumerator.skipDescendants()
+            let added: Bool = autoreleasepool {
+                guard var values = try? item.resourceValues(forKeys: keySet) else { return false }
+                if values.isSymbolicLink == true {
+                    // Resource values describe the link itself. A link to a file counts as that file (dotfiles repos are
+                    // full of them); links to folders are not entered.
+                    guard let target = try? item.resolvingLinkChain.resourceValues(forKeys: keySet) else { return false }
+                    values = target
+                } else if values.isDirectory == true {
+                    if skippedDirectories.contains(item.lastPathComponent)
+                        || (isHome && enumerator.level == 1 && homeSkippedDirectories.contains(item.lastPathComponent)) {
+                        enumerator.skipDescendants()
+                    }
+                    return false
                 }
-                continue
+                guard values.isRegularFile == true, item.lastPathComponent != ".DS_Store" else { return false }
+                let path = item.path
+                let relative = path.hasPrefix(basePrefix)
+                    ? String(path.dropFirst(basePrefix.count))
+                    : item.pathComponents.suffix(enumerator.level).joined(separator: "/")
+                files.append(WalkedFile(url: item, relativePath: relative, modified: values.contentModificationDate ?? .distantPast,
+                                        size: values.fileSize ?? 0))
+                return true
             }
-            guard values.isRegularFile == true, item.lastPathComponent != ".DS_Store" else { continue }
-            // `level` is the depth below the root, which stays right whichever way the file system spells the prefix.
-            let relative = item.pathComponents.suffix(enumerator.level).joined(separator: "/")
-            files.append(WalkedFile(url: item, relativePath: relative, modified: values.contentModificationDate ?? .distantPast,
-                                    size: values.fileSize ?? 0))
-            if files.count >= maxFiles { return (files, true) }
+            if added, files.count >= maxFiles { return (files, true) }
         }
         return (files, false)
     }
@@ -239,7 +249,7 @@ struct GrepTool: AgentTool {
         var withheld = 0
         let singleFile = !root.isExistingDirectory
         if !singleFile {
-            let walked = try FileWalker.files(under: root, deadline: deadline)
+            let walked = try FileWalker.files(under: root, deadline: deadline, needSize: true, needModified: false)
             candidates = walked.files.filter { include?.matches(relativePath: $0.relativePath) ?? true }
             truncated = walked.truncated
             // Private keys and saved passwords are not read in passing by a search of a folder around them; naming
@@ -258,6 +268,8 @@ struct GrepTool: AgentTool {
         candidates.sort { $0.relativePath < $1.relativePath }
 
         let wholeText = wholeTextRegex(for: regex)
+        let caseInsensitive = regex.options.contains(.caseInsensitive)
+        let literalProbe = Self.asciiLiteralBytes(patternText, caseInsensitive: caseInsensitive)
         var output: [String] = []
         var results = 0
         var totalLines = 0
@@ -267,42 +279,75 @@ struct GrepTool: AgentTool {
         var tooLarge: [String] = []
         var limitReached = false
 
-        scan: for candidate in candidates {
+        // Bounded parallel batch (8 files) avoids holding 64 multi-MB decoded files simultaneously while staying fast.
+        let batchSize = (!singleFile && candidates.count > 8) ? 8 : 1
+        var cursor = 0
+        scan: while cursor < candidates.count {
             try Task.checkCancellation()
             if ContinuousClock.now > deadline { truncated = true; break }
-            let name = FileWalker.display(root, candidate.relativePath, workingDirectory: workingDirectory)
-            let scanned: ScannedFile
-            if candidate.size <= maxFileBytes {
-                guard let data = try? Data(contentsOf: candidate.url, options: .mappedIfSafe),
-                      let file = TextFile.decode(data) else { continue }
-                // Most files have no match at all: one pass over the whole text says so before a String is made per line.
-                if let wholeText, hasNoMatch(wholeText, in: file.text, deadline: deadline) {
-                    searched += 1
+            let batchEnd = min(cursor + batchSize, candidates.count)
+            let batchCount = batchEnd - cursor
+            var batchResults = [BatchOutcome?](repeating: nil, count: batchCount)
+            if batchCount > 1 {
+                let slice = Array(candidates[cursor..<batchEnd])
+                batchResults.withUnsafeMutableBufferPointer { buffer in
+                    nonisolated(unsafe) let out = buffer
+                    DispatchQueue.concurrentPerform(iterations: batchCount) { offset in
+                        let candidate = slice[offset]
+                        if candidate.size > maxFileBytes {
+                            out[offset] = .tooLarge
+                            return
+                        }
+                        out[offset] = Self.scanRegularFile(candidate.url, regex: regex, wholeText: wholeText,
+                                                           literalProbe: literalProbe, caseInsensitive: caseInsensitive,
+                                                           mode: mode, deadline: deadline)
+                    }
+                }
+            }
+            for offset in 0..<batchCount {
+                let candidate = candidates[cursor + offset]
+                try Task.checkCancellation()
+                if ContinuousClock.now > deadline { truncated = true; break scan }
+                let name = FileWalker.display(root, candidate.relativePath, workingDirectory: workingDirectory)
+                let scanned: ScannedFile
+                if batchCount > 1 {
+                    switch batchResults[offset] {
+                    case .tooLarge: tooLarge.append(name); continue
+                    case .skipped, .none: continue
+                    case .miss: searched += 1; continue
+                    case .scanned(let s): scanned = s
+                    }
+                } else if candidate.size <= maxFileBytes {
+                    switch Self.scanRegularFile(candidate.url, regex: regex, wholeText: wholeText,
+                                                literalProbe: literalProbe, caseInsensitive: caseInsensitive,
+                                                mode: mode, deadline: deadline) {
+                    case .tooLarge: tooLarge.append(name); continue
+                    case .skipped: continue
+                    case .miss: searched += 1; continue
+                    case .scanned(let s): scanned = s
+                    }
+                } else if singleFile, candidate.size <= maxStreamedBytes {
+                    // A log is what read_file sends the model here to search: look through it without loading it as text.
+                    guard let streamed = try stream(candidate.url, regex: regex, literalProbe: literalProbe,
+                                                    caseInsensitive: caseInsensitive, mode: mode, contextLines: contextLines,
+                                                    room: max(limit - results, 0) + 1, deadline: deadline) else { continue }
+                    scanned = streamed
+                } else {
+                    tooLarge.append(name)
                     continue
                 }
-                let lines = TextFile.lines(of: file.text)
-                scanned = scan(lines: lines, regex: regex, mode: mode, deadline: deadline)
-            } else if singleFile, candidate.size <= maxStreamedBytes {
-                // A log is what read_file sends the model here to search: look through it without loading it as text.
-                guard let streamed = try stream(candidate.url, regex: regex, mode: mode, contextLines: contextLines,
-                                                room: max(limit - results, 0) + 1, deadline: deadline) else { continue }
-                scanned = streamed
-            } else {
-                tooLarge.append(name)
-                continue
-            }
-            searched += 1
-            // A pattern that backtracks without end would otherwise run past the time budget unchecked. What the file gave
-            // before the time ran out is kept, and the search stops after it.
-            let ranOutOfTime = scanned.timedOut
-            if ranOutOfTime {
-                try Task.checkCancellation()
-                truncated = true
-            }
-            guard scanned.hitCount > 0 else {
-                if ranOutOfTime { break scan }
-                continue
-            }
+                searched += 1
+                // A pattern that backtracks without end would otherwise run past the time budget unchecked. What the file gave
+                // before the time ran out is kept, and the search stops after it.
+                let ranOutOfTime = scanned.timedOut
+                if ranOutOfTime {
+                    try Task.checkCancellation()
+                    truncated = true
+                }
+                guard scanned.hitCount > 0 else {
+                    if ranOutOfTime { break scan }
+                    continue
+                }
             if results >= limit {
                 // Something more exists beyond the limit, so the output is truncated rather than just full.
                 limitReached = true
@@ -326,7 +371,9 @@ struct GrepTool: AgentTool {
                 results += kept.count
                 output += contentLines(name: name, lineCount: scanned.lineCount, line: scanned.line, hits: kept, context: contextLines)
             }
-            if ranOutOfTime { break scan }
+                if ranOutOfTime { break scan }
+            }
+            cursor = batchEnd
         }
 
         // However many results the limit allows, one call stays a page the model gets whole (see `ToolOutputBudget`).
@@ -422,10 +469,73 @@ struct GrepTool: AgentTool {
         return scanned
     }
 
+    private enum BatchOutcome { case skipped, tooLarge, miss, scanned(ScannedFile) }
+
+    /// Extracts pure-ASCII literal bytes when `pattern` has no regex metacharacters, allowing a zero-allocation byte pre-filter.
+    private static func asciiLiteralBytes(_ pattern: String, caseInsensitive: Bool) -> [UInt8]? {
+        guard !pattern.isEmpty else { return nil }
+        let meta: Set<UInt8> = Set("\\.^$*+?()[]{}|".utf8)
+        var bytes: [UInt8] = []
+        bytes.reserveCapacity(pattern.utf8.count)
+        for b in pattern.utf8 {
+            guard b < 0x80, !meta.contains(b) else { return nil }
+            bytes.append(caseInsensitive && b >= 65 && b <= 90 ? b + 32 : b)
+        }
+        return bytes
+    }
+
+    private static func bytesContain(_ haystack: UnsafeRawBufferPointer, needle: [UInt8], caseInsensitive: Bool) -> Bool {
+        guard !needle.isEmpty, haystack.count >= needle.count, let base = haystack.baseAddress else { return false }
+        if !caseInsensitive {
+            return needle.withUnsafeBytes { n in memmem(base, haystack.count, n.baseAddress, n.count) != nil }
+        }
+        let raw = base.assumingMemoryBound(to: UInt8.self)
+        let first = needle[0]
+        let firstUpper: UInt8 = (first >= 97 && first <= 122) ? first - 32 : first
+        let lastStart = haystack.count - needle.count
+        var i = 0
+        while i <= lastStart {
+            let b = raw[i]
+            if b == first || b == firstUpper {
+                var j = 1
+                while j < needle.count {
+                    let c = raw[i + j]
+                    let lowered = (c >= 65 && c <= 90) ? c + 32 : c
+                    if lowered != needle[j] { break }
+                    j += 1
+                }
+                if j == needle.count { return true }
+            }
+            i += 1
+        }
+        return false
+    }
+
+    private static func scanRegularFile(_ url: URL, regex: NSRegularExpression, wholeText: NSRegularExpression?,
+                                        literalProbe: [UInt8]?, caseInsensitive: Bool, mode: String,
+                                        deadline: ContinuousClock.Instant) -> BatchOutcome {
+        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return .skipped }
+        // Fast byte-level pre-filter for plain ASCII/UTF-8 files (skip UTF-16/32 BOM or NUL-containing files so decode decides).
+        if let literalProbe, data.count >= literalProbe.count {
+            let head = data.prefix(4)
+            let isUTF16Or32 = head.starts(with: [0xFF, 0xFE]) || head.starts(with: [0xFE, 0xFF])
+                || head.starts(with: [0x00, 0x00, 0xFE, 0xFF])
+            if !isUTF16Or32, !data.prefix(8192).contains(0) {
+                let hasHit = data.withUnsafeBytes { bytesContain($0, needle: literalProbe, caseInsensitive: caseInsensitive) }
+                if !hasHit { return .miss }
+            }
+        }
+        guard let file = TextFile.decode(data, detectLineEnding: false) else { return .skipped }
+        if let wholeText, hasNoMatch(wholeText, in: file.text, deadline: deadline) { return .miss }
+        let lines = TextFile.lines(of: file.text)
+        return .scanned(scan(lines: lines, regex: regex, mode: mode, deadline: deadline))
+    }
+
     /// Looks through a big file line by line straight from the mapped bytes, keeping only the lines that are shown
     /// (matches and their context). Nil when it is not text this can read (binary, UTF-16): those are skipped like
     /// any binary. Latin-1 lines are decoded per line.
-    private static func stream(_ url: URL, regex: NSRegularExpression, mode: String, contextLines: Int, room: Int,
+    private static func stream(_ url: URL, regex: NSRegularExpression, literalProbe: [UInt8]?, caseInsensitive: Bool,
+                               mode: String, contextLines: Int, room: Int,
                                deadline: ContinuousClock.Instant) throws -> ScannedFile? {
         guard let data = try? Data(contentsOf: url, options: .alwaysMapped) else { return nil }
         let sample = [UInt8](data.prefix(8192))
@@ -433,11 +543,16 @@ struct GrepTool: AgentTool {
 
         var kept: [Int: String] = [:]
         var scanned = ScannedFile()
-        var recent: [(index: Int, text: String)] = []
+        var recent: [(index: Int, start: Int, end: Int)] = []
         var afterRemaining = 0
         var cancelled = false
         data.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) in
             guard let base = bytes.baseAddress else { return }
+            func decodeLine(_ s: Int, _ e: Int) -> String {
+                let slice = UnsafeBufferPointer(start: (base + s).assumingMemoryBound(to: UInt8.self), count: e - s)
+                return String(bytes: slice, encoding: .utf8) ?? String(bytes: slice, encoding: .windowsCP1252)
+                    ?? String(decoding: slice, as: UTF8.self)
+            }
             var start = 0
             var index = 0
             while start < bytes.count {
@@ -450,31 +565,36 @@ struct GrepTool: AgentTool {
                 if let found = memchr(base + start, 10, bytes.count - start) { end = base.distance(to: found) }
                 var lineEnd = end
                 if lineEnd > start, bytes[lineEnd - 1] == 13 { lineEnd -= 1 }
-                let slice = Data(bytes: base + start, count: lineEnd - start)
-                let text = String(data: slice, encoding: .utf8) ?? String(data: slice, encoding: .windowsCP1252)
-                    ?? String(decoding: slice, as: UTF8.self)
 
-                var timedOut = false
-                if let range = firstMatch(of: regex, in: text, deadline: deadline, timedOut: &timedOut) {
-                    scanned.hitCount += 1
-                    if mode == "files" { scanned.lineCount = index + 1; return }
-                    if mode == "content" {
-                        scanned.hits.append((index, range.location))
+                let lineBuf = UnsafeRawBufferPointer(start: base + start, count: lineEnd - start)
+                let mayMatch = literalProbe.map { bytesContain(lineBuf, needle: $0, caseInsensitive: caseInsensitive) } ?? true
+                if mayMatch {
+                    let text = decodeLine(start, lineEnd)
+                    var timedOut = false
+                    if let range = firstMatch(of: regex, in: text, deadline: deadline, timedOut: &timedOut) {
+                        scanned.hitCount += 1
+                        if mode == "files" { scanned.lineCount = index + 1; return }
+                        if mode == "content" {
+                            scanned.hits.append((index, range.location))
+                            kept[index] = text
+                            for earlier in recent where kept[earlier.index] == nil { kept[earlier.index] = decodeLine(earlier.start, earlier.end) }
+                            afterRemaining = contextLines
+                            // `room` counts one hit past what is shown, which only tells that the list is cut.
+                            if scanned.hits.count >= room { scanned.lineCount = index + 1; return }
+                        }
+                    } else if timedOut {
+                        scanned.timedOut = true
+                        return
+                    } else if afterRemaining > 0 {
                         kept[index] = text
-                        for earlier in recent { kept[earlier.index] = earlier.text }
-                        afterRemaining = contextLines
-                        // `room` counts one hit past what is shown, which only tells that the list is cut.
-                        if scanned.hits.count >= room { scanned.lineCount = index + 1; return }
+                        afterRemaining -= 1
                     }
-                } else if timedOut {
-                    scanned.timedOut = true
-                    return
                 } else if afterRemaining > 0 {
-                    kept[index] = text
+                    kept[index] = decodeLine(start, lineEnd)
                     afterRemaining -= 1
                 }
                 if contextLines > 0 {
-                    recent.append((index, text))
+                    recent.append((index, start, lineEnd))
                     if recent.count > contextLines { recent.removeFirst() }
                 }
                 start = end + 1

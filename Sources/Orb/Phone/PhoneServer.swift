@@ -16,8 +16,14 @@ final class PhoneConnection {
     var openBot: UUID?
     var chatEpoch = 0
     var chatPending = false
+    var streamPending = false
+    var streamArmed = false
+    var lastChatValue: PhoneWire.Chat?
     var lastChat: Data?
+    var lastStreamTextCount: Int?
+    var lastStreamItem: String?
     var lastStream: Data?
+    var lastBotsValue: PhoneWire.Bots?
     var lastBots: Data?
     /// Frames handed to the network and not yet sent: a phone on a bad line that stops reading is dropped instead of
     /// piling up chat snapshots in memory.

@@ -61,7 +61,13 @@ struct SidebarView: View {
                 SidebarFeatureRow(item: .skills, name: "Skills", symbol: "wand.and.stars",
                                   tip: Tip.skillsPage, shortcut: AppShortcut.skills.label, selectionSpace: selectionSpace)
                     .accessibilityIdentifier("sidebar-skills")
-                    .padding(.bottom, 16)
+                Rectangle()
+                    .fill(Palette.line)
+                    .frame(height: 1)
+                    .padding(.horizontal, 8)
+                    .padding(.top, 8)
+                    .padding(.bottom, 10)
+                    .accessibilityHidden(true)
                 // The Orbs, loose and in categories, as one place to drop on: the gap opens anywhere among them.
                 VStack(alignment: .leading, spacing: 1) {
                     // "Orbs" folds the whole list; "Outros" gathers the loose ones once a category exists to sort them
@@ -159,14 +165,18 @@ struct SidebarView: View {
                 // MARK: MultiOrb (WP6): the groups, below the Orbs; the section shows once there are two Orbs to put together
                 // (or a group already), and its "+" makes a new one.
                 if !model.groups.isEmpty || model.botIDs.count >= 2 {
+                    Rectangle().fill(Palette.line).frame(height: 1)
+                        .padding(.horizontal, 8).padding(.top, 12).padding(.bottom, 6)
+                        .accessibilityHidden(true)
                     SidebarGroupsSection(selectionSpace: selectionSpace)
-                        .padding(.top, 16)
                         .transition(.adapted(.arrive, reduceMotion: reduceMotion))
                 }
                 // MARK: end MultiOrb (WP6)
 
+                Rectangle().fill(Palette.line).frame(height: 1)
+                    .padding(.horizontal, 8).padding(.top, 12).padding(.bottom, 6)
+                    .accessibilityHidden(true)
                 SidebarTeamsSection(selectionSpace: selectionSpace)
-                    .padding(.top, 16)
                     .transition(.adapted(.arrive, reduceMotion: reduceMotion))
             }
             .padding(.horizontal, 8)
@@ -833,19 +843,15 @@ private struct BotRowContent: View, Equatable {
                             name
                             Spacer(minLength: 4)
                         }
-                        // A strip of fixed width at the right: the "+" that opens a new conversation (under the pointer only) and the
-                        // chevron that folds the open Orb's list. Both 16 pt high, the name's line. The "+" is always in the layout and
-                        // only fades, so the pointer passing over the row never shortens a long name.
+                        // Shown on hover only so at rest the timestamp aligns flush with the unread badge below it.
                         HStack(spacing: 0) {
-                            Button { model.newChat(for: row.botID) } label: { SectionPlus(size: 16) }
-                                .buttonStyle(.plain)
-                                .help("\(CommandName.newChat) (\(AppShortcut.newChat.label))")
-                                .opacity(row.showsNewChat ? 1 : 0)
-                                .allowsHitTesting(row.showsNewChat)
-                                // Nor a stop for the keyboard while it is not seen.
-                                .disabled(!row.showsNewChat)
-                                .animation(Motion.fade, value: row.showsNewChat)
-                                .accessibilityHidden(true)
+                            if row.showsNewChat {
+                                Button { model.newChat(for: row.botID) } label: { SectionPlus(size: 16) }
+                                    .buttonStyle(.plain)
+                                    .help("\(CommandName.newChat) (\(AppShortcut.newChat.label))")
+                                    .transition(.opacity)
+                                    .accessibilityHidden(true)
+                            }
                             if let folded = row.chatsFolded {
                                 Button {
                                     withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) { model.setChatsCollapsed(!folded, for: row.botID) }
@@ -883,6 +889,7 @@ private struct BotRowContent: View, Equatable {
                     }
                     .font(Typography.small)
                     .lineLimit(1)
+                    .help(needsYou ? "Precisa de você" : (workText ?? row.reply?.text ?? look.role))
                     Spacer(minLength: 4)
                     ZStack {
                         // While it waits for you, the amber ring and the amber "Precisa de você" already say so (VoiceOver
@@ -979,9 +986,8 @@ private struct SidebarOrbFilterField: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
-        .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: Radius.small))
-        .overlay(RoundedRectangle(cornerRadius: Radius.small).strokeBorder(Palette.lineStrong))
-        .padding(.horizontal, 4)
+        .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: Radius.small, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Radius.small, style: .continuous).strokeBorder(Palette.lineStrong))
         .padding(.bottom, 4)
     }
 }

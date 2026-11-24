@@ -90,6 +90,9 @@ struct ReadFileTool: AgentTool {
         // Reading and decoding up to 20 MB would hold a cooperative thread, so it runs off the pool.
         return try await runDetached {
             let data = try FileAccess.translating(url, writing: false) { try Data(contentsOf: url, options: .mappedIfSafe) }
+            // Fast path for large plain UTF-8 files: locate `[offset..<offset+limit]` via memchr(0x0A) without allocating
+            // hundreds of thousands of discarded Swift Strings.
+            if data.count > 65_536, let fast = Self.readUTF8Window(data, arguments: arguments) { return fast }
             guard let file = TextFile.decode(data) else {
                 let bytes = AttachmentKind.fileSize(Int64(size))
                 throw ToolError("\(url.path) é um arquivo binário (\(bytes)); não dá para ler como texto. "
@@ -101,6 +104,60 @@ struct ReadFileTool: AgentTool {
             if file.lineEnding == .crlf { notes.append("linhas CRLF") }
             return Self.numbered(TextFile.lines(of: file.text), arguments: arguments, note: notes.isEmpty ? nil : notes.joined(separator: ", "))
         }
+    }
+
+    /// Reads the requested line window directly from mapped UTF-8 bytes without splitting the whole file into `[String]`.
+    /// Returns nil when the file has a BOM, NUL bytes, or invalid UTF-8 in the scanned slice (falls back to `TextFile.decode`).
+    private static func readUTF8Window(_ data: Data, arguments: JSONValue) -> String? {
+        let head = data.prefix(4)
+        if head.starts(with: [0xEF, 0xBB, 0xBF]) || head.starts(with: [0xFF, 0xFE]) || head.starts(with: [0xFE, 0xFF])
+            || head.starts(with: [0x00, 0x00, 0xFE, 0xFF]) || data.prefix(8192).contains(0) { return nil }
+        let offset = arguments.integer("offset", default: 1, in: 1...Int.max)
+        let limit = arguments.integer("limit", default: 2000, in: 1...Int.max)
+        var entries: [String] = []
+        var characters = 0
+        var totalLines = 0
+        var crlfCount = 0
+        var lfCount = 0
+        var validUTF8 = true
+        var lastShown = offset - 1
+        data.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) in
+            guard let base = bytes.baseAddress else { return }
+            let count = bytes.count
+            var start = 0
+            var lineNumber = 0
+            while start < count {
+                lineNumber += 1
+                var end = count
+                if let nl = memchr(base + start, 10, count - start) {
+                    end = base.distance(to: nl)
+                    if end > start && bytes[end - 1] == 13 { crlfCount += 1 } else { lfCount += 1 }
+                }
+                let lineEnd = (end > start && bytes[end - 1] == 13) ? end - 1 : end
+                if lineNumber >= offset && entries.count < limit && characters <= DocumentReader.maxCharacters {
+                    let slice = UnsafeBufferPointer(start: (base + start).assumingMemoryBound(to: UInt8.self), count: lineEnd - start)
+                    guard let decoded = String(bytes: slice, encoding: .utf8) else { validUTF8 = false; return }
+                    let label = String(lineNumber)
+                    let entry = String(repeating: " ", count: max(6 - label.count, 0)) + label + "\t" + Self.clip(decoded)
+                    if characters + entry.count + 1 <= DocumentReader.maxCharacters || entries.isEmpty {
+                        entries.append(entry)
+                        characters += entry.count + 1
+                        lastShown = lineNumber
+                    }
+                }
+                start = end < count ? end + 1 : count
+            }
+            totalLines = lineNumber
+        }
+        guard validUTF8 else { return nil }
+        guard totalLines > 0 else { return "(arquivo vazio)" }
+        guard offset <= totalLines else { return "O arquivo tem só \(totalLines) linhas; offset=\(offset) está além do fim." }
+        let note = crlfCount > lfCount ? "(linhas CRLF)\n" : ""
+        var text = note + entries.joined(separator: "\n")
+        if lastShown < totalLines {
+            text += "\n[linhas \(offset)–\(lastShown) de \(totalLines); continue com offset=\(lastShown + 1)]"
+        }
+        return text
     }
 
     /// The bytes of the files inside a package folder (an .rtfd).

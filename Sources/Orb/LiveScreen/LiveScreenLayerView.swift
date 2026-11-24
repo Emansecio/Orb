@@ -160,7 +160,10 @@ final class LiveScreenLayerView: NSView {
 
     private func show(_ frame: LiveFrame) {
         guard showsPage else { return }
+        // In private mode ("Privado"), keep the blurred freeze frame instead of running CIGaussianBlur at 60 fps.
+        let alreadyBlurred = isBlurred && shown != nil
         shown = frame
+        guard !alreadyBlurred else { return }
         apply(frame)
     }
 
@@ -281,17 +284,12 @@ final class LiveScreenLayerView: NSView {
     /// that Core Animation runs on its own: no timer ticks, no redraws). Any action, leaving the screen, hiding the pointer and Reduce
     /// Motion stop it.
     private var pulseTask: Task<Void, Never>?
-    /// How long the cursor rests before it pulses (a test shortens it).
-    var pulseDelay = LiveMotion.idleBeforePulse
-    /// For tests (an animation of a layer nobody sees is dropped by Core Animation, so its presence says nothing there).
-    private(set) var isPulsing = false
 
     private func schedulePulse() {
         pulseTask?.cancel()
         guard LiveMotion.isOn(), !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
-        let delay = pulseDelay
         pulseTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(delay))
+            try? await Task.sleep(for: .seconds(LiveMotion.idleBeforePulse))
             guard !Task.isCancelled, let self, self.isAcquired, !self.cursorLayer.isHidden else { return }
             let pulse = CABasicAnimation(keyPath: "opacity")
             pulse.fromValue = 1
@@ -301,7 +299,6 @@ final class LiveScreenLayerView: NSView {
             pulse.repeatCount = .infinity
             pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             self.cursorLayer.add(pulse, forKey: "pulse")
-            self.isPulsing = true
         }
     }
 
@@ -309,15 +306,9 @@ final class LiveScreenLayerView: NSView {
         pulseTask?.cancel()
         pulseTask = nil
         cursorLayer.removeAnimation(forKey: "pulse")
-        isPulsing = false
     }
 
     // MARK: On screen or not
-
-    /// Whether the picture should be fed: in a window that is on screen, not hidden, and scrolled into view.
-    nonisolated static func wantsFeed(hasWindow: Bool, windowVisible: Bool, viewHidden: Bool, inView: Bool) -> Bool {
-        hasWindow && windowVisible && !viewHidden && inView
-    }
 
     /// Review snapshots draw in a window nobody sees: there, every window counts as on screen.
     nonisolated(unsafe) static var countsOffscreenWindows = false
@@ -327,8 +318,8 @@ final class LiveScreenLayerView: NSView {
         guard let window else { return false }
         if Self.countsOffscreenWindows { return true }
         let inView = clipView.map { OrbVisibility.isVisible(orb: convert(bounds, to: $0), in: $0.bounds, margin: 20) } ?? true
-        return Self.wantsFeed(hasWindow: true, windowVisible: window.isVisible && window.occlusionState.contains(.visible),
-                              viewHidden: isHiddenOrHasHiddenAncestor, inView: inView)
+        return window.isVisible && window.occlusionState.contains(.visible)
+            && (OrbView.animateInactive || NSApp.isActive) && !isHiddenOrHasHiddenAncestor && inView
     }
 
     /// Registers and acquires while on screen; lets go of both otherwise. Cheap when nothing changed (it runs on scrolling).
@@ -385,8 +376,12 @@ final class LiveScreenLayerView: NSView {
         super.viewWillMove(toWindow: newWindow)
         let center = NotificationCenter.default
         center.removeObserver(self, name: NSWindow.didChangeOcclusionStateNotification, object: nil)
+        center.removeObserver(self, name: NSApplication.didBecomeActiveNotification, object: nil)
+        center.removeObserver(self, name: NSApplication.didResignActiveNotification, object: nil)
         if let newWindow {
             center.addObserver(self, selector: #selector(refresh), name: NSWindow.didChangeOcclusionStateNotification, object: newWindow)
+            center.addObserver(self, selector: #selector(refresh), name: NSApplication.didBecomeActiveNotification, object: nil)
+            center.addObserver(self, selector: #selector(refresh), name: NSApplication.didResignActiveNotification, object: nil)
         }
     }
 

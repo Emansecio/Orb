@@ -391,6 +391,8 @@ actor SCKSession {
         if #available(macOS 14.2, *) { configuration.includeChildWindows = true }
         return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
     }
+
+    func clear() { objects.removeAll() }
 }
 
 // MARK: - screencapture

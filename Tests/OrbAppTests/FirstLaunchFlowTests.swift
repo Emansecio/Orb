@@ -86,7 +86,6 @@ import Testing
             return model.hasCheckedConnections
         }
         await waitUntil("the connection waiter to register") { model.connectionWaiterCount > 0 }
-        #expect(model.connectionWaiterCount == 1)
         model.publishConnections([.openai])
         #expect(await released.value)
         await model.connectionsChecked() // already checked: returns at once

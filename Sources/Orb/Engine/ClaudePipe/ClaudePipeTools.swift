@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 // The Orb's tools, as the Claude Code CLI sees them when it is only a pipe to the model: the CLI is started with `--tools ""` and an
 // MCP config naming one stdio server, "orb" (the app's own binary in `--pipe-tools` mode), which only DECLARES the tools. When the model
@@ -94,12 +95,15 @@ enum ClaudePipeServer {
     }
 
     /// The reply to one stdin line; nil for notifications and for lines that are not JSON objects.
-    /// A `tools/call` waits (polling `mailbox` every `pollInterval`, up to `timeout`) for the result of its `_meta` tool-use id;
-    /// cancelling the calling task ends the wait.
     static func respond(toLine line: String, declarations: [JSONValue], mailbox: ClaudePipeMailbox,
                         pollInterval: Duration = defaultPollInterval, timeout: Duration = defaultTimeout) async -> JSONValue? {
         guard let request = JSONValue.parse(line), case .object = request else { return nil }
-        guard let id = request["id"], id != .null else { return nil }
+        return await respond(to: request, declarations: declarations, mailbox: mailbox, pollInterval: pollInterval, timeout: timeout)
+    }
+
+    static func respond(to request: JSONValue, declarations: [JSONValue], mailbox: ClaudePipeMailbox,
+                        pollInterval: Duration = defaultPollInterval, timeout: Duration = defaultTimeout) async -> JSONValue? {
+        guard case .object = request, let id = request["id"], id != .null else { return nil }
         let handler = Handler(declarations: declarations)
         switch request["method"]?.string {
         case "tools/call":
@@ -117,29 +121,68 @@ enum ClaudePipeServer {
         }
     }
 
-    /// The `tools/call` result of one call: the delivered text, then its pictures as MCP image blocks; an error result when nothing arrives.
+    /// The `tools/call` result of one call: watches `mailbox.directory` with kqueue (`EVFILT_VNODE`) so results wake
+    /// immediately (<0.5 ms) instead of polling every 50 ms, falling back to `pollInterval` only if the folder does not exist yet.
     static func callResult(toolUseID: String?, name: String, mailbox: ClaudePipeMailbox,
                            pollInterval: Duration, timeout: Duration) async -> JSONValue {
         guard let toolUseID, !toolUseID.isEmpty else {
             return MCPStdioServer.textResult("O Claude Code não informou qual chamada de «\(name)» é esta; o Orb não consegue entregar o resultado.", isError: true)
         }
         let deadline = ContinuousClock.now.advanced(by: timeout)
-        while true {
+        if let delivered = mailbox.take(toolUseID: toolUseID) { return content(of: delivered) }
+        while !Task.isCancelled, ContinuousClock.now < deadline {
+            let remaining = deadline - ContinuousClock.now
+            let wait = min(remaining, .seconds(1))
+            let fd = open(mailbox.directory.path, O_EVTONLY)
+            if fd >= 0 {
+                // Re-check after opening the descriptor so a delivery before `open` is never missed.
+                if let delivered = mailbox.take(toolUseID: toolUseID) {
+                    close(fd)
+                    return content(of: delivered)
+                }
+                await waitForDirectoryChange(fd: fd, timeout: wait)
+            } else {
+                do { try await Task.sleep(for: min(pollInterval, remaining)) } catch { break }
+            }
             if let delivered = mailbox.take(toolUseID: toolUseID) { return content(of: delivered) }
-            if Task.isCancelled || ContinuousClock.now >= deadline { break }
-            do { try await Task.sleep(for: pollInterval) } catch { break }
         }
-        // One last look: the result may have arrived while the wait was ending.
         if let delivered = mailbox.take(toolUseID: toolUseID) { return content(of: delivered) }
         return MCPStdioServer.textResult("O Orb não devolveu o resultado de «\(name)» a tempo.", isError: true)
+    }
+
+    private static func waitForDirectoryChange(fd: Int32, timeout: Duration) async {
+        let queue = DispatchQueue.global(qos: .userInitiated)
+        let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: [.write, .rename, .extend], queue: queue)
+        let done = OSAllocatedUnfairLock(initialState: false)
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                @Sendable func finish() {
+                    let first = done.withLock { already -> Bool in
+                        if already { return false }
+                        already = true
+                        return true
+                    }
+                    guard first else { return }
+                    source.cancel()
+                    continuation.resume()
+                }
+                source.setEventHandler { finish() }
+                source.setCancelHandler { close(fd) }
+                source.resume()
+                let ms = max(1, Int(timeout.components.seconds * 1000 + timeout.components.attoseconds / 1_000_000_000_000_000))
+                queue.asyncAfter(deadline: .now() + .milliseconds(ms)) { finish() }
+            }
+        } onCancel: {
+            source.cancel()
+        }
     }
 
     /// The MCP content of one delivered result (pictures that cannot be read are left out).
     static func content(of result: ClaudePipeToolResult) -> JSONValue {
         var blocks: [JSONValue] = [.object(["type": .string("text"), "text": .string(result.text)])]
         for image in result.images {
-            guard let data = try? Data(contentsOf: URL(fileURLWithPath: image.path)), !data.isEmpty else { continue }
-            blocks.append(.object(["type": .string("image"), "data": .string(data.base64EncodedString()),
+            guard let encoded = ImageWire.base64(ofFileAt: image.path) else { continue }
+            blocks.append(.object(["type": .string("image"), "data": .string(encoded),
                                    "mimeType": .string(image.mediaType)]))
         }
         return .object(["content": .array(blocks), "isError": .bool(result.isError)])
@@ -217,8 +260,13 @@ enum ClaudePipeServer {
                 let (declarations, mailbox, pollInterval, timeout) = (self.declarations, self.mailbox, self.pollInterval, self.timeout)
                 let task = Task.detached { [self] in
                     await previous?.value
-                    let answer = await ClaudePipeServer.respond(toLine: line, declarations: declarations, mailbox: mailbox,
+                    let answer: JSONValue?
+                    if let parsed {
+                        answer = await ClaudePipeServer.respond(to: parsed, declarations: declarations, mailbox: mailbox,
                                                                 pollInterval: pollInterval, timeout: timeout)
+                    } else {
+                        answer = nil
+                    }
                     // A cancelled request gets no reply, as the protocol asks.
                     if let answer, !Task.isCancelled { writeLock.withLock { write(answer.jsonString) } }
                     state.withLock { _ = tasks.removeValue(forKey: key) }

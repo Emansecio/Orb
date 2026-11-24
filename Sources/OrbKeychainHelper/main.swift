@@ -24,29 +24,52 @@ private func isAuthorizedParent() -> Bool {
     return caller.identifier == "app.orb.mac" && caller.certificate == helper.certificate
 }
 
-private struct Request: Decodable {
-    let operation: String
+private struct BatchItem: Decodable {
     let service: String
     let account: String
+}
+private struct Request: Decodable {
+    let operation: String
+    let service: String?
+    let account: String?
     let value: String?
+    let items: [BatchItem]?
 }
 private struct Reply: Encodable {
     let ok: Bool
     var value: String?
+    var values: [String: String]?
+}
+
+private func readOne(service: String, account: String) -> String? {
+    guard ["app.orb.mac", "app.openbot.mac"].contains(service), !account.isEmpty else { return nil }
+    let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                kSecAttrService as String: service, kSecAttrAccount as String: account,
+                                kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne]
+    var result: CFTypeRef?
+    guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+          let data = result as? Data else { return nil }
+    return String(data: data, encoding: .utf8)
 }
 
 private func perform(_ request: Request) -> Reply {
-    guard ["app.orb.mac", "app.openbot.mac"].contains(request.service), !request.account.isEmpty else { return Reply(ok: false) }
+    if request.operation == "batchRead" {
+        guard let items = request.items else { return Reply(ok: false) }
+        var found: [String: String] = [:]
+        for item in items {
+            if let value = readOne(service: item.service, account: item.account) {
+                found["\(item.service)\n\(item.account)"] = value
+            }
+        }
+        return Reply(ok: true, values: found)
+    }
+    guard let service = request.service, let account = request.account,
+          ["app.orb.mac", "app.openbot.mac"].contains(service), !account.isEmpty else { return Reply(ok: false) }
     let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-                                kSecAttrService as String: request.service, kSecAttrAccount as String: request.account]
+                                kSecAttrService as String: service, kSecAttrAccount as String: account]
     switch request.operation {
     case "read":
-        var read = query
-        read[kSecReturnData as String] = true
-        read[kSecMatchLimit as String] = kSecMatchLimitOne
-        var result: CFTypeRef?
-        guard SecItemCopyMatching(read as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data, let value = String(data: data, encoding: .utf8) else { return Reply(ok: false) }
+        guard let value = readOne(service: service, account: account) else { return Reply(ok: false) }
         return Reply(ok: true, value: value)
     case "replace":
         guard let value = request.value else { return Reply(ok: false) }

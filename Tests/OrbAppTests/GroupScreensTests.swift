@@ -18,11 +18,6 @@ struct StackedAvatarsTests {
         #expect(StackedAvatars.plan(count: 8) == (2, 6))
     }
 
-    @Test @MainActor func overlapIsNineAndTheAvatarIs24() {
-        #expect(StackedAvatars.headerOverlap == 9)
-        #expect(StackedAvatars.slotWidth(size: 24, overlap: StackedAvatars.headerOverlap) == 54)
-    }
-
     @Test @MainActor func theSidebarSlotPutsTheGroupsTextWhereTheOrbsNameStarts() {
         // The row's 8 pt, the stack and its air: the text starts on the Orbs' names (the avatar's 30 pt and 8 pt, after the row's 8).
         let slot = StackedAvatars.slotWidth(size: SidebarGroupRow.stackSize, overlap: SidebarGroupRow.stackOverlap)

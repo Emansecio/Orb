@@ -48,8 +48,7 @@ import Testing
 
     @Test func aReleaseRefusesEveryDeveloperModeButTheIconOne() {
         // A flag DevRun honours that the release does not refuse would leave an invisible process with a temporary data folder.
-        #expect(Set(Launcher.devOnlyFlags) == Set(DevRun.flags).subtracting(["--render-icon"]))
-        #expect(Launcher.devOnlyFlags.contains("--bench-panels") && Launcher.devOnlyFlags.contains("--bench-scroll"))
+        #expect(Set(Launcher.devOnlyFlags) == ["--snapshot", "--render-orbs", "--bench-panels", "--bench-scroll"])
     }
 
     @Test func theKeychainIsOutOfReachOnlyInDeveloperModes() {

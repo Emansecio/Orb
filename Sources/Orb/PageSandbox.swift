@@ -1,4 +1,6 @@
 import AppKit
+import ImageIO
+import UniformTypeIdentifiers
 import WebKit
 
 /// The one way a web page is made in the app. What runs in one was written by a model, or by a page a model read, so it gets no
@@ -123,16 +125,24 @@ enum PageSandbox {
         if zooms { view.pageZoom = usable }
         view.setFrameSize(CGSize(width: (size.width + 8) * usable, height: (size.height + 8) * usable))
         view.layoutSubtreeIfNeeded()
-        // The new size reaches the page on its next frame.
-        try? await Task.sleep(for: .milliseconds(60))
         let shot = WKSnapshotConfiguration()
         shot.rect = CGRect(x: 0, y: 0, width: size.width * usable, height: size.height * usable)
-        let png: Data?? = await withDeadline(.seconds(5)) { done in
+        shot.afterScreenUpdates = true
+        let cgImage: CGImage?? = await withDeadline(.seconds(5)) { done in
             view.takeSnapshot(with: shot) { image, _ in
-                done(image?.tiffRepresentation.flatMap { NSBitmapImageRep(data: $0) }?.representation(using: .png, properties: [:]))
+                done(image?.cgImage(forProposedRect: nil, context: nil, hints: nil))
             }
         }
-        return (png ?? nil).map { .image($0, size) }
+        guard let cgImage = cgImage ?? nil else { return nil }
+        let png = await Task.detached(priority: .utility) { Self.encodePNG(cgImage) }.value
+        return png.map { .image($0, size) }
+    }
+
+    nonisolated private static func encodePNG(_ image: CGImage) -> Data? {
+        let data = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(dest, image, nil)
+        return CGImageDestinationFinalize(dest) ? data as Data : nil
     }
 
     /// Runs `start`, which ends by calling what it is given, and gives up on it after `deadline`.

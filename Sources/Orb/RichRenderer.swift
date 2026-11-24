@@ -60,36 +60,44 @@ final class RichRenderer {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appending(path: "Orb/rich", directoryHint: .isDirectory)
     }
 
-    private var outcomes: [RichRequest: RichOutcome] = [:]
-    private var running: [RichRequest: Task<RichOutcome, Never>] = [:]
+    private var outcomes: [String: RichOutcome] = [:]
+    private var running: [String: Task<RichOutcome, Never>] = [:]
     private var lastInLine: Task<Void, Never>?
     private var page: WKWebView?
     private var closing: Task<Void, Never>?
     private var drawnSinceTrim = 0
 
     /// What is already known, for a row that comes back into view.
-    func known(_ request: RichRequest) -> RichOutcome? { outcomes[request] }
+    func known(_ request: RichRequest) -> RichOutcome? { outcomes[request.key] }
 
     func draw(_ request: RichRequest) async -> RichOutcome {
-        if let known = outcomes[request] { return known }
-        if let task = running[request] { return await task.value }
+        let key = request.key
+        if let known = outcomes[key] { return known }
+        if let task = running[key] { return await task.value }
+        // Disk cache hits bypass the serial WebKit queue so already-rendered diagrams show immediately.
+        if let stored = await Task.detached(priority: .utility, operation: { RichDisk.read(key) }).value {
+            if outcomes.count >= Self.keptOutcomes { outcomes.removeAll() }
+            outcomes[key] = stored
+            return stored
+        }
+        if let known = outcomes[key] { return known }
+        if let task = running[key] { return await task.value }
         let previous = lastInLine
         let task = Task<RichOutcome, Never> { [weak self] in
             await previous?.value
             guard let self else { return .failed("App encerrando") }
-            return await self.produce(request)
+            return await self.produce(request, key: key)
         }
-        running[request] = task
+        running[key] = task
         lastInLine = Task { _ = await task.value }
         let outcome = await task.value
-        running[request] = nil
+        running[key] = nil
         if outcomes.count >= Self.keptOutcomes { outcomes.removeAll() }
-        outcomes[request] = outcome
+        outcomes[key] = outcome
         return outcome
     }
 
-    private func produce(_ request: RichRequest) async -> RichOutcome {
-        let key = request.key
+    private func produce(_ request: RichRequest, key: String) async -> RichOutcome {
         if let stored = await Task.detached(priority: .utility, operation: { RichDisk.read(key) }).value { return stored }
         closing?.cancel()
         let drawn: Drawn

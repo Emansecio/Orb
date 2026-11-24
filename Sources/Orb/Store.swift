@@ -466,7 +466,15 @@ struct Store: Sendable {
     /// is written. Reads of the conversation wait for it. A conversation file that can't be read is left alone, and so
     /// is a set-aside one that can't; the routines' and requests' files in the same folder are never touched.
     func mergeArchive(of botID: UUID) {
-        let url = conversationURL(botID), note = metaURL(botID), index = archiveIndexURL(botID)
+        let manager = FileManager.default
+        let folder = archiveFolder(botID)
+        let index = archiveIndexURL(botID)
+        let hasLegacy = ((try? manager.contentsOfDirectory(atPath: folder.path)) ?? []).contains { name in
+            name.hasSuffix(".json") && UUID(uuidString: String(name.dropLast(".json".count))) != nil
+        }
+        // Skip enqueueing (and avoid blocking the first conversation's FileGate) when there is no legacy archive to merge.
+        guard hasLegacy || manager.fileExists(atPath: index.path) else { return }
+        let url = conversationURL(botID), note = metaURL(botID)
         enqueue(touching: [url, note, index]) {
             let manager = FileManager.default
             func setAside() -> [URL] {
@@ -1021,8 +1029,9 @@ struct SystemKeychainItems: KeychainItems {
 /// credentials never appear in arguments, environment variables, temporary files or logs. A failed helper never falls
 /// back to another identity: that would both hide the failure and recreate the authorization prompts.
 struct StableKeychainHelper {
-    struct Request: Encodable { var operation: String; var service: String; var account: String; var value: String? }
-    struct Reply: Decodable { var ok: Bool; var value: String? }
+    struct BatchItem: Encodable { var service: String; var account: String }
+    struct Request: Encodable { var operation: String; var service: String?; var account: String?; var value: String?; var items: [BatchItem]? }
+    struct Reply: Decodable { var ok: Bool; var value: String?; var values: [String: String]? }
     let executable: URL
 
     static var current: StableKeychainHelper? {
@@ -1034,7 +1043,18 @@ struct StableKeychainHelper {
 
     /// `timeout` bounds the wait: some callers are on the main thread, and a helper that never answers must not freeze the app.
     func call(operation: String, account: String, service: String, value: String? = nil, timeout: TimeInterval = 20) -> Reply? {
-        guard let request = try? JSONEncoder().encode(Request(operation: operation, service: service, account: account, value: value)) else { return nil }
+        send(Request(operation: operation, service: service, account: account, value: value, items: nil), timeout: timeout)
+    }
+
+    func batchRead(_ items: [(service: String, account: String)], timeout: TimeInterval = 20) -> [String: String]? {
+        let request = Request(operation: "batchRead", service: nil, account: nil, value: nil,
+                              items: items.map { BatchItem(service: $0.service, account: $0.account) })
+        guard let reply = send(request, timeout: timeout), reply.ok else { return nil }
+        return reply.values ?? [:]
+    }
+
+    private func send(_ body: Request, timeout: TimeInterval) -> Reply? {
+        guard let request = try? JSONEncoder().encode(body) else { return nil }
         let process = Process(), input = Pipe(), output = Pipe()
         // A helper may reject its caller and exit before reading: a closed pipe must not terminate the whole Orb.
         guard fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1) == 0 else { return nil }
@@ -1116,6 +1136,15 @@ final class KeychainReadCache: @unchecked Sendable {
         return value
     }
 
+    func storeBatch(_ values: [String: String?]) {
+        lock.withLock {
+            let stamp = now()
+            for (key, value) in values {
+                if let value { found[key] = value; missed[key] = nil } else { missed[key] = stamp }
+            }
+        }
+    }
+
     func invalidate() { lock.withLock { generation += 1; found.removeAll(); missed.removeAll() } }
 }
 
@@ -1143,10 +1172,48 @@ enum Keychain {
     /// is not looked at again.
     static func lookup(_ account: String, service: String, items: any KeychainItems, ledger: LegacyKeychainLedger?) -> String? {
         if let value = items.read(account, service: service) { return value }
-        guard service == Keychain.service, let ledger, !ledger.handled(account),
-              let legacy = items.read(account, service: legacyService) else { return nil }
+        guard service == Keychain.service, let ledger, !ledger.handled(account) else { return nil }
+        guard let legacy = items.read(account, service: legacyService) else {
+            // Remember the miss too so accounts that never existed in OpenBot do not spawn a second helper lookup on every launch.
+            ledger.record(account)
+            return nil
+        }
         if items.replace(legacy, account: account, service: service) { ledger.record(account) }
         return legacy
+    }
+
+    /// Reads multiple accounts in one `OrbKeychainHelper` spawn and warms `readCache` before `refreshConnections`.
+    static func prefetch(_ accounts: [String], service: String = Keychain.service) {
+        guard !accounts.isEmpty, DevRun.allowsKeychain(arguments: CommandLine.arguments),
+              let helper = StableKeychainHelper.current else { return }
+        let ledger = LegacyKeychainLedger.current
+        var queries: [(service: String, account: String)] = []
+        for account in accounts {
+            queries.append((service, account))
+            if service == Keychain.service, let ledger, !ledger.handled(account) {
+                queries.append((legacyService, account))
+            }
+        }
+        guard let found = helper.batchRead(queries) else { return }
+        var cached: [String: String?] = [:]
+        for account in accounts {
+            let key = "\(service)\n\(account)"
+            if let value = found[key] {
+                cached[key] = value
+            } else if service == Keychain.service, let ledger, !ledger.handled(account) {
+                let legacyKey = "\(legacyService)\n\(account)"
+                if let legacy = found[legacyKey] {
+                    if SystemKeychainItems().replace(legacy, account: account, service: service) { ledger.record(account) }
+                    cached[key] = legacy
+                } else {
+                    ledger.record(account)
+                    cached[key] = nil
+                }
+            } else {
+                cached[key] = nil
+            }
+        }
+        readCache.storeBatch(cached)
     }
 
     /// Stores `value`; an empty value deletes the item.

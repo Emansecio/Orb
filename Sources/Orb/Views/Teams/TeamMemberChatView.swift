@@ -88,11 +88,16 @@ struct TeamMemberChatView: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         HStack(spacing: 8) {
-                            if !member.model.isEmpty { TeamPill(text: member.model, tint: Palette.faint) }
-                            TeamPill(text: team.permissionMode.label,
-                                     tint: team.permissionMode == .bypass ? Palette.warn : Palette.faint)
+                            if !member.model.isEmpty {
+                                CatalogBadge(text: model.modelName(member.model), symbol: "cpu")
+                            }
+                            if team.permissionMode == .bypass {
+                                CatalogBadge(text: team.permissionMode.label, symbol: team.permissionMode.symbol, tint: Palette.warn)
+                            } else {
+                                CatalogBadge(text: team.permissionMode.label, symbol: team.permissionMode.symbol)
+                            }
                             if member.id == team.orchestratorID {
-                                TeamPill(text: "Líder do time", tint: Palette.accentText)
+                                CatalogBadge(text: "Líder do time", symbol: "star.fill", tint: Palette.accentText)
                             }
                         }
                     }

@@ -743,7 +743,7 @@ private enum HTMLTables {
             guard !stack.isEmpty else { return }
             closeCell()
             let top = stack.count - 1
-            if let row = stack[top].row { stack[top].rows.append(row) }
+            if let row = stack[top].row, stack[top].rows.count <= OfficeReader.maxRows { stack[top].rows.append(row) }
             stack[top].row = nil
         }
 

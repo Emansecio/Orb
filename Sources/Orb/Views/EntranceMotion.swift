@@ -385,6 +385,12 @@ struct ReplyAvatars: Equatable {
         (quiet, narration) = Self.runs(in: items)
     }
 
+    init(lastID: UUID?, quiet: Set<UUID>, narration: Set<UUID>) {
+        self.lastID = lastID
+        self.quiet = quiet
+        self.narration = narration
+    }
+
     /// One pass from the end, so a long chat costs one walk and two sets of ids; rows compare only their own bits, which
     /// means a new reply or action redraws the one it changes and not the list.
     static func runs(in items: [TranscriptItem]) -> (quiet: Set<UUID>, narration: Set<UUID>) {

@@ -12,12 +12,6 @@ struct BrowserPickerCopyTests {
         return status
     }
 
-    @Test func thePickersShowOnlyWhileTheOrbCanBrowseTheWeb() {
-        #expect(BrowserPickerCopy.showsPickers([.terminal, .browser]))
-        #expect(!BrowserPickerCopy.showsPickers([.terminal, .computerUse, .connectors]))
-        #expect(!BrowserPickerCopy.showsPickers([]))
-    }
-
     @Test func theModesAndProvidersAreNamedAndSummarizedForThePicker() {
         #expect(BrowserMode.allCases.map(\.label) == ["Segundo plano", "Visível"])
         #expect(SearchProvider.allCases.map(\.label) == ["DuckDuckGo", "Google", "TinyFish"])

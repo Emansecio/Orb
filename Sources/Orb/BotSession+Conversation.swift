@@ -101,6 +101,7 @@ extension BotSession {
     func unload() {
         cancelChunkNote()
         conversation = nil
+        reviewBase = nil
         isUnloaded = true
         loadEpoch += 1
         lastUsed = nil
@@ -112,6 +113,7 @@ extension BotSession {
         cancelChunkNote()
         liveText = nil
         conversation = nil
+        reviewBase = nil
         parkedChat = nil
         workingChatID = nil
         isUnloaded = false

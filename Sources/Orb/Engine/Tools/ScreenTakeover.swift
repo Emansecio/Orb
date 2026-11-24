@@ -652,7 +652,7 @@ final class LiveTakeoverPoster: TakeoverEventPoster, @unchecked Sendable {
 
     /// Asks `UCKeyTranslate` for no dead keys, so the ` ~ ^ ´ keys of the Brazilian and International layouts give their
     /// character instead of waiting for the next one. The option is the Mask (1), not the Bit (0), which would ask for nothing.
-    static let translateOptions = OptionBits(kUCKeyTranslateNoDeadKeysMask)
+    private static let translateOptions = OptionBits(kUCKeyTranslateNoDeadKeysMask)
 
     /// Characters → key codes on the current (ASCII-capable) layout, by asking `UCKeyTranslate` for each key; the
     /// Text Services calls want the main thread. Falls back to the US layout if the layout cannot be read.

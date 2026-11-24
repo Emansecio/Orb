@@ -28,7 +28,6 @@ struct DictationButton: View {
                 .contentShape(.circle)
         }
         .buttonStyle(MicStyle(isOn: isOn))
-        .padding(.horizontal, 3) // room for the halo before Send
         .motion(value: isOn)
         .animation(Motion.fade, value: phase)
         .help(Self.help(phase))

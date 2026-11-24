@@ -309,42 +309,7 @@ extension OrbDriverTests {
         #expect(view.shownForTesting.activity == .thinking)
     }
 
-    @Test func theCelebrationOnScreenFollowsTheLevelAndCanGrow() async throws {
-        try #require(NSScreen.main != nil)
-        let (view, win) = reactionOrb()
-        defer { closePlacement(win) }
-        configure(view, .happy, celebration: .light)
-        #expect(view.shownForTesting == (.happy, .light))
-        // A bigger celebration while still happy takes over (it blends from the smaller one).
-        configure(view, .happy, celebration: .big)
-        #expect(view.shownForTesting == (.happy, .big))
-        configure(view, .idle)
-        #expect(view.shownForTesting.activity == .idle)
-    }
-
-    @Test func eachJumpKindPlaysAndEndsOnItsOwn() async throws {
-        try #require(NSScreen.main != nil)
-        let (view, win) = reactionOrb()
-        defer { closePlacement(win) }
-        let start = CACurrentMediaTime()
-        view.jumpNow(.ack)
-        #expect(view.currentJumpForTesting == .ack)
-        var time = step(view, from: start, seconds: 0.2)
-        #expect(view.currentJumpForTesting == .ack)
-        time = step(view, from: time, seconds: 0.3)
-        #expect(view.currentJumpForTesting == nil) // 0.35 s
-        view.jumpNow(.landing)
-        #expect(view.currentJumpForTesting == .landing)
-        _ = step(view, from: time, seconds: 0.5)
-        #expect(view.currentJumpForTesting == nil)
-        // A paused orb jumps for nobody.
-        configure(view, .idle, live: false)
-        _ = step(view, from: time, seconds: 9)
-        view.jumpNow(.play)
-        #expect(view.currentJumpForTesting == nil)
-    }
-
-    @Test func aCueBlinksOrSighsWhileTheOrbIsStillMovingAndNotAtRest() async throws {
+    @Test func aCueBlinksWhileTheOrbIsStillMovingAndNotAtRest() async throws {
         try #require(NSScreen.main != nil)
         let (view, win) = reactionOrb()
         defer { closePlacement(win) }
@@ -352,8 +317,6 @@ extension OrbDriverTests {
         #expect(view.isCueBlinking && view.frameRate >= 30)
         var time = step(view, from: CACurrentMediaTime(), seconds: 0.5)
         #expect(!view.isCueBlinking) // one blink
-        view.cueNow(.sigh)
-        #expect(view.currentFlourishForTesting == .sigh)
         // The turn that ended is what lets the avatar rest: the cue still shows while it settles...
         configure(view, .idle, live: false)
         view.cueNow(.blink)

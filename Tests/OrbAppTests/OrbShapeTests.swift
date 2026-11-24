@@ -84,8 +84,9 @@ struct OrbShapeTests {
     @Test func aRecoloredLayerHasItsOwnCacheKey() {
         let plain = OrbLayer(kind: .body, path: "body/indigo")
         let recolored = OrbLayer(kind: .body, path: "body/indigo", recolor: "indigo")
-        #expect(plain.id != recolored.id && plain != recolored)
-        // Same path, different palette: not found under the other's key (nothing is cached here, so both are nil).
+        defer { OrbImages.evictForTesting([plain, recolored], pixels: 97) }
+        #expect(OrbImages.cgImage(plain, pixels: 97) != nil)
+        #expect(OrbImages.cached(plain, pixels: 97) != nil)
         #expect(OrbImages.cached(recolored, pixels: 97) == nil)
     }
 

@@ -77,11 +77,15 @@ extension AppModel {
     /// Lets go of the threads nobody looks at: no request running, nothing left to save, not the open one, unused for `idle`.
     func unloadIdleGroupSessions(idle: Duration = .seconds(600)) {
         guard !didReportSaveFailure else { return } // after a failed save, memory may be the only copy
+        var unloadedAny = false
         for (id, session) in groupSessions {
             guard selection != .group(id), !groupHub.isActive(id), !session.isDirty,
                   ContinuousClock.now - session.lastUsed > idle else { continue }
             groupSessions[id] = nil
+            groupBoards[id] = nil
+            unloadedAny = true
         }
+        if unloadedAny { MemoryRelief.soon() }
     }
 
     /// Writes every thread that changed (quitting).

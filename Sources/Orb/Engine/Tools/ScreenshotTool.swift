@@ -1,6 +1,7 @@
 import AppKit
 import ImageIO
 import os
+import ScreenCaptureKit
 import Vision
 
 struct ScreenshotTool: AgentTool {
@@ -80,7 +81,12 @@ struct ScreenshotTool: AgentTool {
         }
         // A capture of a large display can pass the size limit meant for attachments; it is shrunk all the same.
         do {
-            let image = try await store.attach(fileAt: file, botID: botID, enforcingLimit: false)
+            let image: ImageAttachment
+            if let prepared = captured.prepared {
+                image = try await store.attachPrepared(prepared, botID: botID)
+            } else {
+                image = try await store.attach(fileAt: file, botID: botID, enforcingLimit: false)
+            }
             return ToolResult(text: captured.report(ocrLimit: Self.ocrLimitWithPicture), images: [image])
         } catch {
             return ToolResult(text: captured.report(ocrLimit: Self.ocrLimitTextOnly)
@@ -94,6 +100,8 @@ struct ScreenshotTool: AgentTool {
         var ocr: String
         /// The picture; nil when only the legend could be made (no Screen Recording).
         var file: URL?
+        /// Already-encoded JPEG bytes + dimensions so `runWithImages` stores directly without a second JPEG encode.
+        var prepared: ImageProcessing.Prepared?
         var legend = ""
         /// The OCR was not asked for, or `auto` found the Accessibility tree enough: nothing to say about it.
         var ocrSkipped = false
@@ -148,6 +156,33 @@ struct ScreenshotTool: AgentTool {
 
         let hadAccess = screenAccess.isGranted()
         if !hadAccess { screenAccess.request() }
+        // Fast path: capture display straight into memory via ScreenCaptureKit (avoids `/usr/sbin/screencapture` + 5K PNG disk roundtrip).
+        if hadAccess, let cgImage = await Self.captureDisplayImage(displayIndex: display) {
+            if ScreenshotImage.isBlank(cgImage) { throw ToolError(ScreenshotImage.blankAdvice) }
+            let wantsText = OCRPolicy.shouldRun(mode: ocrMode, labeledElements: nil)
+            var text = ""
+            var ocrFailed = false
+            if wantsText {
+                do {
+                    let found = try await Self.recognize(cgImage)
+                    text = (found.tables.map { $0 + "\nTexto corrido (com a posição):\n" } ?? "") + TextRecognizer.format(found.lines)
+                } catch { ocrFailed = true }
+            }
+            if let encoded = try? await runDetached({ () -> JPEGPicture? in
+                let scaled = ImageScaling.scaled(cgImage, maxSide: maxSide)
+                guard let result = ScreenshotJPEG.encode(fitting: scaled) else { return nil }
+                return JPEGPicture(data: result.data, width: result.image.width, height: result.image.height)
+            }) {
+                let saved = try Self.newFile(in: folder, extension: "jpg")
+                try encoded.data.write(to: saved, options: .atomic)
+                let points = display <= screens.count ? Double(screens[display - 1]) : 0
+                let scale = points > 0 ? ", \(Self.format(Double(encoded.width) / points)) px/pt" : ""
+                let report = "Captura salva em \(saved.path) (\(encoded.width)×\(encoded.height) px\(scale), \((encoded.data.count + 500) / 1000) KB)."
+                let prepared = ImageProcessing.Prepared(data: encoded.data, mediaType: "image/jpeg", fileExtension: "jpg",
+                                                        width: encoded.width, height: encoded.height)
+                return Capture(header: report, ocr: text, file: saved, prepared: prepared, ocrSkipped: !wantsText, ocrFailed: ocrFailed)
+            }
+        }
         let file = try Self.newFile(in: folder, extension: "png")
         let result = try await ProcessRunner.run("/usr/sbin/screencapture", captureArguments + [file.path], timeout: .seconds(20))
         guard !result.timedOut else { throw ToolError("A captura demorou demais e foi interrompida.") }
@@ -417,6 +452,7 @@ struct ScreenshotTool: AgentTool {
         // The picture the model gets: the marks on it, as a JPEG that fits.
         var geometry: ShotGeometry?
         var file: URL?
+        var prepared: ImageProcessing.Prepared?
         var pixelSize = ""
         if let image, let target {
             let initial = ShotGeometry(imageWidth: image.width, imageHeight: image.height, windowFrame: target.frame, windowID: target.windowID)
@@ -429,6 +465,8 @@ struct ScreenshotTool: AgentTool {
             let saved = try Self.newFile(in: folder, extension: "jpg")
             try encoded.data.write(to: saved, options: .atomic)
             file = saved
+            prepared = ImageProcessing.Prepared(data: encoded.data, mediaType: "image/jpeg", fileExtension: "jpg",
+                                                width: encoded.width, height: encoded.height)
             let final = ShotGeometry(imageWidth: encoded.width, imageHeight: encoded.height, windowFrame: target.frame, windowID: target.windowID)
             geometry = final
             pixelSize = "\(encoded.width)×\(encoded.height) px, \(Self.format(final.scale)) px/pt, \((encoded.data.count + 500) / 1000) KB"
@@ -456,7 +494,29 @@ struct ScreenshotTool: AgentTool {
         } else if wantsMarks, reading != nil {
             legend = "Nenhum elemento clicável visível nesta janela."
         }
-        return Capture(header: header, ocr: text, file: file, legend: legend, ocrSkipped: !wantsText, ocrFailed: ocrFailed)
+        return Capture(header: header, ocr: text, file: file, prepared: prepared, legend: legend, ocrSkipped: !wantsText, ocrFailed: ocrFailed)
+    }
+
+    /// Captures the requested display (1 = main) directly in memory via ScreenCaptureKit, avoiding `/usr/sbin/screencapture` + 5K PNG disk I/O.
+    private static func captureDisplayImage(displayIndex: Int) async -> CGImage? {
+        do {
+            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            let ordered = content.displays.sorted { lhs, rhs in
+                if lhs.displayID == CGMainDisplayID() { return true }
+                if rhs.displayID == CGMainDisplayID() { return false }
+                return lhs.displayID < rhs.displayID
+            }
+            guard displayIndex >= 1, displayIndex <= ordered.count else { return nil }
+            let display = ordered[displayIndex - 1]
+            let config = SCStreamConfiguration()
+            config.width = display.width
+            config.height = display.height
+            config.showsCursor = false
+            let filter = SCContentFilter(display: display, excludingWindows: [])
+            return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+        } catch {
+            return nil
+        }
     }
 
     private static func message(_ error: any Error) -> String {

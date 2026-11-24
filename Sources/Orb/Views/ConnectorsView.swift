@@ -241,16 +241,18 @@ private struct ConnectorCard: View {
                 ConnectorIcon(connector: connector)
                     .opacity(connector.isEnabled ? 1 : 0.55)
                 VStack(alignment: .leading, spacing: 2) {
+                    let subtitle = connector.local != nil ? "Neste Mac" : connector.isRemote ? connector.url : ([connector.command] + connector.arguments).joined(separator: " ")
                     Text(connector.name)
                         .font(.system(size: 14, weight: .semibold))
                         .lineLimit(1)
-                    Text(connector.local != nil ? "Neste Mac" : connector.isRemote ? connector.url : ([connector.command] + connector.arguments).joined(separator: " "))
+                        .help(connector.name)
+                    Text(subtitle)
                         // A command or a URL reads in monospace; "Neste Mac" is a plain phrase.
                         .font(connector.local != nil ? .system(size: 11) : .system(size: 11).monospaced())
                         .foregroundStyle(Palette.faint)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                        .help(connector.source ?? "")
+                        .help(subtitle)
                 }
                 // Off, the name dims; the switch that turns it back on keeps its full contrast (as a routine's card).
                 .opacity(connector.isEnabled ? 1 : 0.55)
@@ -276,7 +278,7 @@ private struct ConnectorCard: View {
                     .font(Typography.small)
                     .foregroundStyle(usedBy.isEmpty ? Palette.warn : Palette.muted)
                     .lineLimit(1)
-                    .help(usedBy.isEmpty ? "Ligue “Conectores” no painel de um Orb, ou escolha os Orbs em Editar" : "")
+                    .help(usedBy.isEmpty ? "Ligue “Conectores” no painel de um Orb, ou escolha os Orbs em Editar" : "Usado por \(usedBy)")
             }
             Spacer(minLength: 0)
             HStack(spacing: 6) {
@@ -666,8 +668,8 @@ private struct ExploreConnectors: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 CatalogSearchHeader(query: $query, prompt: "Buscar no registro oficial de conectores",
-                                    info: "A busca usa o registro oficial do MCP (registry.modelcontextprotocol.io). O nome de cada servidor é verificado pelo registro, mas o código é de quem publicou.")
-                Label("Os servidores do registro são de quem os publicou. Só os marcados “Oficial” vêm do projeto do MCP; os outros rodam código de terceiros no seu Mac. Confira quem publicou antes de instalar. Para os serviços mais usados, veja a galeria.",
+                                    info: "A busca consulta o registro oficial de conectores. O nome de cada serviço é verificado pelo registro, mas o código é de quem publicou.")
+                Label("Os conectores do registro são de quem os publicou. Só os marcados “Oficial” vêm do projeto principal; os outros rodam código de terceiros no seu Mac. Confira quem publicou antes de instalar. Para os serviços mais usados, veja a galeria.",
                       systemImage: "exclamationmark.shield")
                     .font(Typography.label)
                     .foregroundStyle(Palette.muted)
@@ -1088,7 +1090,6 @@ struct ConnectorEditor: View {
                         .font(Typography.small).foregroundStyle(Palette.faint)
                 } else {
                     TextField("Client ID", text: $clientID, prompt: Text("Em “Basic Information” → “App Credentials”"))
-                        .textFieldStyle(.roundedBorder)
                         .help("O Client ID do app do Slack, que o Orb usa para entrar com a sua conta")
                     Text("Copie o Client ID do app e clique em Entrar com Slack: o Slack pede a sua licença no navegador. Não precisa copiar token.")
                         .font(Typography.small).foregroundStyle(Palette.faint)
@@ -1115,9 +1116,7 @@ struct ConnectorEditor: View {
     @ViewBuilder private var loginApp: some View {
         Section {
             TextField("Client ID", text: $clientID)
-                .textFieldStyle(.roundedBorder)
             SecureField("Client Secret", text: $clientSecret, prompt: Text("Só se o app tiver um"))
-                .textFieldStyle(.roundedBorder)
                 .help("Guardado no Keychain do Mac; em branco, mantém o atual")
         } header: {
             Text("App registrado (login)")
@@ -1182,7 +1181,7 @@ struct ConnectorEditor: View {
         } footer: { FormFootnote {
             Text(isRemote
                  ? "Enviados só para a URL acima. Valores que parecem chaves (token, senha…) ficam no Keychain do Mac."
-                 : "O comando roda com o PATH do seu shell de login. Valores que parecem chaves (token, senha…) ficam no Keychain do Mac.")
+                 : "O comando roda com o ambiente do seu Terminal. Valores que parecem chaves (token, senha…) ficam no Keychain do Mac.")
         } }
     }
 
@@ -1200,6 +1199,7 @@ struct ConnectorEditor: View {
                     .font(.system(size: 12).monospaced())
                     .lineLimit(1)
                     .truncationMode(.middle)
+                    .help(path)
                 Spacer(minLength: 8)
                 Button("Escolher pasta…") { isChoosingFolder = true }
                     .help("Escolhe a pasta que este conector pode abrir")

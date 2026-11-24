@@ -154,7 +154,7 @@ actor AgentEngine {
         var allowed = request.turnGrants
         // The request carries the system prompt and the tool specs besides the history: the budget accounts for them.
         let overheadCharacters = ContextBudget.overheadCharacters(system: request.system, specs: specs)
-        let overhead = ContextBudget.overheadTokens(system: request.system, specs: specs, density: request.budget.density)
+        let overhead = Int((Double(overheadCharacters) / request.budget.density).rounded(.up))
         var budget = request.budget.refined(overheadTokens: overhead)
         request.onOverheadMeasured?(overhead)
         // Where the fits of this turn cut the history, so the start of the request holds still between compactions.

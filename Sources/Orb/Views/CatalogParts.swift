@@ -6,9 +6,6 @@ import SwiftUI
 enum CatalogTab: Hashable {
     /// The gallery of services (only the Conectores page has one).
     case gallery, installed, explore
-
-    /// What VoiceOver says about a tab of the switch besides its name: the selected one is announced as such.
-    static func traits(isSelected: Bool) -> AccessibilityTraits { isSelected ? .isSelected : [] }
 }
 
 /// Pill switch at the top of a catalog screen.
@@ -76,7 +73,7 @@ struct CatalogTabBar: View {
         }
         .buttonStyle(.plain)
         .help(value == .installed ? Tip.showInstalled : value == .gallery ? Tip.showGallery : Tip.showCatalog)
-        .accessibilityAddTraits(CatalogTab.traits(isSelected: tab == value))
+        .accessibilityAddTraits(tab == value ? .isSelected : [])
     }
 }
 
@@ -134,7 +131,7 @@ struct PillTabs<Value: Hashable>: View {
                 .contentShape(.capsule)
         }
         .buttonStyle(.plain)
-        .accessibilityAddTraits(CatalogTab.traits(isSelected: isSelected))
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 
@@ -266,18 +263,23 @@ struct MoreMenu<Content: View>: View {
     let name: String
     var tip: String?
     @ViewBuilder var content: Content
+    @State private var isHovering = false
 
     var body: some View {
         Menu {
             content
         } label: {
             Image(systemName: "ellipsis")
-                .frame(width: 28, height: 28)
-                .contentShape(.rect)
+                .font(.system(size: 13))
+                .foregroundStyle(isHovering ? Palette.ink : Palette.muted)
+                .frame(width: 26, height: 26)
+                .hoverFill(isHovering, in: .circle, color: Palette.ghostCircleHover)
+                .contentShape(.circle)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
+        .onHover { isHovering = $0 }
         .iconTip(tip ?? Tip.moreOptions(of: name), label: Tip.moreOptions(of: name))
     }
 }

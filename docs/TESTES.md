@@ -4,8 +4,8 @@ Parte do mapa do código: veja [ARQUITETURA.md](ARQUITETURA.md) para a visão ge
 
 
 ```bash
-scripts/test.sh                                         # a suíte inteira, em 4 processos com todos os núcleos (~1 min num Mac de 8)
-scripts/test.sh --filter 'ContextWindowTests|WaitingTests'   # as suítes afetadas (expressão regular)
+scripts/test.sh --filter 'ContextWindowTests|WaitingTests'   # o mínimo: as suítes da área alterada (expressão regular)
+scripts/test.sh                                         # a suíte inteira, em 4 processos com todos os núcleos (~1 min num Mac de 8); só a pedido explícito
 ORB_LIVE_TESTS=1 scripts/test.sh --filter LiveCatalogTests   # catálogos reais (internet)
 ORB_REAL_BROWSER_TESTS=1 scripts/test.sh --filter RealBrowser # Chrome real, sem janela (internet)
 ORB_RICH_RENDER_TESTS=1 scripts/test.sh --filter PageSandboxLiveTests # WebKit real: desenho e ataques à sandbox, sem rede

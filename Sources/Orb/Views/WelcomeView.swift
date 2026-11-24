@@ -43,7 +43,7 @@ enum WelcomeStage: Equatable {
 }
 
 /// What makes the list of kept memories be read again: the list turning empty, or a memory that finished being kept.
-struct WelcomeKeptKey: Equatable {
+private struct WelcomeKeptKey: Equatable {
     var listIsEmpty: Bool
     var keptVersion: Int
 }
@@ -569,21 +569,16 @@ struct KeptStartCard: View {
             }
             if memories.count > Self.shown {
                 Divider().overlay(Palette.line).padding(.leading, 48)
-                Button(action: onShowAll) {
-                    Text("Ver todas (\(memories.count))")
-                        .font(Typography.label)
-                        .foregroundStyle(Palette.accentText)
-                        .padding(.horizontal, Spacing.m)
-                        .padding(.vertical, Spacing.s)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .help(Tip.allKeptMemories)
+                Button("Ver todas (\(memories.count))", action: onShowAll)
+                    .buttonStyle(LinkTextStyle(font: Typography.label))
+                    .padding(.horizontal, Spacing.m)
+                    .padding(.vertical, Spacing.s)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .help(Tip.allKeptMemories)
             }
         }
         .padding(.bottom, Spacing.hairline)
-        .frame(width: 420)
+        .frame(maxWidth: 420)
         .card(radius: Radius.large, fill: Palette.surface.opacity(0.9))
         .accessibilityElement(children: .contain)
     }
@@ -606,6 +601,7 @@ private struct KeptStartRow: View {
                         .font(Typography.small)
                         .foregroundStyle(Palette.faint)
                         .lineLimit(1)
+                        .help(memory.shortDetail)
                 }
                 Spacer(minLength: 8)
                 Text("Continuar")

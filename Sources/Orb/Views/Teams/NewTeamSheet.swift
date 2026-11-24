@@ -81,9 +81,11 @@ private struct ScoutHeader: View {
             Button {
                 scoutPoke += 1
             } label: {
-                BotAvatar(orb: TeamScouterRunner.scoutOrb, size: 38, activity: runner.activity,
-                          poke: scoutPoke, ack: runner.scoutAck, landing: runner.scoutLanding,
-                          interactive: true)
+                SettlingOrb(idle: runner.activity == .idle, wake: scoutPoke) { paused in
+                    BotAvatar(orb: TeamScouterRunner.scoutOrb, size: 38, activity: runner.activity,
+                              paused: paused, poke: scoutPoke, ack: runner.scoutAck, landing: runner.scoutLanding,
+                              interactive: true)
+                }
             }
             .buttonStyle(.plain)
             .help("Olheiro de times")

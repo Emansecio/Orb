@@ -300,6 +300,5 @@ final class AttachmentPresentationTests {
         let info = AttachmentInfo.read(folder.path)
         #expect(info.state == .ok && info.size == nil)
         #expect(info.symbol == "folder")
-        #expect(AttachmentInfo.read(root.appending(path: "nada").path).state == .ok || true) // a path that is gone is covered below
     }
 }

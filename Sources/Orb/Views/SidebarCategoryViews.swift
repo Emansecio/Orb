@@ -184,9 +184,10 @@ private struct SidebarCategoryHeader: View {
                     .frame(width: SidebarCategoryLayout.iconColumn)
                     .foregroundStyle(Palette.faint)
                 Text(category.name)
-                    .font(Typography.text.weight(.medium))
-                    .foregroundStyle(collapsed && holdsSelection ? Palette.ink : Palette.secondary)
+                    .font(Typography.label.weight(.medium))
+                    .foregroundStyle(collapsed && holdsSelection ? Palette.ink : Palette.muted)
                     .lineLimit(1)
+                    .help(category.name)
                 Spacer(minLength: 4)
                 HiddenOrbsMarks(collapsed: collapsed, waiting: waiting, unread: unread, count: ids.count)
             }

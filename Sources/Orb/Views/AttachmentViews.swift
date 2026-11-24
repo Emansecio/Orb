@@ -138,13 +138,13 @@ struct FileCard: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(info.name)
                     .font(Typography.label.weight(.medium))
-                    .foregroundStyle(Palette.ink)
+                    .foregroundStyle(info.state == .missing ? Palette.faint : Palette.ink)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 if !info.caption.isEmpty {
                     Text(info.caption)
                         .font(Typography.small)
-                        .foregroundStyle(Palette.muted)
+                        .foregroundStyle(info.state == .missing ? Palette.faint : Palette.muted)
                         .lineLimit(1)
                         .contentTransition(.opacity)
                 }
@@ -153,9 +153,7 @@ struct FileCard: View {
         }
         .padding(.horizontal, 8)
         .frame(maxWidth: isCompact ? 280 : AttachmentStack.width, minHeight: minHeight ?? (isCompact ? 40 : 48), alignment: .leading)
-        .hoverFill(isHovering && info.state == .ok, in: .rect(cornerRadius: Radius.medium), color: Palette.raisedHover, resting: Palette.raised)
-        .overlay { RoundedRectangle(cornerRadius: Radius.medium).strokeBorder(Palette.line) }
-        .opacity(info.state == .missing ? 0.55 : 1)
+        .card(radius: Radius.medium, fill: (isHovering && info.state == .ok) ? Palette.raisedHover : Palette.raised)
         .motion(Motion.fade, value: info)
         .onHover { isHovering = $0 }
         .attachmentActions(path: path, all: all, info: info, label: TranscriptSpeech.attachment(info),
@@ -276,7 +274,7 @@ private struct FileNameLink: View {
     var body: some View {
         let isOK = info.state == .ok
         Text(title ?? info.name)
-            .foregroundStyle(isOK ? (isHovering ? Palette.ink : Palette.secondary) : Palette.hint)
+            .foregroundStyle(isOK ? (isHovering ? Palette.ink : Palette.secondary) : Palette.faint)
             .underline(isHovering && isOK, color: Palette.muted)
             .onHover { isHovering = $0 }
             .clickablePointer(isOK)
@@ -317,6 +315,7 @@ struct ScreenStepsStrip: View {
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                                 .frame(width: Self.tile.width, alignment: .leading)
+                                .help(step.caption)
                                 .accessibilityHidden(true)
                         }
                     }

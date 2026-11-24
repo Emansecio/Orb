@@ -176,12 +176,6 @@ struct BrowserHandoffEngineTests {
         #expect(setup.driver.calls.isEmpty, "the window is not opened: \(setup.driver.calls)")
         #expect(await engine.gate.openIDs(for: turn.bot.id).isEmpty)
     }
-
-    @Test func withoutAHandlerTheToolFallsBackToTellingTheModelToAskAndStop() async throws {
-        // A caller with nobody to answer (no engine around the tool): the old behavior.
-        let text = try await BrowseShowTool().run(.object([:]), context: setup.context())
-        #expect(text.contains("STOP") && text.contains("tell the user"))
-    }
 }
 
 // MARK: - The card in the app
@@ -285,12 +279,5 @@ struct BrowserHandoffNotificationTests {
                 == .decide(.once, botID: botID, approvalID: card.id))
         #expect(ApprovalNotifications.route(actionIdentifier: ApprovalNotifications.denyAction, userInfo: payload.userInfo)
                 == .decide(.deny, botID: botID, approvalID: card.id))
-    }
-
-    @Test func itBannersLikeAnyCardOnlyWhenYouAreNotLookingAtIt() {
-        let bot = UUID()
-        #expect(ApprovalNotifications.shouldPost(appIsActive: false, selectedBotID: bot, botID: bot, enabled: true))
-        #expect(!ApprovalNotifications.shouldPost(appIsActive: true, selectedBotID: bot, botID: bot, enabled: true))
-        #expect(ApprovalNotifications.shouldPost(appIsActive: true, selectedBotID: UUID(), botID: bot, enabled: true))
     }
 }

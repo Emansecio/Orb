@@ -129,14 +129,13 @@ let cardWidth: CGFloat = 560
 enum TranscriptLayout {
     static let edge: CGFloat = 28
     static let column: CGFloat = 760
-    /// What stays free at the right of each line for the hover buttons of a reply.
-    static let actionsReserve: CGFloat = 90
+    /// Actions sit under the reply instead of beside it, so narrow windows keep the full reading width.
+    static let actionsReserve: CGFloat = 0
     /// How far the composer's text sits inside its card: the card's inset plus the field's (`ComposerView.card`).
     static let composerTextInset: CGFloat = Spacing.m + Spacing.xs
-    /// The composer's card stands out of the replies' text by its own inset on both sides, so what you type starts on
-    /// the replies' left edge and the card's two borders are the same distance from the text.
+    /// The composer's card stands out of the replies' text by its own inset on the left; trailing matches the edge.
     static let composerLeading: CGFloat = gutter - composerTextInset
-    static let composerTrailing: CGFloat = actionsReserve - composerTextInset
+    static let composerTrailing: CGFloat = 0
     /// The band over the composer where the conversation fades out instead of being cut by the card's border.
     static let composerFade: CGFloat = 28
     /// The least space kept at the left of a user bubble, so a short line does not touch the right edge.
@@ -468,44 +467,35 @@ private struct BotMessage: View {
     // it is as wide as its longest line within it. The avatar floats over the left padding; the right one leaves room
     // for the buttons beside the text.
     var body: some View {
-        content
-            // The reply's text never animates: not as it streams, and not when the last flush swaps the paragraphs for
-            // the finished blocks, whatever the list around it is animating (the row's own entrance is outside this).
-            .transaction { $0.animation = nil }
-            .environment(\.proseIsQuiet, isNarration)
-            .font(isNarration ? Palette.narrationFont : Palette.conversationFont)
-            .foregroundStyle(isNarration ? Palette.secondary : Palette.ink)
-            .lineSpacing(isNarration ? Palette.narrationLineSpacing : Palette.conversationLineSpacing)
-            .textSelection(.enabled)
-            // Beside its Orb, on the chat's left edge (the tool lines, the notices, the cards'), the first line level with
-            // the avatar's middle. Narration starts there too, set apart by its quieter type.
-            .replyText(narration: isNarration)
-            .overlay(alignment: .bottomTrailing) {
-                // Beside the text, in the space the right padding leaves; the row's hover keeps it up while the pointer
-                // travels to it.
-                // Shown while something is selected too: "Citar" is for the selection.
-                // Not mounted at all otherwise: a long chat does not carry a hidden set of buttons on every reply.
-                let showsActions = hovering || selection != nil || isAskingWhy
-                if live == nil, showsActions || rated?.reaction != nil {
-                    // Hung from the text's bottom right corner, to its right: an alignment guide that moved them there
-                    // was not honored, and they sat over the last words of a short reply.
-                    Color.clear.frame(width: 0, height: 0).overlay(alignment: .bottomLeading) {
-                        Group {
-                            if showsActions {
-                                MessageActions(text: text, botID: botID, offersRedo: offersRedo, selection: selection, rated: rated,
-                                               stamp: stamp, isAskingWhy: $isAskingWhy, redo: redo)
-                            } else if let rated {
-                                // What you marked stays in sight after the pointer leaves.
-                                ReactionButtons(itemID: rated.itemID, botID: botID, reaction: rated.reaction, isAsking: $isAskingWhy,
-                                                showsOnlyChosen: true)
-                            }
-                        }
-                        .fixedSize()
-                        .padding(.leading, 6)
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            content
+                // The reply's text never animates: not as it streams, and not when the last flush swaps the paragraphs for
+                // the finished blocks, whatever the list around it is animating (the row's own entrance is outside this).
+                .transaction { $0.animation = nil }
+                .environment(\.proseIsQuiet, isNarration)
+                .font(isNarration ? Palette.narrationFont : Palette.conversationFont)
+                .foregroundStyle(isNarration ? Palette.secondary : Palette.proseInk)
+                .lineSpacing(isNarration ? Palette.narrationLineSpacing : Palette.conversationLineSpacing)
+                .textSelection(.enabled)
+                // Beside its Orb, on the chat's left edge (the tool lines, the notices, the cards'), the first line level with
+                // the avatar's middle. Narration starts there too, set apart by its quieter type.
+                .replyText(narration: isNarration)
+            // Under the reply, aligned with the text: never overflows narrow windows or collides with the rail.
+            // Not mounted at all at rest: a long chat does not carry a hidden set of buttons on every reply.
+            let showsActions = hovering || selection != nil || isAskingWhy
+            if live == nil, showsActions || rated?.reaction != nil {
+                Group {
+                    if showsActions {
+                        MessageActions(text: text, botID: botID, offersRedo: offersRedo, selection: selection, rated: rated,
+                                       stamp: stamp, isAskingWhy: $isAskingWhy, redo: redo)
+                    } else if let rated {
+                        ReactionButtons(itemID: rated.itemID, botID: botID, reaction: rated.reaction, isAsking: $isAskingWhy,
+                                        showsOnlyChosen: true)
                     }
-                    .transition(.opacity)
                 }
+                .transition(.opacity)
             }
+        }
             .environment(\.proseSelection, live == nil ? ProseSelectionAction(
                 changed: { selection = $0 }, quote: { [model, botID] in model.quote($0, for: botID) }) : nil)
             .alignedWithReplyText()
@@ -773,6 +763,7 @@ struct MessageActionStyle: ButtonStyle {
             .hoverFill(pressed || (isHovering && isEnabled), pressed: pressed, in: outline)
             .background(Palette.surface, in: outline)
             .overlay(outline.strokeBorder(Palette.line, lineWidth: 1))
+            .shadow(color: Shadow.popover, radius: 6, y: 2)
             .contentShape(outline)
             .clickablePointer(isEnabled)
             .onHover { isHovering = $0 }
@@ -1226,6 +1217,7 @@ struct CommandBlock: View {
     var heading: (symbol: String, text: String)?
     var output: String?
     var end: End?
+    @Environment(\.insideActivityCard) private var insideActivityCard
     /// `Palette.raised` on a card, so the block stands apart from it.
     var fill = Palette.surface
     /// "Copiar" for the command, or for the output when there is no command; off on an approval card.
@@ -1237,7 +1229,8 @@ struct CommandBlock: View {
         let output = output.flatMap { $0.isEmpty ? nil : $0 }
         let copied = command ?? output
         let head = folder.map { ("folder", $0) } ?? heading
-        VStack(alignment: .leading, spacing: 0) {
+        let effectiveFill = (fill == Palette.surface && insideActivityCard) ? Palette.raised : fill
+        return VStack(alignment: .leading, spacing: 0) {
             if head != nil || command != nil {
                 VStack(alignment: .leading, spacing: 6) {
                     if let head {
@@ -1247,7 +1240,8 @@ struct CommandBlock: View {
                             Text(head.1)
                                 .font(Typography.codeSmall)
                                 .lineLimit(1)
-                                .truncationMode(.head)
+                                .truncationMode(.middle)
+                                .help(head.1)
                             Spacer(minLength: 8)
                             if copies, let copied { copyButton(copied) }
                         }
@@ -1295,7 +1289,7 @@ struct CommandBlock: View {
             }
         }
         .frame(maxWidth: cardWidth, alignment: .leading)
-        .card(radius: Radius.small, fill: fill, stroke: end?.outcome == .failed ? Palette.danger.opacity(0.35) : Palette.line)
+        .card(radius: Radius.small, fill: effectiveFill, stroke: end?.outcome == .failed ? Palette.danger.opacity(0.35) : Palette.line)
     }
 
     private var rule: some View {
@@ -1348,13 +1342,22 @@ struct CommandBlock: View {
 struct ShowAllButton: View {
     @Binding var isShowing: Bool
     let hidden: Int
+    @State private var isHovering = false
 
     var body: some View {
-        Button(isShowing ? "Mostrar menos" : CommandExcerpt.showAll(hidden: hidden)) { isShowing.toggle() }
-            .buttonStyle(.plain)
-            .font(Typography.small.weight(.medium))
-            .foregroundStyle(Palette.muted)
-            .clickablePointer()
+        VStack(alignment: .leading, spacing: 4) {
+            if !isShowing {
+                LinearGradient(colors: [.clear, Palette.line], startPoint: .leading, endPoint: .trailing)
+                    .frame(height: 1)
+                    .accessibilityHidden(true)
+            }
+            Button(isShowing ? "Mostrar menos" : CommandExcerpt.showAll(hidden: hidden)) { isShowing.toggle() }
+                .buttonStyle(.plain)
+                .font(Typography.small.weight(.medium))
+                .foregroundStyle(isHovering ? Palette.ink : Palette.muted)
+                .onHover { isHovering = $0 }
+                .clickablePointer()
+        }
     }
 }
 
@@ -1602,6 +1605,7 @@ struct WorkGroupRow<Content: View>: View, Equatable {
     let toggle: () -> Void
     @ViewBuilder let content: () -> Content
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.insideActivityCard) private var insideActivityCard
 
     /// The closures (`toggle`, `content`) stay out: they are made again on every pass and say nothing the rest does not.
     nonisolated static func == (lhs: WorkGroupRow, rhs: WorkGroupRow) -> Bool {
@@ -1638,7 +1642,7 @@ struct WorkGroupRow<Content: View>: View, Equatable {
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .card()
+            .card(fill: insideActivityCard ? Palette.raised : Palette.surface)
             .chatCard()
             .help(Tip.toggleWork(isOpen: isOpen))
             .accessibilityLabel(([failures.map { "\(line), \($0.text)" } ?? line] + [meta].compactMap { $0 }).joined(separator: ", "))
@@ -1777,7 +1781,7 @@ private struct NoticeLine: View {
         let otherModels = failure != nil && offersActions ? model.retryModels(for: botID) : []
         let actions = NoticeAction.actions(for: text, canCompact: canCompact, hasProposal: hasProposal,
                                            canSwitchModel: !otherModels.isEmpty)
-        let showsButtons = NoticeAction.showsButtons(for: text, actions: actions, offers: offersActions)
+        let showsButtons = !actions.isEmpty && NoticeAction.showsButtons(for: text, actions: actions, offers: offersActions)
         Group {
             if isOffer {
                 offer(actions: actions, showsButtons: showsButtons)
@@ -1882,7 +1886,7 @@ private struct NoticeLine: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Palette.ghostHover, in: .rect(cornerRadius: Radius.card))
+        .card(fill: Palette.surface)
     }
 
     private func buttons(_ actions: [NoticeAction], otherModels: [(ref: String, name: String, provider: String)]) -> some View {
@@ -2364,7 +2368,7 @@ struct ApprovalCard: View {
             if showsKeys {
                 Text(AppShortcut.commandReturn.label)
                     .font(Typography.small)
-                    .opacity(0.55)
+                    .opacity(0.85)
             }
         }
         .font(.system(size: 13, weight: .medium))
@@ -2468,10 +2472,10 @@ struct ApprovalCard: View {
                 HStack(spacing: 8) {
                     Image(systemName: request.decision == .deny ? "xmark.circle" : "checkmark.circle")
                         .font(Typography.small)
-                        .foregroundStyle(request.decision == .deny ? Palette.danger : Palette.faint)
+                        .foregroundStyle(Palette.faint)
                         .frame(width: 14)
                     (Text(ApprovalSummary.label(request))
-                        .foregroundStyle(request.decision == .deny ? Palette.danger : Palette.muted)
+                        .foregroundStyle(Palette.muted)
                         + Text(" · \(ApprovalSummary.title(request))").foregroundStyle(Palette.muted)
                         + Text("  \(ApprovalSummary.detail(request))").foregroundStyle(Palette.faint))
                         .font(Typography.label)

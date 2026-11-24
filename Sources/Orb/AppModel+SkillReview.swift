@@ -150,6 +150,7 @@ extension AppModel {
                 return
             }
             session.skillReview = nil
+            session.reviewBase = nil
             // "Propor skills" was switched off while the review ran: its result is not announced.
             guard proposesSkills else { return }
             await collectSkillProposals(botID)

@@ -19,6 +19,9 @@ struct SSEDecoder {
     private var pending: [String] = []
     private var name: String?
     private var afterCR = false
+    /// Bytes accumulated since the last blank line (completed lines + current line), for ceiling checks.
+    private var eventBytes = 0
+    var bufferedBytes: Int { eventBytes + line.count }
 
     /// Feeds one byte; the event it completes, if any.
     mutating func feed(_ byte: UInt8) -> SSEEvent? {
@@ -35,7 +38,47 @@ struct SSEDecoder {
 
     /// Feeds a chunk; the events it completes.
     mutating func feed(_ bytes: some Sequence<UInt8>) -> [SSEEvent] {
-        bytes.compactMap { feed($0) }
+        var events: [SSEEvent] = []
+        if let data = bytes as? Data {
+            _ = feed(data) { events.append($0); return false }
+            return events
+        }
+        return bytes.compactMap { feed($0) }
+    }
+
+    /// Scans a contiguous `Data` chunk with `memchr` instead of iterating byte by byte. Stops early if `onEvent` returns true.
+    mutating func feed(_ chunk: Data, onEvent: (SSEEvent) throws -> Bool) rethrows -> Bool {
+        var stopped = false
+        try chunk.withUnsafeBytes { raw in
+            guard let base = raw.baseAddress else { return }
+            let count = raw.count
+            var i = 0
+            while i < count {
+                if afterCR {
+                    afterCR = false
+                    if raw[i] == 0x0A { i += 1; continue }
+                }
+                let rem = count - i
+                let lf = memchr(base + i, 0x0A, rem).map { base.distance(to: $0) }
+                let cr = memchr(base + i, 0x0D, rem).map { base.distance(to: $0) }
+                let nextBreak: Int?
+                if let lf, let cr { nextBreak = min(lf, cr) } else { nextBreak = lf ?? cr }
+                guard let brk = nextBreak else {
+                    line.append(contentsOf: UnsafeBufferPointer(start: (base + i).assumingMemoryBound(to: UInt8.self), count: rem))
+                    return
+                }
+                if brk > i {
+                    line.append(contentsOf: UnsafeBufferPointer(start: (base + i).assumingMemoryBound(to: UInt8.self), count: brk - i))
+                }
+                if raw[brk] == 0x0D { afterCR = true }
+                i = brk + 1
+                if let event = endLine(), try onEvent(event) {
+                    stopped = true
+                    return
+                }
+            }
+        }
+        return stopped
     }
 
     /// The stream ended: the last line and event, if they were not closed.
@@ -46,7 +89,8 @@ struct SSEDecoder {
 
     private mutating func endLine() -> SSEEvent? {
         defer { line.removeAll(keepingCapacity: true) }
-        if line.isEmpty { return dispatch() }
+        if line.isEmpty { eventBytes = 0; return dispatch() }
+        eventBytes += line.count + 1
         if line[0] == UInt8(ascii: ":") { return nil }
         let text = String(decoding: line, as: UTF8.self)
         let field: Substring, value: Substring
@@ -66,8 +110,9 @@ struct SSEDecoder {
     }
 
     private mutating func dispatch() -> SSEEvent? {
-        defer { pending.removeAll(); name = nil }
-        let data = pending.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        defer { pending.removeAll(keepingCapacity: true); name = nil }
+        let raw = pending.count == 1 ? pending[0] : pending.joined(separator: "\n")
+        let data = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         return data.isEmpty ? nil : SSEEvent(name: name, data: data)
     }
 }

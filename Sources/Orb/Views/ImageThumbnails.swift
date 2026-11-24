@@ -73,6 +73,8 @@ enum Thumbnails {
 
     private static func key(_ path: String, _ side: CGFloat) -> NSString { "\(path)#\(Int(side))" as NSString }
 
+    static func clear() { cache.removeAllObjects() }
+
     /// The decoded copy when there is one, without reading anything from disk.
     static func cached(path: String, side: CGFloat) -> NSImage? {
         cache.object(forKey: key(path, side))

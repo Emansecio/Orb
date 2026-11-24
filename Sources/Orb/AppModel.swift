@@ -8,7 +8,7 @@ final class AppModel {
     // MARK: Persisted state
 
     var bots: [Bot] { didSet { scheduleStateSave(); syncLives(); normalizeGroups(); normalizeCategories(); normalizeSkills() } }
-    var routines: [Routine] { didSet { scheduleStateSave(); queueFollowsEdits(from: oldValue); syncActivities() } }
+    var routines: [Routine] { didSet { scheduleStateSave(); queueFollowsEdits(from: oldValue); syncActivities(); rescheduleScheduler() } }
     var skills: [Skill] { didSet { scheduleStateSave(); republishSkills() } }
     var connectors: [MCPServerConfig] { didSet { scheduleStateSave(); syncConnectors() } }
     /// Providers the user set up, with their last fetched model lists.
@@ -121,6 +121,7 @@ final class AppModel {
     @ObservationIgnored private var stateFileTask: Task<Void, Never>?
     /// Gives freed memory back once the app has been in the background a while (see `MemoryRelief`).
     @ObservationIgnored private var backgroundRelief: Task<Void, Never>?
+    @ObservationIgnored private var memoryPressure: MemoryPressureMonitor?
     var isStartingRoutine: Bool { !startingRoutines.isEmpty } // internal for tests (`startingRoutines` is private to this file)
     /// Things the user should hear about the data files (an unreadable file and where its copy is, a failed save).
     /// The first one is shown as an alert; `dismissDataNotice` moves on to the next.
@@ -273,6 +274,7 @@ final class AppModel {
                 orbTranscript(id).readerReturned(unread: live(id).unread)
                 setUnread(0, for: id)
                 if selection != oldValue { liveBot(id)?.glanced() } // its sidebar Orb glances toward the chat
+                if live(id).memory.isEmpty { Task { [weak self] in await self?.refreshMemory(id) } }
             }
             if case .group(let id) = selection { groupHub.markRead(id) } // MultiOrb (WP5): looking at the group reads it
             if case .team(let id) = selection { markTeamRead(id) }
@@ -376,6 +378,10 @@ final class AppModel {
     @ObservationIgnored private var asleepSince: Date?
     /// When the scheduler last looked at the routines: a long gap since then means the Mac slept in between.
     @ObservationIgnored private var lastRoutinePass: Date?
+    /// How long the scheduler intentionally slept before the next pass, so planned long sleeps are not mistaken for system sleep.
+    @ObservationIgnored private var scheduledWakeInterval: TimeInterval = 30
+    /// Sleeper task cancelled when a routine/clock/wake event moves the next wake earlier.
+    @ObservationIgnored private var schedulerSleep: Task<Void, Never>?
     /// When the saved tool outputs were last trimmed (the launch does it once): an app left open for days trims them again.
     @ObservationIgnored private var lastOutputsCleanup = Date()
     nonisolated static let outputsCleanupInterval: TimeInterval = 24 * 3_600
@@ -602,12 +608,14 @@ final class AppModel {
             ToolOutputCap.cleanUp(directory: outputs)
             if cleansTemporaryFiles { LegacyTemporaryFiles.removeStaleMCPConfigs() }
             images.removeOrphans(dataFolder: dataFolder)
+            MemoryRelief.now()
         }
         ApprovalNotifications.clearStale()
         ApprovalNotifications.install { [weak self] route in self?.handle(route) }
         Task { [weak self] in await self?.prepareMemory() }
         // No routines, connections or model lists in a developer mode: a copy of real data must not set real work going.
         if !devRun {
+            Task.detached(priority: .utility) { _ = await ShellEnvironment.shared.resolved() }
             activity = SystemActivity()
             keepsAwakeForRoutines = true
             syncActivities()
@@ -617,15 +625,26 @@ final class AppModel {
             scheduler = Task { [weak self] in
                 await self?.refreshConnections()
                 while !Task.isCancelled {
-                    self?.runDueRoutines()
-                    self?.retrySavesAfterFailure()
-                    self?.saveDraftsIfChanged()
-                    self?.cleanUpOutputsIfDue()
-                    self?.startModelRefresh() // apart: a provider that does not answer must not hold up the routines
-                    await self?.unloadIdleConversations()
-                    self?.unloadIdleGroupSessions()
-                    try? await Task.sleep(for: .seconds(30))
-                    if self == nil { break }
+                    guard let self else { break }
+                    self.runDueRoutines()
+                    self.retrySavesAfterFailure()
+                    self.saveDraftsIfChanged()
+                    self.cleanUpOutputsIfDue()
+                    self.startModelRefresh() // apart: a provider that does not answer must not hold up the routines
+                    await self.unloadIdleConversations()
+                    self.unloadIdleGroupSessions()
+                    let delay = self.nextSchedulerDelay()
+                    self.scheduledWakeInterval = delay
+                    let tolerance = min(30, delay * 0.1)
+                    let sleeper = Task<Void, Never> { _ = try? await Task.sleep(for: .seconds(delay), tolerance: .seconds(tolerance)) }
+                    self.schedulerSleep = sleeper
+                    await sleeper.value
+                    self.schedulerSleep = nil
+                }
+            }
+            for name in [Notification.Name.NSSystemClockDidChange, .NSSystemTimeZoneDidChange] {
+                NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.rescheduleScheduler() }
                 }
             }
             // The settings offer "Entrar" again. Only the app's own login counts (never a copy made by a test), and a
@@ -683,8 +702,24 @@ final class AppModel {
                     guard !Task.isCancelled else { return }
                     // Away for a while (app hidden, window closed, another app in front): the microphone closes, keeping the text.
                     if self?.dictation.botID != nil { await self?.dictation.finish() }
-                    MemoryRelief.soon()
+                    if let self {
+                        for session in self.sessions.values where session.turnTask == nil && session.skillReview == nil {
+                            session.reviewBase = nil
+                        }
+                        MemoryRelief.trimCaches(aggressive: false, memory: self.memory)
+                    } else {
+                        MemoryRelief.soon()
+                    }
                 }
+            }
+        }
+        if !devRun {
+            memoryPressure = MemoryPressureMonitor { [weak self] _ in
+                guard let self else { return }
+                for session in self.sessions.values where session.turnTask == nil && session.skillReview == nil {
+                    session.reviewBase = nil
+                }
+                MemoryRelief.trimCaches(aggressive: true, memory: self.memory)
             }
         }
     }
@@ -782,7 +817,9 @@ final class AppModel {
             guard sessions[botID] === session, session.chatID == chat, session.isIdle(now: now, keepAlive: keepAlive),
                   let conversation = session.conversation, meta.matches(conversation) else { continue }
             session.unload()
+            live(botID).setMemory(MemorySnapshot())
             store.releaseCache(for: botID, chat: chat)
+            await memory.releaseIdle(for: botID)
             unloadedAny = true
         }
         if unloadedAny { MemoryRelief.soon() }
@@ -1148,10 +1185,15 @@ final class AppModel {
             hasCheckedConnections = true
             return
         }
-        let keys = await keyedProviders()
-        var found = keys.filter(\.needsKey)
+        // Warm all provider Keychain items in one helper spawn and run Keychain, ChatGPT and `claude auth status` in parallel.
+        let claudeReader = account(.claudeCode) != nil ? connectionSources.claudeCodeStatus : nil
+        async let claudeTask: ClaudeCodeStatus? = claudeReader != nil ? await claudeReader?() : nil
+        async let keysTask = keyedProviders()
         await chatGPTSignOut?.value
-        if await connectionSources.hasChatGPTCredential() { found.insert(.chatgpt) }
+        async let chatGPTTask = connectionSources.hasChatGPTCredential()
+        let (keys, hasChatGPT) = await (keysTask, chatGPTTask)
+        var found = keys.filter(\.needsKey)
+        if hasChatGPT { found.insert(.chatgpt) }
         // A newer refresh started meanwhile publishes its own result; a provider signed out after this one began stays out.
         func current(_ kinds: Set<ProviderKind>) -> Set<ProviderKind> { kinds.filter { (signedOutAt[$0] ?? 0) < run } }
         guard run == latestConnectionsRefresh?.run else {
@@ -1162,11 +1204,8 @@ final class AppModel {
         // Keys and ChatGPT are known now, `claude auth status` may take a while: the Orbs that do not use Claude Code
         // can already send (its place stays as it was, so a refresh does not make it blink).
         connected = current(found).union(connected.intersection([.claudeCode]))
-        var status: ClaudeCodeStatus?
-        if let reader = connectionSources.claudeCodeStatus, account(.claudeCode) != nil { // the status runs the real `claude`
-            status = await reader()
-            if status?.isLoggedIn == true { found.insert(.claudeCode) }
-        }
+        let status = await claudeTask
+        if status?.isLoggedIn == true { found.insert(.claudeCode) }
         hasCheckedConnections = true
         // The status took a while; what changed meanwhile wins over it (see above).
         guard run == latestConnectionsRefresh?.run else { return }
@@ -1641,7 +1680,10 @@ final class AppModel {
     /// Every Orb has a memory bank: older Orbs get one on the first launch of this version (with their old memory
     /// list moved in), conversation stretches left from the last run are saved and cold sessions age.
     func prepareMemory() async { // internal for tests
-        for bot in bots {
+        // Prioritize the selected Orb first; load `BotLive.memory` at launch only for the selected Orb (others load on selection).
+        let activeID = selectedBotID
+        let ordered = bots.sorted { ($0.id == activeID ? 0 : 1) < ($1.id == activeID ? 0 : 1) }
+        for bot in ordered {
             guard self.bot(bot.id) != nil else { continue } // deleted meanwhile
             let bank = memory.bank(for: bot.id)
             await bank.ensureIdentity(notes: "", interview: false)
@@ -1664,7 +1706,11 @@ final class AppModel {
                 if !wasInMemory { await unloadIdleConversations(now: .now + conversationKeepAlive, only: bot.id) }
             }
             await bank.sweep()
-            await refreshMemory(bot.id)
+            if bot.id == selectedBotID {
+                await refreshMemory(bot.id)
+            } else {
+                await bank.releaseIdleResources()
+            }
         }
     }
 
@@ -1943,8 +1989,22 @@ final class AppModel {
         session.commandRelease = release
         session.turnTask = Task { [self] in
             guard !Task.isCancelled else { return } // stopped before it began
-            // The window is worked out off the main thread: on a long conversation it takes a good part of a second.
-            let prepared = await preparedHistory(of: session, budget: budget, reserving: reserve, now: sentAt)
+            // Kick off every independent pre-flight read in parallel (git/folder snapshot, folder instructions,
+            // attachments, outside context, browser status, proxy Keychain, connector sync) alongside history preparation.
+            let workingURL = bot.workingURL
+            let wantsBrowser = bot.capabilities.contains(.browser)
+            let vault = secretVault, proxyBot = bot, needsProxyPassword = BrowserProxy.hasUser(bot.browserProxy)
+            let syncTask = connectorSync
+            async let preparedTask = preparedHistory(of: session, budget: budget, reserving: reserve, now: sentAt)
+            async let filesTask = attachmentTexts.texts(attachments)
+            async let snapshotTask = WorkspaceSnapshots.shared.snapshot(for: bot.id, folder: workingURL)
+            async let instructionsTask = FolderInstructions.loadInBackground(from: workingURL)
+            async let outsideTask = outsideText(outside, of: botID)
+            async let browserStatusTask: BrowserStatus? = wantsBrowser ? await browserHub.status() : nil
+            async let browserProxyTask: String? = needsProxyPassword
+                ? await Task.detached { Self.browserProxy(of: proxyBot, vault: vault) }.value : bot.browserProxy
+
+            let prepared = await preparedTask
             // The fold is already on the conversation by now (`preparedHistory` keeps it), so even a stopped turn announces it
             // and saves its notes: the next turn finds nothing left to fold and would never say so.
             if let report = prepared.compaction { session.announce(report, memoryUpTo: itemsBeforeMessage) }
@@ -1953,15 +2013,14 @@ final class AppModel {
             let ledger = session.conversation?.currentLedger
             let chunks = session.conversation?.chunks(inHistory: history) ?? []
             let sentMemories = TurnPreface.relatedLines(in: history)
-            // The attachments are read while the memory is gathered (the prompt's inputs need the brief, the files nothing).
-            async let files = attachmentTexts.texts(attachments)
             let brief = await bank.brief(for: typed, context: TurnPreface.taskContext(history: history, goal: ledger?.goal),
                                          conversationIsNew: history.isEmpty && tellsWhereLeftOff, userTurns: userTurns,
                                          canSave: bot.permissionMode != .readOnly, alreadySent: sentMemories,
                                          profile: profile.promptSection)
-            let inputs = await TurnPromptInputs.gather(bot: bot, skills: skills, brief: brief, offersAccess: multi.access)
-            var message = prompt + AttachmentText.block(for: attachments, texts: await files, room: attachmentRoom)
-            if let told = await outsideText(outside, of: botID) { message = told + "\n\n" + message }
+            let inputs = await TurnPromptInputs(bot: bot, skills: skills, brief: brief,
+                                                snapshot: snapshotTask, instructions: instructionsTask, offersAccess: multi.access)
+            var message = prompt + AttachmentText.block(for: attachments, texts: await filesTask, room: attachmentRoom)
+            if let told = await outsideTask { message = told + "\n\n" + message }
             guard session.isCurrent(turn) else { return } // stopped while preparing
             let built = TurnPrompt.native(inputs, history: history, lastWorkspaceHash: lastWorkspaceHash, lastWorkspace: lastWorkspace,
                                           memoryInPrompt: memoryInPrompt, frozenSections: frozenSections, plan: plan)
@@ -1985,16 +2044,13 @@ final class AppModel {
             }
             let accessibilityGranted = !bot.capabilities.contains(.computerUse) || accessibilityProbe()
             // The Orb's own browser: its tools come only when it is installed.
-            let browserStatus = bot.capabilities.contains(.browser) ? await browserHub.status() : nil
+            let browserStatus = await browserStatusTask
             let browserAvailability = BrowserAvailability(capabilities: bot.capabilities, status: browserStatus)
             var context = baseContext
             if context.orbs != nil { context.orbs = delegationHandler(for: botID, turn: turn) } // bound to this turn
             // A run nobody watches (a routine, a request from another Orb) waits for its commands to the end.
             if session.routineID == nil || session.sideKind == .group { context.release = release }
-            // The password of the proxy, when it has one, is read from the Keychain off the main thread.
-            let vault = secretVault, proxyBot = bot
-            let browserProxy = BrowserProxy.hasUser(bot.browserProxy)
-                ? await Task.detached { Self.browserProxy(of: proxyBot, vault: vault) }.value : bot.browserProxy
+            let browserProxy = await browserProxyTask
             browserHub.setProxy(browserProxy, botID: bot.id)
             context.browser = BrowserAccess(hub: browserHub, available: browserAvailability == .browser, mode: bot.browserMode,
                                             searchProvider: bot.searchProvider, searchKeys: SearchKeys(vault: secretVault),
@@ -2028,7 +2084,7 @@ final class AppModel {
             }
             // With none yet, the two still go where `connector_install` is offered: the list cannot change mid-turn.
             if bot.capabilities.contains(.connectors), !allowedConnectors.isEmpty || context.installConnector != nil {
-                await connectorSync?.value // one added a moment ago is known to `mcp` before the model may name it
+                await syncTask?.value // one added a moment ago is known to `mcp` before the model may name it
                 tools += ConnectorGateway.tools(for: allowedConnectors, manager: mcp, roster: roster)
             }
             guard session.isCurrent(turn) else { return }
@@ -2781,6 +2837,51 @@ final class AppModel {
         asleepSince = nil
         wokeAt = date
         phone.systemDidWake()
+        rescheduleScheduler()
+    }
+
+    /// Wakes the scheduler loop early so a newly added/edited routine, wake, or clock change takes effect immediately.
+    func rescheduleScheduler() {
+        schedulerSleep?.cancel()
+    }
+
+    /// Seconds until the next real work item (routine, pulse, wake hold, delegation timeout, idle unload, or daily cleanup).
+    /// Caps at 3600 s so an idle app wakes at most ~24 times/day instead of 2880.
+    func nextSchedulerDelay(now: Date = .now) -> TimeInterval {
+        var soonest: TimeInterval = 3_600
+        let hasOpenDelegations = delegation.requests.values.contains { DelegationHub.isOpen($0.state) }
+            || delegation.inbox.values.contains { !$0.isEmpty }
+        if didReportSaveFailure || !unsavedRoutineConversations.isEmpty || hasOpenDelegations {
+            soonest = min(soonest, 30)
+        }
+        if let wokeAt {
+            let remaining = wokeAt.addingTimeInterval(Self.wakeSettleTime).timeIntervalSince(now)
+            if remaining > 0 { soonest = min(soonest, remaining + 1) }
+        }
+        if let asleepSince {
+            let remaining = asleepSince.addingTimeInterval(Self.sleepHold).timeIntervalSince(now)
+            if remaining > 0 { soonest = min(soonest, remaining + 1) }
+        }
+        for routine in routines where routine.isEnabled && !isRoutineHeld(routine.id) && bot(routine.botID) != nil {
+            let remaining = routine.nextRun.timeIntervalSince(now)
+            soonest = min(soonest, max(5, remaining))
+        }
+        if pulseIsOn, bots.count > 1, pulseState.tokensToday < pulseDailyTokens {
+            if let last = pulseState.lastPulse {
+                let remaining = last.addingTimeInterval(Double(pulseMinutes) * 60).timeIntervalSince(now)
+                soonest = min(soonest, max(5, remaining))
+            } else {
+                soonest = min(soonest, 30)
+            }
+        }
+        let hasUnloadableBot = sessions.values.contains {
+            selection != .bot($0.id) && $0.conversation != nil && $0.turnTask == nil && $0.routineID == nil
+        }
+        let hasUnloadableGroup = groupSessions.keys.contains { selection != .group($0) }
+        if hasUnloadableBot || hasUnloadableGroup { soonest = min(soonest, 300) }
+        let untilCleanup = lastOutputsCleanup.addingTimeInterval(Self.outputsCleanupInterval).timeIntervalSince(now)
+        soonest = min(soonest, max(30, untilCleanup))
+        return max(5, soonest)
     }
 
     /// Trims `saidas/` to its age and size limits once a day: without it they only applied at launch, and fifty Orbs
@@ -2797,7 +2898,8 @@ final class AppModel {
     /// the wake notification winning that race: it also holds back while the Mac is known to be asleep, and when the
     /// time since its last pass shows that it slept.
     func runDueRoutines(now: Date = .now) {
-        if let last = lastRoutinePass, now.timeIntervalSince(last) > Self.sleepGap {
+        let gapThreshold = max(Self.sleepGap, scheduledWakeInterval + Self.sleepGap)
+        if let last = lastRoutinePass, now.timeIntervalSince(last) > gapThreshold {
             wokeAt = max(wokeAt ?? now, now)
             delegation.noteSleep(from: last, to: now) // before the sweep, so the sleep is not counted as waiting
         }
@@ -3174,7 +3276,11 @@ struct ConnectionSources: Sendable {
     var claudeCodeStatus: (@Sendable () async -> ClaudeCodeStatus)?
 
     static let live = ConnectionSources(
-        keyedProviders: { Set(ProviderKind.allCases.filter { $0.storesKey && Keychain.get($0.rawValue) != nil }) },
+        keyedProviders: {
+            let accounts = ProviderKind.allCases.filter(\.storesKey).map(\.rawValue)
+            Keychain.prefetch(accounts)
+            return Set(ProviderKind.allCases.filter { $0.storesKey && Keychain.get($0.rawValue) != nil })
+        },
         storeKey: { Keychain.set($0, account: $1.rawValue) },
         hasChatGPTCredential: { await ChatGPTAuth.shared.credential != nil },
         signOutOfChatGPT: { await ChatGPTAuth.shared.signOut() },

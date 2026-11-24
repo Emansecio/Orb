@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import Orb
 
-/// An Orb has one conversation: where it lives, that an older single-file layout still loads, and what deleting an
+/// An Orb has one conversation: where it lives, and what deleting an
 /// Orb removes (the conversation, the routines' conversations and any leftover set-aside file).
 @Suite final class ConversationHistoryTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbHistory-\(UUID().uuidString)")
@@ -13,11 +13,6 @@ import Testing
 
     private func currentURL(_ botID: UUID) -> URL { root.appending(path: "conversations/\(botID.uuidString).json") }
     private func archiveFolder(_ botID: UUID) -> URL { root.appending(path: "conversations/\(botID.uuidString)") }
-
-    private func put(_ text: String, at url: URL) throws {
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data(text.utf8).write(to: url)
-    }
 
     private func conversation(_ said: String..., reply: String = "certo", at start: Date = .now) -> Conversation {
         var items: [TranscriptItem] = []
@@ -45,18 +40,11 @@ import Testing
 
     // MARK: Layout
 
-    @Test @MainActor func theSingleFileLayoutOfOlderVersionsLoadsAsTheCurrentConversation() {
-        let (model, botID) = model(current: conversation("oi"))
-        #expect(model.transcript(botID).count == 2)
-        #expect(!FileManager.default.fileExists(atPath: archiveFolder(botID).path)) // nothing was created for it
-    }
-
     @Test @MainActor func theConversationStaysWhereItAlwaysWas() async {
         let (model, botID) = model(current: conversation("primeira"))
         model.saveNow()
         #expect(FileManager.default.fileExists(atPath: currentURL(botID).path))
         #expect(store.loadConversation(botID)?.items.count == 2)
-        #expect(!FileManager.default.fileExists(atPath: archiveFolder(botID).path))
     }
 
     // MARK: Deleting an Orb

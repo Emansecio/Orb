@@ -112,7 +112,11 @@ struct WebFetchTool: AgentTool {
         request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
         // The permission was granted for this address's host, so a redirect only goes on within it (see `WebRedirectPolicy`).
         let redirects = WebRedirectPolicy()
-        let (bytes, response) = try await session.bytes(for: request, delegate: redirects)
+        let (chunks, response) = try await ChunkedHTTPStream.open(request, using: session) { s, t, r, next in
+            await withCheckedContinuation { cont in
+                redirects.urlSession(s, task: t, willPerformHTTPRedirection: r, newRequest: next) { cont.resume(returning: $0) }
+            }
+        }
         if let refused = redirects.refused {
             throw ToolError(Self.redirectMessage(from: url, to: refused))
         }
@@ -128,7 +132,7 @@ struct WebFetchTool: AgentTool {
                 throw ToolError(Self.tooLargeMessage)
             }
             let target = context.url(for: destination)
-            let size = try await Self.download(bytes, to: target)
+            let size = try await Self.download(chunks, to: target)
             return ToolResult(text: "\(AttachmentKind.fileSize(Int64(size))) (\(response.mimeType ?? "tipo desconhecido")) de \(finalURL.absoluteString) salvos em \(WriteFileTool.location(target, target.resolvingLinkChain))")
         }
 
@@ -143,7 +147,7 @@ struct WebFetchTool: AgentTool {
         let generic = !mimeType.contains("pdf") && Self.isGeneric(mimeType)
         let finite = response.expectedContentLength > 0 && (mimeType.contains("pdf") || generic)
         let deadline = finite ? max(readDeadline, Self.finiteReadDeadline) : readDeadline
-        let (data, cutByTime) = try await Self.read(bytes, limit: mimeType.contains("pdf") || generic ? pdfLimit : textLimit,
+        let (data, cutByTime) = try await Self.read(chunks, limit: mimeType.contains("pdf") || generic ? pdfLimit : textLimit,
                                                     unlessPDF: generic ? textLimit : nil, deadline: deadline)
         let isPDF = mimeType.contains("pdf") || data.starts(with: Array("%PDF".utf8))
         let limit = isPDF ? pdfLimit : textLimit
@@ -209,29 +213,55 @@ struct WebFetchTool: AgentTool {
 
     /// The body, up to `limit` bytes or until `deadline`, whichever comes first (`timedOut` then); `unlessPDF` lowers
     /// the limit once the first bytes show the body is not a PDF. A read that fails partway still throws; cancelling the turn does too.
+    /// Compatibility overload for callers/tests holding `URLSession.AsyncBytes`.
     static func read(_ bytes: URLSession.AsyncBytes, limit: Int, unlessPDF: Int? = nil, deadline: Duration) async throws -> (data: Data, timedOut: Bool) {
+        try await read(Self.chunked(bytes), limit: limit, unlessPDF: unlessPDF, deadline: deadline)
+    }
+
+    private static func chunked(_ bytes: URLSession.AsyncBytes) -> AsyncThrowingStream<Data, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    var buf = Data()
+                    for try await byte in bytes {
+                        buf.append(byte)
+                        if buf.count >= 16_384 { continuation.yield(buf); buf.removeAll(keepingCapacity: true) }
+                    }
+                    if !buf.isEmpty { continuation.yield(buf) }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    static func read(_ chunks: AsyncThrowingStream<Data, Error>, limit: Int, unlessPDF: Int? = nil, deadline: Duration) async throws -> (data: Data, timedOut: Bool) {
         enum Outcome { case finished, timedOut, failed(any Error) }
         let received = OSAllocatedUnfairLock(initialState: Data())
         let outcome = await withTaskGroup(of: Outcome.self) { group in
             group.addTask {
-                var chunk = Data()
                 var total = 0
                 var limit = limit
-                // What arrived is handed over in pieces (a lock per byte is wasteful) and once more on the way out.
-                func hand() {
-                    let piece = chunk
-                    received.withLock { $0.append(piece) }
-                    chunk.removeAll(keepingCapacity: true)
-                }
-                defer { hand() }
+                var checkedPDF = false
+                var head = Data()
                 do {
-                    for try await byte in bytes {
-                        chunk.append(byte)
-                        total += 1
-                        // The first four bytes are still all in `chunk`.
-                        if total == 4, let plain = unlessPDF, !chunk.starts(with: Array("%PDF".utf8)) { limit = min(limit, plain) }
+                    for try await piece in chunks {
+                        guard !piece.isEmpty else { continue }
+                        if !checkedPDF, let plain = unlessPDF {
+                            head.append(piece.prefix(4 - head.count))
+                            if head.count >= 4 {
+                                checkedPDF = true
+                                if !head.starts(with: Array("%PDF".utf8)) { limit = min(limit, plain) }
+                            }
+                        }
+                        let room = limit - total
+                        if room <= 0 { break }
+                        let slice = piece.count > room ? Data(piece.prefix(room)) : piece
+                        received.withLock { $0.append(slice) }
+                        total += slice.count
                         if total >= limit { break }
-                        if chunk.count >= 16_384 { hand() }
                     }
                     return .finished
                 } catch {
@@ -390,6 +420,10 @@ struct WebFetchTool: AgentTool {
     /// download never leaves a half-written file behind. Returns the size in bytes.
     /// Given up after `deadline`, with nothing left behind.
     static func download(_ bytes: URLSession.AsyncBytes, to target: URL, deadline: Duration = downloadDeadline) async throws -> Int {
+        try await download(Self.chunked(bytes), to: target, deadline: deadline)
+    }
+
+    static func download(_ chunks: AsyncThrowingStream<Data, Error>, to target: URL, deadline: Duration = downloadDeadline) async throws -> Int {
         let destination = target.resolvingLinkChain
         guard !destination.isExistingDirectory else { throw ToolError("\(destination.path) é uma pasta; informe o nome do arquivo em save_to.") }
         let manager = FileManager.default
@@ -400,29 +434,21 @@ struct WebFetchTool: AgentTool {
         defer { if !completed { try? manager.removeItem(at: temporary) } }
 
         let handle = try FileHandle(forWritingTo: temporary)
-        // The deadline is a sibling task that cancels the read, as in `read()`: a stream that sends one byte now and then
-        // is cut on time without looking at the clock for every byte. `written` is what reached the file, for the message.
         let written = OSAllocatedUnfairLock(initialState: 0)
         let size: Int? = try await withThrowingTaskGroup(of: Int?.self) { group in
             group.addTask {
                 defer { try? handle.close() }
-                var buffer = Data()
                 var total = 0
-                for try await byte in bytes {
-                    buffer.append(byte)
-                    if buffer.count >= 65_536 {
-                        total += buffer.count
-                        try handle.write(contentsOf: buffer)
-                        buffer.removeAll(keepingCapacity: true)
-                        let flushed = total
-                        written.withLock { $0 = flushed }
-                    }
-                    if total + buffer.count > maxDownloadBytes {
+                for try await piece in chunks {
+                    guard !piece.isEmpty else { continue }
+                    if total + piece.count > maxDownloadBytes {
                         throw ToolError(tooLargeMessage)
                     }
+                    try handle.write(contentsOf: piece)
+                    total += piece.count
+                    let flushed = total
+                    written.withLock { $0 = flushed }
                 }
-                total += buffer.count
-                try handle.write(contentsOf: buffer)
                 return total
             }
             group.addTask {
@@ -491,6 +517,14 @@ actor WebPageCache {
         entry.characters = entry.text.count
         entries.append((address, entry))
         if entries.count > Self.capacity { entries.removeFirst(entries.count - Self.capacity) }
+    }
+
+    func pruneExpired(now: Date = Date()) {
+        entries.removeAll { now.timeIntervalSince($0.entry.date) > Self.lifetime }
+    }
+
+    func clear() {
+        entries.removeAll()
     }
 }
 

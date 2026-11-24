@@ -255,10 +255,19 @@ extension BrowseSupport {
     /// is false when it was still changing after the last try. Inside the caller's `exclusive`.
     static func settledSnapshot(_ session: BrowserSession, context: ToolContext) async throws -> (snapshot: BrowserSnapshot, settled: Bool) {
         var previous = try await session.driver.snapshot(interactive: true, selector: nil)
+        var sameStructureRuns = 0
         for _ in 0..<settlePolls {
             try await pause(context, settlePoll)
             let next = try await session.driver.snapshot(interactive: true, selector: nil)
             if next.tree == previous.tree, next.url == previous.url { return (next, true) }
+            // Pages with a live clock/ticker change text every poll while URL and interactive refs stay identical: stop after 2 stable structure polls.
+            if next.url == previous.url, next.refs.count == previous.refs.count,
+               !next.refs.isEmpty, next.refs.keys == previous.refs.keys {
+                sameStructureRuns += 1
+                if sameStructureRuns >= 2 { return (next, true) }
+            } else {
+                sameStructureRuns = 0
+            }
             previous = next
         }
         return (previous, false)

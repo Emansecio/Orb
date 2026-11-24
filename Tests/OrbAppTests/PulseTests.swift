@@ -113,7 +113,9 @@ private final class PulseWorld {
         var conversation = Conversation()
         var plan = TaskPlan(goal: "Entregar o relatório \(tag)", steps: [TaskPlan.Step(text: "Reunir dados", state: .done),
                                                                       TaskPlan.Step(text: "Escrever"), TaskPlan.Step(text: "Revisar")])
-        plan.updatedAt = t0.addingTimeInterval(-3_600)
+        // An hour before the injected clock, which only counts while it is in the past: the pulse's run start is the real
+        // clock (`beginPulse`), so a plan planted at tomorrow 8 a.m. would be *newer* than the run and never set aside.
+        plan.updatedAt = min(t0, .now).addingTimeInterval(-3_600)
         conversation.taskPlan = plan
         model.session(bot(name).id).conversation = conversation
     }

@@ -264,27 +264,6 @@ struct SessionConnectorTests {
         #expect(notices.count == 2)
     }
 
-    @Test @MainActor func aFoldNeverCoversTheLastMessage() throws {
-        let (model, botID) = model(conversation(turns: 2))
-        _ = model.contextSummary(for: botID)
-        model.apply(.compacted(CompactionReport(kind: .turns, foldedMessages: 500, tokensBefore: 1, tokensAfter: 1,
-                                                fold: .init(summary: "resumo", ledger: nil, turns: 125))), to: botID)
-        // 8 messages: the last one stays, and the cut is at the start of a turn.
-        #expect(model.conversations[botID]?.summaryCoveredCount == 4)
-    }
-
-    @Test @MainActor func aFoldCountedPastAMadeUpReplyStillCutsAtTheStartOfATurn() throws {
-        let (model, botID) = model(conversation(turns: 10))
-        _ = model.contextSummary(for: botID)
-        // The engine saw one message more than the conversation holds (a reply made up for an unanswered call): its
-        // count of messages is not the conversation's, its count of turns is.
-        model.apply(.compacted(CompactionReport(kind: .turns, foldedMessages: 9, tokensBefore: 1, tokensAfter: 1,
-                                                fold: .init(summary: "resumo", ledger: nil, turns: 2))), to: botID)
-        let covered = try #require(model.conversations[botID]?.summaryCoveredCount)
-        #expect(covered == 8)
-        #expect(model.conversations[botID]?.messages[covered].role == .user)
-    }
-
     @Test @MainActor func stepsSetAsideAreAnnouncedButNotKept() throws {
         let (model, botID) = model(conversation(turns: 2))
         _ = model.contextSummary(for: botID)

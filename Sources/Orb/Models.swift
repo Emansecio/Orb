@@ -905,7 +905,7 @@ enum Schedule: Codable, Hashable, Sendable {
             moment > date ? moment : .distantFuture
         case .cron(let expression, let timeZone):
             // A line that does not parse (a hand-edited file) or never matches does not run, rather than run at a wrong time.
-            (try? CronExpression(expression))?.next(after: date, calendar: Self.calendar(calendar, in: timeZone)) ?? .distantFuture
+            (try? CronExpression.parsed(expression))?.next(after: date, calendar: Self.calendar(calendar, in: timeZone)) ?? .distantFuture
         }
     }
 

@@ -167,11 +167,12 @@ final class PhoneAccess {
     }
 
     /// While the access is on, the Mac does not go to sleep on its own (the display still does), unless the user turned
-    /// that off: a sleeping Mac answers no phone.
+    /// that off: a sleeping Mac answers no phone. Uses `.idleSystemSleepDisabled` so macOS keeps App Nap and timer
+    /// coalescing active while idle.
     func syncAwake() {
         let wanted = server != nil && (UserDefaults.standard.object(forKey: Self.keepAwakeKey) as? Bool ?? true)
         if wanted, awake == nil {
-            awake = ProcessInfo.processInfo.beginActivity(options: .userInitiated, reason: "Acesso pelo celular ligado")
+            awake = ProcessInfo.processInfo.beginActivity(options: .idleSystemSleepDisabled, reason: "Acesso pelo celular ligado")
         } else if !wanted, let token = awake {
             ProcessInfo.processInfo.endActivity(token)
             awake = nil
@@ -215,7 +216,9 @@ final class PhoneAccess {
     private func authorized(_ connection: PhoneConnection) {
         refreshDevices()
         guard let model else { return }
-        let frame = PhoneWire.encode(Self.botsFrame(model, hash: avatarHash))
+        let bots = Self.botsFrame(model, hash: avatarHash)
+        let frame = PhoneWire.encode(bots)
+        connection.lastBotsValue = bots
         connection.lastBots = frame
         server?.send(frame, to: connection)
         armBots()
@@ -234,7 +237,13 @@ final class PhoneAccess {
             guard model.bot(bot) != nil else { return unknown(bot, to: connection) }
             connection.openBot = bot
             connection.chatEpoch += 1
+            connection.chatPending = false
+            connection.streamPending = false
+            connection.streamArmed = false
+            connection.lastChatValue = nil
             connection.lastChat = nil
+            connection.lastStreamTextCount = nil
+            connection.lastStreamItem = nil
             connection.lastStream = nil
             let epoch = connection.chatEpoch
             watchChat(connection)
@@ -243,12 +252,19 @@ final class PhoneAccess {
                 Task { [weak self] in
                     await model.loadedConversation(bot)
                     guard connection.chatEpoch == epoch else { return }
+                    connection.chatEpoch += 1
+                    connection.chatPending = false
+                    connection.streamPending = false
+                    connection.streamArmed = false
                     self?.watchChat(connection)
                 }
             }
         case .close:
             connection.openBot = nil
             connection.chatEpoch += 1
+            connection.chatPending = false
+            connection.streamPending = false
+            connection.streamArmed = false
         case .send(let bot, let text, let ref):
             guard model.bot(bot) != nil else { return unknown(bot, to: connection) }
             Task { [weak self] in
@@ -324,10 +340,15 @@ final class PhoneAccess {
         } onChange: { [weak self] in
             Task { @MainActor in self?.botsChanged() }
         }
+        let targets = server.authorized.filter { $0.lastBotsValue != frame }
+        guard !targets.isEmpty else { return }
         let data = PhoneWire.encode(frame)
-        for connection in server.authorized where connection.lastBots != data {
-            connection.lastBots = data
-            server.send(data, to: connection)
+        for connection in targets {
+            connection.lastBotsValue = frame
+            if connection.lastBots != data {
+                connection.lastBots = data
+                server.send(data, to: connection)
+            }
         }
     }
 
@@ -342,30 +363,60 @@ final class PhoneAccess {
         }
     }
 
-    /// The chat a phone follows: a `chat` frame when its items changed, a `stream` frame when the reply being written grew.
+    /// Structural watcher for the open chat (`items`, `working`, `status`): never fires on streaming text deltas.
     private func watchChat(_ connection: PhoneConnection) {
         guard let model, let server, let bot = connection.openBot, server.connections[connection.id] != nil else { return }
         let epoch = connection.chatEpoch
-        let (chat, stream) = withObservationTracking {
-            Self.chatFrames(model, bot: bot)
+        let (chat, hasStreaming) = withObservationTracking {
+            Self.chatFrame(model, bot: bot)
         } onChange: { [weak self] in
             Task { @MainActor in self?.chatChanged(connection, epoch: epoch) }
         }
-        let chatData = PhoneWire.encode(chat)
-        if connection.lastChat != chatData {
-            connection.lastChat = chatData
-            server.send(chatData, to: connection)
+        if connection.lastChatValue != chat {
+            connection.lastChatValue = chat
+            let chatData = PhoneWire.encode(chat)
+            if connection.lastChat != chatData {
+                connection.lastChat = chatData
+                server.send(chatData, to: connection)
+            }
         }
         // The phone is reading this chat (it sends `close` when it goes to the background): what arrives is not unread.
         model.setUnread(0, for: bot)
+        if hasStreaming {
+            if !connection.streamPending, !connection.streamArmed { watchStream(connection) }
+        } else {
+            connection.streamArmed = false
+            connection.lastStream = nil
+            connection.lastStreamItem = nil
+            connection.lastStreamTextCount = nil
+        }
+    }
+
+    /// Lightweight watcher dedicated to the live streaming text (`closed`/`tail`), avoiding 80-item `Chat` rebuilds every 150 ms.
+    private func watchStream(_ connection: PhoneConnection) {
+        guard let model, let server, let bot = connection.openBot, server.connections[connection.id] != nil else { return }
+        let epoch = connection.chatEpoch
+        connection.streamArmed = true
+        let stream = withObservationTracking {
+            Self.streamFrame(model, bot: bot)
+        } onChange: { [weak self] in
+            Task { @MainActor in self?.streamChanged(connection, epoch: epoch) }
+        }
         if let stream {
-            let streamData = PhoneWire.encode(stream)
-            if connection.lastStream != streamData {
-                connection.lastStream = streamData
-                server.send(streamData, to: connection)
+            let count = stream.text.utf8.count
+            if connection.lastStreamItem != stream.item || connection.lastStreamTextCount != count {
+                connection.lastStreamItem = stream.item
+                connection.lastStreamTextCount = count
+                let streamData = PhoneWire.encode(stream)
+                if connection.lastStream != streamData {
+                    connection.lastStream = streamData
+                    server.send(streamData, to: connection)
+                }
             }
         } else {
             connection.lastStream = nil
+            connection.lastStreamItem = nil
+            connection.lastStreamTextCount = nil
         }
     }
 
@@ -377,6 +428,19 @@ final class PhoneAccess {
             connection.chatPending = false
             guard connection.chatEpoch == epoch else { return }
             self?.watchChat(connection)
+        }
+    }
+
+    private func streamChanged(_ connection: PhoneConnection, epoch: Int) {
+        guard connection.chatEpoch == epoch else { return }
+        connection.streamArmed = false
+        guard !connection.streamPending else { return }
+        connection.streamPending = true
+        Task { [weak self] in
+            try? await Task.sleep(for: Self.chatThrottle)
+            connection.streamPending = false
+            guard connection.chatEpoch == epoch else { return }
+            self?.watchStream(connection)
         }
     }
 
@@ -400,20 +464,33 @@ final class PhoneAccess {
     /// The last `itemWindow` items of the chat, plus any card still open further up or in a routine's own conversation
     /// (the phone must be able to answer it), and the reply being written.
     static func chatFrames(_ model: AppModel, bot: UUID) -> (PhoneWire.Chat, PhoneWire.Stream?) {
+        let (chat, _) = chatFrame(model, bot: bot)
+        return (chat, streamFrame(model, bot: bot))
+    }
+
+    private static func chatFrame(_ model: AppModel, bot: UUID) -> (PhoneWire.Chat, hasStreaming: Bool) {
         let items = model.orbTranscript(bot).items
         var window = items.suffix(PhoneWire.itemWindow).map(PhoneWire.Item.init)
-        let shown = Set(window.map(\.id))
-        for item in pendingCards(model, bot: bot) where !shown.contains(item.id.uuidString) {
-            window.append(PhoneWire.Item(item))
-        }
         let live = model.live(bot)
+        if live.needsYou {
+            let shown = Set(window.map(\.id))
+            for item in pendingCards(model, bot: bot) where !shown.contains(item.id.uuidString) {
+                window.append(PhoneWire.Item(item))
+            }
+        }
         let chat = PhoneWire.Chat(bot: bot.uuidString, items: window, working: live.isWorking,
                                   status: live.isWorking ? (live.work?.phrase ?? live.status) : nil)
+        let hasStreaming = items.last(where: { if case .bot(_, true) = $0.kind { true } else { false } }) != nil
+        return (chat, hasStreaming)
+    }
+
+    private static func streamFrame(_ model: AppModel, bot: UUID) -> PhoneWire.Stream? {
+        let items = model.orbTranscript(bot).items
         guard let streaming = items.last(where: { if case .bot(_, true) = $0.kind { true } else { false } }),
-              let text = model.liveText(for: streaming.id, of: bot) else { return (chat, nil) }
+              let text = model.liveText(for: streaming.id, of: bot) else { return nil }
         _ = text.closed // read for the observation: `text` itself is not observed
         _ = text.tail
-        return (chat, PhoneWire.Stream(bot: bot.uuidString, item: streaming.id.uuidString, text: text.text))
+        return PhoneWire.Stream(bot: bot.uuidString, item: streaming.id.uuidString, text: text.text)
     }
 
     /// The open cards of an Orb as lines of its conversation: the chat's, or a running routine's (`pendingApprovals`).
@@ -455,27 +532,31 @@ final class PhoneAccess {
             .environment(\.displayScale, scale))
         renderer.scale = scale
         // An orb-less image (layers dropped from the cache in between) is not kept: the phone caches by hash for good.
-        guard let image = renderer.cgImage, Self.showsTheOrb(image),
-              let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else { return nil }
-        let encoded = png.base64EncodedString()
+        guard let image = renderer.cgImage else { return nil }
+        let encoded = await Task.detached(priority: .userInitiated) { () -> String? in
+            guard Self.showsTheOrb(image),
+                  let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else { return nil }
+            return png.base64EncodedString()
+        }.value
+        guard let encoded else { return nil }
         avatarImages[hash] = encoded
         return encoded
     }
 
-    /// Whether `image` shows the orb's body: its center is opaque. Without its layers the canvas still draws the
-    /// ground shadow, so "some pixels" is not enough.
+    /// Whether `image` shows the orb's body: its center pixel is opaque. Cropping to 1×1 avoids rasterizing the full 256×256 buffer.
     nonisolated static func showsTheOrb(_ image: CGImage) -> Bool {
         let width = image.width, height = image.height
-        guard width > 0, height > 0 else { return false }
-        var pixels = [UInt8](repeating: 0, count: width * height * 4)
-        let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
-            guard let context = CGContext(data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
-                                          bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+        guard width > 0, height > 0,
+              let center = image.cropping(to: CGRect(x: width / 2, y: height / 2, width: 1, height: 1)) else { return false }
+        var pixel: [UInt8] = [0, 0, 0, 0]
+        let drawn = pixel.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(data: buffer.baseAddress, width: 1, height: 1, bitsPerComponent: 8,
+                                          bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
                                           bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
-            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            context.draw(center, in: CGRect(x: 0, y: 0, width: 1, height: 1))
             return true
         }
-        return drawn && pixels[((height / 2) * width + width / 2) * 4 + 3] > 200
+        return drawn && pixel[3] > 200
     }
 }
 

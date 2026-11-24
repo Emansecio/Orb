@@ -16,7 +16,7 @@ struct BotInspector: View {
     @State private var isConfirmingBypass = false
     @State private var isShowingBypassInfo = false
     /// Which of the General tab's cards are open, for the whole app (a card with a problem is open whatever this says).
-    @AppStorage(InspectorFold.modelKey) private var modelFoldOpen = false
+    @AppStorage(InspectorFold.modelKey) private var modelFoldOpen = true
     @AppStorage(InspectorFold.capabilitiesKey) private var capabilitiesFoldOpen = false
     /// What the browser has on this Mac and whether the search key is kept: read here, not by the browser rows, because a
     /// problem in them opens the "Pode usar" card even when the rows are not drawn.
@@ -476,7 +476,7 @@ struct BotInspector: View {
 
     /// The icons of the folded row: VoiceOver gets the count from the row itself.
     private func capabilityStrip(_ bot: Bot) -> some View {
-        HStack(spacing: Spacing.s) {
+        HStack(spacing: Spacing.xs + Spacing.hairline) {
             ForEach(Capability.allCases) { capability in
                 Image(systemName: capability.symbol)
                     .font(Typography.label)
@@ -598,11 +598,11 @@ struct BotInspector: View {
         } header: {
             // Not "Pasta": that is the tab's own name, right above.
             Text("Onde trabalha").sectionTitleStyle()
-        } footer: { FormFootnote {
+        } footer: {
             if let folderProblem {
-                Text(folderProblem).foregroundStyle(Palette.warn)
+                FormFootnote { Text(folderProblem).foregroundStyle(Palette.warn) }
             }
-        } }
+        }
 
         if let file = instructionFile {
             PanelSection {
@@ -644,19 +644,19 @@ struct BotInspector: View {
                 .transition(.adapted(.opacity.animation(Motion.exit), reduceMotion: reduceMotion))
             }
             if bot.permissionRules.count > 1 {
-                Button("Remover todas", role: .destructive) { model.update(bot.id) { $0.permissionRules = [] } }
+                Button("Remover todas") { model.update(bot.id) { $0.permissionRules = [] } }
                     .chipButton()
                     .help(Tip.removeAllGrants)
                     .transition(.quiet)
             }
         } header: {
             Text("Liberações").sectionTitleStyle()
-        } footer: { FormFootnote {
+        } footer: {
             // With grants listed the rule sits under them, with its detail one hover away; with none the empty note says it.
             if !bot.permissionRules.isEmpty {
-                Label(PermissionMode.grantsNote, systemImage: "info.circle").help(PermissionMode.grantsNoteDetail)
+                FormFootnote { Label(PermissionMode.grantsNote, systemImage: "info.circle").help(PermissionMode.grantsNoteDetail) }
             }
-        } }
+        }
         // Bound to the rules themselves (a short list), so only a grant coming or going moves anything.
         .animateChanges(of: bot.permissionRules)
 
@@ -792,14 +792,15 @@ struct BotInspector: View {
                     Spacer()
                     Button("Atualizar", systemImage: "arrow.clockwise") { filesRefresh += 1 }
                         .labelStyle(.iconOnly)
-                        .buttonStyle(.borderless)
+                        .buttonStyle(CircleGhostStyle(side: 24, fontSize: 11))
+                        .foregroundStyle(Palette.muted)
                         .iconTip(Tip.refreshFolder)
                 }
-            } footer: { FormFootnote {
+            } footer: {
                 if !listing.files.isEmpty {
-                    Text("Alterados no git primeiro, depois os mais recentes.")
+                    FormFootnote { Text("Alterados no git primeiro, depois os mais recentes.") }
                 }
-            } }
+            }
             // The list is read off the main thread and arrives later: it fades in, and its height (it may be long) is not
             // animated; a refresh that changes the files swaps them at once.
             .transition(.quiet)
@@ -849,11 +850,11 @@ struct BotInspector: View {
                     allRoutines.hangsOnLeadingEdge()
                 }
             }
-        } footer: { FormFootnote {
+        } footer: {
             if !routines.isEmpty {
-                Text("\(bot.name) faz isso sozinho, no horário, enquanto o app está aberto.")
+                FormFootnote { Text("\(bot.name) faz isso sozinho, no horário, enquanto o app está aberto.") }
             }
-        } }
+        }
         // Cards come and go in place (also the ones the Orb schedules or deletes from the chat). Only this tab watches.
         .animateChanges(of: routines.map(\.id))
     }
@@ -968,17 +969,10 @@ private struct InspectorTabBar: View {
                     .foregroundStyle(isSelected ? Palette.ink : Palette.secondary)
                     .frame(maxWidth: .infinity, minHeight: 44, maxHeight: 44)
                     .padding(.horizontal, 2)
-                    .background {
-                        if isSelected {
-                            RoundedRectangle(cornerRadius: Radius.small)
-                                .fill(Palette.ghostSelected)
-                                .matchedGeometryEffect(id: "destaque", in: highlight)
-                        }
-                    }
-                    // The gray fill alone is ~1.2:1 against the panel: a 2 pt accent bar says which tab is open.
+                    // One clean accent bar marks the active tab without doubling up a gray pill behind it.
                     .overlay(alignment: .bottom) {
                         if isSelected {
-                            Capsule().fill(Palette.accentText).frame(width: 18, height: 2)
+                            Capsule().fill(Palette.accentText).frame(width: 22, height: 2)
                                 .matchedGeometryEffect(id: "indicador", in: highlight)
                         }
                     }

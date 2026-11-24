@@ -25,26 +25,46 @@ final class LineProcess: Sendable {
         let stdin = Pipe(), stdout = Pipe(), stderr = Pipe()
 
         let (lines, continuation) = AsyncStream.makeStream(of: String.self)
-        let partial = OSAllocatedUnfairLock(initialState: Data())
+        let partial = OSAllocatedUnfairLock(initialState: (buffer: Data(), scanned: 0))
         stdout.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
             guard !data.isEmpty else {
                 handle.readabilityHandler = nil
-                let rest = partial.withLock { buffer in defer { buffer = Data() }; return buffer }
+                let rest = partial.withLock { state in
+                    defer { state = (Data(), 0) }
+                    return state.buffer
+                }
                 if !rest.isEmpty { continuation.yield(String(decoding: rest, as: UTF8.self)) }
                 continuation.finish()
                 return
             }
-            let complete = partial.withLock { buffer in
-                buffer.append(data)
-                var found: [Data] = []
-                while let newline = buffer.firstIndex(of: 0x0A) {
-                    found.append(buffer[buffer.startIndex..<newline])
-                    buffer.removeSubrange(buffer.startIndex...newline)
+            let complete = partial.withLock { state -> [String] in
+                state.buffer.append(data)
+                var found: [String] = []
+                var start = 0
+                var cursor = state.scanned
+                state.buffer.withUnsafeBytes { raw in
+                    guard let base = raw.baseAddress else { return }
+                    let count = raw.count
+                    while cursor < count, let nl = memchr(base + cursor, 0x0A, count - cursor) {
+                        let end = base.distance(to: nl)
+                        if end > start {
+                            let slice = UnsafeBufferPointer(start: (base + start).assumingMemoryBound(to: UInt8.self), count: end - start)
+                            found.append(String(decoding: slice, as: UTF8.self))
+                        }
+                        start = end + 1
+                        cursor = start
+                    }
+                }
+                if start > 0 {
+                    state.buffer.removeSubrange(..<start)
+                    state.scanned = 0
+                } else {
+                    state.scanned = state.buffer.count
                 }
                 return found
             }
-            for line in complete where !line.isEmpty { continuation.yield(String(decoding: line, as: UTF8.self)) }
+            for line in complete { continuation.yield(line) }
         }
         let errors = OSAllocatedUnfairLock(initialState: OutputBuffer(limit: 4000))
         let (errorsDrained, errorsDone) = AsyncStream<Never>.makeStream()

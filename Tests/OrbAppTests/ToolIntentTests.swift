@@ -270,12 +270,6 @@ struct ToolIntentTests {
                 "grep finding nothing: not a failure, but not a plain success either")
     }
 
-    @Test func theToolWritesWhatTheChatReadsBack() {
-        // The writer and the reader share the words (`RunCommandTool`, `CommandOutput`).
-        #expect(RunCommandTool.folderNote == "\n\nem ")
-        #expect(CommandOutput(CommandOutput.exitLead + "2\nx").end == .code(2))
-    }
-
     // MARK: The working line
 
     @Test func theWorkingLineSaysWhatTheCurrentActionIsFor() {
@@ -370,15 +364,6 @@ struct ToolIntentTests {
         let calls = [described("Ler A"), described("Conferir B"), described(nil)]
         #expect(ToolTally.work(calls, seconds: 65) == "Trabalhou por 1 min 05 s · rodou 3 comandos")
         #expect(ToolTally.work([shell("ls")], seconds: 5) == "Trabalhou por 5 s · rodou 1 comando")
-    }
-
-    @Test func aStumbleTheOrbGotOverIsQuietAndOneItDidNotIsRed() {
-        let failed = described("Ler A", .failed), worked = described("Ler B"), running = described("Ler C", .running)
-        #expect(ToolTally.failures([failed, worked]) == ToolTally.Failures(text: "1 com erro", recovered: true))
-        #expect(ToolTally.failures([worked, failed]) == ToolTally.Failures(text: "1 com erro", recovered: false))
-        #expect(ToolTally.failures([failed, failed, worked]) == ToolTally.Failures(text: "2 com erro", recovered: true))
-        #expect(ToolTally.failures([failed, running])?.recovered == true, "it goes on")
-        #expect(ToolTally.failures([worked, running]) == nil)
     }
 
     // MARK: The model and the conversations

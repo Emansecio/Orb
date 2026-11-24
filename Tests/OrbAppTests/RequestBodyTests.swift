@@ -248,10 +248,4 @@ struct RequestBodyTests {
         #expect(sent.body?["prompt_cache_key"] == nil)
         #expect(sent.body?["input"] != nil)
     }
-
-    @Test func theChatCacheKeyStaysForOpenAIOnly() {
-        let openAI = OpenAIClient(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: nil, conversationID: "bot-1")
-        #expect(openAI.isOpenAI)
-        #expect(!OpenAIClient(baseURL: URL(string: "https://gateway.test/v1")!, apiKey: nil, conversationID: "bot-1").isOpenAI)
-    }
 }

@@ -6,7 +6,6 @@ struct TeamChatView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let teamID: UUID
-    @State private var draftMessage = ""
     @State private var isConfirmingDelete = false
 
     var body: some View {
@@ -14,7 +13,6 @@ struct TeamChatView: View {
             let items = model.teamThreadItems(for: team.id)
             VStack(spacing: 0) {
                 TeamChatHeaderBar(team: team, requestDelete: { isConfirmingDelete = true })
-                Divider().overlay(Palette.line)
 
                 ScrollViewReader { proxy in
                     ScrollView {
@@ -27,7 +25,7 @@ struct TeamChatView: View {
                                     model.startTeam(team.id)
                                 }
                             } else {
-                                VStack(alignment: .leading, spacing: 10) {
+                                LazyVStack(alignment: .leading, spacing: 12) {
                                     Text("Fio da missão")
                                         .font(Typography.label.weight(.medium))
                                         .foregroundStyle(Palette.faint)
@@ -51,12 +49,7 @@ struct TeamChatView: View {
                     }
                 }
 
-                Divider().overlay(Palette.line)
-                TeamComposerBar(team: team, text: $draftMessage) {
-                    let text = draftMessage
-                    guard model.postTeamMessage(text, to: team.id) else { return }
-                    draftMessage = ""
-                }
+                TeamComposerBar(teamID: team.id)
             }
             .background(Palette.canvas)
             .onAppear { model.loadTeamThreadIfNeeded(team.id) }
@@ -128,8 +121,10 @@ private struct TeamChatHeaderBar: View {
             .accessibilityLabel("Mais ações")
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 12)
-        .background(Palette.chrome)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
+        .background(Palette.canvas)
+        .overlay(alignment: .bottom) { Rectangle().fill(Palette.line).frame(height: 1) }
     }
 
     private var statusTint: Color {
@@ -173,31 +168,20 @@ private struct TeamThreadItemRow: View {
         switch item.kind {
         case .user(let text, _):
             HStack {
-                Spacer(minLength: 40)
+                Spacer(minLength: TranscriptLayout.bubbleSpacer)
                 Text(text)
-                    .font(Typography.text)
                     .foregroundStyle(Palette.ink)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Palette.userBubble, in: .rect(cornerRadius: Radius.medium))
+                    .lineSpacing(Palette.conversationLineSpacing)
+                    .userBubble()
             }
         case .bot(let text, _):
-            Group {
-                if let attributed = try? AttributedString(
-                    markdown: text,
-                    options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-                ) {
-                    Text(attributed)
-                } else {
-                    Text(text)
-                }
-            }
-                .font(Typography.text)
-                .foregroundStyle(Palette.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(14)
+            MarkdownChunk(source: text).equatable()
+                .font(Palette.conversationFont)
+                .foregroundStyle(Palette.ink)
+                .lineSpacing(Palette.conversationLineSpacing)
+                .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .card()
+                .padding(.vertical, 2)
         case .notice(let text):
             HStack(spacing: 8) {
                 Image(systemName: "info.circle")
@@ -215,36 +199,38 @@ private struct TeamThreadItemRow: View {
 }
 
 private struct TeamComposerBar: View {
-    let team: OrbTeam
-    @Binding var text: String
-    let send: () -> Void
+    @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let teamID: UUID
+    @State private var text = ""
+    @FocusState private var isFocused: Bool
+
+    private func send() {
+        guard model.postTeamMessage(text, to: teamID) else { return }
+        text = ""
+    }
 
     var body: some View {
+        let enabled = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         HStack(alignment: .bottom, spacing: 10) {
             TextField("Direcionar o time ou continuar a missão…", text: $text, axis: .vertical)
                 .textFieldStyle(.plain)
-                .font(Typography.text)
-                .lineLimit(1...4)
+                .font(Palette.conversationFont)
+                .foregroundStyle(Palette.ink)
+                .lineLimit(1...5)
+                .focused($isFocused)
                 .onSubmit { send() }
 
-            Button {
-                send()
-            } label: {
-                let enabled = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 22))
-                    .foregroundStyle(enabled ? Palette.accentText : Palette.hint)
-            }
-            .buttonStyle(.plain)
-            .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            .help("Enviar direcionamento ao time")
+            SendArrowButton(canSend: enabled, help: "Enviar direcionamento ao time", action: send)
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, Spacing.m + Spacing.xs)
         .padding(.vertical, 10)
-        .background(Palette.surface, in: .rect(cornerRadius: Radius.card))
-        .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Palette.line))
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
+        .background {
+            ComposerSurface(isFocused: isFocused, isDropTargeted: false, reduceMotion: reduceMotion)
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, Spacing.xs + Spacing.hairline)
+        .padding(.bottom, Spacing.m)
         .frame(maxWidth: 780)
         .frame(maxWidth: .infinity)
     }

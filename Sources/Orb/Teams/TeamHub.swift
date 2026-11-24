@@ -102,9 +102,12 @@ final class TeamHub {
 
     // MARK: Continuous loop
 
+    private static let maxNoProgressRounds = 6
+
     private func runLoop(teamID: UUID, runID: UUID) async {
         stagnations[teamID] = TeamStagnationDetector()
         var lastCompletedOwnerID: UUID?
+        var noProgressRounds = 0
 
         while !Task.isCancelled, isCurrentRun(teamID: teamID, runID: runID), let team = model?.team(teamID), team.status == .running {
             let readyStages = nextReadyStages(in: team)
@@ -116,6 +119,12 @@ final class TeamHub {
                         finishRun(teamID: teamID, status: .completed)
                         return
                     }
+                    noProgressRounds += 1
+                    if noProgressRounds >= Self.maxNoProgressRounds {
+                        finishRun(teamID: teamID, status: .waitingUser)
+                        return
+                    }
+                    try? await Task.sleep(for: .milliseconds(min(4_000, 500 * noProgressRounds)))
                     continue
                 }
                 // All remaining open stages are waiting on external blockers (`blockerNote`).
@@ -138,6 +147,14 @@ final class TeamHub {
             if let doneStage = results.first(where: { $0.1 })?.0,
                let latest = model?.team(teamID)?.mission.stages.first(where: { $0.id == doneStage }) {
                 lastCompletedOwnerID = latest.ownerMemberID
+                noProgressRounds = 0
+            } else {
+                noProgressRounds += 1
+                if noProgressRounds >= Self.maxNoProgressRounds {
+                    finishRun(teamID: teamID, status: .waitingUser)
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(min(4_000, 500 * noProgressRounds)))
             }
         }
     }

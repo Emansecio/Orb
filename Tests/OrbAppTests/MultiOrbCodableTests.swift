@@ -303,11 +303,6 @@ struct OrbEventSentenceTests {
         #expect(sentence(.unknown) == "")
         #expect(sentence(.unknown, detail: "texto") == "texto")
     }
-
-    @Test func theSentenceIsPure() {
-        let event = OrbEvent(kind: .orbCreated, actor: atlas, subject: revisor)
-        #expect(event.sentence == event.sentence)
-    }
 }
 
 struct PortugueseArticleTests {
@@ -371,12 +366,6 @@ struct MultiOrbInvariantTests {
         #expect(capped?.memberIDs == Array(ten.prefix(8)))
         #expect(capped?.orchestratorID == ten[0])
         #expect(OrbGroup.memberLimits == 2...8)
-    }
-
-    @Test func theSizesAreTheOnesTheContractNames() {
-        #expect(DelegationLimits.messageLimit == 4_000 && DelegationLimits.replyLimit == 6_000)
-        #expect(DelegationLimits.replyLimit > DelegationLimits.messageLimit)
-        #expect(DelegationLimits.workTimeout > DelegationLimits.requestTimeout)
     }
 
     @Test func howManyRequestsAndHowDeepAreNotLimited() throws {
@@ -640,9 +629,9 @@ struct MultiOrbActivityTests {
 
     @Test func itRanksBelowEverythingTheOrbDoesAndAboveWatchingYouType() {
         func activity(working: Bool = false, tool: ToolCall.Kind? = nil, composing: Bool = false, conversing: Bool = false,
-                      awaiting: Bool = false) -> OrbActivity {
+                      awaiting: Bool = false, speaking: Bool = false) -> OrbActivity {
             BotLive.activity(awaitingApproval: awaiting, failed: false, celebrating: false, isWorking: working, tool: tool,
-                             speaking: false, listening: false, composing: composing, conversing: conversing)
+                             speaking: speaking, listening: false, composing: composing, conversing: conversing)
         }
         #expect(activity(conversing: true) == .conversing)
         #expect(activity(composing: true, conversing: true) == .conversing)
@@ -650,6 +639,8 @@ struct MultiOrbActivityTests {
         #expect(activity() == .idle)
         #expect(activity(working: true, conversing: true) == .thinking)
         #expect(activity(working: true, tool: .orbs) == .conversing)
+        #expect(activity(working: true, tool: .orbs, speaking: true) == .conversing)
+        #expect(activity(working: true, conversing: true, speaking: true) == .speaking)
         #expect(activity(working: true, tool: .shell, conversing: true) == .typing)
         #expect(activity(conversing: true, awaiting: true) == .waiting)
     }
@@ -679,20 +670,10 @@ struct MultiOrbActivityTests {
 // MARK: - Screens
 
 struct MultiOrbScreenTests {
-    @Test func theNewSelectionIsAnItemOfTheSidebar() {
-        let id = UUID()
-        #expect(SidebarItem.group(id) != SidebarItem.bot(id))
-        #expect(DetailPage.page(for: .group(id), botIDs: [id]) == .orb)
-    }
-
-    @Test @MainActor func theSnapshotChainKnowsNoScreenYet() {
+    @Test @MainActor func theSnapshotModesAreRegistered() {
         let folder = FileManager.default.temporaryDirectory.appending(path: "OrbSnap-\(UUID().uuidString)")
         defer { removeTestFolder(folder) }
         let model = AppModel(store: Store(directory: folder), runsBackgroundWork: false, secretVault: MemoryVault())
-        // "events" and the delegation screens belong to WP2, the creation card's to WP3, the groups' to WP6, the wizard's to WP4.
-        for screen in ["settings-general-orbs", "transcript"] {
-            #expect(MultiOrbSnapshots.view(screen, model: model) == nil, "\(screen)")
-        }
         #expect(MultiOrbSnapshots.view("group-chat", model: model) != nil) // WP6
         // The creation card's modes are registered (WP3).
         for screen in ["orb-proposal", "orb-proposal-editing", "orb-proposal-created", "orb-proposal-dismissed", "orb-proposal-narrow",

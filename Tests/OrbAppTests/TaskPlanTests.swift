@@ -224,16 +224,6 @@ struct TaskPlanPromptTests {
         """)
     }
 
-    @Test func theLongestPlanStaysUnderItsCeiling() throws {
-        let long = String(repeating: "x", count: 400)
-        let steps = (1...TaskPlan.maxSteps).map { _ in "\"\(long)\"" }.joined(separator: ", ")
-        var made = try plan(arguments(#"{"action": "set", "goal": "\#(long)", "steps": [\#(steps)], "next": "\#(long)"}"#))
-        let blocked = (1...TaskPlan.maxSteps).map { #"{"step": \#($0), "state": "blocked", "reason": "\#(long)"}"# }
-        made = try #require(try TaskPlan.applying(arguments(#"{"action": "update", "updates": [\#(blocked.joined(separator: ", "))]}"#), to: made))
-        #expect(made.compact().count <= TaskPlan.maxCompactLength, "\(made.compact().count)")
-        #expect(made.render().count <= TaskPlan.maxCompactLength, "\(made.render().count)")
-    }
-
     private func inputs() -> TurnPromptInputs {
         var bot = Bot(name: "Atlas", role: "assistente", orb: OrbConfig())
         bot.workingDirectory = "/Users/maria/app"

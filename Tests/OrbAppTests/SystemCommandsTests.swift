@@ -169,13 +169,6 @@ import Testing
         #expect(items.filter { $0.keys.contains("⇧↩") }.count == 1)
     }
 
-    @Test func catalogListsTheCommandsOfTheMenus() {
-        let keys = Set(ShortcutCatalog.groups.flatMap(\.items).map(\.keys))
-        for key in ["⌘N", "⌘K", "⌘L", "⇧⌘O", "⌘.", "⌥⌘B", "⌥⌘R", "⌥⌘C", "⌥⌘K", "⌥↑", "⌥↓"] {
-            #expect(keys.contains(key), "\(key) falta no catálogo")
-        }
-    }
-
     // MARK: Palette
 
     private func sample() -> [PaletteEntry] {

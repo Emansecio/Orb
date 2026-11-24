@@ -168,13 +168,6 @@ struct ContextBudgetTests {
         #expect(learned.tokens == 16_800)
         #expect(learned.overheadTokens == budget.overheadTokens)
     }
-
-    @Test func overheadIsEstimatedFromThePromptAndSpecs() {
-        let spec = ToolSpec(name: "read_file", description: String(repeating: "d", count: 100), parameters: .schema(["path": .property("string", "p")]))
-        let tokens = ContextBudget.overheadTokens(system: String(repeating: "s", count: 350), specs: [spec])
-        let characters = 350 + "read_file".count + 100 + spec.parameters.jsonString.count
-        #expect(tokens == Int((Double(characters) / 3.5).rounded(.up)))
-    }
 }
 
 struct ContextMemoryLevelTests {

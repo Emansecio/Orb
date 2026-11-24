@@ -32,44 +32,45 @@ struct TextFile: Sendable {
 
     /// Strict UTF-8 first, then byte-order marks (UTF-16/32), UTF-16 without a mark, and finally Windows-1252
     /// (which is what most non-UTF-8 text on a Mac or Windows machine is). Nil for binary data.
-    static func decode(_ data: Data) -> TextFile? {
+    static func decode(_ data: Data, detectLineEnding: Bool = true) -> TextFile? {
+        let ending: (String) -> LineEnding = { detectLineEnding ? lineEnding(of: $0) : .lf }
         let head = [UInt8](data.prefix(4))
         if head.starts(with: [0xEF, 0xBB, 0xBF]), let text = String(data: data.dropFirst(3), encoding: .utf8) {
-            return TextFile(text: text, encoding: .utf8, hasBOM: true, lineEnding: lineEnding(of: text))
+            return TextFile(text: text, encoding: .utf8, hasBOM: true, lineEnding: ending(text))
         }
         if head.starts(with: [0xFF, 0xFE, 0x00, 0x00]), let text = String(data: data.dropFirst(4), encoding: .utf32LittleEndian) {
-            return TextFile(text: text, encoding: .utf32LittleEndian, hasBOM: true, lineEnding: lineEnding(of: text))
+            return TextFile(text: text, encoding: .utf32LittleEndian, hasBOM: true, lineEnding: ending(text))
         }
         if head.starts(with: [0x00, 0x00, 0xFE, 0xFF]), let text = String(data: data.dropFirst(4), encoding: .utf32BigEndian) {
-            return TextFile(text: text, encoding: .utf32BigEndian, hasBOM: true, lineEnding: lineEnding(of: text))
+            return TextFile(text: text, encoding: .utf32BigEndian, hasBOM: true, lineEnding: ending(text))
         }
         if head.starts(with: [0xFF, 0xFE]), let text = String(data: data.dropFirst(2), encoding: .utf16LittleEndian) {
-            return TextFile(text: text, encoding: .utf16LittleEndian, hasBOM: true, lineEnding: lineEnding(of: text))
+            return TextFile(text: text, encoding: .utf16LittleEndian, hasBOM: true, lineEnding: ending(text))
         }
         if head.starts(with: [0xFE, 0xFF]), let text = String(data: data.dropFirst(2), encoding: .utf16BigEndian) {
-            return TextFile(text: text, encoding: .utf16BigEndian, hasBOM: true, lineEnding: lineEnding(of: text))
+            return TextFile(text: text, encoding: .utf16BigEndian, hasBOM: true, lineEnding: ending(text))
         }
 
         if data.prefix(8192).contains(0) {
             guard let encoding = guessUTF16WithoutMark(data.prefix(8192)),
                   let text = String(data: data, encoding: encoding), looksLikeText(text) else { return nil }
-            return TextFile(text: text, encoding: encoding, hasBOM: false, lineEnding: lineEnding(of: text))
+            return TextFile(text: text, encoding: encoding, hasBOM: false, lineEnding: ending(text))
         }
         if let text = String(data: data, encoding: .utf8) {
-            return TextFile(text: text, encoding: .utf8, hasBOM: false, lineEnding: lineEnding(of: text))
+            return TextFile(text: text, encoding: .utf8, hasBOM: false, lineEnding: ending(text))
         }
         // Mostly UTF-8 with a few bad bytes: reading all of it as Windows-1252 would turn every accent into two characters.
         let profile = utf8Profile(data)
         if profile.multibyte >= 3, profile.invalid * 3 <= profile.multibyte, profile.invalid <= 3 || profile.invalid * 10 <= profile.multibyte {
             let text = String(decoding: data, as: UTF8.self)
-            return TextFile(text: text, encoding: .utf8, hasBOM: false, lineEnding: lineEnding(of: text), invalidUTF8Bytes: profile.invalid)
+            return TextFile(text: text, encoding: .utf8, hasBOM: false, lineEnding: ending(text), invalidUTF8Bytes: profile.invalid)
         }
         if let text = String(data: data, encoding: .windowsCP1252) {
-            return TextFile(text: text, encoding: .windowsCP1252, hasBOM: false, lineEnding: lineEnding(of: text))
+            return TextFile(text: text, encoding: .windowsCP1252, hasBOM: false, lineEnding: ending(text))
         }
         // Windows-1252 leaves five bytes undefined; Latin-1 maps every byte.
         guard let text = String(data: data, encoding: .isoLatin1) else { return nil }
-        return TextFile(text: text, encoding: .isoLatin1, hasBOM: false, lineEnding: lineEnding(of: text), isLatin1Fallback: true)
+        return TextFile(text: text, encoding: .isoLatin1, hasBOM: false, lineEnding: ending(text), isLatin1Fallback: true)
     }
 
     /// How many valid multi-byte UTF-8 sequences `data` holds, and how many bytes belong to none (a truncated or stray one).

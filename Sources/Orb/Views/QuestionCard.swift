@@ -71,12 +71,15 @@ struct QuestionCard: View {
 
     private var pendingCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            header(asked: false)
-            Text(question.text)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(Palette.ink)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 6) {
+                header(asked: false)
+                Text(question.text)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Palette.ink)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.bottom, 2)
             if !question.options.isEmpty {
                 VStack(alignment: .leading, spacing: Spacing.s) {
                     ForEach(Array(question.options.enumerated()), id: \.element) { index, option in
@@ -121,7 +124,7 @@ struct QuestionCard: View {
                     HStack(spacing: 7) {
                         Text("Responder")
                         if answerKeyApplies {
-                            Text(AppShortcut.commandReturn.label).font(Typography.small).opacity(0.55)
+                            Text(AppShortcut.commandReturn.label).font(Typography.small).opacity(0.8)
                         }
                     }
                 }
@@ -160,8 +163,8 @@ struct QuestionCard: View {
     private func fieldRow(_ field: OrbQuestion.Field, index: Int, value: Binding<String>) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(field.label)
-                .font(Typography.label.weight(.medium))
-                .foregroundStyle(Palette.secondary)
+                .font(Typography.small.weight(.semibold))
+                .foregroundStyle(Palette.muted)
             if field.options.isEmpty {
                 TextField(field.label, text: value, prompt: nil)
                     .labelsHidden()

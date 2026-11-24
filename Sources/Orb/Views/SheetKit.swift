@@ -43,11 +43,8 @@ struct SheetCloseButton: View {
     var body: some View {
         Button("Fechar", systemImage: "xmark", action: action)
             .labelStyle(.iconOnly)
-            .buttonStyle(.plain)
-            .font(.system(size: 12, weight: .semibold))
+            .buttonStyle(CircleGhostStyle(side: 24, fontSize: 12))
             .foregroundStyle(Palette.muted)
-            .frame(width: 24, height: 24)
-            .contentShape(.rect)
             .help("Fechar (Esc)")
     }
 }
@@ -160,9 +157,6 @@ struct SheetFooter: View {
     var primaryHelp = ""
     let primary: () -> Void
 
-    /// Return's shortcut for the primary button, or none when the sheet keeps it from being the default.
-    static func primaryShortcut(isDefault: Bool) -> KeyboardShortcut? { isDefault ? .defaultAction : nil }
-
     var body: some View {
         SheetFooterBar {
             // One row when it fits; otherwise the leading action takes a row of its own above the others (the buttons keep
@@ -217,7 +211,7 @@ struct SheetFooter: View {
             }
             Button(primaryTitle, action: primary)
                 .buttonStyle(PrimaryPillStyle(isDestructive: primaryIsDestructive))
-                .keyboardShortcut(SheetFooter.primaryShortcut(isDefault: primaryIsDefault))
+                .keyboardShortcut(primaryIsDefault ? .defaultAction : nil)
                 .help(primaryHelp)
                 .disabled(isPrimaryDisabled)
         }

@@ -445,12 +445,6 @@ struct SidebarCategoryPersistenceTests {
 }
 
 struct SidebarCategoryLayoutTests {
-    @Test func headingNameStartsWhereAnOrbsNameStarts() {
-        // An Orb row: 8 pt padding, the 30 pt avatar, an 8 pt gap. The heading name must land on the same edge.
-        let orbNameEdge: CGFloat = 8 + 30 + 8
-        #expect(SidebarCategoryLayout.titleInset == orbNameEdge)
-    }
-
     @Test @MainActor func previousOrbFromAPageGoesToTheLastOne() throws {
         let world = CategoryWorld()
         let model = world.model
