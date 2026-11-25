@@ -138,8 +138,8 @@ enum TranscriptLayout {
     static let composerTrailing: CGFloat = 0
     /// The band over the composer where the conversation fades out instead of being cut by the card's border.
     static let composerFade: CGFloat = 28
-    /// The least space kept at the left of a user bubble, so a short line does not touch the right edge.
-    static let bubbleSpacer: CGFloat = 120
+    /// The least space kept at the left of a user bubble (matches `gutter`), while `cardWidth` caps its width on wide screens.
+    static let bubbleMinSpacer: CGFloat = gutter
     /// How far an empty chat pushes its first block down: the same for the spinner of a loading one.
     static let emptyStateTop: CGFloat = 72
 }
@@ -227,6 +227,7 @@ enum TranscriptSpeech {
 
 private struct UserBubble: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.chatTextScale) private var textScale
     let text: String
     let attachments: [String]
     /// It reached the Orb in the middle of its task (see `TranscriptItem.duringTask`): a small, quiet line says so.
@@ -241,7 +242,7 @@ private struct UserBubble: View {
 
     var body: some View {
         HStack {
-            Spacer(minLength: TranscriptLayout.bubbleSpacer)
+            Spacer(minLength: TranscriptLayout.bubbleMinSpacer)
             // No "Você" over it: the bubble on the right says whose it is, and its label for VoiceOver starts with "Você".
             VStack(alignment: .trailing, spacing: 6) {
                 if !attachments.isEmpty { AttachmentStack(paths: attachments) }
@@ -253,6 +254,7 @@ private struct UserBubble: View {
                     }
                     .foregroundStyle(Palette.ink)
                     .userBubble()
+                    .font(ChatTextScale.conversationFont(textScale))
                     .contextMenu {
                         Button("Copiar") { Clipboard.copy(text) }
                         // Without the mouse too; when it cannot be edited now, the reason is said instead.
@@ -275,13 +277,23 @@ private struct UserBubble: View {
                     }
                 }
             }
+            .frame(maxWidth: cardWidth, alignment: .trailing)
             .overlay(alignment: .leading) {
-                // To the left of the bubble, in the space the row leaves; the row's hover keeps it up while the pointer
-                // travels to it. Made only while hovered: whether the message can be edited is looked at then.
-                if hovering, editable {
-                    EditMessageButton(botID: botID, itemID: itemID)
-                        .offset(x: -34)
-                        .transition(.opacity)
+                // Quick Copy + Edit to the left of the bubble, positioned cleanly via alignmentGuide.
+                if hovering, !text.isEmpty || editable {
+                    HStack(spacing: 4) {
+                        if !text.isEmpty {
+                            CopyButton(symbol: "doc.on.doc", help: "Copiar mensagem", copiedHelp: "Copiado") {
+                                Clipboard.copy(text)
+                            }
+                        }
+                        if editable {
+                            EditMessageButton(botID: botID, itemID: itemID)
+                        }
+                    }
+                    .fixedSize()
+                    .alignmentGuide(.leading) { $0.width + 6 }
+                    .transition(.opacity)
                 }
             }
         }
@@ -429,6 +441,7 @@ private struct BotMessage: View {
     /// Readable reasoning/thinking summary returned for this reply.
     var reasoning: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.chatTextScale) private var textScale
 
     @State private var hovering = false
     @State private var showsReasoning = false
@@ -473,27 +486,29 @@ private struct BotMessage: View {
                 // the finished blocks, whatever the list around it is animating (the row's own entrance is outside this).
                 .transaction { $0.animation = nil }
                 .environment(\.proseIsQuiet, isNarration)
-                .font(isNarration ? Palette.narrationFont : Palette.conversationFont)
+                .font(isNarration ? ChatTextScale.narrationFont(textScale) : ChatTextScale.conversationFont(textScale))
                 .foregroundStyle(isNarration ? Palette.secondary : Palette.proseInk)
                 .lineSpacing(isNarration ? Palette.narrationLineSpacing : Palette.conversationLineSpacing)
                 .textSelection(.enabled)
                 // Beside its Orb, on the chat's left edge (the tool lines, the notices, the cards'), the first line level with
                 // the avatar's middle. Narration starts there too, set apart by its quieter type.
                 .replyText(narration: isNarration)
-            // Under the reply, aligned with the text: never overflows narrow windows or collides with the rail.
-            // Not mounted at all at rest: a long chat does not carry a hidden set of buttons on every reply.
-            let showsActions = hovering || selection != nil || isAskingWhy
-            if live == nil, showsActions || rated?.reaction != nil {
-                Group {
+            // Fixed-height action slot below finished answers prevents vertical layout shifts on hover;
+            // the latest reply keeps its actions subtly visible at rest for immediate discoverability.
+            if live == nil, !isNarration {
+                let showsActions = hovering || selection != nil || isAskingWhy || isLastReply
+                ZStack(alignment: .leading) {
                     if showsActions {
                         MessageActions(text: text, botID: botID, offersRedo: offersRedo, selection: selection, rated: rated,
                                        stamp: stamp, isAskingWhy: $isAskingWhy, redo: redo)
-                    } else if let rated {
+                            .opacity(hovering || selection != nil || isAskingWhy ? 1 : 0.65)
+                    } else if let rated, rated.reaction != nil {
                         ReactionButtons(itemID: rated.itemID, botID: botID, reaction: rated.reaction, isAsking: $isAskingWhy,
                                         showsOnlyChosen: true)
                     }
                 }
-                .transition(.opacity)
+                .frame(minHeight: 26, alignment: .leading)
+                .animation(Motion.hover(hovering), value: hovering)
             }
         }
             .environment(\.proseSelection, live == nil ? ProseSelectionAction(
@@ -1627,7 +1642,8 @@ struct WorkGroupRow<Content: View>: View, Equatable {
         let failures = [.stopped, .appClosed].contains(outcome) ? nil : ToolTally.failures(calls)
         VStack(alignment: .leading, spacing: 12) {
             let kinds = Self.kinds(of: calls)
-            let meta = answer?.text
+            // Avoid showing a second clock timestamp next to the elapsed duration ("1 min 35 s ... 0:01").
+            let meta = seconds == nil ? answer?.text : nil
             Button(action: toggle) {
                 // One object for the request's work, as wide as the chat's other cards: what it was (the symbols of the
                 // kinds of action), how long and how much, and at its end when the answer came and what it used. In a

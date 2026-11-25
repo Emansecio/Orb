@@ -168,11 +168,12 @@ private struct TeamThreadItemRow: View {
         switch item.kind {
         case .user(let text, _):
             HStack {
-                Spacer(minLength: TranscriptLayout.bubbleSpacer)
+                Spacer(minLength: TranscriptLayout.bubbleMinSpacer)
                 Text(text)
                     .foregroundStyle(Palette.ink)
                     .lineSpacing(Palette.conversationLineSpacing)
                     .userBubble()
+                    .frame(maxWidth: cardWidth, alignment: .trailing)
             }
         case .bot(let text, _):
             MarkdownChunk(source: text).equatable()

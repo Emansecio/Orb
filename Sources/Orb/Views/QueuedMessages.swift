@@ -89,7 +89,7 @@ private struct QueuedBubble: View {
 
     var body: some View {
         HStack {
-            Spacer(minLength: 120)
+            Spacer(minLength: TranscriptLayout.bubbleMinSpacer)
             VStack(alignment: .trailing, spacing: 2) {
                 VStack(alignment: .trailing, spacing: 6) {
                     if !message.attachmentPaths.isEmpty { AttachmentStack(paths: message.attachmentPaths, dimmed: true) }
@@ -111,7 +111,7 @@ private struct QueuedBubble: View {
                     buttons
                         .fixedSize()
                         .alignmentGuide(.leading) { $0.width + 6 }
-                        .opacity(showsButtons ? 1 : 0)
+                        .opacity(showsButtons ? 1 : 0.55)
                         .animation(Motion.hover(showsButtons), value: showsButtons)
                         // The row already offers the same three actions to VoiceOver (`accessibilityActions`): the buttons
                         // are for the pointer and the keyboard, and would be read a second time.

@@ -7,9 +7,8 @@ import AppKit
 /// A compact bar at the top of the chat, like the one of Safari or Xcode: the field, "3 de 12", the arrows, the list of
 /// results and "Fechar". ↩ / ↓ / ⌘G go to the next result, ⇧↩ / ↑ / ⇧⌘G to the previous one, Esc closes.
 struct FindBar: View {
-    /// How far the chat's content is pushed down while the bar is open: the bar sits 10 pt from the top and is about 34 pt
-    /// tall, the list already has 20 pt of its own above the first message, and a gap of 8 pt is left under the bar.
-    static let clearance: CGFloat = 32
+    /// How far the chat's content is pushed down while the bar is open: 10 pt top inset + ~36 pt bar + 6 pt breathing room.
+    static let clearance: CGFloat = 52
 
     @Environment(AppModel.self) private var model
     let find: ConversationFind
@@ -36,6 +35,14 @@ struct FindBar: View {
                 .onKeyPress(.upArrow) { find.previous(); return .handled }
                 .onKeyPress(.escape) { close(); return .handled }
                 .accessibilityLabel("Buscar na conversa")
+            if !find.query.isEmpty {
+                Button("Limpar busca", systemImage: "xmark.circle.fill") { find.query = "" }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(Palette.muted)
+                    .font(Typography.small)
+                    .help("Limpar busca")
+            }
             status
             HStack(spacing: Spacing.hairline) {
                 step("chevron.up", help: Tip.findPrevious(), label: "Resultado anterior", enabled: hasResults) { find.previous() }

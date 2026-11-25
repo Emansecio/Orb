@@ -17,7 +17,7 @@ struct BotInspector: View {
     @State private var isShowingBypassInfo = false
     /// Which of the General tab's cards are open, for the whole app (a card with a problem is open whatever this says).
     @AppStorage(InspectorFold.modelKey) private var modelFoldOpen = true
-    @AppStorage(InspectorFold.capabilitiesKey) private var capabilitiesFoldOpen = false
+    @AppStorage(InspectorFold.capabilitiesKey) private var capabilitiesFoldOpen = true
     /// What the browser has on this Mac and whether the search key is kept: read here, not by the browser rows, because a
     /// problem in them opens the "Pode usar" card even when the rows are not drawn.
     @State private var browserStatus: BrowserStatus?
@@ -320,6 +320,7 @@ struct BotInspector: View {
                                                              provider: bot.searchProvider, hasKey: searchKey)
         let capabilitiesAreOpen = InspectorFold.isOpen(stored: capabilitiesFoldOpen, hasProblem: browserHasProblem)
         modelCard(bot, info: info, unavailable: unavailable, isOpen: modelIsOpen)
+        grantsCard(bot)
         // Read here, once per pass, and only for the open card that shows them.
         let skillNames = capabilitiesAreOpen ? model.skills(for: bot.id).map(\.name) : []
         let connectorNames = capabilitiesAreOpen ? model.connectorNames(for: bot.id) : []
@@ -443,6 +444,43 @@ struct BotInspector: View {
         }
     }
 
+    // MARK: Liberações
+
+    /// Standing grants ("Sempre permitir…") live in Geral alongside permission mode and capabilities.
+    @ViewBuilder
+    private func grantsCard(_ bot: Bot) -> some View {
+        PanelSection {
+            if bot.permissionRules.isEmpty {
+                PanelEmptyNote("Nenhuma liberação ainda", systemImage: "checkmark.shield",
+                               detail: "Ao aprovar um pedido, escolha “Sempre permitir…” e ela aparece aqui. \(PermissionMode.grantsNote)")
+                    .transition(.quiet)
+            }
+            ForEach(bot.permissionRules, id: \.self) { rule in
+                LabeledContent {
+                    Button("Remover") { model.update(bot.id) { $0.permissionRules.removeAll { $0 == rule } } }
+                        .chipButton()
+                        .help(Tip.removeGrant)
+                } label: {
+                    Text(rule.title)
+                }
+                .transition(.adapted(.opacity.animation(Motion.exit), reduceMotion: reduceMotion))
+            }
+            if bot.permissionRules.count > 1 {
+                Button("Remover todas") { model.update(bot.id) { $0.permissionRules = [] } }
+                    .chipButton()
+                    .help(Tip.removeAllGrants)
+                    .transition(.quiet)
+            }
+        } header: {
+            Text("Liberações").sectionTitleStyle()
+        } footer: {
+            if !bot.permissionRules.isEmpty {
+                FormFootnote { Label(PermissionMode.grantsNote, systemImage: "info.circle").help(PermissionMode.grantsNoteDetail) }
+            }
+        }
+        .animateChanges(of: bot.permissionRules)
+    }
+
     // MARK: Pode usar
 
     /// Folded: one line with a small icon for each thing the Orb may use, dimmed for what is off. Open: a switch row for
@@ -451,11 +489,15 @@ struct BotInspector: View {
     private func capabilitiesCard(_ bot: Bot, isOpen: Bool, hasProblem: Bool, skillNames: [String],
                                   connectorNames: [String]) -> some View {
         let enabled = Capability.allCases.filter { bot.capabilities.contains($0) }.count
+        let countText = CapabilityStrip.spokenCount(enabled: enabled, total: Capability.allCases.count)
         return PanelSection {
             FoldHeader(title: "Pode usar", isOpen: isOpen, tip: Tip.toggleCapabilities(isOpen: isOpen),
-                       spokenSummary: CapabilityStrip.spokenCount(enabled: enabled, total: Capability.allCases.count),
+                       spokenSummary: countText,
                        action: { toggleFold($capabilitiesFoldOpen, isOpen: isOpen, hasProblem: hasProblem) }) {
-                capabilityStrip(bot)
+                Text(countText)
+                    .font(Typography.small)
+                    .foregroundStyle(Palette.faint)
+                    .lineLimit(1)
             }
             if isOpen {
                 ForEach(Capability.allCases) { capability in
@@ -472,21 +514,6 @@ struct BotInspector: View {
         } footer: {
             panelFooter(bot)
         }
-    }
-
-    /// The icons of the folded row: VoiceOver gets the count from the row itself.
-    private func capabilityStrip(_ bot: Bot) -> some View {
-        HStack(spacing: Spacing.xs + Spacing.hairline) {
-            ForEach(Capability.allCases) { capability in
-                Image(systemName: capability.symbol)
-                    .font(Typography.label)
-                    .foregroundStyle(Palette.secondary)
-                    .frame(width: 20, height: 20)
-                    .background(Palette.raised, in: .rect(cornerRadius: 6))
-                    .opacity(CapabilityStrip.opacity(isOn: bot.capabilities.contains(capability)))
-            }
-        }
-        .accessibilityHidden(true)
     }
 
     @ViewBuilder
@@ -624,41 +651,6 @@ struct BotInspector: View {
             // be long (§2.13).
             .transition(.quiet)
         }
-
-        PanelSection {
-            if bot.permissionRules.isEmpty {
-                // The rule of the footer below is said here while there is nothing to list (see the footer).
-                PanelEmptyNote("Nenhuma liberação ainda", systemImage: "checkmark.shield",
-                               detail: "Ao aprovar um pedido, escolha “Sempre permitir…” e ela aparece aqui. \(PermissionMode.grantsNote)")
-                    .transition(.quiet)
-            }
-            ForEach(bot.permissionRules, id: \.self) { rule in
-                LabeledContent {
-                    Button("Remover") { model.update(bot.id) { $0.permissionRules.removeAll { $0 == rule } } }
-                        .chipButton()
-                        .help(Tip.removeGrant)
-                } label: {
-                    Text(rule.title)
-                }
-                // A removed grant just fades, quickly; the others close the gap.
-                .transition(.adapted(.opacity.animation(Motion.exit), reduceMotion: reduceMotion))
-            }
-            if bot.permissionRules.count > 1 {
-                Button("Remover todas") { model.update(bot.id) { $0.permissionRules = [] } }
-                    .chipButton()
-                    .help(Tip.removeAllGrants)
-                    .transition(.quiet)
-            }
-        } header: {
-            Text("Liberações").sectionTitleStyle()
-        } footer: {
-            // With grants listed the rule sits under them, with its detail one hover away; with none the empty note says it.
-            if !bot.permissionRules.isEmpty {
-                FormFootnote { Label(PermissionMode.grantsNote, systemImage: "info.circle").help(PermissionMode.grantsNoteDetail) }
-            }
-        }
-        // Bound to the rules themselves (a short list), so only a grant coming or going moves anything.
-        .animateChanges(of: bot.permissionRules)
 
         filesSection(bot)
     }
@@ -960,7 +952,7 @@ private struct InspectorTabBar: View {
                         if showsEveryName || isSelected {
                             // One weight for every state: the semibold of the chosen tab widened it and moved its neighbors.
                             // `fixedSize` so the bar measures the whole name and `ViewThatFits` can tell when it does not fit.
-                            Text(tab.shortTitle)
+                            Text(tab.title)
                                 .font(Typography.small.weight(.medium))
                                 .lineLimit(1)
                                 .fixedSize(horizontal: true, vertical: false)
@@ -1242,11 +1234,6 @@ private struct RoutineRow: View {
     let routine: Routine
     let edit: () -> Void
     @State private var isConfirmingDelete = false
-    @State private var isHovering = false
-    @FocusState private var deleteIsFocused: Bool
-
-    /// One flag for the trash can's opacity and its animation, so the two cannot drift apart.
-    private var showsDelete: Bool { isHovering || deleteIsFocused }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -1292,7 +1279,6 @@ private struct RoutineRow: View {
         .animateChanges(of: routine.isEnabled)
         .animateChanges(of: model.freshRoutine)
         .animateChanges(of: isConfirmingDelete)
-        .onHover { isHovering = $0 }
         .sensoryFeedback(.alignment, trigger: routine.isEnabled)
         .transition(.adapted(.arrive, reduceMotion: reduceMotion))
     }
@@ -1339,15 +1325,18 @@ private struct RoutineRow: View {
                 }
                 .controlSize(.small)
                 Spacer(minLength: 4)
-                Button("Apagar “\(routine.name)”", systemImage: "trash") { isConfirmingDelete = true }
-                    .panelTrashButton()
-                    .help(Tip.deleteRoutine)
-                    .padding(.trailing, -Spacing.xs)
-                    .focused($deleteIsFocused)
-                    // Only under the pointer, like the lembranças: a list of routines, not of trash cans. It takes Tab
-                    // too, so it must also show while it has the keyboard focus.
-                    .opacity(showsDelete ? 1 : 0)
-                    .animation(Motion.hover(showsDelete), value: showsDelete)
+                Menu {
+                    Button("Apagar “\(routine.name)”", systemImage: "trash", role: .destructive) { isConfirmingDelete = true }
+                } label: {
+                    Image(systemName: "ellipsis")
+                }
+                .menuStyle(.button)
+                .buttonStyle(CircleGhostStyle(side: 24, fontSize: 12))
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .foregroundStyle(Palette.muted)
+                .help("Mais ações para “\(routine.name)”")
+                .accessibilityLabel("Mais ações para \(routine.name)")
             }
         }
         .frame(minHeight: 26)

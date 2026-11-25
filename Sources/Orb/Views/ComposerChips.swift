@@ -53,7 +53,7 @@ struct PermissionChip: View {
             HStack(spacing: 4) {
                 Image(systemName: permission.mode.symbol)
                 if Self.showsName(permission.mode, compact: compact) {
-                    Text(permission.mode == .bypass ? "Sem pedir" : permission.mode.label).lineLimit(1)
+                    Text(Self.chipLabel(permission.mode)).lineLimit(1)
                 }
             }
             .foregroundStyle(Self.tint(permission.mode))
@@ -70,8 +70,17 @@ struct PermissionChip: View {
     }
 
     static func showsName(_ mode: PermissionMode, compact: Bool) -> Bool {
-        // The risky mode keeps its words even in a narrow bar: a lone bolt hid that every prompt was off (item 4).
-        mode == .bypass || (!compact && mode == .readOnly)
+        // Show short label in all modes when space allows; in compact bars only the risky bypass mode keeps its words.
+        !compact || mode == .bypass
+    }
+
+    static func chipLabel(_ mode: PermissionMode) -> String {
+        switch mode {
+        case .ask: "Perguntar"
+        case .auto: "Automático"
+        case .bypass: "Sem pedir"
+        case .readOnly: "Só leitura"
+        }
     }
 
     static func tint(_ mode: PermissionMode) -> Color {
@@ -186,44 +195,26 @@ private struct PermissionRow: View {
 
 // MARK: Skills
 
-/// The "+" that starts the bar: a short menu to attach files or to pick a skill. The skill list (with search) opens
-/// from the "+" itself; picking one puts `/slug` in the message, as `/` typed at the start of the field does.
-struct ComposerPlusMenu: View {
+/// Direct 1-click button that opens the Orb's skill list (`SkillsPopover`); picking one inserts `/slug` into the draft.
+struct ComposerSkillsButton: View {
     @Environment(AppModel.self) private var model
     /// The Orb whose skills are listed (a skill can be limited to some Orbs).
     let botID: UUID
-    let attach: () -> Void
     let onPick: (String) -> Void
     @State private var isSkillsOpen = false
 
     var body: some View {
-        Menu {
-            Button("Anexar arquivos…", systemImage: "paperclip", action: attach)
-            Button("Usar skill…", systemImage: "wand.and.stars", action: openSkills)
-        } label: {
-            Image(systemName: "plus")
-        }
-        .menuStyle(.button)
-        .buttonStyle(CircleGhostStyle(side: 28, fontSize: 13))
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help(Tip.attach)
-        .accessibilityLabel("Anexar ou usar skill")
-        .popover(isPresented: $isSkillsOpen, arrowEdge: .bottom) {
-            SkillsPopover(skills: model.skills(for: botID)) { slug in
-                isSkillsOpen = false
-                onPick(slug)
+        Button("Usar skill…", systemImage: "wand.and.stars") { isSkillsOpen.toggle() }
+            .labelStyle(.iconOnly)
+            .buttonStyle(CircleGhostStyle(side: 28, fontSize: 13))
+            .help("Usar skill (ou digite / no campo)")
+            .accessibilityLabel("Usar skill")
+            .popover(isPresented: $isSkillsOpen, arrowEdge: .bottom) {
+                SkillsPopover(skills: model.skills(for: botID)) { slug in
+                    isSkillsOpen = false
+                    onPick(slug)
+                }
             }
-        }
-    }
-
-    /// The menu is still closing when its item runs: the list opens a turn later, so the popover is not shown and
-    /// taken away with the menu.
-    private func openSkills() {
-        Task { @MainActor in
-            await Task.yield()
-            isSkillsOpen = true
-        }
     }
 }
 
@@ -354,7 +345,7 @@ struct ModelChip: View {
             }
         }
         .buttonStyle(ComposerChipStyle(filled: true))
-        .foregroundStyle(name.isEmpty ? Palette.warn : Palette.secondary)
+        .foregroundStyle(name.isEmpty ? Palette.muted : Palette.secondary)
         .help("Modelo deste Orb" + (name.isEmpty ? "" : ": \(name)" + (provider.map { " · \($0)" } ?? "")) + " (\(AppShortcut.chooseModel.label))")
         .accessibilityLabel("Modelo")
         .accessibilityValue(name.isEmpty ? "Nenhum" : name)

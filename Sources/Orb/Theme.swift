@@ -26,7 +26,7 @@ enum Palette {
     static let canvasHex: UInt32 = 0x070707
     static let canvas = Color(hex: canvasHex)       // conversation
     static let surface = Color(hex: 0x181818)       // cards, composer
-    static let surfaceFocused = Color(hex: 0x1D1D1D) // surface 2 % lighter: the composer while it has the focus
+    static let surfaceFocused = Color(hex: 0x202020) // composer while it has the focus: clear lift from `surface`
     static let raised = Color(hex: 0x222222)        // code blocks, chips
     /// The person's message. An Orb's reply has no bubble: its words sit on `canvas`, beside its avatar.
     static let userBubble = Color(hex: 0x323232)
@@ -88,6 +88,34 @@ enum Palette {
     /// What the Orb says along its work, between the action lines: a step below an answer.
     static let narrationFont = Font.system(size: 13)
     static let narrationLineSpacing: CGFloat = 4
+}
+
+/// Reading scale for conversation text (⌘+ / ⌘- / ⌘0), stored in UserDefaults.
+enum ChatTextScale {
+    static let key = "chatTextScale"
+    static let steps: [CGFloat] = [0.9, 1.0, 1.1, 1.2, 1.3]
+    static let defaultScale: CGFloat = 1.0
+
+    static func clamped(_ value: CGFloat) -> CGFloat {
+        let valid = value > 0 ? value : defaultScale
+        return min(max(valid, steps[0]), steps[steps.count - 1])
+    }
+
+    static func stepped(from current: CGFloat, by delta: Int) -> CGFloat {
+        let value = clamped(current)
+        let index = steps.enumerated().min(by: { abs($0.element - value) < abs($1.element - value) })?.offset ?? 1
+        return steps[min(max(index + delta, 0), steps.count - 1)]
+    }
+
+    static func conversationSize(_ scale: CGFloat) -> CGFloat { (14 * clamped(scale)).rounded() }
+    static func narrationSize(_ scale: CGFloat) -> CGFloat { (13 * clamped(scale)).rounded() }
+    static func conversationFont(_ scale: CGFloat) -> Font { .system(size: conversationSize(scale)) }
+    static func narrationFont(_ scale: CGFloat) -> Font { .system(size: narrationSize(scale)) }
+}
+
+extension EnvironmentValues {
+    /// Current conversation text scale factor (`ChatTextScale`).
+    @Entry var chatTextScale: CGFloat = ChatTextScale.defaultScale
 }
 
 /// The small regular sizes the interface repeats, named by role (not `caption`/`body`, which are the system's own styles).

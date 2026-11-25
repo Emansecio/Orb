@@ -269,7 +269,7 @@ struct CodeBlockView: View, Equatable {
                                       help: showsPage ? Tip.showSource : Tip.previewPage) { showsPage.toggle() }
                 }
                 if !streaming && !showsPage {
-                    BlockHeaderButton(title: wrapsLines ? "Rolar" : "Quebrar",
+                    BlockHeaderButton(title: wrapsLines ? "Sem quebra" : "Quebrar linhas",
                                       symbol: wrapsLines ? "arrow.left.and.right" : "text.alignleft",
                                       help: wrapsLines ? "Desativa a quebra de linhas longas" : "Quebra linhas longas na largura do bloco") {
                         wrapsLines.toggle()
@@ -299,6 +299,7 @@ struct CodeBlockView: View, Equatable {
             }
         }
         .background(Palette.raised, in: .rect(cornerRadius: Radius.small))
+        .padding(.bottom, Spacing.xs)
         .animation(FoldMotion.animation(reduceMotion: reduceMotion), value: showsWhole)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(language.map { "Código em \($0)" } ?? "Código")

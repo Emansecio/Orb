@@ -22,6 +22,9 @@ func waitUntil(
     _ condition: () async throws -> Bool
 ) async rethrows -> Bool {
     let deadline = ContinuousClock.now + timeout
+    // Start with a short poll so fast conditions return in ~2 ms instead of waiting a full 20 ms tick,
+    // then ramp up to `poll` so genuinely slow waits do not burn CPU.
+    var step = min(poll, .milliseconds(2))
     while true {
         if Task.isCancelled { return false }
         let satisfied = try await condition()
@@ -29,8 +32,9 @@ func waitUntil(
         if satisfied { return true }
         if ContinuousClock.now >= deadline { break }
         // A long polling interval must not extend the timeout.
-        do { try await Task.sleep(for: min(poll, ContinuousClock.now.duration(to: deadline))) }
+        do { try await Task.sleep(for: min(step, ContinuousClock.now.duration(to: deadline))) }
         catch { return false }
+        if step < poll { step = min(poll, step * 2) }
     }
     Issue.record("Timed out after \(timeout) waiting for \(what())", sourceLocation: sourceLocation)
     return false

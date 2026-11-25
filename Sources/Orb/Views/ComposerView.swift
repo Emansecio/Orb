@@ -276,6 +276,10 @@ struct ComposerView: View {
 
     private func placeholder(_ live: BotLive) -> LocalizedStringKey {
         if isQueueing { return "Oriente o Orb enquanto ele trabalha" }
+        if model.hasCheckedConnections && !model.hasModelSetup(for: botID) {
+            let name = live.look.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            return LocalizedStringKey(name.isEmpty ? "Conecte um modelo para começar" : "Conecte um modelo para conversar com \(name)")
+        }
         // Free or running a routine (the strip above the field says so): the same short line, naming the Orb.
         return LocalizedStringKey(ComposerAction.placeholder(orbName: live.look.name))
     }
@@ -350,29 +354,45 @@ struct ComposerView: View {
         let waitsOnChain = situation.live.chainWork != nil
         let action = ComposerAction.current(isWorking: situation.live.isWorking, canSend: canSend, waitsOnChain: waitsOnChain)
         let secondaryStop = action.showsSecondaryStop(waitsOnChain: waitsOnChain)
+        let showsAfterTask = action == .queue && model.canSteer(botID)
         return HStack(spacing: Spacing.xs) {
-            ComposerPlusMenu(botID: botID, attach: { isImporting = true }) { draft.wrappedValue = AppModel.draft(inserting: $0, into: draft.wrappedValue); isFocused = true }
+            Button("Anexar arquivos…", systemImage: "paperclip") { isImporting = true }
+                .labelStyle(.iconOnly)
+                .buttonStyle(CircleGhostStyle(side: 28, fontSize: 13))
+                .help("Anexar arquivos…")
+                .accessibilityLabel("Anexar arquivos")
+            ComposerSkillsButton(botID: botID) { draft.wrappedValue = AppModel.draft(inserting: $0, into: draft.wrappedValue); isFocused = true }
             PermissionChip(botID: botID, compact: isCompact) { isFocused = true }
             if model.browserWithPerson.contains(botID) { PersonBrowserChip(botID: botID, compact: isCompact) }
             Spacer(minLength: 8)
             ContextMeterChip(botID: botID, gauge: gauge, compact: isCompact)
             ModelChip(botID: botID, isOpen: $isModelOpen)
+            Rectangle()
+                .fill(Palette.line)
+                .frame(width: 1, height: 14)
+                .padding(.horizontal, 2)
+                .accessibilityHidden(true)
             if Dictation.isSupported { DictationButton(botID: botID) }
-            actionButtons(action, secondaryStop: secondaryStop, situation)
+            actionButtons(action, secondaryStop: secondaryStop, showsAfterTask: showsAfterTask, situation)
         }
         .foregroundStyle(Palette.muted)
-        // Stop stepping in or out moves the whole row: the model and meter chips slide with it (34-38 pt, 0.25 s)
-        // instead of jumping. Tied to this one value, so neither the chips' texts nor `isCompact` animate with it.
         .animateChanges(of: secondaryStop)
     }
 
-    /// One round button that is Send or Stop: its symbol is swapped (not the button), so the change reads as the same
-    /// control changing meaning. While the Orb works and a message is typed, Stop steps back beside it as a plain round
-    /// icon (like "+" and the microphone), so the white button is the one thing the eye finds, and it queues the message.
-    @ViewBuilder private func actionButtons(_ action: ComposerAction, secondaryStop: Bool, _ situation: Situation) -> some View {
+    /// Action cluster at the trailing edge: while a turn runs, Stop keeps its own button beside the primary one, and
+    /// while steering with text ready, a 1-click "Depois da tarefa" button sits beside it so mouse users never need a context menu.
+    @ViewBuilder private func actionButtons(_ action: ComposerAction, secondaryStop: Bool, showsAfterTask: Bool, _ situation: Situation) -> some View {
         let routine = situation.routineName
         let elsewhere = situation.workingChat != nil
         HStack(spacing: Spacing.s) {
+            if showsAfterTask {
+                Button("Depois da tarefa", systemImage: "clock") { send(delivery: .afterTask) }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(CircleGhostStyle(side: 28, fontSize: 12))
+                    .foregroundStyle(Palette.secondary)
+                    .help("Enviar depois da tarefa (⌥↩)")
+                    .transition(.opacity)
+            }
             if secondaryStop {
                 Button("Parar", systemImage: "stop.fill") { model.stopTurn(botID) }
                     .labelStyle(.iconOnly)
@@ -383,8 +403,7 @@ struct ComposerView: View {
             }
             mainButton(action, routine: routine, elsewhere: elsewhere)
         }
-        // Under Reduce Motion the row above does not animate: Stop alone fades in or out (opacity is not movement).
-        .motion(value: secondaryStop)
+        .motion(value: secondaryStop || showsAfterTask)
     }
 
     private func mainButton(_ action: ComposerAction, routine: String?, elsewhere: Bool) -> some View {
@@ -449,16 +468,11 @@ struct ComposerView: View {
         }
     }
 
-    /// ⇥ completes the highlighted skill while the suggestions are open; otherwise, with the Orb working and a message
-    /// ready, it queues the message for after the task. Anywhere else it is the plain Tab (see `ComposerAction.tab`).
+    /// ⇥ completes the highlighted skill while the suggestions are open; everywhere else it stays plain Tab for macOS focus navigation.
     private func handleTab(_ press: KeyPress) -> KeyPress.Result {
-        switch ComposerAction.tab(slashIsOpen: !slashMatches.isEmpty, isQueueing: isQueueing, canSend: canSend, isPlain: press.modifiers.intersection([.shift, .control, .option, .command]).isEmpty) {
-        case .completeSkill: return completeSlash() ? .handled : .ignored
-        case .queueAfterTask:
-            send(delivery: .afterTask)
-            return .handled
-        case .ignore: return .ignored
-        }
+        guard !slashMatches.isEmpty,
+              press.modifiers.intersection([.shift, .control, .option, .command]).isEmpty else { return .ignored }
+        return completeSlash() ? .handled : .ignored
     }
 
     private func moveSlash(_ step: Int) -> KeyPress.Result {
@@ -523,6 +537,11 @@ struct ComposerView: View {
         guard PasteGate.takes(eventIsInComposerWindow: event.window === window, isKey: window.isKeyWindow,
                               hasSheet: window.attachedSheet != nil, isFocused: isFocused) else { return false }
         if NewLineKey.isShiftReturn(event) { return NewLineKey.insert(in: window) }
+        if NewLineKey.isOptionReturn(event),
+           ComposerAction.optionReturnQueues(slashIsOpen: !slashMatches.isEmpty, isQueueing: isQueueing, canSend: canSend) {
+            send(delivery: .afterTask)
+            return true
+        }
         guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
               event.charactersIgnoringModifiers == "v" else { return false }
         return pasteImages()
@@ -801,22 +820,9 @@ enum ComposerAction: Equatable {
         return isEditing ? .cancelEdit : .ignore
     }
 
-    /// What ⇥ does in the message field.
-    enum TabKey: Equatable {
-        /// Completes the highlighted skill of the `/` suggestions.
-        case completeSkill
-        /// Sends the message to wait for the end of the task (↩ would steer the task with it).
-        case queueAfterTask
-        /// Not ours: the plain Tab (moving the focus) goes on.
-        case ignore
-    }
-
-    /// ⇥ is taken only when it means something: the skill suggestions are open, or the Orb works on your chat and a
-    /// message is ready (`canSend`: something to send, no picture still on its way). With ⇧ or another modifier, or
-    /// with the Orb free or running a routine, it stays the plain Tab.
-    static func tab(slashIsOpen: Bool, isQueueing: Bool, canSend: Bool, isPlain: Bool) -> TabKey {
-        if slashIsOpen { return .completeSkill }
-        return isPlain && isQueueing && canSend ? .queueAfterTask : .ignore
+    /// ⌥↩ queues the message for after the task while the Orb works on this chat and the skill list is closed.
+    static func optionReturnQueues(slashIsOpen: Bool, isQueueing: Bool, canSend: Bool) -> Bool {
+        !slashIsOpen && isQueueing && canSend
     }
 
     /// The sentence of the strip above the field while a routine runs (a message cannot join the run: it waits for its end).
@@ -859,7 +865,13 @@ enum ComposerAction: Equatable {
         return canSend ? .queue : .stop
     }
 
-    var symbol: String { self == .stop ? "stop.fill" : "arrow.up" }
+    var symbol: String {
+        switch self {
+        case .send: "arrow.up"
+        case .queue: "arrow.turn.down.right"
+        case .stop: "stop.fill"
+        }
+    }
 
     /// The button's name for VoiceOver.
     var title: String {
@@ -873,7 +885,7 @@ enum ComposerAction: Equatable {
     var help: String {
         switch self {
         case .send: "Enviar (↩)"
-        case .queue: "Direcionar o Orb (↩); ⇥ ou o botão direito deixa para depois da tarefa"
+        case .queue: "Direcionar o Orb no próximo passo (↩); ⌥↩ deixa para depois da tarefa"
         case .stop: "\(CommandName.stop) (\(AppShortcut.stop.label))"
         }
     }
@@ -919,7 +931,7 @@ enum ComposerHint {
     /// else ⌘↩ allows the request (see `ApprovalShortcut`), and the line says so.
     static func queueing(needsYou: Bool, typesInComposer: Bool, compact: Bool = false) -> String {
         let command = AppShortcut.commandReturn.label
-        let keys = "↩ envia agora · ⇥ depois da tarefa"
+        let keys = "↩ direciona agora · ⌥↩ depois da tarefa"
         if needsYou {
             if !typesInComposer { return compact ? "\(command) permite o pedido" : "\(keys) · \(command) permite o pedido" }
             // A narrow composer gets the same promises in fewer words, so the line is whole rather than cut with "…".
@@ -947,6 +959,11 @@ enum NewLineKey {
     static func isShiftReturn(_ event: NSEvent) -> Bool {
         [36, 76].contains(event.keyCode) // Return, and Enter on the numeric keypad
             && event.modifierFlags.intersection([.shift, .command, .option, .control]) == .shift
+    }
+
+    static func isOptionReturn(_ event: NSEvent) -> Bool {
+        [36, 76].contains(event.keyCode)
+            && event.modifierFlags.intersection([.shift, .command, .option, .control]) == .option
     }
 
     /// The field being typed in takes the line break (with its undo); false when no text field has the keys.
@@ -987,7 +1004,7 @@ struct ComposerSurface: View {
     static func stroke(isFocused: Bool, isDropTargeted: Bool, isDictating: Bool = false) -> Color {
         if isDropTargeted { return Palette.accentText }
         if isDictating { return Palette.danger.opacity(0.45) }
-        return isFocused ? Color.white.opacity(0.22) : Palette.line
+        return isFocused ? Color.white.opacity(0.28) : Palette.line
     }
 
     var body: some View {

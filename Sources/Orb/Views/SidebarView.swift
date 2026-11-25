@@ -40,8 +40,17 @@ struct SidebarView: View {
         let filterWords = showsFilter ? SearchText.words(orbFilter) : []
         let isFiltering = !filterWords.isEmpty
         let allLooseIDs = model.looseBotIDs
-        let looseIDs = isFiltering ? allLooseIDs.filter { SidebarOrbFilter.matches(model.live($0).look, words: filterWords) } : allLooseIDs
-        let matchingCategoryIDs = isFiltering ? model.categories.flatMap { $0.botIDs.filter { model.botIDs.contains($0) && SidebarOrbFilter.matches(model.live($0).look, words: filterWords) } } : []
+        let looseIDs = isFiltering ? allLooseIDs.filter {
+            let live = model.live($0)
+            return SidebarOrbFilter.matches(live.look, chats: live.chats, words: filterWords)
+        } : allLooseIDs
+        let matchingCategoryIDs = isFiltering ? model.categories.flatMap {
+            $0.botIDs.filter {
+                guard model.botIDs.contains($0) else { return false }
+                let live = model.live($0)
+                return SidebarOrbFilter.matches(live.look, chats: live.chats, words: filterWords)
+            }
+        } : []
         let sections = SidebarDrop.sections(loose: allLooseIDs, categories: model.categories, botIDs: model.botIDs)
         let listChanged = settledBotIDs.map { Set($0) != Set(model.botIDs) } ?? false
         let isNamingNewCategory = if case .new = model.categoryNaming { true } else { false }
@@ -200,7 +209,7 @@ struct SidebarView: View {
             // A name field opens for a new category while "Orbs" is folded: it has to be seen, so the section unfolds.
             .onChange(of: model.categoryNaming) { if case .new = model.categoryNaming { orbsUnfolded = true } }
         }
-        .scrollIndicators(.never)
+        .scrollIndicators(.automatic)
         .ignoresSafeArea(.container, edges: .top)
         .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { toolbarHeight = $0 }
         .background(Palette.chrome)
@@ -224,6 +233,7 @@ struct SidebarView: View {
             .padding(.top, 8)
             .padding(.bottom, 12)
             .background(Palette.chrome)
+            .overlay(alignment: .top) { Rectangle().fill(Palette.line).frame(height: 1) }
         }
     }
 }
@@ -252,11 +262,11 @@ struct SectionTitle<Trailing: View>: View {
     }
 }
 
-/// The small "+" at the right of a section title: dim at rest, lighter under the pointer, a 20 pt target. The Orbs'
+/// The small "+" at the right of a section title: dim at rest, lighter under the pointer, a 24 pt target. The Orbs'
 /// title wraps it in a `Menu`, the groups' in a `Button`.
 struct SectionPlus: View {
-    /// The target's side: 20 pt beside a title, 16 pt in an Orb's row (its name's line height).
-    var size: CGFloat = 20
+    /// The target's side: 24 pt beside a title, 22 pt in an Orb's row.
+    var size: CGFloat = 24
     /// The one "+" the sidebar draws, in a button or as a decoration (an invitation, a name field, "Nova conversa").
     static let glyph = Font.system(size: 11, weight: .medium)
     /// The small arrow beside it (a folded list's chevron, a category's, a close mark): one step lighter than the "+" in
@@ -367,15 +377,13 @@ private struct SidebarFoldHeader<Trailing: View>: View {
                     // The arrow turns in the content curve; under Reduce Motion it just takes its new direction.
                     .animation(Motion.panel(reduceMotion: reduceMotion), value: collapsed)
                     .foregroundStyle(Palette.faint)
-                // "Outros" is a row of the grid, as a category's heading; "Orbs" a section title, as "Grupos", with its
-                // arrow after the word.
-                HStack(spacing: sub ? SidebarCategoryLayout.iconGap : 4) {
-                    if sub { chevron.frame(width: SidebarCategoryLayout.iconColumn) }
+                // Every foldable heading in the sidebar places its chevron on the leading side for one consistent scan line.
+                HStack(spacing: sub ? SidebarCategoryLayout.iconGap : 6) {
+                    chevron.frame(width: sub ? SidebarCategoryLayout.iconColumn : 12)
                     Text(title)
                         .font(sub ? Typography.text.weight(.medium) : Typography.label.weight(.medium))
                         .foregroundStyle(collapsed && holdsSelection ? Palette.ink : sub ? Palette.secondary : Palette.faint)
                         .lineLimit(1)
-                    if !sub { chevron }
                     Spacer(minLength: 4)
                     HiddenOrbsMarks(collapsed: collapsed, waiting: waiting, unread: unread, count: ids.count)
                 }
@@ -411,8 +419,6 @@ struct SidebarRow<Content: View>: View {
     var help = ""
     /// What the row carries when it is dragged (an Orb's row, onto a category); nil for a row that is not dragged.
     var dragPayload: String?
-    /// Optional double-click action (runs simultaneously so single click stays immediate).
-    var doubleAction: (() -> Void)?
     let action: () -> Void
     @ViewBuilder let content: (Bool) -> Content
     /// Runs as the drag starts, before the row is over anything.
@@ -441,7 +447,6 @@ struct SidebarRow<Content: View>: View {
                 // dragged answers the click with a tap, and is still a button for VoiceOver.
                 row
                     .onTapGesture(perform: action)
-                    .simultaneousGesture(TapGesture(count: 2).onEnded { doubleAction?() })
                     .onDrag {
                         dragBegan()
                         return NSItemProvider(object: dragPayload as NSString)
@@ -452,7 +457,6 @@ struct SidebarRow<Content: View>: View {
             } else {
                 Button(action: action) { row }
                     .buttonStyle(.plain)
-                    .simultaneousGesture(TapGesture(count: 2).onEnded { doubleAction?() })
             }
         }
         .help(help)
@@ -562,7 +566,6 @@ struct SidebarBotRow: View {
     let selectionSpace: Namespace.ID
     /// Moved into or out of a category, the row slides from where it was to where it went.
     let rowSpace: Namespace.ID
-    @State private var isRenaming = false
 
     var body: some View {
         let live = model.live(botID)
@@ -571,21 +574,19 @@ struct SidebarBotRow: View {
         // Folded, the conversations are out of sight and the row alone is the card.
         let chats = isSelected ? live.chats : nil
         let folded = chats?.collapsed == true
+        let rowHelp = index < 9 ? "\(live.look.name) (\(AppShortcut.bot(at: index).label))" : live.look.name
         // The name and the reply under it are cut to one line each: the hover text has the name whole.
         VStack(alignment: .leading, spacing: 0) {
-            SidebarRow(isSelected: isSelected, selectionSpace: selectionSpace, paintsSelection: chats == nil || folded, help: live.look.name,
-                       dragPayload: isRenaming ? nil : live.look.name, doubleAction: { isRenaming = true }) { // the name, not the id: dropped in a text field or another app it reads as the Orb
+            SidebarRow(isSelected: isSelected, selectionSpace: selectionSpace, paintsSelection: chats == nil || folded, help: rowHelp,
+                       dragPayload: live.look.name) { // the name, not the id: dropped in a text field or another app it reads as the Orb
                 model.selection = .bot(botID)
             } content: { isHovering in
                 BotRowContent(row: BotRow(look: live.look, workText: live.shownWork?.headline, shimmers: live.shownWork?.shimmers ?? false, activity: live.activity, isSelected: isSelected,
                                           celebration: live.celebration, ack: live.poke, cue: live.cue, glance: live.glance, needsYou: live.needsYou, unread: live.unread, reply: live.lastReply, replyTime: BotRow.time(of: live.lastReply),
                                           // MARK: MultiOrb (WP2): the ring of the Orb it is exchanging messages with
                                           partner: live.partner,
-                                          hint: isHovering && index < 9 ? AppShortcut.bot(at: index).label : nil,
                                           landing: live.landing, botID: botID, chatsFolded: chats == nil ? nil : folded,
-                                          showsNewChat: isHovering, isRenaming: isRenaming)) {
-                    isRenaming = false
-                }
+                                          showsNewChat: isHovering))
                 .equatable()
             } dragBegan: {
                 model.draggedBotID = botID
@@ -715,18 +716,14 @@ struct BotRow: Equatable {
     let replyTime: String?
     /// The Orb it is exchanging messages with now: its avatar gets a ring in that Orb's color.
     var partner: PartnerTint?
-    /// The shortcut shown while the pointer is on the row.
-    var hint: String?
     /// Changes once when the Orb was just born from another Orb's proposal: its avatar gives the birth hop (MultiOrb, WP3).
     var landing = 0
     /// Whose row it is: what its "+" and its chevron act on.
     let botID: UUID
     /// The open Orb's conversations under the row are folded (true) or listed (false); nil when there are none to list.
     var chatsFolded: Bool?
-    /// The pointer is on the row: the "+" that opens a new conversation shows beside the shortcut.
+    /// The pointer is on the row: the "+" that opens a new conversation shows beside the timestamp.
     var showsNewChat = false
-    /// The Orb's name is currently being edited inline on this row.
-    var isRenaming = false
 
     static func time(of reply: ReplyPreview?, now: Date = .now, calendar: Calendar = .current) -> String? {
         reply.map { ReplyTime.label($0.date, now: now, calendar: calendar) }
@@ -743,7 +740,6 @@ private struct BotRowContent: View, Equatable {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let row: BotRow
-    let finishRenaming: () -> Void
     /// The selected row has looked at the chat and nothing has happened since: it rests like the others.
     @State private var selectionSettled = false
     /// Plays one brief arrival pulse on the status ring when attention or unread work arrives.
@@ -799,75 +795,54 @@ private struct BotRowContent: View, Equatable {
                 }
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
-                    if row.isRenaming {
-                        InlineNameField(initial: look.name, label: "Nome do Orb", font: Typography.text.weight(.medium),
-                                        limit: AppModel.nameLimit, normalize: {
-                                            let clipped = AppModel.clippedName($0)
-                                            return clipped.isEmpty ? nil : clipped
-                                        }, save: { model.rename(row.botID, to: $0) }, finish: finishRenaming)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: Radius.small))
-                            .overlay(RoundedRectangle(cornerRadius: Radius.small).strokeBorder(Palette.lineStrong))
-                    } else {
-                        let name = Text(look.name)
-                            .font(Typography.text.weight(.medium))
-                            .foregroundStyle(Palette.ink)
-                            .lineLimit(1)
-                        // The shortcut takes the time's place while the pointer is on the row. The name comes first: the time
-                        // shows only where both fit.
-                        if let hint = row.hint {
-                            name
-                            Spacer(minLength: 4)
-                            Text(hint)
-                                .font(Typography.small)
-                                .foregroundStyle(Palette.muted)
-                                .accessibilityHidden(true)
-                        } else if let replyTime = row.replyTime {
-                            ViewThatFits(in: .horizontal) {
-                                HStack(spacing: 4) {
-                                    name.fixedSize()
-                                    Spacer(minLength: 4)
-                                    DayAware { now in
-                                        Text(BotRow.time(of: row.reply, now: now) ?? replyTime)
-                                            .font(Typography.small.monospacedDigit())
-                                            .foregroundStyle(Palette.faint)
-                                    }
-                                }
-                                HStack(spacing: 4) {
-                                    name
-                                    Spacer(minLength: 0)
-                                }
-                            }
-                        } else {
-                            name
-                            Spacer(minLength: 4)
-                        }
-                        // Shown on hover only so at rest the timestamp aligns flush with the unread badge below it.
-                        HStack(spacing: 0) {
-                            if row.showsNewChat {
-                                Button { model.newChat(for: row.botID) } label: { SectionPlus(size: 16) }
-                                    .buttonStyle(.plain)
-                                    .help("\(CommandName.newChat) (\(AppShortcut.newChat.label))")
-                                    .transition(.opacity)
-                                    .accessibilityHidden(true)
-                            }
-                            if let folded = row.chatsFolded {
-                                Button {
-                                    withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) { model.setChatsCollapsed(!folded, for: row.botID) }
-                                } label: {
-                                    Image(systemName: "chevron.right")
-                                        .font(SectionPlus.chevron)
-                                        .rotationEffect(.degrees(folded ? 0 : 90))
-                                        .animation(Motion.panel(reduceMotion: reduceMotion), value: folded)
+                    let name = Text(look.name)
+                        .font(Typography.text.weight(.medium))
+                        .foregroundStyle(Palette.ink)
+                        .lineLimit(1)
+                    if let replyTime = row.replyTime {
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 4) {
+                                name.fixedSize()
+                                Spacer(minLength: 4)
+                                DayAware { now in
+                                    Text(BotRow.time(of: row.reply, now: now) ?? replyTime)
+                                        .font(Typography.small.monospacedDigit())
                                         .foregroundStyle(Palette.faint)
-                                        .frame(width: 16, height: 16)
-                                        .contentShape(.rect)
                                 }
-                                .buttonStyle(.plain)
-                                .help(folded ? "Mostra as conversas deste Orb" : "Recolhe as conversas deste Orb")
-                                .accessibilityHidden(true)
                             }
+                            HStack(spacing: 4) {
+                                name
+                                Spacer(minLength: 0)
+                            }
+                        }
+                    } else {
+                        name
+                        Spacer(minLength: 4)
+                    }
+                    // Comfortable 22 pt hit targets with 4 pt spacing so "+" and chevron never collide.
+                    HStack(spacing: 4) {
+                        if row.showsNewChat {
+                            Button { model.newChat(for: row.botID) } label: { SectionPlus(size: 22) }
+                                .buttonStyle(.plain)
+                                .help("\(CommandName.newChat) (\(AppShortcut.newChat.label))")
+                                .transition(.opacity)
+                                .accessibilityHidden(true)
+                        }
+                        if let folded = row.chatsFolded {
+                            Button {
+                                withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) { model.setChatsCollapsed(!folded, for: row.botID) }
+                            } label: {
+                                Image(systemName: "chevron.right")
+                                    .font(SectionPlus.chevron)
+                                    .rotationEffect(.degrees(folded ? 0 : 90))
+                                    .animation(Motion.panel(reduceMotion: reduceMotion), value: folded)
+                                    .foregroundStyle(Palette.faint)
+                                    .frame(width: 22, height: 22)
+                                    .contentShape(.rect)
+                            }
+                            .buttonStyle(.plain)
+                            .help(folded ? "Mostra as conversas deste Orb" : "Recolhe as conversas deste Orb")
+                            .accessibilityHidden(true)
                         }
                     }
                 }
@@ -927,11 +902,12 @@ private struct BotRowContent: View, Equatable {
     }
 }
 
-/// Pure filter matching Orbs by name or role without case or accent sensitivity.
+/// Pure filter matching Orbs by name, role, or conversation titles without case or accent sensitivity.
 enum SidebarOrbFilter {
-    static func matches(_ look: BotLook, words: [String]) -> Bool {
+    static func matches(_ look: BotLook, chats: OrbChats? = nil, words: [String]) -> Bool {
         guard !words.isEmpty else { return true }
-        let haystack = MemoryText.fold(look.name + " " + look.role)
+        let chatTitles = chats?.list.map(\.title).joined(separator: " ") ?? ""
+        let haystack = MemoryText.fold(look.name + " " + look.role + " " + chatTitles)
         return words.allSatisfy { haystack.contains($0) }
     }
 }
@@ -944,16 +920,16 @@ private struct SidebarFilterButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 10.5, weight: .medium))
+                .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(isActive ? Palette.accentText : isHovering ? Palette.secondary : Palette.faint)
-                .frame(width: 20, height: 20)
+                .frame(width: 24, height: 24)
                 .hoverFill(isHovering || isActive, in: .rect(cornerRadius: Radius.small))
                 .contentShape(.rect)
                 .onHover { isHovering = $0 }
                 .animation(Motion.fade, value: isHovering)
         }
         .buttonStyle(.plain)
-        .help(isActive ? "Fechar filtro de Orbs" : "Filtrar Orbs por nome ou papel")
+        .help(isActive ? "Fechar filtro de Orbs" : "Filtrar Orbs por nome, papel ou conversa")
         .accessibilityLabel(isActive ? "Fechar filtro de Orbs" : "Filtrar Orbs")
     }
 }

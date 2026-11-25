@@ -35,7 +35,7 @@ struct MotionControlsTests {
 
     @Test @MainActor func theFocusedCardHasTheStrongBorderAndASlightlyLighterFill() {
         #expect(ComposerSurface.stroke(isFocused: false, isDropTargeted: false) == Palette.line)
-        #expect(ComposerSurface.stroke(isFocused: true, isDropTargeted: false) == Palette.lineStrong)
+        #expect(ComposerSurface.stroke(isFocused: true, isDropTargeted: false) == Color.white.opacity(0.28))
         // A file being dragged over wins over the focus.
         #expect(ComposerSurface.stroke(isFocused: true, isDropTargeted: true) == Palette.accentText)
         #expect(ComposerSurface.stroke(isFocused: false, isDropTargeted: true) == Palette.accentText)
@@ -54,14 +54,12 @@ struct MotionControlsTests {
         #expect(drop.color == Palette.accent.opacity(0.35) && drop.y == 0)
     }
 
-    @Test func theFocusedFillIsAboutTwoPercentLighter() throws {
+    @Test func theFocusedFillIsNoticeablyLighterThanSurface() throws {
         let rest = try #require(NSColor(Palette.surface).usingColorSpace(.sRGB))
         let focused = try #require(NSColor(Palette.surfaceFocused).usingColorSpace(.sRGB))
         for (a, b) in [(rest.redComponent, focused.redComponent), (rest.greenComponent, focused.greenComponent),
                        (rest.blueComponent, focused.blueComponent)] {
-            #expect(b > a)
-            // `surface` with 2 % white over it, give or take the rounding to a hex byte.
-            #expect(abs(b - (a + (1 - a) * 0.02)) < 1.0 / 255)
+            #expect(b > a + 0.02 && b < a + 0.06)
         }
     }
 
@@ -105,9 +103,9 @@ struct MotionControlsTests {
         #expect(model.canStopCurrent)
     }
 
-    @Test func theSymbolSwapsOnlyBetweenSendingAndStopping() {
+    @Test func eachActionHasItsOwnDistinctSymbol() {
         #expect(ComposerAction.send.symbol == "arrow.up")
-        #expect(ComposerAction.queue.symbol == "arrow.up")
+        #expect(ComposerAction.queue.symbol == "arrow.turn.down.right")
         #expect(ComposerAction.stop.symbol == "stop.fill")
     }
 
@@ -115,7 +113,7 @@ struct MotionControlsTests {
         #expect(ComposerAction.send.title == "Enviar")
         #expect(ComposerAction.send.help == "Enviar (↩)")
         #expect(ComposerAction.queue.title == "Direcionar")
-        #expect(ComposerAction.queue.help == "Direcionar o Orb (↩); ⇥ ou o botão direito deixa para depois da tarefa")
+        #expect(ComposerAction.queue.help == "Direcionar o Orb no próximo passo (↩); ⌥↩ deixa para depois da tarefa")
         #expect(ComposerAction.stop.title == "Parar")
         #expect(ComposerAction.stop.help == "\(CommandName.stop) (\(AppShortcut.stop.label))")
         #expect(ComposerAction.stop.help.contains("⌘."))

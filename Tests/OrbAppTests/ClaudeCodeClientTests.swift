@@ -369,7 +369,7 @@ struct ClaudeCodeClientTests {
         try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-2 * 24 * 3600)], ofItemAtPath: old.path)
         try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-2 * 24 * 3600)], ofItemAtPath: other.path)
         _ = try await collect(rig.client().stream(model: "claude-x", messages: [.system("s"), .user("oi")], tools: [], toolChoice: .auto))
-        #expect(!FileManager.default.fileExists(atPath: old.path))
+        #expect(await waitUntil("stale session file to be swept") { !FileManager.default.fileExists(atPath: old.path) })
         #expect(FileManager.default.fileExists(atPath: recent.path))
         // Only the CLI's session files: the folder may hold what is not ours.
         #expect(FileManager.default.fileExists(atPath: other.path))

@@ -94,16 +94,17 @@ private struct TeamsWingHeader: View {
                        help: collapsed ? "Mostra os Times" : "Recolhe os Times") {
                 toggle()
             } content: { _ in
-                HStack(spacing: 4) {
-                    Text("Times")
-                        .font(Typography.label.weight(.medium))
-                        .foregroundStyle(collapsed && holdsSelection ? Palette.ink : Palette.faint)
-                        .lineLimit(1)
+                HStack(spacing: 6) {
                     Image(systemName: "chevron.right")
                         .font(SectionPlus.chevron)
                         .rotationEffect(.degrees(collapsed ? 0 : 90))
                         .animation(Motion.panel(reduceMotion: reduceMotion), value: collapsed)
                         .foregroundStyle(Palette.faint)
+                        .frame(width: 12)
+                    Text("Times")
+                        .font(Typography.label.weight(.medium))
+                        .foregroundStyle(collapsed && holdsSelection ? Palette.ink : Palette.faint)
+                        .lineLimit(1)
                     Spacer(minLength: 4)
                     if collapsed && teamCount > 0 {
                         CollapsedTeamsMarks(needsAttention: needsAttention, anyUnread: anyUnread, anyWorking: anyWorking, count: teamCount)

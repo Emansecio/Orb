@@ -12,6 +12,7 @@ struct RootView: View {
     @State private var presentedQueued = PresentedOrbs()
     /// Whether the welcome screen's entrance already played for this empty list (§2.11).
     @State private var welcomeLedger = WelcomeLedger()
+    @AppStorage(ChatTextScale.key) private var chatTextScale: Double = Double(ChatTextScale.defaultScale)
 
     var body: some View {
         @Bindable var model = model
@@ -42,6 +43,7 @@ struct RootView: View {
         }
         .environment(\.presentedEmptyChats, presentedEmptyChats)
         .environment(\.presentedQueued, presentedQueued)
+        .environment(\.chatTextScale, ChatTextScale.clamped(chatTextScale))
         .sheet(isPresented: $model.showNewBot, onDismiss: { model.newBotStart = nil; model.newBotImporting = false; MemoryRelief.orbsClosed() }) {
             // Opened from a kept memory on the welcome screen: the sheet starts from it. Opened to import: on that panel.
             NewBotSheet(kept: model.newBotStart.map { [$0] } ?? [], chosen: model.newBotStart, startsImporting: model.newBotImporting)

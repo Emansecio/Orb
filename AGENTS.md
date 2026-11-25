@@ -37,6 +37,7 @@ Correções que o usuário já fez mais de uma vez e decisões dele que já est�
 - **TESTE-4.** Depois de cada feature implementada ou alterada, rode uma vez só a suíte que nomeia o comportamento (`scripts/test.sh --filter '<Suite>'`); mudança só de documentação não roda teste.
 - **TESTE-5.** Toda correção de bug ganha um teste de regressão, e você confere que ele falha sem a correção (dois testes já passavam mesmo sem ela). Lógica nova com ramificação, laço ou parsing ganha testes do caminho principal e dos casos de borda.
 - **TESTE-6.** Rode só os testes que cobrem o que você alterou (`scripts/test.sh --filter` com as suítes dessa área), num único comando. A suíte completa (`scripts/test.sh` sem filtro) só a pedido explícito do usuário; quando rodar, diga no relatório por quê. Código compartilhado por muitas áreas (ex.: `AppModel`, `BotSession`, `Engine`, `TestSupport`) ou falha que só aparece no conjunto não autoriza a suíte inteira por conta própria: relate o limite da validação.
+- **TESTE-7.** Mantenha os testes rápidos e agrupados: testes pequenos (< 45 linhas) entram na suíte temática da área em vez de virar arquivo solto; testes de timeout usam prazos curtos em milissegundos (nunca segundos inteiros sem necessidade) e nenhum teste novo usa `Thread.sleep`. `TestHygieneTests` e `scripts/test.sh` vigiam regressões.
 
 ### Subagentes
 

@@ -89,11 +89,13 @@ enum ProseText {
     private final class CacheKey: NSObject {
         let blocks: [MarkdownBlock]
         let isQuiet: Bool
+        let scale: CGFloat
         private let cachedHash: Int
 
-        init(blocks: [MarkdownBlock], isQuiet: Bool) {
+        init(blocks: [MarkdownBlock], isQuiet: Bool, scale: CGFloat) {
             self.blocks = blocks
             self.isQuiet = isQuiet
+            self.scale = scale
             var hasher = Hasher()
             hasher.combine(blocks.count)
             for block in blocks {
@@ -108,13 +110,14 @@ enum ProseText {
                 }
             }
             hasher.combine(isQuiet)
+            hasher.combine(scale)
             cachedHash = hasher.finalize()
         }
 
         override var hash: Int { cachedHash }
         override func isEqual(_ object: Any?) -> Bool {
             guard let other = object as? CacheKey else { return false }
-            return isQuiet == other.isQuiet && blocks == other.blocks
+            return isQuiet == other.isQuiet && scale == other.scale && blocks == other.blocks
         }
     }
 
@@ -131,21 +134,37 @@ enum ProseText {
 
     static func clearCache() { builtCache.removeAllObjects() }
 
-    static func built(_ blocks: [MarkdownBlock], cursor: Bool, cached: Bool, highlight: String?, isQuiet: Bool) -> Built {
+    static func built(_ blocks: [MarkdownBlock], cursor: Bool, cached: Bool, highlight: String?, isQuiet: Bool,
+                      scale: CGFloat = ChatTextScale.defaultScale) -> Built {
+        let clamped = ChatTextScale.clamped(scale)
         if !cursor, cached, highlight == nil {
-            let key = CacheKey(blocks: blocks, isQuiet: isQuiet)
+            let key = CacheKey(blocks: blocks, isQuiet: isQuiet, scale: clamped)
             if let hit = builtCache.object(forKey: key) { return hit.built }
             let raw = make(blocks, cursor: false, cached: true, highlight: nil)
-            let finalText = isQuiet ? quieter(raw) : raw
-            let entry = Built(text: finalText, hasQuote: contains(quoteKey, in: finalText),
-                              hasInlineCode: contains(inlineCodeKey, in: finalText))
-            builtCache.setObject(CacheEntry(entry), forKey: key, cost: max(finalText.length * 4, 64))
+            let styled = scaled(isQuiet ? quieter(raw) : raw, by: clamped)
+            let entry = Built(text: styled, hasQuote: contains(quoteKey, in: styled),
+                              hasInlineCode: contains(inlineCodeKey, in: styled))
+            builtCache.setObject(CacheEntry(entry), forKey: key, cost: max(styled.length * 4, 64))
             return entry
         }
         let raw = make(blocks, cursor: cursor, cached: cached, highlight: highlight)
-        let finalText = isQuiet ? quieter(raw) : raw
-        return Built(text: finalText, hasQuote: contains(quoteKey, in: finalText),
-                     hasInlineCode: contains(inlineCodeKey, in: finalText))
+        let styled = scaled(isQuiet ? quieter(raw) : raw, by: clamped)
+        return Built(text: styled, hasQuote: contains(quoteKey, in: styled),
+                     hasInlineCode: contains(inlineCodeKey, in: styled))
+    }
+
+    /// Scales every font run in `text` when the user adjusted the chat reading scale (`⌘+` / `⌘-`).
+    private static func scaled(_ text: NSAttributedString, by scale: CGFloat) -> NSAttributedString {
+        guard abs(scale - 1.0) > 0.001, text.length > 0 else { return text }
+        let copy = NSMutableAttributedString(attributedString: text)
+        copy.enumerateAttribute(.font, in: NSRange(location: 0, length: copy.length)) { value, range, _ in
+            guard let font = value as? NSFont else { return }
+            let newSize = (font.pointSize * scale).rounded()
+            if let resized = NSFont(descriptor: font.fontDescriptor, size: newSize) {
+                copy.addAttribute(.font, value: resized, range: range)
+            }
+        }
+        return copy
     }
 
     private static func contains(_ key: NSAttributedString.Key, in text: NSAttributedString) -> Bool {
@@ -626,6 +645,7 @@ struct SelectableProse: NSViewRepresentable {
         let cursor: Bool
         let highlight: String?
         let isQuiet: Bool
+        let scale: CGFloat
     }
 
     final class Coordinator {
@@ -650,11 +670,12 @@ struct SelectableProse: NSViewRepresentable {
     private func update(_ view: ProseTextView, context: Context) {
         view.selection = context.environment.proseSelection
         let isQuiet = context.environment.proseIsQuiet
+        let scale = context.environment.chatTextScale
         view.isQuiet = isQuiet
-        let shown = Shown(blocks: blocks, cursor: cursor, highlight: highlight, isQuiet: isQuiet)
+        let shown = Shown(blocks: blocks, cursor: cursor, highlight: highlight, isQuiet: isQuiet, scale: scale)
         guard context.coordinator.shown != shown else { return }
         context.coordinator.shown = shown
-        show(in: view, isQuiet: isQuiet, fades: cursor && !context.environment.accessibilityReduceMotion)
+        show(in: view, isQuiet: isQuiet, scale: scale, fades: cursor && !context.environment.accessibilityReduceMotion)
         guard !cursor, cached, let text = view.textStorage else { return }
         let paths = PathLinks.unknown(in: text)
         guard !paths.isEmpty else { return }
@@ -665,8 +686,8 @@ struct SelectableProse: NSViewRepresentable {
         }
     }
 
-    private func show(in view: ProseTextView, isQuiet: Bool, fades: Bool) {
-        let built = ProseText.built(blocks, cursor: cursor, cached: cached, highlight: highlight, isQuiet: isQuiet)
+    private func show(in view: ProseTextView, isQuiet: Bool, scale: CGFloat, fades: Bool) {
+        let built = ProseText.built(blocks, cursor: cursor, cached: cached, highlight: highlight, isQuiet: isQuiet, scale: scale)
         var text = built.text
         if !cursor, cached {
             let linked = NSMutableAttributedString(attributedString: text)

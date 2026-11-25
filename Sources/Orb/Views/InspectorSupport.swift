@@ -16,16 +16,10 @@ enum InspectorTab: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .general: "Geral"
         case .memory: "Memória"
-        case .folder: "Pasta e acessos"
+        case .folder: "Pasta"
         case .routines: "Rotinas"
         case .screen: "Tela"
         }
-    }
-
-    /// The name under the icon in the panel's bar: one line each, so the bar keeps one height ("Pasta e acessos" stays
-    /// the tab's full name, said to VoiceOver and in its tip).
-    var shortTitle: String {
-        self == .folder ? "Pasta" : title
     }
 
     var symbol: String {
@@ -133,13 +127,8 @@ enum ModelCardSummary {
 
 }
 
-/// The closed "Pode usar" row: one small icon for each thing the Orb may use, dimmed for what is off.
+/// The closed "Pode usar" row summary: plain count of active capabilities ("3 de 4 ligadas").
 enum CapabilityStrip {
-    static let dimmedOpacity = 0.3
-
-    static func opacity(isOn: Bool) -> Double { isOn ? 1 : dimmedOpacity }
-
-    /// The icons are hidden from VoiceOver, so the row says how many are on: "3 de 4 ligadas".
     static func spokenCount(enabled: Int, total: Int) -> String { "\(enabled) de \(total) ligadas" }
 }
 

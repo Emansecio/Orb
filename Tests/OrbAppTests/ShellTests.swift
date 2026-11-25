@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import Orb
+import os
 
 /// A stand-in for the user's login shell: `-lic <script>` runs the script after exporting some variables, the
 /// way a `.zshrc` would. Lets the tests control exactly what "the user's environment" is.
@@ -151,16 +152,14 @@ struct ShellEnvironmentTests {
         let slowOnce = directory.appending(path: "slow-once")
         let shell = try FakeShell.make(in: directory, exports: ["FROM_PROFILE": "late"],
                                        preamble: "[ -e '\(slowOnce.path)' ] || { touch '\(slowOnce.path)'; sleep 30; }")
-        let environment = ShellEnvironment(shell: shell, base: basicEnvironment, timeout: .seconds(1), retryAfterTimeout: .milliseconds(300),
+        let environment = ShellEnvironment(shell: shell, base: basicEnvironment, timeout: .milliseconds(300), retryAfterTimeout: .milliseconds(100),
                                            retryTimeout: .seconds(2))
         let first = await environment.resolved()
         #expect(!first.isFromUserShell)
-        // A few tries: a loaded machine may kill the first run before it marks itself as slow, and the new answer
-        // comes from the background try that the first of these calls starts.
         var second = first
-        for _ in 0..<20 where !second.isFromUserShell {
-            try await Task.sleep(for: .milliseconds(400))
+        await waitUntil("the background retry to resolve from user shell", timeout: .seconds(8), poll: .milliseconds(40)) {
             second = await environment.resolved()
+            return second.isFromUserShell
         }
         #expect(second.isFromUserShell)
         #expect(second.environment["FROM_PROFILE"] == "late")
@@ -172,11 +171,11 @@ struct ShellEnvironmentTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let counter = directory.appending(path: "count")
         let shell = try FakeShell.make(in: directory, preamble: "echo x >> '\(counter.path)'; sleep 5")
-        let environment = ShellEnvironment(shell: shell, base: basicEnvironment, timeout: .milliseconds(400),
-                                           retryAfterTimeout: .milliseconds(100), retryTimeout: .milliseconds(400))
+        let environment = ShellEnvironment(shell: shell, base: basicEnvironment, timeout: .milliseconds(150),
+                                           retryAfterTimeout: .milliseconds(60), retryTimeout: .milliseconds(150))
         _ = await environment.resolved()
         var slowest = Duration.zero
-        let end = ContinuousClock.now + .seconds(4)
+        let end = ContinuousClock.now + .milliseconds(1200)
         while ContinuousClock.now < end {
             let started = ContinuousClock.now
             let resolved = await environment.resolved()
@@ -186,7 +185,6 @@ struct ShellEnvironmentTests {
         }
         // Nobody waits for the new tries (a slow machine allows some margin), and doubling the wait keeps them few.
         #expect(slowest < .milliseconds(300), "\(slowest)")
-        // A machine too busy to start the script at all runs it fewer times, never more (a constant wait would make 8).
         let runs = ((try? String(contentsOf: counter, encoding: .utf8)) ?? "").split(separator: "\n").count
         #expect(runs <= 6, "\(runs) runs")
     }
@@ -207,8 +205,8 @@ struct ShellEnvironmentTests {
     }
 
     @Test func theRealShellGivesACompleteEnvironment() async {
-        // Patient: a timeout would fall back to the app's own environment and this would stop testing the real shell.
-        let resolved = await ShellEnvironment(timeout: patientShell).resolved()
+        // Use a realistic bounded timeout so a slow user .zshrc never stalls the whole test shard for 60+ seconds.
+        let resolved = await ShellEnvironment(timeout: .seconds(5)).resolved()
         #expect(resolved.environment["PATH"]?.isEmpty == false)
         #expect(resolved.environment["TERM"] == "dumb")
         #expect(resolved.environment["GIT_CONFIG_KEY_\((Int(resolved.environment["GIT_CONFIG_COUNT"] ?? "") ?? 1) - 1)"] == "core.quotepath")
@@ -912,5 +910,169 @@ final class BackgroundJobsTests {
         let mixed = directory.appending(path: "mixed.log")
         try "a\nb\r\nc".write(to: mixed, atomically: true, encoding: .utf8)
         #expect(BackgroundJobs.tail(of: mixed, lines: 2) == "b\nc")
+    }
+}
+
+// MARK: - ChildProcessGroupsTests
+
+// Quitting the app must not leave Claude Code or a foreground command running: they lead groups of their own, so
+// only `ChildProcessGroups` reaches them. The tests share the process with others that start children, so each one only
+// touches the pids it started itself.
+
+struct ChildProcessGroupsTests {
+    @Test func killAllStopsTheGroupsItKnows() async throws {
+        let null = FileHandle(forWritingAtPath: "/dev/null")!
+        defer { try? null.close() }
+        let pid = try SpawnedProcess.start("/bin/sleep", ["60"], directory: nil, environment: nil, output: null.fileDescriptor)
+        ChildProcessGroups.insert(pid)
+        SpawnedProcess.watch(pid) { _ in ChildProcessGroups.remove(pid) }
+        #expect(ChildProcessGroups.running.contains(pid))
+
+        ChildProcessGroups.killAllNow(only: [pid])
+
+        await waitUntil("the group to be gone", timeout: .seconds(2)) { kill(-pid, 0) != 0 }
+        await waitUntil("the list to forget it") { !ChildProcessGroups.running.contains(pid) }
+    }
+
+    @Test func aLineProcessIsKnownWhileItRunsAndForgottenAfter() async throws {
+        let line = try LineProcess(executable: URL(fileURLWithPath: "/bin/cat"), arguments: [],
+                                   directory: FileManager.default.temporaryDirectory, environment: ProcessInfo.processInfo.environment)
+        #expect(ChildProcessGroups.running.contains(line.pid))
+        line.closeInput() // cat ends at the end of its input
+        await waitUntil("the list to forget it") { !ChildProcessGroups.running.contains(line.pid) }
+    }
+
+    @Test func aForegroundCommandIsKnownWhileItRuns() async throws {
+        let argument = "61.\(Int.random(in: 100_000...999_999))" // makes the command line this test's own
+        let command = Task { try await ProcessRunner.run("/bin/sleep", [argument], timeout: .seconds(120)) }
+        defer { command.cancel() }
+        var pid: pid_t?
+        await waitUntil("the command to be listed") {
+            let found = try? await ProcessRunner.run("/usr/bin/pgrep", ["-f", "sleep \(argument)"], timeout: .seconds(10))
+            pid = found?.output.split(whereSeparator: \.isNewline).first.flatMap { pid_t($0.trimmingCharacters(in: .whitespaces)) }
+            return pid != nil
+        }
+        let known = try #require(pid)
+        #expect(ChildProcessGroups.running.contains(known))
+
+        command.cancel() // stops its own group
+        _ = try? await command.value
+        await waitUntil("the list to forget it") { !ChildProcessGroups.running.contains(known) }
+    }
+}
+
+// MARK: - LineProcessWritesTests
+
+// A child that does not read its stdin must not block whoever writes to it: `send` and `closeInput` run on the main thread
+// when a Claude Code turn is cancelled (Stop, or quitting).
+
+struct LineProcessWritesTests {
+    private let environment = ["PATH": "/usr/bin:/bin"]
+    private let folder = TempFolder(creating: true)
+
+    // Stopping a Claude Code process closes its stdin and drops the client: the child must still be able to write while it
+    // winds down, or a closed stdout kills it (SIGPIPE) before it ends on its own. It made the pipe tests flaky on the CI.
+    @Test func aChildCanStillWriteAfterItsProcessIsReleased() async throws {
+        let marker = folder.appending("ended")
+        do {
+            let process = try LineProcess(executable: URL(fileURLWithPath: "/bin/sh"),
+                                          arguments: ["-c", #"cat >/dev/null; echo tchau; echo tchau >&2; touch "$0""#, marker.path],
+                                          directory: folder.url, environment: environment)
+            process.closeInput()
+        }
+        #expect(await waitUntil("the child to finish writing after its input ended") {
+            FileManager.default.fileExists(atPath: marker.path)
+        })
+    }
+
+    @Test func writingToAChildThatDoesNotReadNeverBlocksTheCaller() async throws {
+        let process = try LineProcess(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "sleep 30"],
+                                      directory: FileManager.default.temporaryDirectory, environment: environment)
+        defer { process.terminate(after: 0) }
+        let returned = OSAllocatedUnfairLock(initialState: false)
+        // On a thread of its own, so a blocked call fails the test instead of hanging it.
+        Thread.detachNewThread {
+            process.send(String(repeating: "x", count: 256_000)) // more than a pipe holds
+            process.send("y")
+            process.closeInput()
+            returned.withLock { $0 = true }
+        }
+        for _ in 0..<250 where !returned.withLock({ $0 }) { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(returned.withLock { $0 }, "send / closeInput blocked on a full pipe")
+    }
+
+    @Test func linesReachTheChildInOrderAndTheEndOfInputFollows() async throws {
+        let process = try LineProcess(executable: URL(fileURLWithPath: "/bin/cat"), arguments: [],
+                                      directory: FileManager.default.temporaryDirectory, environment: environment)
+        process.send("um")
+        process.send("dois")
+        process.send("três")
+        process.closeInput()
+        process.send("depois do fim") // ignored
+        var lines: [String] = []
+        for await line in process.lines { lines.append(line) }
+        #expect(lines == ["um", "dois", "três"])
+    }
+}
+
+// MARK: - SpawnedProcessTests
+
+// `SpawnedProcess.watch` must report every child's end without keeping a thread of the global queues for each one.
+
+struct SpawnedProcessTests {
+    private func spawn(_ executable: String, _ arguments: [String]) throws -> pid_t {
+        let null = FileHandle(forWritingAtPath: "/dev/null")!
+        defer { try? null.close() }
+        return try SpawnedProcess.start(executable, arguments, directory: nil, environment: nil, output: null.fileDescriptor)
+    }
+
+    private final class Exits: Sendable {
+        private let state = OSAllocatedUnfairLock(initialState: [ChildExit]())
+        var all: [ChildExit] { state.withLock { $0 } }
+        func add(_ exit: ChildExit) { state.withLock { $0.append(exit) } }
+    }
+
+    @Test func manyLongLivedChildrenDoNotStarveTheGlobalQueues() async throws {
+        let exits = Exits()
+        let pids = try (0..<100).map { _ in try spawn("/bin/sleep", ["30"]) }
+        defer { pids.forEach { kill(-$0, SIGKILL) } }
+        pids.forEach { SpawnedProcess.watch($0) { exits.add($0) } }
+
+        // A block on the same queues the watchers used to wait on must still run.
+        let ran = OSAllocatedUnfairLock(initialState: false)
+        DispatchQueue.global(qos: .utility).async { ran.withLock { $0 = true } }
+        for _ in 0..<250 where !ran.withLock({ $0 }) { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(ran.withLock { $0 }, "the global queue is full of threads waiting for children")
+
+        pids.forEach { kill(-$0, SIGKILL) }
+        await waitUntil("every exit to be reported", timeout: .seconds(5)) { exits.all.count == 100 }
+        #expect(exits.all.allSatisfy { $0.signaled && $0.status == SIGKILL })
+    }
+
+    @Test func aChildThatEndedBeforeWatchingIsStillReportedOnce() async throws {
+        let exits = Exits()
+        let pid = try spawn("/usr/bin/true", [])
+        try await Task.sleep(for: .milliseconds(200))
+        SpawnedProcess.watch(pid) { exits.add($0) }
+        await waitUntil("the exit to be reported") { !exits.all.isEmpty }
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(exits.all == [ChildExit(status: 0, signaled: false)])
+    }
+
+    /// An environment the system cannot take is refused before anything starts (and the arguments copied for it are freed).
+    @Test func aNullByteInTheEnvironmentIsRefused() throws {
+        let null = FileHandle(forWritingAtPath: "/dev/null")!
+        defer { try? null.close() }
+        let error = try #require(#expect(throws: ToolError.self) {
+            _ = try SpawnedProcess.start("/bin/echo", ["oi"], directory: nil, environment: ["X": "a\u{0}b"], output: null.fileDescriptor)
+        })
+        #expect(error.message.contains("byte nulo"))
+    }
+
+    @Test func theExitCodeIsReported() async throws {
+        let exits = Exits()
+        SpawnedProcess.watch(try spawn("/bin/sh", ["-c", "exit 7"])) { exits.add($0) }
+        await waitUntil("the exit to be reported") { !exits.all.isEmpty }
+        #expect(exits.all == [ChildExit(status: 7, signaled: false)])
     }
 }

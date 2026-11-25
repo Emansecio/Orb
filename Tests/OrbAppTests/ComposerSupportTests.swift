@@ -17,8 +17,8 @@ struct ComposerSupportTests {
 
     @Test func theQueueHintHasAShortFormForANarrowComposer() {
         let key = AppShortcut.commandReturn.label
-        #expect(ComposerHint.queueing(needsYou: false, typesInComposer: true, compact: true) == "↩ envia agora · ⇥ depois da tarefa")
-        #expect(ComposerHint.queueing(needsYou: true, typesInComposer: true, compact: true) == "↩ envia agora · ⇥ depois da tarefa")
+        #expect(ComposerHint.queueing(needsYou: false, typesInComposer: true, compact: true) == "↩ direciona agora · ⌥↩ depois da tarefa")
+        #expect(ComposerHint.queueing(needsYou: true, typesInComposer: true, compact: true) == "↩ direciona agora · ⌥↩ depois da tarefa")
         #expect(ComposerHint.queueing(needsYou: true, typesInComposer: false, compact: true) == "\(key) permite o pedido")
         // Every short form is shorter than its long one, and the long ones are unchanged without `compact`.
         for (needs, types) in [(false, true), (true, true), (true, false)] {
@@ -48,10 +48,10 @@ struct ComposerSupportTests {
     @Test func theHintNeverPromisesStopAndSendWhereCommandReturnAllows() {
         let key = AppShortcut.commandReturn.label
         // No request open: the line is the usual one.
-        #expect(ComposerHint.queueing(needsYou: false, typesInComposer: true) == "↩ envia agora · ⇥ depois da tarefa · \(key) para a tarefa e envia")
+        #expect(ComposerHint.queueing(needsYou: false, typesInComposer: true) == "↩ direciona agora · ⌥↩ depois da tarefa · \(key) para a tarefa e envia")
         // A request open and text in the focused composer: ⌘↩ does nothing there, so the line promises no key for it.
         let typing = ComposerHint.queueing(needsYou: true, typesInComposer: true)
-        #expect(typing == "↩ envia agora · ⇥ depois da tarefa · responda ao pedido acima" && !typing.contains(key))
+        #expect(typing == "↩ direciona agora · ⌥↩ depois da tarefa · responda ao pedido acima" && !typing.contains(key))
         // Elsewhere ⌘↩ still allows the request, and the line says that instead.
         let elsewhere = ComposerHint.queueing(needsYou: true, typesInComposer: false)
         #expect(elsewhere.contains("\(key) permite o pedido") && !elsewhere.contains("para a tarefa e envia"))
@@ -60,11 +60,11 @@ struct ComposerSupportTests {
     @Test func theFieldHintForVoiceOverNamesTheKeysInsteadOfTheirSymbols() {
         #expect(ComposerHint.spoken("↩ envia · \(CommandName.newLineKeys) nova linha") == "Return envia, Shift Return nova linha")
         #expect(ComposerHint.spoken(ComposerHint.queueing(needsYou: false, typesInComposer: true))
-                == "Return envia agora, Tab depois da tarefa, Command Return para a tarefa e envia")
+                == "Return direciona agora, Option Return depois da tarefa, Command Return para a tarefa e envia")
         #expect(ComposerHint.spoken("") == "")
         #expect(ComposerHint.spoken("sem teclas") == "sem teclas")
         // The visible line is not touched by it.
-        #expect(ComposerHint.queueing(needsYou: false, typesInComposer: true, compact: true) == "↩ envia agora · ⇥ depois da tarefa")
+        #expect(ComposerHint.queueing(needsYou: false, typesInComposer: true, compact: true) == "↩ direciona agora · ⌥↩ depois da tarefa")
     }
 
     @Test func theStripOfAnotherChatOffersToGoBackOrToAnswer() {
@@ -77,10 +77,11 @@ struct ComposerSupportTests {
         #expect(ComposerAction.elsewhereHelp(chatTitle: "Bug", needsYou: false) == "Voltar para “Bug”")
     }
 
-    @Test @MainActor func thePermissionChipSaysItsNameForTheUnusualModesAndBypassKeepsItWhenNarrow() {
+    @Test @MainActor func thePermissionChipSaysItsNameWhenWideAndBypassKeepsItWhenNarrow() {
         for mode in PermissionMode.allCases {
             #expect(PermissionChip.showsName(mode, compact: true) == (mode == .bypass))
-            #expect(PermissionChip.showsName(mode, compact: false) == (mode == .bypass || mode == .readOnly))
+            #expect(PermissionChip.showsName(mode, compact: false))
+            #expect(!PermissionChip.chipLabel(mode).isEmpty)
         }
     }
 
@@ -180,26 +181,35 @@ struct ComposerSupportTests {
         #expect(message.queuedRowID != message.id.uuidString && message.queuedRowID.contains(message.id.uuidString))
     }
 
-    @Test func tabQueuesForAfterTheTaskOnlyWithTheOrbWorkingAndSomethingToSend() {
-        func tab(slash: Bool = false, working: Bool = true, content: Bool = true, steer: Bool = true, pending: Int = 0, plain: Bool = true) -> ComposerAction.TabKey {
+    @Test func optionReturnQueuesForAfterTheTaskOnlyWithTheOrbWorkingAndSomethingToSend() {
+        func queues(slash: Bool = false, working: Bool = true, content: Bool = true, steer: Bool = true, pending: Int = 0) -> Bool {
             let canSend = ComposerAction.canSend(hasContent: content, isWorking: working, canQueue: steer, pendingPictures: pending)
-            return ComposerAction.tab(slashIsOpen: slash, isQueueing: working && steer, canSend: canSend, isPlain: plain)
+            return ComposerAction.optionReturnQueues(slashIsOpen: slash, isQueueing: working && steer, canSend: canSend)
         }
-        #expect(tab() == .queueAfterTask)
-        #expect(tab(content: false) == .ignore) // nothing to send: the plain Tab
-        #expect(tab(working: false) == .ignore) // the Orb is free
-        #expect(tab(steer: false) == .ignore) // a routine's run takes no message
-        #expect(tab(pending: 1) == .ignore) // a picture still on its way
-        #expect(tab(plain: false) == .ignore) // ⇧⇥ keeps moving the focus backwards
-        // The skill suggestions keep ⇥ for completing, with the Orb working or not.
-        #expect(tab(slash: true) == .completeSkill)
-        #expect(tab(slash: true, working: false, content: false) == .completeSkill)
+        #expect(queues())
+        #expect(!queues(content: false))
+        #expect(!queues(working: false))
+        #expect(!queues(steer: false))
+        #expect(!queues(pending: 1))
+        #expect(!queues(slash: true))
     }
 
     @Test func theRoundButtonSaysDirecionarWhereTheOrbTakesMessagesMidTask() {
         #expect(ComposerAction.queue.title(isRoutine: false) == "Direcionar")
         #expect(ComposerAction.queue.help(isRoutine: false).hasPrefix("Direcionar"))
+        #expect(ComposerAction.queue.symbol == "arrow.turn.down.right")
+        #expect(ComposerAction.send.symbol == "arrow.up")
         #expect(ComposerAction.stop.title(isRoutine: false) == "Parar")
+    }
+
+    @Test func chatTextScaleClampsAndStepsAcrossKnownStops() {
+        #expect(ChatTextScale.clamped(0) == 1.0)
+        #expect(ChatTextScale.clamped(0.5) == 0.9)
+        #expect(ChatTextScale.clamped(2.0) == 1.3)
+        #expect(ChatTextScale.stepped(from: 1.0, by: 1) == 1.1)
+        #expect(ChatTextScale.stepped(from: 1.0, by: -1) == 0.9)
+        #expect(ChatTextScale.stepped(from: 1.3, by: 1) == 1.3)
+        #expect(ChatTextScale.stepped(from: 0.9, by: -1) == 0.9)
     }
 
     // MARK: Permission chip

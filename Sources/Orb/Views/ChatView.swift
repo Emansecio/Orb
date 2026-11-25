@@ -124,12 +124,15 @@ private struct InspectorToolbarButton: View {
 }
 
 extension ChatView {
-    /// Under the name, the conversation on show, when the Orb has more than one. The model is the composer's (its picker
-    /// says it), and what the Orb is doing is said in one place, the working line at the end of the chat, not here too.
+    /// Under the name, the safety mode (when bypass), the active conversation title (when the Orb has more than one),
+    /// and the working folder — never hiding bypass or folder just because multiple chats exist.
     private func subtitle(_ live: BotLive) -> String {
-        if let chats = live.chats, let title = chats.title(of: chats.active) { return title }
-        if live.permission.mode == .bypass { return ModelCardSummary.bypassLine }
-        return EmptyChatContent.folderText(for: live.bot) ?? ""
+        let chatTitle = live.chats.flatMap { $0.title(of: $0.active) }
+        let folder = EmptyChatContent.folderText(for: live.bot)
+        if live.permission.mode == .bypass {
+            return [ModelCardSummary.bypassLine, chatTitle].compactMap { $0 }.joined(separator: " · ")
+        }
+        return [chatTitle, folder].compactMap { $0 }.joined(separator: " · ")
     }
 
     /// The "Resultado indisponível" alert is open while a notice waits; closing it drops the notice.
@@ -1142,7 +1145,7 @@ struct LoadingTranscript: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xl) {
             HStack {
-                Spacer(minLength: TranscriptLayout.bubbleSpacer)
+                Spacer(minLength: TranscriptLayout.bubbleMinSpacer)
                 Capsule().fill(Palette.raised).frame(width: 180, height: 32)
             }
             HStack(alignment: .top, spacing: 14) {

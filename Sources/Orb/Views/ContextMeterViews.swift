@@ -137,7 +137,6 @@ struct ContextMeterChip: View {
     let gauge: ContextGauge
     let compact: Bool
     @State private var isOpen = false
-    @State private var isHovering = false
     @State private var warnPulse = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -154,7 +153,9 @@ struct ContextMeterChip: View {
     }
 
     private func chip(_ reading: ContextReading) -> some View {
-        let showsPercent = !compact && reading.tone.showsPercent(pointing: isHovering || isOpen)
+        // Show percentage inline only for warming/full states (preventing horizontal hover shifts when calm),
+        // and keep it visible in full/critical state even on narrow bars.
+        let showsPercent = reading.tone == .full || (!compact && reading.tone == .warming)
         return Button { isOpen.toggle() } label: {
             HStack(spacing: Spacing.xs) {
                 if showsPercent {
@@ -171,7 +172,6 @@ struct ContextMeterChip: View {
             // The number comes and goes with the chip widening or narrowing under it; under Reduce Motion it only fades.
             .motion(value: showsPercent)
         }
-        .onHover { isHovering = $0 }
         .buttonStyle(ComposerChipStyle())
         .phaseAnimator(reduceMotion ? [0] : [0, 1, 2], trigger: warnPulse) { view, phase in
             view.scaleEffect(phase == 1 ? 1.07 : 1)

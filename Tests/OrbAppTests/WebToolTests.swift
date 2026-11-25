@@ -712,13 +712,11 @@ final class EndlessResponseTests {
 
     @Test func aStreamThatNeverEndsIsCutAtTheDeadlineWithWhatArrived() async throws {
         let host = "sse.test"
-        let session = EndlessStreamProtocol.session(host: host, .init(mime: "text/event-stream", chunk: Data("data: x\n\n".utf8), interval: 0.05))
-        // A loose deadline: with the whole suite queued at the start of a run, no piece was read within 2 s.
-        let tool = WebFetchTool(session: session, cache: WebPageCache(), readDeadline: .seconds(5))
+        let session = EndlessStreamProtocol.session(host: host, .init(mime: "text/event-stream", chunk: Data("data: x\n\n".utf8), interval: 0.02))
+        let tool = WebFetchTool(session: session, cache: WebPageCache(), readDeadline: .milliseconds(400))
         let started = ContinuousClock.now
         let output = try await tool.run(arguments(host), context: workspace.context)
-        // Far from the 7 days of a plain URLSession, but generous: the whole suite runs on a loaded machine.
-        #expect(ContinuousClock.now - started < .seconds(30))
+        #expect(ContinuousClock.now - started < .seconds(15))
         #expect(output.contains("data: x"))
         #expect(output.contains("não terminou"))
     }
@@ -758,9 +756,9 @@ final class EndlessResponseTests {
     @Test func aPDFWhoseSizeIsAnnouncedIsReadToTheEndOnASlowLink() async throws {
         let pdf = try Fixtures.pdf(pages: ["Relatório lento"])
         let host = "slowpdf.test"
-        let session = SlowBodyProtocol.session(host: host, .init(mime: "application/pdf", body: pdf, piece: max(pdf.count / 5, 1), interval: 0.2, announcesLength: true))
-        // The deadline for a body of unknown length would cut this one (it takes about a second).
-        let tool = WebFetchTool(session: session, cache: WebPageCache(), readDeadline: .milliseconds(300))
+        let session = SlowBodyProtocol.session(host: host, .init(mime: "application/pdf", body: pdf, piece: max(pdf.count / 5, 1), interval: 0.06, announcesLength: true))
+        // The deadline for a body of unknown length would cut this one (it takes ~0.3 s).
+        let tool = WebFetchTool(session: session, cache: WebPageCache(), readDeadline: .milliseconds(120))
         let output = try await tool.run(arguments(host), context: workspace.context)
         #expect(output.contains("Relatório lento"), "\(output)")
         #expect(!output.contains("não terminou"))
@@ -768,8 +766,8 @@ final class EndlessResponseTests {
 
     @Test func aPDFOfUnknownLengthCutByTimeSaysSoAndSuggestsSaveTo() async throws {
         let host = "endlesspdf.test"
-        let session = EndlessStreamProtocol.session(host: host, .init(mime: "application/pdf", chunk: Data("%PDF-1.4 ".utf8), interval: 0.05))
-        let tool = WebFetchTool(session: session, cache: WebPageCache(), readDeadline: .seconds(1))
+        let session = EndlessStreamProtocol.session(host: host, .init(mime: "application/pdf", chunk: Data("%PDF-1.4 ".utf8), interval: 0.02))
+        let tool = WebFetchTool(session: session, cache: WebPageCache(), readDeadline: .milliseconds(250))
         let error = try #require(await #expect(throws: ToolError.self, "a PDF cut by time should not read as complete") {
             _ = try await tool.run(arguments(host), context: workspace.context)
         })
@@ -784,13 +782,12 @@ final class EndlessResponseTests {
 
     @Test func aPageCutByTimeKeepsTheNoteWhenItIsReadInPieces() async throws {
         let host = "slowpage.test"
-        let session = EndlessStreamProtocol.session(host: host, .init(mime: "text/html", chunk: Data("<p>palavra palavra</p>".utf8), interval: 0.05))
-        // A loose deadline: on a busy machine (the whole suite in parallel) no piece may arrive within 1 s.
-        let tool = WebFetchTool(session: session, cache: WebPageCache(), readDeadline: .seconds(3))
+        let session = EndlessStreamProtocol.session(host: host, .init(mime: "text/html", chunk: Data("<p>palavra palavra</p>".utf8), interval: 0.02))
+        let tool = WebFetchTool(session: session, cache: WebPageCache(), readDeadline: .seconds(1))
         let first = try await tool.run(arguments(host), context: workspace.context)
         #expect(first.contains("não terminou"))
         let again = try await tool.run(.object(["url": .string("https://\(host)/events"), "offset": .number(5)]), context: workspace.context)
-        #expect(again.contains("[... a resposta não terminou em 3 s; o resto não foi lido ...]"), "\(again)")
+        #expect(again.contains("[... a resposta não terminou em 1 s; o resto não foi lido ...]"), "\(again)")
     }
 }
 

@@ -76,13 +76,8 @@ struct InspectorFoldTests {
 
     // MARK: Pode usar
 
-    @Test func theIconsOfTheClosedRowAreDimmedForWhatIsOff() {
-        #expect(CapabilityStrip.opacity(isOn: true) == 1)
-        #expect(CapabilityStrip.opacity(isOn: false) == 0.3)
-        #expect(Capability.allCases.count == 4 && Capability.allCases.allSatisfy { !$0.symbol.isEmpty })
-    }
-
     @Test func theClosedRowSaysHowManyAreOn() {
+        #expect(Capability.allCases.count == 4 && Capability.allCases.allSatisfy { !$0.symbol.isEmpty })
         #expect(CapabilityStrip.spokenCount(enabled: 3, total: 4) == "3 de 4 ligadas")
         #expect(CapabilityStrip.spokenCount(enabled: 0, total: 4) == "0 de 4 ligadas")
     }

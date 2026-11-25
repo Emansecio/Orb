@@ -22,7 +22,8 @@ struct SidebarCategorySection: View {
     var body: some View {
         let categoryIDs = category.botIDs.filter { model.botIDs.contains($0) }
         let ids = filterWords.isEmpty ? categoryIDs : categoryIDs.filter {
-            SidebarOrbFilter.matches(model.live($0).look, words: filterWords)
+            let live = model.live($0)
+            return SidebarOrbFilter.matches(live.look, chats: live.chats, words: filterWords)
         }
         let isFiltering = !filterWords.isEmpty
         if !isFiltering || !ids.isEmpty {

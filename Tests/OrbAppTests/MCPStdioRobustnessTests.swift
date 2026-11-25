@@ -48,7 +48,7 @@ while True:
         elif name == "hang":
             time.sleep(30)  # alive, and not reading its input
         elif name == "late":
-            time.sleep(1); text(id, "late")  # answers, but after the client gave up
+            time.sleep(0.35); text(id, "late")  # answers, but after the client gave up
             open(os.environ["LATE_MARK"], "w").close()
         elif name == "echo":
             text(id, args.get("text", ""))
@@ -134,8 +134,8 @@ struct MCPStdioRobustnessTests {
         let mark = URL(fileURLWithPath: try #require(server.environment["LATE_MARK"]))
         defer { try? FileManager.default.removeItem(at: mark) }
         await waitUntil("the late reply to be sent") { FileManager.default.fileExists(atPath: mark.path) }
-        try await Task.sleep(for: .milliseconds(200))
-        await #expect(throws: ToolError.self) { try await connection.call("late", arguments: .object([:]), timeout: .milliseconds(200)) }
+        try await Task.sleep(for: .milliseconds(80))
+        await #expect(throws: ToolError.self) { try await connection.call("late", arguments: .object([:]), timeout: .milliseconds(150)) }
         #expect(await connection.isRunning)
         #expect(try pid(try await connection.call("pid", arguments: .object([:]))) == first)
         await connection.stop()
@@ -145,8 +145,8 @@ struct MCPStdioRobustnessTests {
         let connection = MCPConnection(config: try config())
         _ = try await connection.start()
         // Both are sent well inside the first one's timeout, so they are one silence, not two.
-        let one = Task { try await connection.call("hang", arguments: .object([:]), timeout: .milliseconds(800)) }
-        let two = Task { try await connection.call("hang", arguments: .object([:]), timeout: .milliseconds(800)) }
+        let one = Task { try await connection.call("hang", arguments: .object([:]), timeout: .milliseconds(350)) }
+        let two = Task { try await connection.call("hang", arguments: .object([:]), timeout: .milliseconds(350)) }
         await #expect(throws: ToolError.self) { try await one.value }
         await #expect(throws: ToolError.self) { try await two.value }
         #expect(await connection.isRunning)
@@ -156,10 +156,10 @@ struct MCPStdioRobustnessTests {
     @Test func aCallPendingWhenTheServerIsReplacedIsToldSoNotThatItRanOutOfTime() async throws {
         let connection = MCPConnection(config: try config())
         _ = try await connection.start()
-        await #expect(throws: ToolError.self) { try await connection.call("hang", arguments: .object([:]), timeout: .milliseconds(200)) }
+        await #expect(throws: ToolError.self) { try await connection.call("hang", arguments: .object([:]), timeout: .milliseconds(150)) }
         // The second silent call closes the connection while this one is still waiting for its turn at the server.
         let waiting = Task { try await connection.call("echo", arguments: .object(["text": .string("x")]), timeout: .seconds(20)) }
-        await #expect(throws: ToolError.self) { try await connection.call("hang", arguments: .object([:]), timeout: .milliseconds(800)) }
+        await #expect(throws: ToolError.self) { try await connection.call("hang", arguments: .object([:]), timeout: .milliseconds(350)) }
         let error = try #require(await #expect(throws: ToolError.self, "expected an error") {
             _ = try await waiting.value
         })

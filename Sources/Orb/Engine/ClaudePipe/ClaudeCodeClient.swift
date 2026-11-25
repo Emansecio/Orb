@@ -425,13 +425,14 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
     /// Run folders a crashed app left behind (older than a day). With `onlySessionFiles`, the folder is the CLI's project folder
     /// of the neutral cwd, and what a crash leaves there is a `<session>.jsonl` with the whole conversation, which "forget"
     /// promises not to keep.
-    private static let lastSweep = OSAllocatedUnfairLock<ContinuousClock.Instant?>(initialState: nil)
+    private static let lastSweep = OSAllocatedUnfairLock<[String: ContinuousClock.Instant]>(initialState: [:])
 
-    /// Sweeps stale scratch/session folders off the critical TTFT path at most once per hour.
+    /// Sweeps stale scratch/session folders off the critical TTFT path at most once per hour per scratch root.
     private static func scheduleStaleSweepIfDue(scratch: URL, projectDirectory: URL) {
+        let key = scratch.standardizedFileURL.path
         let shouldRun = lastSweep.withLock { last -> Bool in
-            if let last, ContinuousClock.now - last < .seconds(3_600) { return false }
-            last = .now
+            if let seen = last[key], ContinuousClock.now - seen < .seconds(3_600) { return false }
+            last[key] = .now
             return true
         }
         guard shouldRun else { return }

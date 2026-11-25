@@ -182,6 +182,12 @@ struct AppCommands: Commands {
         NSApp.activate()
     }
 
+    private func stepTextScale(by delta: Int) {
+        let current = UserDefaults.standard.double(forKey: ChatTextScale.key)
+        let next = ChatTextScale.stepped(from: current, by: delta)
+        UserDefaults.standard.set(Double(next), forKey: ChatTextScale.key)
+    }
+
     var body: some Commands {
         // While a sheet is open the commands that would open another one wait for it.
         let sheetOpen = model.hasOpenSheet
@@ -199,6 +205,16 @@ struct AppCommands: Commands {
         CommandGroup(after: .sidebar) {
             Button(CommandName.toggleInspector) { showMain(); model.toggleInspector() }
                 .keyboardShortcut(AppShortcut.toggleInspector)
+                .disabled(sheetOpen)
+            Divider()
+            Button(CommandName.textZoomIn) { stepTextScale(by: 1) }
+                .keyboardShortcut(AppShortcut.textZoomIn)
+                .disabled(sheetOpen)
+            Button(CommandName.textZoomOut) { stepTextScale(by: -1) }
+                .keyboardShortcut(AppShortcut.textZoomOut)
+                .disabled(sheetOpen)
+            Button(CommandName.textZoomReset) { UserDefaults.standard.set(Double(ChatTextScale.defaultScale), forKey: ChatTextScale.key) }
+                .keyboardShortcut(AppShortcut.textZoomReset)
                 .disabled(sheetOpen)
         }
         // The system's Quit is ignored while a sheet is open (see `AppTermination`).

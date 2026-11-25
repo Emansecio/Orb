@@ -166,7 +166,7 @@ private struct HangsAfterText: LLMClient {
     @Test func aStreamOfKeepAlivesOnlyIsGivenUpOn() async throws {
         let server = try await TrickleServer(script: [], forever: .init(after: .milliseconds(50), text: ": keep-alive\n\n"))
         let started = ContinuousClock.now
-        let (_, error) = await drain(OpenAIClient(baseURL: server.baseURL, apiKey: nil), timeout: 0.5)
+        let (_, error) = await drain(OpenAIClient(baseURL: server.baseURL, apiKey: nil), timeout: 0.2)
         #expect(started.duration(to: .now) < .seconds(5))
         guard case LLMError.stream(let type, _)? = error as? LLMError else { Issue.record("no stall: \(String(describing: error))"); return }
         #expect(type == LLMError.stalledType)
@@ -177,7 +177,7 @@ private struct HangsAfterText: LLMClient {
     @Test func pingEventsAreKeepAlivesToo() async throws {
         let ping = "event: ping\ndata: {\"type\": \"ping\"}\n\n"
         let server = try await TrickleServer(script: [], forever: .init(after: .milliseconds(50), text: ping))
-        let (_, error) = await drain(OpenAIClient(baseURL: server.baseURL, apiKey: nil), timeout: 0.5)
+        let (_, error) = await drain(OpenAIClient(baseURL: server.baseURL, apiKey: nil), timeout: 0.2)
         guard case LLMError.stream(let type, _)? = error as? LLMError else { Issue.record("no stall: \(String(describing: error))"); return }
         #expect(type == LLMError.stalledType)
     }
@@ -187,7 +187,7 @@ private struct HangsAfterText: LLMClient {
         // the whole response (1.8 s) well past it.
         let words = (0..<12).map { _ in TrickleServer.Piece(after: .milliseconds(150), text: #"data: {"choices":[{"delta":{"content":"a "}}]}"# + "\n\n") }
         let server = try await TrickleServer(script: words + [.init(after: .zero, text: "data: [DONE]\n\n")])
-        let (events, error) = await drain(OpenAIClient(baseURL: server.baseURL, apiKey: nil), timeout: 1.2)
+        let (events, error) = await drain(OpenAIClient(baseURL: server.baseURL, apiKey: nil), timeout: 0.5)
         #expect(error == nil)
         #expect(events.filter { if case .text = $0 { true } else { false } }.count == 12)
     }
@@ -693,7 +693,7 @@ private struct HangsAfterText: LLMClient {
         let server = MCPServerConfig(name: "Lento", command: "/bin/sleep", arguments: ["30"])
         await manager.sync([server])
         let starting = Task { try await manager.ensureStarted(server.id) }
-        try await Task.sleep(for: .milliseconds(500))
+        try await Task.sleep(for: .milliseconds(200))
         let stopped = ContinuousClock.now
         starting.cancel()
         _ = await starting.result

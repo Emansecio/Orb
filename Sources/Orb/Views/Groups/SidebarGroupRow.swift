@@ -45,16 +45,17 @@ struct SidebarGroupsSection: View {
                            help: collapsed ? "Mostra os grupos" : "Recolhe os grupos") {
                     withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) { unfolded.toggle() }
                 } content: { _ in
-                    HStack(spacing: 4) {
-                        Text("Grupos")
-                            .font(Typography.label.weight(.medium))
-                            .foregroundStyle(holdsSelection ? Palette.ink : Palette.faint)
-                            .lineLimit(1)
+                    HStack(spacing: 6) {
                         Image(systemName: "chevron.right")
                             .font(SectionPlus.chevron)
                             .rotationEffect(.degrees(collapsed ? 0 : 90))
                             .animation(Motion.panel(reduceMotion: reduceMotion), value: collapsed)
                             .foregroundStyle(Palette.faint)
+                            .frame(width: 12)
+                        Text("Grupos")
+                            .font(Typography.label.weight(.medium))
+                            .foregroundStyle(holdsSelection ? Palette.ink : Palette.faint)
+                            .lineLimit(1)
                         Spacer(minLength: 4)
                         if collapsed, !model.groups.isEmpty {
                             Text("\(model.groups.count)")

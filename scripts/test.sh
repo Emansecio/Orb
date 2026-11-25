@@ -74,6 +74,18 @@ for i in {1..$SHARDS}; do wait "${PIDS[$i]}" || STATUS=1; done
 # The interleaved output of the shards would be unreadable: show what failed (and the issues recorded for it), then one
 # summary line per shard. The full logs stay in $LOGS.
 grep -h -E '^. (Test|Suite) .*( failed after| recorded an issue)' "$LOGS"/*.log | grep -v 'Test run with' || true
+SLOW_WARN="${ORB_TEST_WARN_SECONDS:-5}"
+SLOW_MAX="${ORB_TEST_MAX_SECONDS:-20}"
+SLOW_LINES="$(sed -n -E 's/^[^ ]+ Test ([^ ]+\(\)) (passed|failed) after ([0-9.]+) seconds.*/\3 \1/p' "$LOGS"/*.log \
+  | awk -v w="$SLOW_WARN" '$1 + 0 >= w { printf "%.2fs %s\n", $1, $2 }' | sort -k1,1gr)"
+if [[ -n "$SLOW_LINES" ]]; then
+  print -r -- "Testes lentos (>= ${SLOW_WARN}s):"
+  print -r -- "$SLOW_LINES" | sed 's/^/  /'
+  if (( SLOW_MAX > 0 )) && print -r -- "$SLOW_LINES" | awk -v m="$SLOW_MAX" '$1 + 0 >= m { found=1 } END { exit !found }'; then
+    print -r -- "Erro: há teste acima do teto de ${SLOW_MAX}s (defina ORB_TEST_MAX_SECONDS=0 para ignorar)." >&2
+    STATUS=1
+  fi
+fi
 for i in {1..$SHARDS}; do
   print -r -- "parte $i/$SHARDS: $(grep -E 'Test run with|error:' "$LOGS/$i.log" | tail -n 1)"
 done

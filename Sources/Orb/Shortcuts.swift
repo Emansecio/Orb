@@ -25,6 +25,9 @@ enum CommandName {
     static let sendToBackground = "Mandar o comando para segundo plano"
     static let openFolder = "Abrir pasta do Orb no Finder"
     static let toggleInspector = "Mostrar ou ocultar o painel do Orb"
+    static let textZoomIn = "Aumentar texto"
+    static let textZoomOut = "Diminuir texto"
+    static let textZoomReset = "Tamanho padrão do texto"
     static let dictate = "Ditar ou parar de ditar"
     static let shortcuts = "Atalhos do teclado"
     static let previousBot = "Orb anterior"
@@ -60,6 +63,10 @@ enum AppShortcut {
     static let routines = KeyboardShortcut("r", modifiers: [.command, .option])
     static let connectors = KeyboardShortcut("c", modifiers: [.command, .option])
     static let skills = KeyboardShortcut("k", modifiers: [.command, .option])
+    /// ⌘+, ⌘-, ⌘0: conversation reading scale (`ChatTextScale`).
+    static let textZoomIn = KeyboardShortcut("+", modifiers: .command)
+    static let textZoomOut = KeyboardShortcut("-", modifiers: .command)
+    static let textZoomReset = KeyboardShortcut("0", modifiers: .command)
     /// ⌘/: the "Atalhos do teclado" sheet (the Ajuda menu's item).
     static let shortcuts = KeyboardShortcut("/")
 
@@ -92,7 +99,8 @@ enum AppShortcut {
 
     /// Every key above, for the tests that check that none is used twice.
     static let all: [KeyboardShortcut] = [newBot, newChat, newGroup, toggleInspector, goTo, writeMessage, stop, sendToBackground,
-                                          openFolder, previousBot, nextBot, routines, connectors, skills, shortcuts]
+                                          openFolder, previousBot, nextBot, routines, connectors, skills,
+                                          textZoomIn, textZoomOut, textZoomReset, shortcuts]
         + (0..<9).map(bot(at:))
 }
 
@@ -122,7 +130,7 @@ extension KeyboardShortcut {
 
 /// A command a key answers to, so the places that show a key (the palette) ask the catalog for it by command.
 enum ShortcutCommand: String, CaseIterable, Sendable {
-    case newBot, newGroup, goTo, toggleInspector, settings, shortcuts
+    case newBot, newGroup, goTo, toggleInspector, textZoomIn, textZoomOut, textZoomReset, settings, shortcuts
     case newChat, writeMessage, stop, sendToBackground, openFolder, send, newLine, queueAfterTask, stopAndSend, chooseModel, cancelEdit
     case goToBot, previousBot, nextBot, routines, connectors, skills, dictate
     case allowApproval, denyApproval
@@ -170,6 +178,9 @@ enum ShortcutCatalog {
             ShortcutItem(.newGroup, AppShortcut.newGroup, CommandName.newGroup),
             ShortcutItem(.goTo, AppShortcut.goTo, "Ir para… (Orbs, páginas e ações)"),
             ShortcutItem(.toggleInspector, AppShortcut.toggleInspector, CommandName.toggleInspector),
+            ShortcutItem(.textZoomIn, AppShortcut.textZoomIn, CommandName.textZoomIn),
+            ShortcutItem(.textZoomOut, AppShortcut.textZoomOut, CommandName.textZoomOut),
+            ShortcutItem(.textZoomReset, AppShortcut.textZoomReset, CommandName.textZoomReset),
             ShortcutItem(.settings, AppShortcut.settings, "Ajustes"),
             ShortcutItem(.shortcuts, AppShortcut.shortcuts, CommandName.shortcuts),
         ]),
@@ -181,7 +192,7 @@ enum ShortcutCatalog {
             ShortcutItem(.sendToBackground, AppShortcut.sendToBackground, CommandName.sendToBackground + " (enquanto o Orb espera um comando do Terminal)"),
             ShortcutItem(.openFolder, AppShortcut.openFolder, CommandName.openFolder),
             ShortcutItem(command: .send, keys: "↩", title: "Enviar a mensagem (com o Orb trabalhando, direciona a tarefa)"),
-            ShortcutItem(command: .queueAfterTask, keys: "⇥", title: "Pôr na fila para depois da tarefa (Orb trabalhando e algo escrito)"),
+            ShortcutItem(command: .queueAfterTask, keys: "⌥↩", title: "Pôr na fila para depois da tarefa (Orb trabalhando e algo escrito)"),
             ShortcutItem(command: .newLine, keys: CommandName.newLineKeys, title: "Nova linha na mensagem"),
             ShortcutItem(.dictate, AppShortcut.dictate, CommandName.dictate + " (com o cursor no campo de mensagem; ↩ envia, Esc encerra mantendo o texto)"),
             ShortcutItem(.stopAndSend, AppShortcut.commandReturn, "Parar e enviar agora (Orb trabalhando e algo escrito, fora da edição de uma mensagem e sem pedido aberto)"),

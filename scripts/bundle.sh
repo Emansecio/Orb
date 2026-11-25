@@ -50,17 +50,24 @@ if [[ -n "$SIGN_IDENTITY" && "$SIGN_IDENTITY" != "-" ]]; then
   cp "$HELPER_CACHE/OrbKeychainHelper" "$APP/Contents/Helpers/OrbKeychainHelper"
 fi
 
-# App icon: rendered by the app itself (AppIcon), straight at each size. The ten renders run at once: each launch of the
-# app takes ~0.8 s, and one after the other they were most of the time this script spends after the build.
-ICONSET="$(mktemp -d)/AppIcon.iconset"
-mkdir -p "$ICONSET"
-RENDERS=()
-for size in 16 32 128 256 512; do
-  "$BIN" --render-icon "$ICONSET/icon_${size}x${size}.png" $size & RENDERS+=($!)
-  "$BIN" --render-icon "$ICONSET/icon_${size}x${size}@2x.png" $((size * 2)) & RENDERS+=($!)
-done
-for pid in $RENDERS; do wait $pid; done
-iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
+# App icon: cached by AppIcon.swift content hash so unchanged rebuilds skip launching Orb 10 times (~2-4 s saved).
+ICON_CACHE="${ORB_ICON_CACHE:-$HOME/Library/Caches/app.orb.mac}"
+ICON_KEY="$(shasum -a 256 Sources/Orb/AppIcon.swift | awk '{print $1}')"
+if [[ -f "$ICON_CACHE/AppIcon.icns" && -f "$ICON_CACHE/AppIcon.key" && "$(cat "$ICON_CACHE/AppIcon.key")" == "$ICON_KEY" ]]; then
+  cp "$ICON_CACHE/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+else
+  ICONSET="$(mktemp -d)/AppIcon.iconset"
+  mkdir -p "$ICONSET" "$ICON_CACHE"
+  RENDERS=()
+  for size in 16 32 128 256 512; do
+    "$BIN" --render-icon "$ICONSET/icon_${size}x${size}.png" $size & RENDERS+=($!)
+    "$BIN" --render-icon "$ICONSET/icon_${size}x${size}@2x.png" $((size * 2)) & RENDERS+=($!)
+  done
+  for pid in $RENDERS; do wait $pid; done
+  iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
+  cp "$APP/Contents/Resources/AppIcon.icns" "$ICON_CACHE/AppIcon.icns"
+  print -r -- "$ICON_KEY" > "$ICON_CACHE/AppIcon.key"
+fi
 
 # Version from git, so "Sobre" and diagnostics can tell builds apart: the build number is the commit count, the short
 # version is 1.0.<count>, and OrbGitCommit is the short hash ("-dirty" when tracked files have uncommitted changes).

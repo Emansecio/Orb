@@ -109,10 +109,10 @@ extension AppModel {
         InspectorTab.allCases.first { takeChatRequest(.showTab($0), of: botID) }
     }
 
-    /// "Gerenciar" in the permissions chip: the panel opens on "Pasta e acessos", where the grants (Liberações) are.
+    /// "Gerenciar" in the permissions chip: the panel opens on "Geral", where the mode, capabilities and standing grants live.
     func showPermissions(of botID: UUID) {
         setInspector(true)
-        request(.showTab(.folder), of: botID)
+        request(.showTab(.general), of: botID)
     }
 
     /// ⌘L: the cursor goes to the composer, from the sidebar, the panel or another page.

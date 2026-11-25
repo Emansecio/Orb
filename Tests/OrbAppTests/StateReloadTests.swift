@@ -174,7 +174,7 @@ private final class TestFlag: @unchecked Sendable {
         model.skills.append(Skill(slug: "marcador", name: "Marcador", summary: "", instructions: "x", orbIDs: [model.bots[0].id]))
         model.checkStateFile()
         #expect(model.skills.map(\.slug).contains("marcador"))
-        try? await Task.sleep(for: .milliseconds(600)) // the debounced save lands: still the app's own write
+        try? await Task.sleep(for: .milliseconds(380)) // the debounced save lands: still the app's own write
         model.checkStateFile()
         #expect(model.skills.map(\.slug).contains("marcador"))
     }
@@ -190,7 +190,7 @@ private final class TestFlag: @unchecked Sendable {
         model.checkStateFile()
 
         #expect(await waitUntil("the outside state applied") { model.skills.map(\.slug) == ["externa"] })
-        try? await Task.sleep(for: .milliseconds(700)) // past the debounce: the pending write of the old state is dead
+        try? await Task.sleep(for: .milliseconds(420)) // past the debounce: the pending write of the old state is dead
         let written = try JSONDecoder().decode(AppState.self, from: Data(contentsOf: stateURL))
         #expect(written.skills.map(\.slug) == ["externa"])
     }
@@ -212,12 +212,12 @@ private final class TestFlag: @unchecked Sendable {
         #expect(await waitUntil("the app's save to land") {
             FileFingerprint(of: stateURL) == model.lastSavedStateFingerprint && model.lastSavedStateFingerprint != nil
         })
-        try? await Task.sleep(for: .milliseconds(600)) // the watch fired by then and found its own write
+        try? await Task.sleep(for: .milliseconds(380)) // the watch fired by then and found its own write
         #expect(model.skills.map(\.slug).contains("marcador"))
 
         // Gone, then back: the folder watch reports the file's return (the descriptor died with it).
         try FileManager.default.removeItem(at: stateURL)
-        try? await Task.sleep(for: .milliseconds(700))
+        try? await Task.sleep(for: .milliseconds(420))
         edited.skills = [Skill(slug: "devolta", name: "Devolta", summary: "", instructions: "x", orbIDs: [atlas])]
         try write(edited)
         #expect(await waitUntil("the re-armed watch to reload") { model.skills.map(\.slug) == ["devolta"] })
