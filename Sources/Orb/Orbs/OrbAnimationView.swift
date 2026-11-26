@@ -444,6 +444,14 @@ final class OrbAnimationView: NSView {
                 if resize, !placed.isEmpty { fitPlacedToGeometry() }
                 return
             }
+        } else if resize {
+            // A scale/size change arrived while an earlier non-resize decode was in flight: fill any layer that was
+            // expected to be reused from cache, or re-request the full set at the new pixel size.
+            for item in layers where images[item] == nil { images[item] = OrbImages.cached(item, pixels: side * scale) }
+            if images.count < layers.count {
+                rebuild(resize: true)
+                return
+            }
         }
         needsResize = false
         builtScale = scale

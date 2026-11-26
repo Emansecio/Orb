@@ -1,5 +1,6 @@
 import AppKit
 import QuartzCore
+import SwiftUI
 import Testing
 @testable import Orb
 
@@ -351,5 +352,55 @@ extension OrbDriverTests {
         look.eyeScale = 1
         view.configure(config: look, activity: .idle, size: 41, followsPointer: false, interactive: false, live: false)
         #expect(eyes.transform.m11 == 1 && brows.transform.m11 == 1)
+    }
+
+    @Test func switchingBotInInspectorUpdatesOrbAppearance() async throws {
+        try #require(NSScreen.main != nil)
+        let root = TempFolder("InspectorOrbSwitch")
+        let model = AppModel(store: Store(directory: root.url), runsBackgroundWork: false)
+        let greenSquare = OrbConfig(color: "menta", shape: "almofada", eyes: "pilulas", mouth: "nenhuma", brows: "retas")
+        let pinkCircle = OrbConfig(color: "rosa", shape: "circulo", eyes: "ovais", mouth: "sorriso", brows: "nenhuma")
+        let botA = model.createBot(name: "Atendente", role: "A", orb: greenSquare, model: "", mode: .ask, base: root.url)
+        let botB = model.createBot(name: "Gestor", role: "B", orb: pinkCircle, model: "", mode: .ask, base: root.url)
+        model.showInspector = true
+        model.selection = .bot(botA.id)
+
+        let host = NSHostingView(rootView: RootView().environment(model))
+        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 700),
+                           styleMask: [.borderless], backing: .buffered, defer: false)
+        win.contentView = host
+        win.alphaValue = 0
+        win.ignoresMouseEvents = true
+        win.orderFrontRegardless()
+        defer { closePlacement(win) }
+
+        func inspectorAvatars(in view: NSView) -> [OrbAnimationView] {
+            let all = (view as? OrbAnimationView).map { [$0] } ?? view.subviews.flatMap(inspectorAvatars)
+            return all
+        }
+        func matchingSize(_ size: CGFloat) -> [OrbAnimationView] {
+            inspectorAvatars(in: host).filter { abs($0.intrinsicContentSize.width - size) < 1 }
+        }
+
+        await waitUntil("initial green square orb in inspector (46pt)") {
+            guard let orb = matchingSize(46).first else { return false }
+            return orb.config == greenSquare && orb.placedLayersForTesting.contains { $0.layer.kind == .body && $0.layer.recolor == "menta" }
+        }
+        let beforeOrb = try #require(matchingSize(46).first)
+        // Simulate prior interaction state on botA so switching must not leak it onto botB.
+        beforeOrb.lastPoke = 5
+
+        // Switch selection to botB (reusing BotInspector inside RootView's .inspector).
+        model.selection = .bot(botB.id)
+        let updated = await waitUntil("pink circle orb in inspector after switching", timeout: .seconds(4)) {
+            guard let orb = matchingSize(46).first else { return false }
+            return orb !== beforeOrb
+                && orb.config == pinkCircle
+                && orb.placedLayersForTesting.contains { $0.layer.kind == .body && $0.layer.path == "body/rosa" }
+                && !orb.placedLayersForTesting.contains { $0.layer.kind == .brows }
+        }
+        let shown = matchingSize(46).first
+        #expect(updated, "Expected fresh pinkCircle OrbAnimationView, got same=\(shown === beforeOrb) config=\(String(describing: shown?.config)) layers=\(String(describing: shown?.placedLayersForTesting.map(\.layer)))")
+        #expect(shown?.currentJumpForTesting == nil)
     }
 }

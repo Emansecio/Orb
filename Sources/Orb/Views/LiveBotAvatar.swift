@@ -33,6 +33,10 @@ struct LiveBotAvatar: View {
                       paused: paused || settled || (restsWhenIdle && activity == .idle && !hovering), ack: live.poke, landing: landing,
                       cue: live.cue, interactive: interactive, badge: showsUnread && live.unread > 0)
         }
+        // Each Orb owns its own SettlingOrb and OrbAnimationView so switching Orbs in a reused panel/chat never
+        // carries over the previous Orb's Core Animation layers, hover state, activity hold, or poke counters.
+        .id(botID)
+        .onChange(of: botID) { hovering = false }
         .onHover { if interactive && restsWhenIdle { hovering = $0 } }
     }
 }
