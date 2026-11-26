@@ -367,10 +367,9 @@ enum ModelCatalog {
         case .ollama:
             // The OpenAI-style list names the models; the server's own, beside `/v1`, says which of them run in the cloud.
             let root = base.lastPathComponent == "v1" ? base.deletingLastPathComponent() : base
-            async let ids = OpenAIClient(baseURL: base, apiKey: token, session: session).models()
-            async let tags = getJSON(root.appending(path: "api/tags"), token: token, session: session)
-            let windows = ollamaCloudWindows(try? await tags)
-            return try await ids.map { ProviderModel(id: $0, name: $0, format: .chat, contextLength: windows[$0]) }
+            let ids = try await OpenAIClient(baseURL: base, apiKey: token, session: session).models()
+            let windows = ollamaCloudWindows(try? await getJSON(root.appending(path: "api/tags"), token: token, session: session))
+            return ids.map { ProviderModel(id: $0, name: $0, format: .chat, contextLength: windows[$0]) }
         case .claudeCode, .openDesign, .xai, .lmstudio:
             return listedModels(try await OpenAIClient(baseURL: base, apiKey: token, session: session).modelEntries(), format: .chat)
         }
