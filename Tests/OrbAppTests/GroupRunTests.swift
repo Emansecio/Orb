@@ -611,4 +611,24 @@ struct GroupHuntFixesTests {
         world.model.renameGroup(id, to: "Lançamento")
         #expect(world.model.group(id)?.name == "Lançamento", "its own name is not a repeat")
     }
+
+    @Test @MainActor func threeConsecutiveChangesRoundsWarnTheThreadAndSignalOrchestrator() async throws {
+        let world = GroupWorld()
+        let first = await startOrchestratorTurn(world)
+        for round in 1...3 {
+            let ask = try world.fake.ask(from: world.atlas.id, to: world.revisor.id, text: "Revise rodada \(round)", parent: first)
+            await world.fake.run(ask, reply: "CHANGES: ajuste \(round)")
+        }
+        #expect(world.hub.run(world.groupID)?.consecutiveChanges == 3)
+        let notices = world.items.compactMap { item -> String? in
+            if case .notice(let text) = item.kind { return text }
+            return nil
+        }
+        #expect(notices.contains { $0.contains("atingiu 3 rodadas") })
+        let prompt = await world.hub.prompt(for: first, member: world.atlas.id)
+        #expect(prompt.contains("Review limit reached"))
+        // Human guidance resets consecutive change tracking.
+        #expect(world.model.postUserMessage("Sigam assim mesmo", to: world.groupID))
+        #expect(world.hub.run(world.groupID)?.consecutiveChanges == 0)
+    }
 }

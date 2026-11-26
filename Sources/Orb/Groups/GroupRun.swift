@@ -38,6 +38,10 @@ struct GroupRun: Equatable, Sendable {
     /// Review replies seen (a member's reply that starts with APPROVED or CHANGES) and the last verdict.
     var round = 0
     var verdict: ReviewVerdict?
+    /// Consecutive `CHANGES:` verdicts in this run without an approval or new user guidance.
+    var consecutiveChanges = 0
+    /// Whether the thread already warned the person that `GroupHub.maxConsecutiveChanges` was reached.
+    var reviewLimitNotified = false
 
     /// `id`: a request resumed after the app closed keeps its run's id, so each member finds its worktree and branch again.
     static func new(group: OrbGroup, request: String, now: Date = .now, id: UUID = UUID()) -> GroupRun {

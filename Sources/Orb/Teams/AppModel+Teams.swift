@@ -143,12 +143,19 @@ extension AppModel {
         guard !isResetting, !typed.isEmpty, let idx = teams.firstIndex(where: { $0.id == teamID }) else { return false }
         appendTeamThreadItem(TranscriptItem(.user(text: typed, attachments: [])), to: teamID)
         markTeamRead(teamID)
+        // Every next turn carries the message, also when the Team is already running (`start` is then a no-op).
+        teamHub.steer(teamID, message: typed)
         if teams[idx].status == .completed || teams[idx].status == .failed {
             teams[idx].mission.stages.append(MissionStage(
                 title: typed,
                 ownerMemberID: teams[idx].orchestratorID,
                 reviewerMemberID: teams[idx].members.first(where: { $0.id != teams[idx].orchestratorID })?.id
             ))
+            // New work can break what was verified: the final audit checks every criterion again.
+            for c in teams[idx].mission.criteria.indices {
+                teams[idx].mission.criteria[c].isVerified = false
+                teams[idx].mission.criteria[c].lastEvidence = ""
+            }
         }
         teamHub.start(teamID)
         return true

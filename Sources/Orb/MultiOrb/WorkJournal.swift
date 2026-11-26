@@ -10,6 +10,8 @@ struct WorkEntry: Codable, Equatable, Sendable, Identifiable {
         case groupRun
         /// A request one Orb made of another outside any group.
         case request
+        /// A reply already received for a chat-level request, waiting in the asker's inbox until sibling requests finish.
+        case pendingReply
         /// Continuous execution of an autonomous Team (`teamID`).
         case teamRun
         /// An Orb's pulse run (`botID`). Never resumed: the next pulse covers it (`AppModel.resumeInterruptedWork` drops it).
@@ -293,6 +295,28 @@ final class WorkJournal {
 
     func dropRequest(_ id: UUID) {
         remove { $0.kind == .request && $0.envelope?.id == id }
+    }
+
+    /// A reply arrived for a top-level chat request and is waiting in `inbox` (e.g. for sibling fan-out requests to finish).
+    /// Persisting it prevents re-running already completed teammates if the app closes before the asker wakes.
+    func replyPending(_ envelope: OrbEnvelope, at date: Date = .now) {
+        guard !frozen, envelope.kind == .reply, envelope.groupID == nil, envelope.servingRequest == nil,
+              envelope.servingRoutine == nil, envelope.servingPulse == nil,
+              !live.contains(where: { $0.kind == .pendingReply && $0.envelope?.id == envelope.id }) else { return }
+        live.append(WorkEntry(kind: .pendingReply, startedAt: date, envelope: envelope))
+        persist()
+    }
+
+    func dropPendingReply(_ id: UUID) {
+        remove { $0.kind == .pendingReply && $0.envelope?.id == id }
+    }
+
+    func dropPendingReplies(inChain chainID: UUID) {
+        remove { $0.kind == .pendingReply && $0.envelope?.chainID == chainID }
+    }
+
+    func dropPendingReplies(forBot botID: UUID) {
+        remove { $0.kind == .pendingReply && $0.envelope?.to.id == botID }
     }
 
     // MARK: The pulse

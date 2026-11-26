@@ -71,6 +71,10 @@ enum TeamWorkspaces {
                                                        commit: commit, summary: summary, to: board)
                 }
             }
+            let touched = await WorkFolders.changedFiles(in: commit, project: project, gitPath: gitPath)
+            if !touched.isEmpty {
+                await TeamBoard.markStaleContracts(touching: touched, commit: commit, to: board)
+            }
             let author = team.orchestrator?.name ?? "Líder"
             await TeamBoard.recordContract(title: "Integração \(stageTitle)",
                                            summary: "Ramo \(branch) integrado no commit \(commit).",

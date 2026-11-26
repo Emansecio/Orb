@@ -58,6 +58,8 @@ final class GroupHub: GroupTurnHooks {
     var now: @MainActor () -> Date = { .now }
     /// At most one banner per group in this interval.
     var noticeInterval: TimeInterval = 5
+    /// Consecutive `CHANGES:` review rounds before the hub warns the thread and asks the orchestrator to escalate to the person.
+    static let maxConsecutiveChanges = 3
     private var lastNotice: [UUID: Date] = [:]
 
     init(model: AppModel, delegation: any DelegationService) {
@@ -93,7 +95,15 @@ final class GroupHub: GroupTurnHooks {
         // What the members are asked when the message is only pictures, as in an Orb's chat.
         let text = typed.isEmpty ? AppModel.attachmentsOnlyPrompt : typed
         let isNew = activeRun(groupID) == nil
-        if isNew { runs[groupID] = .new(group: group, request: text, now: now()) }
+        if isNew {
+            runs[groupID] = .new(group: group, request: text, now: now())
+        } else {
+            // New human guidance resets consecutive review-change stagnation tracking.
+            update(groupID) {
+                $0.consecutiveChanges = 0
+                $0.reviewLimitNotified = false
+            }
+        }
         session.append(.user(text: typed, attachments: images.map(\.path)))
         markRead(groupID)
         var targets = Mentions.parse(typed, members: group.memberIDs.map { reference($0) })
@@ -200,10 +210,14 @@ final class GroupHub: GroupTurnHooks {
             GroupPrompt.Member(name: name(of: id), role: model.bot(id)?.role ?? "", isOrchestrator: id == group.orchestratorID,
                                waitsForUser: id != member && model.liveBot(id)?.needsYou == true)
         }
-        return GroupPrompt.preface(.init(groupName: group.name, you: name(of: member),
-                                         role: member == group.orchestratorID ? .orchestrator : .member,
-                                         members: members,
-                                         thread: thread, board: board))
+        let base = GroupPrompt.preface(.init(groupName: group.name, you: name(of: member),
+                                             role: member == group.orchestratorID ? .orchestrator : .member,
+                                             members: members,
+                                             thread: thread, board: board))
+        if member == group.orchestratorID, run.consecutiveChanges >= Self.maxConsecutiveChanges {
+            return base + "\n\nReview limit reached (\(run.consecutiveChanges) consecutive CHANGES rounds): do not start another build/review round. Summarize the current state and remaining issues for the user so they can decide how to proceed."
+        }
+        return base
     }
 
     /// The pictures of the person's message(s) this turn answers. Not taken out: a turn put back in the queue because the
@@ -259,6 +273,7 @@ final class GroupHub: GroupTurnHooks {
                                           requestID: request.envelope.id, chainID: run.id, groupID: group.id)
                 session.append(.orbMessage(post))
                 addUnread(group.id)
+                var hitReviewLimit = false
                 update(group.id) { run in
                     run.lastText = text
                     if !interim, member == group.orchestratorID, fromUser { run.finalText = text }
@@ -268,9 +283,23 @@ final class GroupHub: GroupTurnHooks {
                         run.round += 1
                         run.verdict = verdict
                         review = (verdict, run.round)
+                        switch verdict {
+                        case .approved:
+                            run.consecutiveChanges = 0
+                            run.reviewLimitNotified = false
+                        case .changes:
+                            run.consecutiveChanges += 1
+                            if run.consecutiveChanges >= Self.maxConsecutiveChanges, !run.reviewLimitNotified {
+                                run.reviewLimitNotified = true
+                                hitReviewLimit = true
+                            }
+                        }
                     }
                 }
                 if let review { session.append(.notice(ReviewVerdict.eventLine(review.0, round: review.1))) }
+                if hitReviewLimit {
+                    session.append(.notice("A revisão atingiu \(Self.maxConsecutiveChanges) rodadas com ajustes pendentes; revise os apontamentos ou envie uma orientação."))
+                }
             }
             setAssignment(request.envelope.id, to: .replied, in: session)
         case .failed, .refused:

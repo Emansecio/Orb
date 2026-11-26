@@ -18,6 +18,11 @@ struct OrbsTool: AgentTool {
             "to": .property("string", "Teammate name."),
             "message": .property("string", "Up to \(DelegationLimits.messageLimit) characters."),
             "folder": .property("string", "ask: project folder; in git, its own branch."),
+            "files": .object([
+                "type": .string("array"),
+                "items": .object(["type": .string("string")]),
+                "description": .string("Optional file paths relevant to the message (up to \(DelegationLimits.maxArtifacts))."),
+            ]),
         ], required: ["action"]))
 
     var kind: ToolCall.Kind { .orbs }

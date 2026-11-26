@@ -15,6 +15,8 @@ struct TeamProposalTool: AgentTool {
             "objective": .property("string", "Clear Mission goal."),
             "analysis_summary": .property("string", "1-2 sentences summarizing what you found in the project folder or idea."),
             "scout_note": .property("string", "Short friendly comment presenting the proposed squad."),
+            "constraints": .object(["type": .string("array"), "items": .object(["type": .string("string")]),
+                                    "description": .string("Optional operational allow/deny constraints that must hold throughout the Mission.")]),
             "criteria": .object(["type": .string("array"), "items": .object(["type": .string("string")])]),
             "stages": .object(["type": .string("array"), "items": .object(["type": .string("string")])]),
             "members": .object([

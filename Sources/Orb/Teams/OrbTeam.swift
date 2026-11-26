@@ -104,6 +104,8 @@ extension MissionStage {
 /// Structured Mission guiding continuous execution and progress tracking.
 struct TeamMission: Codable, Sendable, Equatable {
     var objective = ""
+    /// Immutable operational constraints (`allow`/`deny`) kept visible across all Team turns.
+    var constraints: [String] = []
     var criteria: [MissionCriterion] = []
     var stages: [MissionStage] = []
 
@@ -138,6 +140,7 @@ extension TeamMission {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         objective = try c.value(.objective, default: "")
+        constraints = try c.lossyArray(.constraints)
         criteria = try c.lossyArray(.criteria)
         stages = try c.lossyArray(.stages)
     }

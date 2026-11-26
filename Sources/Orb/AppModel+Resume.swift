@@ -19,7 +19,8 @@ extension AppModel {
             await self?.connectionsChecked()
             guard let self, !isResetting else { return }
             // Groups and requests only queue the work (the hub starts it when the Orb is free); an Orb's own task is waited for.
-            for entry in entries {
+            // Open requests are resubmitted before pending replies are restored so `stillAwaited` holds fan-in until siblings finish.
+            for entry in entries where entry.kind != .pendingReply {
                 switch entry.kind {
                 case .groupRun: resumeGroupRun(entry)
                 case .teamRun:
@@ -32,8 +33,11 @@ extension AppModel {
                 case .pulse:
                     // A pulse is opportunistic: the next one looks again, so a cut one is dropped instead of resumed.
                     if let botID = entry.botID { workJournal.dropPulse(bot: botID) }
-                case .chatTask, .unknown: break
+                case .chatTask, .pendingReply, .unknown: break
                 }
+            }
+            for entry in entries where entry.kind == .pendingReply {
+                resumePendingReply(entry)
             }
             let tasks = entries.filter { $0.kind == .chatTask }.map { entry in Task { await self.resumeChatTask(entry) } }
             for task in tasks { await task.value }
@@ -112,6 +116,14 @@ extension AppModel {
             if let folder = envelope.folder, !folder.isEmpty {
                 cleanUpAbandonedWork(project: URL(fileURLWithPath: folder), run: envelope.id, notify: envelope.from.id)
             }
+        }
+    }
+
+    /// A reply already received before the app closed: restored into the asker's inbox so completed teammates are not re-run.
+    private func resumePendingReply(_ entry: WorkEntry) {
+        guard let envelope = entry.envelope else { return }
+        if !delegation.restorePendingReply(envelope) {
+            workJournal.dropPendingReply(envelope.id)
         }
     }
 

@@ -93,6 +93,11 @@ struct TurnRequest: Sendable {
     /// The prompt only steers the turn (the review of the conversation): it is part of the task in progress, not the
     /// request that starts one, so the outputs of the steps before it stay whole, as in the turn's last call.
     var promptOnlySteers = false
+    /// Final steps before `isLastStep` reserved for wrap-up (0 disables). During wrap-up, `specs` stays unchanged to
+    /// preserve prompt cache, but only tools in `wrapUpTools` may execute; action tools are locked.
+    var wrapUpSteps = 0
+    /// Tool names allowed to run during the wrap-up window (e.g. `["team_note"]`).
+    var wrapUpTools: Set<String> = []
 
     func currentPermissions() async -> PermissionState {
         if let permissions { return await permissions() }
@@ -168,6 +173,7 @@ actor AgentEngine {
         var learnedWindow: (tokens: Int, stated: Bool)?
         let toolNames = Set(request.tools.map(\.spec.name))
         let maxSteps = max(2, request.maxSteps)
+        let effectiveWrapUp = min(max(0, request.wrapUpSteps), max(0, maxSteps - 2))
         var usage: TokenUsage?
         var requestsWithUsage = 0
         /// A request that failed after the provider said what it used is billed anyway: counted, not shown as a reply.
@@ -227,6 +233,7 @@ actor AgentEngine {
                 guard step <= maxSteps else { return }
                 // The last step answers in text (the tools stay listed, so the provider's cache still applies).
                 let isLastStep = step == maxSteps
+                let inWrapUp = effectiveWrapUp > 0 && !isLastStep && step >= maxSteps - effectiveWrapUp
                 // What the user said since the last call goes to the model now: a step boundary.
                 let delivered = Self.deliverSteering(request.steering, into: &messages, out: out)
                 if continuedForSteering, delivered.isEmpty { return }
@@ -257,8 +264,9 @@ actor AgentEngine {
                         if let fit {
                             for report in announced.reports(after: fit, cut: cut, input: messages.dropFirst()) { out.yield(.compacted(report)) }
                         }
+                        let forcesTextOnly = isLastStep || (inWrapUp && request.wrapUpTools.isEmpty)
                         reply = try await respond(to: window, request: request, specs: specs, thinking: thinking,
-                                                  toolChoice: isLastStep ? .none : .auto, stableToolCallID: fit?.stableToolCallID,
+                                                  toolChoice: forcesTextOnly ? .none : .auto, stableToolCallID: fit?.stableToolCallID,
                                                   out: out, onDiscardedUsage: countDiscarded)
                         // The smaller history worked: that is what this model's window really is.
                         if let learned = learnedWindow {
@@ -332,7 +340,14 @@ actor AgentEngine {
                 let calls = isLastStep ? [] : reply.calls
                 let assistant = ChatMessage(role: .assistant, content: reply.text, toolCalls: calls, reasoning: reply.reasoning)
                 // Append-only, so the earlier part of the conversation still hits the provider's cache.
-                let warning = maxSteps - step == Self.warningSteps ? Self.stepWarning(remaining: Self.warningSteps) : nil
+                let warning: String?
+                if effectiveWrapUp > 0 && step == maxSteps - effectiveWrapUp - 1 {
+                    warning = Self.wrapUpWarning(remaining: effectiveWrapUp, allowedTools: request.wrapUpTools)
+                } else if effectiveWrapUp == 0 && maxSteps - step == Self.warningSteps {
+                    warning = Self.stepWarning(remaining: Self.warningSteps)
+                } else {
+                    warning = nil
+                }
                 let recital = Self.planRecital(request.context.taskPlan.plan, calls: calls, step: step, shown: &planShown)
                 let notes = [warning, recital].compactMap { $0 }
                 let note = notes.isEmpty ? nil : notes.joined(separator: "\n\n")
@@ -424,7 +439,7 @@ actor AgentEngine {
                     // work undone: the model is reminded, at most `reminderLimit` times, and again only after it did some work. Not in the wizard or a review (`onlyTools`: conversations, not tasks).
                     // Last, from the same allowance: a reply that ends the task with steps of its plan still open, once
                     // per request (`PlanReminder`).
-                    if !isLastStep, request.onlyTools == nil, reminders < Self.reminderLimit(unattended: request.unattended),
+                    if !isLastStep, !inWrapUp, request.onlyTools == nil, reminders < Self.reminderLimit(unattended: request.unattended),
                        reminders == 0 || workedSinceReminder {
                         // The user asked to stop: no reminder sends the model back to work, a promise or an unproven "done" included.
                         let earlier = stopAsked ? nil
@@ -452,7 +467,8 @@ actor AgentEngine {
                 }
 
                 circling = await runCalls(calls, request: request, reason: said, allowed: &allowed, toolNames: toolNames, note: note,
-                                          watch: &watch, completion: &completion, planTouched: &planTouched, messages: &messages, out: out)
+                                          inWrapUp: inWrapUp, watch: &watch, completion: &completion, planTouched: &planTouched,
+                                          messages: &messages, out: out)
                 if circling {
                     circlingNotes += 1
                     if circlingNotes == LoopWatch.alertAfter { out.yield(.notice(LoopWatch.userNotice)) }
@@ -701,6 +717,16 @@ actor AgentEngine {
         "[Orb: restam \(remaining) passos neste turno; priorize e termine com um resumo do que fez e do que falta]"
     }
 
+    static let wrapUpLockedPrefix = "Wrap-up phase:"
+
+    static func wrapUpWarning(remaining: Int, allowedTools: Set<String>) -> String {
+        let allowed = allowedTools.sorted().joined(separator: ", ")
+        let toolsNote = allowed.isEmpty
+            ? "Action tools are now locked for the remaining \(remaining) step(s)."
+            : "Action tools are now locked for the remaining \(remaining) step(s); only \(allowed) remain available."
+        return "[Orb wrap-up: \(toolsNote) Persist any contracts or findings and write your final summary.]"
+    }
+
     /// The steps of the task `messages` end with, written as a progress record (nil when it made no tool calls).
     /// `pickedUp`: the turn's request only picks up the task before it. `nudges`: the indexes of the messages the engine
     /// added, which is no request. `turnStart`: the index of the message that opened the turn; the messages sent during it
@@ -746,8 +772,8 @@ actor AgentEngine {
     /// time; everything else runs alone, in order. `note`, and what `watch` has to say about the turn going in circles,
     /// go at the end of the last result. Returns whether `watch` said something.
     private func runCalls(_ calls: [ToolCallRequest], request: TurnRequest, reason: String, allowed: inout [PermissionRule],
-                          toolNames: Set<String>, note: String?, watch: inout LoopWatch, completion: inout CompletionWatch,
-                          planTouched: inout Bool, messages: inout [ChatMessage],
+                          toolNames: Set<String>, note: String?, inWrapUp: Bool = false, watch: inout LoopWatch,
+                          completion: inout CompletionWatch, planTouched: inout Bool, messages: inout [ChatMessage],
                           out: AsyncStream<TurnEvent>.Continuation) async -> Bool {
         let (calls, request) = await resolved(calls, in: request)
         var circling = false
@@ -766,8 +792,9 @@ actor AgentEngine {
         func append(_ outcome: ToolOutcome, capped text: String, for call: ToolCallRequest) {
             var text = text
             let kind = request.tools.first { $0.spec.name == call.name }?.kind
-            // A call the user refused never ran: it is no failure of its own, nor a result to compare.
-            if !outcome.text.hasPrefix(PermissionPolicy.refusalPrefix) {
+            // A call the user refused or wrap-up locked never ran: it is no failure of its own, nor a result to compare.
+            if !outcome.text.hasPrefix(PermissionPolicy.refusalPrefix),
+               !outcome.text.hasPrefix(Self.wrapUpLockedPrefix) {
                 watch.record(call, result: outcome.text, failed: outcome.isError, live: LoopWatch.isLive(call.name, kind: kind))
                 completion.record(call, result: outcome.text, failed: outcome.isError)
                 if call.name == TaskPlanTool.name, !outcome.isError { planTouched = true }
@@ -782,7 +809,7 @@ actor AgentEngine {
             out.yield(.message(message))
         }
 
-        let confirmed = await confirmBatch(calls, request: request, reason: reason, allowed: &allowed, out: out)
+        let confirmed = await confirmBatch(calls, request: request, reason: reason, allowed: &allowed, inWrapUp: inWrapUp, out: out)
         // A command that went on in the background (`CommandRelease`) ends the step: the calls after it were asked for as
         // if it had ended, and the user wants the Orb back. They are answered without running, and the model asks again.
         let releasedBefore = request.context.release?.releasedCount ?? 0
@@ -804,7 +831,8 @@ actor AgentEngine {
             var end = index
             while end < calls.count, Self.runsWithoutAsking(calls[end], request: request) { end += 1 }
             guard end - index > 1 else {
-                let outcome = await execute(calls[index], request: request, reason: reason, allowed: &allowed, approved: confirmed.approved.contains(index), out: out)
+                let outcome = await execute(calls[index], request: request, reason: reason, allowed: &allowed,
+                                            approved: confirmed.approved.contains(index), inWrapUp: inWrapUp, out: out)
                 append(outcome, capped: await capped(outcome, for: calls[index]), for: calls[index])
                 index += 1
                 continue
@@ -818,7 +846,8 @@ actor AgentEngine {
                     guard let (offset, call) = calls.next() else { return }
                     group.addTask {
                         var local = snapshot
-                        return (offset, await self.execute(call, request: request, reason: reason, allowed: &local, out: out))
+                        return (offset, await self.execute(call, request: request, reason: reason, allowed: &local,
+                                                           inWrapUp: inWrapUp, out: out))
                     }
                 }
                 for _ in 0..<Self.parallelTools { startNext() }
@@ -868,8 +897,8 @@ actor AgentEngine {
     /// calls the user allowed (they run without asking again) and the ones refused. "Revisar uma a uma", and a switch
     /// to read-only while the card was open, leave both empty: every call then asks for itself, as without batching.
     private func confirmBatch(_ calls: [ToolCallRequest], request: TurnRequest, reason: String, allowed: inout [PermissionRule],
-                              out: AsyncStream<TurnEvent>.Continuation) async -> (approved: Set<Int>, refused: [Int: ToolOutcome]) {
-        guard request.onlyTools == nil else { return ([], [:]) } // the calls that can run need no card
+                              inWrapUp: Bool = false, out: AsyncStream<TurnEvent>.Continuation) async -> (approved: Set<Int>, refused: [Int: ToolOutcome]) {
+        guard request.onlyTools == nil, !inWrapUp else { return ([], [:]) } // the calls that can run need no card
         let live = await request.currentPermissions()
         guard let batch = ApprovalBatch.plan(calls: calls, tools: request.tools, context: request.context, state: live, grants: allowed)
         else { return ([], [:]) }
@@ -973,8 +1002,11 @@ actor AgentEngine {
     /// Runs one tool call (asking first when needed) and returns the text the model receives. `allowed` holds the
     /// grants of this turn ("Só nesta tarefa"). `approved`: the user already allowed it on a card that grouped it.
     private func execute(_ call: ToolCallRequest, request: TurnRequest, reason: String, allowed: inout [PermissionRule],
-                         approved: Bool = false, out: AsyncStream<TurnEvent>.Continuation) async -> ToolOutcome {
+                         approved: Bool = false, inWrapUp: Bool = false, out: AsyncStream<TurnEvent>.Continuation) async -> ToolOutcome {
         if let only = request.onlyTools, !only.contains(call.name) { return ToolOutcome("Not available in this review.", isError: true) }
+        if inWrapUp, !request.wrapUpTools.contains(call.name) {
+            return ToolOutcome("\(Self.wrapUpLockedPrefix) action tools are locked. Persist any contracts or findings and write your final summary.", isError: true)
+        }
         guard let tool = request.tools.first(where: { $0.spec.name == call.name }) else {
             return ToolOutcome("Error: unknown tool \(call.name).", isError: true)
         }

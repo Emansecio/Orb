@@ -35,8 +35,12 @@ struct MultiOrbRoundTripTests {
 
         let envelope = OrbEnvelope(kind: .reply, from: revisor, to: atlas, text: "Pronto", hop: 2, path: [atlas.id, revisor.id],
                                    replyTo: request, servingRequest: UUID(), status: .ok, groupID: group,
-                                   sentAt: Date(timeIntervalSince1970: 1_000_000), folder: "/Users/x/projeto")
+                                   sentAt: Date(timeIntervalSince1970: 1_000_000), folder: "/Users/x/projeto",
+                                   artifacts: ["/Users/x/projeto/README.md"], fullReplyPath: "/tmp/resposta-1234.md")
         #expect(try roundTrip(envelope) == envelope)
+
+        let pending = WorkEntry(kind: .pendingReply, startedAt: Date(timeIntervalSince1970: 1_000_000), envelope: envelope)
+        #expect(try roundTrip(pending) == pending)
 
         let orbGroup = OrbGroup(name: "Lançamento", memberIDs: [atlas.id, revisor.id], orchestratorID: atlas.id,
                                 policy: GroupPolicy(membersMayTalk: false), projectFolder: "/Users/x/projeto")
@@ -207,7 +211,7 @@ struct MultiOrbCompatibilityTests {
 
         let envelope = try decode(OrbEnvelope.self, #"{"id":"00000000-0000-4000-8000-0000000000C3","chainID":"00000000-0000-4000-8000-0000000000D4","kind":"?","from":{"id":"00000000-0000-4000-8000-0000000000A1","name":"A"},"to":{"id":"00000000-0000-4000-8000-0000000000B2","name":"B"}}"#)
         #expect(envelope.kind == .tell && envelope.hop == 1 && envelope.path.isEmpty && envelope.text.isEmpty)
-        #expect(envelope.folder == nil)
+        #expect(envelope.folder == nil && envelope.artifacts.isEmpty && envelope.fullReplyPath == nil)
 
         let pause = try decode(GroupPauseItem.self, #"{"groupID":"00000000-0000-4000-8000-0000000000C3","runID":"00000000-0000-4000-8000-0000000000D4","reason":"x","state":"y"}"#)
         #expect(pause.reason == .turns && pause.state == .ended)

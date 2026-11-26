@@ -51,6 +51,10 @@ struct OrbEnvelope: Codable, Equatable, Sendable {
     /// The pulse run that asked, waiting in its own conversation (`DelegationHub.holdPulse`): its answer resumes that run, not
     /// the chat.
     var servingPulse: UUID?
+    /// Structured file paths attached to an ask/tell (`files`) or produced during a reply (`ProducedFile`).
+    var artifacts: [String] = []
+    /// When a reply exceeds `DelegationLimits.replyLimit`, the full untruncated text is spilled to disk here.
+    var fullReplyPath: String?
 
     /// The run that waits for this answer in its own conversation: a routine's or a pulse's (one of the two at most).
     var servingRun: UUID? { servingRoutine ?? servingPulse }
@@ -79,5 +83,7 @@ extension OrbEnvelope {
         folder = (try? c.decodeIfPresent(String.self, forKey: .folder)) ?? nil
         pulseRun = (try? c.decodeIfPresent(UUID.self, forKey: .pulseRun)) ?? nil
         servingPulse = (try? c.decodeIfPresent(UUID.self, forKey: .servingPulse)) ?? nil
+        artifacts = try c.lossyArray(.artifacts)
+        fullReplyPath = (try? c.decodeIfPresent(String.self, forKey: .fullReplyPath)) ?? nil
     }
 }

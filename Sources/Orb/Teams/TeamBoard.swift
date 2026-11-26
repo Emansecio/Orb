@@ -23,21 +23,103 @@ enum TeamBoard {
     }
 
     /// Appends or updates Block 3 (Active contracts and architectural decisions) so parallel members see newly merged interfaces.
-    static func recordContract(title: String, summary: String, author: String, to bank: MemoryBank) async {
+    /// `supersedes`: titles of older contracts replaced by this one (matched case/diacritic-insensitively).
+    /// `files`: optional file paths anchored to this contract so post-merge hooks can flag staleness.
+    static func recordContract(title: String, summary: String, author: String,
+                               supersedes: [String] = [], files: [String] = [], to bank: MemoryBank) async {
         await bank.prepare(now: .now)
         let cleanTitle = MemoryText.clip(MemoryText.flatten(MemorySanitizer.scrub(title)), 70)
         let cleanSummary = MemoryText.clip(MemoryText.flatten(MemorySanitizer.scrub(summary)), 220)
         let cleanAuthor = MemoryText.clip(MemoryText.flatten(author), 40)
         guard !cleanTitle.isEmpty, !cleanSummary.isEmpty else { return }
 
-        let line = "- **\(cleanTitle)** (\(cleanAuthor)): \(cleanSummary)"
+        let cleanFiles = Array(files.map {
+            MemoryText.clip(MemoryText.flatten(MemorySanitizer.scrub($0)), 80)
+                .replacingOccurrences(of: "[", with: "")
+                .replacingOccurrences(of: "]", with: "")
+                .replacingOccurrences(of: ",", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }.filter { !$0.isEmpty }.prefix(4))
+        let filesSuffix = cleanFiles.isEmpty ? "" : " [arquivos: \(cleanFiles.joined(separator: ", "))]"
+        let line = "- **\(cleanTitle)** (\(cleanAuthor)): \(cleanSummary)\(filesSuffix)"
+
+        let replacedTitles = Set(([cleanTitle] + supersedes).map(foldKey).filter { !$0.isEmpty })
         var lines = await existingLines(at: contractsPath, in: bank)
-            .filter { !$0.hasPrefix("- **\(cleanTitle)** (") }
+            .filter { existing in
+                guard let existingTitle = extractContractTitle(from: existing) else { return true }
+                return !replacedTitles.contains(foldKey(existingTitle))
+            }
         lines.append(line)
         if lines.count > maxContractEntries { lines.removeFirst(lines.count - maxContractEntries) }
 
         await writePage(path: contractsPath, kind: .preferencia, title: "Contratos e decisões ativas",
                         body: lines.joined(separator: "\n"), origin: .orb, to: bank)
+    }
+
+    /// Flags active contracts anchored to any file touched by `commit` so subsequent stages re-verify them.
+    static func markStaleContracts(touching changedFiles: [String], commit: String, to bank: MemoryBank) async {
+        let normalized = changedFiles.map(normalizePath).filter { !$0.isEmpty }
+        guard !normalized.isEmpty else { return }
+        await bank.prepare(now: .now)
+        let lines = await existingLines(at: contractsPath, in: bank)
+        guard !lines.isEmpty else { return }
+
+        let shortCommit = MemoryText.clip(MemoryText.flatten(commit), 12)
+        let tag = shortCommit.isEmpty ? "[revisar após merge]" : "[revisar após \(shortCommit)]"
+        var changed = false
+        let updated = lines.map { line -> String in
+            let anchored = extractContractFiles(from: line)
+            guard !anchored.isEmpty else { return line }
+            let overlaps = anchored.contains { anchor in
+                let a = normalizePath(anchor)
+                return normalized.contains { file in
+                    file == a || file.hasSuffix("/" + a) || a.hasSuffix("/" + file)
+                }
+            }
+            guard overlaps else { return line }
+            // Replace any previous stale marker instead of stacking tags.
+            let stripped = stripStaleTag(from: line)
+            let next = stripped + " " + tag
+            if next != line { changed = true }
+            return next
+        }
+        guard changed else { return }
+        await writePage(path: contractsPath, kind: .preferencia, title: "Contratos e decisões ativas",
+                        body: updated.joined(separator: "\n"), origin: .automatico, to: bank)
+    }
+
+    private static func foldKey(_ text: String) -> String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+            .lowercased()
+    }
+
+    private static func normalizePath(_ path: String) -> String {
+        var clean = path.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\\", with: "/")
+        while clean.hasPrefix("./") { clean.removeFirst(2) }
+        return clean.lowercased()
+    }
+
+    private static func extractContractTitle(from line: String) -> String? {
+        guard line.hasPrefix("- **"),
+              let end = line.range(of: "** (", range: line.index(line.startIndex, offsetBy: 4)..<line.endIndex) else {
+            return nil
+        }
+        return String(line[line.index(line.startIndex, offsetBy: 4)..<end.lowerBound])
+    }
+
+    private static func extractContractFiles(from line: String) -> [String] {
+        guard let start = line.range(of: "[arquivos: "),
+              let end = line.range(of: "]", range: start.upperBound..<line.endIndex) else { return [] }
+        return line[start.upperBound..<end.lowerBound]
+            .components(separatedBy: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private static func stripStaleTag(from line: String) -> String {
+        guard let range = line.range(of: #" \[revisar após [^\]]+\]$"#, options: .regularExpression) else { return line }
+        return String(line[..<range.lowerBound])
     }
 
     /// Records a check/test verification entry into Block 4 (`Log de verificações`).
@@ -119,6 +201,13 @@ enum TeamBoard {
         var lines: [String] = []
         let obj = MemoryText.flatten(MemorySanitizer.scrub(mission.objective))
         if !obj.isEmpty { lines.append("Objetivo: \(MemoryText.clip(obj, 320))") }
+        if !mission.constraints.isEmpty {
+            lines.append("Restrições:")
+            for constraint in mission.constraints.prefix(6) {
+                let clean = MemoryText.clip(MemoryText.flatten(MemorySanitizer.scrub(constraint)), 140)
+                if !clean.isEmpty { lines.append("- \(clean)") }
+            }
+        }
         if !mission.criteria.isEmpty {
             lines.append("Critérios:")
             for criterion in mission.criteria {

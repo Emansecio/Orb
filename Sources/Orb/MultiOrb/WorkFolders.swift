@@ -154,6 +154,38 @@ enum WorkFolders {
         }
     }
 
+    /// Relative file paths changed by `commit` in `project` (empty if git is unavailable or commit has no diff).
+    static func changedFiles(in commit: String, project: URL, gitPath: String? = nil) async -> [String] {
+        let project = project.standardizedFileURL
+        guard !commit.isEmpty, WorkspaceSnapshot.hasRepository(project), let git = Git.make(path: gitPath) else { return [] }
+        return await GitQueue.shared.run {
+            let result = await git.run(["diff-tree", "--no-commit-id", "--name-only", "-r", "-m", "--first-parent", commit], in: project)
+            guard result.succeeded, let output = result.output else { return [] }
+            return output.components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        }
+    }
+
+    /// Commits what a member left uncommitted in its worktree, so merging its branch carries the work (a branch with no new
+    /// commits merges as "Already up to date" and the edits stay behind in the worktree). Nil when everything is committed
+    /// (or was committed now); otherwise git's first line.
+    static func commitPending(in folder: URL, message: String, gitPath: String? = nil) async -> String? {
+        guard WorkspaceSnapshot.hasRepository(folder), let git = Git.make(path: gitPath) else {
+            return "git repository is unavailable"
+        }
+        return await GitQueue.shared.run {
+            let status = await git.run(["status", "--porcelain"], in: folder)
+            guard status.succeeded else { return firstLine(status.text) }
+            guard status.output != nil else { return nil }
+            let added = await git.run(["add", "-A"], in: folder)
+            guard added.succeeded else { return firstLine(added.text) }
+            let identity = ["-c", "user.name=Orb", "-c", "user.email=orb@local", "-c", "commit.gpgsign=false"]
+            let committed = await git.run(identity + ["commit", "--no-verify", "-m", message], in: folder)
+            return committed.succeeded ? nil : firstLine(committed.text)
+        }
+    }
+
     /// Removes a single integrated worktree and branch if merged in HEAD, leaving sibling parallel worktrees intact.
     static func cleanUpBranch(_ branch: String, in project: URL, root: URL, gitPath: String? = nil) async -> Bool {
         let project = project.standardizedFileURL

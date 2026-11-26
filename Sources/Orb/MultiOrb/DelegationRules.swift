@@ -94,11 +94,18 @@ enum DelegationRules {
     }
 
     /// A reply above the limit is cut, and the model reading it is told so and by how much (a bare "…" hides the missing part).
-    static func clippedReply(_ text: String) -> String {
+    /// When `fullPath` is provided, the full untruncated text was spilled to disk and the model is told where to read it.
+    static func clippedReply(_ text: String, fullPath: String? = nil) -> String {
         let limit = DelegationLimits.replyLimit
         guard text.count > limit else { return text }
-        let note = "\n[Reply cut: first \(limit) of \(text.count) characters shown; ask for the rest if needed.]"
-        return String(text.prefix(limit - note.count)).trimmingCharacters(in: .whitespacesAndNewlines) + note
+        let note: String
+        if let fullPath, !fullPath.isEmpty {
+            note = "\n[Reply cut: first \(limit) of \(text.count) characters shown; full text saved at \(fullPath) — use read_file if needed.]"
+        } else {
+            note = "\n[Reply cut: first \(limit) of \(text.count) characters shown; ask for the rest if needed.]"
+        }
+        let headLimit = max(0, limit - note.count)
+        return String(text.prefix(headLimit)).trimmingCharacters(in: .whitespacesAndNewlines) + note
     }
 
     static func fold(_ text: String) -> String {

@@ -25,7 +25,7 @@ struct DelegationRequest: Sendable, Equatable {
 /// The sizes and waits of Orbs talking to each other (tests cite these). How many requests, how deep a chain and how many
 /// turns are not limited: the person stops a chain with ⌘. or Parar.
 enum DelegationLimits {
-    static let messageLimit = 4_000, replyLimit = 6_000, wakeBatch = 5
+    static let messageLimit = 4_000, replyLimit = 6_000, wakeBatch = 5, maxArtifacts = 12
     static let requestTimeout: TimeInterval = 30 * 60, keptPedidos = 20
     static let rosterLimit = 12, roleClip = 80
     /// How long a request may wait while the work it waits for goes on (a child still at work, a queue behind a turn in

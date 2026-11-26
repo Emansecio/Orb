@@ -87,21 +87,53 @@ struct TeamStagnationDetector: Sendable, Equatable {
 
 /// Detects genuine physical/external blockers that autonomous agents cannot resolve on their own.
 enum TeamExternalBlocker {
+    private static let captcha = "O serviço exigiu verificação humana (CAPTCHA) para continuar."
+    private static let twoFactor = "É necessário concluir autenticação em duas etapas (2FA) manualmente."
+    private static let apiKey = "Falta uma chave de API/credencial externa para esta frente avançar."
+    private static let payment = "A ação exige confirmação de pagamento pelo usuário."
+    private static let login = "A conta externa pede login manual antes de continuar."
+
+    /// Tokens are matched on word boundaries (accents and case folded), so "2fa" inside a commit hash is not a blocker.
     private static let patterns: [(token: String, prompt: String)] = [
-        ("captcha", "O serviço exigiu verificação humana (CAPTCHA) para continuar."),
-        ("2fa", "É necessário concluir autenticação em duas etapas (2FA) manualmente."),
-        ("two-factor", "É necessário concluir autenticação em duas etapas (2FA) manualmente."),
-        ("missing api key", "Falta uma chave de API/credencial externa para esta frente avançar."),
-        ("no api key", "Falta uma chave de API/credencial externa para esta frente avançar."),
-        ("payment required", "A ação exige confirmação de pagamento pelo usuário."),
-        ("login required", "A conta externa pede login manual antes de continuar."),
+        ("captcha", captcha),
+        ("recaptcha", captcha),
+        ("2fa", twoFactor),
+        ("two-factor", twoFactor),
+        ("autenticacao em duas etapas", twoFactor),
+        ("verificacao em duas etapas", twoFactor),
+        ("missing api key", apiKey),
+        ("no api key", apiKey),
+        ("falta a chave de api", apiKey),
+        ("chave de api ausente", apiKey),
+        ("sem chave de api", apiKey),
+        ("payment required", payment),
+        ("pagamento necessario", payment),
+        ("login required", login),
+        ("login necessario", login),
+        ("exige login", login),
     ]
 
     static func detect(in text: String) -> String? {
-        let lower = text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil).lowercased()
-        for entry in patterns where lower.contains(entry.token) {
+        let folded = text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil).lowercased()
+        for entry in patterns where containsWord(entry.token, in: folded) {
             return entry.prompt
         }
         return nil
+    }
+
+    private static func containsWord(_ token: String, in text: String) -> Bool {
+        var searchRange = text.startIndex..<text.endIndex
+        while let found = text.range(of: token, range: searchRange) {
+            let before = found.lowerBound == text.startIndex ? nil : text[text.index(before: found.lowerBound)]
+            let after = found.upperBound == text.endIndex ? nil : text[found.upperBound]
+            if !isWordCharacter(before), !isWordCharacter(after) { return true }
+            searchRange = found.upperBound..<text.endIndex
+        }
+        return false
+    }
+
+    private static func isWordCharacter(_ character: Character?) -> Bool {
+        guard let character else { return false }
+        return character.isLetter || character.isNumber || character == "_"
     }
 }

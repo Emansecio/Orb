@@ -340,12 +340,13 @@ private final class Hooks: GroupTurnHooks {
         await waitUntil("the answer to wait for the asker's turn to end") { model.delegation.inbox[team.atlas.id]?.count == 1 }
         #expect(await team.log.count(by: "Atlas") == calls) // not woken: it is working
         #expect(!team.botTexts(team.atlas).contains("Voltei com a resposta."))
-        // The reply lives in memory only: until it is taken, the request stays in the journal so a quit does not lose it.
-        #expect(model.workJournal.entries.contains { $0.kind == .request })
+        // The reply itself is persisted as `.pendingReply` until taken (replacing `.request` so a quit does not re-run the target).
+        #expect(!model.workJournal.entries.contains { $0.kind == .request })
+        #expect(model.workJournal.entries.contains { $0.kind == .pendingReply })
         await busy.open()
         await team.settle()
         #expect(team.botTexts(team.atlas) == ["Pedi.", "Terminei a outra coisa.", "Voltei com a resposta."])
-        #expect(!model.workJournal.entries.contains { $0.kind == .request })
+        #expect(!model.workJournal.entries.contains { $0.kind == .pendingReply })
     }
 
     @Test func aRequestRedoneAfterTheAppClosedGoesOnInTheConversationItLeft() async throws {
@@ -3259,5 +3260,57 @@ struct MultiOrbSearchTests {
         #expect(found.contains("pediu ajuda ao Pesquisador"))
         #expect(found.contains("Pesquisa preços."))
         #expect(ConversationSearch.searchable(TranscriptItem(.groupPause(GroupPauseItem(groupID: UUID(), runID: UUID(), reason: .turns, turnsUsed: 1, tokensUsed: 0, turnLimit: 1, tokenLimit: 1)))) == nil)
+    }
+}
+
+@Suite("Artefatos, spill e respostas pendentes")
+struct DelegationArtifactsAndRecoveryTests {
+    private let root = TempFolder("OrbDelegationArtifacts", creating: true)
+
+    @Test @MainActor func oversizedReplySpillsToDiskAndCarriesArtifacts() throws {
+        let model = AppModel(store: Store(directory: root.url), runsBackgroundWork: false, secretVault: MemoryVault())
+        let other = Bot(name: "Revisor", role: "Revisa código", orb: OrbConfig())
+        model.bots.append(other)
+        let asker = model.bots[0]
+        let req = DelegationRequest(
+            envelope: OrbEnvelope(kind: .ask, from: OrbRef(asker), to: OrbRef(other), text: "Analise tudo"),
+            state: .running
+        )
+        let longText = String(repeating: "linha de análise detalhada\n", count: 350)
+        model.delegation.answer(req, status: .ok, text: longText, artifacts: ["/tmp/relatorio.md", "/tmp/diff.patch"])
+
+        let reply = try #require(model.delegation.inbox[asker.id]?.first)
+        let fullPath = try #require(reply.fullReplyPath)
+        #expect(FileManager.default.fileExists(atPath: fullPath))
+        #expect(try String(contentsOfFile: fullPath, encoding: .utf8) == longText)
+        #expect(reply.artifacts == ["/tmp/relatorio.md", "/tmp/diff.patch"])
+        let rendered = OrbEnvelopeText.reply([reply])
+        #expect(rendered.contains("full_reply=\"\(fullPath)\""))
+        #expect(rendered.contains("<artifacts>"))
+        #expect(rendered.contains("/tmp/relatorio.md"))
+        #expect(model.workJournal.entries.contains { $0.kind == .pendingReply && $0.envelope?.id == reply.id })
+    }
+
+    @Test @MainActor func pendingReplyRestoresAndWaitsForOpenSiblingRequest() throws {
+        let store = Store(directory: root.url)
+        let model = AppModel(store: store, runsBackgroundWork: false, secretVault: MemoryVault())
+        let b = Bot(name: "B", role: "", orb: OrbConfig())
+        let c = Bot(name: "C", role: "", orb: OrbConfig())
+        model.bots.append(contentsOf: [b, c])
+        let a = model.bots[0]
+        let chatID = model.session(a.id).chatID
+        let chainID = UUID()
+
+        var openAsk = OrbEnvelope(chainID: chainID, kind: .ask, from: OrbRef(a), to: OrbRef(c), text: "parte C")
+        openAsk.chat = chatID
+        var savedReply = OrbEnvelope(chainID: chainID, kind: .reply, from: OrbRef(b), to: OrbRef(a), text: "resultado B",
+                                     replyTo: UUID(), status: .ok)
+        savedReply.chat = chatID
+
+        #expect(model.delegation.resubmit(openAsk))
+        #expect(model.delegation.restorePendingReply(savedReply))
+        // Sibling request C is still queued, so B's restored reply stays held in A's inbox instead of waking A early.
+        #expect(!model.delegation.deliverInbox(for: a.id))
+        #expect(model.delegation.inbox[a.id]?.map(\.id) == [savedReply.id])
     }
 }

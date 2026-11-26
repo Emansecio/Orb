@@ -871,6 +871,33 @@ extension AgentEngineTests {
         #expect(failures(events).isEmpty)
     }
 
+    @Test func wrapUpLocksActionToolsWhileAllowingWrapUpTools() async {
+        let touchRuns = Counter()
+        let lookGauge = Gauge()
+        let script = CallScript([
+            [touchCall],                                // step 1: normal (allowed)
+            [touchCall],                                // step 2: normal + emits wrapUpWarning
+            [.toolCalls([ToolCallRequest(id: "c3", name: "touch", arguments: "{}"), lookCall("w1")])], // step 3: wrap-up (touch locked, look allowed)
+            [.toolCalls([lookCall("w2")])],             // step 4: wrap-up (look allowed)
+            [.text("Resumo final"), .finished(.done, nil)], // step 5: isLastStep (toolChoice = .none)
+        ], whenExhausted: .fim)
+        let tools: [any AgentTool] = [TouchTool(runs: touchRuns), LookTool(gauge: lookGauge)]
+        var req = request(script, mode: .bypass, runs: touchRuns, tools: tools, maxSteps: 5)
+        req.wrapUpSteps = 2
+        req.wrapUpTools = ["look"]
+
+        let events = await run(AgentEngine(), req)
+        #expect(await touchRuns.value == 2) // step 3's touch was locked
+        #expect(await script.calls.map(\.toolChoice) == [.auto, .auto, .auto, .auto, .none])
+        let toolMessages = messages(events).filter { $0.role == .tool }
+        #expect(toolMessages[1].content.contains("[Orb wrap-up:"))
+        #expect(toolMessages[2].isError && toolMessages[2].content.contains("Wrap-up phase"))
+        #expect(!toolMessages[3].isError && toolMessages[3].content == "viu x")
+        #expect(!toolMessages[4].isError && toolMessages[4].content == "viu x")
+        #expect(messages(events).last?.content.hasPrefix("Resumo final") == true)
+        #expect(failures(events).isEmpty)
+    }
+
     @Test func toolCallsOnTheLastStepAreNotRunAndTheTurnPauses() async {
         let runs = Counter()
         let script = CallScript([[touchCall], [touchCall], [touchCall]], whenExhausted: .fim)

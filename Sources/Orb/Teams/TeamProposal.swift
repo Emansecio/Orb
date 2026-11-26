@@ -5,6 +5,7 @@ enum TeamProposalField: Hashable, Sendable {
     case teamName
     case objective
     case analysisSummary
+    case constraints
     case criteria
     case stages
     case members
@@ -60,6 +61,7 @@ struct TeamProposal: Sendable, Equatable {
     var objective = ""
     var analysisSummary = ""
     var scoutNote = ""
+    var constraints: [String] = []
     var criteria: [String] = []
     var stages: [String] = []
     var members: [TeamMemberDraft] = []
@@ -119,6 +121,13 @@ struct TeamProposal: Sendable, Equatable {
         }
         if let rawNote = arguments["scout_note"]?.string {
             scoutNote = rawNote.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if let list = arguments["constraints"]?.array {
+            let parsed = list.compactMap(\.string).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+            if parsed != constraints {
+                constraints = Array(parsed.prefix(8))
+                changed.insert(.constraints)
+            }
         }
         if let list = arguments["criteria"]?.array {
             let parsed = list.compactMap(\.string).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
@@ -212,10 +221,14 @@ struct TeamProposal: Sendable, Equatable {
             )
         }
         let nonLeadID = builtMembers.first(where: { $0.id != leadID })?.id
-        let builtStages = stages.enumerated().map { index, title in
+        // Stages are an ordered plan: each waits for the one before it, so later work (tests, integration) never starts
+        // before what it builds on, and two stages never run at once in the same member's folder.
+        var builtStages: [MissionStage] = []
+        for (index, title) in stages.enumerated() {
             let owner = builtMembers[index % builtMembers.count].id
             let reviewer = builtMembers.first(where: { $0.id != owner })?.id ?? nonLeadID
-            return MissionStage(title: title, ownerMemberID: owner, reviewerMemberID: reviewer)
+            builtStages.append(MissionStage(title: title, ownerMemberID: owner, reviewerMemberID: reviewer,
+                                            dependsOn: builtStages.last.map { [$0.id] } ?? []))
         }
         let builtCriteria = criteria.map { MissionCriterion(description: $0) }
         let cleanName = teamName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -230,6 +243,7 @@ struct TeamProposal: Sendable, Equatable {
             orchestratorID: leadID,
             members: builtMembers,
             mission: TeamMission(objective: resolvedObjective.isEmpty ? idea : resolvedObjective,
+                                 constraints: constraints,
                                  criteria: builtCriteria,
                                  stages: builtStages),
             status: .paused
