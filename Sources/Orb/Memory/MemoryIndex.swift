@@ -33,7 +33,7 @@ final class MemoryIndex {
     private var db: OpaquePointer?
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
     /// Bumped when the schema changes; an index from another version is simply rebuilt from the pages.
-    static let schemaVersion = 1
+    static let schemaVersion = 2
 
     /// Why an index could not be opened: another process holds it (try again later, never delete it), the file is
     /// damaged (rebuild it from the pages), or it is not there to open at all (folder missing, no permission).
@@ -52,12 +52,12 @@ final class MemoryIndex {
         // Opening an index that is already right writes nothing: a write here would wait for whoever holds the index
         // (another process rebuilding it) and fail with it busy.
         let version = rows("PRAGMA user_version").first?.int(0) ?? 0
-        if version != 0, version != Self.schemaVersion {
+        if version != 0, version != 1, version != Self.schemaVersion {
             sqlite3_exec(db, "DROP TABLE IF EXISTS pages_fts; DROP TABLE IF EXISTS pages; DROP TABLE IF EXISTS meta;", nil, nil, nil)
         }
         // Session pragmas: WAL checkpoint ceiling + tighter 512 KB page cache + in-memory temp B-trees + 4 MB mmap.
         var schema = "PRAGMA synchronous = NORMAL;\nPRAGMA cache_size = -512;\nPRAGMA journal_size_limit = 1048576;\nPRAGMA temp_store = MEMORY;\nPRAGMA mmap_size = 4194304;\n"
-        if version != Self.schemaVersion {
+        if version != 1, version != Self.schemaVersion {
             if rows("PRAGMA journal_mode").first?.text(0).lowercased() != "wal" { schema += "PRAGMA journal_mode = WAL;\n" }
             schema += "PRAGMA user_version = \(Self.schemaVersion);\n"
             schema += """
@@ -82,13 +82,13 @@ final class MemoryIndex {
         }
         let result = sqlite3_exec(db, schema, nil, nil, nil)
         guard result == SQLITE_OK else { throw Self.failure(result) }
-        // Non-destructive additive migration for existing v1 databases (preserves `access_count` and `last_access`).
-        if version == Self.schemaVersion {
+        // One-time non-destructive upgrade from v1 -> v2 (preserves `access_count` and `last_access`); v2 skips these checks.
+        if version == 1 {
             let columns = Set(rows("PRAGMA table_info(pages)").map { $0.text(1) })
             if !columns.contains("origin") {
                 _ = sqlite3_exec(db, "ALTER TABLE pages ADD COLUMN origin TEXT NOT NULL DEFAULT '';", nil, nil, nil)
             }
-            _ = sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS pages_kind_access ON pages(kind, access_count DESC, path);", nil, nil, nil)
+            _ = sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS pages_kind_access ON pages(kind, access_count DESC, path); PRAGMA user_version = \(Self.schemaVersion);", nil, nil, nil)
         }
     }
 

@@ -124,9 +124,8 @@ final class BotSession {
 
     func makeTranscript() -> OrbTranscript {
         if let transcript { return transcript }
-        let made = OrbTranscript(items: shownItems)
+        let made = OrbTranscript(items: shownItems, isLive: model?.live(id).isWorking == true)
         made.showPlan(shownPlan)
-        made.setLive(model?.live(id).isWorking == true)
         transcript = made
         return made
     }

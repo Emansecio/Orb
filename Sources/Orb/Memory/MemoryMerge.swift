@@ -165,8 +165,11 @@ extension MemoryBank {
     /// The candidates, when a new proposal is due: past the threshold, `step` pages past the last one, none waiting.
     /// Asked after every turn, so the index is counted first and the pages read only past the floor.
     func mergeDue(now: Date = .now) -> [MemorySnapshot.Item]? {
-        guard pendingMerge(now: now).isEmpty else { return nil }
-        let floor = max(MemoryMerge.threshold, (mergeProposal()?.askedCount ?? 0) + MemoryMerge.step)
+        let proposal = mergeProposal()
+        if let proposal, now.timeIntervalSince(proposal.askedAt) < MemoryMerge.expiry, !proposal.groups.isEmpty {
+            return nil
+        }
+        let floor = max(MemoryMerge.threshold, (proposal?.askedCount ?? 0) + MemoryMerge.step)
         prepare(now: now)
         let indexed = count([.fato, .procedimento])
         guard indexed >= floor, mergeShortScan?.indexed != indexed || mergeShortScan?.floor != floor else { return nil }

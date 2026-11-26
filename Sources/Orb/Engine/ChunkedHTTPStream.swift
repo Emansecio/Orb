@@ -19,13 +19,25 @@ enum ChunkedHTTPStream {
         RedirectGuard.follows(from: task.originalRequest?.url, to: next.url) ? next : nil
     }
 
+    /// Persistent ephemeral session for `WebFetchTool`: no persistent cookies or disk cache, while reusing
+    /// TCP/TLS/HTTP2 connections across fetches and isolating each task's redirect policy via `Entry.onRedirect`.
+    private static let sharedWebFetchMultiplex: MultiplexSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.urlCache = nil
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return MultiplexSession(configuration: config)
+    }()
+
     static func open(_ request: URLRequest, using session: URLSession = .shared,
                      onRedirect: RedirectHandler? = nil) async throws -> (AsyncThrowingStream<Data, Error>, URLResponse) {
         if session === URLSession.shared, onRedirect == nil {
             return try await sharedMultiplex.open(request)
         }
         if session === HTTPTransport.defaultSession {
-            return try await sharedMCPMultiplex.open(request)
+            return try await sharedMCPMultiplex.open(request, onRedirect: onRedirect)
+        }
+        if session === WebFetchTool.defaultSession {
+            return try await sharedWebFetchMultiplex.open(request, onRedirect: onRedirect)
         }
         let config = (session.configuration.copy() as? URLSessionConfiguration) ?? .ephemeral
         let oneShot = MultiplexSession(configuration: config, onRedirect: onRedirect, invalidatesAfterTask: true)
@@ -37,6 +49,7 @@ enum ChunkedHTTPStream {
             var task: URLSessionDataTask?
             var responseCont: CheckedContinuation<(AsyncThrowingStream<Data, Error>, URLResponse), Error>?
             var streamCont: AsyncThrowingStream<Data, Error>.Continuation?
+            var onRedirect: RedirectHandler?
             var cancelled = false
         }
 
@@ -52,11 +65,12 @@ enum ChunkedHTTPStream {
             self.urlSession = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
         }
 
-        func open(_ request: URLRequest) async throws -> (AsyncThrowingStream<Data, Error>, URLResponse) {
+        func open(_ request: URLRequest, onRedirect taskRedirect: RedirectHandler? = nil) async throws -> (AsyncThrowingStream<Data, Error>, URLResponse) {
             let task = urlSession.dataTask(with: request)
             let id = task.taskIdentifier
             let entry = Entry()
             entry.task = task
+            entry.onRedirect = taskRedirect
             entries.withLock { $0[id] = entry }
             return try await withTaskCancellationHandler {
                 try await withCheckedThrowingContinuation { continuation in
@@ -92,8 +106,9 @@ enum ChunkedHTTPStream {
 
         func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                         newRequest request: URLRequest) async -> URLRequest? {
-            guard let onRedirect else { return request }
-            return await onRedirect(session, task, response, request)
+            let handler = entries.withLock { $0[task.taskIdentifier]?.onRedirect } ?? onRedirect
+            guard let handler else { return request }
+            return await handler(session, task, response, request)
         }
 
         func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,

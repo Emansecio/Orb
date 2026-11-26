@@ -351,7 +351,7 @@ enum ModelCatalog {
         case .opencodeZen, .opencodeGo:
             // The gateway lists what is live; models.dev (what OpenCode itself uses) says which format each one needs.
             async let live = OpenAIClient(baseURL: base, apiKey: nil, session: session).models()
-            async let metadata = getJSON(modelsDevURL, token: nil, session: session)
+            async let metadata = fetchModelsDev(session: session)
             let key = account.kind == .opencodeZen ? "opencode" : "opencode-go"
             return openCodeModels(live: try await live, metadata: (try? await metadata)?[key]?["models"], provider: account.kind)
         case .custom:
@@ -367,9 +367,10 @@ enum ModelCatalog {
         case .ollama:
             // The OpenAI-style list names the models; the server's own, beside `/v1`, says which of them run in the cloud.
             let root = base.lastPathComponent == "v1" ? base.deletingLastPathComponent() : base
-            let ids = try await OpenAIClient(baseURL: base, apiKey: token, session: session).models()
-            let windows = ollamaCloudWindows(try? await getJSON(root.appending(path: "api/tags"), token: token, session: session))
-            return ids.map { ProviderModel(id: $0, name: $0, format: .chat, contextLength: windows[$0]) }
+            async let ids = OpenAIClient(baseURL: base, apiKey: token, session: session).models()
+            async let tags = getJSON(root.appending(path: "api/tags"), token: token, session: session)
+            let windows = ollamaCloudWindows(try? await tags)
+            return try await ids.map { ProviderModel(id: $0, name: $0, format: .chat, contextLength: windows[$0]) }
         case .claudeCode, .openDesign, .xai, .lmstudio:
             return listedModels(try await OpenAIClient(baseURL: base, apiKey: token, session: session).modelEntries(), format: .chat)
         }
@@ -546,10 +547,61 @@ enum ModelCatalog {
 
     private static func getJSON(_ url: URL, token: String?, session: URLSession) async throws -> JSONValue {
         let data = try await ProviderTransport.fetch(ProviderTransport.authorizedRequest(url, apiKey: token), session: session)
-        guard let json = JSONValue.parse(String(decoding: data, as: UTF8.self)) else {
+        guard let json = JSONValue.parse(data) else {
             throw LLMError.invalidResponse("lista de modelos ilegível")
         }
         return json
+    }
+
+    /// Coalesces concurrent `models.dev/api.json` fetches (e.g. OpenCode Zen + Go refreshing together) and reuses
+    /// cached responses with conditional `If-None-Match` (304 Not Modified) when using the shared session.
+    private static func fetchModelsDev(session: URLSession) async throws -> JSONValue {
+        guard session === URLSession.shared else {
+            return try await getJSON(modelsDevURL, token: nil, session: session)
+        }
+        return try await ModelsDevCache.shared.fetch(url: modelsDevURL, session: session)
+    }
+}
+
+private actor ModelsDevCache {
+    static let shared = ModelsDevCache()
+    private static let ttl: Duration = .seconds(600)
+
+    private var cached: (value: JSONValue, etag: String?, at: ContinuousClock.Instant)?
+    private var inFlight: Task<(JSONValue, String?), Error>?
+
+    func fetch(url: URL, session: URLSession) async throws -> JSONValue {
+        if let cached, ContinuousClock.now - cached.at < Self.ttl {
+            return cached.value
+        }
+        if let inFlight {
+            return try await inFlight.value.0
+        }
+        let etag = cached?.etag
+        let previous = cached?.value
+        let task = Task<(JSONValue, String?), Error> {
+            var request = ProviderTransport.authorizedRequest(url, apiKey: nil)
+            request.timeoutInterval = min(request.timeoutInterval, ProviderTransport.listTimeout)
+            if let etag { request.setValue(etag, forHTTPHeaderField: "If-None-Match") }
+            let (data, response) = try await session.data(for: request)
+            var responseEtag = etag
+            if let http = response as? HTTPURLResponse {
+                if let fresh = http.value(forHTTPHeaderField: "ETag"), !fresh.isEmpty { responseEtag = fresh }
+                if http.statusCode == 304, let previous {
+                    return (previous, responseEtag)
+                }
+            }
+            try await ProviderTransport.check(response, body: { data.prefix(ProviderTransport.errorBodyLimit) })
+            guard let json = JSONValue.parse(data) else {
+                throw LLMError.invalidResponse("lista de modelos ilegível")
+            }
+            return (json, responseEtag)
+        }
+        inFlight = task
+        defer { inFlight = nil }
+        let (value, freshEtag) = try await task.value
+        cached = (value, freshEtag, .now)
+        return value
     }
 }
 

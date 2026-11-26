@@ -106,12 +106,20 @@ extension MemoryBank {
 
     /// Writes the skills the Orb may use, only when they changed since the file was written (the app does it for every message).
     func publishSkills(_ skills: [SkillDigest]) {
+        guard !isClosed else { return }
+        if lastPublishedSkills == skills { return }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         let url = directory.appending(path: Self.skillsFile)
-        guard !isClosed, let data = try? encoder.encode(skills), (try? Data(contentsOf: url)) != data else { return }
+        guard let data = try? encoder.encode(skills) else { return }
+        if (try? Data(contentsOf: url)) == data {
+            lastPublishedSkills = skills
+            return
+        }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try? data.write(to: url, options: .atomic)
+        if (try? data.write(to: url, options: .atomic)) != nil {
+            lastPublishedSkills = skills
+        }
     }
 
     func skillDigests() -> [SkillDigest] {

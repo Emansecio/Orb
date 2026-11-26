@@ -12,19 +12,19 @@ import Foundation
 /// the gateways and caches that hash the body as it comes.
 enum WireEncoder {
     static func encode(_ value: JSONValue, trailing: [String] = []) throws -> Data {
-        var bytes: [UInt8] = []
-        bytes.reserveCapacity(1_024)
+        var bytes = Data()
+        bytes.reserveCapacity(4_096)
         try append(value, to: &bytes, trailing: trailing)
-        return Data(bytes)
+        return bytes
     }
 
     /// Encodes a Responses API request body and builds its `CacheProbe` fingerprint from the exact encoded bytes in one pass.
     static func encodeWithResponsesFingerprint(_ body: JSONValue, trailing: [String] = []) throws -> (data: Data, fingerprint: JSONValue) {
-        var bytes: [UInt8] = []
-        bytes.reserveCapacity(4_096)
+        var bytes = Data()
+        bytes.reserveCapacity(16_384)
         guard case .object(let object) = body else {
             try append(body, to: &bytes)
-            return (Data(bytes), CacheProbe.fingerprint(of: body))
+            return (bytes, CacheProbe.fingerprint(of: body))
         }
         let tail = trailing.filter { object[$0] != nil }
         let lead = object.keys.filter { !tail.contains($0) }.sorted()
@@ -56,15 +56,34 @@ enum WireEncoder {
                 for (i, item) in items.enumerated() {
                     if i > 0 { bytes.append(0x2C) }
                     let start = bytes.count
-                    try append(item, to: &bytes)
+                    var extraToolsRange: Range<Int>?
+                    if toolsSeg == nil, item["type"]?.string == "additional_tools", case .object(let dict) = item {
+                        // Capture the encoded byte range of `tools` during the single pass instead of encoding it twice.
+                        bytes.append(0x7B)
+                        for (kIdx, k) in dict.keys.sorted().enumerated() {
+                            if kIdx > 0 { bytes.append(0x2C) }
+                            appendString(k, to: &bytes)
+                            bytes.append(0x3A)
+                            if k == "tools" {
+                                let tStart = bytes.count
+                                try append(dict[k] ?? .null, to: &bytes)
+                                extraToolsRange = tStart..<bytes.count
+                            } else {
+                                try append(dict[k] ?? .null, to: &bytes)
+                            }
+                        }
+                        bytes.append(0x7D)
+                    } else {
+                        try append(item, to: &bytes)
+                    }
                     let slice = bytes[start..<bytes.count]
                     let tag = item["type"]?.string ?? item["role"]?.string ?? "?"
                     itemSegs.append(.array([.string(tag), .number(Double(slice.count)), .string(CacheProbe.hashBytes(slice))]))
-                    if toolsSeg == nil, item["type"]?.string == "additional_tools", let extraTools = item["tools"] {
-                        let encodedTools = try encode(extraTools)
-                        toolsCount = extraTools.array?.count ?? 0
-                        toolsSeg = [.number(Double(toolsCount)), .number(Double(encodedTools.count)),
-                                    .string(CacheProbe.hashBytes(encodedTools))]
+                    if let range = extraToolsRange {
+                        let extraSlice = bytes[range]
+                        toolsCount = item["tools"]?.array?.count ?? 0
+                        toolsSeg = [.number(Double(toolsCount)), .number(Double(extraSlice.count)),
+                                    .string(CacheProbe.hashBytes(extraSlice))]
                     }
                 }
                 bytes.append(0x5D) // ]
@@ -79,10 +98,10 @@ enum WireEncoder {
             "tools": .array(finalTools),
             "items": .array(itemSegs),
         ])
-        return (Data(bytes), fp)
+        return (bytes, fp)
     }
 
-    private static func append(_ value: JSONValue, to out: inout [UInt8], trailing: [String] = []) throws {
+    private static func append(_ value: JSONValue, to out: inout Data, trailing: [String] = []) throws {
         switch value {
         case .null:
             out.append(contentsOf: [0x6E, 0x75, 0x6C, 0x6C]) // null
@@ -129,16 +148,17 @@ enum WireEncoder {
 
     private static let hex: [UInt8] = Array("0123456789abcdef".utf8)
 
-    private static func appendString(_ string: String, to out: inout [UInt8]) {
+    private static func appendString(_ string: String, to out: inout Data) {
         out.append(0x22) // "
         var copy = string
         copy.withUTF8 { buffer in
+            guard let base = buffer.baseAddress else { return }
             var runStart = 0
             for index in 0..<buffer.count {
                 let b = buffer[index]
                 if b >= 0x20 && b != 0x22 && b != 0x5C { continue }
                 if index > runStart {
-                    out.append(contentsOf: buffer[runStart..<index])
+                    out.append(base + runStart, count: index - runStart)
                 }
                 switch b {
                 case 0x22: out.append(contentsOf: [0x5C, 0x22]) // \"
@@ -154,7 +174,7 @@ enum WireEncoder {
                 runStart = index + 1
             }
             if runStart < buffer.count {
-                out.append(contentsOf: buffer[runStart..<buffer.count])
+                out.append(base + runStart, count: buffer.count - runStart)
             }
         }
         out.append(0x22) // "

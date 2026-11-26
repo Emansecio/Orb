@@ -475,8 +475,11 @@ final class AppModel {
         lastSavedStateFingerprint = stateRead.fingerprint // the state the app starts with is also its own, to the watcher
         let state = stateRead.value ?? firstUse
         // An Orb has one conversation: the ones an older version set aside come back into it, once. Reads of the
-        // conversation wait for this.
-        for bot in state.bots { store.mergeArchive(of: bot.id) }
+        // conversation wait for this. In the running app (`readsFirstLater`), run the directory scan off the main thread.
+        let readsFirstLater = asyncLoading ?? runsBackgroundWork
+        if !readsFirstLater {
+            for bot in state.bots { store.mergeArchive(of: bot.id) }
+        }
         bots = state.bots
         routines = state.routines
         skills = state.skills
@@ -516,7 +519,6 @@ final class AppModel {
         outputsDirectory = ToolOutputCap.directory(inDataFolder: store.directory)
         browserHub = BrowserHub.live(dataFolder: store.directory)
         // Only the Orb shown first is read at launch, and the window does not wait for it (`beginLoading` below).
-        let readsFirstLater = asyncLoading ?? runsBackgroundWork
         for bot in state.bots {
             let session = session(bot.id)
             session.isUnloaded = true
@@ -594,6 +596,15 @@ final class AppModel {
         syncConnectors()
         // Tokens an older version left in the data file move to the Keychain with the next save.
         if secrets.hasUnprotectedSecrets(connectors) { scheduleStateSave() }
+        if readsFirstLater {
+            let botIDsToMerge = state.bots.map(\.id)
+            let firstID = firstShown?.id
+            let mergeStore = store
+            Task.detached(priority: .utility) {
+                if let firstID { mergeStore.mergeArchive(of: firstID) }
+                for id in botIDsToMerge where id != firstID { mergeStore.mergeArchive(of: id) }
+            }
+        }
         if readsFirstLater, let first = firstShown { beginLoading(first.id) }
         Task { [weak self, changes = jobs.changes] in
             for await botID in changes { await self?.showJobs(of: botID) }
@@ -604,7 +615,10 @@ final class AppModel {
         // A developer run shares the user's $TMPDIR (`ORB_DATA_DIR` only moves the data), so it leaves alone what a running app wrote.
         let cleansTemporaryFiles = !DevRun.isActive
         let images = images, dataFolder = store.directory
+        let deferCleanup = !devRun
         Task.detached(priority: .utility) {
+            // Let initial UI render and first-conversation load finish before scanning outputs and attachments on disk.
+            if deferCleanup { try? await Task.sleep(for: .seconds(10)) }
             ToolOutputCap.cleanUp(directory: outputs)
             if cleansTemporaryFiles { LegacyTemporaryFiles.removeStaleMCPConfigs() }
             images.removeOrphans(dataFolder: dataFolder)
@@ -1282,17 +1296,31 @@ final class AppModel {
     /// load is tried again after a growing wait (`ModelRefreshBackoff`), not at every tick of the scheduler; the
     /// refresh the user asks for (`refreshModels`) always tries.
     func refreshAllModels(olderThan age: TimeInterval = 6 * 3600, now: Date = .now) async {
-        for account in providers where account.isEnabled && isUsable(account)
-            && ModelRefreshBackoff.isDue(updatedAt: account.modelsUpdatedAt, failure: modelRefreshFailures[account.kind], now: now, age: age,
-                                         outdated: (account.catalogVersion ?? 1) < ModelCatalog.version) {
-            do {
-                try await refreshModels(account.kind)
-            } catch {
-                guard !Task.isCancelled else { return }
-                modelRefreshFailures[account.kind] = .init(
-                    at: now, count: (modelRefreshFailures[account.kind]?.count ?? 0) + 1,
-                    credentialRefused: (error as? LLMError)?.isCredentialRefusal == true)
+        let due = providers.compactMap { account -> ProviderKind? in
+            guard account.isEnabled && isUsable(account)
+                && ModelRefreshBackoff.isDue(updatedAt: account.modelsUpdatedAt, failure: modelRefreshFailures[account.kind], now: now, age: age,
+                                             outdated: (account.catalogVersion ?? 1) < ModelCatalog.version)
+            else { return nil }
+            return account.kind
+        }
+        guard !due.isEmpty else { return }
+        await withTaskGroup(of: Void.self) { group in
+            for kind in due {
+                group.addTask {
+                    await self.refreshDueModel(kind, now: now)
+                }
             }
+        }
+    }
+
+    private func refreshDueModel(_ kind: ProviderKind, now: Date) async {
+        do {
+            try await refreshModels(kind)
+        } catch {
+            guard !Task.isCancelled else { return }
+            modelRefreshFailures[kind] = .init(
+                at: now, count: (modelRefreshFailures[kind]?.count ?? 0) + 1,
+                credentialRefused: (error as? LLMError)?.isCredentialRefusal == true)
         }
     }
 

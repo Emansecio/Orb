@@ -689,7 +689,8 @@ struct SelectableProse: NSViewRepresentable {
     private func show(in view: ProseTextView, isQuiet: Bool, scale: CGFloat, fades: Bool) {
         let built = ProseText.built(blocks, cursor: cursor, cached: cached, highlight: highlight, isQuiet: isQuiet, scale: scale)
         var text = built.text
-        if !cursor, cached {
+        // Skip copying the attributed string when there is no "/" (no file path candidate can exist).
+        if !cursor, cached, text.string.utf8.contains(0x2F) {
             let linked = NSMutableAttributedString(attributedString: text)
             PathLinks.link(linked)
             text = linked

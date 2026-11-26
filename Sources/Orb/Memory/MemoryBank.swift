@@ -99,6 +99,8 @@ actor MemoryBank {
     /// read again): `mergeCandidates` and `consolidablePreferences` ask after every turn, and reading one file per page took
     /// ~0.1 s a turn at 1 200 pages.
     private var origins: [String: (mtime: Double, origin: MemoryOrigin)] = [:]
+    /// Last skills payload published to `_skills.json`, so unchanged per-message calls skip encoding and disk reads.
+    var lastPublishedSkills: [SkillDigest]?
     /// What the last `mergeDue` scan found short of its floor: while the index holds the same number of pages, a new scan would
     /// read the same bodies (yours, imported, count in the index but never as candidates) to the same result.
     var mergeShortScan: (indexed: Int, floor: Int)?

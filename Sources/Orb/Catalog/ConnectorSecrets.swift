@@ -6,12 +6,19 @@ protocol SecretVault: Sendable {
     /// True when the value is stored (an empty value deletes the item).
     func set(_ value: String, account: String) -> Bool
     func remove(_ account: String)
+    /// Optional batch warm-up so implementations backed by an external helper can read all accounts in one round trip.
+    func prefetch(_ accounts: [String])
+}
+
+extension SecretVault {
+    func prefetch(_ accounts: [String]) {}
 }
 
 struct KeychainVault: SecretVault {
     func get(_ account: String) -> String? { Keychain.get(account) }
     func set(_ value: String, account: String) -> Bool { Keychain.store(value, account: account) }
     func remove(_ account: String) { Keychain.set("", account: account) }
+    func prefetch(_ accounts: [String]) { Keychain.prefetch(accounts) }
 }
 
 final class MemoryVault: SecretVault, @unchecked Sendable {
@@ -72,7 +79,13 @@ final class ConnectorSecrets {
     /// `configs` as read from the data file with real values in place of markers. A marker whose item is gone becomes
     /// an empty value (the editor then asks for it again).
     func resolve(_ configs: [MCPServerConfig]) -> [MCPServerConfig] {
-        configs.map { config in
+        var accounts: [String] = []
+        for config in configs {
+            for (name, value) in config.environment where value == Self.marker { accounts.append(Self.account(id: config.id, name: name)) }
+            for (name, value) in config.headers where value == Self.marker { accounts.append(Self.account(id: config.id, name: name)) }
+        }
+        if !accounts.isEmpty { vault.prefetch(accounts) }
+        return configs.map { config in
             var config = config
             config.environment = resolved(config.environment, of: config)
             config.headers = resolved(config.headers, of: config)

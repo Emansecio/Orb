@@ -365,4 +365,69 @@ import Testing
         // Already at the end: nothing to glide to.
         #expect(!FollowRule.glides(distance: 0.5, minY: 1000, wasAtBottom: true, startMinY: 1000))
     }
+
+    @MainActor
+    @Test func tailPrefixMatchesFullRefoldAcrossLiveAndIdleTransitions() {
+        let base = Date(timeIntervalSince1970: 1_700_000_000)
+        var items: [TranscriptItem] = []
+        for turn in 0..<12 {
+            var u = TranscriptItem(.user(text: "pedido \(turn)", attachments: []))
+            u.date = base.addingTimeInterval(Double(turn * 600))
+            var b = TranscriptItem(.bot(text: "resposta \(turn)", isStreaming: false))
+            b.date = u.date.addingTimeInterval(10)
+            items.append(u)
+            items.append(b)
+        }
+        var lastUser = TranscriptItem(.user(text: "último", attachments: []))
+        lastUser.date = base.addingTimeInterval(12 * 600)
+        items.append(lastUser)
+
+        let incremental = OrbTranscript(items: items, isLive: false)
+        incremental.setLive(true)
+        let toolID = UUID()
+        var tool1 = TranscriptItem(.tool(ToolCall(id: toolID, kind: .file, title: "Lendo", detail: "a.swift", state: .running)))
+        tool1.date = lastUser.date.addingTimeInterval(2)
+        items.append(tool1)
+        incremental.show(items)
+
+        var tool1Done = tool1
+        tool1Done.kind = .tool(ToolCall(id: toolID, kind: .file, title: "Lendo", detail: "a.swift", state: .done))
+        items[items.count - 1] = tool1Done
+        incremental.show(items)
+
+        let freshLive = OrbTranscript(items: items, isLive: true)
+        #expect(incremental.rows == freshLive.rows)
+        #expect(incremental.timeBreaks == freshLive.timeBreaks)
+        #expect(incremental.avatars == freshLive.avatars)
+        #expect(incremental.workAnswers == freshLive.workAnswers)
+        #expect(incremental.requests == freshLive.requests)
+        #expect(incremental.trails == freshLive.trails)
+
+        var reply = TranscriptItem(.bot(text: "pronto", isStreaming: false))
+        reply.date = tool1.date.addingTimeInterval(5)
+        items.append(reply)
+        incremental.show(items)
+        incremental.setLive(false)
+
+        let freshIdle = OrbTranscript(items: items, isLive: false)
+        #expect(incremental.rows == freshIdle.rows)
+        #expect(incremental.timeBreaks == freshIdle.timeBreaks)
+        #expect(incremental.avatars == freshIdle.avatars)
+        #expect(incremental.workAnswers == freshIdle.workAnswers)
+        #expect(incremental.trails == freshIdle.trails)
+    }
+
+    @Test func sseDecoderParsesLFAndCRLFChunksIdentically() {
+        let lfPayload = ": keep-alive\n\nevent: delta\ndata: {\"a\":1}\n\ndata: line1\ndata: line2\n\n"
+        let crlfPayload = lfPayload.replacingOccurrences(of: "\n", with: "\r\n")
+        var d1 = SSEDecoder(), d2 = SSEDecoder()
+        var e1: [SSEEvent] = [], e2: [SSEEvent] = []
+        _ = d1.feed(Data(lfPayload.utf8)) { e1.append($0); return false }
+        _ = d2.feed(Data(crlfPayload.utf8)) { e2.append($0); return false }
+        #expect(e1 == e2)
+        #expect(e1 == [
+            SSEEvent(name: "delta", data: "{\"a\":1}"),
+            SSEEvent(name: nil, data: "line1\nline2"),
+        ])
+    }
 }

@@ -234,7 +234,7 @@ extension BotSession {
             showWork(forStatus: text)
         case .text(let delta):
             // Shown by `flushText`; anything that adds to the transcript flushes first (`closeStreaming`).
-            pendingText = (pendingText ?? "") + delta
+            if pendingText != nil { pendingText!.append(delta) } else { pendingText = delta }
             if !delta.allSatisfy(\.isWhitespace) { markSpeaking() }
             if textFlush == nil {
                 textFlush = Task { [weak self] in

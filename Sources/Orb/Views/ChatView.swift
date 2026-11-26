@@ -587,9 +587,9 @@ private struct TranscriptList: View {
                 find.itemsChanged()
                 if leftAt != nil { arrived = JumpToEnd.arrived(in: transcript.items, after: leftAt) }
                 if BottomFollower.anchorsItself {
-                    // The scroll view keeps the end as rows grow, but not always when a whole row arrives at once (a card that
-                    // needs you, a long answer relayed from another Orb): it is laid out by estimate first. Settle on it.
-                    followResumedTurn(proxy)
+                    // `KeepsBottom` anchors the bottom as rows grow; debounce a single settle scroll after a burst
+                    // of tool events instead of calling `proxy.scrollTo` synchronously on every revision.
+                    settleFollow(proxy)
                 } else {
                     follower.follow { scrollToBottom(proxy) }
                 }
@@ -682,16 +682,20 @@ private struct TranscriptList: View {
             .modifier(RowEntrance(id: row.id, style: items[0].kind.entrance, isNew: entrances.isNew(row.id), entrances: entrances))
             .transition(.identity)
         case .work(let items, let seconds, let outcome):
-            workGroup(items, seconds: seconds, outcome: outcome, steps: TranscriptFolding.activityRows(for: items), owner: row.id,
-                      avatars: avatars, redoID: redoID, dropping: dropping, found: found)
-                .transition(.identity)
+            workGroup(items, seconds: seconds, outcome: outcome, owner: row.id,
+                      avatars: avatars, redoID: redoID, dropping: dropping, found: found) {
+                TranscriptFolding.activityRows(for: items)
+            }
+            .transition(.identity)
         case .activity(let items):
             let parts = TranscriptFolding.activityParts(TranscriptFolding.activityRows(for: items))
             ActivityCard {
                 WorkingLine(look: look, avatarHidden: true, transcript: model.orbTranscript(look.id), compact: true)
                 if !parts.earlier.isEmpty {
-                    workGroup(parts.earlier.flatMap(\.items), seconds: nil, outcome: .answered, steps: parts.earlier, owner: row.id,
-                              avatars: avatars, redoID: redoID, dropping: dropping, found: found)
+                    workGroup(parts.earlier.flatMap(\.items), seconds: nil, outcome: .answered, owner: row.id,
+                              avatars: avatars, redoID: redoID, dropping: dropping, found: found) {
+                        parts.earlier
+                    }
                 }
                 activitySteps(parts.current, in: row.id, avatars: avatars, redoID: redoID, dropping: dropping, found: found)
             }
@@ -711,8 +715,10 @@ private struct TranscriptList: View {
     }
 
     /// The collapsed line of a request's work; opened, it carries the state its steps need to redraw.
-    private func workGroup(_ items: [TranscriptItem], seconds: Int?, outcome: WorkOutcome, steps: [TranscriptRowModel], owner: UUID,
-                           avatars: ReplyAvatars, redoID: UUID?, dropping: Set<UUID>, found: FindFocus?) -> some View {
+    /// `steps` is evaluated lazily only when `isOpen` is true, avoiding `TranscriptFolding.activityRows` on collapsed rows.
+    private func workGroup(_ items: [TranscriptItem], seconds: Int?, outcome: WorkOutcome, owner: UUID,
+                           avatars: ReplyAvatars, redoID: UUID?, dropping: Set<UUID>, found: FindFocus?,
+                           steps: @escaping () -> [TranscriptRowModel]) -> some View {
         let isOpen = openRuns.contains(owner) || ToolGroupRow.opensInSnapshots
         return WorkGroupRow(items: items, seconds: seconds, outcome: outcome, isOpen: isOpen,
                             inputs: isOpen ? .init(openRuns: openRuns, openSteps: openSteps, avatars: avatars, redoID: redoID,
@@ -720,7 +726,7 @@ private struct TranscriptList: View {
                             answer: model.orbTranscript(look.id).workAnswers[owner]) {
             toggleRun(owner)
         } content: {
-            activitySteps(steps, in: owner, avatars: avatars, redoID: redoID, dropping: dropping, found: found)
+            activitySteps(steps(), in: owner, avatars: avatars, redoID: redoID, dropping: dropping, found: found)
         }
         .equatable()
     }
@@ -848,6 +854,18 @@ private struct TranscriptList: View {
         followsBottom = true
         withAnimation(wasAtBottom ? ScrollMotion.animation(reduceMotion: reduceMotion) : nil) {
             scrollToBottom(proxy)
+        }
+    }
+
+    /// Debounces a single settle scroll after a burst of transcript revisions (macOS 15+ `KeepsBottom` already
+    /// anchors the bottom during growth, so calling `proxy.scrollTo` on every revision only adds layout churn).
+    private func settleFollow(_ proxy: ScrollViewProxy) {
+        guard followsBottom, !find.pausesFollowing else { return }
+        settle.task?.cancel()
+        settle.task = Task {
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            if followsBottom, !find.pausesFollowing { scrollToBottom(proxy) }
         }
     }
 

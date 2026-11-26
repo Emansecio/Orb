@@ -313,6 +313,8 @@ struct LiveStreamRunner: Sendable {
         var sawMessage = false
         var frames = 0
         var viewport = CGSize.zero
+        /// Last decoded frame's base64 payload (cleared on reconnect) to skip redundant JPEG decodes on static pages.
+        var lastFrameBase64: String?
     }
 
     func run() async {
@@ -401,6 +403,9 @@ struct LiveStreamRunner: Sendable {
             run.frames += 1
             if run.frames % Self.checkEvery == 0 { await refreshSensitivity() }
             guard !protection.dropsFrames, let base64 = message.data, !base64.isEmpty else { return }
+            // Skip duplicate consecutive frames before base64/JPEG decode and GPU upload when the page is static.
+            if run.frames > 1, base64 == run.lastFrameBase64 { return }
+            run.lastFrameBase64 = base64
             // The viewport is the `status` one: the frame metadata's deviceHeight does not match the image (measured, 720 vs 633).
             let viewport = run.viewport.width > 0 ? run.viewport : message.viewport
             let raw = LiveRawFrame(base64: base64, viewport: viewport, scroll: message.scroll,

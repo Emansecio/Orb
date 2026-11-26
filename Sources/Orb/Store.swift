@@ -827,12 +827,24 @@ struct Store: Sendable {
         }
         Self.gate.waitForReaders(of: url)
         do {
-            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let parent = url.deletingLastPathComponent()
+            if !CreatedDirectories.contains(parent) {
+                try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+                CreatedDirectories.mark(parent)
+            }
             guard let data = try content() else {
                 forgetFailure(of: url) // nothing to write: this file cannot be failing
                 return .skipped
             }
-            try data.write(to: url, options: .atomic)
+            do {
+                try data.write(to: url, options: .atomic)
+            } catch {
+                // Directory may have been removed externally since it was cached; recreate and retry once.
+                CreatedDirectories.forget(parent)
+                try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+                CreatedDirectories.mark(parent)
+                try data.write(to: url, options: .atomic)
+            }
             if SaveHealth.noteWritten(directory, file: url) { onSaveRecovered?() }
             return .wrote
         } catch {
@@ -883,6 +895,16 @@ enum SaveHealth {
             return true
         }
     }
+}
+
+/// Remembers parent folders already created by `Store.writeFile`, avoiding a `createDirectory` syscall on every save.
+private enum CreatedDirectories {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var known: Set<String> = []
+
+    static func contains(_ url: URL) -> Bool { lock.withLock { known.contains(url.path) } }
+    static func mark(_ url: URL) { lock.withLock { _ = known.insert(url.path) } }
+    static func forget(_ url: URL) { lock.withLock { _ = known.remove(url.path) } }
 }
 
 /// The data folders that must not be written to any more (see `Store.sealWrites`).
@@ -1326,7 +1348,20 @@ extension Decoder {
 extension AppState {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        bots = try c.lossyArray(.bots)
+        // Decode each Orb once, capturing any legacy `unread` field embedded inside it (before `unread` moved top-level).
+        struct LegacyBot: Decodable {
+            var bot: Bot?
+            var unread: Int
+            init(from decoder: Decoder) throws {
+                bot = try? Bot(from: decoder)
+                if bot == nil { DecodeLoss.record() }
+                let keyed = try? decoder.container(keyedBy: CodingKeys.self)
+                unread = (try? keyed?.decodeIfPresent(Int.self, forKey: .unread)) ?? 0
+            }
+            enum CodingKeys: CodingKey { case unread }
+        }
+        let decodedBots = try c.lossyOptionals(.bots) as [LegacyBot?]
+        bots = decodedBots.compactMap { $0?.bot }
         routines = try c.lossyArray(.routines)
         // A file written before skills were scoped has no `orbIDs` on a skill: that skill was for every Orb, so it
         // is given the Orbs the file has (and only those). An absent `skills` key reads as none — the starters are
@@ -1359,21 +1394,9 @@ extension AppState {
             }
         }
         unread = c.recordingLoss([String: Count].self, forKey: .unread)?.compactMapValues(\.value) ?? [:]
-        // Before the count lived apart from the Orbs it was saved inside each one.
-        struct Counted: Decodable {
-            var id: UUID
-            var unread: Int
-            init(from decoder: Decoder) throws {
-                let c = try decoder.container(keyedBy: CodingKeys.self)
-                id = try c.decode(UUID.self, forKey: .id)
-                unread = (try? c.decodeIfPresent(Int.self, forKey: .unread)) ?? 0
-            }
-            enum CodingKeys: CodingKey { case id, unread }
-        }
-        // The same Orbs again: the ones it can't read were already counted as lost by `bots` above.
-        let counted = try DecodeLoss.measure { try c.lossyArray(.bots) as [Counted] }.value
-        for orb in counted where orb.unread > 0 && unread[orb.id.uuidString] == nil {
-            unread[orb.id.uuidString] = orb.unread
+        for entry in decodedBots {
+            guard let entry, let orb = entry.bot, entry.unread > 0, unread[orb.id.uuidString] == nil else { continue }
+            unread[orb.id.uuidString] = entry.unread
         }
         // A preview is only a convenience: one that can't be read is dropped, never the file.
         replies = c.recordingLoss([String: ReplyPreview].self, forKey: .replies) ?? [:]

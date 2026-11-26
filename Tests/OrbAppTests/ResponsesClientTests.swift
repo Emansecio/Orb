@@ -259,4 +259,20 @@ extension ResponsesClientTests {
         }
         #expect(ResponsesClient.requestBody(model: "m", messages: [.user("oi")], tools: [], toolChoice: .none)["tool_choice"] == nil)
     }
+
+    @Test func encodeWithResponsesFingerprintCapturesAdditionalToolsInOnePass() throws {
+        let spec = ToolSpec(name: "echo", description: "Echo text", parameters: .schema(["text": .property("string")], required: ["text"]))
+        let body = ResponsesClient.requestBody(model: "gpt-5", messages: [.user("oi")], tools: [spec], toolsAsInputItem: true)
+        let (data, fp) = try WireEncoder.encodeWithResponsesFingerprint(body, trailing: ["input"])
+        let standalone = try WireEncoder.encode(body, trailing: ["input"])
+        #expect(data == standalone)
+        let extraItem = try #require(body["input"]?.array?.first { $0["type"]?.string == "additional_tools" })
+        let extraTools = try #require(extraItem["tools"])
+        let encodedTools = try WireEncoder.encode(extraTools)
+        #expect(fp["tools"] == .array([
+            .number(Double(extraTools.array?.count ?? 0)),
+            .number(Double(encodedTools.count)),
+            .string(CacheProbe.hashBytes(encodedTools)),
+        ]))
+    }
 }

@@ -209,8 +209,9 @@ final class OrbTranscript: WritesOnlyChanges {
         assign(\.newFrom, to: nil)
     }
 
-    /// Snapshot of everything before the running turn's tail (`0..<prefixCount`, ending on a top-level `.user` item),
-    /// so tool updates inside a live turn only refold the tail (`O(turn)`) instead of rescanning the whole history.
+    /// Snapshot of everything before the last turn's tail (`0..<count`, ending on a top-level `.user` item),
+    /// so updates inside the last turn (live or idle, and `setLive` transitions) only refold the tail (`O(turn)`)
+    /// instead of rescanning the whole history.
     private struct TailPrefix {
         var count: Int
         var fold: CompactedFold
@@ -223,6 +224,10 @@ final class OrbTranscript: WritesOnlyChanges {
         var requests: [RequestMark]
         var trails: [UUID: TurnTrail]
         var foldedRows: Int
+        var tailHasExtraBreaks = false
+        var tailHasExtraAvatars = false
+        var tailHasExtraWorkAnswers = false
+        var tailHasExtraTrails = false
     }
 
     @ObservationIgnored private var tailPrefix: TailPrefix?
@@ -233,12 +238,15 @@ final class OrbTranscript: WritesOnlyChanges {
     func setLive(_ live: Bool) {
         guard live != isLive else { return }
         isLive = live
-        tailPrefix = nil
-        refold()
+        if !refoldTail(from: storedItems, checkPrefix: false) {
+            tailPrefix = nil
+            refold()
+        }
     }
 
-    init(items: [TranscriptItem] = []) {
+    init(items: [TranscriptItem] = [], isLive: Bool = false) {
         storedItems = items
+        self.isLive = isLive
         refold()
     }
 
@@ -247,7 +255,7 @@ final class OrbTranscript: WritesOnlyChanges {
         guard !storedItems.isSameStorage(as: items) else { return }
         let previous = storedItems
         withMutation(keyPath: \.items) { storedItems = items }
-        if !refoldTail(from: previous) { refold() }
+        if !refoldTail(from: previous, checkPrefix: true) { refold() }
         revision &+= 1
     }
 
@@ -256,10 +264,10 @@ final class OrbTranscript: WritesOnlyChanges {
         items[..<fold.count].contains { $0.id == itemID }
     }
 
-    /// Fast path for mutations inside the last live turn (after its opening `.user` item): reuses the cached prefix
+    /// Fast path for mutations inside the last turn (after its opening `.user` item): reuses the cached prefix
     /// when `0..<prefix.count` is unchanged and the tail introduced no new user message or compaction notice.
-    private func refoldTail(from previous: [TranscriptItem]) -> Bool {
-        guard isLive, let prefix = tailPrefix,
+    private func refoldTail(from previous: [TranscriptItem], checkPrefix: Bool) -> Bool {
+        guard let prefix = tailPrefix,
               storedItems.count >= prefix.count, previous.count >= prefix.count else { return false }
         let tail = storedItems[prefix.count...]
         for item in tail {
@@ -269,52 +277,145 @@ final class OrbTranscript: WritesOnlyChanges {
             default: break
             }
         }
-        // CoW keeps identical String/ToolCall backing storage for untouched prefix items, making this equality check fast.
-        for index in 0..<prefix.count where storedItems[index] != previous[index] { return false }
+        if checkPrefix {
+            // CoW keeps identical String/ToolCall backing storage for untouched prefix items, making this equality check fast.
+            for index in 0..<prefix.count where storedItems[index] != previous[index] { return false }
+        }
+        applyTail(Array(tail), onto: prefix, initial: false)
+        return true
+    }
 
-        let tailArray = Array(tail)
-        let tailFolded = TranscriptFolding.foldedRows(tailArray, boundary: 0, liveTail: true)
+    /// Folds only `tailArray` on top of `prefix`, skipping O(N) dictionary/set copies and comparisons when the tail
+    /// adds no breaks, avatars, work answers, or trails.
+    private func applyTail(_ tailArray: [TranscriptItem], onto prefix: TailPrefix, initial: Bool) {
+        let tailFolded = TranscriptFolding.foldedRows(tailArray, boundary: 0, liveTail: isLive)
         let rows: [TranscriptRowModel]?
         if let prefixRows = prefix.rows {
-            rows = prefixRows + (tailFolded ?? tailArray.map(TranscriptRowModel.single))
+            let tailRows = tailFolded ?? tailArray.map(TranscriptRowModel.single)
+            var combined: [TranscriptRowModel] = []
+            combined.reserveCapacity(prefixRows.count + tailRows.count)
+            combined.append(contentsOf: prefixRows)
+            combined.append(contentsOf: tailRows)
+            rows = combined
         } else if let tailFolded {
-            rows = storedItems[..<prefix.count].map(TranscriptRowModel.single) + tailFolded
+            var combined: [TranscriptRowModel] = []
+            combined.reserveCapacity(prefix.count + tailFolded.count)
+            for item in storedItems[..<prefix.count] { combined.append(.single(item)) }
+            combined.append(contentsOf: tailFolded)
+            rows = combined
         } else {
             rows = nil
         }
         withMutation(keyPath: \.rows) { storedRows = rows }
+
         let tailSpans: [(UUID, Date, Date)] = tailFolded.map { $0.map { ($0.id, $0.span.start, $0.span.end) } }
             ?? tailArray.map { ($0.id, $0.date, $0.date) }
-        var breaks = prefix.breaks
-        for (id, date) in TimeSeparators.breaks(spans: tailSpans, startingAfter: prefix.lastDate) { breaks[id] = date }
-        assign(\.timeBreaks, to: breaks)
+        let tailBreaks = TimeSeparators.breaks(spans: tailSpans, startingAfter: prefix.lastDate)
+        if !tailBreaks.isEmpty {
+            var breaks = prefix.breaks
+            for (id, date) in tailBreaks { breaks[id] = date }
+            assign(\.timeBreaks, to: breaks)
+            tailPrefix?.tailHasExtraBreaks = true
+        } else if initial || prefix.tailHasExtraBreaks {
+            assign(\.timeBreaks, to: prefix.breaks)
+            tailPrefix?.tailHasExtraBreaks = false
+        }
+
         let (tailQuiet, tailNarration) = ReplyAvatars.runs(in: tailArray)
         let lastReplyID: UUID? = if let last = storedItems.last, last.kind.isReply { last.id } else { nil }
-        assign(\.avatars, to: ReplyAvatars(lastID: lastReplyID, quiet: prefix.quietAvatars.union(tailQuiet),
-                                           narration: prefix.narrationAvatars.union(tailNarration)))
-        assign(\.workAnswers, to: prefix.workAnswers)
+        if !tailQuiet.isEmpty || !tailNarration.isEmpty {
+            assign(\.avatars, to: ReplyAvatars(lastID: lastReplyID,
+                                               quiet: tailQuiet.isEmpty ? prefix.quietAvatars : prefix.quietAvatars.union(tailQuiet),
+                                               narration: tailNarration.isEmpty ? prefix.narrationAvatars : prefix.narrationAvatars.union(tailNarration)))
+            tailPrefix?.tailHasExtraAvatars = true
+        } else if initial || prefix.tailHasExtraAvatars {
+            assign(\.avatars, to: ReplyAvatars(lastID: lastReplyID, quiet: prefix.quietAvatars, narration: prefix.narrationAvatars))
+            tailPrefix?.tailHasExtraAvatars = false
+        } else if avatars.lastID != lastReplyID {
+            avatars = ReplyAvatars(lastID: lastReplyID, quiet: prefix.quietAvatars, narration: prefix.narrationAvatars)
+        }
+
+        let tailWorkAnswers = tailFolded.map(TranscriptFolding.workAnswers) ?? [:]
+        if !tailWorkAnswers.isEmpty {
+            var merged = prefix.workAnswers
+            for (id, answer) in tailWorkAnswers { merged[id] = answer }
+            assign(\.workAnswers, to: merged)
+            tailPrefix?.tailHasExtraWorkAnswers = true
+        } else if initial || prefix.tailHasExtraWorkAnswers {
+            assign(\.workAnswers, to: prefix.workAnswers)
+            tailPrefix?.tailHasExtraWorkAnswers = false
+        }
+
         assign(\.redoCandidate, to: RewindRows.redoTarget(in: storedItems, isWorking: false))
         markNew()
-        var trails = prefix.trails
-        let tailTrails = TurnTrail.of(tailArray, isLive: true)
-        if !tailTrails.isEmpty {
-            for (id, trail) in tailTrails { trails[id] = trail }
-            if let tailFolded {
-                for row in tailFolded {
-                    for item in row.items where item.id != row.id {
-                        if let trail = trails.removeValue(forKey: item.id) { trails[row.id] = trail }
-                    }
+
+        var tailTrails = TurnTrail.of(tailArray, isLive: isLive)
+        if !tailTrails.isEmpty, let tailFolded {
+            for row in tailFolded {
+                for item in row.items where item.id != row.id {
+                    if let trail = tailTrails.removeValue(forKey: item.id) { tailTrails[row.id] = trail }
                 }
             }
         }
-        assign(\.trails, to: trails)
-        return true
+        if !tailTrails.isEmpty {
+            var trails = prefix.trails
+            for (id, trail) in tailTrails { trails[id] = trail }
+            assign(\.trails, to: trails)
+            tailPrefix?.tailHasExtraTrails = true
+        } else if initial || prefix.tailHasExtraTrails {
+            assign(\.trails, to: prefix.trails)
+            tailPrefix?.tailHasExtraTrails = false
+        }
     }
 
     /// The rows and what a compaction folded, from the items: the rows end where the fold does, so none is half in it.
+    /// For conversations with >= 20 items and a top-level `.user` item past the compaction fold, builds `tailPrefix`
+    /// in a single pass so subsequent events in the last turn only fold the tail.
     private func refold() {
         let items = storedItems
         let fold = CompactedFold.of(items)
+        if items.count >= 20,
+           let split = items.lastIndex(where: { if case .user = $0.kind { $0.duringTask != true } else { false } }),
+           split >= fold.count {
+            let count = split + 1
+            let head = Array(items[..<count])
+            let headRows = TranscriptFolding.foldedRows(head, boundary: fold.count, liveTail: false)
+            let headSpans: [(UUID, Date, Date)] = headRows.map { $0.map { ($0.id, $0.span.start, $0.span.end) } }
+                ?? head.map { ($0.id, $0.date, $0.date) }
+            let headBreaks = TimeSeparators.breaks(spans: headSpans)
+            let lastDate = headSpans.reduce(nil as Date?) { best, span in max(span.2, best ?? span.2) }
+            let (quiet, narration) = ReplyAvatars.runs(in: head)
+            var headTrails = TurnTrail.of(head, isLive: false)
+            if let headRows, !headTrails.isEmpty {
+                for row in headRows {
+                    for item in row.items where item.id != row.id {
+                        if let trail = headTrails.removeValue(forKey: item.id) { headTrails[row.id] = trail }
+                    }
+                }
+            }
+            let foldedCount: Int
+            if let headRows, fold.count > 0 {
+                let folded = Set(head[..<fold.count].lazy.map(\.id))
+                foldedCount = headRows.prefix { row in row.items.allSatisfy { folded.contains($0.id) } }.count
+            } else {
+                foldedCount = 0
+            }
+            let requests = RequestMark.of(head)
+            let prefix = TailPrefix(
+                count: count, fold: fold, rows: headRows, breaks: headBreaks, lastDate: lastDate,
+                quietAvatars: quiet, narrationAvatars: narration,
+                workAnswers: headRows.map(TranscriptFolding.workAnswers) ?? [:],
+                requests: requests, trails: headTrails, foldedRows: foldedCount
+            )
+            tailPrefix = prefix
+            assign(\.fold, to: fold)
+            assign(\.foldedRows, to: foldedCount)
+            assign(\.requests, to: requests)
+            applyTail(Array(items[count...]), onto: prefix, initial: true)
+            return
+        }
+
+        tailPrefix = nil
         let rows = TranscriptFolding.foldedRows(items, boundary: fold.count, liveTail: isLive)
         withMutation(keyPath: \.rows) { storedRows = rows }
         assign(\.fold, to: fold)
@@ -346,40 +447,6 @@ final class OrbTranscript: WritesOnlyChanges {
             foldedCount = 0
         }
         assign(\.foldedRows, to: foldedCount)
-        cacheTailPrefix(items: items, fold: fold, foldedCount: foldedCount)
-    }
-
-    /// Precomputes the closed prefix through the last top-level `.user` item when live so subsequent tool events in this
-    /// turn skip rescanning the history.
-    private func cacheTailPrefix(items: [TranscriptItem], fold: CompactedFold, foldedCount: Int) {
-        guard isLive, items.count >= 20,
-              let split = items.lastIndex(where: { if case .user = $0.kind { $0.duringTask != true } else { false } }),
-              split >= fold.count else {
-            tailPrefix = nil
-            return
-        }
-        let count = split + 1
-        let head = Array(items[..<count])
-        let headRows = TranscriptFolding.foldedRows(head, boundary: fold.count, liveTail: false)
-        let headSpans: [(UUID, Date, Date)] = headRows.map { $0.map { ($0.id, $0.span.start, $0.span.end) } }
-            ?? head.map { ($0.id, $0.date, $0.date) }
-        let headBreaks = TimeSeparators.breaks(spans: headSpans)
-        let lastDate = headSpans.reduce(nil as Date?) { best, span in max(span.2, best ?? span.2) }
-        let (quiet, narration) = ReplyAvatars.runs(in: head)
-        var headTrails = TurnTrail.of(head, isLive: false)
-        if let headRows, !headTrails.isEmpty {
-            for row in headRows {
-                for item in row.items where item.id != row.id {
-                    if let trail = headTrails.removeValue(forKey: item.id) { headTrails[row.id] = trail }
-                }
-            }
-        }
-        tailPrefix = TailPrefix(
-            count: count, fold: fold, rows: headRows, breaks: headBreaks, lastDate: lastDate,
-            quietAvatars: quiet, narrationAvatars: narration,
-            workAnswers: headRows.map(TranscriptFolding.workAnswers) ?? [:],
-            requests: RequestMark.of(head), trails: headTrails, foldedRows: foldedCount
-        )
     }
 }
 
