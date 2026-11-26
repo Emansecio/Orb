@@ -40,8 +40,7 @@ struct OrbFrameClock {
 /// at 60 Hz, which wakes the main thread twice as often as the fastest orb needs: up to 30 the link stops at 30
 /// instead, and an orb whose rate does not divide it steps at `stepRate` (a little faster, never slower).
 enum OrbLinkRate {
-    static let candidates: [Float] = [10, 15, 20, 30, 60]
-    private static let fastestLinkForSmallOrbs: Float = 30
+    static let candidates: [Float] = [30, 60]
 
     static func rate(forOrbsAt orbRates: [Float]) -> Float {
         let rates = orbRates.filter { $0 > 0 }
@@ -49,12 +48,11 @@ enum OrbLinkRate {
         let fits = { (link: Float) in
             link >= fastest && rates.allSatisfy { divides(link, by: $0) }
         }
-        let meeting = candidates.first(where: fits) ?? max(fastest, candidates[candidates.count - 1])
-        return fastest <= fastestLinkForSmallOrbs ? min(meeting, fastestLinkForSmallOrbs) : meeting
+        return candidates.first(where: fits) ?? max(fastest, candidates[candidates.count - 1])
     }
 
     /// The rate an orb that wants `wanted` fps actually steps at on a link of `link` Hz: the lowest one at or above what
-    /// it wants that the link divides evenly (20 fps on a 30 Hz link takes every tick: 30 fps, smoother, never choppier).
+    /// it wants that the link divides evenly.
     static func stepRate(_ wanted: Float, onLink link: Float) -> Float {
         guard link > 0 else { return wanted }
         return candidates.first { $0 >= wanted && $0 <= link && divides(link, by: $0) } ?? link
@@ -140,7 +138,8 @@ final class OrbDriver: NSObject {
         let wanted = OrbLinkRate.rate(forOrbsAt: running.map(\.frameRate))
         guard wanted != rate else { return }
         rate = wanted
-        link?.preferredFrameRateRange = CAFrameRateRange(minimum: wanted / 2, maximum: wanted, preferred: wanted)
+        let minRate: Float = wanted > 30 ? 30 : wanted
+        link?.preferredFrameRateRange = CAFrameRateRange(minimum: minRate, maximum: wanted, preferred: wanted)
     }
 
     @objc private func tick(_ link: CADisplayLink) {

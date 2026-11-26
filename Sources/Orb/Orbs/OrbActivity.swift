@@ -92,17 +92,9 @@ enum OrbActivity: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Lowest frame rate that still shows this activity's fastest motion (vibrations and hops would alias
-    /// into slow wobbles below it). The worst case: `minFrameRate(elapsed:size:celebration:)` lowers it when the motion
-    /// is calmer than that (small Orbs, a reaction that has died down).
-    var minFrameRate: Float {
-        switch self {
-        case .typing, .error, .waiting, .happy: 30
-        case .speaking: 20
-        case .thinking, .browsing, .reading, .searching: 15
-        case .idle, .attentive, .listening, .sleepy, .conversing: 10
-        }
-    }
+    /// Lowest frame rate that still shows this activity's motion smoothly (30 fps floor so nothing drops to choppy 10–15 fps;
+    /// lively interactions temporarily step up to 60 fps in `OrbAnimationView.pace`).
+    var minFrameRate: Float { 30 }
 
     /// The Orb shows what a tool does (the terminal, the browser, a file, a search).
     var isTool: Bool {
@@ -263,28 +255,10 @@ enum OrbActivity: String, CaseIterable, Identifiable, Sendable {
                              tilt: 7 * size * sin(phase * 4.2) * energy + 2 * (1 - energy) * sin(t * 1.1), glow: Self.pulse(t))
     }
 
-    /// `minFrameRate` for an activity that started `elapsed` seconds ago, on an Orb of `size` points: the floor is what the
-    /// motion needs *now*. Once `happy` has calmed down it needs no more than idle (the editor's preview can stay happy for
-    /// minutes); "precisa de você" needs 30 only while it hops; the terminal shakes slowly enough for 20 on small Orbs; the
-    /// error is still after its "no"; and the activities that only drift need 10 on small Orbs, where a step is a fraction of
-    /// a pixel.
+    /// `minFrameRate` for an activity that started `elapsed` seconds ago, on an Orb of `size` points: steady 30 fps floor
+    /// for all live motion (0 fps when paused/resting).
     func minFrameRate(elapsed: Double, size: CGFloat = 96, celebration: OrbCelebration = .big) -> Float {
-        switch self {
-        case .happy:
-            // (The slowest temperament paces motion at 0.7×.)
-            let hops = celebration.hop > 0 && elapsed <= (Self.happyReady + celebration.calm) / 0.7
-            return hops ? minFrameRate : OrbActivity.idle.minFrameRate
-        case .waiting:
-            return OrbWaiting.isHopping(at: elapsed) ? minFrameRate : OrbActivity.idle.minFrameRate
-        case .error:
-            return elapsed > OrbActivity.errorShake ? OrbActivity.idle.minFrameRate : (size < Self.vibratesBelow ? 20 : minFrameRate)
-        case .typing:
-            return size < Self.vibratesBelow ? 20 : minFrameRate
-        case .thinking, .browsing, .reading, .searching:
-            return size < Self.smallOrb ? OrbActivity.idle.minFrameRate : minFrameRate
-        default:
-            return minFrameRate
-        }
+        minFrameRate
     }
 
     /// Orbs under these sizes need fewer frames: 20 for a shake, 10 for a drift.

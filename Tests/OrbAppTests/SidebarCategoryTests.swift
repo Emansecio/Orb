@@ -193,7 +193,7 @@ struct SidebarCategoryOrganizingTests {
         #expect(model.categories.map(\.name) == ["Pesquisa"])
     }
 
-    @Test @MainActor func theSidebarListsTheLooseOrbsThenEachCategoryFoldedOrNot() throws {
+    @Test @MainActor func theSidebarListsEachCategoryThenTheLooseOrbsFoldedOrNot() throws {
         let world = CategoryWorld()
         let model = world.model
         let ids = world.ids
@@ -204,11 +204,11 @@ struct SidebarCategoryOrganizingTests {
         model.moveBot(ids[0], to: research.id)
         model.setCategory(support.id, collapsed: true)
         #expect(model.looseBotIDs == [ids[3]])
-        #expect(model.sidebarBotIDs == [ids[3], ids[2], ids[1], ids[0]])
+        #expect(model.sidebarBotIDs == [ids[2], ids[1], ids[0], ids[3]])
         // ⌘1…⌘9 count in the same order, folded categories included.
-        #expect(model.botID(atShortcut: 0) == ids[3])
-        #expect(model.botID(atShortcut: 1) == ids[2])
-        #expect(model.botID(atShortcut: 3) == ids[0])
+        #expect(model.botID(atShortcut: 0) == ids[2])
+        #expect(model.botID(atShortcut: 1) == ids[1])
+        #expect(model.botID(atShortcut: 3) == ids[3])
         #expect(model.botID(atShortcut: 4) == nil)
     }
 
@@ -229,11 +229,11 @@ struct SidebarCategoryOrganizingTests {
         // Dropped in the gap it left: nothing moves.
         model.placeBot(ids[3], in: category.id, at: 1)
         #expect(model.category(category.id)?.botIDs == [ids[1], ids[3], ids[2]])
-        // Out, above Atlas: loose again and first in the sidebar (and on ⌘1).
+        // Out, above Atlas: loose again and first in Outros, after the category.
         model.placeBot(ids[3], in: nil, at: 0)
         #expect(model.looseBotIDs == [ids[3], ids[0]])
-        #expect(model.sidebarBotIDs == [ids[3], ids[0], ids[1], ids[2]])
-        #expect(model.botID(atShortcut: 0) == ids[3])
+        #expect(model.sidebarBotIDs == [ids[1], ids[2], ids[3], ids[0]])
+        #expect(model.botID(atShortcut: 0) == ids[1])
         // And under Atlas.
         model.placeBot(ids[3], in: nil, at: 1)
         #expect(model.looseBotIDs == [ids[0], ids[3]])
@@ -393,9 +393,9 @@ struct SidebarCategoryPersistenceTests {
 
     @Test @MainActor func theAppOpensOnTheOrbAtTheTopOfTheSidebar() throws {
         let world = CategoryWorld()
-        world.model.createCategory(named: "Primeiro", moving: world.ids[0])
+        world.model.createCategory(named: "Primeiro", moving: world.ids[2])
         world.relaunch()
-        #expect(world.model.selection == .bot(world.ids[1])) // the first loose Orb, not the first in the category
+        #expect(world.model.selection == .bot(world.ids[2])) // the first Orb in the first category, not the loose one
     }
 
     @Test @MainActor func nextAndPreviousOrbWalkTheSidebarNotTheOrderOfCreation() throws {
@@ -403,27 +403,27 @@ struct SidebarCategoryPersistenceTests {
         let model = world.model
         let ids = world.ids
         model.createCategory(named: "Pesquisa", moving: ids[1])
-        #expect(model.sidebarBotIDs == [ids[0], ids[2], ids[3], ids[1]])
-        model.selection = .bot(ids[0])
+        #expect(model.sidebarBotIDs == [ids[1], ids[0], ids[2], ids[3]])
+        model.selection = .bot(ids[1])
         model.selectAdjacentBot(offset: 1)
-        #expect(model.selection == .bot(ids[2]))
+        #expect(model.selection == .bot(ids[0]))
         model.selectAdjacentBot(offset: 1)
         model.selectAdjacentBot(offset: 1)
-        #expect(model.selection == .bot(ids[1])) // the one in the category is the last shown
+        #expect(model.selection == .bot(ids[3])) // the last loose Orb is the last shown
         model.selectAdjacentBot(offset: 1)
-        #expect(model.selection == .bot(ids[0])) // and it wraps to the first
+        #expect(model.selection == .bot(ids[1])) // and it wraps to the first
         model.selectAdjacentBot(offset: -1)
-        #expect(model.selection == .bot(ids[1]))
+        #expect(model.selection == .bot(ids[3]))
     }
 
     @Test @MainActor func deletingTheSelectedOrbSelectsTheOneAtTheTopOfTheSidebar() throws {
         let world = CategoryWorld()
         let model = world.model
         let ids = world.ids
-        model.createCategory(named: "Pesquisa", moving: ids[0])
-        model.selection = .bot(ids[1])
-        _ = model.deleteBot(ids[1])
-        #expect(model.selection == .bot(ids[2])) // not ids[0], the first created, which sits in the category
+        model.createCategory(named: "Pesquisa", moving: ids[2])
+        model.selection = .bot(ids[0])
+        _ = model.deleteBot(ids[0])
+        #expect(model.selection == .bot(ids[2])) // the first in the sidebar (inside the category), not the next loose one
     }
 
     @Test func anOlderStateFileOpensWithNoCategories() throws {
@@ -459,10 +459,11 @@ struct SidebarCategoryLayoutTests {
     @Test @MainActor func commandsFromAPageActOnTheOrbAtTheTopOfTheSidebar() throws {
         let world = CategoryWorld()
         let model = world.model
-        // The oldest Orb goes into a category: the top of the sidebar is no longer the first in creation order.
-        _ = try #require(model.createCategory(named: "Arquivo", moving: world.ids[0]))
+        // An Orb created later goes into a category: the top of the sidebar is no longer the first in creation order.
+        _ = try #require(model.createCategory(named: "Destaque", moving: world.ids[2]))
         model.selection = .inicio
         #expect(model.commandBotID == model.sidebarBotIDs.first)
+        #expect(model.commandBotID == world.ids[2])
         #expect(model.commandBotID != world.ids[0])
         #expect(model.routineDefaultBot?.id == model.sidebarBotIDs.first)
     }
@@ -497,5 +498,43 @@ struct SidebarCategoryLayoutTests {
         #expect(SidebarOrbFilter.matches(look, words: ["secretaria"]))
         #expect(SidebarOrbFilter.matches(look, words: ["cobrancas", "agenda"]))
         #expect(!SidebarOrbFilter.matches(look, words: ["secretaria", "financas"]))
+    }
+
+    @Test func categoryFilterFallsBackToAllWhenTargetDisappears() {
+        let cat = SidebarCategory(name: "AcessosFit")
+        let missing = UUID()
+        #expect(SidebarCategoryFilter.all.resolved(categories: [cat], hasLoose: true) == .all)
+        #expect(SidebarCategoryFilter.category(cat.id).resolved(categories: [cat], hasLoose: false) == .category(cat.id))
+        #expect(SidebarCategoryFilter.category(missing).resolved(categories: [cat], hasLoose: true) == .all)
+        #expect(SidebarCategoryFilter.loose.resolved(categories: [cat], hasLoose: true) == .loose)
+        #expect(SidebarCategoryFilter.loose.resolved(categories: [cat], hasLoose: false) == .all)
+    }
+
+    @Test func dropSectionsPlaceCategoriesBeforeLooseOrbs() {
+        let (a, b) = (UUID(), UUID())
+        let cat = SidebarCategory(name: "AcessosFit", botIDs: [a])
+        let sections = SidebarDrop.sections(loose: [b], categories: [cat], botIDs: [a, b])
+        #expect(sections.map(\.categoryID) == [cat.id, nil])
+        #expect(sections.map(\.botIDs) == [[a], [b]])
+    }
+
+    @Test func botRowShowsSubtitleOnlyForActiveOrUnreadStates() {
+        let bot = Bot(name: "Atendente", role: "Responde clientes", orb: OrbConfig())
+        let look = BotLook(bot)
+        let reply = ReplyPreview(text: "Tudo certo por aqui.", date: .now)
+        func row(work: String? = nil, shimmers: Bool = false, needsYou: Bool = false, unread: Int = 0, reply: ReplyPreview? = reply) -> BotRow {
+            BotRow(look: look, workText: work, shimmers: shimmers, activity: .idle, isSelected: false,
+                   celebration: .smile, ack: 0, cue: .init(), glance: 0, needsYou: needsYou, unread: unread,
+                   reply: reply, replyTime: nil, botID: bot.id)
+        }
+        // Idle and read: compact single line (no stale reply preview or role).
+        #expect(row().activeSubtitle == nil)
+        // Waiting for the user takes priority over work and unread.
+        #expect(row(work: "Pensando…", needsYou: true, unread: 2).activeSubtitle == .needsYou)
+        // Working state shows the live work phrase.
+        #expect(row(work: "Rodando testes", shimmers: true).activeSubtitle == .working("Rodando testes", shimmers: true))
+        // Unread message shows its reply preview; without a preview, stays single-line (dot sits on the main line).
+        #expect(row(unread: 1).activeSubtitle == .unreadReply("Tudo certo por aqui."))
+        #expect(row(unread: 1, reply: nil).activeSubtitle == nil)
     }
 }

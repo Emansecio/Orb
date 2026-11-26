@@ -46,11 +46,11 @@ enum SidebarOrder {
         return botIDs.filter { !placed.contains($0) }
     }
 
-    /// Every Orb in the order the sidebar shows them: the loose ones, then each category's. Folded categories count too,
-    /// so an Orb keeps its ⌘ number when its category is folded.
+    /// Every Orb in the order the sidebar shows them: each category's, then the loose ones ("Outros"). Folded categories
+    /// count too, so an Orb keeps its ⌘ number when its category is folded.
     static func all(_ botIDs: [UUID], categories: [SidebarCategory]) -> [UUID] {
         let alive = Set(botIDs)
-        return loose(botIDs, categories: categories) + categories.flatMap { $0.botIDs.filter { alive.contains($0) } }
+        return categories.flatMap { $0.botIDs.filter { alive.contains($0) } } + loose(botIDs, categories: categories)
     }
 
     /// "Nova categoria" shows at the end of the Orbs once there are two to sort (or a category already), as "Novo grupo" does.
@@ -60,6 +60,22 @@ enum SidebarOrder {
     static func name(_ typed: String) -> String? {
         let name = typed.trimmingCharacters(in: .whitespacesAndNewlines)
         return name.isEmpty ? nil : String(name.prefix(SidebarCategory.nameLimit))
+    }
+}
+
+/// Which subset of the Orbs list the quick-filter pills show (session-only).
+enum SidebarCategoryFilter: Equatable, Hashable {
+    case all
+    case category(UUID)
+    case loose
+
+    /// Falls back to `.all` if the selected category was deleted or no loose Orbs remain.
+    func resolved(categories: [SidebarCategory], hasLoose: Bool) -> Self {
+        switch self {
+        case .all: .all
+        case .category(let id): categories.contains { $0.id == id } ? self : .all
+        case .loose: hasLoose ? .loose : .all
+        }
     }
 }
 
@@ -125,8 +141,8 @@ enum SidebarDrop {
 
     static func sections(loose: [UUID], categories: [SidebarCategory], botIDs: [UUID]) -> [Section] {
         let alive = Set(botIDs)
-        return [Section(categoryID: nil, botIDs: loose)]
-            + categories.map { Section(categoryID: $0.id, botIDs: $0.botIDs.filter { alive.contains($0) }, isCollapsed: $0.isCollapsed) }
+        return categories.map { Section(categoryID: $0.id, botIDs: $0.botIDs.filter { alive.contains($0) }, isCollapsed: $0.isCollapsed) }
+            + [Section(categoryID: nil, botIDs: loose)]
     }
 
     /// The list with `botID` held at height `y`. The gap opens at the place whose middle is nearest the pointer, worked out

@@ -20,7 +20,7 @@ struct SidebarChatList: View {
     /// A conversation's row, and its rename field, at least: a click target (the text alone made it about 23 pt).
     static let rowHeight: CGFloat = 28
     /// Where the Orb's name starts in its row, and a conversation's text in its own.
-    static let nameInset: CGFloat = 46
+    static let nameInset: CGFloat = SidebarCategoryLayout.titleInset
     static let rowInset: CGFloat = 8
 
     var body: some View {

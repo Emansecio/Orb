@@ -208,23 +208,22 @@ struct OrbPolishTests {
         // Slumped (-3°), its glow still at 0.85.
         #expect(late.allSatisfy { abs($0.tilt + 3) < 0.01 && $0.glow == 0.85 })
         #expect(error.motion(at: 0.2, elapsed: 0.2).glow == 0.85)
-        // 20 fps for the shake on small Orbs, 30 on big ones, and 10 once it is still.
-        #expect(error.minFrameRate(elapsed: 0.5, size: 30) == 20 && error.minFrameRate(elapsed: 0.5, size: 96) == 30)
-        #expect(error.minFrameRate(elapsed: 1.31, size: 30) == 10 && error.minFrameRate(elapsed: 1.31, size: 96) == 10)
+        // Steady 30 fps floor during and after the shake (never drops to choppy 10–20 fps).
+        #expect(error.minFrameRate(elapsed: 0.5, size: 30) == 30 && error.minFrameRate(elapsed: 0.5, size: 96) == 30)
+        #expect(error.minFrameRate(elapsed: 1.31, size: 30) == 30 && error.minFrameRate(elapsed: 1.31, size: 96) == 30)
     }
 
     // MARK: Frame rates and glow
 
-    @Test func smallOrbsNeedFewerFramesForTheirSlowMotion() {
+    @Test func activitiesKeepASmoothThirtyFpsFloor() {
         for slow in [OrbActivity.thinking, .reading, .searching, .browsing] {
-            #expect(slow.minFrameRate(elapsed: 1, size: 30) == 10, "\(slow)")
-            #expect(slow.minFrameRate(elapsed: 1, size: 39.9) == 10)
-            #expect(slow.minFrameRate(elapsed: 1, size: 40) == 15 && slow.minFrameRate(elapsed: 1, size: 96) == 15)
+            #expect(slow.minFrameRate(elapsed: 1, size: 30) == 30, "\(slow)")
+            #expect(slow.minFrameRate(elapsed: 1, size: 96) == 30)
         }
-        #expect(OrbActivity.typing.minFrameRate(elapsed: 5, size: 30) == 20 && OrbActivity.typing.minFrameRate(elapsed: 5, size: 79) == 20)
+        #expect(OrbActivity.typing.minFrameRate(elapsed: 5, size: 30) == 30)
         #expect(OrbActivity.typing.minFrameRate(elapsed: 5, size: 80) == 30)
-        #expect(OrbActivity.speaking.minFrameRate(elapsed: 5, size: 30) == 20)
-        // The terminal's shake is slower now (28 rad/s), and nothing aliases at 20 fps (Nyquist 10 Hz, it is 4.5 Hz).
+        #expect(OrbActivity.speaking.minFrameRate(elapsed: 5, size: 30) == 30)
+        // The terminal's shake is slower now (28 rad/s), and nothing aliases at 30 fps (Nyquist 15 Hz, it is 4.5 Hz).
         let shakes = (0..<1000).map { OrbActivity.typing.motion(at: Double($0) / 1000).shake }
         let zero = zip(shakes, shakes.dropFirst()).filter { $0 * $1 < 0 }.count
         #expect(zero >= 8 && zero <= 10) // about 4.5 Hz over one second

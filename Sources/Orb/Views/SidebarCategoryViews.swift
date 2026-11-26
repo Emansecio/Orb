@@ -18,6 +18,10 @@ struct SidebarCategorySection: View {
     let selectionSpace: Namespace.ID
     let rowSpace: Namespace.ID
     var filterWords: [String] = []
+    /// False when the quick-filter pill isolates this category (avoids repeating its title right under the active pill).
+    var showsHeader = true
+    /// Breathing room above the section heading so categories read as distinct blocks.
+    var topPadding: CGFloat = 0
 
     var body: some View {
         let categoryIDs = category.botIDs.filter { model.botIDs.contains($0) }
@@ -28,19 +32,22 @@ struct SidebarCategorySection: View {
         let isFiltering = !filterWords.isEmpty
         if !isFiltering || !ids.isEmpty {
             VStack(alignment: .leading, spacing: 1) {
-                Group {
-                    if model.categoryNaming == .rename(category.id) {
-                        CategoryNameField(initial: category.name, symbol: "chevron.right", turned: !category.isCollapsed) { name in
-                            model.renameCategory(category.id, to: name)
+                if showsHeader {
+                    Group {
+                        if model.categoryNaming == .rename(category.id) {
+                            CategoryNameField(initial: category.name, symbol: "chevron.right", turned: !category.isCollapsed) { name in
+                                model.renameCategory(category.id, to: name)
+                            }
+                        } else {
+                            SidebarCategoryHeader(category: category, ids: ids,
+                                                  isTargeted: category.isCollapsed && drag?.slot.categoryID == category.id,
+                                                  selectionSpace: selectionSpace)
                         }
-                    } else {
-                        SidebarCategoryHeader(category: category, ids: ids,
-                                              isTargeted: category.isCollapsed && drag?.slot.categoryID == category.id,
-                                              selectionSpace: selectionSpace)
                     }
+                    .padding(.top, topPadding)
+                    .sidebarDropItem(.header(category.id), drag)
                 }
-                .sidebarDropItem(.header(category.id), drag)
-                if !category.isCollapsed || isFiltering {
+                if !category.isCollapsed || isFiltering || !showsHeader {
                     ForEach(ids, id: \.self) { id in
                         SidebarBotRow(botID: id, index: order.firstIndex(of: id) ?? order.count, selectionSpace: selectionSpace, rowSpace: rowSpace)
                             .sidebarDropItem(.row(id), drag)
@@ -224,14 +231,16 @@ private struct SidebarCategoryHeader: View {
     }
 }
 
-/// What a folded heading shows for the Orbs it hides: the attention mark, then their count. Unfolded, the Orbs
-/// themselves are there to see and count.
+/// What a category heading shows for its Orbs: the attention mark when folded, and a quiet count (fainter when open,
+/// clearer when folded so hidden Orbs stay accounted for).
 struct HiddenOrbsMarks: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let collapsed: Bool
     let waiting: Bool
     let unread: Bool
     let count: Int
+    /// Show the count softly even when unfolded (category headings and "Outros", not the top "Orbs" section title).
+    var showsCountWhenOpen = true
 
     var body: some View {
         ZStack {
@@ -248,10 +257,10 @@ struct HiddenOrbsMarks: View {
             }
         }
         .motion(value: collapsed && (waiting || unread))
-        if collapsed {
+        if collapsed || (showsCountWhenOpen && count > 0) {
             Text("\(count)")
                 .font(Typography.small)
-                .foregroundStyle(Palette.faint)
+                .foregroundStyle(collapsed ? Palette.faint : Palette.hint)
                 .monospacedDigit()
                 .help(CategoryText.orbs(count))
         }
@@ -313,9 +322,11 @@ enum SidebarCategoryLayout {
     /// A heading is 32 pt tall at least (a click target): its content takes what is left of the row's 6 pt above and below.
     static let headerContentHeight: CGFloat = 32 - 2 * 6
     /// The leading column, as wide as an Orb's avatar: arrows and icons stand centered on the avatars.
-    static let iconColumn: CGFloat = 30
+    static let iconColumn: CGFloat = 24
     /// The gap after it, the avatar's.
     static let iconGap: CGFloat = 8
     /// Where a row's name starts: the row's padding, the column and the gap.
     static let titleInset: CGFloat = 8 + iconColumn + iconGap
+    /// Vertical breathing room above each category block (and "Outros") so sections separate clearly.
+    static let sectionTopSpacing: CGFloat = Spacing.m
 }

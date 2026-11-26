@@ -31,6 +31,7 @@ struct SidebarView: View {
     @State private var looseUnfolded = true
     @State private var showsFilter = false
     @State private var orbFilter = ""
+    @State private var categoryFilter: SidebarCategoryFilter = .all
     @FocusState private var filterFocused: Bool
 
     var body: some View {
@@ -40,11 +41,18 @@ struct SidebarView: View {
         let filterWords = showsFilter ? SearchText.words(orbFilter) : []
         let isFiltering = !filterWords.isEmpty
         let allLooseIDs = model.looseBotIDs
+        let activeFilter = categoryFilter.resolved(categories: model.categories, hasLoose: !allLooseIDs.isEmpty)
         let looseIDs = isFiltering ? allLooseIDs.filter {
             let live = model.live($0)
             return SidebarOrbFilter.matches(live.look, chats: live.chats, words: filterWords)
         } : allLooseIDs
-        let matchingCategoryIDs = isFiltering ? model.categories.flatMap {
+        let visibleCategories: [SidebarCategory] = switch activeFilter {
+        case .all: model.categories
+        case .category(let id): model.categories.filter { $0.id == id }
+        case .loose: []
+        }
+        let showsLoose = activeFilter == .all || activeFilter == .loose
+        let matchingCategoryIDs = isFiltering ? visibleCategories.flatMap {
             $0.botIDs.filter {
                 guard model.botIDs.contains($0) else { return false }
                 let live = model.live($0)
@@ -54,7 +62,7 @@ struct SidebarView: View {
         let sections = SidebarDrop.sections(loose: allLooseIDs, categories: model.categories, botIDs: model.botIDs)
         let listChanged = settledBotIDs.map { Set($0) != Set(model.botIDs) } ?? false
         let isNamingNewCategory = if case .new = model.categoryNaming { true } else { false }
-        let nestedLoose = !model.categories.isEmpty && !looseIDs.isEmpty
+        let nestedLoose = !model.categories.isEmpty && !looseIDs.isEmpty && activeFilter == .all
         ScrollView {
             VStack(alignment: .leading, spacing: 1) {
                 SidebarFeatureRow(item: .inicio, name: "Início", symbol: "house",
@@ -108,6 +116,13 @@ struct SidebarView: View {
                         .transition(.adapted(.unfold, reduceMotion: reduceMotion))
                     }
                     if orbsUnfolded {
+                        if !model.categories.isEmpty {
+                            SidebarCategoryPills(categories: model.categories, hasLoose: !allLooseIDs.isEmpty, selection: activeFilter) { picked in
+                                withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) { categoryFilter = picked }
+                            }
+                            .padding(.top, 2)
+                            .padding(.bottom, 4)
+                        }
                         if model.botIDs.isEmpty {
                             // No Orbs: an invitation in the list's own place. It shows the welcome screen (what you get with
                             // nothing selected); when that is already on screen, the click opens the New Orb sheet instead.
@@ -123,28 +138,35 @@ struct SidebarView: View {
                             }
                             .transition(.opacity)
                         }
-                        if nestedLoose {
-                            // Lit only while an Orb is dragged over it: with no drag, `drag?.slot.categoryID` is nil too.
-                            SidebarFoldHeader(title: "Outros", unfolded: looseUnfolded, ids: looseIDs,
-                                              isTargeted: !looseUnfolded && drag.map { $0.slot.categoryID == nil } == true, sub: true,
-                                              selectionSpace: selectionSpace) { EmptyView() } action: {
-                                withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) { looseUnfolded.toggle() }
-                            }
-                            .sidebarDropItem(.othersTitle, drag)
-                        }
-                        if !nestedLoose || looseUnfolded || isFiltering {
-                            ForEach(looseIDs, id: \.self) { id in
-                                SidebarBotRow(botID: id, index: order.firstIndex(of: id) ?? order.count, selectionSpace: selectionSpace, rowSpace: rowSpace)
-                                    .sidebarDropItem(.row(id), drag)
-                                    .transition(.adapted(.arrive, reduceMotion: reduceMotion))
-                            }
-                        }
-                        // The categories, after the loose Orbs: only how the list is laid out.
-                        ForEach(model.categories) { category in
-                            SidebarCategorySection(category: category, order: order, drag: drag, selectionSpace: selectionSpace, rowSpace: rowSpace, filterWords: filterWords)
+                        // User categories first, with clear breathing room between blocks; "Outros" follows below.
+                        ForEach(Array(visibleCategories.enumerated()), id: \.element.id) { index, category in
+                            SidebarCategorySection(category: category, order: order, drag: drag,
+                                                   selectionSpace: selectionSpace, rowSpace: rowSpace,
+                                                   filterWords: filterWords,
+                                                   showsHeader: activeFilter == .all,
+                                                   topPadding: index == 0 ? Spacing.xs : SidebarCategoryLayout.sectionTopSpacing)
                                 .transition(.adapted(.arrive, reduceMotion: reduceMotion))
                         }
-                        if isFiltering && looseIDs.isEmpty && matchingCategoryIDs.isEmpty {
+                        if showsLoose {
+                            if nestedLoose {
+                                // Lit only while an Orb is dragged over it: with no drag, `drag?.slot.categoryID` is nil too.
+                                SidebarFoldHeader(title: "Outros", unfolded: looseUnfolded, ids: looseIDs,
+                                                  isTargeted: !looseUnfolded && drag.map { $0.slot.categoryID == nil } == true, sub: true,
+                                                  selectionSpace: selectionSpace) { EmptyView() } action: {
+                                    withAnimation(FoldMotion.animation(reduceMotion: reduceMotion)) { looseUnfolded.toggle() }
+                                }
+                                .padding(.top, SidebarCategoryLayout.sectionTopSpacing)
+                                .sidebarDropItem(.othersTitle, drag)
+                            }
+                            if !nestedLoose || looseUnfolded || isFiltering || activeFilter == .loose {
+                                ForEach(looseIDs, id: \.self) { id in
+                                    SidebarBotRow(botID: id, index: order.firstIndex(of: id) ?? order.count, selectionSpace: selectionSpace, rowSpace: rowSpace)
+                                        .sidebarDropItem(.row(id), drag)
+                                        .transition(.adapted(.arrive, reduceMotion: reduceMotion))
+                                }
+                            }
+                        }
+                        if isFiltering && (!showsLoose || looseIDs.isEmpty) && matchingCategoryIDs.isEmpty {
                             Text("Nenhum Orb encontrado")
                                 .font(Typography.small)
                                 .foregroundStyle(Palette.faint)
@@ -381,11 +403,11 @@ private struct SidebarFoldHeader<Trailing: View>: View {
                 HStack(spacing: sub ? SidebarCategoryLayout.iconGap : 6) {
                     chevron.frame(width: sub ? SidebarCategoryLayout.iconColumn : 12)
                     Text(title)
-                        .font(sub ? Typography.text.weight(.medium) : Typography.label.weight(.medium))
-                        .foregroundStyle(collapsed && holdsSelection ? Palette.ink : sub ? Palette.secondary : Palette.faint)
+                        .font(Typography.label.weight(.medium))
+                        .foregroundStyle(collapsed && holdsSelection ? Palette.ink : sub ? Palette.muted : Palette.faint)
                         .lineLimit(1)
                     Spacer(minLength: 4)
-                    HiddenOrbsMarks(collapsed: collapsed, waiting: waiting, unread: unread, count: ids.count)
+                    HiddenOrbsMarks(collapsed: collapsed, waiting: waiting, unread: unread, count: ids.count, showsCountWhenOpen: sub)
                 }
                 .frame(minHeight: SidebarCategoryLayout.headerContentHeight)
                 .hoverFill(isTargeted, in: .rect(cornerRadius: Radius.medium))
@@ -672,7 +694,7 @@ private struct FirstOrbInvitation: View {
                     .font(SectionPlus.glyph)
                     .foregroundStyle(Palette.muted)
             }
-            .frame(width: 30, height: 30)
+            .frame(width: SidebarCategoryLayout.iconColumn, height: SidebarCategoryLayout.iconColumn)
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
                     .font(Typography.text.weight(.medium))
@@ -725,6 +747,21 @@ struct BotRow: Equatable {
     /// The pointer is on the row: the "+" that opens a new conversation shows beside the timestamp.
     var showsNewChat = false
 
+    /// What appears on the second line of an Orb's row: only active or attention-worthy states. Idle, read Orbs stay
+    /// single-line so the list reads cleanly without a wall of stale previews.
+    enum Subtitle: Equatable {
+        case needsYou
+        case working(String, shimmers: Bool)
+        case unreadReply(String)
+    }
+
+    var activeSubtitle: Subtitle? {
+        if needsYou { return .needsYou }
+        if let workText { return .working(workText, shimmers: shimmers) }
+        if unread > 0, let reply { return .unreadReply(reply.text) }
+        return nil
+    }
+
     static func time(of reply: ReplyPreview?, now: Date = .now, calendar: Calendar = .current) -> String? {
         reply.map { ReplyTime.label($0.date, now: now, calendar: calendar) }
     }
@@ -759,16 +796,17 @@ private struct BotRowContent: View, Equatable {
 
     var body: some View {
         let (look, workText, activity, needsYou) = (row.look, row.workText, row.activity, row.needsYou)
-        HStack(spacing: 8) {
+        let subtitle = row.activeSubtitle
+        HStack(spacing: SidebarCategoryLayout.iconGap) {
             // Only the selected bot and bots with something going on move; the rest rest (no frames at all).
-            BotAvatar(orb: look.orb, size: 30, activity: activity, celebration: row.celebration,
+            BotAvatar(orb: look.orb, size: SidebarCategoryLayout.iconColumn, activity: activity, celebration: row.celebration,
                       paused: activity == .idle && (!row.isSelected || selectionSettled), ack: row.ack, landing: row.landing, glance: row.glance, cue: row.cue)
                 // A 1.5 pt ring that says what is going on at a glance. Pulses once when attention is needed.
                 .overlay {
                     if let ring {
                         Circle()
                             .strokeBorder(ring.opacity(0.55), lineWidth: 1.5)
-                            .frame(width: 36, height: 36)
+                            .frame(width: SidebarCategoryLayout.iconColumn + 6, height: SidebarCategoryLayout.iconColumn + 6)
                             .phaseAnimator(reduceMotion ? [0] : [0, 1, 2], trigger: ringPulse) { view, phase in
                                 view
                                     .scaleEffect(phase == 1 ? 1.14 : 1)
@@ -819,6 +857,10 @@ private struct BotRowContent: View, Equatable {
                         name
                         Spacer(minLength: 4)
                     }
+                    // When there is no second line, an unread indicator without a reply preview still sits on the main line.
+                    if subtitle == nil, !needsYou, row.unread > 0 {
+                        unreadMark
+                    }
                     // Comfortable 22 pt hit targets with 4 pt spacing so "+" and chevron never collide.
                     HStack(spacing: 4) {
                         if row.showsNewChat {
@@ -846,59 +888,64 @@ private struct BotRowContent: View, Equatable {
                         }
                     }
                 }
-                HStack(spacing: 4) {
-                    Group {
-                        if needsYou {
-                            Text("Precisa de você").foregroundStyle(Palette.warn)
-                        } else if let workText {
-                            if row.shimmers {
-                                Text(workText).shimmer()
-                            } else {
-                                Text(workText).foregroundStyle(Palette.faint)
-                            }
-                        } else if let reply = row.reply {
-                            Text(reply.text).foregroundStyle(Palette.faint)
-                        } else {
-                            Text(look.role).foregroundStyle(Palette.faint)
-                        }
-                    }
-                    .font(Typography.small)
-                    .lineLimit(1)
-                    .help(needsYou ? "Precisa de você" : (workText ?? row.reply?.text ?? look.role))
-                    Spacer(minLength: 4)
-                    ZStack {
-                        // While it waits for you, the amber ring and the amber "Precisa de você" already say so (VoiceOver
-                        // reads that text, the row is one element): no third sign here, and no count over it.
-                        if !needsYou, row.unread > 0 {
-                            // One unread is a dot; from two on the count is worth its width.
-                            Group {
-                                if row.unread >= 2 {
-                                    Text(row.unread > 99 ? "99+" : "\(row.unread)")
-                                        .font(Typography.small.weight(.semibold).monospacedDigit())
-                                        .foregroundStyle(Palette.accentText)
-                                        .padding(.horizontal, 5)
-                                        .frame(minWidth: 16, minHeight: 16)
-                                        .background(Capsule().fill(Palette.accent.opacity(0.22)))
-                                        .overlay(Capsule().strokeBorder(Palette.accentText.opacity(0.32), lineWidth: 0.75))
+                if let subtitle {
+                    HStack(spacing: 4) {
+                        Group {
+                            switch subtitle {
+                            case .needsYou:
+                                Text("Precisa de você").foregroundStyle(Palette.warn)
+                            case .working(let text, let shimmers):
+                                if shimmers {
+                                    Text(text).shimmer()
                                 } else {
-                                    Circle()
-                                        .fill(Palette.accentText)
-                                        .frame(width: 8, height: 8)
+                                    Text(text).foregroundStyle(Palette.faint)
                                 }
+                            case .unreadReply(let text):
+                                Text(text).foregroundStyle(Palette.secondary)
                             }
-                            .transition(.adapted(.mark, reduceMotion: reduceMotion))
-                            .accessibilityLabel(SidebarText.unread(row.unread))
                         }
+                        .font(Typography.small)
+                        .lineLimit(1)
+                        .help(needsYou ? "Precisa de você" : (workText ?? row.reply?.text ?? look.role))
+                        Spacer(minLength: 4)
+                        ZStack {
+                            // While it waits for you, the amber ring and the amber "Precisa de você" already say so (VoiceOver
+                            // reads that text, the row is one element): no third sign here, and no count over it.
+                            if !needsYou, row.unread > 0 {
+                                unreadMark
+                            }
+                        }
+                        .animateChanges(of: needsYou || row.unread > 0)
                     }
-                    .animateChanges(of: needsYou || row.unread > 0)
                 }
             }
-            // The same height with or without a second line (an Orb with no role), so the rows keep one rhythm.
-            .frame(minHeight: 32, alignment: .leading)
+            .frame(minHeight: SidebarCategoryLayout.iconColumn, alignment: .leading)
             .animateChanges(of: workText)
             .animateChanges(of: needsYou)
         }
         .accessibilityElement(children: .combine)
+    }
+
+    /// One unread is a dot; from two on the count is worth its width.
+    @ViewBuilder
+    private var unreadMark: some View {
+        Group {
+            if row.unread >= 2 {
+                Text(row.unread > 99 ? "99+" : "\(row.unread)")
+                    .font(Typography.small.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(Palette.accentText)
+                    .padding(.horizontal, 5)
+                    .frame(minWidth: 16, minHeight: 16)
+                    .background(Capsule().fill(Palette.accent.opacity(0.22)))
+                    .overlay(Capsule().strokeBorder(Palette.accentText.opacity(0.32), lineWidth: 0.75))
+            } else {
+                Circle()
+                    .fill(Palette.accentText)
+                    .frame(width: 8, height: 8)
+            }
+        }
+        .transition(.adapted(.mark, reduceMotion: reduceMotion))
+        .accessibilityLabel(SidebarText.unread(row.unread))
     }
 }
 
@@ -965,6 +1012,58 @@ private struct SidebarOrbFilterField: View {
         .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: Radius.small, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: Radius.small, style: .continuous).strokeBorder(Palette.lineStrong))
         .padding(.bottom, 4)
+    }
+}
+
+/// Quick-filter pills under "Orbs": isolates one category (or "Outros") without folding the rest.
+private struct SidebarCategoryPills: View {
+    let categories: [SidebarCategory]
+    let hasLoose: Bool
+    let selection: SidebarCategoryFilter
+    let select: (SidebarCategoryFilter) -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: Spacing.xs) {
+                CategoryFilterPill(title: "Todos", isSelected: selection == .all) { select(.all) }
+                ForEach(categories) { category in
+                    CategoryFilterPill(title: category.name, isSelected: selection == .category(category.id)) {
+                        select(.category(category.id))
+                    }
+                }
+                if hasLoose {
+                    CategoryFilterPill(title: "Outros", isSelected: selection == .loose) { select(.loose) }
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 1)
+        }
+    }
+}
+
+private struct CategoryFilterPill: View {
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(Typography.small.weight(isSelected ? .medium : .regular))
+                .foregroundStyle(isSelected ? Palette.ink : isHovering ? Palette.secondary : Palette.muted)
+                .lineLimit(1)
+                .padding(.horizontal, 8)
+                .frame(height: 22)
+                .background(Capsule().fill(isSelected ? Palette.ghostSelected : isHovering ? Palette.ghostHover : Palette.chipFill))
+                .overlay(Capsule().strokeBorder(isSelected ? Palette.lineStrong : .clear, lineWidth: 1))
+                .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .animation(Motion.fade, value: isHovering)
+        .help(title)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 

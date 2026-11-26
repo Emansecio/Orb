@@ -11,23 +11,13 @@ struct OrbDriverTests {
     // MARK: Link rate
 
     @Test func linkRunsAtTheLowestRateEveryOrbDivides() {
-        #expect(OrbLinkRate.rate(forOrbsAt: []) == 10)
-        #expect(OrbLinkRate.rate(forOrbsAt: [10]) == 10)
-        #expect(OrbLinkRate.rate(forOrbsAt: [10, 20]) == 20)
-        #expect(OrbLinkRate.rate(forOrbsAt: [10, 30]) == 30)
-        #expect(OrbLinkRate.rate(forOrbsAt: [10, 15]) == 30)
-        #expect(OrbLinkRate.rate(forOrbsAt: [15, 30]) == 30)
-        // Rates that do not divide each other meet at 30, not at 60: the link wakes the main thread half as often and
-        // the orb at 20 fps steps at 30 (see `stepRate`).
-        #expect(OrbLinkRate.rate(forOrbsAt: [20, 30]) == 30)
-        #expect(OrbLinkRate.rate(forOrbsAt: [15, 20]) == 30)
-        #expect(OrbLinkRate.rate(forOrbsAt: [10, 15, 20]) == 30)
-        #expect(OrbLinkRate.rate(forOrbsAt: [20]) == 20)
+        #expect(OrbLinkRate.rate(forOrbsAt: []) == 30)
+        #expect(OrbLinkRate.rate(forOrbsAt: [30]) == 30)
         #expect(OrbLinkRate.rate(forOrbsAt: [30, 60]) == 60)
-        #expect(OrbLinkRate.rate(forOrbsAt: [20, 60]) == 60)
+        #expect(OrbLinkRate.rate(forOrbsAt: [60]) == 60)
         // A rate not set yet does not matter.
-        #expect(OrbLinkRate.rate(forOrbsAt: [0, 20]) == 20)
-        #expect(OrbLinkRate.rate(forOrbsAt: [0]) == 10)
+        #expect(OrbLinkRate.rate(forOrbsAt: [0, 30]) == 30)
+        #expect(OrbLinkRate.rate(forOrbsAt: [0]) == 30)
     }
 
     /// Intervals between the frames an orb of `rate` gets from a link at `linkRate`.
@@ -69,12 +59,10 @@ struct OrbDriverTests {
                 #expect(abs(link / stepped - (link / stepped).rounded()) < 0.01)
             }
         } } }
-        #expect(OrbLinkRate.stepRate(20, onLink: 30) == 30)
-        #expect(OrbLinkRate.stepRate(15, onLink: 30) == 15)
-        #expect(OrbLinkRate.stepRate(10, onLink: 30) == 10)
-        #expect(OrbLinkRate.stepRate(20, onLink: 20) == 20)
+        #expect(OrbLinkRate.stepRate(30, onLink: 30) == 30)
         #expect(OrbLinkRate.stepRate(30, onLink: 60) == 30)
-        #expect(OrbLinkRate.stepRate(0, onLink: 30) == 10)
+        #expect(OrbLinkRate.stepRate(60, onLink: 60) == 60)
+        #expect(OrbLinkRate.stepRate(0, onLink: 30) == 30)
     }
 
     @Test func aLinkThatDoesNotDivideTheRateWouldStutter() {

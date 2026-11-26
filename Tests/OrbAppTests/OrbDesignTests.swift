@@ -122,7 +122,7 @@ struct OrbDesignTests {
         // And the calm phase moves slowly enough for that floor at the editor's size.
         let lifts = stride(from: 4.0, to: 8, by: 0.01).map { OrbActivity.happy.motion(at: $0, elapsed: $0) }
         let speed = zip(lifts, lifts.dropFirst()).map { max(abs($1.lift - $0.lift), abs($1.tilt - $0.tilt) * .pi / 360) / 0.01 }.max() ?? 0
-        #expect(OrbFrameRate.rate(forSpeed: speed * 144 * 2, cap: 60) <= 20)
+        #expect(OrbFrameRate.rate(forSpeed: speed * 144 * 2, cap: 60) == 30)
     }
 
 
@@ -143,7 +143,7 @@ struct OrbDesignTests {
         let attentive = OrbActivity.attentive
         #expect(attentive.eyes == nil && attentive.brows == nil && attentive.bubble == nil)
         #expect(attentive.mouth(base: "sorriso") == nil && attentive.mouth(base: "nenhuma") == nil)
-        #expect(attentive.minFrameRate == OrbActivity.idle.minFrameRate && attentive.minFrameRate == 10)
+        #expect(attentive.minFrameRate == OrbActivity.idle.minFrameRate && attentive.minFrameRate == 30)
         #expect(attentive.wander == 0.2)
         for t in stride(from: 0.0, through: 20, by: 0.25) {
             let gaze = attentive.gaze(at: t)

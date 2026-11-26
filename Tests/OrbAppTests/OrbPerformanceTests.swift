@@ -84,12 +84,13 @@ struct OrbPerformanceTests {
 
     // MARK: Frame rate
 
-    @Test func bigOrbsOnlyReachSixtyWhileLively() {
+    @Test func orbsOnlyReachSixtyWhileLively() {
         #expect(OrbFrameRate.cap(forSize: 96, lively: false) == 30)
         #expect(OrbFrameRate.cap(forSize: 96, lively: true) == 60)
         #expect(OrbFrameRate.cap(forSize: 132, lively: false) == 30)
-        #expect(OrbFrameRate.cap(forSize: 30, lively: true) == 30)
-        #expect(OrbFrameRate.cap(forSize: 79, lively: true) == 30)
+        #expect(OrbFrameRate.cap(forSize: 30, lively: false) == 30)
+        #expect(OrbFrameRate.cap(forSize: 30, lively: true) == 60)
+        #expect(OrbFrameRate.cap(forSize: 79, lively: true) == 60)
     }
 
     // MARK: Bitmaps

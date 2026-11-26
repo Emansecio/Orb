@@ -285,15 +285,15 @@ enum OrbGlance {
 
 /// Picks the display-link rate from how fast the pose is changing on screen.
 enum OrbFrameRate {
-    static let steps: [Float] = [10, 15, 20, 30, 60]
+    /// Only divisors of 60 Hz and 120 Hz (no 10/15/20 fps stutter): 30 fps for calm continuous motion, 60 fps for lively moments.
+    static let steps: [Float] = [30, 60]
     /// Largest step per frame (device pixels) that still reads as smooth motion.
-    static let maxStep = 0.8
+    static let maxStep = 0.5
 
-    /// The fastest rate an orb may ask for. Small orbs never need more than 30. Big ones (the empty chat's,
-    /// the editor's) reach 60 only while something lively happens (click, hover, a hop, a change of
-    /// activity); idle saccades and blinks are fine at 30.
+    /// The fastest rate an orb may ask for: 60 fps during short lively interactions (click, hover, hop, blink, glance,
+    /// activity blend) regardless of size, and 30 fps for steady background motion so continuous work stays light.
     static func cap(forSize size: CGFloat, lively: Bool) -> Float {
-        size >= 80 && lively ? 60 : 30
+        lively ? 60 : 30
     }
 
     static func rate(forSpeed pixelsPerSecond: Double, cap: Float) -> Float {

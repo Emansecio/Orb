@@ -211,6 +211,10 @@ final class OrbAnimationView: NSView {
     private var backingScale: CGFloat { window?.backingScaleFactor ?? 2 }
     private var side: CGFloat { OrbGeometry.imageSide(for: size, scale: backingScale) }
     /// Orbs this large (the empty chat's, the editor's) are short-lived and mostly idle.
+    /// Minimum on-screen change (device pixels) worth applying: low enough that gentle 30 fps breathing on small Orbs
+    /// never drops every other frame, while still skipping truly static frames.
+    private static let minPixelDelta = 0.08
+    /// Orbs this large (the empty chat's, the editor's) are short-lived and mostly idle.
     private static let bigSize: CGFloat = 80
     private var isBig: Bool { size >= Self.bigSize }
     private var maxFrameRate: Float { OrbFrameRate.cap(forSize: size, lively: true) }
@@ -753,7 +757,7 @@ final class OrbAnimationView: NSView {
         moved.talk = lastPose.talk
         let speed = dt > 0 ? moved.pixelDistance(to: lastPose, size: size, scale: backingScale) / dt : 0
         lastPose = pose
-        if resting || drawnPose.map({ pose.pixelDistance(to: $0, size: size, scale: backingScale) >= 0.25 }) ?? true {
+        if resting || drawnPose.map({ pose.pixelDistance(to: $0, size: size, scale: backingScale) >= Self.minPixelDelta }) ?? true {
             apply(pose)
         }
         if resting {
@@ -772,8 +776,9 @@ final class OrbAnimationView: NSView {
     /// The rate the motion needs: raised as soon as it speeds up, lowered only after it stayed slow for a bit.
     /// Blinks and events get the full rate only while they last.
     private func pace(speed: Double, at time: Double) {
+        let blinks = blinkFactor > 0 && (blinker.isBlinking || blinker.nextBlink - time < 0.1)
         let lively = time < livelyUntil || hoverPoint != nil || jump != nil || glanceStart != nil || cueBlinkStart != nil
-            || flourishes.current != nil || time - crossover.start < Self.transition
+            || blinks || flourishes.current != nil || time - crossover.start < Self.transition
         let cap = OrbFrameRate.cap(forSize: size, lively: lively)
         let wanted = OrbFrameRate.rate(forSpeed: speed, cap: cap)
         if wanted >= motionRate {
@@ -786,9 +791,8 @@ final class OrbAnimationView: NSView {
         var floor = max(shown.minFrameRate(elapsed: time - crossover.start, size: size, celebration: crossover.shownStyle),
                         blending ? crossover.previous.minFrameRate(elapsed: time - crossover.previousStart, size: size,
                                                          celebration: crossover.previousStyle) : 0)
-        // Blinks need 30 fps to show their shape; eyes that are closed already have none.
-        let blinks = blinkFactor > 0 && (blinker.isBlinking || blinker.nextBlink - time < 0.1)
-        if blinks || glanceStart != nil || cueBlinkStart != nil { floor = max(floor, 30) }
+        // Blinks and quick glances run at 60 fps while they last (~0.23–0.6 s), then drop back to 30 fps.
+        if blinks || glanceStart != nil || cueBlinkStart != nil { floor = max(floor, 60) }
         if let flourish = flourishes.current { floor = max(floor, flourish.minFrameRate) }
         if time < livelyUntil { floor = maxFrameRate }
         setFrameRate(min(cap, max(floor, motionRate)))

@@ -614,7 +614,7 @@ struct MultiOrbActivityTests {
         #expect(conversing.label == "Conversando" && conversing.symbol == "bubble.left.and.bubble.right")
         #expect(conversing.hasSameFace(as: .attentive, mouth: "sorriso"))
         #expect(conversing.eyes == nil && conversing.brows == nil && conversing.bubble == nil && conversing.mouth(base: "sorriso") == nil)
-        #expect(!conversing.isTool && conversing.energy == 0 && conversing.minFrameRate == 10 && conversing.wander == 0.2)
+        #expect(!conversing.isTool && conversing.energy == 0 && conversing.minFrameRate == 30 && conversing.wander == 0.2)
         #expect(OrbActivity.allCases.contains(.conversing))
     }
 

@@ -92,8 +92,9 @@ struct OrbTests {
     // MARK: Frame pacing
 
     @Test func frameRateFollowsOnScreenSpeed() {
-        #expect(OrbFrameRate.rate(forSpeed: 0, cap: 60) == 10)
-        #expect(OrbFrameRate.rate(forSpeed: 10, cap: 60) == 15)
+        #expect(OrbFrameRate.rate(forSpeed: 0, cap: 60) == 30)
+        #expect(OrbFrameRate.rate(forSpeed: 10, cap: 60) == 30)
+        #expect(OrbFrameRate.rate(forSpeed: 20, cap: 60) == 60)
         #expect(OrbFrameRate.rate(forSpeed: 1000, cap: 30) == 30)
         #expect(OrbFrameRate.rate(forSpeed: 1000, cap: 60) == 60)
     }
