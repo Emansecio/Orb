@@ -356,6 +356,8 @@ extension OrbDriverTests {
 
     @Test func switchingBotInInspectorUpdatesOrbAppearance() async throws {
         try #require(NSScreen.main != nil)
+        // Under Reduce Motion (CI runners have it enabled), OrbView draws static OrbFrame Canvas instead of OrbAnimationView.
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
         let root = TempFolder("InspectorOrbSwitch")
         let model = AppModel(store: Store(directory: root.url), runsBackgroundWork: false)
         let greenSquare = OrbConfig(color: "menta", shape: "almofada", eyes: "pilulas", mouth: "nenhuma", brows: "retas")

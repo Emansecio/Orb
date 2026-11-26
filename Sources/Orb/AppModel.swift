@@ -601,7 +601,6 @@ final class AppModel {
             let firstID = firstShown?.id
             let mergeStore = store
             Task.detached(priority: .utility) {
-                if let firstID { mergeStore.mergeArchive(of: firstID) }
                 for id in botIDsToMerge where id != firstID { mergeStore.mergeArchive(of: id) }
             }
         }

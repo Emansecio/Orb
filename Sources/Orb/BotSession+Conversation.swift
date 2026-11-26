@@ -35,6 +35,9 @@ extension BotSession {
         isLoading = true
         let epoch = loadEpoch, botID = id, chat = chatID
         let task = Task { [weak self] in
+            if chat == botID {
+                await Task.detached(priority: .userInitiated) { store.mergeArchive(of: botID) }.value
+            }
             let read = await store.readConversationAsync(botID, chat: chat)
             self?.finishLoading(epoch: epoch, read)
         }
