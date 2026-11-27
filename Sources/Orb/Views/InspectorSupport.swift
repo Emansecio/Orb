@@ -241,8 +241,9 @@ enum NewBotSheetLayout {
     }
 
     /// The app window a sheet opens over (the sheet itself is the key window by then).
+    /// `NSApp` is nil until the app object exists (a process that only builds the views, as a test does): the preferred height then.
     @MainActor
     static func height(preferred: CGFloat = preferredHeight) -> CGFloat {
-        height(preferred: preferred, windowHeight: (NSApp.mainWindow ?? NSApp.keyWindow)?.contentLayoutRect.height)
+        height(preferred: preferred, windowHeight: (NSApp?.mainWindow ?? NSApp?.keyWindow)?.contentLayoutRect.height)
     }
 }
