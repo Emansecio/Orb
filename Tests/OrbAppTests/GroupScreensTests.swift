@@ -19,7 +19,7 @@ struct StackedAvatarsTests {
     }
 
     @Test @MainActor func theSidebarSlotPutsTheGroupsTextWhereTheOrbsNameStarts() {
-        // The row's 8 pt, the stack and its air: the text starts on the Orbs' names (the avatar's 30 pt and 8 pt, after the row's 8).
+        // The row's 8 pt, the stack and its air: the text starts on the Orbs' names (the avatar's 24 pt and 8 pt, after the row's 8).
         let slot = StackedAvatars.slotWidth(size: SidebarGroupRow.stackSize, overlap: SidebarGroupRow.stackOverlap)
         #expect(SidebarChatList.rowInset + slot + SidebarGroupRow.stackGap == SidebarChatList.nameInset)
         #expect(StackedAvatars.offset(of: 1, size: 18, overlap: 10) == 8)

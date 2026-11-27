@@ -113,9 +113,9 @@ struct SidebarGroupRow: View {
     @State private var isHovering = false
     @State private var isConfirmingDelete = false
 
-    /// The stack takes the Orb avatar's 30 pt column and the 8 pt to the text (the Orbs' names start 46 pt from the row's edge):
-    /// three 18 pt avatars overlapped by 10 pt are 34 wide, 4 pt of air after them.
-    static let stackSize: CGFloat = 18
+    /// The stack takes the Orb avatar's 24 pt column and the 8 pt to the text (the Orbs' names start 40 pt from the row's edge,
+    /// `SidebarCategoryLayout.titleInset`): three 16 pt avatars overlapped by 10 pt are 28 wide, 4 pt of air after them.
+    static let stackSize: CGFloat = 16
     static let stackOverlap: CGFloat = 10
     static let stackGap: CGFloat = 4
 
