@@ -191,16 +191,16 @@ struct BrowserPlatform: Sendable, Equatable {
     var agentBrowserAsset: String { "agent-browser-darwin-" + (architecture == .arm64 ? "arm64" : "x64") }
 
     /// The `agent-browser` the app installs, pinned: the version it was tested with and the SHA-256 of each release file (the
-    /// `digest` GitHub publishes for the asset, conferred against the downloaded file on 15/11/2026). A new version is a change in
+    /// `digest` GitHub publishes for the asset, conferred against the downloaded file on 27/11/2026). A new version is a change in
     /// the app, with the new hashes; the install never takes "the latest".
-    static let agentBrowserVersion = "0.43.0"
+    static let agentBrowserVersion = "0.45.0"
     /// About the size of the release file, for the progress bar and the free-space check.
-    static let agentBrowserSize: Int64 = 17_800_000
+    static let agentBrowserSize: Int64 = 20_100_000
 
     /// The pinned hash of each release file. A property so that tests can serve a file of their own.
     var pinnedHashes: [Architecture: String] = [
-        .arm64: "05338a8eeddf0b3f9ebf0c87a6c21aedc10685608c68618e1a8483c43eae9c3f",
-        .x86_64: "49a5ab27297213c1bc0005701a6a4542399abfc9d2cb7520ab519ebb94b8b13d",
+        .arm64: "bdd665cddefcc61488e0ffe383d7aee33d47b7a6b5b36dc75ae10d1e827826f7",
+        .x86_64: "4696167af4c90394c1cd1da78d461f39bd074d3e0d686ac57cf67b29e28b2171",
     ]
 
     var agentBrowserSHA256: String { pinnedHashes[architecture] ?? "" }
