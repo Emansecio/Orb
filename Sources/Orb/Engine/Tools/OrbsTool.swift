@@ -21,7 +21,7 @@ struct OrbsTool: AgentTool {
             "files": .object([
                 "type": .string("array"),
                 "items": .object(["type": .string("string")]),
-                "description": .string("Optional file paths relevant to the message (up to \(DelegationLimits.maxArtifacts))."),
+                "description": .string("Relevant file paths, up to \(DelegationLimits.maxArtifacts)."),
             ]),
         ], required: ["action"]))
 

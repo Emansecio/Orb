@@ -173,6 +173,9 @@ struct ToolSpecEconomyTests {
     /// (docs/historico/REVISAO-TOKENS-PROMPT-2026-10-17.md); they had no ceiling of their own. `multiple` and `fields` of `ask_user`
     /// (the fuller questions, 2026-11-02) took it to 3,964. `folder` on `orbs` and `group_create` (a shared project, a git
     /// worktree per member) and the builder/reviewer hint of `group_create` took it to 4,173. `group_edit` (2026-11-07) took it to 4,723. `orb_delete` and the neutral `orb_propose` (2026-11-08) took it to 4,979; "only when no teammate fits" in `orb_propose` (the same day) fit under the ceiling by shortening its first line.
+    /// `files` on `orbs` (2026-11-26) took it to 5,112, past the ceiling. With the list that tells each teammate's work and the
+    /// `tell` read mid-work (2026-11-27), it came back under it (about 4,998): `group_edit` no longer repeats the edits its
+    /// enum lists, and `orbs`, its `files` and `group_create` say the same in fewer words.
     @Test func theMultiOrbToolSpecsStayWithinTheirOwnCeiling() {
         let now = specChars(ToolBox.multiOrbTools + [AskUserTool()])
         #expect(now <= 5_000, "\(now) characters")

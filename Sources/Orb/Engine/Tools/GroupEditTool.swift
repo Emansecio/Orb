@@ -10,8 +10,7 @@ struct GroupEditTool: AgentTool {
     let spec = ToolSpec(
         name: GroupEditTool.name,
         description: """
-        Change one of the user's groups: add or remove a member, set the orchestrator, rename it, set its objective, or delete it \
-        (the user confirms deleting). Use it whenever it helps the user's work.
+        Change one of the user's groups (the user confirms a delete). Use it whenever it helps the user's work.
         """,
         parameters: .schema([
             "group": .property("string", "The group's name."),
