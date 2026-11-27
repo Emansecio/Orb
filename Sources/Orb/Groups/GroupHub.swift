@@ -41,6 +41,10 @@ final class GroupHub: GroupTurnHooks {
     /// Where the thread stood when a request's preface was written, by request. It becomes `consumed` only when the turn
     /// really begins: a turn put back in the queue (the Orb was taken meanwhile) writes its preface again from the same point.
     private var pendingMark: [UUID: Int] = [:]
+    /// The requests whose answer each member was already handed as `<orb_reply>`, by group: the thread of its next turn leaves
+    /// those posts out. Memory only, and dropped once that turn begins (the mark has passed them): after a relaunch an answer
+    /// is told again rather than hidden.
+    private var handed: [UUID: [UUID: Set<UUID>]] = [:]
     /// The person's messages a turn not yet started answers, by request (more than one when they wrote again before it began:
     /// `enqueue`). Its preface leaves them out of the thread.
     private var personTexts: [UUID: [String]] = [:]
@@ -204,7 +208,8 @@ final class GroupHub: GroupTurnHooks {
         pendingMark[request.envelope.id] = session.items.count
         let asked = personTexts[request.envelope.id] ?? [request.envelope.text]
         let thread = GroupThread.lines(from: slice, member: member, request: request.envelope.id,
-                                       userTexts: fromUser ? asked.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } : [])
+                                       userTexts: fromUser ? asked.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } : [],
+                                       handed: handed[group.id]?[member] ?? [])
         let board = await GroupBoard.brief(bank: model.memory.groupBank(for: group.id), message: request.envelope.text)
         let members = group.memberIDs.map { id in
             GroupPrompt.Member(name: name(of: id), role: model.bot(id)?.role ?? "", isOrchestrator: id == group.orchestratorID,
@@ -231,7 +236,10 @@ final class GroupHub: GroupTurnHooks {
         let member = request.envelope.to.id
         postAssignment(request, fromUser: isFromUser(request, in: run), group: group, run: run)
         noteActive(member, request: request, group: group.id, run: run.id)
-        if let mark = pendingMark.removeValue(forKey: request.envelope.id) { consumed[group.id, default: [:]][member] = mark }
+        if let mark = pendingMark.removeValue(forKey: request.envelope.id) {
+            consumed[group.id, default: [:]][member] = mark
+            handed[group.id]?[member] = nil // the thread it reads next begins after them
+        }
         update(group.id) { run in
             run.turnsUsed += 1
             run.running.removeAll { $0.request == request.envelope.id }
@@ -239,6 +247,10 @@ final class GroupHub: GroupTurnHooks {
             run.note(participant: member)
         }
         refreshLive(group.id)
+    }
+
+    func repliesHanded(_ requests: [UUID], to member: UUID, in group: UUID) {
+        handed[group, default: [:]][member, default: []].formUnion(requests)
     }
 
     func turnFinished(_ request: DelegationRequest, reply: String?, outcome: OrbEnvelope.ReplyStatus) {
@@ -476,6 +488,7 @@ final class GroupHub: GroupTurnHooks {
         terminate(groupID, by: .user, writesEvent: writesEvent, group: group)
         runs[groupID] = nil
         consumed[groupID] = nil
+        handed[groupID] = nil
         lastNotice[groupID] = nil
     }
 

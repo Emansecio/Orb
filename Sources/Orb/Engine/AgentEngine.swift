@@ -86,6 +86,10 @@ struct TurnRequest: Sendable {
     /// Messages the user sends while this turn runs. The engine hands them to the model at the next step boundary;
     /// nil means the turn takes none (they wait for the turn's end).
     var steering: SteeringQueue?
+    /// What the Orb whose request this turn serves tells it meanwhile (`DelegationHub.noticeQueue`): handed to the model at the
+    /// same step boundary and read under the same frame. A queue of its own: nothing in it is the user's, so none of it
+    /// becomes a bubble or the next request.
+    var notices: SteeringQueue?
     /// The only tools the turn may run (the background review of the conversation, `SkillReview`): a call to any other
     /// is answered with "Not available" and never runs, and a call that would need the user's approval is refused with
     /// no card, while `tools` still lists them all, so the request is the one the provider already has in its cache.
@@ -236,6 +240,7 @@ actor AgentEngine {
                 let inWrapUp = effectiveWrapUp > 0 && !isLastStep && step >= maxSteps - effectiveWrapUp
                 // What the user said since the last call goes to the model now: a step boundary.
                 let delivered = Self.deliverSteering(request.steering, into: &messages, out: out)
+                    + Self.deliverSteering(request.notices, into: &messages, out: out)
                 if continuedForSteering, delivered.isEmpty { return }
                 continuedForSteering = false
                 steered += delivered
@@ -430,7 +435,7 @@ actor AgentEngine {
                 }
                 if calls.isEmpty {
                     // The user spoke while this answer was being written: it is one more step, not a new turn.
-                    if !isLastStep, request.steering?.hasSteering == true {
+                    if !isLastStep, request.steering?.hasSteering == true || request.notices?.hasSteering == true {
                         continuedForSteering = true
                         continue
                     }
@@ -503,7 +508,8 @@ actor AgentEngine {
         guard let queue else { return [] }
         var indexes: [Int] = []
         for steered in queue.drainSteering() { // the ones meant for after the task stay
-            // The chat shows it under the id it has in the queue (`AppModel.deliverSteered`).
+            // The chat shows it under the id it has in the queue (`AppModel.deliverSteered`, which knows only the user's
+            // messages: an Orb's notice gets no bubble).
             var message = ChatMessage.user(steered.prompt, images: steered.pictures)
             message.itemID = steered.id
             indexes.append(messages.count)

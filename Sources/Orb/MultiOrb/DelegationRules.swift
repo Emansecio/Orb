@@ -113,6 +113,9 @@ enum DelegationRules {
             .split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
 
-    /// What makes two sends "the same words": the target and the text without case, accents or spacing.
-    static func repeatKey(to target: UUID, text: String) -> String { target.uuidString + "|" + fold(text) }
+    /// What makes two sends "the same words": the target, the kind and the text without case, accents or spacing. The kind
+    /// counts: an `ask` after a `tell` of the same words is not a repeat (the notice ran no turn and gets no answer).
+    static func repeatKey(to target: UUID, text: String, kind: OrbEnvelope.Kind) -> String {
+        target.uuidString + "|" + kind.rawValue + "|" + fold(text)
+    }
 }

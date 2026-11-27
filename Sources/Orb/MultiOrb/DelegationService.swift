@@ -64,6 +64,9 @@ protocol GroupTurnHooks: AnyObject {
     func chainStopped(_ chainID: UUID, by reason: CancelReason)
     /// A member left a notice (`tell`) inside the group's chain: it is a post in the thread and runs no turn.
     func noticePosted(_ envelope: OrbEnvelope)
+    /// `member` was handed the answers to `requests` as `<orb_reply>` in a turn of `group`: its next preface need not
+    /// repeat them from the thread.
+    func repliesHanded(_ requests: [UUID], to member: UUID, in group: UUID)
 }
 
 // MARK: MultiOrb (WP5)
@@ -73,5 +76,6 @@ extension GroupTurnHooks {
     func refusal(forRequestFrom asker: UUID, to member: UUID, chain: UUID) -> DelegationRefusal? { nil }
     func chainStopped(_ chainID: UUID, by reason: CancelReason) {}
     func noticePosted(_ envelope: OrbEnvelope) {}
+    func repliesHanded(_ requests: [UUID], to member: UUID, in group: UUID) {}
 }
 // MARK: end MultiOrb (WP5)

@@ -2010,6 +2010,8 @@ final class AppModel {
         if let override, let chat = session.conversationChat { keepModel(override, ofChat: chat, of: botID) }
         let turn = session.beginTurn()
         let steering = composerLane(botID).queue // messages sent during the turn reach the model between its steps
+        // A turn that serves another Orb's request also reads what that Orb tells it meanwhile.
+        let notices = session.servingRequest.map { delegation.noticeQueue(for: $0) }
         let release = CommandRelease(steering: steering) { [weak self] waited in
             Task { @MainActor in self?.live(botID).setCommandWaited(waited) }
         }
@@ -2145,7 +2147,7 @@ final class AppModel {
                                           Task { @MainActor in self?.noteDensity(characters: characters, promptTokens: promptTokens, of: ref.text) }
                                       },
                                       picksUpTask: paused,
-                                      steering: steering)
+                                      steering: steering, notices: notices)
             session.keepForReview(request)
             await session.play(engine.run(request), turn: turn)
         }

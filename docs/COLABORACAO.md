@@ -7,6 +7,24 @@ Fora de `ToolBox.all`: `MultiOrbOffering` (`AppModel.multiOrbOffering`) decide p
 leva a chamada ao `DelegationHub`. `orbs` (`ask`, `tell`, `list`), `group_create`, `group_edit`, `group_recall`, `orb_propose` e `orb_delete`.
 - **Pedidos e grupos.** `DelegationHub` (pedidos, cadeias, filas, recusas) e `GroupHub` (a run de cada grupo, o fio). Um grupo acionado por
   outro devolve a resposta ao turno do grupo que pediu, e `ChainState.groupsVisited` barra o laço grupo → grupo.
+- **Ver, pedir e corrigir** (`DelegationHub+Tool.swift`). `list` diz o que cada colega tem aberto (`activity`: em turno de grupo, só
+  o do grupo; fora dele, todo pedido aberto, com os 60 primeiros caracteres), os pedidos que o próprio Orb espera ("Seus pedidos
+  abertos") e, em cada grupo, se há pedido em andamento e desde quando. O retorno do `ask` avisa quando o colega está ocupado e
+  quantos pedidos há na frente (`waitNote`). Um `tell` de quem pediu a quem está trabalhando nesse pedido chega no meio do
+  trabalho: o hub guarda uma `SteeringQueue` por pedido em andamento (`noticeQueue`, `liveRequest`), o turno a recebe em
+  `TurnRequest.notices` e o motor a esvazia no mesmo limite de passo da fila da pessoa, sem bolha no chat e sem virar o próximo
+  pedido; a linha do aviso continua no chat (ou no fio) como antes. Sem pedido em andamento de quem avisa, o `tell` é o de sempre.
+- **Texto entre Orbs.** A resposta é guardada como foi escrita (`OrbEnvelopeText.plain`) e só é cercada ao entrar num prompt
+  (`sanitize`, `GroupThread.fenced`). Respostas entregues em partes dizem quantas ainda faltam (`reply(more:)`); a resposta longa
+  vai para `resposta-<uuid inteiro>.md`; pedir depois de avisar com as mesmas palavras não é repetição (`repeatKey` leva o tipo);
+  um pedido que falha encerra os pedidos que ele fez e ainda estavam na fila.
+- **Grupo com pasta de projeto.** O membro é instruído a citar o ramo na resposta; o orquestrador vê "ramo (pasta)" e pede a
+  revisão começando por `REVIEW:` com ramo e pasta (`ReviewVerdict.isReviewRequest` reconhece o prefixo ou palavra que comece por
+  review/revis). O fio entregue ao membro avisa quando mensagens antigas ficaram de fora (`GroupThread.cutNote`) e não repete a
+  resposta que ele já recebeu como `<orb_reply>` (`GroupHub.repliesHanded`, só em memória, até o próximo turno novo dele). Sem
+  `orbs` no turno (grupo que não deixa os membros falarem entre si), a seção do membro manda dizer na resposta o que precisa. Ao
+  fim do pedido, um merge deixado pela metade no projeto vira aviso no fio (`CleanUp.mergePending`) e nada é desfeito; o
+  `git worktree add` tem prazo próprio (`WorkFolders.checkoutTimeout`).
 - **Preferências** (`AppModel+MultiOrbSettings.swift`, todas `UserDefaults`, ligadas por padrão): `orbsCanTalk`, `orbsCanStartGroups`,
   `orbsActOnOwn` (cria e aciona grupos e propõe Orbs fora do chat próprio: rotina, pedido, turno de grupo, pulso), `orbsCanManageGroups`
   (`group_edit` e `orb_delete`) e `orbsCreateWithoutAsking` (`orb_propose` cria na hora, sem teto de quantidade, e a linha do criador

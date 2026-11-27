@@ -60,11 +60,14 @@ extension DelegationHub {
                 }
                 let envelope = try submit(from: botID, to: name, text: text, kind: kind, messageID: messageID, groupID: groupID,
                                           folder: folder, artifacts: artifacts)
+                if kind == .tell, liveRequest(of: envelope.to.id, from: botID) != nil {
+                    return "Aviso entregue a \(envelope.to.name), que trabalha no seu pedido: ele lê no próximo passo, sem parar o trabalho."
+                }
                 return kind == .ask
                     ? "Pedido enviado a \(envelope.to.name) (id \(envelope.shortID)). A resposta chega sozinha como mensagem"
                         + (envelope.servingRoutine != nil ? " e retoma esta execução da rotina"
                             : envelope.servingPulse != nil ? " e retoma este pulso" : "")
-                        + "; não espere nem repita o pedido. Termine o que puder sem ela."
+                        + "; não espere nem repita o pedido. Termine o que puder sem ela." + waitNote(for: envelope)
                     : "Aviso deixado para \(envelope.to.name): \(envelope.groupID == nil ? "ele lê na próxima mensagem que receber" : "fica no fio do grupo, que ele lê no próximo turno"). tell não acorda; para acordar e ter resposta, use ask."
             } catch let refusal as DelegationRefusal {
                 throw refusal.toolError
@@ -72,6 +75,15 @@ extension DelegationHub {
         default:
             throw ToolError("Use action list, ask ou tell.")
         }
+    }
+
+    /// " Pesquisador está ocupado agora…", for whoever just asked: it can wait, ask another Orb or do the work itself. Empty
+    /// when the colleague is free (the request starts on the next pass of the main actor).
+    private func waitNote(for envelope: OrbEnvelope) -> String {
+        let ahead = queues[envelope.to.id]?.firstIndex(of: envelope.id) ?? 0
+        guard ahead > 0 || isInTurn(envelope.to.id) else { return "" }
+        let line = ahead == 0 ? "" : ahead == 1 ? " e tem 1 pedido na frente do seu" : " e tem \(ahead) pedidos na frente do seu"
+        return " \(envelope.to.name) está ocupado agora\(line): a resposta pode demorar."
     }
 
     static func parseArtifactPaths(_ value: JSONValue?) -> [String] {
@@ -88,22 +100,34 @@ extension DelegationHub {
         return result
     }
 
-    /// "- Pesquisador: Pesquisa na web e resume (livre)": the teammates, without ids or folders. Outside a group's turn, the
-    /// groups the Orb is in come after them; in one, the other groups its orchestrator may ask.
-    func teammatesText(for botID: UUID, groupID: UUID?) -> String {
+    /// "- Pesquisador: Pesquisa na web e resume (livre)": the teammates, without ids or folders, each with what it is doing;
+    /// then the requests the Orb itself still waits for. Outside a group's turn, the groups the Orb is in come after them
+    /// (and whether each is at work); in one, the other groups its orchestrator may ask.
+    func teammatesText(for botID: UUID, groupID: UUID?, now: Date = .now) -> String {
         guard let model else { return "" }
         let team = roster(for: botID, groupID: groupID).compactMap { model.bot($0.id) }
         let listed = team.prefix(DelegationLimits.rosterLimit * 4)
         var teammates = team.isEmpty ? "Não há outros Orbs." : listed.map { orb in
             let role = MemoryText.clip(MemoryText.flatten(orb.role), DelegationLimits.roleClip)
-            let state = groupID.map { groupStatus(of: orb.id, in: $0) } ?? status(of: orb.id)
+            let state = activity(of: orb.id, in: groupID, now: now)
             return "- \(orb.name)\(role.isEmpty ? "" : ": " + role) (\(state))"
         }.joined(separator: "\n")
         if team.count > listed.count { teammates += "\n- e mais \(team.count - listed.count) Orbs (não listados)" }
+        // What the Orb itself waits for: without it, a coordinator would have to ask each teammate where its request stands.
+        let mine = openRequests(from: botID)
+        if !mine.isEmpty {
+            teammates += "\n\nSeus pedidos abertos:\n" + mine.prefix(Self.listedRequests).map {
+                "- \(displayName(of: $0.envelope)): " + assignmentText($0, now: now, own: true)
+            }.joined(separator: "\n")
+            if mine.count > Self.listedRequests { teammates += "\n- e mais \(mine.count - Self.listedRequests)" }
+        }
         let lines = groupID == nil ? model.groupLines(for: botID) : model.otherGroupLines(for: botID, inTurnOf: groupID)
         let groups = lines.prefix(OrbsPrompt.groupLimit).map { group in
             let lead = group.youOrchestrate ? "você orquestra" : "\(group.orchestrator) orquestra"
+            // At work or not, and since when, as the group's screen shows (a group's name is its own: `createGroup`).
+            let run = model.groups.first { $0.name == group.name }.flatMap { model.groupHub.activeRun($0.id) }
             return "- \(group.name): \(lead)" + (group.others.isEmpty ? "" : "; outros membros: " + group.others.joined(separator: ", "))
+                + (run.map { "; pedido em andamento \(Self.ago($0.startedAt, now: now))" } ?? "")
         }
         // The groups it is not in, which group_edit may change: without their names it could only guess them.
         let elsewhere = model.orbsCanManageGroups
@@ -125,32 +149,43 @@ extension DelegationHub {
         return isBusy(botID) ? "ocupado" : "livre"
     }
 
-    /// In a group's turn, what the member is doing for the group: each open assignment ("trabalhando em “…” (pedido de Atlas,
-    /// há 4 min)"), and whether it waits for the person. With none, `status(of:)`.
-    private func groupStatus(of botID: UUID, in groupID: UUID, now: Date = .now) -> String {
+    /// Requests of its own that `list` tells an Orb, at most.
+    static let listedRequests = 5
+
+    /// What the Orb is doing: each open request it has ("trabalhando em “…” (pedido de Atlas, há 4 min)"; in a group's turn,
+    /// only the group's), whether it waits for the person, and whether what it has only waits because it is busy with
+    /// something else. With no request, `status(of:)`.
+    private func activity(of botID: UUID, in groupID: UUID?, now: Date) -> String {
         var parts: [String] = []
         if model?.liveBot(botID)?.needsYou == true { parts.append("espera aprovação do usuário") }
-        let open = requests.values.filter { $0.envelope.groupID == groupID && $0.envelope.to.id == botID && Self.isOpen($0.state) }
-            .sorted(by: Self.older)
+        let open = requests.values.filter {
+            (groupID == nil || $0.envelope.groupID == groupID) && $0.envelope.to.id == botID && Self.isOpen($0.state)
+        }.sorted(by: Self.older)
+        if !open.isEmpty, !open.contains(where: { $0.state == .running }), isInTurn(botID) { parts.append("ocupado") }
         parts += open.prefix(3).map { assignmentText($0, now: now) }
         if open.count > 3 { parts.append("e mais \(open.count - 3)") }
         return parts.isEmpty ? status(of: botID) : parts.joined(separator: "; ")
     }
 
-    /// One open request as `list` tells it: what, for whom, since when.
-    private func assignmentText(_ request: DelegationRequest, now: Date) -> String {
+    /// One open request as `list` tells it: what, for whom, since when. `own`: told to whoever asked it, so not for whom.
+    private func assignmentText(_ request: DelegationRequest, now: Date, own: Bool = false) -> String {
         let envelope = request.envelope
         let what = "“" + MemoryText.clip(MemoryText.flatten(envelope.text), 60) + "”"
-        let who = envelope.from.id == envelope.to.id && !envelope.fromChat ? "pedido do usuário" : "pedido de \(currentName(envelope.from))"
+        let who = own ? nil
+            : envelope.from.id == envelope.to.id && !envelope.fromChat ? "pedido do usuário" : "pedido de \(currentName(envelope.from))"
+        func noted(_ notes: String?...) -> String {
+            let said = notes.compactMap { $0 }
+            return said.isEmpty ? "" : " (" + said.joined(separator: ", ") + ")"
+        }
         switch request.state {
         case .queued:
-            return "na fila: \(what) (\(who))"
+            return "na fila: \(what)" + noted(who)
         case .awaitingChildren:
             let names = request.openChildren.compactMap { requests[$0].map { currentName($0.envelope.to) } }
             let waits = names.isEmpty ? "esperando respostas" : "esperando " + Self.list(Array(Set(names)).sorted())
-            return "\(waits) em \(what) (\(who))"
+            return "\(waits) em \(what)" + noted(who)
         default:
-            return "trabalhando em \(what) (\(who), \(Self.ago(request.startedAt ?? envelope.sentAt, now: now)))"
+            return "trabalhando em \(what)" + noted(who, Self.ago(request.startedAt ?? envelope.sentAt, now: now))
         }
     }
 

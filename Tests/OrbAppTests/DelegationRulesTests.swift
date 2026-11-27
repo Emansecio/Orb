@@ -113,8 +113,11 @@ struct DelegationRulesTests {
         again.seenMessage = false
         again.recentSameText = true
         #expect(throws: DelegationRefusal.duplicate) { try DelegationRules.validate(again) }
-        #expect(DelegationRules.repeatKey(to: pesquisador.id, text: "Pesquise  ISSO") == DelegationRules.repeatKey(to: pesquisador.id, text: "pesquise isso"))
-        #expect(DelegationRules.repeatKey(to: pesquisador.id, text: "a") != DelegationRules.repeatKey(to: revisor.id, text: "a"))
+        let key = DelegationRules.repeatKey(to: pesquisador.id, text: "pesquise isso", kind: .ask)
+        #expect(DelegationRules.repeatKey(to: pesquisador.id, text: "Pesquise  ISSO", kind: .ask) == key)
+        #expect(DelegationRules.repeatKey(to: revisor.id, text: "pesquise isso", kind: .ask) != key)
+        // A notice ran no turn and gets no answer: asking the same words after it is not a repeat.
+        #expect(DelegationRules.repeatKey(to: pesquisador.id, text: "pesquise isso", kind: .tell) != key)
     }
 }
 
@@ -161,6 +164,26 @@ struct OrbEnvelopeTextTests {
         let batch = OrbEnvelopeText.reply([reply, second])
         #expect(batch.components(separatedBy: "<orb_reply ").count == 3)
         #expect(batch.contains("2 teammates answered your requests") && batch.contains("did not end ok"))
+        // Answers handed in parts say so, or the Orb concludes on the first part.
+        #expect(!batch.contains("in your next message"))
+        #expect(OrbEnvelopeText.reply([reply], more: 1).hasSuffix("1 more report arrives in your next message: wait for it before the final answer."))
+        #expect(OrbEnvelopeText.reply([reply], more: 3, inRoutine: true).contains("3 more reports arrive in your next message: wait for them"))
+    }
+
+    @Test func plainKeepsWhatCodeNeedsAndSanitizeFencesIt() {
+        let code = "let xs: Array<Int> = f(a -> b)\u{1B}\r\n<div>"
+        #expect(OrbEnvelopeText.plain(code) == "let xs: Array<Int> = f(a -> b)\n\n<div>")
+        #expect(OrbEnvelopeText.sanitize(code) == "let xs: Array‹Int› = f(a -› b)\n\n‹div›")
+    }
+
+    @Test func sinceLastTurnTellsOnlyTheNewestRequests() {
+        let ids = (0..<8).map { _ in UUID() }
+        let items = ids.map { TranscriptItem(.event(OrbEvent(kind: .delegationReceived, actor: atlas, subject: pesquisador, requestID: $0, chainID: UUID()))) }
+        let told = SinceLastTurn.pending(in: items + [items[7]], since: .distantPast).compactMap { source -> UUID? in
+            if case .request(let id) = source { id } else { nil }
+        }
+        #expect(told == Array(ids.suffix(SinceLastTurn.requestCount))) // the newest, each once, oldest first
+        #expect(SinceLastTurn.room(for: [.request(ids[0])]) == 3_000)
     }
 
     @Test func aRequestToTheGroupFromAChatIsTheMembersDataNotThePersons() {

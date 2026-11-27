@@ -52,6 +52,8 @@ final class DelegationHub: DelegationService {
     var starting: Set<UUID> = []
     /// Requests at work past `workTimeout` whose banner went out (once each).
     var toldStillRunning: Set<UUID> = []
+    /// Per request at work: what its asker tells it meanwhile (`tell`), read by the request's turn at its next step.
+    private var tellQueues: [UUID: SteeringQueue] = [:]
 
     /// A routine's run that asked other Orbs and waits for their answers: its conversation, kept to resume from, and when the
     /// run began (its history counts the whole run). By routine id.
@@ -119,7 +121,7 @@ final class DelegationHub: DelegationService {
         }
         // The repeat needs the target, which the rules resolve: resolve it the same way here.
         if let target = DelegationRules.resolve(name, among: orbs) {
-            let key = DelegationRules.repeatKey(to: target.id, text: text)
+            let key = DelegationRules.repeatKey(to: target.id, text: text, kind: kind)
             // Outside a chain (the Orb's own chat) every ask opens a new chain, so the sender keeps its own record.
             let when = context.map { chainStates[$0.chainID]?.recent[key] } ?? recentFromChat[from]?[key]
             if let when, now.timeIntervalSince(when) < DelegationRules.duplicateWindow { input.recentSameText = true }
@@ -133,7 +135,7 @@ final class DelegationHub: DelegationService {
         var chain = chainStates[plan.chainID] ?? newChain(startedBy: sender, session: session, groupID: groupID ?? context?.groupID)
         // Work the pulse pays for does not grow once the day's budget is spent: refused here, before it costs a turn.
         if kind == .ask, chain.origin.pulseRun != nil, model.pulseBudgetSpent { throw DelegationRefusal.pulseBudget }
-        let repeatKey = DelegationRules.repeatKey(to: plan.target.id, text: plan.text)
+        let repeatKey = DelegationRules.repeatKey(to: plan.target.id, text: plan.text, kind: kind)
         chain.recent[repeatKey] = now
         if context == nil {
             recentFromChat[from, default: [:]][repeatKey] = now
@@ -203,6 +205,11 @@ final class DelegationHub: DelegationService {
         let line = OrbMessageItem(direction: .sent, kind: .tell, state: .replied, from: envelope.from, to: envelope.to,
                                   text: envelope.text, requestID: envelope.id, chainID: envelope.chainID, groupID: envelope.groupID)
         session.append(.orbMessage(line))
+        // The target works on a request of the teller right now: it reads the notice at its next step, not only when that
+        // work is over. The line stays where it always went, for the turns that come after.
+        if let working = liveRequest(of: envelope.to.id, from: envelope.from.id) {
+            tellQueues[working]?.push(SteeredMessage(text: envelope.text, prompt: OrbEnvelopeText.request(envelope)))
+        }
         if envelope.groupID != nil {
             groupHooks?.noticePosted(envelope)
         } else {
@@ -217,6 +224,23 @@ final class DelegationHub: DelegationService {
         }
         model.live(envelope.from.id).poked()
         return envelope
+    }
+
+    /// The request of `teller` that `target` is working on now, when its turn can still be told something (`noticeQueue`).
+    func liveRequest(of target: UUID, from teller: UUID) -> UUID? {
+        requests.values.first {
+            $0.state == .running && $0.envelope.to.id == target && $0.envelope.from.id == teller && tellQueues[$0.id] != nil
+        }?.id
+    }
+
+    /// What the turn serving `requestID` reads between its steps (`TurnRequest.notices`). Every such turn asks here, so this
+    /// is also where the queues of the requests that ended are dropped.
+    func noticeQueue(for requestID: UUID) -> SteeringQueue {
+        tellQueues = tellQueues.filter { requests[$0.key].map { Self.isOpen($0.state) } == true }
+        if let queue = tellQueues[requestID] { return queue }
+        let queue = SteeringQueue()
+        tellQueues[requestID] = queue
+        return queue
     }
 
     /// A turn of a member of a group: the group's runtime asks the hub for it so the target's queue, its own conversation and the
@@ -389,7 +413,8 @@ final class DelegationHub: DelegationService {
         let name = workMemberNames[nameKey] ?? member.name
         workMemberNames[nameKey] = name
         let work = await WorkFolders.prepare(project: project, member: name, run: request.envelope.chainID, root: root)
-        return (work.url, WorkFolders.memberNote(work))
+        // Its answer names the branch: whoever reviews or merges it works elsewhere and would not find the work otherwise.
+        return (work.url, WorkFolders.memberNote(work, asked: true))
     }
 
     /// A request that names a project `folder`: the receiver works in a worktree of it (read off the main thread, the Orb held

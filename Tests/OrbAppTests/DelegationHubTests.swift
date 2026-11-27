@@ -304,7 +304,7 @@ private final class Hooks: GroupTurnHooks {
         await waitUntil("the target to be busy") { model.sessions[team.pesquisador.id]?.turnTask != nil }
         model.send("peça", to: team.atlas.id, fromUser: true)
         await waitUntil("the request to wait in the queue") { team.model.delegation.queues[team.pesquisador.id]?.count == 1 }
-        #expect(team.model.delegation.teammatesText(for: team.atlas.id, groupID: nil).contains("Pesquisador: Pesquisa e resume (ocupado)"))
+        #expect(team.model.delegation.teammatesText(for: team.atlas.id, groupID: nil).contains("Pesquisador: Pesquisa e resume (ocupado; na fila: “Pesquise.” (pedido de Atlas))"))
         #expect(await team.log.calls(by: "Pesquisador").count == 1) // only its own turn so far
         await valve.open()
         await team.settle()
@@ -645,6 +645,86 @@ private final class Hooks: GroupTurnHooks {
         #expect(woken.contains("Pesquisa pronta.") && woken.contains("Revisão pronta."))
     }
 
+    @Test func anAskToABusyOrbSaysSoAndTheListTellsWhoWaitsOnWhat() async throws {
+        let valve = TestGate()
+        let team = Team { seen in
+            switch seen.who {
+            case "Pesquisador":
+                if seen.user.contains("<orb_request") { return say("Feito.") }
+                await valve.wait()
+                return say("Terminei a minha.")
+            default:
+                if seen.user.contains("<orb_reply") { return say("Recebi.") }
+                if seen.toolResult != nil { return say("Pedi.") }
+                return orbsCall("ask", to: "Pesquisador", seen.who == "Atlas" ? "Pesquise o mercado." : "Confira os preços.")
+            }
+        }
+        defer { team.cleanUp() }
+        let model = team.model, hub = model.delegation
+        #expect(hub.teammatesText(for: team.atlas.id, groupID: nil).contains("- Pesquisador: Pesquisa e resume (livre)"))
+        model.send("trabalho demorado", to: team.pesquisador.id, fromUser: true)
+        await waitUntil("the target to be busy") { model.sessions[team.pesquisador.id]?.turnTask != nil }
+        model.send("peça", to: team.atlas.id, fromUser: true)
+        await waitUntil("the first request to wait") { hub.queues[team.pesquisador.id]?.count == 1 }
+        model.send("peça", to: team.revisor.id, fromUser: true)
+        await waitUntil("the second request to wait") { hub.queues[team.pesquisador.id]?.count == 2 }
+        await waitUntil("both to read what the ask returned") {
+            let seen = await team.log.seen
+            return ["Atlas", "Revisor"].allSatisfy { who in seen.contains { $0.who == who && $0.toolResult != nil } }
+        }
+        // Whoever asks is told the wait, so it can wait, ask another Orb or do the work itself.
+        let first = try #require(await team.log.calls(by: "Atlas").first { $0.toolResult != nil }?.toolResult)
+        #expect(first.hasSuffix("Termine o que puder sem ela. Pesquisador está ocupado agora: a resposta pode demorar."))
+        let second = try #require(await team.log.calls(by: "Revisor").first { $0.toolResult != nil }?.toolResult)
+        #expect(second.hasSuffix(" Pesquisador está ocupado agora e tem 1 pedido na frente do seu: a resposta pode demorar."))
+        // Outside a group too, the list says what each teammate has and what the Orb itself waits for.
+        let list = hub.teammatesText(for: team.atlas.id, groupID: nil)
+        #expect(list.contains("- Pesquisador: Pesquisa e resume (ocupado; na fila: “Pesquise o mercado.” (pedido de Atlas); "
+            + "na fila: “Confira os preços.” (pedido de Revisor))"))
+        #expect(list.contains("\n\nSeus pedidos abertos:\n- Pesquisador: na fila: “Pesquise o mercado.”"))
+        #expect(!hub.teammatesText(for: team.pesquisador.id, groupID: nil).contains("Seus pedidos abertos"))
+        await valve.open()
+        await team.settle()
+        #expect(!hub.teammatesText(for: team.atlas.id, groupID: nil).contains("Seus pedidos abertos"))
+    }
+
+    @Test func aTellToWhoeverWorksOnYourRequestIsReadInTheMiddleOfThatWork() async throws {
+        let valve = TestGate()
+        let team = Team { seen in
+            switch seen.who {
+            case "Atlas":
+                if seen.user.contains("<orb_reply") { return say("Recebi.") }
+                if seen.toolResult != nil { return say("Pedi.") }
+                return orbsCall("ask", to: "Pesquisador", "Pesquise o mercado.")
+            default:
+                if seen.user.contains("Use só fontes de 2026.") { return say("Feito, só com fontes de 2026.") }
+                await valve.wait()
+                return say("Feito.")
+            }
+        }
+        defer { team.cleanUp() }
+        let model = team.model, hub = model.delegation
+        func tell(_ text: String, by orb: Bot) async throws -> String {
+            try await hub.handleTool(.object(["action": .string("tell"), "to": .string("Pesquisador"), "message": .string(text)]), orb: orb.id)
+        }
+        model.send("peça", to: team.atlas.id, fromUser: true)
+        await waitUntil("the request at work") { await team.log.count(by: "Pesquisador") == 1 }
+        // Only the asker's word reaches the work: another Orb's notice waits for the next message, as before.
+        #expect(try await tell("Vi uma notícia.", by: team.revisor).hasPrefix("Aviso deixado para Pesquisador: ele lê na próxima mensagem"))
+        #expect(try await tell("Use só fontes de 2026.", by: team.atlas).hasPrefix("Aviso entregue a Pesquisador, que trabalha no seu pedido"))
+        await valve.open() // the answer it was writing ends; the notice is one more step of the same turn
+        await team.settle()
+        let calls = await team.log.calls(by: "Pesquisador")
+        let told = try #require(calls.last?.user)
+        #expect(calls.count == 2 && told.contains("<orb_request from=\"Atlas\"") && told.contains("No reply is expected."))
+        #expect(!calls.contains { $0.user.contains("Vi uma notícia.") })
+        #expect(try #require(await team.log.calls(by: "Atlas").last?.user).contains("Feito, só com fontes de 2026."))
+        // The chat keeps both lines, for the turns that come after.
+        #expect(team.orbMessages(team.pesquisador).filter { $0.kind == .tell }.map(\.text) == ["Vi uma notícia.", "Use só fontes de 2026."])
+        // With the request over, a notice is left as it always was.
+        #expect(try await tell("Obrigado.", by: team.atlas).hasPrefix("Aviso deixado para Pesquisador"))
+    }
+
     @Test func aTellWakesNobodyAndIsReadOnceWithTheTargetsNextMessage() async throws {
         let team = Team { seen in
             switch seen.who {
@@ -896,6 +976,92 @@ private final class Hooks: GroupTurnHooks {
         _ = try hub.submit(from: team.atlas.id, to: "Revisor", text: "Pesquise", kind: .ask, messageID: UUID(), groupID: nil)
         _ = try hub.submit(from: team.revisor.id, to: "Pesquisador", text: "Pesquise", kind: .ask, messageID: UUID(), groupID: nil)
         await team.settle()
+    }
+
+    @Test func anAskAfterATellOfTheSameWordsIsNotARepeat() async throws {
+        let team = Team { _ in say("x") }
+        defer { team.cleanUp() }
+        let hub = team.model.delegation
+        _ = try hub.submit(from: team.atlas.id, to: "Pesquisador", text: "Mudei o README", kind: .tell, messageID: UUID(), groupID: nil)
+        _ = try hub.submit(from: team.atlas.id, to: "Pesquisador", text: "Mudei o README", kind: .ask, messageID: UUID(), groupID: nil)
+        #expect(throws: DelegationRefusal.duplicate) {
+            try hub.submit(from: team.atlas.id, to: "Pesquisador", text: "Mudei o README", kind: .ask, messageID: UUID(), groupID: nil)
+        }
+        await team.settle()
+    }
+
+    /// The person reads the reply as it was written (code keeps its `<` and `>`); only the model's copy is fenced.
+    @Test func aReplyKeepsItsAngleBracketsForThePersonAndIsFencedForTheModel() async throws {
+        let team = Team { seen in
+            switch seen.who {
+            case "Atlas":
+                if seen.user.contains("<orb_reply") { return say("Fim.") }
+                if seen.toolResult != nil { return say("Pedi.") }
+                return orbsCall("ask", to: "Pesquisador", "Qual o tipo?")
+            default: return say("Use Array<Int> e a -> b.")
+            }
+        }
+        defer { team.cleanUp() }
+        team.model.send("peça", to: team.atlas.id, fromUser: true)
+        await waitUntil("the asker to end") { team.botTexts(team.atlas).contains("Fim.") }
+        await team.settle()
+        #expect(team.orbMessages(team.atlas).last?.text == "Use Array<Int> e a -> b.")
+        let wake = try #require(await team.log.calls(by: "Atlas").last)
+        #expect(wake.user.contains("Use Array‹Int› e a -› b.") && !wake.user.contains("Array<Int>"))
+    }
+
+    /// Six answers come five and one: the first part says one more is coming, so the Orb does not conclude on it.
+    @Test func answersHandedInPartsSayHowManyAreStillToCome() async throws {
+        let extra = ["Quarto", "Quinto", "Sexto", "Setimo"]
+        let targets = ["Pesquisador", "Revisor"] + extra
+        let team = Team(extra: extra) { seen in
+            guard seen.who == "Atlas" else { return say("Feito por \(seen.who).") }
+            if seen.user.contains("<orb_reply") { return say("Recebi.") }
+            if seen.toolResult != nil { return say("Pedi a todos.") }
+            return [.toolCalls(targets.enumerated().map { index, name in
+                let arguments = JSONValue.object(["action": .string("ask"), "to": .string(name), "message": .string("Parte \(index)")])
+                return ToolCallRequest(id: "c\(index)", name: "orbs", arguments: arguments.jsonString)
+            })]
+        }
+        defer { team.cleanUp() }
+        team.model.send("peça a todos", to: team.atlas.id, fromUser: true)
+        await waitUntil("both parts to wake the asker") { team.botTexts(team.atlas).filter { $0 == "Recebi." }.count == 2 }
+        await team.settle()
+        let wakes = await team.log.calls(by: "Atlas").filter { $0.user.contains("<orb_reply") }
+        try #require(wakes.count == 2)
+        #expect(wakes[0].user.components(separatedBy: "<orb_reply ").count == DelegationLimits.wakeBatch + 1)
+        #expect(wakes[0].user.contains("1 more report arrives in your next message"))
+        #expect(!wakes[1].user.contains("in your next message"))
+    }
+
+    /// A request that fails takes with it what it asked and has not begun: that turn would work for nobody.
+    @Test func aFailedRequestEndsTheRequestsItAskedThatDidNotBegin() async throws {
+        let valve = TestGate()
+        let team = Team { seen in
+            switch seen.who {
+            case "Revisor":
+                await valve.wait()
+                return say("Ocupado até agora.")
+            case "Pesquisador":
+                if seen.toolResult != nil || seen.user.contains("<orb_reply") { return say("Aguardo.") }
+                return orbsCall("ask", to: "Revisor", "Revise a parte.")
+            default: return say("x")
+            }
+        }
+        defer { team.cleanUp() }
+        let hub = team.model.delegation
+        _ = try hub.submit(from: team.atlas.id, to: "Revisor", text: "Ocupe-se.", kind: .ask, messageID: UUID(), groupID: nil)
+        _ = try hub.submit(from: team.atlas.id, to: "Pesquisador", text: "Faça a parte.", kind: .ask, messageID: UUID(), groupID: nil)
+        await waitUntil("the middle one to wait") { team.request(from: team.atlas, to: team.pesquisador)?.state == .awaitingChildren }
+        let middle = try #require(team.request(from: team.atlas, to: team.pesquisador))
+        let child = try #require(team.request(from: team.pesquisador, to: team.revisor))
+        try #require(child.state == .queued)
+        hub.fail(middle, "Tempo esgotado")
+        #expect(hub.requests[child.id]?.state == .failed)
+        #expect(hub.queues[team.revisor.id]?.contains(child.id) != true)
+        await valve.open()
+        await team.settle()
+        #expect(await !team.log.calls(by: "Revisor").contains { $0.user.contains("Revise a parte.") })
     }
 
     @Test func deletingTheChatThatAskedStopsWhatItAskedAndTouchesNoOtherChain() async throws {
@@ -1412,7 +1578,8 @@ private final class Hooks: GroupTurnHooks {
         model.send("peça", to: team.atlas.id, fromUser: true)
         await waitUntil("the card") { !model.pendingApprovals(of: team.pesquisador.id).isEmpty && model.live(team.pesquisador.id).needsYou }
         let list = try await model.delegation.handleTool(.object(["action": .string("list")]), orb: team.atlas.id)
-        #expect(list.contains("- Pesquisador: Pesquisa e resume (espera aprovação do usuário)"))
+        #expect(list.contains("- Pesquisador: Pesquisa e resume (espera aprovação do usuário; trabalhando em “Grave o resumo.” "
+            + "(pedido de Atlas, há menos de 1 min))"))
         let card = try #require(model.pendingApprovals(of: team.pesquisador.id).first)
         model.giveUpWaiting(on: card.id, of: team.pesquisador.id)
         await team.settle()
@@ -1611,6 +1778,31 @@ private actor Names {
         #expect(team.model.groupSession(group.id)?.items.contains { if case .groupPause = $0.kind { true } else { false } } == false)
     }
 
+    @Test func anAnswerHandedAsAReplyIsNotReadAgainInTheThreadOfTheNextRequest() async throws {
+        let found = String(repeating: "Achei 42. ", count: 120)
+        let team = Team { seen in
+            switch seen.who {
+            case "Atlas":
+                if seen.user.contains("E o prazo?") { return say("Sexta.") }
+                if seen.user.contains("<orb_reply") { return say("Fechado com o que o Pesquisador achou.") }
+                if seen.toolResult != nil { return say("Pedi ao Pesquisador.") }
+                return orbsCall("ask", to: "Pesquisador", "Pesquise.")
+            default: return say(found)
+            }
+        }
+        defer { team.cleanUp() }
+        let group = group(team)
+        team.model.postUserMessage("Descubra o número", to: group.id)
+        await waitUntil("the first request to end") {
+            self.finalPosts(team, group, "Fechado com o que o Pesquisador achou.") == 1 && team.model.groupHub.run(group.id) == nil
+        }
+        team.model.postUserMessage("E o prazo?", to: group.id)
+        await waitUntil("the second request to end") { self.finalPosts(team, group, "Sexta.") == 1 && team.model.groupHub.run(group.id) == nil }
+        let next = try #require(await team.log.calls(by: "Atlas").last)
+        // The answer came as <orb_reply> and the turn it woke is in the orchestrator's conversation: the thread does not bring it again.
+        #expect(next.user.hasSuffix("E o prazo?") && !next.user.contains("Achei 42."))
+    }
+
     @Test func stoppingTheGroupCancelsEveryTurnAndPostsNothingMore() async throws {
         let valve = TestGate()
         let team = Team { seen in
@@ -1628,10 +1820,15 @@ private actor Names {
         let group = group(team)
         team.model.postUserMessage("Preparar o lançamento", to: group.id)
         await waitUntil("both members to work") { team.model.isWorking(team.pesquisador.id) && team.model.isWorking(team.revisor.id) }
+        // From its own chat, the orchestrator's list says the group is at work and what each member has of it.
+        let list = team.model.delegation.teammatesText(for: team.atlas.id, groupID: nil)
+        #expect(list.contains("- Lançamento: você orquestra; outros membros: Pesquisador, Revisor; pedido em andamento há menos de 1 min"))
+        #expect(list.contains("(trabalhando em “Levante o mercado.” (pedido de Atlas, há menos de 1 min))"))
         team.model.stopGroup(group.id)
         await valve.open()
         await team.settle()
         await waitUntil("the group to be idle") { !team.model.isGroupWorking(group.id) }
+        #expect(!team.model.delegation.teammatesText(for: team.atlas.id, groupID: nil).contains("pedido em andamento"))
         #expect(team.model.groupHub.run(group.id) == nil && team.model.groupLive(group.id).runState == .idle)
         #expect(team.model.delegation.requests.values.allSatisfy { !DelegationHub.isOpen($0.state) } && team.model.delegation.inbox.isEmpty)
         let items = team.model.groupSession(group.id)?.items ?? []
@@ -3201,6 +3398,19 @@ struct GroupReviewTests {
         }
     }
 
+    /// Only the reply to a review request is read for a verdict: a word that merely contains "revis" or "valid" made a
+    /// builder's "Alterações:" count as a round of changes.
+    @Test func aReviewRequestIsToldByItsPrefixOrAWordThatBeginsLikeReview() {
+        for text in ["REVIEW: confira o login em orb/atlas/1a2b", "review the login", "Revise o trabalho do Atlas", "faça a revisão",
+                     "Please do a code-review of it"] {
+            #expect(ReviewVerdict.isReviewRequest(text), "\(text)")
+        }
+        for text in ["Calcule a previsão e a validade do cupom", "Implement validation for the form", "Aproveite o que já existe",
+                     "Verifique o estoque e monte a tabela", ""] {
+            #expect(!ReviewVerdict.isReviewRequest(text), "\(text)")
+        }
+    }
+
     @Test func theLinesAreInPortuguese() {
         #expect(ReviewVerdict.eventLine(.approved, round: 2) == "Revisão: aprovado na rodada 2")
         #expect(ReviewVerdict.eventLine(.changes, round: 1) == "Revisão: pediu mudanças (rodada 1)")
@@ -3289,6 +3499,25 @@ struct DelegationArtifactsAndRecoveryTests {
         #expect(rendered.contains("<artifacts>"))
         #expect(rendered.contains("/tmp/relatorio.md"))
         #expect(model.workJournal.entries.contains { $0.kind == .pendingReply && $0.envelope?.id == reply.id })
+    }
+
+    /// The tags show four characters of an id; the file of a long reply is named by all of it, so two cannot share one.
+    @Test @MainActor func twoLongRepliesWhoseIdsStartAlikeKeepTheirOwnFiles() throws {
+        let model = AppModel(store: Store(directory: root.url), runsBackgroundWork: false, secretVault: MemoryVault())
+        let other = Bot(name: "Revisor", role: "Revisa código", orb: OrbConfig())
+        model.bots.append(other)
+        let asker = model.bots[0]
+        let ids = ["A1B20000-0000-4000-8000-000000000001", "A1B20000-0000-4000-8000-000000000002"].compactMap(UUID.init(uuidString:))
+        for (index, id) in ids.enumerated() {
+            let envelope = OrbEnvelope(id: id, kind: .ask, from: OrbRef(asker), to: OrbRef(other), text: "Analise \(index)")
+            model.delegation.answer(DelegationRequest(envelope: envelope, state: .running), status: .ok,
+                                    text: String(repeating: "resposta \(index) ", count: 700))
+        }
+        let paths = try #require(model.delegation.inbox[asker.id]).compactMap(\.fullReplyPath)
+        try #require(paths.count == 2)
+        #expect(paths[0] != paths[1])
+        #expect(try String(contentsOfFile: paths[0], encoding: .utf8).hasPrefix("resposta 0 "))
+        #expect(try String(contentsOfFile: paths[1], encoding: .utf8).hasPrefix("resposta 1 "))
     }
 
     @Test @MainActor func pendingReplyRestoresAndWaitsForOpenSiblingRequest() throws {

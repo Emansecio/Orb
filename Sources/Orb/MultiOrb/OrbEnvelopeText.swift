@@ -61,8 +61,9 @@ enum OrbEnvelopeText {
 
     /// The answers to requests the Orb made, one block each, then what to do with them.
     /// `inRoutine`: the answers resume a routine's run, which ends with its report, not with words to the user. `inPulse`: they
-    /// resume a pulse's run, which nobody asked for: it ends saying what was done, or NOTHING.
-    static func reply(_ envelopes: [OrbEnvelope], inRoutine: Bool = false, inPulse: Bool = false) -> String {
+    /// resume a pulse's run, which nobody asked for: it ends saying what was done, or NOTHING. `more`: answers to the same
+    /// work that come in the next message (they are handed `DelegationLimits.wakeBatch` at a time).
+    static func reply(_ envelopes: [OrbEnvelope], more: Int = 0, inRoutine: Bool = false, inPulse: Bool = false) -> String {
         let blocks = envelopes.map { envelope -> String in
             let fullAttr = envelope.fullReplyPath.flatMap { $0.isEmpty ? nil : " full_reply=\"\(clean($0))\"" } ?? ""
             return """
@@ -80,6 +81,8 @@ enum OrbEnvelopeText {
             : inRoutine ? " Continue the routine's task with \(them) and finish with your report."
             : " Continue the user's task with \(them) and tell the user the result.")
             + (unfinished ? " A request that did not end ok (failed, cancelled or refused): say what could not be done." : "")
+            + (more > 0 ? " \(more) more report\(more == 1 ? " arrives" : "s arrive") in your next message: wait for "
+                + "\(more == 1 ? "it" : "them") before the final answer." : "")
         return blocks + "\n" + who + reportMark + closing
     }
 
@@ -91,13 +94,19 @@ enum OrbEnvelopeText {
     }
 
     /// The text of an Orb as data: tag characters out of reach, control characters gone (a newline and a tab stay).
-    static func sanitize(_ text: String) -> String {
+    static func sanitize(_ text: String) -> String { cleaned(text, swappingTags: true) }
+
+    /// The text of an Orb as the person reads it and a file keeps it: control characters gone, the rest as written (code
+    /// keeps its `<` and `>`). Whatever hands it to a model fences it there (`sanitize`, `GroupThread.fenced`).
+    static func plain(_ text: String) -> String { cleaned(text, swappingTags: false) }
+
+    private static func cleaned(_ text: String, swappingTags: Bool) -> String {
         var result = ""
         result.reserveCapacity(text.count)
         for scalar in text.unicodeScalars {
             switch scalar {
-            case "<": result.append("‹")
-            case ">": result.append("›")
+            case "<" where swappingTags: result.append("‹")
+            case ">" where swappingTags: result.append("›")
             case "\n", "\t": result.unicodeScalars.append(scalar)
             case "\r": result.append("\n")
             default:

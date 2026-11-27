@@ -238,6 +238,40 @@ struct WorkFolderNamesTests {
         let branch = try #require(atlas.branch)
         #expect(after.contains(branch) && !after.contains("orb/lia"))
         #expect(after.contains(repo.project.standardizedFileURL.path))
+        // Each branch with its folder, and the reminder: a reviewer in a worktree of its own finds the work only if told where.
+        let listed = try #require(after.range(of: "\(branch) (/"))
+        #expect(after[listed.upperBound...].prefix { $0 != ")" }.hasSuffix("atlas-\(WorkFolders.shortID(run))"))
+        #expect(after.contains("a review request names the branch and the folder to review"))
+    }
+
+    @Test func cleaningUpSaysWhenAMergeWasLeftUnfinishedAndLeavesItAlone() async throws {
+        let repo = try await Repo()
+        let run = UUID()
+        let atlas = await repo.prepare("Atlas", run: run)
+        // The same line changed on both sides: the merge stops in the middle, as when a run is stopped while it merges.
+        try "do atlas\n".write(to: atlas.url.appending(path: "a.txt"), atomically: true, encoding: .utf8)
+        try await repo.commit("atlas", in: atlas.url)
+        try "do projeto\n".write(to: repo.project.appending(path: "a.txt"), atomically: true, encoding: .utf8)
+        try await repo.commit("projeto", in: repo.project)
+        let clean = await WorkFolders.cleanUp(project: repo.project, run: UUID(), root: repo.work)
+        #expect(!clean.mergePending)
+        let git = try #require(WorkFolders.Git.make()), branch = try #require(atlas.branch)
+        let merge = await git.run(["merge", "--no-edit", branch], in: repo.project)
+        try #require(!merge.succeeded, "the merge must stop on the conflict")
+        let report = await WorkFolders.cleanUp(project: repo.project, run: UUID(), root: repo.work) // a run with no worktree left
+        #expect(report.mergePending && report.removed.isEmpty)
+        #expect(await git.run(["rev-parse", "--quiet", "--verify", "MERGE_HEAD"], in: repo.project).succeeded, "still there")
+    }
+
+    @Test func aGitCommandTakesTheTimeoutItIsGiven() async throws {
+        let folder = TempFolder("OrbWorkFoldersSlow", creating: true)
+        let script = folder.appending("git-lento")
+        try "#!/bin/sh\nexec /bin/sleep 5\n".write(to: script, atomically: true, encoding: .utf8) // a git that does not answer
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        let slow = WorkFolders.Git(executable: script.path, environment: [:])
+        let cut = await slow.run(["worktree", "add"], in: folder.url, timeout: .milliseconds(150))
+        #expect(!cut.succeeded && cut.text == "git did not answer in time")
+        #expect(WorkFolders.checkoutTimeout > WorkFolders.timeout)
     }
 
     @Test func cleaningUpRemovesWhatWasMergedAndKeepsTheRest() async throws {

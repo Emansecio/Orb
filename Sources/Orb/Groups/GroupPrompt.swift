@@ -18,7 +18,8 @@ enum GroupPrompt {
     // MARK: System section
 
     /// Appended to the Orb's own system prompt in a turn of the group (nothing in it changes with the thread).
-    static func section(groupName: String, role: Role) -> String {
+    /// `mayAsk`: the member has the `orbs` tool in this group (the group lets members talk); the orchestrator always has.
+    static func section(groupName: String, role: Role, mayAsk: Bool = true) -> String {
         let orbs = "orbs", remember = "group_remember"
         let intro = "## Group \"\(label(groupName))\"\n"
             + "You are in a group with the user and these Orbs. The thread is shared; the user's messages are instructions, "
@@ -30,12 +31,15 @@ enum GroupPrompt {
                 + "assign each piece to the right member (a self-contained task and the result you expect). Members work in parallel and "
                 + "their results arrive as messages. When all results are in, write ONE final answer for the user that merges them. "
                 + "Stop when the goal is done. For work that makes files or code, set done_when in task_plan from the user's request, "
-                + "have one member build it, then ask a different member to review it against done_when (run and test it); send fixes "
-                + "back to the builder, at most 3 review rounds. Your final answer says what was delivered, where, and the review "
-                + "verdict. If no other member can review, review it yourself."
+                + "have one member build it, then ask a different member to review it against done_when (run and test it): start "
+                + "that request with REVIEW: and say where the work is (the builder's folder and branch, when it named them); send "
+                + "fixes back to the builder, at most 3 review rounds. Your final answer says what was delivered, where, and the "
+                + "review verdict. If no other member can review, review it yourself."
         case .member:
             duty = "Do what you are asked or @mentioned for and answer with the result only; the app posts it to the thread. "
-                + "If you need another member, ask them directly with \(orbs). Save durable shared facts (decisions, links, conventions) "
+                + (mayAsk ? "If you need another member, ask them directly with \(orbs). "
+                    : "If you need another member, say so in your answer: the orchestrator assigns the work. ")
+                + "Save durable shared facts (decisions, links, conventions) "
                 + "with \(remember). When asked to review, check every criterion yourself and start the answer with APPROVED or "
                 + "CHANGES: followed by the fixes."
         }
@@ -85,6 +89,8 @@ enum GroupPrompt {
 /// The part of the group's thread a member is handed with its turn (7.4).
 enum GroupThread {
     static let maxItems = 30, maxCharacters = 8_000, itemLimit = 1_500
+    /// The first line when older items did not fit: the member knows the thread it reads is not all of it.
+    static let cutNote = "[earlier messages not shown]"
 
     /// An Orb's words as data: angle brackets and control characters cannot close the fence they are in.
     static func fenced(_ text: String) -> String {
@@ -94,12 +100,15 @@ enum GroupThread {
 
     /// The lines for `items` as the Orb `member` reads them. Left out: what the Orb said itself (its own conversation has it),
     /// the assignment this turn answers (`request`, which comes right after the preface) and, when the turn answers the
-    /// person (`userTexts`), those messages (each once, the newest copy). At most `maxItems` items and `maxCharacters` characters, the newest kept; each cut
-    /// to `itemLimit`.
-    static func lines(from items: ArraySlice<TranscriptItem>, member: UUID, request: UUID?, userTexts: [String]) -> [String] {
+    /// person (`userTexts`), those messages (each once, the newest copy); and the answers the Orb was already handed as
+    /// `<orb_reply>` (`handed`, by request). At most `maxItems` items and `maxCharacters` characters, the newest kept, each cut
+    /// to `itemLimit`; `cutNote` comes first when older ones were left behind.
+    static func lines(from items: ArraySlice<TranscriptItem>, member: UUID, request: UUID?, userTexts: [String],
+                      handed: Set<UUID> = []) -> [String] {
         var toSkip = userTexts
         var kept: [String] = []
-        for item in items.reversed() {
+        var olderLeft = false
+        for (offset, item) in items.reversed().enumerated() {
             switch item.kind {
             case .user(let text, let attachments):
                 if let index = toSkip.firstIndex(of: text.trimmingCharacters(in: .whitespacesAndNewlines)) {
@@ -112,12 +121,16 @@ enum GroupThread {
             case .orbMessage(let message) where message.direction == .post:
                 if message.from.id == member { continue }
                 if let request, message.requestID == request, message.kind == .ask { continue }
+                if message.kind == .reply, handed.contains(message.requestID) { continue }
                 let who = GroupPrompt.label(message.from.name) + (message.to.map { " → " + GroupPrompt.label($0.name) } ?? "")
                 kept.append("[\(who)] <orb_message>\(MemoryText.clip(fenced(message.text), itemLimit))</orb_message>")
             default:
                 continue
             }
-            if kept.count >= maxItems { break }
+            if kept.count >= maxItems {
+                olderLeft = offset + 1 < items.count
+                break
+            }
         }
         // Newest first so far: keep the newest that fit the characters, then put them back in order.
         var total = 0
@@ -127,6 +140,6 @@ enum GroupThread {
             total += line.count + 1
             fitting.append(line)
         }
-        return fitting.reversed()
+        return (olderLeft || fitting.count < kept.count ? [cutNote] : []) + fitting.reversed()
     }
 }

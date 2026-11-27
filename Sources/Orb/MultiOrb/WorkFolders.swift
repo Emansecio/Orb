@@ -15,6 +15,9 @@ struct WorkFolder: Sendable, Equatable {
 /// The orchestrator works in the project folder and merges the branches; `cleanUp` removes what was merged when the run ends.
 enum WorkFolders {
     static let timeout = Duration.seconds(30)
+    /// `git worktree add` checks out the whole tree: a large repository needs longer, or its members would fall back to the
+    /// shared folder.
+    static let checkoutTimeout = Duration.seconds(300)
     /// A branch of ours: `orb/<member>/<run>`.
     static let branchPrefix = "orb/"
 
@@ -61,7 +64,7 @@ enum WorkFolders {
         // The branch survives a pruned worktree: reuse it (its commits are the member's work) instead of failing on the name.
         let known = await git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(branch)"], in: project).output != nil
         let arguments = known ? ["worktree", "add", folder.path, branch] : ["worktree", "add", folder.path, "-b", branch, "HEAD"]
-        let added = await git.run(arguments, in: project)
+        let added = await git.run(arguments, in: project, timeout: checkoutTimeout)
         guard added.succeeded else {
             // A failed or timed-out add can leave a half-registered worktree (and a new branch) that the next turn would
             // find and hand over as ready.
@@ -107,10 +110,11 @@ enum WorkFolders {
     static func orchestratorNote(project: URL, run: UUID, root: URL, gitPath: String? = nil) async -> String {
         let project = project.standardizedFileURL
         guard WorkspaceSnapshot.hasRepository(project), let git = Git.make(path: gitPath) else { return sharedNote(project) }
-        let branches = await runBranches(project: project, run: run, root: root, git: git).map(\.branch)
+        let branches = await runBranches(project: project, run: run, root: root, git: git).map { "\($0.branch) (\($0.path))" }
         let listed = branches.isEmpty ? "branches \(branchPrefix)<member>/\(shortID(run)) once they work"
             : "branches " + branches.joined(separator: ", ")
         return "Work in \(project.path) (main checkout). Members work in their own worktrees, \(listed). "
+            + "A member sees only its own worktree: a review request names the branch and the folder to review. "
             + "Merge each approved branch into \(project.path) with git merge; resolve conflicts."
     }
 
@@ -125,6 +129,8 @@ enum WorkFolders {
         var removed: [String] = []
         /// Worktrees left alone: their branch has commits the project does not, or the worktree has changes not committed.
         var kept: [Kept] = []
+        /// The project has a merge begun and not concluded (the run stopped while the orchestrator merged): the person's to settle.
+        var mergePending = false
     }
 
     enum MergeOutcome: Sendable, Equatable {
@@ -213,10 +219,11 @@ enum WorkFolders {
         guard WorkspaceSnapshot.hasRepository(project), let git = Git.make(path: gitPath) else { return CleanUp() }
         return await GitQueue.shared.run {
             let ours = await runBranches(project: project, run: run, root: root, git: git)
-            guard !ours.isEmpty else { return CleanUp() }
+            var report = CleanUp()
+            report.mergePending = await git.run(["rev-parse", "--quiet", "--verify", "MERGE_HEAD"], in: project).succeeded
+            guard !ours.isEmpty else { return report }
             let merged = Set((await git.run(["branch", "--merged", "HEAD", "--format=%(refname:short)"], in: project).output ?? "")
                 .split(separator: "\n").map(String.init))
-            var report = CleanUp()
             for entry in ours {
                 if merged.contains(entry.branch), await git.run(["worktree", "remove", entry.path], in: project).succeeded {
                     _ = await git.run(["branch", "-d", entry.branch], in: project)
@@ -291,9 +298,9 @@ enum WorkFolders {
             }
         }
 
-        func run(_ arguments: [String], in folder: URL) async -> Result {
+        func run(_ arguments: [String], in folder: URL, timeout: Duration = WorkFolders.timeout) async -> Result {
             guard let done = try? await ProcessRunner.run(executable, arguments, directory: folder, environment: environment,
-                                                          timeout: WorkFolders.timeout, outputLimit: 50_000) else {
+                                                          timeout: timeout, outputLimit: 50_000) else {
                 return Result(succeeded: false, text: "git did not start")
             }
             return Result(succeeded: done.status == 0 && !done.timedOut && done.signal == nil,

@@ -82,6 +82,7 @@ private let gitReady = WorkFolders.Git.make() != nil
                 "the system prompt names the worktree")
         let told = first.messages.last?.content ?? ""
         #expect(told.contains("(branch orb/revisor/") && told.contains("Commit your work there before you answer."))
+        #expect(told.contains("Name the branch in your answer."), "whoever reviews or merges works elsewhere")
         // The file went to the worktree, not to the project nor to the Orb's folder.
         let made = try FileManager.default.contentsOfDirectory(at: work, includingPropertiesForKeys: nil).first.flatMap {
             try FileManager.default.contentsOfDirectory(at: $0, includingPropertiesForKeys: nil).first
@@ -152,6 +153,31 @@ private let gitReady = WorkFolders.Git.make() != nil
         }
         let branches = await WorkFolders.Git.make()?.run(["branch", "--format=%(refname:short)"], in: project)
         #expect(branches?.text.contains("orb/") == false, "the merged branch goes with its worktree")
+    }
+
+    @Test(.enabled(if: gitReady)) @MainActor func theThreadSaysWhenAMergeWasLeftUnfinishedInTheProject() async throws {
+        try await makeRepo()
+        let git = try #require(WorkFolders.Git.make())
+        let identity = ["-c", "user.name=Teste", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"]
+        // The same line changed on both sides: the merge stops in the middle, as when a run is stopped while the orchestrator merges.
+        let file = project.appending(path: "a.txt")
+        _ = await git.run(["checkout", "-b", "outro"], in: project)
+        try "dois\n".write(to: file, atomically: true, encoding: .utf8)
+        _ = await git.run(identity + ["commit", "-am", "outro"], in: project)
+        _ = await git.run(["checkout", "main"], in: project)
+        try "três\n".write(to: file, atomically: true, encoding: .utf8)
+        _ = await git.run(identity + ["commit", "-am", "principal"], in: project)
+        let merge = await git.run(identity + ["merge", "--no-edit", "outro"], in: project)
+        try #require(!merge.succeeded, "the merge must stop on the conflict")
+
+        let (model, group, _, _) = try setUp(CallScript([[.text("Feito."), .finished(.done, nil)]]))
+        model.postUserMessage("Organize o trabalho", to: group.id)
+        _ = await waitUntil("the notice") {
+            model.groupSession(group.id)?.items.contains { item in
+                if case .notice(let text) = item.kind { text.contains("Ficou um merge por concluir em projeto.") } else { false }
+            } == true
+        }
+        #expect(await git.run(["rev-parse", "--quiet", "--verify", "MERGE_HEAD"], in: project).succeeded, "nothing is undone")
     }
 
     @Test(.enabled(if: gitReady)) @MainActor func renamingAMemberMidRequestKeepsItsWorktree() async throws {

@@ -140,7 +140,21 @@ struct GroupThreadTests {
     @Test func atMostThirtyItemsTheNewestOnesAndInOrder() {
         let items = (1...40).map { user("m\($0)") }
         let result = lines(items)
-        #expect(result.count == GroupThread.maxItems && result.first == "[Você] m11" && result.last == "[Você] m40")
+        // The first line says older ones were left behind, so the member does not take what it reads for the whole thread.
+        #expect(result.first == GroupThread.cutNote && result.count == GroupThread.maxItems + 1)
+        #expect(result[1] == "[Você] m11" && result.last == "[Você] m40")
+        #expect(lines(Array(items.suffix(GroupThread.maxItems))).first == "[Você] m11") // all of it fits: no note
+    }
+
+    @Test func anAnswerAlreadyHandedAsAReplyIsNotRepeatedFromTheThread() {
+        let asked = UUID(), other = UUID()
+        let items = [post(pesquisador, to: atlas, "achei três", request: asked), post(ana, to: atlas, "revisei", request: other),
+                     post(pesquisador, "ainda esperando", kind: .tell, request: asked)]
+        let all = GroupThread.lines(from: items[...], member: atlas.id, request: nil, userTexts: [])
+        #expect(all.count == 3)
+        let fresh = GroupThread.lines(from: items[...], member: atlas.id, request: nil, userTexts: [], handed: [asked])
+        // Only the reply goes: what the member said while it waited was never handed.
+        #expect(fresh == ["[Ana → Atlas] <orb_message>revisei</orb_message>", "[Pesquisador] <orb_message>ainda esperando</orb_message>"])
     }
 
     @Test func eachItemIsCutAndTheWholeStaysUnderTheCharacterLimit() {
@@ -149,8 +163,8 @@ struct GroupThreadTests {
         #expect(cut.count == 1 && cut[0].count <= "[Você] ".count + GroupThread.itemLimit + 1) // + the ellipsis
         let many = (1...30).map { _ in user(String(repeating: "y", count: 1_400)) }
         let result = lines(many)
-        #expect(result.reduce(0) { $0 + $1.count + 1 } <= GroupThread.maxCharacters)
-        #expect(result.count < 30 && !result.isEmpty) // the oldest gave way
+        #expect(result.dropFirst().reduce(0) { $0 + $1.count + 1 } <= GroupThread.maxCharacters)
+        #expect(result.count < 30 && result.first == GroupThread.cutNote) // the oldest gave way, and the thread says so
     }
 
     @Test func eventsPausesAndNoticesAreNotPartOfWhatAMemberReads() {
@@ -169,12 +183,17 @@ struct GroupPromptTests {
         #expect(member.contains("Do what you are asked or @mentioned for"))
         #expect(member.contains("ask them directly with orbs") && member.contains("with group_remember."))
         #expect(!member.contains("You receive each user message first"))
+        // A group that keeps its members from asking each other gives them no orbs tool: the section must not send them to it.
+        let quiet = GroupPrompt.section(groupName: "Lançamento", role: .member, mayAsk: false)
+        #expect(!quiet.contains("orbs") && quiet.contains("say so in your answer") && quiet.contains("with group_remember."))
     }
 
     @Test func theReviewLoopIsInTheSectionOfEachRole() {
         let orchestrator = GroupPrompt.section(groupName: "g", role: .orchestrator)
         #expect(orchestrator.contains("done_when") && orchestrator.contains("different member to review"))
         #expect(orchestrator.contains("at most 3 review rounds") && orchestrator.contains("review verdict"))
+        // The reviewer works elsewhere: the request says it is a review and where the work is.
+        #expect(orchestrator.contains("start that request with REVIEW:") && orchestrator.contains("the builder's folder and branch"))
         let member = GroupPrompt.section(groupName: "g", role: .member)
         #expect(member.contains("When asked to review") && member.contains("APPROVED or CHANGES:"))
         #expect(!member.contains("done_when"))

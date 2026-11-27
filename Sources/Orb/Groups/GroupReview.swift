@@ -21,10 +21,12 @@ enum ReviewVerdict: String, Equatable, Sendable {
     }
 
     /// Whether a request asks for a review (the group has no fixed reviewer: the orchestrator picks one and asks it to review),
-    /// so only the reply to such a request can be a verdict.
+    /// so only the reply to such a request can be a verdict. The orchestrator is told to start it with `REVIEW:`; a word that
+    /// begins like "review" or "revisar" counts too. Only the beginning of a word: "previsão" asks for no review, and a
+    /// builder's summary that starts with "Alterações:" would be counted as a round of changes.
     static func isReviewRequest(_ text: String) -> Bool {
         let folded = text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
-        return ["review", "revis", "approv", "aprov", "verify", "verifi", "valid"].contains { folded.contains($0) }
+        return folded.range(of: #"\b(review|revis)"#, options: .regularExpression) != nil
     }
 
     /// Leading Markdown/space, the word, then the end of the line or a separator (":", "-", ".", etc.).

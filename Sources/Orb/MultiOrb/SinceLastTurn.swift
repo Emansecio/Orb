@@ -15,7 +15,10 @@ enum SinceLastTurn {
     /// The block of the first version, which only told requests: still in saved histories.
     static let legacyTags = ("<orb_requests_handled>", "</orb_requests_handled>")
     /// Each part, as the block carries it.
-    static let requestLimit = 1_500, replyLimit = DelegationLimits.replyLimit, reportLimit = 3_000, groupLimit = 4_000
+    /// `replyLimit`: the Orb's own answer told back to it, so the gist is enough (the request's conversation has it whole).
+    static let requestLimit = 1_500, replyLimit = 1_500, reportLimit = 3_000, groupLimit = 4_000
+    /// Requests told at most (the newest): an Orb that served many in a row is not handed every one of them.
+    static let requestCount = 5
     static let noticeTextLimit = DelegationLimits.messageLimit
     /// Notices told at most (the newest), as the box of notices kept before.
     static let noticeLimit = 10
@@ -88,27 +91,28 @@ enum SinceLastTurn {
         return indices.reversed()
     }
 
-    /// What is new in `items`, oldest first; only the newest `noticeLimit` notices.
+    /// What is new in `items`, oldest first; of the notices, the reactions and the requests, only the newest
+    /// (`noticeLimit`, `feedbackCount`, `requestCount`).
     static func pending(in items: [TranscriptItem], since: Date?) -> [Source] {
         let reacted = Set(reactedIndices(in: items, since: since))
-        var sources = pendingIndices(in: items, since: since).compactMap { index in
+        var seen: Set<UUID> = []
+        var sources: [Source] = pendingIndices(in: items, since: since).compactMap { index in
             reacted.contains(index)
                 ? Reaction.report(on: index, in: items).map { .feedback(report: $0, commands: Reaction.commandsUsed(inTurnOf: index, items)) }
                 : source(items[index])
-        }
-        let notices = sources.indices.filter { if case .notice = sources[$0] { true } else { false } }
-        if notices.count > noticeLimit {
-            let dropped = Set(notices.dropLast(noticeLimit))
-            sources = sources.indices.filter { !dropped.contains($0) }.map { sources[$0] }
-        }
+        }.filter { if case .request(let id) = $0 { seen.insert(id).inserted } else { true } }
+        sources = keepNewest(noticeLimit, of: sources) { if case .notice = $0 { true } else { false } }
         // Someone who marks a whole conversation at once: the newest say enough.
-        let feedback = sources.indices.filter { if case .feedback = sources[$0] { true } else { false } }
-        if feedback.count > feedbackCount {
-            let dropped = Set(feedback.dropLast(feedbackCount))
-            sources = sources.indices.filter { !dropped.contains($0) }.map { sources[$0] }
-        }
-        var seen: Set<UUID> = []
-        return sources.filter { if case .request(let id) = $0 { seen.insert(id).inserted } else { true } }
+        sources = keepNewest(feedbackCount, of: sources) { if case .feedback = $0 { true } else { false } }
+        return keepNewest(requestCount, of: sources) { if case .request = $0 { true } else { false } }
+    }
+
+    /// `sources` without the oldest of those that `matches`, when there are more than `limit` of them; the rest as it was.
+    private static func keepNewest(_ limit: Int, of sources: [Source], where matches: (Source) -> Bool) -> [Source] {
+        let found = sources.indices.filter { matches(sources[$0]) }
+        guard found.count > limit else { return sources }
+        let dropped = Set(found.dropLast(limit))
+        return sources.indices.filter { !dropped.contains($0) }.map { sources[$0] }
     }
 
     static func source(_ item: TranscriptItem) -> Source? {

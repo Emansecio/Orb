@@ -724,6 +724,24 @@ extension AgentEngineTests {
         #expect(messages(events).filter { $0.role == .user }.map(\.content) == ["oi", "use a pasta X"])
     }
 
+    @Test func whatTheAskerTellsDuringARequestReachesTheModelFramedFromAQueueOfItsOwn() async {
+        let notices = SteeringQueue()
+        var bot = Bot(name: "Teste", role: "", orb: OrbConfig(), permissionMode: .bypass)
+        bot.permissionRules = []
+        // Told while the first answer was being written: one more step of the turn, as with a message of the user's.
+        let script = CallScript([[.text("Feito")], [.text("Feito, na pasta X")]], whenExhausted: .fim) { index in
+            if index == 0 { notices.push(SteeredMessage(text: "use a pasta X", prompt: "use a pasta X")) }
+        }
+        let told = TurnRequest(bot: bot, model: "fake", system: "sys", history: [], prompt: "oi",
+                               client: CallScriptModel(script: script), tools: [],
+                               context: ToolContext(workingDirectory: URL(fileURLWithPath: NSTemporaryDirectory())),
+                               maxSteps: 5, notices: notices)
+        let events = await run(AgentEngine(), told)
+        let sent = await script.received.dropFirst().first?.filter { $0.role == .user }.map(\.content)
+        #expect(sent == ["oi", AgentEngine.steeringFrame + "\n\nuse a pasta X"])
+        #expect(notices.isEmpty && failures(events).isEmpty)
+    }
+
     @Test func aCutOffWithNoTextRecordsNoEmptyAssistantMessage() async {
         let script = CallScript([[.finished(.maxTokens, nil)], [.text("ok"), .finished(.done, nil)]], whenExhausted: .fim)
         let events = await run(AgentEngine(), request(script, mode: .ask, runs: Counter()))

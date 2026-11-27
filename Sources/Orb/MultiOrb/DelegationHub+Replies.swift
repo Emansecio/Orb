@@ -23,7 +23,7 @@ extension DelegationHub {
             if !current.openChildren.isEmpty || inbox[botID]?.contains(where: { $0.servingRequest == requestID }) == true {
                 waits = true
             } else {
-                let said = reply.map { OrbEnvelopeText.sanitize($0) } ?? ""
+                let said = reply.map { OrbEnvelopeText.plain($0) } ?? ""
                 outcome = succeeded ? (.ok, said.isEmpty ? "Concluí, sem nada a relatar." : said)
                     // What it got to say (a task stopped at the step limit says how far it went) goes with the reason.
                     : (.failed, Self.failedLead + Self.reason(in: own) + (said.isEmpty ? "" : "\n\n" + said))
@@ -58,7 +58,7 @@ extension DelegationHub {
             requests[requestID] = waiting
             waitingSince[requestID] = .now
             if kind == .group { // MultiOrb (WP5): what it said before waiting is interim speech (the request is `awaitingChildren`)
-                let said = reply.map { OrbEnvelopeText.sanitize($0) } ?? ""
+                let said = reply.map { OrbEnvelopeText.plain($0) } ?? ""
                 groupHooks?.turnFinished(waiting, reply: succeeded && !said.isEmpty ? said : nil, outcome: succeeded ? .ok : .failed)
             }
         } else if let outcome, finished {
@@ -102,13 +102,14 @@ extension DelegationHub {
 
     // MARK: Answering
 
-    /// Spills an oversized reply to `saidas/<receiverID>/resposta-<shortID>.md` so the receiver can read the full text on demand
-    /// and `ToolOutputCap.cleanUp` automatically prunes it after 14 days.
+    /// Spills an oversized reply to `saidas/<receiverID>/resposta-<requestID>.md` so the receiver can read the full text on demand
+    /// and `ToolOutputCap.cleanUp` automatically prunes it after 14 days. The whole id: the four characters the tags show
+    /// repeat among the replies kept there, and the later one would overwrite the earlier.
     private func spillReplyIfNeeded(_ text: String, requestID: UUID, receiverID: UUID) -> String? {
         guard text.count > DelegationLimits.replyLimit, let model else { return nil }
         let folder = ToolOutputCap.directory(inDataFolder: model.store.directory)
             .appending(path: receiverID.uuidString)
-        let fileURL = folder.appending(path: "resposta-\(OrbEnvelopeText.shortID(requestID)).md")
+        let fileURL = folder.appending(path: "resposta-\(requestID.uuidString.lowercased()).md")
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             try Data(text.utf8).write(to: fileURL, options: .atomic)
@@ -218,6 +219,7 @@ extension DelegationHub {
                 continue
             }
             let batch = Array(sameWork.prefix(DelegationLimits.wakeBatch))
+            let more = sameWork.count - batch.count // told with the batch, so the Orb does not conclude on part of the answers
             held += sameWork.dropFirst(DelegationLimits.wakeBatch)
             let rest = held + waiting
             inbox[botID] = rest.isEmpty ? nil : rest
@@ -232,8 +234,11 @@ extension DelegationHub {
                 suspended[serving] = nil
                 request.openChildren.subtract(batch.compactMap(\.replyTo))
                 for reply in batch { conversation.items.settingSent(reply.replyTo ?? reply.id, to: SendOrigin.state(of: reply.status)) }
-                if startRun(request, conversation: conversation, text: OrbEnvelopeText.reply(batch), origin: .orbReply(batch),
-                            resuming: true) { return true }
+                if startRun(request, conversation: conversation, text: OrbEnvelopeText.reply(batch, more: more), origin: .orbReply(batch),
+                            resuming: true) {
+                    if let group = request.envelope.groupID { groupHooks?.repliesHanded(batch.compactMap(\.replyTo), to: botID, in: group) }
+                    return true
+                }
                 continue
             }
             if let routine = first.servingRoutine {
@@ -244,7 +249,7 @@ extension DelegationHub {
                 let chain = ChainContext(chainID: first.chainID, hop: max(0, first.hop - 1), path: first.path, groupID: nil)
                 chainStates[first.chainID]?.touched = .now
                 if model.resumeRoutine(routine, of: botID, conversation: wait.conversation, started: wait.started, chain: chain,
-                                       text: OrbEnvelopeText.reply(batch, inRoutine: true), origin: .orbReply(batch)) {
+                                       text: OrbEnvelopeText.reply(batch, more: more, inRoutine: true), origin: .orbReply(batch)) {
                     refresh(botID)
                     return true
                 }
@@ -258,7 +263,7 @@ extension DelegationHub {
                 let chain = ChainContext(chainID: first.chainID, hop: max(0, first.hop - 1), path: first.path, groupID: nil)
                 chainStates[first.chainID]?.touched = .now
                 if model.resumePulse(run, of: botID, conversation: wait.conversation, chain: chain,
-                                     text: OrbEnvelopeText.reply(batch, inPulse: true), origin: .orbReply(batch)) {
+                                     text: OrbEnvelopeText.reply(batch, more: more, inPulse: true), origin: .orbReply(batch)) {
                     refresh(botID)
                     return true
                 }
@@ -274,7 +279,7 @@ extension DelegationHub {
                     guard let self else { return }
                     self.starting.remove(botID)
                     let wanted = !self.isShuttingDown && model.bot(botID) != nil && self.chainStates[first.chainID]?.cancelled != true
-                    if ready, wanted, self.wake(botID, with: batch) {
+                    if ready, wanted, self.wake(botID, with: batch, more: more) {
                         for reply in batch { model.workJournal.dropPendingReply(reply.id) }
                         return
                     }
@@ -288,7 +293,7 @@ extension DelegationHub {
                 }
                 return true
             }
-            if wake(botID, with: batch) {
+            if wake(botID, with: batch, more: more) {
                 for reply in batch { model.workJournal.dropPendingReply(reply.id) }
                 return true
             }
@@ -299,7 +304,7 @@ extension DelegationHub {
     }
 
     /// The answers wake the conversation the turn machinery has: it goes on with them, as a turn of its own.
-    private func wake(_ botID: UUID, with batch: [OrbEnvelope]) -> Bool {
+    private func wake(_ botID: UUID, with batch: [OrbEnvelope], more: Int) -> Bool {
         guard let model, let first = batch.first else { return false }
         let session = model.session(botID)
         session.ensureLoaded()
@@ -313,7 +318,7 @@ extension DelegationHub {
             session.changeConversation { $0.items.settingSent(reply.replyTo ?? reply.id, to: SendOrigin.state(of: reply.status)) }
         }
         chainStates[first.chainID]?.touched = .now
-        if model.send(OrbEnvelopeText.reply(batch), to: botID, origin: .orbReply(batch)) {
+        if model.send(OrbEnvelopeText.reply(batch, more: more), to: botID, origin: .orbReply(batch)) {
             model.live(botID).glanced()
             refresh(botID)
             return true

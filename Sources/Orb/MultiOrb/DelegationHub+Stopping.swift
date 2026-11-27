@@ -169,10 +169,12 @@ extension DelegationHub {
 
     func forgetRepeat(_ request: DelegationRequest) {
         let envelope = request.envelope
-        let key = DelegationRules.repeatKey(to: envelope.to.id, text: envelope.text)
+        let key = DelegationRules.repeatKey(to: envelope.to.id, text: envelope.text, kind: envelope.kind)
         chainStates[envelope.chainID]?.recent[key] = nil
         recentFromChat[envelope.from.id]?[key] = nil
     }
+
+    static let askerGoneReason = "Quem pediu não espera mais a resposta"
 
     /// A request that cannot go on (the target cannot start, time ran out): it ends `failed` and its asker is told.
     func fail(_ request: DelegationRequest, _ reason: String) {
@@ -186,6 +188,10 @@ extension DelegationHub {
         waitingSince[request.id] = nil
         answer(failed, status: .failed, text: reason)
         if request.envelope.groupID != nil { groupHooks?.turnFinished(failed, reply: nil, outcome: .failed) }
+        // What it asked and has not begun would work for nobody: those end with it (one already at work finishes its turn).
+        for child in request.openChildren.compactMap({ requests[$0] }) where child.state == .queued {
+            fail(child, Self.askerGoneReason)
+        }
         refresh(request.envelope.from.id, request.envelope.to.id)
     }
 

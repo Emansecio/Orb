@@ -353,6 +353,6 @@ struct GroupTurnExtras {
 
     /// The group section of the system prompt.
     var system: String {
-        GroupPrompt.section(groupName: groupName, role: role)
+        GroupPrompt.section(groupName: groupName, role: role, mayAsk: offering.orbs)
     }
 }
